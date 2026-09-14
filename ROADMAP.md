@@ -590,6 +590,106 @@ whole function, unlike the existing implicit-return-type exemption) -
 `missingType.return`'s own bare-Mixed check was never actually at risk
 either way, since neither method's real type is bare `Type::Mixed`.
 
+**A whole, previously-unexamined class of stub over-refinement: phpstorm-
+stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute, never read
+by real PHPStan at all.** A different, much broader mechanism than the
+`usleep()`/`proc_open()` cases above (both real, narrow phpstorm-stubs-
+vs-`functionMap.php` divergences) - this one's own premise ("real PHPStan
+reads this attribute directly to recover a precise array shape") was
+never actually true, for *any* function. Confirmed by a direct grep of
+`vendor/phpstan-src/src/`: zero occurrences of `"ArrayShape"` anywhere in
+it. This project's stub-generation pipeline used to graft that
+attribute's own shape onto any bare `array`/`array|X` return type
+unconditionally - for a function or method carrying an attribute
+literally *named* `ArrayShape` at all, own project code included, not
+just the vendored stub corpus - across ~85 real occurrences in 37
+vendored phpstorm-stubs files. Two real Piwigo corpus false positives
+this caused, both traced directly to `functionMap.php` (the real source
+`NativeFunctionReflectionProvider` uses for a `functionMap.php`-covered
+function's native signature, before phpstorm-stubs' own attributes are
+ever reachable) giving the function a bare, unshaped type while the
+attribute gave phpstan-rs a precise one: `ImageBackend::
+getGraphicsLibrary`'s own `gd_info()['GD Version'] ?? null`
+(`nullCoalesce.offset` - `functionMap.php`'s own `gd_info` is bare
+`array`) and `ImageExtImagick::write`'s own `isset(pathinfo($path)
+['dirname'])` (`isset.offset`).
+
+Fixed by removing the general mechanism entirely (`registry::
+function_sig::from_decl` no longer consults this attribute at all,
+matching real PHPStan exactly) and restoring real precision only where
+`functionMap.php` genuinely gives one - `php_stubs::patch_functionmap_
+array_shapes`, transcribed directly from that file's own type text
+(several disagree with the attribute in the details - e.g.
+`imagecolorsforindex`'s real shape uses `int<0, 255>`/`int<0, 127>`
+ranges, not the attribute's plain `int`), for every function this
+investigation actually checked (`imagecolorsforindex`, `getdate`,
+`date_parse`/`date_parse_from_format`, `date_get_last_errors`,
+`timezone_location_get`, `session_get_cookie_params`, `posix_getpwnam`/
+`getpwuid`, `localeconv`, `getimagesize`/`getimagesizefromstring`,
+`stream_context_get_params`, `stream_get_meta_data`, `error_get_last`,
+`proc_get_status`, `time_nanosleep`, `pathinfo`) - the same narrow,
+one-function-at-a-time, `functionMap.php`-verified discipline
+`patch_usleep`/`patch_debug_backtrace` already established, just
+covering every function this pass actually checked rather than the
+single one direct corpus evidence first surfaced. Not ported:
+`date_sun_info` (`functionMap.php` wraps its shape in a
+`__benevolent<...>` marker this project's type-string parser doesn't
+model) and `opcache_get_configuration` (a real but very large nested
+shape, left bare rather than risk a hand-transcription typo for no real
+corpus payoff); every method-only occurrence (`Imagick`/`PDOStatement`/
+`Phar`/`SQLite3`, ~22 sites) needs no patch at all - `functionMap.php`
+only ever covers top-level functions, and none of those classes have a
+real PHPStan-bundled dynamic-return-type extension either, so bare is
+already the correct answer.
+
+`pathinfo()` needed a second, genuinely distinct fix on top of the
+above: its return type is never actually read from the registry
+signature at all at an ordinary 1-/2-arg call site - a dedicated Phase
+77 call-site special case (`checker::expr::builtin_calls::
+pathinfo_array_shape`, mirroring real PHPStan's own
+`PathinfoFunctionDynamicReturnTypeExtension`) unconditionally overrides
+it. That real extension's own source (confirmed by direct read) only
+marks `dirname` unconditionally present when `$path`'s own type is
+provably `non-empty-string` (`!$pathType->isNonEmptyString()->yes()` as
+the field's own optionality) - this project's port hardcoded it present
+regardless, contradicting its own doc comment's stated intent. Fixed by
+threading `$path`'s inferred type through and checking
+`string_type_has_accessory(_, AccessoryKind::NonEmptyString)`, matching
+real PHPStan exactly: a literal non-empty path string still (correctly)
+gets `dirname` flagged as always-present, but a plain, unrefined
+`string`-typed variable no longer does.
+
+Verification: scoped Piwigo diff 50 -> 48, exactly the 2 target findings
+removed, zero new. Unscoped diff: 83 removed (a broad, genuine
+precision win well beyond Piwigo itself - `guzzlehttp/psr7`'s own
+`Stream::__construct`, `monolog/monolog`'s `RotatingFileHandler` [both
+the same `pathinfo()`-`dirname` shape], `php-standard-library`'s
+`ResourceHandle`/`DKIM\Signer`/`TLS\parse_peer_certificate`, `phpunit`'s
+own `SystemGarbageCollectorStatusProvider`, and more - all real
+`functionMap.php`-divergence false positives this same mechanism was
+causing project-wide), 84 added - all but one are either the vendored
+phpstorm-stubs files' own bare-`array` declarations now correctly
+triggering `missingType.iterableValue` under the unscoped run's
+"scan literally everything, including `vendor/`" mode (real, correct
+precision - these functions genuinely have no shape per `functionMap.php`
+- not a false positive), or summary-line/tooltip noise. The one
+substantive addition, `tests/Browser/ImageDerivativeControllerTest.php`'s
+own `idcPixel` (`return type mismatch: ... got array{red: mixed, green:
+mixed, blue: mixed}`), does **not** appear in the scoped run at all -
+confirmed root cause: the unscoped mode's own "scan `vendor/` as regular
+project source" quirk causes `imagecolorsforindex()` to be *redeclared*
+by literally parsing `vendor/jetbrains/phpstorm-stubs/gd/gd.php` as a
+project file, and that redeclaration (which gets none of `patch_
+functionmap_array_shapes`'s patching, since that only patches the
+built-in `generated_stubs()` cache) merges with the patched built-in
+signature via `FunctionSig::merge`'s `union_types`, degrading the merged
+shape's own field values to `Mixed`. A pre-existing architectural
+quirk of scanning vendor stub source as if it were project code, not a
+new regression in the actual check logic - previously invisible only
+because both the built-in and the redeclared copy happened to agree
+(both driven by the same now-removed attribute), not because the
+underlying double-declaration wasn't already happening.
+
 **A real generics-substitution gap, fully diagnosed and fixed.** Calling
 a generic interface's own templated method through a concrete class that
 *itself directly re-declares/implements* that method (not merely

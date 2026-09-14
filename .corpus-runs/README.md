@@ -409,3 +409,24 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   reason to resolve, reached for the first time now that a class-scoped
   ancestor template argument gets parsed/used at all, not a defect in
   this fix - current baseline for future diffs.
+- `329d112` - removed the never-real phpstorm-stubs `#[ArrayShape(...)]`
+  attribute mechanism (confirmed by grepping `vendor/phpstan-src/src/`:
+  zero occurrences anywhere - real PHPStan never reads it, for any
+  function or method), restoring precision only where `functionMap.php`
+  genuinely gives one (`php_stubs::patch_functionmap_array_shapes`,
+  ~15 functions), plus a real `pathinfo()`-`dirname`-optionality bug in
+  the pre-existing Phase 77 call-site special case. Full diagnosis in
+  ROADMAP.md's own Done entry. Scoped 50 -> 48 (the 2 target findings -
+  `gd_info()`/`pathinfo()` - removed cleanly, zero new). Unscoped: 83
+  removed (a broad win well beyond Piwigo - guzzlehttp/psr7, monolog,
+  php-standard-library, phpunit, and more, all real `functionMap.php`-
+  divergence false positives this mechanism caused project-wide), 84
+  added - all but one are either phpstorm-stubs' own bare-array
+  declarations now correctly triggering `missingType.iterableValue`
+  under the unscoped run's "scan `vendor/` as project source" mode (real
+  precision, not a false positive), or summary/tooltip noise. The one
+  substantive addition (`ImageDerivativeControllerTest.php`'s own
+  `idcPixel`) does not appear in the scoped run at all - confirmed a
+  pre-existing artifact of that same "`vendor/` scanned as project
+  source" quirk double-declaring `imagecolorsforindex()`, not a new
+  regression (see ROADMAP.md for the full trace).
