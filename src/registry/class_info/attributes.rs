@@ -1,8 +1,6 @@
 use crate::ast::{Attribute, BinOp, Expr, ExprKind, Literal};
 
-/// PHP's own `Attribute::TARGET_*`/`IS_REPEATABLE` class constant values -
-/// confirmed directly via `php -r 'var_dump((new ReflectionClass(Attribute::class))->getConstants());'`,
-/// not guessed from the manual.
+/// PHP's own `Attribute::TARGET_*`/`IS_REPEATABLE` class constant values.
 fn attribute_target_constant_value(name: &str) -> Option<u32> {
     match name {
         "TARGET_CLASS" => Some(1),

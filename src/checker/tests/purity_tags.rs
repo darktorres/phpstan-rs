@@ -67,10 +67,10 @@ fn a_provably_pure_function_with_no_purity_tag_at_all_is_never_flagged() {
     );
 }
 
-// Phase 41 follow-up: `check_purity_impure_points` -
-// `impure.<id>`/`possiblyImpure.<id>`/`pure{Function,Method}.
-// parameterByRef`/`pure{Function,Method}.void`, for a declaration real
-// PHPStan considers pure (`@phpstan-pure`-tagged, or classifier-proven).
+// `check_purity_impure_points` - `impure.<id>`/`possiblyImpure.<id>`/
+// `pure{Function,Method}.parameterByRef`/`pure{Function,Method}.void`,
+// for a declaration real PHPStan considers pure (`@phpstan-pure`-tagged,
+// or classifier-proven).
 
 #[test]
 fn a_function_declared_pure_but_echoing_is_flagged_certain_impure() {
@@ -90,10 +90,9 @@ fn a_function_declared_pure_but_echoing_is_flagged_certain_impure() {
 
 #[test]
 fn a_pure_function_reading_a_class_constant_or_enum_case_is_never_flagged_static_property_access() {
-    // Corpus find (`Psl\Ansi\Cursor\back()`, php-standard-library): a class
-    // constant/enum-case read (`Foo::BAR`, no leading `$`) is immutable -
-    // real PHPStan never treats it as an impure point at all, unlike an
-    // actual static *property* read (`Foo::$bar`).
+    // A class constant/enum-case read (`Foo::BAR`, no leading `$`) is
+    // immutable - real PHPStan never treats it as an impure point at all,
+    // unlike an actual static *property* read (`Foo::$bar`).
     let d = all_diagnostics_for(
         r#"<?php
             enum Kind { case A; }

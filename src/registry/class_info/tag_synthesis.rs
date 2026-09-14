@@ -39,12 +39,11 @@ pub(crate) fn method_tag_sig(
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> FunctionSig {
-    // Phase 48 item 7d: also collects `(raw, resolved)` case refs
-    // alongside the resolved `Type` itself - `@method`'s own raw text
-    // flows through this exact same mark-then-resolve pipeline every
-    // other PHPDoc-typed position uses, so its case refs need the
-    // identical `collect_class_name_case_refs` call between the two
-    // steps.
+    // Also collects `(raw, resolved)` case refs alongside the resolved
+    // `Type` itself - `@method`'s own raw text flows through this exact
+    // same mark-then-resolve pipeline every other PHPDoc-typed position
+    // uses, so its case refs need the identical
+    // `collect_class_name_case_refs` call between the two steps.
     let resolve = |text: &str| -> (Type, Vec<(String, String)>) {
         let ty = types::parse_type_string(text);
         let ty = mark_template_params(ty, template_params);

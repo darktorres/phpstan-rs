@@ -1,13 +1,13 @@
-//! Phase 45 (item 11, 45B/45D): `parameterByRef.type` - a by-ref
-//! parameter directly assigned a value its own declared type (native, or
-//! `@param-out` when present - see `Checker::current_function_by_ref_
-//! params`'s own doc comment) can never actually hold.
+//! `parameterByRef.type` - a by-ref parameter directly assigned a value
+//! its own declared type (native, or `@param-out` when present - see
+//! `Checker::current_function_by_ref_params`'s own doc comment) can
+//! never actually hold.
 //!
-//! `ParameterOutAssignedTypeRule` is confirmed tag-independent (falls
-//! back to the native type with no `@param-out` tag at all,
-//! `TooWideParameterOutTypeCheck.php:87-92`'s identical `getOutType() ??
-//! getType()` fallback) - this check runs unconditionally for every
-//! by-ref parameter, not gated on any opt-in flag, matching that.
+//! Runs unconditionally for every by-ref parameter, not gated on any
+//! opt-in flag, matching real PHPStan's own `ParameterOutAssignedTypeRule`
+//! (tag-independent - falls back to the native type with no
+//! `@param-out` tag at all, `TooWideParameterOutTypeCheck.php:87-92`'s
+//! identical `getOutType() ?? getType()` fallback).
 
 use crate::ast::{Expr, ExprKind};
 use crate::checker::Checker;

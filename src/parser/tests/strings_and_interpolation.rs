@@ -20,10 +20,9 @@ fn shell_exec_backtick_string_parses() {
     assert!(matches!(&callee.kind, ExprKind::Name(n) if n == "shell_exec"));
 }
 
-// Finding 11 from the architecture audit - every diagnostic inside a
-// {$...} string-interpolation expression reported the wrong source
-// position (the throwaway sub-parse's own fresh line-1-col-1
-// coordinates, never biased into the real file's coordinates).
+// A diagnostic inside a {$...} string-interpolation expression must
+// report the real file position, not the throwaway sub-parse's own
+// fresh line-1-col-1 coordinates.
 
 #[test]
 fn complex_interpolation_expression_spans_are_biased_to_real_file_positions() {
@@ -59,18 +58,11 @@ fn quote_inside_complex_interpolation_does_not_end_the_string() {
     ));
 }
 
-// Found by the fuzz/ workspace's own token_stream_parse target (feeds a
-// synthetic, Arbitrary-derived token stream straight into the parser,
-// bypassing the real lexer entirely - real PHP source can never produce
-// a ComplexExpr fragment_base this extreme, since no real file gets
-// remotely close to u32::MAX lines/columns, but the parser must still
-// not crash on one). `bias_position` (interpolation.rs) computed
-// `frag_base.col + pos.col - 1` with plain u32 arithmetic - a
-// `frag_base` this close to `u32::MAX` overflowed and panicked
-// ("attempt to add with overflow") instead of producing any position at
-// all. Exercised here through the real Parser::new/parse_program path
-// (not a private-helper unit test), matching exactly how the fuzz
-// target itself reaches it.
+// `bias_position` (interpolation.rs) computes `frag_base.col + pos.col
+// - 1` with plain u32 arithmetic - a `ComplexExpr` `frag_base` this
+// close to `u32::MAX` must not overflow/panic, even though no real PHP
+// file gets remotely close to it. Exercised through the real
+// Parser::new/parse_program path, not a private-helper unit test.
 #[test]
 fn a_complex_interpolation_fragment_with_an_extreme_base_position_does_not_panic() {
     let extreme = Position {

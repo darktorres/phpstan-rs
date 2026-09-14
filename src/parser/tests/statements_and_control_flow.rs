@@ -46,15 +46,11 @@ fn global_with_dynamic_target_parses() {
     assert!(matches!(&program[0].kind, StmtKind::Global(names) if names == &["{dynamic}"]));
 }
 
-// Coverage measurement (cargo llvm-cov) found parse_switch,
-// parse_do_while, parse_if_alt, parse_alt_block, and
-// parse_optional_level all had zero test executions - real,
-// reachable parser functions for common PHP syntax (switch, do-while,
-// the `if (...): ... endif;` alternative syntax used throughout
-// template-heavy code, and `break N;`/`continue N;`) that happened to
-// never come up in any existing test's PHP source. Manually verified
-// via the full pipeline that all five currently produce correct
-// results; these lock that in at the AST level.
+// Locks in AST-level coverage for parse_switch, parse_do_while,
+// parse_if_alt, parse_alt_block, and parse_optional_level - common PHP
+// syntax (switch, do-while, the `if (...): ... endif;` alternative
+// syntax used throughout template-heavy code, and `break N;`/
+// `continue N;`).
 
 #[test]
 fn switch_with_brace_syntax_parses_cases_default_and_fallthrough() {

@@ -1,12 +1,12 @@
-//! Phase 78: `SimpleXMLElement`'s own construction well-formedness
-//! checking. Real PHPStan's `SimpleXMLElementConstructorThrowTypeExtension`
-//! needs to know whether a literal XML string argument is well-formed
-//! before `new SimpleXMLElement($xml)` would throw. Unlike `DateInterval`/
-//! `DOMDocument::createElement()`'s own small, closed-form grammars, this
-//! needs a real (if well-formedness-only) XML parser - `roxmltree` is a
-//! minimal, read-only, pure-Rust parser with no C toolchain requirement,
-//! strictly cheaper to add than the C dependency this project already
-//! accepts for Phase 46's PCRE work.
+//! `SimpleXMLElement`'s own construction well-formedness checking. Real
+//! PHPStan's `SimpleXMLElementConstructorThrowTypeExtension` needs to
+//! know whether a literal XML string argument is well-formed before
+//! `new SimpleXMLElement($xml)` would throw. Unlike `DateInterval`/
+//! `DOMDocument::createElement()`'s own small, closed-form grammars,
+//! this needs a real (if well-formedness-only) XML parser - `roxmltree`
+//! is a minimal, read-only, pure-Rust parser with no C toolchain
+//! requirement, strictly cheaper to add than the C dependency this
+//! project already accepts for its PCRE work.
 
 use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;

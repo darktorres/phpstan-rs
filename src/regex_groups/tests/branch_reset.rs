@@ -1,4 +1,4 @@
-//! Phase 72 (a-ii): `(?|...)` branch-reset support.
+//! `(?|...)` branch-reset support.
 
 use super::super::*;
 use super::helpers::numbers_and_names;
@@ -15,24 +15,19 @@ fn a_branch_reset_where_every_branch_captures_safely_bails() {
 #[test]
 fn a_branch_reset_where_only_one_branch_captures_resolves_with_no_bail() {
     // Only "a" ever captures anything - "b"/"c" have no groups at all,
-    // so no number is ever reused. This is a real improvement over the
-    // pre-Phase-72 status quo, which bailed on *any* `(?|` at all,
-    // anywhere in the pattern.
+    // so no number is ever reused.
     let parsed = parse_capture_groups("/(?|(a)|b|c)/").expect("should not bail");
     assert_eq!(numbers_and_names(&parsed.groups), vec![(1, None, true)]);
 }
 
 #[test]
 fn a_group_declared_after_a_branch_reset_renumbers_from_the_highest_number_reached() {
-    // Confirmed live against a real PHP interpreter:
     // `preg_match('/(?|(a)(b)|(c))(d)/', 'abd', $m)` gives
     // `$m = [0=>'abd',1=>'a',2=>'b',3=>'d']` - `(d)` really is group 3,
     // not 2, since branch 1 alone reached as high as group 2. This
     // pattern collides (both branches reach number 1), so the whole
-    // parse still bails - but the underlying `next_number` restoration
-    // this test actually exercises is verified directly against
-    // `scan_branch_reset_alternation`'s own numbering via a variant that
-    // *doesn't* collide, just below.
+    // parse still bails; the `next_number` restoration is exercised via
+    // a non-colliding variant just below.
     assert!(parse_capture_groups("/(?|(a)(b)|(c))(d)/").is_none());
 }
 

@@ -2,11 +2,8 @@
 use super::super::*;
 use crate::token::StringPart;
 
-// Coverage measurement (cargo llvm-cov) found lex_heredoc and
-// strip_heredoc_indent had zero test executions - lexer.rs had no
-// test module at all before this. Heredoc/nowdoc are real, common
-// PHP syntax (flexible/PHP-7.3+ indentation stripping in
-// particular), verified manually correct before writing these.
+// Heredoc/nowdoc are real, common PHP syntax - flexible/PHP-7.3+
+// indentation stripping (`strip_heredoc_indent`) in particular.
 
 #[test]
 fn nowdoc_strips_the_closing_markers_indentation_with_no_interpolation() {
@@ -40,22 +37,20 @@ fn unterminated_heredoc_does_not_hang_or_panic() {
     let _ = Lexer::new(src).tokenize();
 }
 
-// Finding 10 from the architecture audit - the same string-
-// unawareness bug as Finding 6, in {$...} complex interpolation's
-// own brace-depth counters (two independent ones: lex_interpolated_run
-// scanning for the block's own extent, and scan_interpolated's
-// separate pass carving it into StringPart pieces).
+// {$...} complex interpolation's own brace-depth counters (two
+// independent ones: lex_interpolated_run scanning for the block's own
+// extent, and scan_interpolated's separate pass carving it into
+// StringPart pieces) must stay string-aware - a brace inside a nested
+// string literal must not throw off the count.
 
 #[test]
 fn complex_interpolation_is_not_fooled_by_a_brace_inside_a_nested_string_argument() {
     let src = r#"<?php "value: {$f->wrap('}')} end";"#;
     let toks = Lexer::new(src).tokenize();
-    // A successful, non-panicking tokenize that reaches Eof (rather
-    // than the old parse error stopping partway through the file)
-    // is the real regression test here - the interpolation's own
-    // ComplexExpr part additionally proves the block's real extent
-    // (through the true closing brace, not the one inside the
-    // string) was found correctly.
+    // Must tokenize successfully through to Eof - the interpolation's
+    // own ComplexExpr part additionally proves the block's real extent
+    // (through the true closing brace, not the one inside the string)
+    // was found correctly.
     assert_eq!(toks.last(), Some(&Token::Eof));
     let Token::InterpString(parts) = &toks[0] else {
         panic!("expected an interpolated string, got {:?}", toks[0]);

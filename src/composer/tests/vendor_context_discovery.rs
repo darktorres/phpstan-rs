@@ -58,13 +58,12 @@ return array(
     assert_eq!(ctx.dirs, vec![src_dir]);
 }
 
-// A round of Piwigo-corpus bucketing found real code that constructs
-// Composer's own bootstrap loader directly (`new
-// \Composer\Autoload\ClassLoader()`, a real plugin-autoloading idiom)
-// was flagged as an unknown class - `vendor/composer/ClassLoader.php`
-// is never listed in any of the generated autoload maps at all (it's
-// what *runs* them), so it needs its own, separate, unconditional
-// inclusion.
+// Real code that constructs Composer's own bootstrap loader directly
+// (`new \Composer\Autoload\ClassLoader()`, a real plugin-autoloading
+// idiom) must not be flagged as an unknown class -
+// `vendor/composer/ClassLoader.php` is never listed in any of the
+// generated autoload maps at all (it's what *runs* them), so it needs
+// its own, separate, unconditional inclusion.
 #[test]
 fn always_includes_composers_own_class_loader_file() {
     let dir = TempDir::new("class_loader");
@@ -92,12 +91,10 @@ return array();
 
 #[test]
 fn resolves_the_real_autoload_static_shape_with_chained_dir_concat() {
-    // Modeled directly on a real, installed `autoload_static.php`
-    // (verified by hand against actual Composer output) - not a
-    // simplified guess - specifically to exercise the left-nested,
-    // multi-segment `__DIR__ . '/..' . '/...'` concat shape real
-    // Composer generates, which a flat `$vendorDir . '/...'`-only
-    // fixture would never catch.
+    // Modeled on a real, installed `autoload_static.php` to exercise
+    // the left-nested, multi-segment `__DIR__ . '/..' . '/...'` concat
+    // shape real Composer generates, which a flat
+    // `$vendorDir . '/...'`-only fixture would never catch.
     let dir = TempDir::new("static_shape");
     dir.write("composer.json", "{}");
     dir.write("vendor/acme/lib/Foo.php", "<?php class Foo {}");
@@ -150,8 +147,7 @@ class ComposerStaticInitTest
     assert!(ctx.dirs.contains(&acme_dir), "got: {:?}", ctx.dirs);
 
     // The `__DIR__ . '/../..'`-rooted (first-party, `app/`) entries
-    // must be dropped by the vendor-only filter - this is the other
-    // bug caught during review, pinned here as a regression.
+    // must be dropped by the vendor-only filter.
     let first_party_file = std::fs::canonicalize(dir.path().join("app/FirstParty.php")).unwrap();
     let first_party_dir = std::fs::canonicalize(dir.path().join("app")).unwrap();
     assert!(

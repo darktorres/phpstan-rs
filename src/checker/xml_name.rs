@@ -1,14 +1,13 @@
-//! Phase 78: `DOMDocument::createElement()`'s own tag-name validation.
-//! Real PHPStan's `DomDocumentCreateElementDynamicThrowTypeExtension`
+//! `DOMDocument::createElement()`'s own tag-name validation. Real
+//! PHPStan's `DomDocumentCreateElementDynamicThrowTypeExtension`
 //! validates a single tag-name string against the finite W3C XML 1.0
 //! `Name` production before `createElement()` would throw `DOMException`,
 //! never parsing an XML document at all - structurally identical in
 //! shape to `DateInterval`'s own duration-spec grammar
-//! (`date_interval.rs`), not "full XML-content validation." Confirmed
-//! live against real PHP 8.5: a colon is accepted as a literal `Name`
-//! character (`createElement('a:b')` succeeds), meaning this is the
-//! base, colon-permissive `Name` grammar, not the namespace-restricted
-//! `NCName` one.
+//! (`date_interval.rs`), not "full XML-content validation." A colon is
+//! accepted as a literal `Name` character (`createElement('a:b')`
+//! succeeds) - the base, colon-permissive `Name` grammar, not the
+//! namespace-restricted `NCName` one.
 
 use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
@@ -52,10 +51,10 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// The W3C XML 1.0 (Fifth Edition) §2.3 `Name` production, confirmed live
-/// against real PHP 8.5 (`ext-dom`/libxml) as the grammar `createElement`
-/// actually validates against - not the namespace-restricted `NCName`
-/// grammar (a colon is a valid, literal `NameChar`/`NameStartChar`).
+/// The W3C XML 1.0 (Fifth Edition) §2.3 `Name` production - the grammar
+/// `createElement` (`ext-dom`/libxml) actually validates against, not
+/// the namespace-restricted `NCName` grammar (a colon is a valid,
+/// literal `NameChar`/`NameStartChar`).
 pub(crate) fn is_valid_xml_name(name: &str) -> bool {
     let mut chars = name.chars();
     match chars.next() {
@@ -99,8 +98,8 @@ mod tests {
 
     #[test]
     fn a_colon_is_accepted_as_a_literal_name_character() {
-        // Confirmed live against real PHP 8.5: `createElement('a:b')`
-        // succeeds - this is the base Name grammar, not NCName.
+        // `createElement('a:b')` succeeds - this is the base Name
+        // grammar, not NCName.
         assert!(is_valid_xml_name("a:b"));
     }
 

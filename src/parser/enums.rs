@@ -10,7 +10,7 @@ impl Parser {
     // properties or extend anything.
     pub(crate) fn parse_enum_decl(&mut self) -> Result<EnumDecl, ParseError> {
         let start = self.current_pos();
-        // Phase 66: captured here, at the very first token, mirroring
+        // Captured here, at the very first token, mirroring
         // `parse_class_decl`'s identical note above - needed for
         // rejecting a stray `@template` on an enum (enums can't be
         // generic; PHP has no `enum Foo<T>` syntax at all).
@@ -54,7 +54,7 @@ impl Parser {
 
         while !self.check(&Token::RBrace) && !self.at_eof() {
             let member_start = self.current_pos();
-            // Phase 37: see the identical handling in `parse_class_body`.
+            // See the identical handling in `parse_class_body`.
             let attrs = self.parse_leading_attributes()?;
             let doc = self.take_doc_comment();
 

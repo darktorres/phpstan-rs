@@ -24,9 +24,9 @@ use crate::types::{CallableParam, CallableSig, Type};
 /// (also, itself, recursively resolved - a real, if rarer, nested-
 /// conditional shape). A real bound picks `if_true`/`if_false` via
 /// `is_subtype(bound, target) != negated`, then recurses into *only* the
-/// picked branch (never both) - the whole point of this mechanism over the
-/// pre-Phase-80 eager-union behavior still preserved by `types::parse`'s
-/// own fallback for an unrepresentable subject.
+/// picked branch (never both) - the eager-union fallback (`types::parse`'s
+/// own, for an unrepresentable subject) is deliberately the less precise
+/// path.
 pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Conditional {
