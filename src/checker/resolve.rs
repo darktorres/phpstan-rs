@@ -42,32 +42,32 @@ impl<'a> Checker<'a> {
     }
 
     /// Parses a raw type-hint string (a closure/arrow-fn param/return, or
-    /// (Phase 80 follow-up) an inline `@var` annotation via `inline_var_
+    /// An inline `@var` annotation via `inline_var_
     /// annotation` below - one of a few places in this checker that build
     /// a `Type` straight from source without going through the registry's
     /// own `FunctionSig::from_decl`, which already resolves names as part
     /// of its pipeline; `checker.rs`'s anonymous-class param/return
     /// docblock fallback is another, patched the same way at its own two
     /// call sites) and resolves any class name in it against this file's
-    /// `NameContext`, exactly like a real declaration would. Found
-    /// necessary the hard way: an unresolved bare name here compared as a
-    /// real mismatch against the correctly-resolved FQN the closure body
-    /// itself infers, on real code (a `static fn(array $row): ActionCount
-    /// => new ActionCount(...)` where `ActionCount` is `use`-imported).
+    /// `NameContext`, exactly like a real declaration would - otherwise
+    /// an unresolved bare name here compares as a real mismatch against
+    /// the correctly-resolved FQN the closure body itself infers, on
+    /// real code (a `static fn(array $row): ActionCount =>
+    /// new ActionCount(...)` where `ActionCount` is `use`-imported).
     ///
-    /// Phase 80 follow-up: also resolves `types::parse_type_keyword_or_class`'s
+    /// Also resolves `types::parse_type_keyword_or_class`'s
     /// `value-of<T>`-on-an-enum sentinel (`Registry::resolve_deferred_value_of_now`) -
     /// unlike `Registry::resolve_deferred_value_of`'s own one-time,
     /// registry-build-time pass, every class/enum is already fully
     /// indexed by the time *this* function ever runs, so resolution
-    /// happens immediately, inline, with no separate pass needed. Real
-    /// corpus false positive this closes: an inline `@var` annotation is
-    /// checked through here, and without this, the raw, unresolved
-    /// sentinel leaked straight into a real diagnostic message
-    /// (`shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
+    /// happens immediately, inline, with no separate pass needed. An
+    /// inline `@var` annotation is checked through here, and without
+    /// this, the raw, unresolved sentinel would leak straight into a
+    /// real diagnostic message (real shape:
+    /// `shipmonk/dead-code-detector`'s own `CollectedUsage::deserialize()`,
     /// `/** @var array{..., t: value-of<MemberType>, ...} $result */`).
     ///
-    /// Phase 50 (reattempt): also marks the *current class's own*
+    /// Also marks the *current class's own*
     /// `@template` names as `Type::TemplateParam` (`registry::
     /// mark_template_params`) *before* resolving names - order matters,
     /// the same as the registry-build pipeline's own `build_template_
@@ -75,14 +75,12 @@ impl<'a> Checker<'a> {
     /// resolving names first would already have namespace-mangled the
     /// template's own short name beyond recognition. Without this, a
     /// class-level template referenced inside a raw type string parsed
-    /// through here (an inline `@var`, most commonly) was indistinguishable
-    /// from a genuine, unqualified class reference and got resolved (and
-    /// then, downstream, flagged) as one - the real root cause behind
-    /// this project's own reverted `InvalidKeyInArrayDimFetchRule` first
-    /// attempt (see ROADMAP.md's **Reverted** section): `php-standard-
-    /// library`'s own `SetType`/`MapType`/`MutableSetType`, each with an
-    /// inline `/** @var Type\Type<T> $type */` referencing its own
-    /// class-level `@template`.
+    /// through here (an inline `@var`, most commonly) would otherwise be
+    /// indistinguishable from a genuine, unqualified class reference and
+    /// get resolved (and then, downstream, flagged) as one (real shape:
+    /// `php-standard-library`'s own `SetType`/`MapType`/`MutableSetType`,
+    /// each with an inline `/** @var Type\Type<T> $type */` referencing
+    /// its own class-level `@template`).
     ///
     /// Also merges in the *current function/method's own* `@template`s
     /// (`current_function_template_params` below) - real corpus evidence
@@ -97,7 +95,7 @@ impl<'a> Checker<'a> {
         self.resolve_type_hint_with_case_refs(hint).0
     }
 
-    /// Phase 48 follow-up (item 6d): `resolve_type_hint`'s own case_refs-
+    /// `resolve_type_hint`'s own case_refs-
     /// collecting sibling - a closure/arrow-fn literal has no `FunctionSig`
     /// of its own for `case_refs` to live on at registry-build time the
     /// way an ordinary function/method parameter's does, so this
@@ -221,7 +219,7 @@ impl<'a> Checker<'a> {
         out
     }
 
-    /// Phase 48.D: `FunctionDefinitionCheck`'s own `method.
+    /// `FunctionDefinitionCheck`'s own `method.
     /// templateTypeNotInParameter` half (confirmed by direct read,
     /// `checkParametersAcceptor`'s shared tail, so this applies uniformly
     /// to a function/method's own `@template` - real PHPStan runs the
@@ -393,7 +391,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48's "does this name actually resolve" primitive: `name` is a
+    /// The "does this name actually resolve" primitive: `name` is a
     /// real class/interface/trait/enum this checker's own `Registry`
     /// indexed, or one of the small, fixed set of native type-hint
     /// keywords this project's own `types::parse_type_keyword_or_class`
@@ -420,25 +418,23 @@ impl<'a> Checker<'a> {
         ) || self.registry.lookup_class(name).is_some()
     }
 
-    /// Phase 48.2/37/48.H: `ClassCaseSensitivityCheck`'s equivalent.
-    /// Started scoped to a class/enum declaration's own `extends`/
-    /// `implements`/trait-`use` references (Phase 48.2 - the ones that
-    /// already carried a per-item span, `ClassDecl::extends_spans`/
-    /// `implements_spans`/`uses_spans`, at the time), gained an attribute-
-    /// reference call site soon after (Phase 37), and Phase 48.H widened
-    /// it further to every *native-syntax* class-name reference: `new`,
+    /// `ClassCaseSensitivityCheck`'s equivalent, covering every
+    /// *native-syntax* class-name reference: a class/enum declaration's
+    /// own `extends`/`implements`/trait-`use` references (which already
+    /// carry a per-item span, `ClassDecl::extends_spans`/
+    /// `implements_spans`/`uses_spans`), an attribute reference, `new`,
     /// `instanceof`, a static method call/property/constant access
-    /// (`Foo::...`), and a `catch` clause. Each of those needed no new
-    /// parser/registry plumbing at all - the raw, as-written text was
+    /// (`Foo::...`), and a `catch` clause. Each of those needs no new
+    /// parser/registry plumbing at all - the raw, as-written text is
     /// already sitting in the AST as a bare `String`/`ExprKind::Name`
     /// field, just never read for this purpose - unlike a *PHPDoc-typed*
     /// position (a param/return/property type hint, `@method`/`@mixin`/
     /// `@phpstan-type` tag target), where this project's own type-parsing
     /// pipeline collapses every reference straight into a resolved `Type`
     /// with no per-reference raw spelling retained anywhere by the time
-    /// any checker call site sees it - this needed a parallel traversal
+    /// any checker call site sees it - that needs a parallel traversal
     /// run one step earlier in the parse pipeline instead
-    /// (`registry::collect_class_name_case_refs`, Phase 48 item 7a) to
+    /// (`registry::collect_class_name_case_refs`) to
     /// preserve it; see `check_type_class_name_case` just below, this
     /// function's own fan-out consumer for that PHPDoc-typed case.
     /// Skips a `use`-imported reference (real PHPStan's own default
@@ -475,7 +471,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48 follow-up (item 7b): `class.nameCase` for a PHPDoc-typed
+    /// `class.nameCase` for a PHPDoc-typed
     /// position (a param/return/property type hint, `@method`/`@mixin`/
     /// `@phpstan-type` tag target) - the gap `check_class_name_case`'s
     /// own doc comment above names as "a genuinely bigger, still-open
@@ -528,7 +524,7 @@ impl<'a> Checker<'a> {
     /// project already made once for bound-checking.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
-            // Phase 54: a call-site variance sentinel's own name is
+            // A call-site variance sentinel's own name is
             // never a real class reference to flag - matches this
             // function's own existing, deliberate leniency of not
             // recursing into a generic argument list at all (see this
@@ -574,7 +570,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.A: `FunctionDefinitionCheck`'s own "resolved but a trait"
+    /// `FunctionDefinitionCheck`'s own "resolved but a trait"
     /// half - `parameter.trait`/`return.trait`/`property.trait` (real
     /// PHPStan, confirmed by direct read: a native type-hint resolving to
     /// a real, indexed class that turns out to be a `trait` rather than a
@@ -654,7 +650,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 48.E: `parameter.noParent`/`return.noParent` - real
+    /// `parameter.noParent`/`return.noParent` - real
     /// PHPStan's `NonexistentParentClassType` (`describe()` returns the
     /// literal string `"parent"`, confirmed by direct read), produced
     /// when a native `parent` type-hint is used on a class with no
@@ -742,7 +738,7 @@ impl<'a> Checker<'a> {
                 "class.notFound",
             );
         }
-        // Phase 48.G: `class.prefixed`'s own pipeline-wide widening -
+        // `class.prefixed`'s own pipeline-wide widening -
         // every one of this function's own ~18 call sites gets this for
         // free now, not just `check_use_class_imports`'s own single
         // `use`-import site. Checked on the *successfully-resolved* name
@@ -769,7 +765,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 48.G: `collect_unknown_class_names`'s own sibling, minus the
+/// `collect_unknown_class_names`'s own sibling, minus the
 /// existence filter (a prefixed vendor class is almost always a real,
 /// indexed one - see `check_type_class_names_exist`'s own doc comment) -
 /// otherwise the identical recursive shape.
@@ -839,7 +835,7 @@ fn collect_scoped_template_params(
                 collect_scoped_template_params(t, scope, out);
             }
         }
-        // Phase 48.D follow-up: real corpus false positive
+        // A real false positive
         // (`php-standard-library`'s own `Psl\Dict\group_by()`, `@template
         // Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc` - `Tk`
         // only ever appears nested inside a `Closure(...)`-shaped
