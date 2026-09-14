@@ -1,29 +1,22 @@
-//! Phase 42: the checked-exception/throw-type model.
+//! The checked-exception/throw-type model.
 //!
-//! - `InvalidThrowsPhpDocValueRule` (`throws.notThrowable`, a `@throws`
-//!   tag naming something that isn't actually a `Throwable` subtype) and
-//!   `ThrowsVoidFunctionWithExplicitThrowPointRule`/
-//!   `ThrowsVoidMethodWithExplicitThrowPointRule` (`throws.void`, an
-//!   explicit `@throws void` directly contradicted by a real `throw`
-//!   visible in the body) - this module's own original, self-contained
-//!   slice, needing no per-callee throw-type model at all.
-//! - Sub-item A (transitive throw-point collection): `Checker::current_
-//!   function_throw_points`/`current_function_has_unannotated_call`
-//!   (`checker.rs`'s own doc comments on each), recorded at every real
-//!   `throw` and every already-resolved-signature call choke point
-//!   (`checker/expr.rs`'s `ExprKind::Call`/`New`/`MethodCall`/
+//! - `throws.notThrowable` (a `@throws` tag naming something that isn't
+//!   actually a `Throwable` subtype) and `throws.void` (an explicit
+//!   `@throws void` directly contradicted by a real `throw` visible in
+//!   the body) - self-contained, needing no per-callee throw-type model.
+//! - Transitive throw-point collection: `Checker::current_function_
+//!   throw_points`/`current_function_has_unannotated_call`, recorded at
+//!   every real `throw` and every already-resolved-signature call choke
+//!   point (`checker/expr.rs`'s `ExprKind::Call`/`New`/`MethodCall`/
 //!   `StaticCall` arms, `checker/stmt/try_catch.rs`'s `check_throw`).
-//! - Sub-item D (per-callee dynamic throw-type extensions): `dynamic`
-//!   submodule, tried before each hook's plain `FunctionSig.throws`
-//!   fallback.
-//! - Sub-item C (`TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule`):
-//!   `too_wide` submodule.
-//! - Bonus item (opt-in "missing checked exception" family, gated on
-//!   `Registry::check_missing_checked_exceptions`): `missing` submodule.
+//! - Per-callee dynamic throw-type extensions: `dynamic` submodule,
+//!   tried before each hook's plain `FunctionSig.throws` fallback.
+//! - Too-wide throw-type checks: `too_wide` submodule.
+//! - Opt-in "missing checked exception" family, gated on
+//!   `Registry::check_missing_checked_exceptions`: `missing` submodule.
 //!
-//! Declined, unchanged since the original decision: `MethodThrowTypeCovarianceRule`
-//! (Sub-item B - no call-graph-wide implicit-throw model exists to build
-//! it on).
+//! Declined: a method-throw-type covariance check, since no call-graph-
+//! wide implicit-throw model exists to build it on.
 
 use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children};
@@ -36,15 +29,12 @@ mod dynamic;
 mod missing;
 mod too_wide;
 
-/// Whether `stmts` contains a real, direct `throw` (statement or
-/// expression) anywhere in its own body - `Some(span)` of the first one
-/// found, `None` if there isn't one. Mirrors `checker::control_flow`'s
-/// own `body_contains_yield`/`stmt_contains_yield`/`expr_contains_yield`
-/// trio exactly, including their identical "stops at a nested
-/// `Closure`/`ArrowFn`/`NewAnonymousClass`/`FunctionDecl`/`ClassDecl`/
-/// `EnumDecl` boundary" semantics (`expr_children`/`stmt_children`'s own
-/// doc comments) - a `throw` inside a nested closure belongs to *that*
-/// closure's own reflection, not this outer function/method.
+/// Whether `stmts` contains a real, direct `throw` anywhere in its own
+/// body - `Some(span)` of the first one found. Mirrors
+/// `checker::control_flow`'s `body_contains_yield` trio, including their
+/// "stops at a nested `Closure`/`ArrowFn`/`NewAnonymousClass`/
+/// `FunctionDecl`/`ClassDecl`/`EnumDecl` boundary" semantics - a `throw`
+/// inside a nested closure belongs to that closure, not the outer one.
 pub(crate) fn body_contains_explicit_throw(stmts: &[Stmt]) -> Option<Span> {
     stmts.iter().find_map(stmt_contains_explicit_throw)
 }
@@ -98,10 +88,8 @@ fn stmt_contains_explicit_throw(stmt: &Stmt) -> Option<Span> {
     })
 }
 
-// Phase 42 property-hook family: `check_get_hook`/`check_set_hook`'s own
-// `throws.void` check needs this for an arrow-form hook body, which is a
-// single `Expr`, not a `Vec<Stmt>` - `body_contains_explicit_throw` only
-// ever takes the latter.
+// `check_get_hook`/`check_set_hook`'s `throws.void` check needs this for
+// an arrow-form hook body, which is a single `Expr`, not a `Vec<Stmt>`.
 pub(crate) fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
     if let ExprKind::Throw(_) = &e.kind {
         return Some(e.span);
@@ -112,32 +100,24 @@ pub(crate) fn expr_contains_explicit_throw(e: &Expr) -> Option<Span> {
 }
 
 impl<'a> Checker<'a> {
-    /// Phase 42 Sub-item A: records one call's own contribution to
-    /// `current_function_throw_points`/`current_function_has_unannotated_
-    /// call` - shared by every call-shape choke point (`checker/expr.rs`'s
-    /// `ExprKind::Call`/`New`/`MethodCall`/`StaticCall` arms). `dynamic`
-    /// is Sub-item D's own per-callee override, already computed by the
-    /// caller (tried first); `sig` is the plainly-resolved callee
-    /// signature, whose own `throws` field is the fallback once `dynamic`
-    /// is `None`.
+    /// Records one call's contribution to `current_function_throw_points`/
+    /// `current_function_has_unannotated_call` - shared by every
+    /// call-shape choke point. `dynamic` is a per-callee override,
+    /// already computed by the caller (tried first); `sig` is the
+    /// plainly-resolved callee signature, whose `throws` field is the
+    /// fallback once `dynamic` is `None`.
     ///
-    /// `sig` being `None` (no signature at all - a dynamic call, or a
-    /// genuinely unresolvable one) is the one case that marks the whole
-    /// enclosing declaration `current_function_has_unannotated_call`:
-    /// real PHP lets an arbitrarily-implemented callee throw literally
-    /// anything, so this project genuinely has no bound to offer. A
-    /// *resolved* signature with no `@throws` tag of its own (`sig.throws
-    /// == None`) is deliberately treated as "known to throw nothing," not
-    /// "unknown" - the overwhelmingly common real case (an ordinary
-    /// function nobody ever documented a `@throws` tag on, because it
-    /// genuinely doesn't throw), matching this project's own established
-    /// "absence of a tag makes no claim either way, but isn't treated as
-    /// a worse-than-nothing unknown" convention for `@internal`/
-    /// `@deprecated` elsewhere. Treating it as "unknown" instead would
-    /// make `current_function_has_unannotated_call` true for nearly every
-    /// real function body (anything calling an untagged stdlib function
-    /// at all), suppressing Sub-item C's whole comparison almost
-    /// everywhere - a real, considered trade-off, not an oversight.
+    /// `sig` being `None` (a dynamic or genuinely unresolvable call) is
+    /// the one case that marks the enclosing declaration `current_
+    /// function_has_unannotated_call`: real PHP lets an arbitrary callee
+    /// throw anything, so there's no bound to offer. A *resolved*
+    /// signature with no `@throws` tag (`sig.throws == None`) is
+    /// deliberately treated as "known to throw nothing," not "unknown" -
+    /// the common case of an ordinary function nobody documented a
+    /// `@throws` tag on because it genuinely doesn't throw. Treating it
+    /// as "unknown" instead would make `current_function_has_
+    /// unannotated_call` true for nearly every real function body,
+    /// suppressing the too-wide-throw-type comparison almost everywhere.
     pub(crate) fn record_call_throw_point(
         &mut self,
         dynamic: Option<Type>,
@@ -178,24 +158,16 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Mirrors real PHPStan's own `InvalidThrowsPhpDocValueRule::isThrowsValid`:
-/// every member of a union must itself be a `Throwable` subtype for the
-/// whole tag to be valid. Anything this project's own type system can
-/// produce for a `@throws` tag besides a plain class reference (`Mixed`
-/// from an unparseable type, `Void` - real PHPStan's own explicit
-/// "never throws" escape hatch, a template param, ...) is left alone -
-/// "don't know, don't guess," this project's usual leniency for
-/// anything short of a confident violation. Same reasoning for a class
-/// name the registry has no entry for at all (real corpus shape: a
-/// native-extension-only exception class, e.g. `SVMException` from the
-/// `svm` extension, whose own type never gets vendored into this
-/// project's own stub corpus the way `Exception`/`RuntimeException`/etc.
-/// are) - `is_subclass_of` on an unknown class can't confidently say
-/// anything either way, and treating "unknown" the same as "confirmed
-/// not Throwable" would misreport a real typo'd/missing class the same
-/// confusing way `CaughtExceptionExistenceRule`'s own existence-check
-/// ordering (`checker/stmt.rs`'s `StmtKind::Try` handling) already
-/// avoids for the analogous `catch` case.
+/// Every member of a union must itself be a `Throwable` subtype for the
+/// whole tag to be valid. Anything besides a plain class reference
+/// (`Mixed` from an unparseable type, `Void` as the explicit "never
+/// throws" escape hatch, a template param, ...) is left alone - "don't
+/// know, don't guess." Same reasoning for a class name the registry has
+/// no entry for at all (e.g. a native-extension-only exception class
+/// never vendored into the stub corpus): `is_subclass_of` on an unknown
+/// class can't confidently say anything either way, and treating
+/// "unknown" the same as "confirmed not Throwable" would misreport a
+/// real typo'd/missing class.
 fn throws_is_valid(ty: &Type, registry: &Registry) -> bool {
     match ty {
         Type::Union(members) => members.iter().all(|m| throws_is_valid(m, registry)),

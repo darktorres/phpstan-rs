@@ -1,34 +1,23 @@
-//! Phase 42 Sub-item D: per-callee dynamic throw-type extensions - a
-//! curated, disclosed subset of real PHPStan's own `vendor/phpstan-src/
-//! src/Type/Php/*ThrowTypeExtension.php` family (each verified by reading
-//! the real extension source directly, not guessed), tried before the
-//! plain `FunctionSig.throws` fallback at every one of `throws/mod.rs`'s
-//! own recording hooks.
+//! Per-callee dynamic throw-type extensions, tried before the plain
+//! `FunctionSig.throws` fallback at every one of `throws/mod.rs`'s
+//! recording hooks.
 //!
-//! Deliberately simplified relative to the real extensions in one
-//! consistent direction: real PHPStan often tries hard to *prove* a call
+//! Simplified in one consistent direction relative to what a full
+//! per-callee model could prove: rather than trying to *prove* a call
 //! can't possibly throw (a provably-in-range divisor, a provably-valid
-//! reflection target, ...) before contributing nothing at all. This
-//! project instead contributes the exception type whenever the call
-//! *shape* matches, unless a literal argument makes the "can't throw"
-//! case trivial to prove - the safe direction for what a throw point
-//! feeds into (`TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule`,
-//! `checker/throws/too_wide.rs`): under-recognizing a real throw point
-//! would make a real `@throws` tag look wrongly "unused"; over-
-//! recognizing one only ever makes this project *more* conservative
-//! about flagging that, never less.
+//! reflection target, ...), this contributes the exception type whenever
+//! the call *shape* matches, unless a literal argument makes the "can't
+//! throw" case trivial to prove. This is the safe direction for what a
+//! throw point feeds into (`checker/throws/too_wide.rs`): under-
+//! recognizing a real throw point would make a real `@throws` tag look
+//! wrongly "unused"; over-recognizing one only makes this project more
+//! conservative, never less.
 //!
-//! Excluded from this subset, each for its own disclosed reason:
-//! `version_compare()` (PHP-version-conditional in real PHPStan - this
-//! project has no PHP-version-awareness plumbing to gate it on, and the
-//! value density is low); DateTime's own relative-date-string parsing
-//! (`DateTimeConstructorThrowTypeExtension`/`DateTimeModifyMethodThrow
-//! TypeExtension` - genuinely infeasible, real PHP invokes its actual
-//! C/ICU date parser at analysis time, with no formally-specified
-//! grammar to replicate the way DOM/SimpleXML's own extensions have).
-//! DOM (`DomDocumentCreateElementDynamicThrowTypeExtension`) and
-//! SimpleXML (`SimpleXMLElementConstructorThrowTypeExtension`) are both
-//! covered below.
+//! Excluded: `version_compare()` (would need PHP-version-awareness
+//! plumbing this project doesn't have, and the value density is low);
+//! DateTime's relative-date-string parsing (genuinely infeasible - real
+//! PHP invokes its actual C/ICU date parser at analysis time, with no
+//! formally-specified grammar to replicate the way DOM/SimpleXML have).
 
 use crate::ast::{Arg, ExprKind, Literal, UnaryOp};
 use crate::checker::date_interval::is_valid_date_interval_spec;
@@ -42,11 +31,8 @@ fn throwable(class: &str) -> Type {
     Type::Object(class.to_string(), Vec::new())
 }
 
-/// A literal, non-negative-or-negative integer argument's own value, or
-/// `None` for anything else (a variable, a computed expression, ...) -
-/// this file's own narrow "is this argument a provable literal" need,
-/// distinct from `literal_string_value`/`literal_class_name_from_expr`
-/// (neither handles an integer).
+/// A literal integer argument's value, or `None` for anything else (a
+/// variable, a computed expression, ...).
 fn literal_int_value(a: &Arg) -> Option<i64> {
     if a.name.is_some() || a.spread {
         return None;
@@ -62,10 +48,9 @@ fn literal_int_value(a: &Arg) -> Option<i64> {
 }
 
 impl<'a> Checker<'a> {
-    /// Phase 42 Sub-item D: an ordinary (not method/constructor) function
-    /// call's own dynamic throw type, tried before `sig.throws`.
-    /// `bare_name` is already the last namespace segment, lowercased -
-    /// matching every other by-name builtin dispatch in this checker.
+    /// An ordinary (not method/constructor) function call's dynamic
+    /// throw type, tried before `sig.throws`. `bare_name` is already the
+    /// last namespace segment, lowercased.
     pub(crate) fn dynamic_function_throw_type(
         &self,
         bare_name: &str,
@@ -73,49 +58,32 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<Type> {
         match bare_name {
-            // `IntdivThrowTypeExtension`: contributes `DivisionByZeroError`
-            // unless the divisor is a literal, provably-nonzero integer.
-            // Real PHPStan also contributes `ArithmeticError` for the
-            // `PHP_INT_MIN / -1` overflow case - skipped here (a real,
-            // disclosed narrower scope: that combination needs both
-            // arguments' own provable ranges, not just the divisor's).
+            // Contributes `DivisionByZeroError` unless the divisor is a
+            // literal, provably-nonzero integer. Omits `ArithmeticError`
+            // for the `PHP_INT_MIN / -1` overflow case, which needs both
+            // arguments' provable ranges, not just the divisor's.
             "intdiv" => {
                 let divisor = args.get(1)?;
                 match literal_int_value(divisor) {
                     Some(0) => Some(throwable("DivisionByZeroError")),
-                    // A real, previously-live bug found and fixed this
-                    // session: `None` here (this file's own established
-                    // "not recognized/no contribution" sentinel) was
-                    // indistinguishable, at every one of this function's
-                    // own call sites (`record_call_throw_point`), from
-                    // "this exact call shape isn't `intdiv` at all" - both
-                    // fell through to `intdiv`'s own generic stub-level
-                    // `@throws DivisionByZeroError`/`ArithmeticError` tag,
-                    // completely undoing the whole point of proving *this*
-                    // call, with a literal nonzero divisor, safe.
-                    // `Type::Void` is `record_call_throw_point`'s own
-                    // already-built "recognized, but definitely
-                    // contributes nothing - don't fall back to the sig"
-                    // sentinel (its own `if t != Type::Void { push(t); }
-                    // return;` already handles this correctly; nothing
-                    // there needed to change, only this file's own choice
-                    // of which "nothing" to return).
+                    // `Type::Void` is `record_call_throw_point`'s
+                    // "recognized, but definitely contributes nothing -
+                    // don't fall back to the sig" sentinel; returning
+                    // bare `None` here would be indistinguishable from
+                    // "not `intdiv` at all" and fall back to the generic
+                    // stub-level `@throws` tag, undoing the proof that
+                    // this call with a literal nonzero divisor is safe.
                     Some(_) => Some(Type::Void),
                     None => Some(throwable("DivisionByZeroError")),
                 }
             }
-            // `ArrayCombineFunctionThrowTypeExtension`: real PHPStan only
-            // contributes `ValueError` when it can't prove the two arrays'
-            // own element counts match - this project has no element-
-            // count tracking to attempt that proof at all, so (favoring
-            // the "recognize more, not less" direction this file's own
-            // doc comment describes) it's contributed unconditionally
-            // whenever `array_combine` is called with both arguments.
+            // No element-count tracking exists to prove the two arrays'
+            // counts match, so `ValueError` is contributed unconditionally
+            // whenever both arguments are present.
             "array_combine" if args.len() >= 2 => Some(throwable("ValueError")),
-            // `AssertThrowTypeExtension`: a custom second argument that's
-            // itself a `Throwable` subtype is thrown as-is instead of the
-            // default `AssertionError` - this project's own `infer_expr`
-            // stands in for real PHPStan's `$scope->getType`.
+            // A custom second argument that's itself a `Throwable`
+            // subtype is thrown as-is instead of the default
+            // `AssertionError`.
             "assert" => {
                 if let Some(custom) = args.get(1)
                     && custom.name.is_none()
@@ -130,12 +98,10 @@ impl<'a> Checker<'a> {
                 }
                 Some(throwable("AssertionError"))
             }
-            // `JsonThrowTypeExtension`: `JSON_THROW_ON_ERROR` present in a
-            // bitwise-or flags argument.
+            // `JSON_THROW_ON_ERROR` present in a bitwise-or flags argument.
             "json_encode" => Self::json_throw_on_error(args, 1),
             "json_decode" => Self::json_throw_on_error(args, 3),
-            // `FilterVarThrowTypeExtension`: `FILTER_THROW_ON_FAILURE`
-            // present in `filter_var`'s own third argument.
+            // `FILTER_THROW_ON_FAILURE` present in the third argument.
             "filter_var" => {
                 let flags = args.get(2)?;
                 (flags.name.is_none()
@@ -155,18 +121,13 @@ impl<'a> Checker<'a> {
         .then(|| throwable("JsonException"))
     }
 
-    /// Phase 42 Sub-item D: `new X(...)`'s own dynamic throw type -
-    /// `DateIntervalConstructorThrowTypeExtension` (reuses the already-
-    /// shipped spec validator - `check_date_interval_constructor`'s own
-    /// separate "is this malformed" diagnostic and this throw-type
-    /// contribution are two different consumers of the same underlying
-    /// fact) and the four `Reflection*ConstructorThrowTypeExtension`s
-    /// (each collapsed to "contribute `ReflectionException`
-    /// unconditionally whenever constructed with at least one argument" -
-    /// real PHPStan tries to prove the target class/method/property
-    /// genuinely exists first; this project doesn't attempt that proof
-    /// here, matching this file's own "recognize more, not less"
-    /// direction).
+    /// `new X(...)`'s dynamic throw type. `DateInterval` reuses the
+    /// already-shipped spec validator (`check_date_interval_constructor`'s
+    /// "is this malformed" diagnostic and this throw-type contribution
+    /// are two different consumers of the same fact); the `Reflection*`
+    /// classes contribute `ReflectionException` unconditionally whenever
+    /// constructed with at least one argument, without trying to prove
+    /// the target class/method/property genuinely exists.
     pub(crate) fn dynamic_new_throw_type(&self, class: &str, args: &[Arg]) -> Option<Type> {
         match class {
             "DateInterval" => {
@@ -175,14 +136,7 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 match &unwrap_grouping(&arg.value).kind {
-                    // Same bug, same fix as `intdiv`'s own identical
-                    // `Type::Void` sentinel just above: a *valid* literal
-                    // spec previously returned bare `None` here, silently
-                    // falling back to `DateInterval::__construct()`'s own
-                    // generic stub-level `@throws Exception`/
-                    // `DateMalformedIntervalStringException` tag - exactly
-                    // undoing this arm's own proof that *this* literal
-                    // spec can never throw.
+                    // Same `Type::Void` sentinel as `intdiv` above.
                     ExprKind::Literal(Literal::String(spec)) => {
                         if is_valid_date_interval_spec(spec) {
                             Some(Type::Void)
@@ -195,8 +149,7 @@ impl<'a> Checker<'a> {
             }
             "ReflectionClass" | "ReflectionObject" | "ReflectionFunction" | "ReflectionMethod"
             | "ReflectionProperty" => (!args.is_empty()).then(|| throwable("ReflectionException")),
-            // Phase 78: `SimpleXMLElementConstructorThrowTypeExtension` -
-            // real PHP throws a plain `Exception` when the argument isn't
+            // Real PHP throws a plain `Exception` when the argument isn't
             // well-formed XML.
             "SimpleXMLElement" => {
                 let arg = args.first()?;
@@ -218,10 +171,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 42 Sub-item D: `$obj->method(...)`'s own dynamic throw type -
-    /// `DateTimeSubMethodThrowTypeExtension` (`DateTime[Immutable]::sub()`)
-    /// and `DomDocumentCreateElementDynamicThrowTypeExtension`
-    /// (`DOMDocument::createElement()`).
+    /// `$obj->method(...)`'s dynamic throw type: `DateTime[Immutable]::
+    /// sub()` and `DOMDocument::createElement()`.
     pub(crate) fn dynamic_method_throw_type(
         &self,
         class: &str,
