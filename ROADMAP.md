@@ -690,6 +690,47 @@ because both the built-in and the redeclared copy happened to agree
 (both driven by the same now-removed attribute), not because the
 underlying double-declaration wasn't already happening.
 
+**A `foreach` by-ref value variable never widened its own subject array's
+tracked element type.** `StmtKind::Foreach`'s own `by_ref: bool` field was
+destructured in `stmt.rs`'s dispatch match and then silently dropped -
+never even passed into `check_foreach` at all, so `foreach ($items as
+&$item) { $item['x'] = ...; }` was checked identically to a plain by-
+value `foreach ($items as $item)`: writing a new field into the by-ref
+alias had zero effect on what this project believed `$items`'s own
+elements looked like afterward. Real corpus false positive:
+`CategoryCatsRenderer::render`'s own `foreach ($infosOfImage as &$info)
+{ $info['src_image'] = new SrcImage(...); }`, unconditionally adding
+`src_image` to every element - a later `$infosOfImage[$representative
+PictureId]['src_image']` read (through a fresh `??`-defaulted dynamic-key
+lookup, past the loop) was flagged `shapeAccess.notFound` because
+`$infosOfImage`'s own tracked element type never picked the field up.
+
+Fixed by threading `by_ref` through to `check_foreach`, and - once the
+loop's body has converged - unioning the by-ref value variable's own
+final type into the subject's tracked element type, when the subject is
+a bare variable with an already-homogeneous element type (the same scope
+`array_element_type` already commits to for binding the loop variable in
+the first place). The value's final type has to be captured *from
+inside* the last accepted convergence pass, not read back from the
+locals `converge_loop_body` itself returns - by the time that returns,
+its own "loop may run zero times" merge has already dropped the value
+variable entirely (the same treatment it correctly gives any other name
+introduced only inside the loop body, confirmed live: reading the value
+variable itself right after the loop, unguarded, correctly still reports
+`variable.undefined`). Deliberately unions with the pre-loop element
+type rather than replacing it outright - sound even if some other,
+not-yet-seen caller shape turns out to add the field conditionally
+rather than unconditionally.
+
+Verification: scoped Piwigo diff 48 -> 47, the 1 target finding removed
+cleanly, zero new. Unscoped diff: 5 removed/4 added, net -1 - the same
+Piwigo finding is the only real fix; the other 3 removed/3 added pairs
+are the identical pre-existing `return.type`/`argument.type` findings in
+`symfony/string`/`rector`/`sabberworm` vendor code, now with a correctly
+by-ref-aware (wider, more precise) "got" type in the message - the same
+diagnostic at the same line, still flagged either way, neither a new nor
+a fixed finding.
+
 **A real generics-substitution gap, fully diagnosed and fixed.** Calling
 a generic interface's own templated method through a concrete class that
 *itself directly re-declares/implements* that method (not merely

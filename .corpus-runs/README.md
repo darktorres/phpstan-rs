@@ -430,3 +430,15 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   pre-existing artifact of that same "`vendor/` scanned as project
   source" quirk double-declaring `imagecolorsforindex()`, not a new
   regression (see ROADMAP.md for the full trace).
+- `2c6bf5f` - `check_foreach` now widens a `foreach` subject's own
+  tracked element type when its by-ref value variable is written into
+  (`by_ref` used to be dropped entirely, never even threaded into
+  `check_foreach` at all). Scoped 48 -> 47 (the 1 target finding -
+  `CategoryCatsRenderer::render`'s own `$infosOfImage`/`$info['src_image']`
+  - removed cleanly, zero new). Unscoped: 5 removed/4 added, net -1; the
+  same Piwigo finding is the only removal that's a real fix, the other
+  3 removed/3 added pairs are the identical pre-existing `return.type`/
+  `argument.type` findings in `symfony/string`/`rector`/`sabberworm`
+  vendor code with a slightly more precise (wider, correctly by-ref-
+  aware) "got" type in the message - same diagnostic, same line, still
+  flagged either way, not a new or fixed finding.
