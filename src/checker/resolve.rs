@@ -669,13 +669,12 @@ impl<'a> Checker<'a> {
 
     /// The shared reporting half every existence-checking call site
     /// (parameter/return/property type hints, closure/arrow-fn
-    /// typehints, ...) reduces to once it has its own `subject` phrase
-    /// ready (`"parameter $foo of Foo::bar()"`, `"return type of
-    /// Foo::bar()"`, `"property Foo::$bar"`, ...) - one `class.notFound`
-    /// diagnostic per distinct unresolvable name `ty` references,
-    /// mirroring the message this project's own pre-existing `new Foo()`
-    /// existence check (`checker/expr.rs`'s `ExprKind::New` arm) already
-    /// uses the same identifier for.
+    /// typehints, ...) reduces to once it has its `subject` phrase ready
+    /// (`"parameter $foo of Foo::bar()"`, `"return type of Foo::bar()"`,
+    /// `"property Foo::$bar"`, ...) - one `class.notFound` diagnostic per
+    /// distinct unresolvable name `ty` references, mirroring the message
+    /// `checker/expr.rs`'s `ExprKind::New` arm uses the same identifier
+    /// for.
     pub(crate) fn check_type_class_names_exist(
         &mut self,
         ty: &Type,
@@ -694,16 +693,12 @@ impl<'a> Checker<'a> {
                 "class.notFound",
             );
         }
-        // `class.prefixed`'s own pipeline-wide widening -
-        // every one of this function's own ~18 call sites gets this for
-        // free now, not just `check_use_class_imports`'s own single
-        // `use`-import site. Checked on the *successfully-resolved* name
-        // too (unlike the `class.notFound` loop just above, which only
-        // ever sees a name `collect_unknown_class_names` couldn't find at
-        // all) - a leaked Rector/PHP-Scoper/PHPUnit-PHAR/Box-prefixed
-        // vendor class is almost always still a real, indexed class (it
-        // was compiled into the vendor tree, just under a mangled name),
-        // so it would never appear in `unknown` above.
+        // `class.prefixed`: checked on the *successfully-resolved* name
+        // too, unlike the `class.notFound` loop above (which only sees a
+        // name `collect_unknown_class_names` couldn't find) - a leaked
+        // Rector/PHP-Scoper/PHPUnit-PHAR/Box-prefixed vendor class is
+        // almost always still a real, indexed class, so it would never
+        // appear in `unknown` above.
         let mut prefixed = Vec::new();
         collect_prefixed_class_names(ty, &mut prefixed);
         for (name, project) in prefixed {
@@ -721,9 +716,8 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// `collect_unknown_class_names`'s own sibling, minus the
-/// existence filter (a prefixed vendor class is almost always a real,
-/// indexed one - see `check_type_class_names_exist`'s own doc comment) -
+/// `collect_unknown_class_names`'s sibling, minus the existence filter
+/// (a prefixed vendor class is almost always a real, indexed one) -
 /// otherwise the identical recursive shape.
 fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'static str)>) {
     match ty {
@@ -755,13 +749,13 @@ fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'stat
     }
 }
 
-/// Walks `ty` collecting every distinct `Type::TemplateParam` node whose
-/// own `.scope` matches `scope` exactly - `Checker::
-/// current_function_template_params`'s own recursive helper. Mirrors
-/// `resolve_pseudo`'s/`collect_unknown_class_names`'s own recursive shape
-/// (`Object`'s own generic argument list included, unlike those two -
-/// a template can itself appear nested inside another class's own type
-/// argument, e.g. `array<int, Box<T>>`).
+/// Walks `ty` collecting every distinct `Type::TemplateParam` node
+/// whose `.scope` matches `scope` exactly - `Checker::
+/// current_function_template_params`'s recursive helper. Mirrors
+/// `resolve_pseudo`'s/`collect_unknown_class_names`'s recursive shape,
+/// but includes `Object`'s own generic argument list (a template can
+/// appear nested inside another class's type argument, e.g.
+/// `array<int, Box<T>>`).
 fn collect_scoped_template_params(
     ty: &Type,
     scope: &str,
@@ -791,14 +785,13 @@ fn collect_scoped_template_params(
                 collect_scoped_template_params(t, scope, out);
             }
         }
-        // A real false positive
-        // (`php-standard-library`'s own `Psl\Dict\group_by()`, `@template
-        // Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc` - `Tk`
-        // only ever appears nested inside a `Closure(...)`-shaped
-        // parameter's own return-type slot, never as that parameter's
-        // own bare top-level type) - a template only reachable this way
-        // is exactly as real an inference source as one reachable through
-        // an ordinary class's own generic argument list just above.
+        // A template only reachable inside a `Closure(...)`-shaped
+        // parameter's return-type slot (real shape:
+        // `php-standard-library`'s own `Psl\Dict\group_by()`,
+        // `@template Tk of array-key`/`@param (Closure(Tv): ?Tk) $keyFunc`
+        // - `Tk` never appears as that parameter's own bare top-level
+        // type) is exactly as real an inference source as one reachable
+        // through an ordinary class's generic argument list above.
         Type::Callable(Some(sig)) => {
             for p in &sig.params {
                 collect_scoped_template_params(&p.ty, scope, out);
