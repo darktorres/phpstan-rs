@@ -1,6 +1,5 @@
-//! Phase 45 (item 11, 45A): `TooWideFunctionReturnTypehintRule`/
-//! `TooWideMethodReturnTypehintRule` - a declared return-type union
-//! member never actually produced.
+//! `TooWideFunctionReturnTypehintRule`/`TooWideMethodReturnTypehintRule`
+//! - a declared return-type union member never actually produced.
 
 use super::helpers::*;
 
@@ -164,8 +163,8 @@ fn a_non_first_declaration_non_private_method_returning_only_null_is_exempt() {
     );
 }
 
-// Phase 45 (item 11, 45B): `parameterByRef.type`, direct/compound
-// assignment to a by-ref parameter.
+// `parameterByRef.type`, direct/compound assignment to a by-ref
+// parameter.
 
 #[test]
 fn a_by_ref_parameter_assigned_a_mismatched_value_is_flagged() {

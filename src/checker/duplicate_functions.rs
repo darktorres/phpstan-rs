@@ -1,29 +1,26 @@
-//! Phase 63: `DuplicateFunctionDeclarationRule`'s equivalent - a top-level
+//! `DuplicateFunctionDeclarationRule`'s equivalent - a top-level
 //! `function` name declared unconditionally more than once across the
 //! whole project (not just within one file - `checker::duplicates`'s own
 //! `check_duplicate_methods`/`check_duplicate_consts` already cover the
 //! single-class-body shape of this same idea).
 //!
-//! **Corrected, not a straight port of an always-on real rule.** This
-//! project's own real `DuplicateFunctionDeclarationRule` is
+//! Real PHPStan's own `DuplicateFunctionDeclarationRule` is
 //! `#[ValidatesStubFiles]` - exactly like `DuplicateClassDeclarationRule`
 //! (`checker::duplicate_classes`'s own doc comment) - and never runs
 //! against ordinary scanned project files at all, only a project's own
-//! configured `stubFiles:` list in an isolated pass. Originally shipped
-//! here as an unconditional, always-on check on the mistaken premise that
-//! the real rule was "guard-less" project-wide; a live Piwigo/real-PHPStan
-//! corpus diff found the real, structural false positive this produced -
-//! two unconditionally-declared same-named top-level functions in
-//! separate `Unit`/`Integration` test files that are never actually
-//! loaded together in the same PHP process, which this checker (like real
-//! PHPStan) has no general way to rule out. Now gated behind `Registry::
-//! check_duplicate_function_declarations` (opt-in, default `false`),
-//! following `check_duplicate_class_declarations`'s own precedent for the
-//! identical reasoning. Still adds a real, deliberate divergence from the
-//! real rule's own body once opted in: an added signature-difference
-//! check - see `project::duplicate_fn_sites::DuplicateFunctionSites`'s own
-//! doc comment for the concrete, corpus-evidenced reason (phpstorm-stubs'
-//! own real `strtr` two-declaration overload split).
+//! configured `stubFiles:` list in an isolated pass. This project's
+//! version instead gates behind `Registry::check_duplicate_function_
+//! declarations` (opt-in, default `false`), following
+//! `check_duplicate_class_declarations`'s own precedent: two
+//! unconditionally-declared same-named top-level functions in separate
+//! `Unit`/`Integration` test files that are never actually loaded
+//! together in the same PHP process are a real, structural false
+//! positive this checker has no general way to rule out. It also
+//! deliberately diverges from the real rule's own body once opted in:
+//! an added signature-difference check - see
+//! `project::duplicate_fn_sites::DuplicateFunctionSites`'s own doc
+//! comment for the concrete reason (phpstorm-stubs' own real `strtr`
+//! two-declaration overload split).
 
 use std::path::Path;
 

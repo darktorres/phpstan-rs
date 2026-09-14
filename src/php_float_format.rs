@@ -1,19 +1,18 @@
-//! Phase 75: PHP's own float-to-string cast/concatenation algorithm.
+//! PHP's own float-to-string cast/concatenation algorithm.
 //!
-//! Empirically confirmed against a live PHP 8.5 interpreter (`php -r`),
-//! not derived from the `serialize_precision=-1` shortest-round-trip path
-//! that's `var_export()`'s own, separate, algorithm: `(string)(0.1+0.2)`
-//! is `"0.3"` while `var_export(0.1+0.2)` is `"0.30000000000000004"`, and
-//! `(string)1.0` is `"1"`, not `"1.0"`. Every sampled value matched
-//! `sprintf("%.14G", $v)` character-for-character - a fixed 14-
-//! significant-digit `%G`-style formatter (scientific notation exactly
-//! when the exponent is `< -4` or `>= 14`, at most 14 significant digits,
-//! trailing zeros stripped), driven by the `precision` ini directive
-//! (default 14), not a shortest-round-trip encoder. One real difference
-//! from bare C `%G`: PHP's own implementation never drops the decimal
-//! point entirely in scientific notation, even when every digit after
-//! the leading one strips away (`sprintf("%.14G", 1e20)` is `"1.0E+20"`,
-//! not `"1E+20"`) - confirmed directly, not assumed from the C standard.
+//! This is a fixed 14-significant-digit `%G`-style formatter
+//! (scientific notation exactly when the exponent is `< -4` or `>= 14`,
+//! at most 14 significant digits, trailing zeros stripped), driven by
+//! the `precision` ini directive (default 14), not a shortest-round-trip
+//! encoder - `serialize_precision=-1`'s shortest-round-trip path is
+//! `var_export()`'s own, separate algorithm: `(string)(0.1+0.2)` is
+//! `"0.3"` while `var_export(0.1+0.2)` is `"0.30000000000000004"`, and
+//! `(string)1.0` is `"1"`, not `"1.0"`. Matches `sprintf("%.14G", $v)`
+//! character-for-character, with one real difference from bare C `%G`:
+//! PHP's own implementation never drops the decimal point entirely in
+//! scientific notation, even when every digit after the leading one
+//! strips away (`sprintf("%.14G", 1e20)` is `"1.0E+20"`, not
+//! `"1E+20"`).
 //!
 //! Unlike real `ConstantFloatType::toString()` (which unions `'0'`/`'-0'`
 //! for an exactly-zero value, since PHP's own `===` can't distinguish
