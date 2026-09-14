@@ -308,10 +308,7 @@ impl<'a> Checker<'a> {
     /// The `extends`/`implements` half of
     /// `check_class_generic_bounds`, split out so an enum declaration -
     /// which can `implements` a generic interface but has no properties
-    /// and can't `extends` anything - can share it too. Previously this
-    /// whole check only ran for `StmtKind::ClassDecl`, silently skipping
-    /// generic-bound violations written on an enum's own `implements`
-    /// clause.
+    /// and can't `extends` anything - can share it too.
     ///
     /// Also covers `@use Trait<Arg, ...>` (a `use`
     /// clause's own generic arguments) - real PHPStan's own

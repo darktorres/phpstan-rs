@@ -4,8 +4,8 @@
 //! copy of this same recursion structure. Before this module existed, this
 //! exact traversal shape was hand-written three separate times
 //! (`checker::check_expr`, `checker::infer_expr`, `deps::collect_expr`) -
-//! this session's own `Arg`/`ArrayItem` AST migrations each had to update
-//! all three in lockstep purely because of that duplication.
+//! any `Arg`/`ArrayItem` AST change would otherwise have to update all
+//! three in lockstep purely because of that duplication.
 //!
 //! **Scope, load-bearing for correctness**: `expr_children` is exhaustive
 //! over all of `ExprKind`'s variants in the sense that every variant gets a
