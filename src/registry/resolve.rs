@@ -1033,7 +1033,10 @@ impl Registry {
                                     param_fills.push((
                                         i,
                                         function_sig::reconcile_with_native(
-                                            ancestor_param.ty.clone(),
+                                            Registry::substitute_class_scoped_ancestor_templates(
+                                                &ancestor_param.ty,
+                                                &ancestor_bindings,
+                                            ),
                                             p.ty_native.clone(),
                                         ),
                                         ancestor_param.explicit_mixed_hint,
@@ -1064,7 +1067,10 @@ impl Registry {
                                     param_fills.push((
                                         i,
                                         function_sig::reconcile_with_native(
-                                            ancestor_param.ty.clone(),
+                                            Registry::substitute_class_scoped_ancestor_templates(
+                                                &ancestor_param.ty,
+                                                &ancestor_bindings,
+                                            ),
                                             p.ty_native.clone(),
                                         ),
                                         ancestor_param.explicit_mixed_hint,
@@ -1099,7 +1105,10 @@ impl Registry {
                     .then(|| {
                         (
                             function_sig::reconcile_with_native(
-                                ancestor_sig.return_type.clone(),
+                                Registry::substitute_class_scoped_ancestor_templates(
+                                    &ancestor_sig.return_type,
+                                    &ancestor_bindings,
+                                ),
                                 sig.return_type_native.clone(),
                             ),
                             ancestor_sig.return_explicit_mixed_hint,

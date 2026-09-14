@@ -3068,6 +3068,45 @@ fn a_call_through_a_class_scoped_template_binds_via_the_implementing_class_s_own
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A distinct regression the fix above's own first draft introduced,
+// caught via the same corpus diff before it ever shipped: resolving a
+// class-scoped ancestor template only at *external call-site*
+// resolution left it as a raw, still-templated `TemplateParam` in the
+// stored signature - fine for a call from elsewhere, but wrong when the
+// signature is read directly to check its *own declaring class's own
+// method body* (seeding `locals` for its own parameters), a path with
+// no "external call site" to resolve anything through at all. Real
+// corpus shape: `Composer\Pcre\PHPStan\InvalidRegexPatternRule`
+// implementing real PHPStan's own `Rule<TNodeType>` (`@param TNodeType
+// $node` on the interface's own `processNode()`) - `$node`'s own local
+// type stayed literally named `"TNodeType"` the instant its own body
+// called `$this->extractPatterns($node, ...)`. Fixed by resolving a
+// class-scoped ancestor template *eagerly*, at backfill time
+// (`Registry::substitute_class_scoped_ancestor_templates`), not merely
+// checking a binding is *available* and deferring substitution.
+#[test]
+fn a_class_scoped_template_resolves_when_checking_its_own_declaring_class_s_own_body() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Node17 {}
+            /** @template TNodeType of Node17 */
+            interface Rule17 {
+                /** @param TNodeType $node */
+                public function processNode(Node17 $node): void;
+            }
+            final class StaticCall17 implements Node17 {}
+            /** @implements Rule17<StaticCall17> */
+            final class InvalidRegexPatternRule17 implements Rule17 {
+                public function processNode(Node17 $node): void {
+                    $this->extractPatterns($node);
+                }
+                private function extractPatterns(StaticCall17 $node): void {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_trait_string_parameter_rejects_a_plain_class_string() {
     let d = diagnostics_for(

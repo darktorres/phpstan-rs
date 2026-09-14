@@ -177,4 +177,121 @@ impl Registry {
         }
         None
     }
+
+    /// Substitutes only the `TemplateParam`s in `ty` whose own `scope` is
+    /// a key in `ancestor_bindings` (`{ancestor name => {template name =>
+    /// concrete Type}}`, as built by `registry::resolve::flatten_phpdoc_
+    /// inheritance_one_pass` for the class a backfilled signature is
+    /// landing on) - everything else (a method-scoped template, or a
+    /// class-scoped one from an ancestor not present in the map at all)
+    /// passes through completely untouched. Real PHPStan's own identical
+    /// mechanism, confirmed by direct read: `ResolvedPhpDocBlock::
+    /// resolveTemplateTypeInTag` substitutes an *ancestor* tag's own
+    /// class-level template through `$parentClass->getActiveTemplateType
+    /// Map()` immediately, at docblock-merge time - not deferred to each
+    /// later call site the way this project's own method-scoped templates
+    /// correctly are (`types::bind_template_param`/`substitute_template`'s
+    /// own call-site binding, purely name-keyed and blind to which
+    /// class's `FunctionSig` a signature came from). Doing this
+    /// immediately, rather than leaving the raw class-scoped `TemplateParam`
+    /// in the backfilled signature for some later call-time pass to
+    /// resolve, matters for a real, distinct reason from "is a concrete
+    /// binding available at all" (`template_param_scopes_all_safe_to_
+    /// backfill`'s own job): a signature is also read directly when
+    /// *checking its own declaring class's own method body* (seeding
+    /// `locals` for its own parameters), a path that has no "external call
+    /// site" to resolve anything through at all - real corpus false
+    /// positive caught verifying this: `Composer\Pcre\PHPStan\
+    /// InvalidRegexPatternRule::processNode(Node $node, ...)` (implementing
+    /// real PHPStan's own `Rule<TNodeType>`, `@param TNodeType $node` on
+    /// the interface) backfilling the raw, still-templated `TNodeType`
+    /// verbatim left `$node`'s own local type literally named `"TNodeType"`,
+    /// not a concrete class, not `Mixed`, the instant its own body called
+    /// `$this->extractPatterns($node, ...)`. Resolving eagerly here, using
+    /// this exact class's own concrete `@implements Rule<StaticCall>`
+    /// binding, makes the stored signature already-concrete before
+    /// anything ever reads it, closing that gap regardless of which of
+    /// the (at least two) paths reads the signature next.
+    pub(crate) fn substitute_class_scoped_ancestor_templates(
+        ty: &Type,
+        ancestor_bindings: &HashMap<String, HashMap<String, Type>>,
+    ) -> Type {
+        match ty {
+            Type::TemplateParam(tp) => tp
+                .scope
+                .as_deref()
+                .and_then(|s| ancestor_bindings.get(s))
+                .and_then(|b| b.get(&tp.name))
+                .cloned()
+                .unwrap_or_else(|| ty.clone()),
+            Type::Array(key, inner) => Type::Array(
+                Box::new(Registry::substitute_class_scoped_ancestor_templates(
+                    key,
+                    ancestor_bindings,
+                )),
+                Box::new(Registry::substitute_class_scoped_ancestor_templates(
+                    inner,
+                    ancestor_bindings,
+                )),
+            ),
+            Type::ClassString(inner) => Type::ClassString(Box::new(
+                Registry::substitute_class_scoped_ancestor_templates(inner, ancestor_bindings),
+            )),
+            Type::Union(members) => Type::Union(
+                members
+                    .iter()
+                    .map(|m| {
+                        Registry::substitute_class_scoped_ancestor_templates(m, ancestor_bindings)
+                    })
+                    .collect(),
+            ),
+            Type::Intersection(members) => Type::Intersection(
+                members
+                    .iter()
+                    .map(|m| {
+                        Registry::substitute_class_scoped_ancestor_templates(m, ancestor_bindings)
+                    })
+                    .collect(),
+            ),
+            Type::ArrayShape(fields) => Type::ArrayShape(
+                fields
+                    .iter()
+                    .map(|(k, t, opt)| {
+                        (
+                            k.clone(),
+                            Registry::substitute_class_scoped_ancestor_templates(
+                                t,
+                                ancestor_bindings,
+                            ),
+                            *opt,
+                        )
+                    })
+                    .collect(),
+            ),
+            Type::ObjectShape(fields) => Type::ObjectShape(
+                fields
+                    .iter()
+                    .map(|(k, t, opt)| {
+                        (
+                            k.clone(),
+                            Registry::substitute_class_scoped_ancestor_templates(
+                                t,
+                                ancestor_bindings,
+                            ),
+                            *opt,
+                        )
+                    })
+                    .collect(),
+            ),
+            Type::Object(name, args) => Type::Object(
+                name.clone(),
+                args.iter()
+                    .map(|a| {
+                        Registry::substitute_class_scoped_ancestor_templates(a, ancestor_bindings)
+                    })
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
 }

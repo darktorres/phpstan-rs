@@ -296,14 +296,20 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
 // Corrected sibling of the erased case just above, found via a Piwigo/
 // real-PHPStan corpus diff (`MessengerFactory::transport`'s own call
 // through `DoctrineTransportFactory`): a class-scoped `@template` *is*
-// safe to backfill verbatim after all, provided the descendant actually
-// supplies a real, concrete binding for it via `@implements
-// Ancestor<Concrete>` - `Registry::template_param_scopes_all_safe_to_
-// backfill`'s own doc comment has the full reasoning for why this is
-// safe now (a real, resolvable binding, not the still-unresolvable
-// erased case above) and why it wasn't when this guard was first added
-// (`checker::generics::substitution::substitute_class_templates`'s own
-// call-time fix, landed in the same round, is what makes it safe).
+// safe to backfill after all, provided the descendant actually supplies
+// a real, concrete binding for it via `@implements Ancestor<Concrete>` -
+// `Registry::template_param_scopes_all_safe_to_backfill`'s own doc
+// comment has the full reasoning for why this is safe now (a real,
+// resolvable binding, not the still-unresolvable erased case above).
+// Resolved *immediately*, at backfill time, to the concrete bound type -
+// not left as a raw `TemplateParam` for some later call-time pass to
+// substitute (`Registry::substitute_class_scoped_ancestor_templates`'s
+// own doc comment explains why: this same signature is also read
+// directly when checking its own declaring class's own method body, a
+// path with no "external call site" to resolve anything through at all
+// - confirmed by a real corpus false positive this exact design caught,
+// `Composer\Pcre\PHPStan\InvalidRegexPatternRule::processNode`'s own
+// `$node` parameter staying literally typed `"TNodeType"` otherwise).
 #[test]
 fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding_exists() {
     let r = build_registry(
@@ -321,9 +327,10 @@ fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding
             "#,
     );
     let sig = &r.classes["ConcreteContainer11"].methods["get"];
-    assert!(
-        matches!(&sig.return_type, Type::TemplateParam(tp) if tp.scope.as_deref() == Some("Container11")),
-        "expected the ancestor's own scoped TemplateParam to backfill verbatim, got {:?}",
+    assert_eq!(
+        sig.return_type,
+        Type::Object("Widget11".to_string(), Vec::new()),
+        "expected the ancestor's own scoped TemplateParam to resolve to the concrete bound type immediately, got {:?}",
         sig.return_type
     );
 }
