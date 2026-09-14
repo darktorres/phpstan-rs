@@ -474,33 +474,28 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `GenericObjectTypeCheck`'s own call-site-
-    /// variance half (`generics.callSiteVarianceConflict`/
-    /// `.callSiteVarianceRedundant`, confirmed directly against
-    /// `vendor/phpstan-src`) - a call-site variance marker
-    /// (`Collection<covariant Foo>`) is redundant when it names the exact
-    /// same variance `Collection`'s own `@template` already declares for
-    /// that slot (nothing is being overridden), and conflicting when it
-    /// names the *opposite* real variance (`contravariant` written on a
-    /// slot the class itself declared `@template-covariant`, or vice
-    /// versa) - real PHPStan's own `TemplateTypeVariance::validPosition`,
-    /// ported directly: a call-site annotation is only ever unsound
-    /// against a slot the class declares as the *other* non-invariant
-    /// direction. Writing `covariant`/`contravariant` on a slot the class
-    /// declares plain invariant is exactly call-site variance's own
-    /// intended escape hatch (never flagged, either way), and `*`
-    /// (bivariant) is never flagged at all (real PHPStan's own
-    /// `validPosition` always accepts it, `this.bivariant()`).
+    /// `GenericObjectTypeCheck`'s own call-site-variance half
+    /// (`generics.callSiteVarianceConflict`/`.callSiteVarianceRedundant`).
+    /// A call-site variance marker (`Collection<covariant Foo>`) is
+    /// redundant when it names the exact same variance `Collection`'s
+    /// `@template` already declares for that slot, and conflicting when
+    /// it names the *opposite* real variance (`contravariant` written on
+    /// a slot the class declared `@template-covariant`, or vice versa) -
+    /// ported directly from real PHPStan's
+    /// `TemplateTypeVariance::validPosition`: a call-site annotation is
+    /// only ever unsound against a slot the class declares as the
+    /// *other* non-invariant direction. Writing `covariant`/
+    /// `contravariant` on a slot the class declares plain invariant is
+    /// exactly call-site variance's intended escape hatch (never
+    /// flagged), and `*` (bivariant) is never flagged at all.
     ///
-    /// Skips real PHPStan's own narrow `ReflectionClass<covariant T>`
-    /// carve-out (a compat allowance for PHP 8.3 vs. 8.4's differing core
-    /// stub) - confirmed by direct read that this project's own vendored
+    /// Skips real PHPStan's narrow `ReflectionClass<covariant T>`
+    /// carve-out (a compat allowance for PHP 8.3 vs. 8.4's differing
+    /// core stub): this project's vendored
     /// `phpstorm-stubs/Reflection/ReflectionClass.php` declares its `T`
     /// with a plain `@template T of object`, not `@template-covariant`,
-    /// so the carve-out's own gating condition (declared variance must
-    /// already be covariant for the redundant case to fire at all) can
-    /// never be reached against this project's actual data - dead code
-    /// against a scenario that can't happen, not a real gap.
+    /// so the carve-out's gating condition can never be reached against
+    /// this project's actual data.
     fn check_call_site_variance(&mut self, class: &str, args: &[Type], label: &str, span: Span) {
         let Some(info) = self.registry.classes.get(class) else {
             return;
@@ -553,39 +548,30 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `TemplateTypeCheck`'s own declaration-validity family
-    /// (`vendor/phpstan-src`) - validates a
-    /// `@template` tag's own declaration, not a usage site. Shared
-    /// between a class/interface/trait's own templates (`templates`/
-    /// `bounds`/`defaults` read straight off its `ClassInfo`) and a
-    /// method's own (re-parsed fresh from its own doc comment, since
-    /// `FunctionSig` has no persisted raw template-bound/-default map of
-    /// its own - see `Checker::current_function_template_params`'s own
-    /// doc comment for the identical reasoning) - `type_aliases` is
-    /// always the *enclosing class's* own map either way (a type alias is
-    /// class-scoped, real PHPStan's own `hasTypeAlias(name, className)`
-    /// call takes the class regardless of whether the template itself is
-    /// class- or method-level).
+    /// `TemplateTypeCheck`'s own declaration-validity family -
+    /// validates a `@template` tag's own declaration, not a usage site.
+    /// Shared between a class/interface/trait's own templates
+    /// (`templates`/`bounds`/`defaults` read straight off its
+    /// `ClassInfo`) and a method's own (re-parsed fresh from its own doc
+    /// comment, since `FunctionSig` has no persisted raw
+    /// template-bound/-default map - see
+    /// `Checker::current_function_template_params`) - `type_aliases` is
+    /// always the *enclosing class's* map either way (a type alias is
+    /// class-scoped).
     ///
-    /// Deliberately narrower than real PHPStan's own full check in two
-    /// disclosed ways: the bound's/default's own further `GenericObjectTypeCheck`
-    /// (does *that* type, if itself generic, specify all of *its own*
-    /// required template arguments) isn't reused here - a genuinely
-    /// separate primitive this project doesn't have yet, not just a
-    /// missing wiring - left as a narrower, disclosed cut for this pass
-    /// rather than building a whole second bound/arity-checking engine on
-    /// top of the one `check_generic_bounds`/`check_generic_reference_arity`
-    /// already are for usage sites. And unlike real PHPStan, a bound's/
-    /// default's own referenced class is never existence-checked
-    /// (`class.notFound`/`generics.traitBound`) here at all - this
-    /// project's own registry is inherently partial (a real corpus false
-    /// positive already found and fixed once for `check_generic_bounds`'s
-    /// own bound-*violation* check applies identically here: a bound
-    /// naming a real class this project simply has no data for, e.g. a
-    /// PHAR-bundled dependency, is indistinguishable from a genuine typo,
-    /// and this project's own established convention is "don't know,
-    /// don't guess" for exactly that ambiguity - confirmed by a real,
-    /// already-existing test for this same class of bound).
+    /// Deliberately narrower than real PHPStan's full check in two
+    /// disclosed ways: the bound's/default's own further
+    /// `GenericObjectTypeCheck` isn't reused here - a genuinely separate
+    /// primitive this project doesn't have yet, left as a narrower cut
+    /// rather than building a second bound/arity-checking engine on top
+    /// of `check_generic_bounds`/`check_generic_reference_arity`. And
+    /// unlike real PHPStan, a bound's/default's own referenced class is
+    /// never existence-checked here at all: this project's registry is
+    /// inherently partial, so a bound naming a real class this project
+    /// has no data for (e.g. a PHAR-bundled dependency) is
+    /// indistinguishable from a genuine typo, and this project's
+    /// established convention is "don't know, don't guess" for exactly
+    /// that ambiguity.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_template_declaration_validity(
         &mut self,
