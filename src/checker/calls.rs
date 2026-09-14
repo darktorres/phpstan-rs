@@ -14,18 +14,16 @@ mod format_string;
 mod misc_rules;
 
 /// `check_args`'s own call bundle. `callee_label`/`label` are two
-/// adjacent, identically-typed `&str` parameters (the callee's own
-/// display name vs. the enclosing function/method being checked) - a
-/// real mis-ordering risk a positional call site can't catch, which
-/// named struct fields fix. `args` is the raw, as-written argument list
-/// (needed for the two count-based checks `check_args` does, both of
-/// which are about how many arguments were actually written, not which
-/// parameter each one resolves to); `resolved` is Item 1's own per-
-/// parameter resolution of that same list (`resolve_call_args`), used
-/// for the "too few" check's own missing-required-parameter test
-/// (correct for a named call that fills required parameters out of
-/// order, where a raw argument *count* alone can't tell) and for the
-/// per-argument type-checking loop.
+/// adjacent, identically-typed `&str` parameters (the callee's display
+/// name vs. the enclosing function/method being checked) - a real
+/// mis-ordering risk a positional call site can't catch, which named
+/// struct fields fix. `args` is the raw, as-written argument list
+/// (needed for the count-based checks, which are about how many
+/// arguments were actually written); `resolved` is `resolve_call_args`'s
+/// per-parameter resolution of that same list, used for the
+/// missing-required-parameter test (correct for a named call that fills
+/// required parameters out of order, where a raw count alone can't
+/// tell) and for the per-argument type-checking loop.
 pub(crate) struct CheckArgsCall<'a> {
     pub(crate) callee_label: &'a str,
     pub(crate) sig: &'a FunctionSig,
@@ -47,16 +45,13 @@ impl<'a> Checker<'a> {
     /// variable (as Mixed) rather than flag it; a *known* function only
     /// gets this leniency for the specific parameter position actually
     /// marked by-ref.
-    /// `sig: None` (an unresolvable call) conservatively treats *any*
+    /// `sig: None` (an unresolvable call) conservatively treats any
     /// bare-variable argument, in its own written position, as a
-    /// definition site - the real reason this function exists at all
-    /// (see its own callers' comments on `isset`/`empty`). Once a real
-    /// signature is known, `resolved` (Item 1's own per-parameter
-    /// resolution, already computed by the caller) is used instead of the
-    /// raw argument list - a named or reordered-named by-ref argument
-    /// needs to be matched against its *real* declared parameter, not
-    /// whichever parameter happens to sit at the same index it was
-    /// written at.
+    /// definition site. Once a real signature is known, `resolved`
+    /// (the caller's already-computed per-parameter resolution) is used
+    /// instead of the raw argument list - a named or reordered-named
+    /// by-ref argument must be matched against its real declared
+    /// parameter, not whichever parameter sits at the same index.
     pub(crate) fn predefine_byref_or_unknown_args(
         &self,
         call_name: Option<&str>,
@@ -70,14 +65,11 @@ impl<'a> Checker<'a> {
                 let ExprKind::Variable(name) = &arg.value.kind else {
                     continue;
                 };
-                // Phase 17 follow-up: real PHP's own by-ref argument
-                // auto-vivification (real, common - an unhinted
-                // `function(&$x)` called with an as-yet-undefined `$x`)
-                // is this variable's genuine first appearance when
-                // there's nothing here yet to preserve - `declare`, not a
-                // plain `insert`, matching `bind_assignment_target`'s own
-                // identical index-write auto-vivification treatment
-                // (`checker/assignment.rs`).
+                // Real PHP by-ref auto-vivification: an unhinted
+                // `function(&$x)` called with an as-yet-undefined `$x`
+                // is this variable's genuine first appearance -
+                // `declare`, not `insert`, matching
+                // `bind_assignment_target`'s own index-write treatment.
                 if !locals.contains_key(name) {
                     locals.declare(name.clone(), Type::Mixed, arg.value.span);
                 }
@@ -91,11 +83,10 @@ impl<'a> Checker<'a> {
             let ExprKind::Variable(name) = &arg_expr.kind else {
                 continue;
             };
-            // Both the by-ref flag and (Phase 22 Finding 3) the declared
-            // parameter itself need the identical primary-then-variadic-
-            // fallback lookup - `resolved` can extend past `sig.params`'
-            // own length for a variadic tail argument (confirmed via
-            // `resolve_call_args`'s own `resolved.push(...)` there).
+            // Both the by-ref flag and the declared parameter itself need
+            // the identical primary-then-variadic-fallback lookup -
+            // `resolved` can extend past `sig.params`'s own length for a
+            // variadic tail argument.
             let param = sig
                 .params
                 .get(i)
@@ -107,22 +98,16 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !locals.contains_key(name) {
-                // Phase 17 follow-up: same auto-vivification reasoning as
-                // the `sig`-less branch above.
                 locals.declare(name.clone(), Type::Mixed, arg_expr.span);
                 continue;
             }
-            // A round of Piwigo-corpus bucketing found the sort() family's
-            // own real PHPStan dynamic type-specifying extensions weren't
-            // modeled at all - every one fell into the generic widening
-            // below, which discards precision down to the declared
-            // `array &$array`/`array &$arg` param type regardless of what
-            // the function actually does to it. Verified via dumpType():
-            // sort/rsort/usort/shuffle always reindex their by-ref
-            // argument to a real list, preserving the input's own element
-            // type (and non-emptiness, when already known); asort/arsort/
-            // ksort/krsort/uasort/uksort/natsort/natcasesort preserve the
-            // exact key structure - and so the exact type - unchanged.
+            // Real PHPStan models the sort() family's own dynamic
+            // type-specifying extensions rather than the generic
+            // declared-param-type widening below: sort/rsort/usort/
+            // shuffle always reindex their by-ref argument to a real
+            // list, preserving element type (and non-emptiness, when
+            // known); asort/arsort/ksort/krsort/uasort/uksort/natsort/
+            // natcasesort preserve the exact key structure unchanged.
             if let Some(fn_name) = call_name {
                 let current = locals.get(name).cloned().unwrap_or(Type::Mixed);
                 match fn_name {
@@ -142,42 +127,25 @@ impl<'a> Checker<'a> {
                     }
                     "asort" | "arsort" | "ksort" | "krsort" | "uasort" | "uksort" | "natsort"
                     | "natcasesort" => continue,
-                    // Phase 53 follow-up: `array_walk` never adds, removes,
-                    // or reorders keys, and never changes a value's own
-                    // type either unless the callback's own `$value`
-                    // parameter is itself declared by-ref and reassigns it
-                    // - a shape this project doesn't track through a
-                    // closure literal's own body. Left completely
-                    // unchanged, the same "preserve the exact key
-                    // structure" reasoning as `asort`/`ksort`/... just
-                    // above - real corpus find: without this, the stub's
-                    // own declared `array|object &$array` param type
-                    // (confirmed in `phpstorm-stubs`) failed `Checker::
-                    // is_array_like`'s guard below (a bare `Union`, not a
-                    // plain `Array`/`ArrayShape`) and widened all the way
-                    // to `Mixed`, silently discarding `$array`'s own real
-                    // element/key types for the rest of the statement -
-                    // including this same call's own contextual callback-
-                    // parameter injection (`checker/expr.rs`'s
-                    // `contextual_callback_override`), which read the
-                    // already-widened `Mixed` before ever getting a
-                    // chance to see the real type.
+                    // `array_walk` never adds, removes, or reorders keys,
+                    // and never changes a value's type unless the
+                    // callback's `$value` parameter is itself declared
+                    // by-ref and reassigns it - not tracked through a
+                    // closure literal's body, so left unchanged rather
+                    // than falling through to the generic widening below,
+                    // which would otherwise discard `$array`'s real
+                    // element/key types (the stub's declared
+                    // `array|object &$array` param type fails
+                    // `Checker::is_array_like`'s guard and widens to
+                    // `Mixed`).
                     "array_walk" => continue,
-                    // A Piwigo-corpus round found this same "generic
-                    // widening loses list-ness" gap for the other real,
-                    // common by-ref array mutators: `array_push`/
-                    // `array_unshift` always append/prepend at least one
-                    // real value, so a list-like (or empty, per
-                    // `Checker::is_list_like`'s existing "array{}
-                    // satisfies list<T> vacuously" rule) `$array` stays a
-                    // list afterward, now provably non-empty - element
-                    // type widens to include whatever was actually
-                    // pushed. Deliberately not attempting a non-list-like
-                    // input (a real `array_push` on one keeps whatever
-                    // odd key structure it already had, appending fresh
-                    // integer keys past the existing max - not a
-                    // "becomes a list" case at all) - falls through to
-                    // the generic declared-type widening below unchanged.
+                    // `array_push`/`array_unshift` always append/prepend
+                    // at least one real value, so a list-like (or empty)
+                    // `$array` stays a list afterward, now provably
+                    // non-empty - element type widens to include whatever
+                    // was pushed. A non-list-like input keeps its odd key
+                    // structure and falls through to the generic
+                    // declared-type widening below unchanged.
                     "array_push" | "array_unshift" if Checker::is_list_like(&current) => {
                         if let Some(elem_ty) = Checker::array_element_type(&current) {
                             let pushed_ty = args[1..]
@@ -222,59 +190,40 @@ impl<'a> Checker<'a> {
                     _ => {}
                 }
             }
-            // Phase 22 Finding 3: an *already-defined* variable passed
-            // by-ref was previously left untouched entirely (only an
-            // undefined one got the "assume Mixed" leniency above) - a
-            // real corpus example (`Piwigo\Admin\Install\InstallService::
-            // installDbConnect(array &$infos, array &$errors, ...)`
-            // called as `installDbConnect($infos, $errors, ...)` where
-            // `$errors` was already `$errors = [];`) kept its stale,
-            // narrow pre-call type through the call even though the
-            // callee is known (by signature) to mutate it by reference.
-            // Widen to the *declared parameter's own type*, not a
-            // blanket `Type::Mixed` - `array &$errors` becomes
-            // `Type::Array(Mixed)`, preserving the real, guaranteed-by-
-            // the-type-hint information that it's still an array, which
-            // blanket `Mixed` would needlessly discard. `substitute_
-            // template` with empty bindings replaces any unresolved
-            // `TemplateParam` in the declared type with `Mixed` too -
-            // proper substitution would need the receiver's own type
-            // arguments, not available at this call site, so an
-            // unresolved generic by-ref parameter degrades to the same
-            // safe `Mixed` the undefined-variable case already uses.
+            // An already-defined variable passed by-ref widens to the
+            // declared parameter's own type, not a blanket `Type::Mixed`
+            // - `array &$errors` becomes `Type::Array(Mixed)`, preserving
+            // the type-hint-guaranteed "still an array" information.
+            // `substitute_template` with empty bindings replaces any
+            // unresolved `TemplateParam` with `Mixed` too, since proper
+            // substitution would need the receiver's own type arguments,
+            // not available at this call site.
             //
             // Only trust the substituted declared type when it's itself
-            // plainly array-shaped (`Type::Array`/`Type::ArrayShape`) -
-            // found via real corpus verification, not assumed: several
-            // real stdlib by-ref parameters (`array_walk(array|object
-            // &$array, ...)`, confirmed in the vendored phpstorm-stubs)
-            // declare a *union* wider than what the already-array-typed
-            // variable being passed in could actually become - the
-            // parameter type says what the callee *accepts*, not what an
-            // already-narrower-typed argument turns into, so blindly
-            // trusting a `Union`/`Object`/other declared shape here
-            // overshoots into new noise once the corpus is checked, not
-            // just less precision. Anything else falls back to `Mixed`,
-            // exactly this function's own pre-existing behavior for the
-            // undefined-variable case above.
+            // plainly array-shaped (`Type::Array`/`Type::ArrayShape`):
+            // several stdlib by-ref parameters (`array_walk(array|object
+            // &$array, ...)`) declare a union wider than what the
+            // already-array-typed argument could actually become - the
+            // parameter type says what the callee accepts, not what an
+            // already-narrower-typed argument turns into. Anything else
+            // falls back to `Mixed`, matching the undefined-variable case
+            // above.
             let substituted = types::substitute_template(&param.ty, &HashMap::new());
-            // Phase 14: `Checker::is_array_like` also trusts a `list<T>`/
-            // `non-empty-array<T>`-declared by-ref parameter (a real
-            // `Intersection` now) - without it, this fell into the same
-            // "anything else" `Mixed` catch-all a wider declared `Union`/
-            // `Object` already deliberately does, discarding real,
-            // already-available precision.
+            // `Checker::is_array_like` also trusts a `list<T>`/
+            // `non-empty-array<T>`-declared by-ref parameter (an
+            // `Intersection`), rather than falling into the "anything
+            // else" `Mixed` catch-all a wider declared `Union`/`Object`
+            // deliberately does.
             let widened = if Checker::is_array_like(&substituted) {
                 substituted
             } else {
                 Type::Mixed
             };
-            // Phase 33 Finding 5: a by-ref call argument is exactly as
-            // much a "this variable now holds something else" event as a
-            // direct assignment - without this, a stale composite key
-            // rooted at `name` (from narrowing before this call) would
-            // keep answering for whatever the callee may have replaced it
-            // with.
+            // A by-ref call argument is exactly as much a "this variable
+            // now holds something else" event as a direct assignment -
+            // without this, a stale composite key rooted at `name` would
+            // keep answering for whatever the callee may have replaced
+            // it with.
             purge_stale_narrowing_for(locals, name);
             locals.insert(name.clone(), widened);
         }
@@ -291,20 +240,18 @@ impl<'a> Checker<'a> {
             defining_class,
             span,
         } = call;
-        // Item 1 + Item 2: naming/ordering legality first - independent
-        // of, and prior to, every count/type check below.
+        // Naming/ordering legality first - independent of, and prior to,
+        // every count/type check below.
         self.check_argument_legality(callee_label, sig, args, label);
 
-        // Item 2: a spread/unpack argument's own real contents can't be
-        // resolved statically (see `resolve_call_args`'s own doc
-        // comment) - every declared parameter at or past the positional
-        // index the spread occupies might still be filled by it at
-        // runtime, so neither the "missing required parameter" nor the
-        // "too many arguments" check below can trust a `None` slot (or a
-        // raw `args.len()`) at or past that point to mean what it
-        // normally would. `None` here (rather than skipping the whole
-        // call the way this project previously did entirely) still lets
-        // both checks run precisely for everything *before* the spread.
+        // A spread/unpack argument's own real contents can't be resolved
+        // statically (see `resolve_call_args`'s own doc comment) - every
+        // declared parameter at or past the positional index the spread
+        // occupies might still be filled by it at runtime, so neither
+        // the "missing required parameter" nor the "too many arguments"
+        // check below can trust a `None` slot (or a raw `args.len()`) at
+        // or past that point. `None` here still lets both checks run
+        // precisely for everything before the spread.
         let spread_from = first_spread_positional_index(args);
         let required = sig
             .params
@@ -330,17 +277,15 @@ impl<'a> Checker<'a> {
             );
         }
 
-        // Finding 40: calling a non-variadic function/method with more
-        // positional arguments than it can possibly accept is a real PHP
-        // fatal error ("Too many arguments... expected exactly N"), just
-        // as basic a check as the "too few" one right above it - but
-        // nothing here caught it before, since the per-argument loop
-        // below simply stops (via its own fallback once `sig.params.get(i)`
-        // runs out and the last param isn't variadic) rather than
-        // reporting anything. Uses the raw `args.len()` deliberately, not
-        // `resolved`'s own length - a non-variadic signature's resolved
+        // Calling a non-variadic function/method with more positional
+        // arguments than it can accept is a real PHP fatal error ("Too
+        // many arguments... expected exactly N"); the per-argument loop
+        // below wouldn't catch it, since it simply stops once
+        // `sig.params.get(i)` runs out and the last param isn't
+        // variadic. Uses the raw `args.len()` deliberately, not
+        // `resolved`'s length - a non-variadic signature's resolved
         // slice is always exactly `params.len()` long by
-        // `resolve_call_args`'s own design, which would make this check
+        // `resolve_call_args`'s design, which would make this check
         // always read `false` if it read from that shape instead.
         let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
         if spread_from.is_none() && !last_is_variadic && args.len() > sig.params.len() {
@@ -447,21 +392,19 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 53 Sub-item C: argument-checking for a call through a value
-    /// statically known to be a shaped `Closure(...)`-typed callable
+    /// Argument-checking for a call through a value statically known to
+    /// be a shaped `Closure(...)`-typed callable
     /// (`$fn(...)`, `$arr['make']()`, `($this->makeCallback())()`, etc) -
     /// a deliberately trimmed, standalone subset of `check_args`'s own
     /// count/type loop, not a reuse of it: `CallableSig`'s own
     /// `CallableParam` carries no parameter name at all (a PHPDoc
     /// callable shape never spells one out), so named-argument
-    /// resolution - the whole reason `check_args` needs `resolve_call_
-    /// args`/`resolved` in the first place - isn't possible here.
-    /// Positional-only: a named or spread argument silently skips this
-    /// whole check rather than guessing, the same "don't know, don't
-    /// guess" leniency this project uses throughout. Reuses `check_args`'s
-    /// own `arguments.count`/`argument.type` identifiers and message
-    /// shape, with `"Closure"` standing in for a real callee name (one
-    /// doesn't exist for a dynamically-held callable value).
+    /// resolution isn't possible here. Positional-only: a named or
+    /// spread argument silently skips this whole check rather than
+    /// guessing. Reuses `check_args`'s `arguments.count`/`argument.type`
+    /// identifiers and message shape, with `"Closure"` standing in for a
+    /// real callee name (one doesn't exist for a dynamically-held
+    /// callable value).
     pub(crate) fn check_dynamic_callable_args(
         &mut self,
         sig: &types::CallableSig,
@@ -540,17 +483,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 49: `f(...['a', 'b', 'named' => $c])`-style spread arguments
-    /// whose own inferred type is a literal `Type::ArrayShape` have every
-    /// eventual argument slot known statically - real PHP resolves each
-    /// int-keyed shape field positionally (in the order it appears in the
-    /// shape, not by its own literal key value) and each string-keyed
-    /// field by name, exactly like an ordinary named argument. Every other
-    /// check in `check_args` gives up the moment it sees a spread
-    /// (`resolve_call_args`'s own doc comment) because an arbitrary
-    /// spread's contents can't be resolved statically - this recovers real
-    /// type-checking for the one common, fully static shape instead of
-    /// silently skipping every argument the spread might supply.
+    /// `f(...['a', 'b', 'named' => $c])`-style spread arguments whose
+    /// inferred type is a literal `Type::ArrayShape` have every eventual
+    /// argument slot known statically - real PHP resolves each int-keyed
+    /// shape field positionally (in shape order, not by its literal key
+    /// value) and each string-keyed field by name, like an ordinary
+    /// named argument. Every other check in `check_args` gives up the
+    /// moment it sees a spread (see `resolve_call_args`'s doc comment)
+    /// because an arbitrary spread's contents can't be resolved
+    /// statically - this recovers type-checking for the one common,
+    /// fully static shape.
     #[allow(clippy::too_many_arguments)]
     fn check_constant_array_spread_arguments(
         &mut self,
@@ -628,14 +570,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 49 Item 1: validates a call's own argument list for the
-    /// naming/ordering legality real PHP itself enforces, independent of
-    /// which parameter each argument actually resolves to
-    /// (`resolve_call_args`'s own job, used by every other check in
-    /// `check_args`). Mirrors real PHPStan's own
-    /// `FunctionCallParametersCheck::processArguments` plus its raw-args
-    /// ordering pre-pass, reusing its identifiers verbatim
-    /// (`argument.unknown`, `argument.duplicate`,
+    /// Validates a call's argument list for the naming/ordering legality
+    /// real PHP itself enforces, independent of which parameter each
+    /// argument actually resolves to (`resolve_call_args`'s job).
+    /// Mirrors real PHPStan's `FunctionCallParametersCheck::
+    /// processArguments` plus its raw-args ordering pre-pass, reusing
+    /// its identifiers verbatim (`argument.unknown`, `argument.duplicate`,
     /// `argument.positionalAfterNamed`, `argument.unpackAfterNamed`,
     /// `argument.nonUnpackAfterUnpacked`).
     ///
@@ -764,18 +704,17 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 71 Item 3: `RegularExpressionQuotingRule`'s equivalent -
-    /// applies to the 7 pattern-taking functions whose pattern argument
-    /// sits at position 0 and is written as a string concatenation. Finds
-    /// the pattern's own real delimiter (the leftmost concat operand's
-    /// literal first character), then walks the *whole* concat tree for
-    /// any `preg_quote(...)` call, flagging one with no delimiter
-    /// argument at all, or one whose given delimiter doesn't match the
-    /// pattern's real delimiter and isn't one of `preg_quote`'s own
-    /// always-escaped characters (mirrors real PHPStan's own
-    /// `isDefaultEscaped`/`removeDefaultEscapedDelimiters` exactly - a
-    /// mismatch against one of those is inconsequential, since `preg_
-    /// quote` escapes it either way).
+    /// `RegularExpressionQuotingRule`'s equivalent - applies to the 7
+    /// pattern-taking functions whose pattern argument sits at position 0
+    /// and is written as a string concatenation. Finds the pattern's real
+    /// delimiter (the leftmost concat operand's literal first character),
+    /// then walks the whole concat tree for any `preg_quote(...)` call,
+    /// flagging one with no delimiter argument at all, or one whose given
+    /// delimiter doesn't match the pattern's real delimiter and isn't one
+    /// of `preg_quote`'s own always-escaped characters (mirrors real
+    /// PHPStan's `isDefaultEscaped`/`removeDefaultEscapedDelimiters`
+    /// exactly - a mismatch against one of those is inconsequential,
+    /// since `preg_quote` escapes it either way).
     pub(crate) fn check_preg_quote_delimiter(&mut self, name: &str, args: &[Arg], label: &str) {
         const PREG_PATTERN_FUNCTIONS: &[&str] = &[
             "preg_match",
@@ -804,14 +743,12 @@ impl<'a> Checker<'a> {
         };
         // `preg_quote($str)` always escapes this fixed character set
         // regardless of any `$delimiter` argument - when the pattern's
-        // own real delimiter already falls in it, it's covered "for
-        // free," so neither a missing `$delimiter` argument nor a
-        // mismatched one actually leaves it unescaped. Tested against
-        // the *pattern's* own delimiter, not the given one - a real bug
-        // this fix corrects: the original draft tested the wrong side,
-        // which made giving `#` for a `/`-delimited pattern (genuinely
-        // wrong - `/` stays unescaped) silently pass, purely because `#`
-        // itself happens to be in this set.
+        // real delimiter already falls in it, it's covered for free, so
+        // neither a missing `$delimiter` argument nor a mismatched one
+        // actually leaves it unescaped. Tested against the pattern's own
+        // delimiter, not the given one - testing the given one would let
+        // `#` pass for a `/`-delimited pattern purely because `#` itself
+        // is in this set, even though `/` stays unescaped.
         const ALWAYS_ESCAPED: &[char] = &[
             '.', '\\', '+', '*', '?', '[', '^', ']', '$', '(', ')', '{', '}', '=', '!', '<', '>',
             '|', ':', '-', '#',
@@ -854,14 +791,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 71 Item 1: resolves the two common, statically-knowable
+    /// Resolves the two common, statically-knowable
     /// `call_user_func(_array)` callable shapes to a real `FunctionSig` -
     /// a plain string-literal function name, or a two-element array
     /// literal naming a class/object plus a literal method name. Any
     /// other shape (a closure literal, a bare variable of unknown type,
     /// `Closure::fromCallable(...)`, an invokable object, ...) returns
-    /// `None` - don't guess past what's statically known, matching
-    /// `check_format_string_call`'s own literal-format-string precedent.
+    /// `None` rather than guessing.
     fn resolve_call_user_func_callable(
         &self,
         callable_expr: &Expr,
@@ -898,19 +834,18 @@ impl<'a> Checker<'a> {
         self.registry.lookup_method(class, method)
     }
 
-    /// Phase 71 Item 1: `call_user_func`/`call_user_func_array`'s own
-    /// argument re-checking - once the callable resolves (see `resolve_
-    /// call_user_func_callable`'s own doc comment for the two shapes this
-    /// covers), the resolved arguments feed straight into the existing,
-    /// call-shape-agnostic `check_args`, reusing its own `arguments.
-    /// count`/`argument.type`/`argument.byRef` diagnostics verbatim - no
-    /// new identifiers. `call_user_func_array`'s own second argument is
-    /// only trusted when written as a literal array expression at the
-    /// call site (mirrors `vsprintf`/`vprintf`'s own "trust only a
-    /// literal/sequential shape" precedent in `calls/format_string.rs`) -
-    /// real `Arg` nodes (needed for `check_args`'s by-ref/span handling)
-    /// only exist for a literal array's own elements, not for a value
-    /// reached only through its inferred `Type::ArrayShape`.
+    /// `call_user_func`/`call_user_func_array`'s argument re-checking -
+    /// once the callable resolves (see `resolve_call_user_func_callable`'s
+    /// doc comment for the two shapes this covers), the resolved
+    /// arguments feed straight into the existing, call-shape-agnostic
+    /// `check_args`, reusing its `arguments.count`/`argument.type`/
+    /// `argument.byRef` diagnostics verbatim. `call_user_func_array`'s
+    /// second argument is only trusted when written as a literal array
+    /// expression at the call site (mirrors `vsprintf`/`vprintf`'s "trust
+    /// only a literal/sequential shape" precedent) - real `Arg` nodes
+    /// (needed for `check_args`'s by-ref/span handling) only exist for a
+    /// literal array's elements, not for a value reached only through
+    /// its inferred `Type::ArrayShape`.
     pub(crate) fn check_call_user_func(
         &mut self,
         name: &str,
@@ -1013,44 +948,38 @@ pub(crate) fn is_language_construct(name: &str) -> bool {
     )
 }
 
-/// Item 1: resolves a call's own argument list against the declared
-/// parameter list it's being checked against, producing one slot per
-/// declared parameter - `Some(&Expr)` when some argument (positional or
-/// named) actually fills that parameter, `None` when it doesn't (an
-/// omitted optional parameter, or a parameter a spread/unpack argument
-/// might fill, whose real contents can't be resolved statically at
-/// all). Every consumer that used to assume `args[i]` lines up with
-/// `params[i]` - true only for the overwhelmingly common all-positional
-/// case - now goes through this first, so a named or reordered-named
-/// call resolves against the *real* parameter, not whichever one happens
-/// to sit at the same index in the written argument list.
+/// Resolves a call's argument list against the declared parameter list
+/// it's being checked against, producing one slot per declared parameter:
+/// `Some(&Expr)` when some argument (positional or named) actually
+/// fills that parameter, `None` when it doesn't (an omitted optional
+/// parameter, or a parameter a spread/unpack argument might fill, whose
+/// real contents can't be resolved statically). This lets a named or
+/// reordered-named call resolve against the real parameter, not
+/// whichever one happens to sit at the same index in the written
+/// argument list, since `args[i]` only lines up with `params[i]` for
+/// the all-positional case.
 ///
-/// The returned `Vec` can be *longer* than `params.len()` when the last
+/// The returned `Vec` can be longer than `params.len()` when the last
 /// parameter is variadic: real PHP has no way to fill a variadic
-/// parameter by name (there's no single name that means "the rest of the
-/// arguments"), so once a variadic parameter is in play, any further
-/// positional argument is necessarily extra, appended past the initial
-/// `params.len()`-sized block - the same shape `check_args`'s own
-/// existing variadic fallback (`sig.params.last()` when `i` runs past
+/// parameter by name, so once a variadic parameter is in play, any
+/// further positional argument is necessarily extra, appended past the
+/// initial `params.len()`-sized block - the same shape `check_args`'s
+/// variadic fallback (`sig.params.last()` when `i` runs past
 /// `params.len()`) already expects.
 ///
 /// A positional argument fills the next open slot by declaration order,
 /// tracked via a running count of positional arguments seen so far (not
 /// "the next unfilled slot overall" - the two only diverge for a
-/// positional argument written *after* a named one, which real PHP
-/// itself forbids as a parse-time error; this project's own parser
-/// doesn't enforce that ordering, so such input could reach here anyway,
-/// but only needs to avoid panicking on it, not produce a meaningful
-/// result for syntactically-invalid PHP).
+/// positional argument written after a named one, which real PHP itself
+/// forbids as a parse-time error; this project's parser doesn't enforce
+/// that ordering, so such input could reach here anyway, but only needs
+/// to avoid panicking on it).
 ///
-/// Item 2: a spread/unpack argument's own real contents (how many
-/// elements, which keys) aren't known statically, so no further
-/// *positional* argument can be resolved to a slot once one is seen -
-/// but, unlike this function's previous behavior (breaking out of the
-/// whole loop the moment any spread was seen, silently dropping every
-/// argument written after it, named or not), a *named* argument
-/// following a spread (real, legal PHP: `f(...$a, name: $b)`) still
-/// resolves exactly as it would anywhere else.
+/// A spread/unpack argument's real contents (how many elements, which
+/// keys) aren't known statically, so no further positional argument can
+/// be resolved to a slot once one is seen - but a named argument
+/// following a spread (legal PHP: `f(...$a, name: $b)`) still resolves
+/// exactly as it would anywhere else.
 pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec<Option<&'a Expr>> {
     let mut resolved: Vec<Option<&Expr>> = vec![None; params.len()];
     let mut positional_index = 0usize;
@@ -1168,17 +1097,12 @@ fn first_spread_positional_index(args: &[Arg]) -> Option<usize> {
     None
 }
 
-/// Whether `expr`'s own access chain passes through a nullsafe operator
-/// anywhere along it (`$x?->y->z`, `$x->y?->z`, `$x?->y['k']`, ...) - the
-/// generic "does this chain contain a nullsafe operator" walk the
-/// roadmap's own audit flagged as missing from this project (`Property
-/// Access`/`MethodCall`'s own `nullsafe: bool` field was previously only
-/// ever read locally, per-node - see `checker/expr.rs`'s own several
-/// direct reads of it - never walked as a whole chain). Mirrors real
-/// PHPStan's own `NullsafeCheck::containsNullSafe`. A nullsafe access
-/// short-circuits its *entire* enclosing expression to `null` the moment
-/// its own base is `null`, so nothing built on top of one, however deep,
-/// can ever be relied on to name a genuine, always-evaluated storage
+/// Whether `expr`'s access chain passes through a nullsafe operator
+/// anywhere along it (`$x?->y->z`, `$x->y?->z`, `$x?->y['k']`, ...).
+/// Mirrors real PHPStan's `NullsafeCheck::containsNullSafe`. A nullsafe
+/// access short-circuits its entire enclosing expression to `null` the
+/// moment its base is `null`, so nothing built on top of one, however
+/// deep, can be relied on to name a genuine, always-evaluated storage
 /// location, which is exactly what passing an argument by reference
 /// needs.
 pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
