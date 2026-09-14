@@ -1,6 +1,6 @@
-//! Tests for Phase 53's contextual closure-parameter-type injection,
-//! extended beyond `array_map` to `array_filter`/`usort`/`uasort`/
-//! `array_walk`/`preg_replace_callback`.
+//! Contextual closure-parameter-type injection, extended beyond
+//! `array_map` to `array_filter`/`usort`/`uasort`/`array_walk`/
+//! `preg_replace_callback`.
 use super::helpers::*;
 
 #[test]

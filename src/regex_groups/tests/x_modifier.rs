@@ -1,4 +1,4 @@
-//! Phase 72 (a-iii): the `x` (free-spacing) modifier.
+//! The `x` (free-spacing) modifier.
 
 use super::super::*;
 use super::helpers::{fallbacks, numbers_and_names};
@@ -32,13 +32,12 @@ fn whitespace_between_an_atom_and_its_own_quantifier_is_skipped() {
 
 #[test]
 fn whitespace_around_an_alternation_bar_is_skipped_on_both_sides() {
-    // Confirmed live against a real PHP interpreter: group 1 really is
-    // exactly `"cat"`/`"dog"`, with *no* leftover space on either side -
-    // `skip_free_spacing`'s own top-of-loop call in `scan_branch` runs
-    // right before the `|`/`)`/EOF break check, so the space right
-    // before `|` is consumed before that branch ever "closes", and the
-    // space right after is consumed by the next branch's own first
-    // iteration - neither ever becomes a literal atom.
+    // Group 1 really is exactly `"cat"`/`"dog"`, with *no* leftover
+    // space on either side - `skip_free_spacing`'s own top-of-loop call
+    // in `scan_branch` runs right before the `|`/`)`/EOF break check, so
+    // the space right before `|` is consumed before that branch ever
+    // "closes", and the space right after is consumed by the next
+    // branch's own first iteration - neither ever becomes a literal atom.
     let parsed = parse_capture_groups("/(cat | dog)/x").expect("should parse");
     assert_eq!(numbers_and_names(&parsed.groups), vec![(1, None, false)]);
     assert_eq!(

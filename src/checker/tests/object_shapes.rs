@@ -1,9 +1,4 @@
-//! Phase 80 (partial slice): `object{name: string, age?: int}` - PHPDoc's
-//! structural object shape. Before `Type::ObjectShape` existed, the raw
-//! `object{...}` text was mangled into a bogus, namespace-qualified
-//! "class name," producing a real, active `class.notFound` false
-//! positive on every use of this syntax - not just a missing-precision
-//! gap.
+//! `object{name: string, age?: int}` - PHPDoc's structural object shape.
 
 use super::helpers::*;
 

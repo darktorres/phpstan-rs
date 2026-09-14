@@ -1,9 +1,8 @@
-//! Phase 63: `checker::duplicate_functions::check_duplicate_function_declarations`,
+//! `checker::duplicate_functions::check_duplicate_function_declarations`,
 //! a top-level function declared more than once, unconditionally, across
 //! the whole project. Opt-in (`Project::set_check_duplicate_function_
 //! declarations`) - see `registry::Registry::check_duplicate_function_
-//! declarations`'s own doc comment for the real corpus false positive
-//! that corrected this from its original always-on wiring.
+//! declarations`'s own doc comment for why.
 
 use super::super::*;
 
@@ -37,13 +36,12 @@ fn two_files_each_unconditionally_declaring_the_same_function_are_both_flagged()
     assert!(msg.contains("a.php") && msg.contains("b.php"), "got: {msg}");
 }
 
-// The actual real-corpus shape that motivated making this opt-in:
 // `C13yInternalTest`'s own `Unit`/`Integration` suites each
-// unconditionally declaring the identical top-level function name, never
+// unconditionally declare the identical top-level function name, never
 // loaded together in the same PHP process - the check must stay silent
 // by default (no `set_check_duplicate_function_declarations` call at
-// all here), matching real PHPStan's own `DuplicateFunctionDeclaration
-// Rule` (`#[ValidatesStubFiles]`-only) staying silent for the same case.
+// all here), matching real PHPStan's own `DuplicateFunctionDeclarationRule`
+// (`#[ValidatesStubFiles]`-only) staying silent for the same case.
 #[test]
 fn two_files_each_declaring_the_same_function_are_not_flagged_by_default() {
     let mut project = Project::new();

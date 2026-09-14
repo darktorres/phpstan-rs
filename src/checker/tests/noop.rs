@@ -1,6 +1,5 @@
-//! Phase 41 stage 1: `checker::noop`'s own supported slice of real
-//! PHPStan's `NoopRule` - `xor`/`&&`/`||`/ternary as a bare, side-
-//! effect-free statement.
+//! `checker::noop`'s own supported slice of real PHPStan's `NoopRule`
+//! - `xor`/`&&`/`||`/ternary as a bare, side-effect-free statement.
 
 use super::helpers::*;
 
@@ -83,12 +82,11 @@ fn a_bare_comparison_chain_joined_by_and_is_flagged() {
 
 #[test]
 fn guard_or_die_idiom_is_never_flagged() {
-    // Critical regression case: a real, legitimate, corpus-evidenced
-    // idiom (`checker/stmt.rs`'s own "Phase 32 Finding K" narrowing
-    // support exists for exactly this shape) - the right side has a
-    // real side effect (a method call), so this must never be treated
-    // as a no-op, even though its own top-level shape (a bare `||`
-    // statement) otherwise looks identical to one.
+    // A legitimate idiom (`checker/stmt.rs` has narrowing support for
+    // exactly this shape) - the right side has a real side effect (a
+    // method call), so this must never be treated as a no-op, even
+    // though its own top-level shape (a bare `||` statement) otherwise
+    // looks identical to one.
     let d = diagnostics_for(
         r#"<?php
             class Guard {

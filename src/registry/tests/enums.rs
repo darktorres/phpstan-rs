@@ -3,7 +3,7 @@
 use super::super::*;
 use super::helpers::*;
 
-// Phase 79: a case constant's own singleton type, and the reverse
+// A case constant's own singleton type, and the reverse
 // literal-value -> case lookup `::from()`/`::tryFrom()` narrowing needs.
 
 #[test]
@@ -95,12 +95,9 @@ fn enum_is_registered_with_its_methods_and_implements() {
 
 #[test]
 fn every_enum_implements_unit_enum_and_a_backed_one_also_implements_backed_enum() {
-    // Real bug found on the real Piwigo corpus: doctrine/lexer's own
-    // `AbstractLexer<T of UnitEnum|string|int>` flagged every real
-    // backed enum passed to it as a bound violation, since nothing
-    // ever registered an enum as implementing `UnitEnum`/`BackedEnum`
-    // - only their synthesized cases()/name/value members existed,
-    // never the hierarchy relationship itself.
+    // doctrine/lexer's own `AbstractLexer<T of UnitEnum|string|int>`
+    // requires every backed enum to implement `UnitEnum`/`BackedEnum`;
+    // the synthesized cases()/name/value members alone aren't enough.
     let r = build_registry(
         r#"<?php
             enum Suit: string {
@@ -117,9 +114,8 @@ fn every_enum_implements_unit_enum_and_a_backed_one_also_implements_backed_enum(
     assert!(!r.is_subclass_of("Pure", "BackedEnum"));
 }
 
-// Phase 34 Finding C: a backed enum's ->value is the union of its
-// own case literals, not the generic backing type - real shape,
-// Piwigo\Common\Enum\SortOrder.
+// A backed enum's ->value is the union of its own case literals, not
+// the generic backing type - real shape, Piwigo\Common\Enum\SortOrder.
 #[test]
 fn a_backed_enum_s_value_property_is_the_union_of_its_case_literals() {
     let r = build_registry(

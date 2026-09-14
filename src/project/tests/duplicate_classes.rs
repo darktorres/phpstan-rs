@@ -1,4 +1,4 @@
-//! Phase 83: `checker::duplicate_classes::check_duplicate_class_declarations`,
+//! `checker::duplicate_classes::check_duplicate_class_declarations`,
 //! opt-in (unlike `duplicate_functions`'s own always-on equivalent - see
 //! `registry::Registry::check_duplicate_class_declarations`'s own doc
 //! comment for why) - a top-level class-like declared more than once,

@@ -1,4 +1,4 @@
-//! Phase 70.C: `foreach` over a `Traversable`/`Iterator`/`Generator`/
+//! `foreach` over a `Traversable`/`Iterator`/`Generator`/
 //! `IteratorAggregate`-typed object infers real key/value types instead
 //! of always falling back to `Mixed`.
 
@@ -35,8 +35,7 @@ fn foreach_over_a_generator_typed_parameter_infers_real_key_and_value_types() {
     // Generator is itself a real `Iterator` descendant (`Generator<TKey,
     // TValue, TSend, TReturn> extends Iterator<TKey, TValue>` in the
     // real phpstorm-stubs) - the same `Iterator`-targeted template walk
-    // this phase adds naturally covers it too, with no Generator-specific
-    // special case needed.
+    // covers it too, with no Generator-specific special case needed.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -147,12 +146,9 @@ fn foreach_over_an_array_subject_is_unaffected_by_this_phase() {
 
 #[test]
 fn foreach_key_variable_from_a_generic_iterator_is_used_correctly_afterward() {
-    // A real, if small, regression guard: before this phase the key
-    // variable was unconditionally `Mixed`, so calling a string-only
-    // function on it would never have been flagged either way - this
-    // confirms the *value* variable side (which never was `Mixed`-only)
-    // still behaves, and that iterating doesn't itself introduce a false
-    // positive on ordinary use of the bound key.
+    // Confirms the *value* variable side still behaves, and that
+    // iterating doesn't itself introduce a false positive on ordinary
+    // use of the bound key.
     let d = diagnostics_for(
         r#"<?php
             /** @implements \Iterator<int, string> */
