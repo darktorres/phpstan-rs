@@ -31,18 +31,17 @@ struct FileState {
     functions: Vec<String>,
     classes: Vec<String>,
     references: HashSet<String>,
-    // Phase 44: `@phpstan-ignore-line`/`-next-line` - computed once here,
-    // while the raw source is still on hand, rather than at `check_file`
-    // time (the AST alone doesn't carry comment text at all, and
-    // re-reading the file from disk there would be new, avoidable I/O
-    // coupling `check_file` doesn't otherwise have).
+    // `@phpstan-ignore-line`/`-next-line` - computed once here, while the
+    // raw source is still on hand, rather than at `check_file` time (the
+    // AST alone doesn't carry comment text at all, and re-reading the
+    // file from disk there would be new, avoidable I/O coupling
+    // `check_file` doesn't otherwise have).
     ignore_lines: HashSet<u32>,
-    // Phase 44 follow-up: the fuller bare `@phpstan-ignore <identifier
-    // list>` form - which diagnostic identifiers are suppressed on a
-    // given line, computed alongside `ignore_lines` above for the
-    // identical reason.
+    // The fuller bare `@phpstan-ignore <identifier list>` form - which
+    // diagnostic identifiers are suppressed on a given line, computed
+    // alongside `ignore_lines` above for the identical reason.
     ignore_identifiers: HashMap<u32, Vec<String>>,
-    // Phase 17: this file's own raw source text, kept only when
+    // This file's own raw source text, kept only when
     // `Project::retain_source` is on (see that field's own doc comment) -
     // `None` for every ordinary `check-project` batch run, which never
     // needs it again once this file's own diagnostics are computed.
@@ -77,45 +76,37 @@ pub struct Project {
     // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
     // own module doc comment for the full resolution algorithm.
     pest_config: PestConfig,
-    // Phase 40: gates `checker::phpstan_api::check_phpstan_api_usage` -
-    // set once via `set_phpstan_api_check_enabled` (by the same CLI
-    // wiring that already calls `composer::discover_vendor_context`,
-    // using its own new sibling `composer::detect_phpstan_dependency`)
-    // rather than re-detected here on every load/check, since `Project`
-    // itself has no fixed notion of "the project's own root directory" -
-    // its files are just whatever absolute paths were handed to
-    // `load_file`. Defaults to `false`, so every existing caller
-    // (`Project::new`, the ~300+ direct construction sites in this
-    // project's own test suite, the LSP) is completely unaffected.
+    // Gates `checker::phpstan_api::check_phpstan_api_usage` - set once
+    // via `set_phpstan_api_check_enabled` rather than re-detected here on
+    // every load/check, since `Project` itself has no fixed notion of
+    // "the project's own root directory" - its files are just whatever
+    // absolute paths were handed to `load_file`. Defaults to `false`.
     phpstan_api_check_enabled: bool,
-    // Phase 17: whether `load_file`/`update_file` keep each file's own raw
-    // source text around in its `FileState` (see that field's own doc
-    // comment) - off by default, following `phpstan_api_check_enabled`'s
-    // own precedent, so every existing caller (`main.rs`'s batch
-    // `check-project` path, ~300+ direct-construction tests) is
-    // unaffected. Only `lsp.rs`'s `Server::new()` turns this on: hover/
-    // definition's own text-split technique (`lsp::text_split`) needs a
-    // known span's *exact* source text, including whatever an editor's
-    // `didChange` most recently sent - not necessarily what's on disk.
-    // Also gates `decl_locations` below, for the identical "only the LSP
-    // needs this" reasoning.
+    // Whether `load_file`/`update_file` keep each file's own raw source
+    // text around in its `FileState` (see that field's own doc comment) -
+    // off by default. Only `lsp.rs`'s `Server::new()` turns this on:
+    // hover/definition's own text-split technique (`lsp::text_split`)
+    // needs a known span's exact source text, including whatever an
+    // editor's `didChange` most recently sent - not necessarily what's on
+    // disk. Also gates `decl_locations` below, for the identical "only
+    // the LSP needs this" reasoning.
     retain_source: bool,
-    // Phase 17: see `DeclLocations`'s own doc comment. Populated/pruned
-    // alongside `registry.index`/`remove_declarations` in `load_file`/
-    // `update_file`, gated behind `retain_source` the same as `FileState.
-    // source` - a batch `check-project` run never does a position- or
-    // name-based lookup after checking, so building this index there
-    // would be pure overhead.
+    // See `DeclLocations`'s own doc comment. Populated/pruned alongside
+    // `registry.index`/`remove_declarations` in `load_file`/
+    // `update_file`, gated behind `retain_source` the same as
+    // `FileState.source` - a batch `check-project` run never does a
+    // position- or name-based lookup after checking, so building this
+    // index there would be pure overhead.
     decl_locations: DeclLocations,
-    // Phase 63: every top-level function's own unconditional declaration
-    // site(s) - always populated (no `retain_source` gate, unlike
-    // `decl_locations` above), the same indexing-side/check-side split
-    // `duplicate_class_sites` below uses: its own gate is at the *check*
+    // Every top-level function's own unconditional declaration site(s) -
+    // always populated (no `retain_source` gate, unlike `decl_locations`
+    // above), the same indexing-side/check-side split
+    // `duplicate_class_sites` below uses: its own gate is at the check
     // side, `Registry::check_duplicate_function_declarations`, not the
     // indexing side. See `DuplicateFunctionSites`'s own doc comment.
     duplicate_fn_sites: DuplicateFunctionSites,
-    // Phase 83: the class-like counterpart to `duplicate_fn_sites` above -
-    // always populated too (its own gate is at the *check* side,
+    // The class-like counterpart to `duplicate_fn_sites` above - always
+    // populated too (its own gate is at the check side,
     // `Registry::check_duplicate_class_declarations`, not the indexing
     // side, so an opt-out project pays only the cost of an unused table,
     // not a missing one it might later want turned on incrementally).
@@ -159,38 +150,36 @@ impl Project {
         );
     }
 
-    /// Opts the whole project's checking into Phase 11 Stage 5's
-    /// strictness parameter (`registry::Registry::strict_mixed_arrays`) -
-    /// a narrow, purpose-built setter rather than exposing a general
-    /// `&mut Registry` accessor, which would let a caller bypass
+    /// Opts the whole project's checking into
+    /// `registry::Registry::strict_mixed_arrays` - a narrow,
+    /// purpose-built setter rather than exposing a general `&mut
+    /// Registry` accessor, which would let a caller bypass
     /// `load_file`/`update_file`'s own bookkeeping around what's
     /// currently indexed.
     pub fn set_strict_mixed_arrays(&mut self, strict: bool) {
         self.registry.strict_mixed_arrays = strict;
     }
 
-    /// Phase 62: opts the whole project's checking into `Checker::
-    /// check_uninitialized_properties`, following `set_strict_mixed_
-    /// arrays`'s exact precedent - see `registry::Registry::check_
+    /// Opts the whole project's checking into `Checker::
+    /// check_uninitialized_properties` - see `registry::Registry::check_
     /// uninitialized_properties`'s own doc comment for why this defaults
     /// to `false`.
     pub fn set_check_uninitialized_properties(&mut self, enabled: bool) {
         self.registry.check_uninitialized_properties = enabled;
     }
 
-    /// Phase 67: opts the whole project's checking into the `@internal`
-    /// restricted-usage engine, following `set_check_uninitialized_
-    /// properties`'s exact precedent - see `registry::Registry::
+    /// Opts the whole project's checking into the `@internal`
+    /// restricted-usage engine - see `registry::Registry::
     /// check_internal_usage`'s own doc comment for why this defaults to
     /// `false`.
     pub fn set_check_internal_usage(&mut self, enabled: bool) {
         self.registry.check_internal_usage = enabled;
     }
 
-    /// Phase 67: compiles a project's own configured `restricted_symbols`
-    /// list into the `Registry`-held index `checker::restricted_symbol_
-    /// usage` consults. Empty by default (no entries configured), so this
-    /// is a zero-cost no-op call for every ordinary project.
+    /// Compiles a project's own configured `restricted_symbols` list
+    /// into the `Registry`-held index `checker::restricted_symbol_usage`
+    /// consults. Empty by default (no entries configured), so this is a
+    /// zero-cost no-op call for every ordinary project.
     pub fn set_restricted_symbols(
         &mut self,
         entries: &[crate::restricted_symbols::RestrictedSymbolEntry],
@@ -199,53 +188,47 @@ impl Project {
             crate::restricted_symbols::RestrictedSymbols::compile(entries);
     }
 
-    /// ROADMAP "Known but not yet scheduled": opts the whole project's
-    /// checking into `use function`'s own `function.nameCase` check,
-    /// following `set_check_internal_usage`'s exact precedent - see
-    /// `registry::Registry::check_function_name_case`'s own doc comment
-    /// for why this defaults to `false`.
+    /// Opts the whole project's checking into `use function`'s own
+    /// `function.nameCase` check - see `registry::Registry::
+    /// check_function_name_case`'s own doc comment for why this defaults
+    /// to `false`.
     pub fn set_check_function_name_case(&mut self, enabled: bool) {
         self.registry.check_function_name_case = enabled;
     }
 
-    /// Phase 39: opts the whole project's checking into `@deprecated`
-    /// usage warnings, following `set_check_internal_usage`'s exact
-    /// precedent - see `registry::Registry::check_deprecated_usage`'s
-    /// own doc comment for why this defaults to `false`.
+    /// Opts the whole project's checking into `@deprecated` usage
+    /// warnings - see `registry::Registry::check_deprecated_usage`'s own
+    /// doc comment for why this defaults to `false`.
     pub fn set_check_deprecated_usage(&mut self, enabled: bool) {
         self.registry.check_deprecated_usage = enabled;
     }
 
-    /// Phase 42 bonus item: opts the whole project's checking into the
-    /// "missing checked exception" family, following `set_check_
-    /// deprecated_usage`'s exact precedent - see `registry::Registry::
+    /// Opts the whole project's checking into the "missing checked
+    /// exception" family - see `registry::Registry::
     /// check_missing_checked_exceptions`'s own doc comment for why this
     /// defaults to `false`.
     pub fn set_check_missing_checked_exceptions(&mut self, enabled: bool) {
         self.registry.check_missing_checked_exceptions = enabled;
     }
 
-    /// Phase 61: opts the whole project's checking into the reinstated
-    /// empty-concrete-method-body completeness check, following
-    /// `set_check_deprecated_usage`'s exact precedent - see
+    /// Opts the whole project's checking into the reinstated
+    /// empty-concrete-method-body completeness check - see
     /// `registry::Registry::check_empty_method_bodies`'s own doc comment
     /// for why this defaults to `false`.
     pub fn set_check_empty_method_bodies(&mut self, enabled: bool) {
         self.registry.check_empty_method_bodies = enabled;
     }
 
-    /// Phase 69: opts the whole project's checking into the strict (vs.
-    /// the default, castable) printf placeholder-type matching mode,
-    /// following `set_check_empty_method_bodies`'s exact precedent - see
+    /// Opts the whole project's checking into the strict (vs. the
+    /// default, castable) printf placeholder-type matching mode - see
     /// `registry::Registry::check_strict_printf_placeholder_types`'s own
     /// doc comment for why this defaults to `false`.
     pub fn set_check_strict_printf_placeholder_types(&mut self, enabled: bool) {
         self.registry.check_strict_printf_placeholder_types = enabled;
     }
 
-    /// Phase 42 gating fix: opts the whole project's checking into
-    /// `TooWideMethodThrowTypeRule`'s wider, re-declaration-only mode,
-    /// following `set_check_empty_method_bodies`'s exact precedent - see
+    /// Opts the whole project's checking into `TooWideMethodThrowTypeRule`'s
+    /// wider, re-declaration-only mode - see
     /// `registry::Registry::check_too_wide_throw_type_in_protected_and_public_methods`'s
     /// own doc comment for why this defaults to `false`.
     pub fn set_check_too_wide_throw_type_in_protected_and_public_methods(&mut self, enabled: bool) {
@@ -253,8 +236,7 @@ impl Project {
             .check_too_wide_throw_type_in_protected_and_public_methods = enabled;
     }
 
-    /// Phase 45 (item 11, 45A): the return-type analogue - see
-    /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
+    /// The return-type analogue - see `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
     /// own doc comment.
     pub fn set_check_too_wide_return_type_in_protected_and_public_methods(
         &mut self,
@@ -264,32 +246,30 @@ impl Project {
             .check_too_wide_return_type_in_protected_and_public_methods = enabled;
     }
 
-    /// Phase 42: opts the whole project's checking into `MethodThrowType
-    /// CovarianceRule`, following `set_check_empty_method_bodies`'s exact
-    /// precedent - see `registry::Registry::check_method_throw_type_
-    /// covariance`'s own doc comment for why this defaults to `false`.
+    /// Opts the whole project's checking into
+    /// `MethodThrowTypeCovarianceRule` - see `registry::Registry::
+    /// check_method_throw_type_covariance`'s own doc comment for why
+    /// this defaults to `false`.
     pub fn set_check_method_throw_type_covariance(&mut self, enabled: bool) {
         self.registry.check_method_throw_type_covariance = enabled;
     }
 
     /// Corrected from unconditional to opt-in - see `registry::Registry::
     /// check_duplicate_function_declarations`'s own doc comment for the
-    /// real corpus false positive that motivated this. Same precedent as
-    /// `set_check_method_throw_type_covariance`.
+    /// real false positive that motivated this.
     pub fn set_check_duplicate_function_declarations(&mut self, enabled: bool) {
         self.registry.check_duplicate_function_declarations = enabled;
     }
 
-    /// Phase 83: opts the whole project's checking into `checker::
-    /// duplicate_classes::check_duplicate_class_declarations`, following
-    /// `set_check_method_throw_type_covariance`'s exact precedent - see
+    /// Opts the whole project's checking into `checker::
+    /// duplicate_classes::check_duplicate_class_declarations` - see
     /// `registry::Registry::check_duplicate_class_declarations`'s own doc
     /// comment for why this defaults to `false`.
     pub fn set_check_duplicate_class_declarations(&mut self, enabled: bool) {
         self.registry.check_duplicate_class_declarations = enabled;
     }
 
-    /// Phase 84: configures the project's own `level` setting for
+    /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
     /// collapsed `u8` `check-project` otherwise uses for diagnostic
@@ -299,30 +279,26 @@ impl Project {
         self.registry.configured_level = level;
     }
 
-    /// Phase 38: configures the project's target PHP version
-    /// (`registry::Registry::php_version`), following
-    /// `set_strict_mixed_arrays`'s exact precedent - a narrow setter
-    /// rather than a general `&mut Registry` accessor, for the same
-    /// reason given there. `None` means "not configured" (the default),
-    /// not "PHP version zero" - every version-gated rule reading this
-    /// field needs to treat the two differently.
+    /// Configures the project's target PHP version
+    /// (`registry::Registry::php_version`) - a narrow setter rather than
+    /// a general `&mut Registry` accessor, for the same reason given at
+    /// `set_strict_mixed_arrays`. `None` means "not configured" (the
+    /// default), not "PHP version zero" - every version-gated rule
+    /// reading this field needs to treat the two differently.
     pub fn set_php_version(&mut self, php_version: Option<crate::php_version::PhpVersion>) {
         self.registry.php_version = php_version;
     }
 
-    /// Phase 40: opts every subsequent `check_file`/`check_all` call into
+    /// Opts every subsequent `check_file`/`check_all` call into
     /// `checker::phpstan_api::check_phpstan_api_usage` - the caller
     /// (`main.rs`) decides this once, via
     /// `composer::detect_phpstan_dependency` against the project's own
     /// `composer.json`, the same way it already decides whether to load
-    /// `composer::discover_vendor_context`'s own `vendor/` context.
-    /// Phase 40.C: also mirrored into `self.registry.phpstan_api_check_
-    /// enabled`, following every other opt-in check's exact precedent -
+    /// `composer::discover_vendor_context`'s own `vendor/` context. Also
+    /// mirrored into `self.registry.phpstan_api_check_enabled`, since
     /// the main `Checker` pass's own `MethodCall` arm needs to read this
-    /// too now (`phpstanApi.method`/`phpParser.nodeConnectingAttribute`,
-    /// folded in from this module's own previously-separate `Walker`
-    /// pass), and `Checker` only ever has `&Registry` in hand, not
-    /// `Project` itself.
+    /// too (`phpstanApi.method`/`phpParser.nodeConnectingAttribute`), and
+    /// `Checker` only ever has `&Registry` in hand, not `Project` itself.
     pub fn set_phpstan_api_check_enabled(&mut self, enabled: bool) {
         self.phpstan_api_check_enabled = enabled;
         self.registry.phpstan_api_check_enabled = enabled;
@@ -425,7 +401,7 @@ impl Project {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
         }
-        // Phase 40 follow-up: `record_phpstan_class_file` no-ops unless
+        // `record_phpstan_class_file` no-ops unless
         // `phpstan_api_check_enabled` and the name is `PHPStan\*`-
         // namespaced, so this is a zero-cost loop for every ordinary
         // corpus.
@@ -517,15 +493,14 @@ impl Project {
         let ignore_lines = ignore_comments::ignored_lines(new_source);
         let ignore_identifiers = ignore_comments::ignored_identifiers(new_source);
         // `changed_symbols` seeds transitive_affected_files' BFS, which
-        // looks names up in `self.dependents` - keyed by the *bare* names
+        // looks names up in `self.dependents` - keyed by the bare names
         // deps::referenced_names collects (a deliberate simplification,
         // see that function's own doc comment), not the fully-qualified
-        // ones `functions`/`classes` carry (needed for correct
-        // Registry removal above, Phase 9.5). Feeding FQNs into a
-        // bare-keyed lookup silently found nothing for any namespaced
-        // class - confirmed as a real regression this uncovered:
-        // editing a widely-depended-on namespaced class stopped
-        // cascading to any of its real dependents at all.
+        // ones `functions`/`classes` carry (needed for correct Registry
+        // removal above). Feeding FQNs into a bare-keyed lookup would
+        // silently find nothing for any namespaced class, so editing a
+        // widely-depended-on namespaced class wouldn't cascade to any of
+        // its real dependents at all.
         changed_symbols.extend(functions.iter().map(|s| bare_name(s).to_string()));
         changed_symbols.extend(classes.iter().map(|s| bare_name(s).to_string()));
 
@@ -707,7 +682,7 @@ impl Project {
             // this gate is on.
             diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         }
-        // Phase 44: `@phpstan-ignore-line`/`-next-line` - `non_ignorable`
+        // `@phpstan-ignore-line`/`-next-line` - `non_ignorable`
         // diagnostics are exempt, mirroring real PHPStan's own identical
         // exemption (reserved for a handful of its own rules, e.g.
         // flagging a malformed `@phpstan-ignore` comment itself -
@@ -716,10 +691,10 @@ impl Project {
             diagnostics
                 .retain(|d| d.non_ignorable || !file.ignore_lines.contains(&d.span.start.line));
         }
-        // Phase 44 follow-up: the fuller bare `@phpstan-ignore
-        // <identifier list>` form - unlike the two line markers above,
-        // this only suppresses a diagnostic whose own `identifier`
-        // exactly matches one named on that line.
+        // The fuller bare `@phpstan-ignore <identifier list>` form -
+        // unlike the two line markers above, this only suppresses a
+        // diagnostic whose own `identifier` exactly matches one named on
+        // that line.
         if !file.ignore_identifiers.is_empty() {
             diagnostics.retain(|d| {
                 d.non_ignorable
@@ -736,7 +711,7 @@ impl Project {
         &self.registry
     }
 
-    /// Phase 18 Axis 2: runs every `rules` entry's own `check_class`/
+    /// Runs every `rules` entry's own `check_class`/
     /// `check_function` against every class-like/plain-function this
     /// project's own registry currently knows about - the single entry
     /// point `reflection_rule::ReflectionRule`'s own doc comment
@@ -798,13 +773,9 @@ fn parse(source: &str) -> Result<Vec<Stmt>, ParseError> {
 /// Everything about loading one file that's pure - parsing, plus every
 /// fact derived only from the parsed AST or the raw source text, with no
 /// dependency on (or mutation of) a `Project`'s shared registry. Computing
-/// this for many files is embarrassingly parallel (confirmed measured:
-/// on a full real-world monorepo corpus, lexing+parsing this deriving
-/// data for one large batch of files took ~63% of a `check-project` run's
-/// total wall time once `check_file` itself was already parallelized -
-/// the dominant remaining sequential cost) - `insert_parsed_file` below
-/// does the remaining, order-sensitive registry-mutating half, meant to
-/// stay sequential and run in whatever order a caller's own
+/// this for many files is embarrassingly parallel - `insert_parsed_file`
+/// below does the remaining, order-sensitive registry-mutating half,
+/// meant to stay sequential and run in whatever order a caller's own
 /// collision-resolution policy needs (see that method's own doc comment).
 pub struct ParsedFile {
     ast: Vec<Stmt>,
@@ -813,30 +784,29 @@ pub struct ParsedFile {
     references: HashSet<String>,
     ignore_lines: HashSet<u32>,
     ignore_identifiers: HashMap<u32, Vec<String>>,
-    // Phase (parallelize insert+finish_loading): this file's own
-    // declarations, already built into registry-independent `ClassInfo`/
-    // `FunctionSig`/`Type` values (see `registry::build_declarations`'s
-    // own doc comment for why that split is pure and safe to compute
-    // here, alongside everything else in this struct) - `insert_parsed_
-    // file` feeds these into `Registry::insert_built_decl` one at a
-    // time instead of re-deriving them from `ast` via `Registry::index`,
-    // so the expensive "turn an AST node into a ClassInfo/FunctionSig"
-    // work (confirmed the majority of `Registry::index`'s own cost) runs
-    // here, in parallel, rather than in the sequential insert loop.
+    // This file's own declarations, already built into
+    // registry-independent `ClassInfo`/`FunctionSig`/`Type` values (see
+    // `registry::build_declarations`'s own doc comment for why that
+    // split is pure and safe to compute here, alongside everything else
+    // in this struct) - `insert_parsed_file` feeds these into
+    // `Registry::insert_built_decl` one at a time instead of re-deriving
+    // them from `ast` via `Registry::index`, so the expensive "turn an
+    // AST node into a ClassInfo/FunctionSig" work runs here, in
+    // parallel, rather than in the sequential insert loop.
     built_decls: Vec<crate::registry::BuiltDecl>,
-    // Phase (parallelize insert+finish_loading): this file's own
-    // top-level function declaration sites, already built (see
-    // `DuplicateFunctionSites::merge`'s own doc comment) - `insert_
-    // parsed_file` merges these into the project-wide table instead of
-    // re-walking `ast` via `DuplicateFunctionSites::index`, moving the
-    // per-function type-hint cloning `record` does into this already-
-    // parallel step. Unlike `built_decls`, this needs `path` (baked into
-    // every `FnDeclSite`), which is why `parse_file` below takes one now.
+    // This file's own top-level function declaration sites, already
+    // built (see `DuplicateFunctionSites::merge`'s own doc comment) -
+    // `insert_parsed_file` merges these into the project-wide table
+    // instead of re-walking `ast` via `DuplicateFunctionSites::index`,
+    // moving the per-function type-hint cloning `record` does into this
+    // already-parallel step. Unlike `built_decls`, this needs `path`
+    // (baked into every `FnDeclSite`), which is why `parse_file` below
+    // takes one now.
     duplicate_fn_sites: DuplicateFunctionSites,
-    // Phase 83: the class-like counterpart to `duplicate_fn_sites` above,
-    // built the same way and for the same reason - `parse_file`'s own new
-    // `is_stub` parameter is baked into every `ClassDeclSite` here (see
-    // that field's own doc comment for why it's needed at all).
+    // The class-like counterpart to `duplicate_fn_sites` above, built the
+    // same way and for the same reason - `parse_file`'s own `is_stub`
+    // parameter is baked into every `ClassDeclSite` here (see that
+    // field's own doc comment for why it's needed at all).
     duplicate_class_sites: DuplicateClassSites,
 }
 
