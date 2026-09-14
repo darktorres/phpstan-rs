@@ -9,15 +9,11 @@ use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig};
 use crate::types::Type;
 
 impl Registry {
-    /// Does `class` derive from or implement `of`, directly or transitively?
-    /// A single `HashSet::contains` against `self.ancestor_names` (see
-    /// `precompute_ancestor_names`'s own doc comment) - this used to be a
-    /// fresh `extends`+`implements` DFS, with its own per-call `HashSet`/
-    /// `Vec` allocations, on every one of this function's real call sites
-    /// (dozens, all in `checker/*`/`assignability.rs`, all read-only and
-    /// post-load - confirmed by grepping every call site before making
-    /// this change). Found and fixed via a perf-optimization investigation
-    /// workflow.
+    /// Does `class` derive from or implement `of`, directly or
+    /// transitively? A single `HashSet::contains` against
+    /// `self.ancestor_names` (see `precompute_ancestor_names`) - cheaper
+    /// than a fresh `extends`+`implements` DFS on every one of this
+    /// function's dozens of read-only, post-load call sites.
     pub fn is_subclass_of(&self, class: &str, of: &str) -> bool {
         class == of
             || self
@@ -27,11 +23,11 @@ impl Registry {
     }
 
     /// The exact `extends`+`implements`-only transitive closure
-    /// `is_subclass_of` itself used to walk live on every call - NOT
-    /// `all_ancestor_names`'s superset (which also chains `uses`, a trait
-    /// relationship `instanceof`/`is_subclass_of` never recognizes, see
-    /// that function's own doc comment). `class` itself is never included
-    /// (matching `is_subclass_of`'s own separate `class == of` check).
+    /// `is_subclass_of` needs - NOT `all_ancestor_names`'s superset
+    /// (which also chains `uses`, a trait relationship
+    /// `instanceof`/`is_subclass_of` never recognizes). `class` itself
+    /// is never included (matching `is_subclass_of`'s own separate
+    /// `class == of` check).
     fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<String> {
         let mut seen = FxHashSet::default();
         let mut stack = vec![class.to_string()];
@@ -51,22 +47,14 @@ impl Registry {
         result
     }
 
-    /// Rebuilds `self.ancestor_names` (see `is_subclass_of`'s own doc
-    /// comment) from scratch over every currently-registered class - call
-    /// this any time the class graph could have changed, exactly the same
-    /// "just recompute the whole thing" precedent every other `finish_
-    /// loading`-style pass in this file/`resolve.rs` already follows
-    /// (`canonicalize_class_name_case`, `flatten_traits`, ...). Called
-    /// from `Registry::index_and_flatten` (covers `Registry::build` and
-    /// `php_stubs.rs`'s own stub-extraction registries), `Project::
-    /// finish_loading`, and `Project::update_file` - every place that
-    /// finishes building or mutating a registry's class graph, so `is_
-    /// subclass_of` can always trust this map is current. Read-only over
-    /// `self.classes`, so it parallelizes the same way `flatten_traits_
-    /// one_pass` does: reborrow as `&Registry` for the DFS itself, then a
-    /// plain sequential map assignment - unlike `flatten_traits_one_pass`,
-    /// there's no per-class "apply" step, since no class's own result can
-    /// invalidate another's.
+    /// Rebuilds `self.ancestor_names` (see `is_subclass_of`) from
+    /// scratch over every registered class - call this any time the
+    /// class graph could have changed, so `is_subclass_of` can always
+    /// trust this map is current. Read-only over `self.classes`, so it
+    /// parallelizes like `flatten_traits_one_pass`: reborrow as
+    /// `&Registry` for the DFS, then a plain sequential map assignment -
+    /// unlike that function, there's no per-class "apply" step, since no
+    /// class's result can invalidate another's.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
@@ -82,13 +70,11 @@ impl Registry {
             .collect();
     }
 
-    /// Is `class` (or any ancestor it `extends`) tagged `@phpstan-immutable`
-    /// (or `@phpstan-readonly` on the class itself - both fold into
-    /// `ClassInfo::is_immutable` already, see its own doc comment)?
-    /// Query-time, `extends`-only (mirrors real PHPStan's own
-    /// `ClassReflection::isImmutable()`, which walks `getParentClass()`
-    /// only - never `implements`/`uses`, matching `is_immutable`'s own
-    /// deliberate non-inheriting-at-index-time design in `class_info.rs`).
+    /// Is `class` (or any ancestor it `extends`) tagged
+    /// `@phpstan-immutable` (or `@phpstan-readonly` - both fold into
+    /// `ClassInfo::is_immutable`)? Query-time, `extends`-only, mirroring
+    /// real PHPStan's own `ClassReflection::isImmutable()` (walks
+    /// `getParentClass()` only, never `implements`/`uses`).
     pub(crate) fn class_is_immutable(&self, class: &str) -> bool {
         let mut seen = HashSet::new();
         let mut stack = vec![class.to_string()];
@@ -107,15 +93,13 @@ impl Registry {
         false
     }
 
-    /// Every interface/trait `class` transitively inherits from at all -
-    /// `extends`/`implements` (the same walk `is_subclass_of` already
-    /// does, just collecting every name visited instead of stopping at
-    /// the first match) *and* `uses`, which `is_subclass_of` doesn't chain
-    /// at all (a used trait isn't itself a supertype PHP's own `instanceof`
-    /// recognizes). `class` itself is never included. `@phpstan-require-
-    /// extends`/`-implements`'s own consumer check (`checker::oop::
-    /// check_require_tags`) needs this: real PHPStan's `getInterfaces()`/
-    /// `getTraits(true)` are both transitive the identical way.
+    /// Every interface/trait `class` transitively inherits from -
+    /// `extends`/`implements` *and* `uses`, which `is_subclass_of`
+    /// doesn't chain (a used trait isn't itself a supertype
+    /// `instanceof` recognizes). `class` itself is never included.
+    /// Needed by `checker::oop::check_require_tags`: real PHPStan's
+    /// `getInterfaces()`/`getTraits(true)` are both transitive the
+    /// identical way.
     pub(crate) fn all_ancestor_names(&self, class: &str) -> HashSet<String> {
         let mut seen = HashSet::new();
         let mut stack = vec![class.to_string()];
@@ -140,14 +124,12 @@ impl Registry {
         result
     }
 
-    /// Every real class/enum that ends up composing `trait_fqn`, walking
-    /// past any intermediate *trait* user rather than stopping at direct
-    /// `uses` alone - `flatten_traits` merges a used
-    /// trait's own methods into the *user's* method map, never the other
-    /// way around, so a trait used only by another trait (`trait B { ... }
-    /// trait A { use B; } class X { use A; }`) still needs `B` checked
-    /// against `X`, the real, final host - checking it against `A` alone
-    /// would see exactly the same host-unaware member set `A` itself has.
+    /// Every real class/enum that ends up composing `trait_fqn`,
+    /// walking past any intermediate *trait* user - `flatten_traits`
+    /// merges a used trait's methods into the *user's* method map, so a
+    /// trait used only by another trait (`trait B { ... } trait A {
+    /// use B; } class X { use A; }`) still needs `B` checked against
+    /// `X`, the real, final host.
     pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<String> {
         let mut result = Vec::new();
         let mut stack = vec![trait_fqn.to_string()];
