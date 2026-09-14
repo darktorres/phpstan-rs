@@ -1,18 +1,16 @@
 use crate::types::{AccessoryKind, Type};
 
-/// Phase 50: whether `fields` (an `ArrayShape`'s own field list) is a
+/// Whether `fields` (an `ArrayShape`'s own field list) is a
 /// *definite* list - canonical-int-key-sequential from zero *and* no
-/// optional field followed by a later, non-optional one. Three call sites
-/// (this file, `checker/expr/array_ops.rs`'s `is_list_like`,
+/// optional field followed by a later, non-optional one. Shared by three
+/// call sites (this file, `checker/expr/array_ops.rs`'s `is_list_like`,
 /// `checker/calls/format_string.rs`'s `vsprintf`/`vprintf` arg-count
-/// check) used to hand-duplicate only the first half of this check,
-/// ignoring each field's own `optional` flag entirely - a real, unsound
-/// gap confirmed by hand-tracing real PHPStan's own
-/// `ConstantArrayTypeBuilder` algorithm: `array{0: int, 1?: string, 2:
-/// int}` is genuinely `Maybe`-a-list in real PHPStan (if the optional
-/// field 1 is truly absent at runtime, the remaining keys `{0, 2}` aren't
-/// list-sequential at all), but all three call sites answered `true`
-/// unconditionally. Staying on this project's own established false-
+/// check) so each field's own `optional` flag is honored consistently:
+/// per real PHPStan's own `ConstantArrayTypeBuilder` algorithm,
+/// `array{0: int, 1?: string, 2: int}` is genuinely `Maybe`-a-list (if
+/// the optional field 1 is truly absent at runtime, the remaining keys
+/// `{0, 2}` aren't list-sequential at all). Staying on this project's
+/// own established false-
 /// negative-favoring side (a `Maybe` counts as "not a definite list"
 /// here, not "close enough") - once an optional field is seen, every
 /// field after it must also be optional (a trailing run of optional
@@ -32,25 +30,24 @@ pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> boo
     true
 }
 
-/// Phase 50: the aggregate key type real PHPStan's own `ConstantArrayType::
+/// The aggregate key type real PHPStan's own `ConstantArrayType::
 /// getIterableKeyType()` reports for a shape - the union of each *real*
 /// field's own key kind (the `"..."` unsealed-tail sentinel contributes
 /// nothing, same reasoning as `Checker::array_key_type`'s own identical
 /// skip, `checker/expr/array_ops.rs`). Standalone here (not `checker`-
 /// scoped) so `registry::assignability`/this module's own `is_subtype`
 /// can compare an `ArrayShape`'s real key type against a `Type::Array`'s
-/// declared one - a real, previously-missing check: `array{name: string}`
-/// (an all-string-keyed shape) used to be silently accepted as assignable
-/// to `array<int, string>`. `Type::Never` for a shape with no real fields
+/// declared one, so `array{name: string}` (an all-string-keyed shape) is
+/// not wrongly assignable to `array<int, string>`. `Type::Never` for a
+/// shape with no real fields
 /// at all (every field is `"..."`, or the list is empty) - vacuously a
 /// subtype of any key type via `is_subtype`'s own existing
 /// `(Never, _) => true` arm just below, so callers need no special case.
 ///
 /// An int-canonical key contributes its own real `Type::IntLiteral`, not
-/// the bare `Type::Int` widening `Checker::array_key_type` used to settle
-/// for - a real corpus false positive found verifying this against
-/// Piwigo: `array{0: ...}` (a real, known-non-negative literal `0` key)
-/// wrongly failed against a `array<int<0, max>, ...>`-typed parameter
+/// the bare `Type::Int` widening - needed so, e.g., `array{0: ...}` (a
+/// real, known-non-negative literal `0` key) doesn't wrongly fail against
+/// an `array<int<0, max>, ...>`-typed parameter
 /// (a real shape, e.g. Doctrine DBAL's own `executeStatement`/several of
 /// Piwigo's own local `fetchCount`-style helpers) purely because `Type::
 /// Int` isn't a confirmed subtype of `int<0, max>` (it could be
@@ -88,11 +85,11 @@ pub(crate) fn shape_key_type(fields: &[(String, Type, bool)]) -> Type {
 /// literal `Type::Int` key vs. the generic `unknown_array_key()`
 /// sentinel - see the `is_subtype` `Intersection`-vs-`Intersection` list
 /// arm's own doc comment for why both exist) while still being the same
-/// type PHPStan-visibly. Without this, `union_types` kept both as
+/// type PHPStan-visibly. Without this, `union_types` would keep both as
 /// separate members whenever a docblock-declared `list<T>` and a
-/// runtime-inferred one of the same element type met in one union,
-/// printing a duplicate `list<int>|list<int>` in a real corpus
-/// return-type mismatch (`SearchService::getRegularSearchResults()`).
+/// runtime-inferred one of the same element type meet in one union,
+/// printing a duplicate `list<int>|list<int>` (real shape:
+/// `SearchService::getRegularSearchResults()`).
 pub(crate) fn types_equal_for_union(a: &Type, b: &Type) -> bool {
     if a == b {
         return true;
@@ -123,20 +120,18 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
     match (sub, sup) {
         (_, Type::Mixed) => true,
         (Type::Never, _) => true,
-        // Phase 19: `Type` derives plain structural `PartialEq`, so the
+        // `Type` derives plain structural `PartialEq`, so the
         // `a == b` fast path just below is `false` for `FloatLiteral
         // (f64::NAN)` compared to itself (Rust's own `f64: PartialEq`
-        // makes `NAN != NAN`) - reflexivity genuinely failed for this one
-        // value before this arm existed, found by a proptest reflexivity
-        // property (`types/tests/subtyping_properties.rs`) rather than
-        // observed in a real corpus. Mirrors real PHPStan's own
+        // makes `NAN != NAN`) - needs its own arm for reflexivity to hold
+        // (see `types/tests/subtyping_properties.rs`). Mirrors real PHPStan's own
         // `ConstantFloatType::equals()` (`vendor/phpstan-src/src/Type/
         // Constant/ConstantFloatType.php:42-45`), which explicitly
         // special-cases exactly this (`is_nan(a) && is_nan(b)`).
         (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => true,
         (a, b) if a == b => true,
 
-        // Phase 53: a shaped callable is always compatible with a bare
+        // A shaped callable is always compatible with a bare
         // marker, in both directions - deliberately lenient, matching
         // this file's own established "can't verify, don't guess wrong"
         // pattern one screen down (`ClassString`/`String` interchange-
@@ -144,9 +139,9 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // unconditionally compatible rather than attempting real
         // contravariant-parameter/covariant-return comparison
         // (`CallableTypeHelper::isParametersAcceptorSuperTypeOf`'s own
-        // job in real PHPStan) - reproducing that correctly needs the
-        // exact variance machinery this project's own Phase 53 design
-        // deliberately declines to build (sub-item D). This means a
+        // job in real PHPStan) - reproducing that correctly needs
+        // variance machinery this project deliberately declines to
+        // build. This means a
         // parsed callable shape is only ever used *forward* (describing
         // what happens when a value is invoked) and never *backward* (to
         // reject an assignment) - the single biggest false-positive-
@@ -165,7 +160,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Int | Type::IntLiteral(_), Type::Float) => true,
         (Type::FloatLiteral(_), Type::Float) => true,
 
-        // Phase 14: `int<min, max>` ranges. `IntRange` fully replaces
+        // `int<min, max>` ranges. `IntRange` fully replaces
         // `Int`'s own range (the same relationship `IntLiteral` has to
         // `Int`), so an `IntLiteral`/narrower `IntRange` widens to it
         // the same way a literal widens to its own base type.
@@ -179,7 +174,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::IntRange(_, _), Type::Int) => true,
         (Type::IntRange(_, _), Type::Float) => true,
 
-        // Phase 14: string/array accessory kinds. A literal directly
+        // String/array accessory kinds. A literal directly
         // proves or disproves each kind from its own exact value - no
         // guessing. Only a real, structurally-provable `ArrayShape` (or
         // a value from a known list-producing source, e.g.
@@ -196,7 +191,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::StringLiteral(s), Type::Accessory(AccessoryKind::NumericString)) => {
             is_numeric_string_literal(s)
         }
-        // Phase 75: mirrors real `ConstantStringType::isLowercaseString`/
+        // Mirrors real `ConstantStringType::isLowercaseString`/
         // `isUppercaseString` (`strtolower($v) === $v`/`strtoupper($v) ===
         // $v`) - ASCII-only, matching PHP 8.2+'s own locale-independent
         // `strtolower`/`strtoupper` (this project's only supported PHP
@@ -207,7 +202,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::StringLiteral(s), Type::Accessory(AccessoryKind::UppercaseString)) => {
             s.bytes().all(|b| !b.is_ascii_lowercase())
         }
-        // Phase 75: mirrors real `ConstantStringType::isDecimalIntegerString`
+        // Mirrors real `ConstantStringType::isDecimalIntegerString`
         // (`(string) (int) $v === $v`) - round-trips through `i64`, so a
         // leading zero (`"007"`), an explicit sign (`"+1"`), `"-0"`, an
         // empty string, or a non-integer numeric string (`"1.0"`) are all
@@ -221,7 +216,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             Type::Accessory(AccessoryKind::NonFalsyString),
             Type::Accessory(AccessoryKind::NonEmptyString),
         ) => true,
-        // Phase 75: mirrors real `AccessoryDecimalIntegerStringType`'s own
+        // Mirrors real `AccessoryDecimalIntegerStringType`'s own
         // (non-inverse) `isNumericString`/`isLowercaseString`/
         // `isUppercaseString` (all `TrinaryLogic::createYes()`,
         // `AccessoryDecimalIntegerStringType.php:364-397`) and
@@ -250,21 +245,18 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // (checker::infer_call_return_type); these are the safety net for
         // wherever that doesn't happen.
         //
-        // Phase 54: used as `sub` (the actual/source side), it's now
-        // bound-aware rather than an unconditional escape hatch - whatever
-        // `T` ultimately gets instantiated to is guaranteed to satisfy its
+        // Used as `sub` (the actual/source side), this is bound-aware
+        // rather than an unconditional escape hatch - whatever `T`
+        // ultimately gets instantiated to is guaranteed to satisfy its
         // own declared bound (real PHPStan's own upper-bound semantics),
         // so `T` is a subtype of `sup` exactly when its bound is. An
         // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is
         // *not* generally true (only when `sup` is `Mixed` too, via the
         // very first arm above) - so the extremely common bound-free
-        // `@template T` gets an explicit, separate `true` here to keep
-        // this arm's old blanket leniency exactly where no bound was ever
-        // written to make a real judgment from.
+        // `@template T` gets an explicit, separate `true` here.
         //
         // Placed deliberately *before* the `(_, Union(members))` arm
-        // below, not just after the ordinary early arms - a real,
-        // corpus-found bug when it lived there instead: that arm's own
+        // below, not just after the ordinary early arms: that arm's own
         // "is `sub` a subtype of *any one* union member" splitting is
         // wrong for a `TemplateParam` whose own bound is *itself* a union
         // (`@template TKey of array-key`, i.e. bound `int|string`) - it
@@ -278,12 +270,13 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // `filter()`/`partition()` methods' `@phpstan-return` tags,
         // where `TKey` (this same class's own template, correctly bound
         // to `array-key`) is passed right back as the argument satisfying
-        // that identical bound - `generics.templateBound` wrongly fired
-        // as if `TKey` didn't satisfy its own declared bound at all.
+        // that identical bound - `generics.templateBound` would otherwise
+        // wrongly fire as if `TKey` didn't satisfy its own declared bound
+        // at all.
         (Type::TemplateParam(tp), _) => {
             matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
         }
-        // Phase 80 follow-up: an unresolved `Conditional` - either it
+        // An unresolved `Conditional` - either it
         // leaked into a position `types::conditional::resolve_conditional`
         // never runs against (a `@param`/`@var` tag, since `parse_type_
         // string` is shared across every tag kind, not scoped to
@@ -291,14 +284,12 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // check against its declaring function's signature, which has no
         // call-site argument to resolve the subject against at all), or
         // resolution ran but the subject was left unbound/`Mixed`. Falls
-        // back to the same `Union([if_true, if_false])` comparison this
-        // project's own parser always produced before this variant
-        // existed - literally builds that `Union` and delegates to
-        // `is_subtype` again, rather than hand-rolling a narrower
+        // back to the eager `Union([if_true, if_false])` comparison -
+        // literally builds that `Union` and delegates to `is_subtype`
+        // again, rather than hand-rolling a narrower
         // `is_subtype(sub, if_true) || is_subtype(sub, if_false)`-style
-        // check: a real corpus false positive (`NotificationByMailSender::
-        // sendMailNotifications()`) showed that narrower form rejects a
-        // `sub` that's *itself* a `Union` straddling both branches (e.g.
+        // check: that narrower form would reject a `sub` that's *itself*
+        // a `Union` straddling both branches (e.g.
         // `list<string>|list<X>`, entirely valid piecewise) unless the
         // *whole* union happened to fit in just one branch alone -
         // delegating to the real `Union`-vs-`Union` rule two arms below
@@ -327,9 +318,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             sub,
             &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
         ),
-        // Phase 19: a real, pre-existing soundness gap found via a
-        // proptest `intersection_projection` property - `A & B <: B` is
-        // a basic law of intersection types that must hold
+        // `A & B <: B` is a basic law of intersection types that must hold
         // unconditionally, but with only the two generic rules below
         // (and the identical pair further down for `Intersection`), an
         // `Intersection` whose own member happens to *be* a `Union`
@@ -415,7 +404,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::Intersection(members), _) => members.iter().any(|m| is_subtype(m, sup)),
         (_, Type::Intersection(members)) => members.iter().all(|m| is_subtype(sub, m)),
 
-        // Phase 50: a key-type check alongside the existing value-type
+        // A key-type check alongside the existing value-type
         // one - `array<int, T>` is not a subtype of `array<string, T>`.
         // The common "don't know the real key" case (`Type::
         // unknown_array_key()`, `int|string`) still passes here via the
@@ -445,7 +434,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // literal inference, so it's left unrelated rather than guessed.
         // Two shapes are only related via the general `a == b` case above -
         // no shape subtyping (e.g. "has at least these keys") is modeled.
-        // Phase 50: on top of the pre-existing "only when the array's
+        // On top of the "only when the array's
         // own value type is Mixed" rule (this function does no per-field
         // value comparison of its own - that's `registry::is_assignable`'s
         // job), also require the shape's own real aggregate key type to
@@ -456,7 +445,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
             matches!(**b, Type::Mixed) && is_subtype(&shape_key_type(fields), key)
         }
 
-        // Phase 80: an object shape is structurally an object, so it
+        // An object shape is structurally an object, so it
         // satisfies the bare native `object` hint - the same "shape
         // satisfies the ordinary bare hint" rule `ArrayShape` gets just
         // above, one type family over. Checking whether some *real*
@@ -468,7 +457,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
 
-        // Phase 79: a specific case is a real instance of its own enum -
+        // A specific case is a real instance of its own enum -
         // the exact-name check here is the same non-hierarchy-aware
         // baseline `Object`-vs-`Object` gets just below; `registry::
         // is_assignable` is where the hierarchy-aware upgrade (matching
@@ -521,7 +510,7 @@ pub(crate) fn is_numeric_string_literal(s: &str) -> bool {
     mantissa_ok && exponent_ok
 }
 
-/// Phase 75: mirrors real `ConstantStringType::isDecimalIntegerString`
+/// Mirrors real `ConstantStringType::isDecimalIntegerString`
 /// exactly - `(string) (int) $v === $v`, ported as a round-trip `i64`
 /// parse (PHP's own native int width on every platform this project
 /// targets) rather than reimplementing the sign/leading-zero grammar by
