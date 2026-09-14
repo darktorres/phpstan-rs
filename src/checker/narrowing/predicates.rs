@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::checker::{Checker, Locals, literal_string_key, union_types};
 use crate::types::Type;
 
-/// Phase 32 Finding F: the expression `current_narrowed_type`'s own
+/// The expression `current_narrowed_type`'s own
 /// fallback should actually infer from, when no prior narrowing entry
 /// exists yet. `narrowing_key`'s own unwrapping (`Grouping`, `Assign`,
 /// the literal-`null`-coalesce case below) picks a *key* based on the
@@ -46,25 +46,17 @@ pub(crate) fn narrowing_infer_target(e: &Expr) -> &Expr {
 ///
 /// Without the `PropertyAccess` case, `apply_narrowing`'s `instanceof`
 /// handling could only ever narrow a bare variable - `$arg->value
-/// instanceof Variable && $arg->value->name` (an extremely common
-/// AST-visitor idiom - narrow a property, then read a property only the
-/// narrowed-to subtype has) had no way to remember that narrowing at
-/// all, so the second half was checked against `$arg->value`'s
-/// un-narrowed declared type. Found via real false positives once
-/// undefined-property-on-read detection started actually exercising
-/// this: nikic/php-parser AST-visitor code in this project's own
-/// `tools/` does exactly this pattern.
+/// instanceof Variable && $arg->value->name` (a common AST-visitor
+/// idiom - narrow a property, then read a property only the
+/// narrowed-to subtype has) would have no way to remember that
+/// narrowing, so the second half would be checked against
+/// `$arg->value`'s un-narrowed declared type.
 ///
-/// Phase 22's own follow-on: the identical gap for a literal array-index
-/// chain instead of a property chain - `is_string($lang_info
-/// ['jquery_code'])` never narrowed `$lang_info['jquery_code']` at all
-/// (every narrowing call site below required a bare `ExprKind::Variable`
-/// directly, bypassing this function entirely, until Phase 22 changed
-/// them to go through `narrowing_key` too), so a later read of the same
-/// expression saw its un-narrowed, wider declared/inferred type - a real
-/// corpus example (`Template::__construct`) fed that wider type into a
-/// call whose declared parameter type no longer matched. A *dynamic*
-/// key (`$a[$k]`) can't be narrowed this way - the same key at another
+/// The identical gap applies to a literal array-index chain instead of
+/// a property chain: `is_string($lang_info['jquery_code'])` must narrow
+/// `$lang_info['jquery_code']` too, or a later read of the same
+/// expression sees its un-narrowed, wider declared/inferred type. A
+/// dynamic key (`$a[$k]`) can't be narrowed this way - the same key at another
 /// point in the code isn't guaranteed to be the same runtime index - so
 /// only a literal key participates, matching `literal_string_key`'s own
 /// existing use for the analogous shape-growing case in
@@ -80,16 +72,15 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         ExprKind::PropertyAccess(base, prop, _) => {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }
-        // A round of Piwigo-corpus bucketing found a static property
-        // (`self::$adminSessionCookies !== null`) had no narrowing key at
-        // all - only an instance property's `->` chain was handled above.
-        // Scoped to a real static property specifically (the parser's own
-        // `$`-prefixed `member` encoding, distinguishing it from a class
-        // constant or `Foo::class`) - both this arm and the generic
-        // write-side purge-and-update in `bind_assignment_target` key off
-        // `narrowing_key` uniformly, so a later `self::$prop = ...`
-        // correctly invalidates/replaces this same entry with no
-        // additional wiring needed.
+        // A static property (`self::$adminSessionCookies !== null`)
+        // needs a narrowing key too, not just an instance property's
+        // `->` chain. Scoped to a real static property specifically
+        // (the parser's own `$`-prefixed `member` encoding,
+        // distinguishing it from a class constant or `Foo::class`) -
+        // both this arm and the generic write-side purge-and-update in
+        // `bind_assignment_target` key off `narrowing_key` uniformly,
+        // so a later `self::$prop = ...` correctly invalidates/replaces
+        // this same entry with no additional wiring needed.
         ExprKind::StaticAccess(class_name, member) if member.starts_with('$') => {
             Some(format!("{class_name}::{member}"))
         }
@@ -97,7 +88,7 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
             let base_key = narrowing_key(base)?;
             match literal_string_key(idx) {
                 Some(key) => Some(format!("{base_key}[{key}]")),
-                // Phase 33 Finding 5: `is_string($this->mirror[$key])`
+                // `is_string($this->mirror[$key])`
                 // where `$key` is a variable, not a literal - a `$`-
                 // prefixed marker distinguishes "keyed by this variable's
                 // current value" from a literal key's own text (which
@@ -115,7 +106,7 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
                 },
             }
         }
-        // Phase 23: `is_string($result = expr)` - an assignment nested
+        // `is_string($result = expr)` - an assignment nested
         // inside the narrowed expression itself, the common "assign-then-
         // check" idiom. An assignment's own runtime value is exactly
         // what ends up stored under its left-hand side, so whatever gets
@@ -123,22 +114,22 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // narrowing key can borrow the underlying variable/property/index
         // key without needing its own dedicated storage.
         ExprKind::Assign(lhs, _) => narrowing_key(lhs),
-        // Phase 26: `($file = readdir($dir)) !== false` - the
+        // `($file = readdir($dir)) !== false` - the
         // "assign-then-check" idiom above, but wrapped in parens, which
-        // real PHP requires for the *statement's own* top-level shape
+        // real PHP requires for the statement's own top-level shape
         // (`$file = readdir($dir) !== false` would parse as `$file =
         // (readdir($dir) !== false)` instead - `=` binds looser than
         // `!==` there). Without this, `Assign`'s own arm above never
-        // even got a chance to run for the single most common shape it
-        // exists to cover. Phase 85's parser fix means the *comparison-
-        // operand* position specifically (`false !== $file = readdir($dir)`,
-        // no parens, no assignment at the very top of the statement) no
-        // longer needs this arm at all - `parse_assignment_tail` already
-        // builds the right `Assign` node directly as the comparison's
-        // own operand - but plenty of real code still writes the parens
-        // out of habit, so both arms stay.
+        // gets a chance to run for the single most common shape it
+        // exists to cover. The comparison-operand position specifically
+        // (`false !== $file = readdir($dir)`, no parens, no assignment
+        // at the very top of the statement) doesn't need this arm at
+        // all - `parse_assignment_tail` already builds the right
+        // `Assign` node directly as the comparison's own operand - but
+        // plenty of real code still writes the parens out of habit, so
+        // both arms stay.
         ExprKind::Grouping(inner) => narrowing_key(inner),
-        // Phase 32 Finding F: `is_int($decoded['status'] ?? null)` - a
+        // `is_int($decoded['status'] ?? null)` - a
         // common defensive-coding idiom (json_decode results,
         // `$_SERVER`/`$_GET` reads, ...). Scoped to a literal `null`
         // fallback specifically, not any coalesce: `is_int($x['k'] ??
@@ -182,10 +173,10 @@ pub(crate) fn is_real_variable_key(key: &str) -> bool {
 /// `0`/`1` in a way that unambiguously distinguishes "matched" from "not
 /// matched". Deliberately excludes `!== false`/`=== false`: `preg_match`'s
 /// return is `int|false`, and `false` doesn't distinguish a real "no
-/// match" (`0`) from an actual error - where real PHP leaves `$matches`
-/// completely *unchanged* from before the call (confirmed directly
-/// against a live interpreter: a malformed pattern with a pre-existing
-/// `$m` left `$m` untouched), a third state this project has no way to
+/// match" (`0`) from an actual error - real PHP leaves `$matches`
+/// completely unchanged from before the call on error (a malformed
+/// pattern with a pre-existing `$m` leaves `$m` untouched), a third
+/// state this project has no way to
 /// represent (it isn't "the matched shape" or "empty," it's "whatever it
 /// was before this statement") - the same imprecision real PHPStan's own
 /// extensions accept, not something this closes either.
@@ -193,15 +184,14 @@ pub(crate) fn is_real_variable_key(key: &str) -> bool {
 /// Only **strict** `===`/`!==` against exactly 0 or 1 are recognized -
 /// PHP's *loose* `==`/`!=` would make `preg_match(...) == 0` ambiguous
 /// between "no match" (`0`) and "error" (`false`, which loosely equals
-/// `0` - confirmed directly: `false == 0` is `true` in PHP). `== 1`/`!= 1`
-/// happen to still be safe even loosely (`false == 1` is `false`), but a
-/// real grep of every `preg_match(_all)?(...)` comparison across this
-/// project's own verification corpus found zero uses of loose `==`/`!=`
-/// at all - every real comparison is already strict - so dropping loose
-/// comparison recognition entirely costs no real coverage.
+/// `0`: `false == 0` is `true` in PHP). `== 1`/`!= 1`
+/// happen to still be safe even loosely (`false == 1` is `false`), but
+/// real code overwhelmingly uses strict comparison here already, so
+/// dropping loose comparison recognition entirely costs no real
+/// coverage.
 ///
 /// Scoped to plain `preg_match` (not `preg_match_all`, which needs none
-/// of this - see Finding D), to no-`$flags` callers (mirrors this same
+/// of this), to no-`$flags` callers (mirrors this same
 /// scope in `checker/expr.rs`'s own wiring), and to **positional**
 /// arguments only - `Arg` carries its own `name: Option<String>` for a
 /// named argument, and a bare positional destructure alone could
@@ -269,12 +259,12 @@ pub(crate) fn preg_match_condition(cond: &Expr) -> Option<(&Expr, &Expr, bool)> 
 /// own new key shape - never matches for a non-bare-variable `key`,
 /// since a subscript marker only ever wraps a plain variable name).
 ///
-/// Phase 33 Finding 5: without this, nothing ever invalidated a stale
-/// composite-key entry when a variable it depends on changed - not just
-/// for a variable-subscript key, but for *any* composite key at all
-/// (reassigning `$foo` left a stale `"foo->bar"` sitting in `locals`
-/// forever). Called from every real call site that can give a bare
-/// variable, property chain, or index chain a new value.
+/// Without this, nothing invalidates a stale
+/// composite-key entry when a variable it depends on changes - not just
+/// for a variable-subscript key, but for any composite key at all
+/// (reassigning `$foo` would leave a stale `"foo->bar"` sitting in
+/// `locals` forever). Called from every real call site that can give a
+/// bare variable, property chain, or index chain a new value.
 ///
 /// Iterates and removes by key rather than a `retain` call - `Locals`'s
 /// own doc comment (`checker.rs`) only documents `insert`/`remove`/
@@ -307,16 +297,14 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
             Box::new(Type::unknown_array_key()),
             Box::new(Type::Mixed),
         )),
-        // Phase 13 Finding B: `is_countable($x)` is true for exactly
-        // `array|Countable` - the only real corpus call site
-        // (`SectionPopulator::computeMetaRobots`) guards `count($x)`
-        // with it, a correct PHP 8+ idiom (`count()` on anything else is
-        // a `TypeError`).
+        // `is_countable($x)` is true for exactly
+        // `array|Countable` - guards `count($x)` in a correct PHP 8+
+        // idiom (`count()` on anything else is a `TypeError`).
         "is_countable" => Some(Type::Union(vec![
             Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
             Type::Object("Countable".to_string(), Vec::new()),
         ])),
-        // Phase 55: real PHP's own native `iterable` type hint, defined
+        // Real PHP's own native `iterable` type hint, defined
         // as exactly `array|Traversable` - the same target `types::
         // parse_type_string`'s own dedicated `"iterable"` arm resolves
         // the native type hint to, kept in sync deliberately (both are
@@ -328,8 +316,8 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_null" => Some(Type::Null),
         "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
         "is_callable" => Some(Type::Callable(None)),
-        // Phase 28, real shape: `proc_open()`/`fsockopen()` return
-        // `resource|false`, guarded everywhere in this corpus with
+        // `proc_open()`/`fsockopen()` return
+        // `resource|false`, commonly guarded with
         // `if (! is_resource($x)) { throw ...; }` before `fclose`/
         // `fwrite`/`fread`/`proc_close`/etc. - `resource` has no native
         // PHP type declaration, so it's represented the same
@@ -382,14 +370,10 @@ impl<'a> Checker<'a> {
                 let target_ty = narrowing_type_for_predicate(name.trim_start_matches('\\'))?;
                 Some((key, target_ty, &single_arg.value))
             }
-            // A real, corpus-confirmed gap (Phase 51's own cast-validity
-            // check surfaced it: `$node instanceof A || $node instanceof
-            // B ? (string) $node : ...` cast-checked against the
-            // un-narrowed base type, since this whole match had no leaf
-            // for `instanceof` at all despite single-condition `if ($x
-            // instanceof Foo)` narrowing already working fine elsewhere -
-            // `latte/latte`'s own `PrintContext::objectProperty`/
-            // `memberAsString`). A dynamic target (`$x instanceof
+            // `$node instanceof A || $node instanceof B ? (string) $node
+            // : ...` needs a leaf for `instanceof` here too, despite
+            // single-condition `if ($x instanceof Foo)` narrowing
+            // already working fine elsewhere. A dynamic target (`$x instanceof
             // $className`) still doesn't name a concrete class to narrow
             // to, same as the single-condition `ExprKind::Instanceof` arm
             // above already requires.

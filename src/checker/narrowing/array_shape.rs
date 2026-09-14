@@ -71,7 +71,7 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
     }
 }
 
-/// Phase 50/73-74's own `HasOffsetValueType` equivalent, adapted to this
+/// `HasOffsetValueType` equivalent, adapted to this
 /// project's own type system rather than replicating real PHPStan's -
 /// real PHPStan represents "definitely has offset `key`, value type `V`"
 /// as a whole new `CompoundType`/`AccessoryType` (`Type::Accessory::
@@ -119,13 +119,12 @@ pub(crate) fn array_value_type_for_key(ty: &Type, key: &str) -> Option<Type> {
 
 /// Narrows `original` by excluding every falsy member this project can
 /// represent - used for a bare truthiness check (`if ($x)`) and
-/// `empty($x)`'s own truthy branch. Phase 14 extends the falsy set from
-/// just `Null`/`False` to the full real set (`IntLiteral(0)`,
-/// `StringLiteral("")`/`StringLiteral("0")`, an empty `ArrayShape`) and
-/// upgrades a *kept* bare `String`/`Array` to its own accessory-refined
-/// form (`non-falsy-string`/`non-empty-array` - `empty()` is false for
-/// `'0'` too, not merely non-empty, verified against real PHPStan's own
-/// dumpType()). Recurses through `Union` members and drops any that
+/// `empty($x)`'s own truthy branch. The falsy set covers `Null`/`False`,
+/// `IntLiteral(0)`, `StringLiteral("")`/`StringLiteral("0")`, and an
+/// empty `ArrayShape`, and upgrades a kept bare `String`/`Array` to its
+/// own accessory-refined form (`non-falsy-string`/`non-empty-array` -
+/// `empty()` is false for `'0'` too, not merely non-empty). Recurses
+/// through `Union` members and drops any that
 /// resolve to `Never`, rather than pre-filtering and cloning separately -
 /// simpler than maintaining two parallel "is this falsy" checks.
 pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {

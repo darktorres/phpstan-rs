@@ -18,9 +18,9 @@ impl<'a> Checker<'a> {
     /// declared/inferred type (from `infer_expr`) in favor of a bogus
     /// `Mixed`, which then gets *narrowed* (a no-op on `Mixed`) and
     /// written back, permanently overriding the correct type for the
-    /// rest of the enclosing scope. A real corpus example this fix
-    /// exists for: `if ($catListRequest->deleteId !== null) { ... }`
-    /// narrowing `?int` down to `int` only works if the "current" type
+    /// rest of the enclosing scope. E.g. `if ($catListRequest->deleteId
+    /// !== null) { ... }` narrowing `?int` down to `int` only works if
+    /// the "current" type
     /// it narrows from is the real `?int`, not a wrongly-defaulted
     /// `Mixed`. A bare variable already goes through `locals.get(name)`
     /// correctly (it's always present by the time a condition checks
@@ -41,12 +41,11 @@ impl<'a> Checker<'a> {
     /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`),
     /// or a bare empty-array literal `[]` (just as statically provable a
     /// single exact type, `Type::ArrayShape(vec![])`, as any scalar
-    /// literal - real corpus false positive this fixes:
-    /// `PictureModifyPageRenderer::render`'s own `! in_array($raw_tags_post,
-    /// [null, '0', '', []], true)`, whose 4th haystack element being a
-    /// non-`Literal` `ArrayLiteral` used to bail this whole function to
-    /// `None` - silently narrowing *none* of the other three, perfectly
-    /// literal, values either). `None` if any element is a spread, a
+    /// literal - e.g. `! in_array($raw_tags_post, [null, '0', '', []],
+    /// true)`'s 4th haystack element being a non-`Literal` `ArrayLiteral`
+    /// must not bail this whole function to `None`, silently narrowing
+    /// none of the other three, perfectly literal, values either).
+    /// `None` if any element is a spread, a
     /// keyed entry, a non-empty array literal, or anything other than one
     /// of those two provable shapes, since this project has no way to
     /// prove any other haystack element's value statically. Reuses
@@ -86,7 +85,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         matches_when_true: bool,
     ) {
-        // Phase 22: `narrowing_key` on each side, not a bare `ExprKind::
+        // `narrowing_key` on each side, not a bare `ExprKind::
         // Variable` match - the same array-index gap the `Call` arm above
         // has, for the `$arr['key'] === null` idiom instead of an
         // `is_*()` predicate.
@@ -102,26 +101,18 @@ impl<'a> Checker<'a> {
             return;
         }
         let current = self.current_narrowed_type(narrowed_expr, &key, locals);
-        // A real, general unsoundness bug found via a corpus re-check
-        // that turned out to have nothing to do with the two-file
-        // cross-checking mystery it first looked like: `$x !== $y` was
-        // narrowing `$x` by *excluding* `$y`'s own static type -
-        // `Bool`/`Int`/`String`/... - not just a known single value.
         // `narrow_type_excluding` is only sound when `excluded`
         // represents one specific, already-proven value (`Null`,
         // `True`/`False`, a literal, an `is_*()` predicate's own
         // provably-exhaustive target) - every one of its other real
         // callers passes exactly that. A general type like plain `Bool`
-        // covers *multiple* distinct values, so `$x !== $y` where `$y`'s
+        // covers multiple distinct values, so `$x !== $y` where `$y`'s
         // only known fact is "some `Bool`" proves nothing about which
         // specific value `$x` isn't - excluding the whole `Bool` type
-        // from an already-`Bool`-typed `$x` wrongly collapsed it to
-        // `Type::Never`. Confirmed live: `?bool $a` narrowed to `bool` by
-        // `$a !== null`, then compared `$a !== $b` (`bool $b`) inside the
-        // same `&&` - real corpus shape in
-        // `CategoryUpdateController::__invoke`, minimized to `function
+        // from an already-`Bool`-typed `$x` (e.g. `function
         // test(?bool $a, bool $b) { if ($a !== null && $a !== $b) { ... }
-        // }`. `narrow_type_to` doesn't share this bug: for a non-`Union`
+        // }`) would wrongly collapse it to `Type::Never`.
+        // `narrow_type_to` doesn't share this bug: for a non-`Union`
         // original it always returns `target` outright (matches iff both
         // sides are already type-compatible, since `===` between
         // incompatible static types is dead code either way) - safe
@@ -159,7 +150,7 @@ impl<'a> Checker<'a> {
             Type::Object(class, _) => {
                 self.registry.classes.contains_key(class) && !has_member(class)
             }
-            // Phase 79: a specific enum case is still a real instance of
+            // A specific enum case is still a real instance of
             // its enum for member-lookup purposes - only its own case
             // identity (narrowing, `->name`/`->value`) cares which case,
             // never whether some *other* method/property exists.
@@ -325,12 +316,8 @@ impl<'a> Checker<'a> {
                 let current = self.current_narrowed_type(recv, &key, locals);
                 Some((key, current))
             }
-            // Phase 48.C: neither carries a real narrowing target at all
-            // - see `AssertTarget`'s own doc comment. Same "no effect"
-            // behavior this project's checker already had for both
-            // before this phase (previously dropped before ever reaching
-            // here); only the checker-side existence/validity reporting
-            // changed, not the narrowing semantics.
+            // Neither carries a real narrowing target at all - see
+            // `AssertTarget`'s own doc comment.
             AssertTarget::NotFound(_) | AssertTarget::Unknown(_) => None,
             AssertTarget::ThisProp(prop) => {
                 let recv = recv?;
@@ -338,13 +325,11 @@ impl<'a> Checker<'a> {
                 let key = format!("{base_key}->{prop}");
                 let current = match locals.get(&key) {
                     Some(t) => t.clone(),
-                    // Real bug found and fixed this session: this used to
-                    // match `Type::Object` directly, silently falling to
-                    // `Type::Mixed` (discarding the property's own real
-                    // type for narrowing purposes) for a `Union`/
-                    // `Intersection` receiver. `property_access_type`
-                    // (`checker/expr.rs`, shared with `ExprKind::
-                    // PropertyAccess`) already recurses through both.
+                    // `property_access_type` (`checker/expr.rs`, shared
+                    // with `ExprKind::PropertyAccess`) recurses through
+                    // `Union`/`Intersection` receivers, so this doesn't
+                    // discard the property's real type for a
+                    // multi-member receiver.
                     None => self.property_access_type(&self.infer_expr(recv, locals), prop),
                 };
                 Some((key, current))

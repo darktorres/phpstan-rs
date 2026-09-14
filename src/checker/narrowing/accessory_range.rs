@@ -11,7 +11,7 @@ use crate::types::{self, AccessoryKind, Type};
 /// (a `list<T>`) - upgrading the latter to `non-empty-list<T>` rather
 /// than leaving it unchanged - and avoids adding a duplicate
 /// `NonEmptyArray` member if one is already present.
-/// Phase 14: backs `is_numeric($x)`'s own true-branch narrowing above -
+/// Backs `is_numeric($x)`'s own true-branch narrowing above -
 /// upgrades a kept `String`, bare or found inside a `Union`, to
 /// `numeric-string`. The false branch is intentionally left alone (a
 /// string that fails `is_numeric()` is still validly just `String`).
@@ -22,16 +22,15 @@ pub(crate) fn upgrade_string_to_numeric(ty: &Type) -> Type {
 /// Adds `kind` to a `String` value - bare, or already refined by some
 /// other accessory kind (`non-empty-string`, `literal-string`, ... - any
 /// `Intersection` whose base is `String`), recursing into a `Union`'s own
-/// members the same way. Shared by `upgrade_string_to_numeric` (Phase 14,
-/// `is_numeric($x)`) and the `str_contains`/`str_starts_with`/
-/// `str_ends_with` haystack narrowing (Phase 55's own still-open list) -
-/// both are "prove this string satisfies one more accessory fact" upgrades
-/// that would otherwise duplicate the identical bare/intersection/union
-/// recursion. Phase 52's own finding motivated the "already-refined
-/// string" arm: a preg_match() capture group (`non-empty-string`)
-/// surviving an `is_numeric()` guard is a real corpus shape
-/// (`NumberComparator::__construct`), and silently falling through to
-/// `other => other.clone()` left it un-upgraded.
+/// members the same way. Shared by `upgrade_string_to_numeric`
+/// (`is_numeric($x)`) and the `str_contains`/`str_starts_with`/
+/// `str_ends_with` haystack narrowing - both are "prove this string
+/// satisfies one more accessory fact" upgrades that would otherwise
+/// duplicate the identical bare/intersection/union recursion. The
+/// "already-refined string" arm matters because e.g. a preg_match()
+/// capture group (`non-empty-string`) surviving an `is_numeric()` guard
+/// must not silently fall through to `other => other.clone()`
+/// un-upgraded.
 pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> Type {
     match ty {
         Type::String => Type::Intersection(vec![Type::String, Type::Accessory(kind)]),
@@ -53,11 +52,9 @@ pub(crate) fn upgrade_string_with_accessory(ty: &Type, kind: AccessoryKind) -> T
     }
 }
 
-/// Phase 75: whether `ty` (a string-shaped type) is provably `kind` -
-/// generalizes what used to be `checker::expr::is_non_falsy_string`'s own
-/// hardcoded `NonFalsyString` check into a reusable predicate for any
-/// accessory kind (`is_non_falsy_string` itself is now a one-line
-/// delegate to this, unchanged for every existing call site).
+/// Whether `ty` (a string-shaped type) is provably `kind` -
+/// a reusable predicate for any accessory kind
+/// (`is_non_falsy_string` is a one-line delegate to this).
 pub(crate) fn string_type_has_accessory(ty: &Type, kind: AccessoryKind) -> bool {
     types::is_subtype(
         ty,
@@ -90,7 +87,7 @@ fn strip_empty_string_member(ty: &Type) -> Type {
     }
 }
 
-/// Phase 75: the "as if concatenated" string projection of one concat/
+/// The "as if concatenated" string projection of one concat/
 /// interpolation operand's own type - mirrors real PHPStan's own
 /// `Type::toString()` dispatch (each real `*Type::toString()`
 /// implementation read directly, not reconstructed from memory) for
@@ -145,7 +142,7 @@ fn constant_strings(ty: &Type) -> Vec<String> {
 /// concatenation of two wide literal unions can't blow up combinatorially.
 const CALCULATE_SCALARS_LIMIT: usize = 8;
 
-/// Phase 75: a full port of real PHPStan's own `InitializerExprTypeResolver
+/// A full port of real PHPStan's own `InitializerExprTypeResolver
 /// ::resolveConcatType` - the shared engine behind both `BinOp::Concat`
 /// and `ExprKind::Interpolated` (the latter as a left-fold over its own
 /// parts). `l`/`r` are the operands' own *original* inferred types (not
@@ -290,16 +287,12 @@ pub(crate) fn upgrade_array_to_non_empty(ty: &Type) -> Type {
         // unchanged, so a `Union` member that's provably empty gets
         // dropped below instead of surviving as a spurious alternative.
         Type::ArrayShape(fields) if fields.is_empty() => Type::Never,
-        // Found necessary by this session's `LoopZeroIterations` fix - a
-        // loop-built array whose own entry might still be its pre-loop
-        // `[]` is now a real `Union` including that empty-shape
+        // A loop-built array whose own entry might still be its
+        // pre-loop `[]` is a real `Union` including that empty-shape
         // alternative, which a `count($x) > 0` guard immediately
         // afterward should disprove entirely (dropped via the `Never`
         // arm just above), not merely leave untouched by falling to
-        // `_ => ty.clone()`. Real corpus false positive this fixes:
-        // `SiteUpdateSubController::handle`'s own `if (count($to_delete)
-        // > 0) { ...; $this->categoryService->deleteCategories
-        // ($to_delete, ...); }`.
+        // `_ => ty.clone()`.
         Type::Union(members) => {
             let kept: Vec<Type> = members
                 .iter()
@@ -353,8 +346,8 @@ pub(crate) fn numeric_bounds_for_narrowing(ty: &Type) -> Option<(Option<i64>, Op
 /// is smaller/smaller-or-equal/greater/greater-or-equal than the bound" -
 /// `<`/`<=`/`>`/`>=` all four collapse to Smaller/SmallerOrEqual here (a
 /// negated comparison mirrors real PHPStan's own identical `Greater(l,
-/// r)` -> `Smaller(r, l)` rewrite, `BinaryOpHandler.php`, confirmed
-/// directly), so `comparison_narrowed_bounds` only ever has to reason
+/// r)` -> `Smaller(r, l)` rewrite, `BinaryOpHandler.php`), so
+/// `comparison_narrowed_bounds` only ever has to reason
 /// about two shapes, not four.
 enum ComparisonOutcome {
     Smaller,
