@@ -43,8 +43,7 @@ impl Registry {
     /// A thin sequential wrapper: `build_declarations` (see its own doc
     /// comment) does the actual tree walk and produces every declaration
     /// this file contributes as an already-built, registry-independent
-    /// `BuiltDecl`, in the same depth-first order this function used to
-    /// insert them inline before this split; this just feeds each one to
+    /// `BuiltDecl`, in depth-first order; this just feeds each one to
     /// `insert_built_decl` in that same order. Kept as one function
     /// (rather than inlining this loop at every call site) so `Project::
     /// load_file`'s and `update_file`'s existing single-file callers need
@@ -64,15 +63,13 @@ impl Registry {
     }
 
     /// Applies one already-built declaration (see `BuiltDecl`/
-    /// `build_declarations`) to the registry - the exact FQN-collision
-    /// resolution `index`'s own inline walk used to do as it went, now
-    /// factored out so both the sequential single-file path above and
-    /// the parallel-parse batch path in `check_project.rs`'s
-    /// `insert_parsed_file` call site share one implementation of every
-    /// collision decision below, rather than risking two independently
-    /// maintained copies of logic this dense with real, hard-won corpus
-    /// regressions (documented per-branch below) silently drifting apart
-    /// from each other over time.
+    /// `build_declarations`) to the registry - factored out so both the
+    /// sequential single-file path above and the parallel-parse batch
+    /// path in `check_project.rs`'s `insert_parsed_file` call site share
+    /// one implementation of every FQN-collision decision below, rather
+    /// than risking two independently maintained copies of this dense
+    /// logic (documented per-branch below) silently drifting apart from
+    /// each other over time.
     ///
     /// `conditional` is `true` once inside any `if`/`else` branch
     /// (tracked by `build_declarations`) - a declaration found there only
@@ -424,8 +421,7 @@ impl Registry {
 
     /// Same "user-defined wins" rule as `merge_stubs`, for classes -
     /// without this, built-in classes (`Exception`, `ArrayObject`, ...)
-    /// would never be known to the registry at all, since stub sources
-    /// were previously only mined for function signatures.
+    /// would never be known to the registry at all.
     ///
     /// Every merged-in name is also recorded in
     /// `unconditionally_declared_classes` - this runs once, in
