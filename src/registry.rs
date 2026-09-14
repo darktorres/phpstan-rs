@@ -30,7 +30,7 @@ pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
 
-/// Phase 40: real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether
+/// Real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether
 /// `fqn` is under the `PHPStan\` namespace itself (excluding the two
 /// bundled-but-not-really-PHPStan namespaces it explicitly carves out).
 /// Relocated here (from `checker/phpstan_api.rs`) so the vendor-directory
@@ -38,11 +38,10 @@ pub(crate) use purity::{collect_impure_points, is_non_overridable};
 /// during indexing) can call it without a backward `registry -> checker`
 /// dependency.
 pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
-    // Phase 40 follow-up: real `isPhpStanName()` special-cases a bare
-    // `namespace PHPStan;` (no trailing backslash, 7 characters) as true
-    // too (confirmed: `ApiRuleHelperTest.php`'s own `PHPStan`/no-
-    // declaring-file row expects `true`) - this project's own `fqn.len()
-    // >= 8` guard below rejected it before this fix.
+    // Real `isPhpStanName()` special-cases a bare `namespace PHPStan;`
+    // (no trailing backslash, 7 characters) as true too
+    // (`ApiRuleHelperTest.php`'s own `PHPStan`/no-declaring-file row
+    // expects `true`) - a plain `fqn.len() >= 8` guard would reject it.
     fqn.eq_ignore_ascii_case("PHPStan")
         || (fqn.len() >= 8
             && fqn.as_bytes()[..8].eq_ignore_ascii_case(b"PHPStan\\")
@@ -65,10 +64,7 @@ pub struct Registry {
     // real `const NAME = value;` top-level declarations and `define(
     // 'NAME', value)` calls (jetbrains/phpstorm-stubs' own
     // `define('T_WHITESPACE', 397);`-style constants, real corpus scale:
-    // hundreds across that one vendored tree alone). Before this, a bare
-    // reference to *any* global constant resolved to plain `Mixed`
-    // unconditionally (no table existed at all - see `checker/expr.rs`'s
-    // own `bare_name_literal_type` doc comment) - real PHPStan resolves
+    // hundreds across that one vendored tree alone). Real PHPStan resolves
     // both the same way (`ReflectionConstant`'s own value-based type
     // inference doesn't distinguish how the constant was declared), so
     // this table doesn't either. Only a `const`'s own literal-shaped
@@ -89,7 +85,7 @@ pub struct Registry {
     // the global namespace for an unqualified reference" resolution rule
     // real PHP functions do, unlike class names.
     pub global_constants: FxHashMap<String, Type>,
-    // Phase 11 Stage 5's strictness-parameter half (real PHPStan's own
+    // A strictness-parameter half (real PHPStan's own
     // 7-10-style progressively-stricter handling, here narrowed to the
     // one real leniency `is_assignable` has purely on its own: an
     // unknown array literal's type, `Array(Mixed)`, freely satisfying any
@@ -100,7 +96,7 @@ pub struct Registry {
     // existing construction sites already goes through `build`/
     // `default()` and none of them need to change to keep compiling.
     pub strict_mixed_arrays: bool,
-    // Phase 62: opts into `Checker::check_uninitialized_properties`.
+    // Opts into `Checker::check_uninitialized_properties`.
     // Defaults to `false`, matching real PHPStan's own default *exactly*
     // - `UninitializedPropertyRule` sits behind its own
     // `checkUninitializedProperties` parameter (`false` in `conf/
@@ -113,7 +109,7 @@ pub struct Registry {
     // a plain `pub` field via `#[derive(Default)]`, config -> CLI flag ->
     // `Project` setter -> here.
     pub check_uninitialized_properties: bool,
-    // Phase 67: opts into `Checker::check_internal_*` (`internal_usage.rs`).
+    // Opts into `Checker::check_internal_*` (`internal_usage.rs`).
     // Defaults to `false`, matching real PHPStan's own default *exactly*
     // - the whole `RestrictedInternal*UsageExtension` family sits behind
     // `featureToggles.internalTag` (`false` in `conf/config.neon`, not
@@ -123,8 +119,8 @@ pub struct Registry {
     // field via `#[derive(Default)]`, config -> CLI flag -> `Project`
     // setter -> here.
     pub check_internal_usage: bool,
-    // ROADMAP "Known but not yet scheduled": opts into `check_use_
-    // function_imports`'s own `function.nameCase` half - real PHPStan's
+    // Opts into `check_use_function_imports`'s own `function.nameCase`
+    // half - real PHPStan's
     // `ExistingNamesInUseRule` checks this too, but only when its own
     // `checkFunctionNameCase` parameter is enabled (`false` in `conf/
     // config.neon`, not part of any of the standard level 0-10 rule
@@ -138,7 +134,7 @@ pub struct Registry {
     // no "resolves fine but wrong case" scenario the way there is for a
     // function/class name).
     pub check_function_name_case: bool,
-    // Phase 39: opts into `Checker::check_deprecated_*`
+    // Opts into `Checker::check_deprecated_*`
     // (`deprecated_usage.rs`). Defaults to `false` - real PHPStan's own
     // equivalent (`phpstan/phpstan-deprecation-rules`) isn't even part of
     // core `phpstan/phpstan` at all, but a separate, opt-in Composer
@@ -148,36 +144,35 @@ pub struct Registry {
     // wiring chain and "real value, but real vendor-corpus noise"
     // rationale.
     pub check_deprecated_usage: bool,
-    // Phase 42 bonus item: opts into `Checker::check_missing_checked_exceptions`
+    // Opts into `Checker::check_missing_checked_exceptions`
     // (`checker/throws/missing.rs`) - flags a real, explicit `throw`
     // whose own type isn't covered by any `@throws` tag on the enclosing
     // declaration. Defaults to `false` - real PHPStan has no such rule at
     // all (checked-exception enforcement isn't part of core `phpstan/
     // phpstan`, and even the closest real third-party analogue isn't a
-    // simple drop-in), and this project's own design doc explicitly flags
-    // it as the riskiest item in the whole Phase 42 batch given the real
-    // corpus's documented inconsistent `@throws` tagging - same "real
+    // simple drop-in), and this is the riskiest of these opt-in checks
+    // given the real corpus's documented inconsistent `@throws` tagging
+    // - same "real
     // value, but real vendor-corpus noise" rationale, and the identical
     // wiring chain, as `check_internal_usage`/`check_deprecated_usage`.
     pub check_missing_checked_exceptions: bool,
-    // Phase 61: opts into the "genuinely empty concrete method body"
+    // Opts into the "genuinely empty concrete method body"
     // return-completeness check (`Checker::check_function_with_ancestor_hint`'s
     // own `return.missing`/`return.never` fall-through). Defaults to
-    // `false` - this was previously shipped, then reverted, after a
-    // confirmed real corpus false-positive class (IDE-stub/native-
-    // extension declaration files whose bodies are intentionally `{}`,
-    // see ROADMAP.md's own Reverted section) - opt-in for a project that
-    // scopes its own `paths`/excludes `vendor/` the way a realistic
-    // PHPStan setup does. Same wiring chain as the three flags above.
+    // `false` - a real corpus false-positive class (IDE-stub/native-
+    // extension declaration files whose bodies are intentionally `{}`)
+    // means this needs opt-in for a project that scopes its own
+    // `paths`/excludes `vendor/` the way a realistic PHPStan setup does.
+    // Same wiring chain as the three flags above.
     pub check_empty_method_bodies: bool,
-    // Phase 69: opts into the strict (vs. the default, castable)
+    // Opts into the strict (vs. the default, castable)
     // `PrintfPlaceholder::doesArgumentTypeMatchPlaceholder` matching mode
     // for `sprintf`/`printf`/`vsprintf`/`vprintf`/`fprintf` argument-type
     // checks (`checker/calls/format_string.rs`). Defaults to `false`,
     // matching real PHPStan's own stock config exactly (castable is its
     // default too) - same wiring chain as the flags above.
     pub check_strict_printf_placeholder_types: bool,
-    // Phase 42 gating fix: mirrors real PHPStan's own `checkTooWideThrowTypesInProtectedAndPublicMethods`
+    // Mirrors real PHPStan's own `checkTooWideThrowTypesInProtectedAndPublicMethods`
     // (`vendor/phpstan-src/conf/config.neon`, default `false`) - without
     // it, `TooWideMethodThrowTypeRule` only ever runs for a `private`
     // method, a method on a `final` class, or a method itself marked
@@ -190,14 +185,14 @@ pub struct Registry {
     // *re-declaration* narrowing an ancestor's own wider `@throws` gets
     // checked. Same wiring chain as the flags above.
     pub check_too_wide_throw_type_in_protected_and_public_methods: bool,
-    // Phase 45 (item 11, 45A): the return-type analogue of the flag just
-    // above - mirrors real PHPStan's own `checkTooWideReturnTypesInProtectedAndPublicMethods`
+    // The return-type analogue of the flag just above - mirrors real
+    // PHPStan's own `checkTooWideReturnTypesInProtectedAndPublicMethods`
     // gate for `TooWideMethodReturnTypehintRule`, identical wiring chain
     // and identical default-off reasoning (an overridable method's own
     // "unused" declared return-type member might genuinely be needed by
     // a subclass override).
     pub check_too_wide_return_type_in_protected_and_public_methods: bool,
-    // Phase 42: opts into `MethodThrowTypeCovarianceRule` (`checker/oop/
+    // Opts into `MethodThrowTypeCovarianceRule` (`checker/oop/
     // method_overrides.rs`) - a real PHPStan rule (unlike `check_missing_
     // checked_exceptions`), but shipped opt-in here rather than mirroring
     // its own unconditional-by-default registration: this project's own
@@ -214,22 +209,19 @@ pub struct Registry {
     // against a real corpus before defaulting on. Same wiring chain as
     // the flags above.
     pub check_method_throw_type_covariance: bool,
-    // Phase 63/corrected: opts into `checker::duplicate_functions::check_
-    // duplicate_function_declarations`. Originally shipped unconditional,
-    // on the mistaken premise that real PHPStan's own `DuplicateFunction
-    // DeclarationRule` runs the same way project-wide - it doesn't: that
-    // rule is `#[ValidatesStubFiles]`, exactly like `DuplicateClass
-    // DeclarationRule` below, and never runs against ordinary scanned
-    // files at all. A live Piwigo/real-PHPStan corpus diff confirmed the
-    // real, structural false-positive this unsoundly produced: two
-    // unconditionally-declared same-named top-level functions in separate
-    // test files (`Unit`/`Integration` suites) that are never actually
-    // loaded in the same PHP process - a case this checker has no way to
-    // rule out in general, the identical reasoning that made the class-
-    // side check opt-in below. Now opt-in (default `false`), same wiring
-    // chain as the flags above.
+    // Opts into `checker::duplicate_functions::check_
+    // duplicate_function_declarations`. Real PHPStan's own
+    // `DuplicateFunctionDeclarationRule` is `#[ValidatesStubFiles]`,
+    // exactly like `DuplicateClassDeclarationRule` below, and never runs
+    // against ordinary scanned files at all: two unconditionally-declared
+    // same-named top-level functions in separate test files
+    // (`Unit`/`Integration` suites) that are never actually loaded in the
+    // same PHP process are a real, structural false-positive this checker
+    // has no way to rule out in general, the identical reasoning that
+    // made the class-side check opt-in below. Opt-in (default `false`),
+    // same wiring chain as the flags above.
     pub check_duplicate_function_declarations: bool,
-    // Phase 83: opts into `checker::duplicate_classes::check_duplicate_
+    // Opts into `checker::duplicate_classes::check_duplicate_
     // class_declarations` - opt-in (default `false`) because its one
     // known corpus false-positive shape (a vendored built-in stub
     // override, e.g. `Imagick.stub.php`, colliding with the real PHP
@@ -240,7 +232,7 @@ pub struct Registry {
     // for the full design and why this goes beyond real PHPStan (which
     // has no whole-project equivalent of this check to mirror at all).
     pub check_duplicate_class_declarations: bool,
-    // Phase 84: the project's own `level` setting, *before* `check-
+    // The project's own `level` setting, *before* `check-
     // project`'s own `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None`
     // when never explicitly configured (CLI `--level`/config `level`
     // both absent), which `Registry::accepts_at_configured_level` treats
@@ -251,7 +243,7 @@ pub struct Registry {
     // mirroring `phpstan_api_check_enabled`'s own "computed once,
     // upstream of any single flag" precedent.
     pub configured_level: Option<u8>,
-    // Phase 40.C: whether this project consumes real PHPStan as a
+    // Whether this project consumes real PHPStan as a
     // dependency at all (mirrors `Project::phpstan_api_check_enabled`,
     // set once from `composer::detect_phpstan_dependency` before any
     // file is checked - not a CLI-configurable flag of its own the way
@@ -265,7 +257,7 @@ pub struct Registry {
     // `false`, so every existing call site untouched by this is
     // completely unaffected.
     pub phpstan_api_check_enabled: bool,
-    // Phase 40 follow-up: the one narrow, disclosed crack in this
+    // The one narrow, disclosed crack in this
     // struct's own "path-agnostic" contract (see `project/decl_
     // locations.rs`'s doc comment for why `ClassInfo`/`Registry` are
     // deliberately path-agnostic everywhere else) - needed to port real
@@ -275,14 +267,14 @@ pub struct Registry {
     // empty (zero cost) for every ordinary corpus with no `PHPStan\*`-
     // namespaced code of its own.
     pub phpstan_class_files: FxHashMap<String, std::path::PathBuf>,
-    // Phase 67: a project's own configured `restricted_symbols` list
+    // A project's own configured `restricted_symbols` list
     // (`crate::restricted_symbols::RestrictedSymbolEntry`), compiled once
     // via `RestrictedSymbols::compile` - `Project::set_restricted_symbols`.
     // Empty by default, following `check_internal_usage`'s own registry-
     // field wiring shape (minus the CLI-flag hop, since this is a list,
     // not a boolean).
     pub restricted_symbols: crate::restricted_symbols::RestrictedSymbols,
-    // Phase 38: the project's configured target PHP version, if any -
+    // The project's configured target PHP version, if any -
     // `None` (the default) means "not configured", which every
     // version-gated rule that reads this should treat as "nothing to
     // check yet" rather than assuming any particular version. Set via
@@ -291,7 +283,7 @@ pub struct Registry {
     // this field). See `crate::php_version::PhpFeature` for the small
     // feature-availability lookup table this unlocks.
     pub php_version: Option<crate::php_version::PhpVersion>,
-    // Phase 25: class names that have had at least one *unconditional*
+    // Class names that have had at least one *unconditional*
     // declaration indexed so far - lets `Registry::insert_built_decl` tell "this
     // name's existing entry is itself unconditional, so a second
     // unconditional declaration should merge onto it" (Piwigo's own
@@ -322,7 +314,7 @@ pub struct Registry {
     // exactly the regression `unconditional_class_wins_over_a_later_
     // conditional_stub` catches.
     pub(crate) built_in_stub_classes: HashSet<String>,
-    // Phase 32 Finding C: the function-side sibling of the tracking set
+    // The function-side sibling of the tracking set
     // above - phpstorm-stubs represents a real PHP internal function
     // overload (different signatures by argument shape, not version) as
     // two separate top-level `function` declarations sharing one name
@@ -333,7 +325,7 @@ pub struct Registry {
     // entirely, instead of merging into a callable that accepts either
     // shape.
     unconditionally_declared_functions: HashSet<String>,
-    // Phase 60 corpus find: names `merge_stubs` provided a signature for,
+    // Names `merge_stubs` provided a signature for,
     // not yet overwritten by any real, already-indexed conditional
     // declaration - lets `Registry::insert_built_decl`'s own `BuiltDecl::
     // Function` conditional branch tell "this name's existing entry
@@ -354,9 +346,9 @@ pub struct Registry {
     // Every bare function/method name that at least one indexed
     // `FunctionSig` anywhere in the registry has a non-empty `assert`
     // list for. `@phpstan-assert` is a rare docblock tag in real corpora
-    // (confirmed: zero occurrences across the full Symfony monorepo plus
-    // every vendored PHP stub) - `checker::stmt`'s own bare-statement
-    // narrowing pass used to pay a full receiver-type inference plus
+    // (zero occurrences across the full Symfony monorepo plus every
+    // vendored PHP stub) - `checker::stmt`'s own bare-statement narrowing
+    // pass would otherwise pay a full receiver-type inference plus
     // registry hierarchy walk on *every* bare `$x->method();`/
     // `Class::method();`/`func();` statement just to find out `sig.assert`
     // is empty; this lets it check simple set membership by name first
@@ -414,14 +406,14 @@ impl Registry {
     /// `build`: they only ever build a registry to extract raw
     /// `FunctionSig`/`ClassInfo` values out of vendored stub source, and a
     /// stub file's own function body is always empty - classifying it
-    /// would mean every one of PHP's own built-in functions (`header()`,
-    /// `exit()`, ...) looks provably pure, then gets that wrong verdict
-    /// baked permanently into the `LazyLock`-cached stub signatures every
-    /// real project's own registry later merges in (a real bug, found via
-    /// full-corpus verification, not assumed) - `FunctionSig::is_stub`
-    /// isn't even set yet at this point (`php_stubs.rs` sets it
-    /// afterward, on the values this function returns), so classifying
-    /// here couldn't have skipped them via that gate either way.
+    /// would wrongly mark every one of PHP's own built-in functions
+    /// (`header()`, `exit()`, ...) as provably pure, baking that wrong
+    /// verdict permanently into the `LazyLock`-cached stub signatures
+    /// every real project's own registry later merges in.
+    /// `FunctionSig::is_stub` isn't even set yet at this point
+    /// (`php_stubs.rs` sets it afterward, on the values this function
+    /// returns), so classifying here couldn't have skipped them via that
+    /// gate either way.
     pub(crate) fn index_and_flatten(program: &[Stmt]) -> Registry {
         let mut registry = Registry::default();
         registry.index(program, false);
