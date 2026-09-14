@@ -152,35 +152,27 @@ impl Registry {
         result
     }
 
-    /// The exhaustive BFS build `precompute_member_owners` runs once per
-    /// class, replacing what `lookup_method`/`lookup_property`/`lookup_
-    /// const`/their `_with_owner` siblings used to walk live on every
-    /// call. Walks `class`'s own `extends` (*and* `implements`, so an
-    /// interface-typed receiver's own multi-parent `extends` chain and a
-    /// class's declared-but-not-overridden interface methods both resolve)
-    /// ancestor graph, in the same order `is_subclass_of` does, recording
-    /// every method/property/const name found under the *closest*
-    /// (first-visited-by-BFS) declaring ancestor - `class` itself
-    /// included, checked before any parent. A single-parent-only walk
-    /// (`extends.first()`) would be wrong for interfaces specifically,
-    /// since unlike a class, PHP lets an interface `extends` more than one
-    /// parent at once (real example that surfaced this: league/flysystem's
+    /// The exhaustive BFS build `precompute_member_owners` runs once
+    /// per class. Walks `class`'s own `extends` (*and* `implements`, so
+    /// an interface-typed receiver's own multi-parent `extends` chain
+    /// and a class's declared-but-not-overridden interface methods both
+    /// resolve) ancestor graph, in the same order `is_subclass_of` does,
+    /// recording every method/property/const name found under the
+    /// *closest* (first-visited-by-BFS) declaring ancestor - `class`
+    /// itself included, checked before any parent. A single-parent-only
+    /// walk (`extends.first()`) would be wrong for interfaces
+    /// specifically, since unlike a class, PHP lets an interface
+    /// `extends` more than one parent at once (real shape:
+    /// league/flysystem's
     /// `FilesystemOperator extends FilesystemReader, FilesystemWriter`).
     ///
-    /// Fused: this used to be a single generic `own_owner_names(class,
-    /// names_of: impl Fn(&ClassInfo) -> Vec<&str>)` called three separate
-    /// times per class (once each for methods/properties/consts), each
-    /// independently re-walking the identical ancestor graph with its own
-    /// queue/seen-set/lookup - the BFS topology never depends on which
-    /// member kind is being extracted, only on `class`'s own `extends`/
-    /// `implements`, so walking it once and extracting all three kinds at
-    /// each visited node reproduces the exact same per-map first-visited-
-    /// wins result while removing two of the three seen-set/queue/lookup
-    /// passes. `contains_key` guards (rather than `entry(name.to_string())
-    /// .or_insert_with(...)`) avoid allocating a String key on a name a
-    /// closer ancestor already claimed. Found and fixed via a perf-
-    /// optimization investigation workflow; the old three-call version
-    /// measured at 1.91s/124K calls (Symfony), 3.62s/123K calls (Drupal).
+    /// Fused: builds all three (methods/properties/consts) in a single
+    /// walk rather than three independent ones, since the BFS topology
+    /// never depends on which member kind is being extracted - only on
+    /// `class`'s own `extends`/`implements`. `contains_key` guards
+    /// (rather than `entry(name.to_string()).or_insert_with(...)`) avoid
+    /// allocating a String key on a name a closer ancestor already
+    /// claimed.
     fn own_owner_names(
         &self,
         class: &str,
@@ -226,16 +218,14 @@ impl Registry {
 
     /// Builds an `ancestor_*_owner_by_class` entry for `class` from
     /// already-computed `own` maps - correct, not just fast, because of
-    /// how `lookup_ancestor_method_with_owner`/`lookup_ancestor_property_
-    /// with_owner` are specified: for each of `class`'s own direct
-    /// parents *in order*, try that parent's *entire* ancestor chain
-    /// before ever trying the next parent - not a single BFS merged
-    /// across all parents at once. A parent's own `own_owner_names` entry
-    /// already correctly captures "first found within that parent's own
-    /// BFS" (`class` itself included in fully bottom of its BFS start),
-    /// so merging each direct parent's own map in order, first-insert-
-    /// wins, reproduces that exact "try parent 0 fully, then parent 1
-    /// fully" priority without re-walking anything.
+    /// how `lookup_ancestor_method_with_owner`/
+    /// `lookup_ancestor_property_with_owner` are specified: for each of
+    /// `class`'s direct parents *in order*, try that parent's *entire*
+    /// ancestor chain before ever trying the next parent, not a single
+    /// BFS merged across all parents at once. Merging each direct
+    /// parent's own map in order, first-insert-wins, reproduces that
+    /// exact "try parent 0 fully, then parent 1 fully" priority without
+    /// re-walking anything.
     fn merge_ancestor_owner_names(
         parents: impl Iterator<Item = String>,
         own_owner_by_class: &FxHashMap<String, FxHashMap<String, String>>,
@@ -253,51 +243,36 @@ impl Registry {
         merged
     }
 
-    /// Rebuilds every `*_owner_by_class` map (see their own doc comments
-    /// on `Registry`) from scratch over every currently-registered class -
-    /// call this any time the class graph could have changed, exactly the
-    /// same "just recompute the whole thing" precedent `precompute_
-    /// ancestor_names` already follows (called from the identical settle
-    /// points: `Registry::index_and_flatten`/`build`, `Project::finish_
-    /// loading`/`update_file`).
+    /// Rebuilds every `*_owner_by_class` map (see their own doc
+    /// comments on `Registry`) from scratch over every registered class,
+    /// call this any time the class graph could have changed (called
+    /// from the identical settle points `precompute_ancestor_names` is:
+    /// `Registry::index_and_flatten`/`build`, `Project::finish_loading`/
+    /// `update_file`). Avoids a fresh BFS on every
+    /// `lookup_method`/`lookup_property`/`lookup_const`/their
+    /// `_with_owner`/`lookup_ancestor_*` call.
+    /// `find_method_signature_prototype`'s own hand-ordered
+    /// interface/trait/extends priority walk is untouched, since it only
+    /// calls `lookup_method_with_owner` as a sub-step, so it benefits
+    /// automatically.
     ///
-    /// Replaces a fresh BFS (`own_owner_names`'s own per-call `HashSet`/
-    /// `VecDeque`, or worse, a full sequential-per-parent walk for the
-    /// `lookup_ancestor_*` siblings) on every `lookup_method`/`lookup_
-    /// property`/`lookup_const`/their `_with_owner`/`lookup_ancestor_*`
-    /// call - measured, via a perf-optimization investigation workflow,
-    /// at roughly half of total wall time combined across two real
-    /// corpora before this change (Symfony: ~49%, `lookup_method_with_
-    /// owner` alone 1.46M calls/21.81%; Drupal: ~93%, `lookup_method_
-    /// with_owner` alone 1.87M calls/51.93%). `find_method_signature_
-    /// prototype`'s own hand-ordered interface/trait/extends priority
-    /// walk is untouched - it only calls `lookup_method_with_owner` as a
-    /// sub-step, so it benefits automatically without needing its own
-    /// cache or any change to its own ordering logic.
-    ///
-    /// Two phases, `own` then `ancestor`, since every `ancestor_*_owner_
-    /// by_class` entry is built by merging its class's own already-
-    /// computed direct parents' `own` maps (`merge_ancestor_owner_names`'s
-    /// own doc comment) - every class's `own` map must finish before any
-    /// class's `ancestor` map starts.
+    /// Two phases, `own` then `ancestor`, since every
+    /// `ancestor_*_owner_by_class` entry is built by merging its class's
+    /// already-computed direct parents' `own` maps
+    /// (`merge_ancestor_owner_names`) - every class's `own` map must
+    /// finish before any class's `ancestor` map starts.
     #[hotpath::measure]
     pub fn precompute_member_owners(&mut self) {
         let class_names: Vec<String> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
 
-        // Every `self.X = ...`-style assignment below is deferred to the
-        // very end of this function, once `registry` (a borrow of the
-        // *whole* `self`, including every field being written here) is no
-        // longer needed - each intermediate map is built into a plain
-        // local first, exactly as the parallel computation itself already
-        // requires (`registry` must outlive every `par_iter()` call
-        // below, including the two `ancestor_*` ones that read `method_
-        // owner_by_class`/`property_owner_by_class` back as locals, not
-        // as `self` fields, for the same reason).
-        // A single fused BFS per class builds all three own-maps at once
-        // (see `own_owner_names`'s own doc comment for why this is safe -
-        // the ancestor-walk topology never depends on which member kind
-        // is being extracted) rather than three independent walks.
+        // Every `self.X = ...`-style assignment below is deferred to
+        // the end of this function, once `registry` (a borrow of the
+        // *whole* `self`) is no longer needed - each intermediate map is
+        // built into a plain local first, since `registry` must outlive
+        // every `par_iter()` call below, including the two `ancestor_*`
+        // ones that read `method_owner_by_class`/`property_owner_by_class`
+        // back as locals, not as `self` fields.
         let own_by_class: Vec<_> = class_names
             .par_iter()
             .map(|name| {
