@@ -58,20 +58,18 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
                 .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
                 .collect(),
         ),
-        // A real, previously-missing case, found via this session's own
-        // corpus diff: `object{...}`'s own field types were never
-        // recursed into at all, the one structural wrapper this function
-        // otherwise handles identically to `ArrayShape` above - a
-        // `@phpstan-type` alias referenced inside e.g. `object{key: T}`
-        // (`T` itself a *sibling* alias, not just a template) silently
-        // never got substituted.
+        // `object{...}`'s own field types need recursing into as well,
+        // the one structural wrapper this function otherwise handles
+        // identically to `ArrayShape` above - a `@phpstan-type` alias
+        // referenced inside e.g. `object{key: T}` (`T` itself a sibling
+        // alias, not just a template) must still be substituted.
         Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .into_iter()
                 .map(|(k, t, opt)| (k, substitute_type_aliases(t, aliases), opt))
                 .collect(),
         ),
-        // Phase 53: mirrors `mark_template_params`'s own new arm above.
+        // Mirrors `mark_template_params`'s own new arm above.
         Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
             params: sig
                 .params
@@ -85,9 +83,9 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
                 .collect(),
             return_type: Box::new(substitute_type_aliases((*sig.return_type).clone(), aliases)),
         }))),
-        // Phase 80 follow-up: recurses into `target`/`if_true`/`if_false`,
-        // same as `mark_template_params`/`resolve_names_in_type`'s own
-        // identical new arms - a `@phpstan-type` alias referenced inside
+        // Recurses into `target`/`if_true`/`if_false`, same as
+        // `mark_template_params`/`resolve_names_in_type`'s own identical
+        // arms - a `@phpstan-type` alias referenced inside
         // one of a conditional return type's own branches needs the same
         // substitution as anywhere else.
         Type::Conditional {
@@ -128,7 +126,7 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
 /// name, the same "don't know, don't guess further" leniency this
 /// project already accepts elsewhere rather than a full fixed-point
 /// solve for a shape not yet confirmed to occur in practice.
-/// Phase 48 follow-up (item 7d): also returns `type_alias_case_refs`,
+/// Also returns `type_alias_case_refs`,
 /// keyed the same way the returned alias map itself is (the alias's own
 /// resolved local name) - `(raw, resolved)` pairs for every class-name
 /// reference the alias's *own* RHS carries, collected during the same
@@ -179,7 +177,7 @@ pub(crate) fn build_type_aliases(
 /// needs its own type arguments walked (e.g. `Collection<T>`'s `T` needs
 /// marking even though `Collection` doesn't match anything).
 ///
-/// Phase 54: `params` carries each template's own bound/variance/scope/
+/// `params` carries each template's own bound/variance/scope/
 /// default (`build_template_params` below), not just its bare name - every
 /// occurrence of a given name gets the *same* cloned metadata, since it's
 /// one declaration (`@template T of Shape`) applying everywhere `T` is
@@ -220,24 +218,21 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))
                 .collect(),
         ),
-        // A real, previously-missing case, found via this session's own
-        // corpus diff (`amphp/sync`'s own `PriorityQueue<T of int|
-        // string>`, `@var array<int, object{key: T, priority: int}>`):
-        // `object{...}`'s own field types were never recursed into at
-        // all, so a class-level `@template T` used inside one - not a
-        // rare shape, real PHPStan's own object-shape syntax is commonly
-        // combined with generics this exact way - stayed a plain,
-        // unrecognized `Object("T", [])` instead of becoming
-        // `Type::TemplateParam`, which `resolve_names_in_type` then
-        // (correctly, given what it was handed) treated as a genuine,
-        // as-written class reference.
+        // `object{...}`'s own field types need recursing into too, since
+        // real PHPStan's own object-shape syntax is commonly combined
+        // with generics (e.g. `@var array<int, object{key: T, priority:
+        // int}>`): without this, a class-level `@template T` used inside
+        // one would stay a plain, unrecognized `Object("T", [])` instead
+        // of becoming `Type::TemplateParam`, which `resolve_names_in_type`
+        // would then (correctly, given what it was handed) treat as a
+        // genuine, as-written class reference.
         Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .into_iter()
                 .map(|(k, t, opt)| (k, mark_template_params(t, params), opt))
                 .collect(),
         ),
-        // Phase 53: the real motivating corpus case (Doctrine DBAL's own
+        // A template param inside a `Closure(...)` shape (e.g.
         // `@param Closure(self):T $func`) - without this, `T` inside the
         // shape stays an unresolved `Object("T", [])` instead of becoming
         // a real `TemplateParam`.
@@ -254,15 +249,14 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 .collect(),
             return_type: Box::new(mark_template_params((*sig.return_type).clone(), params)),
         }))),
-        // Phase 80 follow-up: recurses into `target`/`if_true`/`if_false` -
-        // real corpus shape (Doctrine DBAL's own `DriverManager::
-        // getConnection()`, `@phpstan-return ($params is array{
-        // wrapperClass: class-string<T>} ? T : Connection)`) - without
-        // this, a class-level/function-own `@template T` referenced
-        // inside a conditional return type's own branches stayed an
+        // Recurses into `target`/`if_true`/`if_false` - e.g.
+        // `@phpstan-return ($params is array{wrapperClass:
+        // class-string<T>} ? T : Connection)`: without this, a
+        // class-level/function-own `@template T` referenced inside a
+        // conditional return type's own branches would stay an
         // unrecognized `Object("T", [])` instead of becoming a real
         // `TemplateParam`, the same gap this function's own `ObjectShape`/
-        // `Callable` arms above were each added to close.
+        // `Callable` arms above each close.
         Type::Conditional {
             subject,
             target,
@@ -282,7 +276,7 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
 
 /// Builds this docblock's own `@template` metadata - bound (`T of X`),
 /// variance (`@template-covariant`/`-contravariant`), and default
-/// (`T = X`, Phase 54) - keyed by name, shared by class-level
+/// (`T = X`) - keyed by name, shared by class-level
 /// (`registry::ClassInfo::from_decl`) and function-level (`FunctionSig::
 /// from_decl` below) template declarations, which otherwise parse
 /// identically. `scope` names whichever class or function declares these
