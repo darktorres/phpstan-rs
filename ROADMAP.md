@@ -2361,30 +2361,44 @@ section used to carry:
   list-ness loss, so the real trigger is something this project's own
   narrower repro didn't capture; needs its own dedicated trace before
   either can be scoped as a fix.
-- `UploadService::addUploadedFile`'s own `$dbnow` (`$dbnow = null;` at
-  the top of a `try` block, reassigned to a real `string` unconditionally
-  inside the "new photo" `else` branch, then read ~200 lines later still
-  inside that same branch) carries a spurious `null` possibility at the
-  point it's passed to `ImageInsertRow::__construct(dateAvailable:
-  $dbnow, ...)` - confirmed live in the corpus, but **not reproduced**
-  in several faithful simplified attempts (a plain if/else with the same
-  assign-then-use shape; the same shape plus an intervening `do`-`while`
-  loop that never touches `$dbnow`; the same shape through a named-
-  argument constructor call). The real trigger is something specific to
-  the surrounding ~250-line method this project's own simplified repros
-  didn't capture - needs a dedicated bisection of the real file (not
-  attempted here, to avoid editing the frozen corpus checkout even
-  temporarily) rather than another guessed reproduction shape.
+- `UploadService::addUploadedFile`'s own `$dbnow` - **root-caused, not
+  simply "unresolved"**: a bisection of the real file (a temporary,
+  immediately-reverted edit confirmed byte-identical via `md5sum` before
+  and after - the frozen corpus checkout itself was never left touched)
+  found the outer `if (isset($image_id)) {...} else {...}` genuinely
+  *closes* right after the "new photo" branch computes `$file_path` (the
+  `do`-`while` unique-filename loop) - not ~250 lines later as it first
+  appeared reading the file top-to-bottom. Everything from there through
+  the `dateAvailable: $dbnow` use is *shared* code reached by both the
+  "existing photo" and "new photo" paths, ending in a *second*,
+  independent `if (isset($image_id))` re-check (deciding update-vs-insert)
+  whose own `else` branch is where `$dbnow` is actually read. This is
+  exactly the already-declined `isset($image_id)`-checked-twice case
+  named in "Permanent design boundaries" below (`condition_alias_shape`'s
+  own missing "the same, unmodified condition re-tested after intervening
+  shared code still correlates" reasoning) - confirmed via direct
+  `\PHPStan\dumpType()` against the real file (temporarily, then reverted)
+  that real PHPStan's own answer here is a clean `non-falsy-string`, no
+  `null` at all. Not a separate, newly-found gap - the same one, just a
+  harder-to-spot instance (same variable re-checked, not a proxy flag).
 - `NotificationByMailSender::sendMailNotifications`'s own `return
   $returnList;` (`return.type` against a conditional return type keyed
-  on `$action === 'send'`) accumulates its final value across several
-  `if`/`else` branches, each themselves keyed on a mix of `$action` and
-  other flags - structurally similar to the discriminant-implies-shape
-  correlation family (see "Permanent design boundaries" below), but
-  compounded with this project's own conditional-return-type resolution
-  needing to pick the *right* branch's contribution based on `$action`'s
-  literal value specifically, not just union everything together. Not
-  reduced to a minimal reproduction this round.
+  on `$action === 'send'`) - **confirmed real via `\PHPStan\dumpType()`
+  against a faithful minimal reproduction** (a boolean alias for
+  `$action === 'send'`, an accumulator written down two different
+  branches of that alias inside a loop, a conditional return type keyed
+  on the same discriminant): real PHPStan produces zero errors. This is
+  a genuinely *compound* gap, bigger than the base discriminant-
+  correlation bucket alone (see "Permanent design boundaries" below):
+  it needs that same boolean-alias correlation to survive across much
+  deeper, longer-lived control flow (loops, several nested `if`s, ~230
+  lines) than `condition_alias_shape` currently attempts *and* it needs
+  the resulting correlated union to be checked against a *conditional*
+  return type's own discriminant-keyed arms, rather than the ordinary
+  flat union every return type gets today. Confirmed scoped, not
+  attempted here.
+- **Corrected diagnosis (real-PHPStan-verified, supersedes this bullet's
+  own original text below the line).** This was originally attributed to
   a missing feature - dynamic-key narrowing not reaching `isset()`/
   `array_key_exists()`-guarded reads - and each finding it produces was
   judged "sound, not a false positive." Direct A/B testing against the
