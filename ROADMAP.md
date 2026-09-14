@@ -2408,6 +2408,37 @@ section used to carry:
   `ArrayShape` source already takes the separate, non-degraded branch
   above it and isn't affected either way. Scoped, well-understood, not
   attempted here.
+- **The opposite mistake, in the same neighborhood: this project is
+  *over*-confident that a by-ref closure capture mutated inside a
+  callback passed to `preg_replace_callback()` is already list-shaped
+  after the call returns - real PHPStan is not.** Found investigating
+  `SearchService::positionalCondition`'s own `arrayValues.list` finding
+  ("call to `array_values()` on `array{}|non-empty-list`, which is
+  already a list, has no effect") - `$values` is captured `use (&$values)`
+  by a closure passed to `preg_replace_callback()`, mutated inside it via
+  both `$values = [...$values, ...$value]` and `$values[] = $value;`
+  across however many regex matches the pattern finds. Confirmed via
+  `\PHPStan\dumpType()` against a faithful minimal reproduction of the
+  exact shape: real PHPStan's own type for `$values` right after the
+  `preg_replace_callback()` call is a bare `array<mixed>` - *not* already
+  a list - meaning the very `array_values($values)` call this project
+  flags as redundant is, per real PHPStan, doing real, needed work. This
+  project's own diagnosis is therefore itself the false positive, not a
+  true one needing verification. Root cause (not yet traced to an exact
+  line, unlike the fixes above): closure-literal checking apparently
+  treats a by-ref `use` capture's own body-local mutations as a single,
+  unconditional pass written straight back into the outer scope, the way
+  an ordinary statement would be - not the "may run zero or many times,
+  each run seeing the *previous* run's own effect as its entry, converge
+  to a fixed point, then merge with *never running at all*" treatment
+  `Checker::converge_loop_body`/`LoopZeroIterations` already gives an
+  ordinary loop body. A real fix likely means routing a by-ref-capturing
+  closure literal passed to `preg_replace_callback`/`array_walk`/
+  `usort`/`uasort`/`uksort` (every real by-ref-callback-accepting builtin,
+  not just this one) through that same convergence machinery instead of
+  a single pass - architecturally similar in shape to work already done
+  for ordinary loops, but needs its own integration at the closure-
+  literal-as-argument checking call site(s). Not attempted here.
 - `UploadService::addUploadedFile`'s own `$dbnow` - **root-caused, not
   simply "unresolved"**: a bisection of the real file (a temporary,
   immediately-reverted edit confirmed byte-identical via `md5sum` before
