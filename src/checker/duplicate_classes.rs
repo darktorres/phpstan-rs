@@ -1,23 +1,13 @@
-//! Phase 83: a same-shape sibling of `checker::duplicate_functions`, but
-//! going *beyond* real PHPStan rather than porting one of its existing
-//! rules. Real PHPStan's own `DuplicateClassDeclarationRule` is tagged
-//! only `#[ValidatesStubFiles]`, wired exclusively into `StubValidator`'s
-//! own isolated, from-scratch reflector over a project's configured
-//! `stubFiles:` entries alone (confirmed directly against
-//! `vendor/phpstan-src/src/Rules/Classes/DuplicateClassDeclarationRule.
-//! php`'s own consumer, `StubValidatorRuleServicesExtension`, and
-//! `AnalyseApplication.php`'s own call to `StubValidator::validate()`) -
-//! it never runs against a project's ordinary analyzed/vendor tree at all.
-//! Real PHPStan therefore has no whole-project "same class declared
-//! twice" detection to port here; this is phpstan-rs choosing to go
-//! stricter (an in-bounds, previously-established convention - see
-//! `feedback_stricter_than_phpstan_is_fine`), not filling a gap real
-//! PHPStan already closes elsewhere. (The identical mischaracterization -
-//! "ported from a real PHPStan always-on rule" - was inherited verbatim
-//! into `duplicate_functions`'s own doc comment; not fixed here, since
-//! that module's own real corpus evidence, the `strtr` two-declaration
-//! stub split, is unaffected by the correction and out of this phase's
-//! own scope.)
+//! A same-shape sibling of `checker::duplicate_functions`, but going
+//! beyond real PHPStan rather than porting one of its existing rules.
+//! Real PHPStan's own `DuplicateClassDeclarationRule` is tagged only
+//! `#[ValidatesStubFiles]`, wired exclusively into `StubValidator`'s own
+//! isolated, from-scratch reflector over a project's configured
+//! `stubFiles:` entries alone - it never runs against a project's
+//! ordinary analyzed/vendor tree at all. Real PHPStan therefore has no
+//! whole-project "same class declared twice" detection to port here;
+//! this is phpstan-rs choosing to go stricter, not filling a gap real
+//! PHPStan already closes elsewhere.
 //!
 //! Unlike the function-side check, this one is opt-in
 //! (`Registry::check_duplicate_class_declarations`, default `false`): its

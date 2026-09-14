@@ -1,18 +1,18 @@
-//! Phase 63: `DuplicateDeclarationHelper`'s own core case - a single
+//! `DuplicateDeclarationHelper`'s own core case - a single
 //! class/interface/trait/enum body literally redeclaring the same
 //! constant/enum-case/property/method name twice. Narrower value than it
 //! sounds for an ordinary class (`php -l` already rejects a literal
-//! duplicate property/method/constant as a hard fatal error - confirmed
-//! directly), but real, provable value survives regardless: this
-//! project's own parser (like real PHPStan's, for the identical reason -
-//! a static analyzer has to tolerate parsing code that might never
-//! actually run, e.g. a work-in-progress edit) accepts the duplicate
-//! into the AST without complaint, so nothing else in the checker would
-//! ever catch it. Enum cases specifically are *also* rejected by real
-//! PHP itself (confirmed: `Cannot redefine class constant`), so this
-//! isn't "the one shape PHP lets through" the way it might first look -
-//! it's "the one shape this project's own checker would otherwise stay
-//! silent about, regardless of what real PHP does with it."
+//! duplicate property/method/constant as a hard fatal error), but real,
+//! provable value survives regardless: this project's own parser (like
+//! real PHPStan's, for the identical reason - a static analyzer has to
+//! tolerate parsing code that might never actually run, e.g. a
+//! work-in-progress edit) accepts the duplicate into the AST without
+//! complaint, so nothing else in the checker would ever catch it. Enum
+//! cases specifically are also rejected by real PHP itself (`Cannot
+//! redefine class constant`), so this isn't "the one shape PHP lets
+//! through" the way it might first look - it's "the one shape this
+//! project's own checker would otherwise stay silent about, regardless
+//! of what real PHP does with it."
 
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder};
@@ -184,11 +184,11 @@ pub(crate) fn class_kind_identifier(kind: &ClassKind) -> &'static str {
 }
 
 /// phpstorm-stubs represents "this member's own shape changed across PHP
-/// versions" by declaring the *same conceptual member twice*, once per
-/// era (real corpus shapes: `ReflectionMethod::setAccessible()`'s pre-
-/// 8.0/8.1+ signature split, `Directory::$path`'s untyped/`readonly
+/// versions" by declaring the same conceptual member twice, once per
+/// era (e.g. `ReflectionMethod::setAccessible()`'s pre-8.0/8.1+
+/// signature split, `Directory::$path`'s untyped/`readonly
 /// string`-typed split) - each gated by its own `#[PhpStormStubsElementAvailable(
-/// from: X, to: Y)]` attribute in the *source*, but this project's own
+/// from: X, to: Y)]` attribute in the source, but this project's own
 /// lexer (`skip_stub_availability_attribute`) consumes that attribute
 /// entirely before the parser ever sees it (a deliberate, pre-existing
 /// design for the *parameter*-level version-split idiom - see
