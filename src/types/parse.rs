@@ -330,11 +330,9 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
 }
 
 /// `object{name: string, age?: int}` - PHPDoc's structural object shape.
-/// Mirrors `try_parse_array_shape` exactly (same field grammar, same
-/// per-field `parse_type_string` recursion) - just builds `ObjectShape`
-/// instead of `ArrayShape`, and has no positional-field/`...`-unsealed-
-/// marker concept to carry over (an object's own properties are always
-/// named, never positional).
+/// Mirrors `try_parse_array_shape` (same field grammar, same per-field
+/// `parse_type_string` recursion), minus the positional-field/`...`-
+/// unsealed-marker concept (an object's properties are always named).
 fn try_parse_object_shape(s: &str) -> Option<Type> {
     let lower = s.to_ascii_lowercase();
     if !lower.starts_with("object") {
@@ -356,10 +354,8 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
             .split_once(':')
             .filter(|(key_part, _)| looks_like_shape_key(key_part.trim()))
         else {
-            // Same "degrade just this one field" leniency `try_parse_
-            // array_shape`'s own `...`-marker arm documents - an
-            // unrecognized field shouldn't abort every other real field
-            // alongside it.
+            // An unrecognized field shouldn't abort every other real
+            // field alongside it.
             continue;
         };
         let key_part = key_part.trim();
@@ -367,7 +363,6 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
             Some(k) => (k.trim(), true),
             None => (key_part, false),
         };
-        // See `try_parse_array_shape`'s own identical fix's doc comment.
         let key = strip_shape_key_quotes(key);
         fields.push((
             key.to_string(),
@@ -378,25 +373,13 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
     Some(Type::ObjectShape(fields))
 }
 
-/// Strips one layer of matching `'...'`/`"..."` quoting from a shape
-/// field key, if present - `looks_like_shape_key` accepts a quoted key
-/// as a real, common way to write one that isn't a valid bare identifier
-/// (`array{'content-type': string}`), but the field itself must be
-/// stored under the *unquoted* text (`"content-type"`, what `literal_
-/// string_key` on a real `$arr['content-type']` access actually
-/// produces) - otherwise every real lookup against it silently fails to
-/// match. A bare (unquoted) key, integer or identifier-shaped, passes
-/// through unchanged.
 /// The inverse of `strip_shape_key_quotes`, for display: a shape key
 /// shown bare only when it's exactly the shape `looks_like_shape_key`
-/// itself accepts unquoted (a bare integer, or an identifier-shaped
-/// token - alphabetic/underscore start, alphanumeric/underscore/hyphen
-/// rest) - anything else (a key containing a space, a leading digit
-/// followed by non-digits, an empty string, ...) is single-quoted, so a
-/// diagnostic message displaying this type stays round-trippable back
-/// through this same parser rather than silently showing a key text
-/// that would parse as something else (or fail to parse at all) if
-/// pasted back into a real `@var`/`@param` tag.
+/// accepts unquoted (a bare integer, or an identifier-shaped token) -
+/// anything else is single-quoted, so a diagnostic message displaying
+/// this type stays round-trippable back through this same parser rather
+/// than showing a key text that would parse differently (or not at all)
+/// if pasted back into a real `@var`/`@param` tag.
 pub(crate) fn display_shape_key(key: &str) -> String {
     let is_bare_integer = canonical_int_key(key).is_some();
     let is_bare_identifier = {
@@ -413,6 +396,13 @@ pub(crate) fn display_shape_key(key: &str) -> String {
     }
 }
 
+/// Strips one layer of matching `'...'`/`"..."` quoting from a shape
+/// field key, if present - `looks_like_shape_key` accepts a quoted key
+/// as a way to write one that isn't a valid bare identifier
+/// (`array{'content-type': string}`), but the field itself must be
+/// stored under the *unquoted* text (what a real `$arr['content-type']`
+/// access's own literal key actually is), or every real lookup against
+/// it fails to match. A bare (unquoted) key passes through unchanged.
 fn strip_shape_key_quotes(key: &str) -> &str {
     for quote in ['\'', '"'] {
         if let Some(inner) = key.strip_prefix(quote).and_then(|k| k.strip_suffix(quote)) {
@@ -422,14 +412,11 @@ fn strip_shape_key_quotes(key: &str) -> &str {
     key
 }
 
-/// Real PHPStan's own `OffsetAccessType::getResult()`:
-/// extracts `key`'s own value type out of `base`. Only the shapes that
-/// come up in practice are resolved (`ArrayShape`/`ObjectShape`'s own
-/// per-field lookup, a plain `Array`'s uniform value type, `Union`
-/// recursing member-wise); anything else (an unresolved class, `Mixed`,
-/// ...) falls back to `Mixed` - safe, and matches this parser's own
-/// established "an unresolvable PHPDoc construct never hard-fails,
-/// it just degrades" convention throughout.
+/// Real PHPStan's own `OffsetAccessType::getResult()`: extracts `key`'s
+/// value type out of `base`. Only the shapes that come up in practice
+/// are resolved (`ArrayShape`/`ObjectShape`'s per-field lookup, a plain
+/// `Array`'s uniform value type, `Union` recursing member-wise);
+/// anything else falls back to `Mixed`.
 fn offset_access_type(base: &Type, key: &str) -> Type {
     match base {
         Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
