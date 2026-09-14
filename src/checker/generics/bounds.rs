@@ -9,45 +9,38 @@ use crate::token::Span;
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
-    /// Walks `ty` for every `Object(class, args)` naming a class with its
-    /// own `@template T of Bound` (the bound-enforcement half),
-    /// flagging any argument that doesn't satisfy its bound - e.g.
-    /// `Collection<Foo>` where `Collection`'s own `@template T of Shape`
-    /// and `Foo` doesn't implement `Shape`. Recurses into every argument
-    /// too (so `Collection<Box<Foo>>` still checks `Box`'s own bound), and
-    /// into `Union`/`Intersection`/`Array`/`ArrayShape` members (a bound
-    /// violation doesn't stop being real just because it's wrapped in a
-    /// union or is one array's element type).
+    /// Walks `ty` for every `Object(class, args)` naming a class with
+    /// its own `@template T of Bound`, flagging any argument that
+    /// doesn't satisfy its bound - e.g. `Collection<Foo>` where
+    /// `Collection`'s own `@template T of Shape` and `Foo` doesn't
+    /// implement `Shape`. Recurses into every argument (so
+    /// `Collection<Box<Foo>>` still checks `Box`'s bound) and into
+    /// `Union`/`Intersection`/`Array`/`ArrayShape` members.
     ///
     /// Bindings are computed once, positionally, before any bound is
-    /// checked - not just so multiple arguments against multiple bounds
-    /// each see the right value, but because a bound can itself reference
-    /// another of the *same* class's own templates (`@template A`
-    /// `@template B of A`), which only resolves correctly once `A`'s own
-    /// concrete argument is known.
+    /// checked, since a bound can itself reference another of the
+    /// *same* class's templates (`@template A` `@template B of A`),
+    /// which only resolves correctly once `A`'s concrete argument is
+    /// known.
     ///
     /// Called once per declared type (a function's params/return type, a
-    /// class's own properties, its `@extends`/`@implements` tags) rather
+    /// class's properties, its `@extends`/`@implements` tags) rather
     /// than at every call/access site - a generic type only needs
-    /// flagging once, where it's *written*, the same way real PHPStan's
-    /// own `GenericObjectTypeCheck` documents itself.
+    /// flagging once, where it's *written*.
     pub(crate) fn check_generic_bounds(&mut self, ty: &Type, label: &str, span: Span) {
         self.check_generic_bounds_and_arity(ty, label, span, true);
     }
 
     /// `check_arity` gates both `check_generic_reference_arity` and
     /// `check_call_site_variance` - `false` only for
-    /// `check_ancestor_generic_bounds`'s own known ill-formed
-    /// multi-`extends`-conflated parent type (see that function's own doc
-    /// comment on `arity_check_types`), whose misattributed args list is
-    /// exactly as untrustworthy for "does argument `i`'s own call-site
-    /// variance match slot `i`'s declared one" as it is for a plain count
-    /// comparison. Every other caller, including this function's own
-    /// recursion into a generic reference's nested arguments just below,
-    /// always keeps both pervasive checks, matching real PHPStan's own `GenericObjectTypeCheck`
-    /// (confirmed via `IncompatiblePhpDocTypeCheck`, the shared engine
-    /// behind param/property/return-type PHPDoc checking) runs both at
-    /// *every* declared generic-type position, not just a class's own
+    /// `check_ancestor_generic_bounds`'s known ill-formed
+    /// multi-`extends`-conflated parent type (see `arity_check_types`),
+    /// whose misattributed args list is exactly as untrustworthy for
+    /// "does argument `i`'s call-site variance match slot `i`'s
+    /// declared one" as it is for a plain count comparison. Every other
+    /// caller always keeps both pervasive checks, matching real
+    /// PHPStan's `GenericObjectTypeCheck` running both at *every*
+    /// declared generic-type position, not just a class's
     /// `extends`/`implements`.
     fn check_generic_bounds_and_arity(
         &mut self,
@@ -68,17 +61,16 @@ impl<'a> Checker<'a> {
                     && let Some(info) = self.registry.classes.get(class)
                     && !info.template_bounds.is_empty()
                 {
-                    // Bound-checking cares about the real
-                    // referenced type, not a call-site variance marker
-                    // wrapping it (`Collection<covariant Foo>` still
-                    // needs `Foo` itself checked against the bound,
-                    // `is_assignable`'s own variance handling is a
-                    // separate concern) - `strip_call_site_variance`
-                    // unwraps for both the substitution bindings and the
-                    // actual bound comparison; the *displayed* `arg`
-                    // below stays the original, marker-and-all, so a
-                    // real violation message still shows `covariant Foo`
-                    // rather than silently dropping the annotation.
+                    // Bound-checking cares about the real referenced
+                    // type, not a call-site variance marker wrapping it
+                    // (`Collection<covariant Foo>` still needs `Foo`
+                    // itself checked against the bound -
+                    // `is_assignable`'s own variance handling is
+                    // separate) - `strip_call_site_variance` unwraps for
+                    // both the substitution bindings and the bound
+                    // comparison; the *displayed* `arg` below stays the
+                    // original, marker-and-all, so a violation message
+                    // still shows `covariant Foo`.
                     let bindings: TemplateBindings = info
                         .templates
                         .iter()
@@ -97,19 +89,17 @@ impl<'a> Checker<'a> {
                         let Some(checked_arg) = types::strip_call_site_variance(arg) else {
                             continue;
                         };
-                        // Same "don't know, don't guess" leniency every
-                        // other undefined-symbol-adjacent check in this
-                        // project already applies to a class the registry
-                        // has no real data for (an uninstalled dependency,
-                        // or - the real case found verifying this against
-                        // Piwigo's corpus - a PHAR-bundled one like
-                        // `phpstan/phpstan` itself, which ships with no
-                        // loose source files to parse at all): without it,
-                        // every reference to one of its own real classes,
-                        // e.g. `PHPStan\Type\ArrayType implements
-                        // PHPStan\Type\Type`, reads as violating a bound
-                        // this project simply has no way to verify either
-                        // way, not one it's actually confirmed broken.
+                        // Same "don't know, don't guess" leniency this
+                        // project applies to a class the registry has no
+                        // real data for (an uninstalled dependency, or a
+                        // PHAR-bundled one like `phpstan/phpstan` itself,
+                        // which ships with no loose source files to
+                        // parse) - without it, every reference to one of
+                        // its own real classes, e.g.
+                        // `PHPStan\Type\ArrayType implements
+                        // PHPStan\Type\Type`, would read as violating a
+                        // bound this project has no way to verify either
+                        // way.
                         if *checked_arg != Type::Mixed
                             && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)
@@ -144,8 +134,8 @@ impl<'a> Checker<'a> {
                     self.check_generic_bounds(t, label, span);
                 }
             }
-            // A real, previously-missing case: `object{...}`'s own field
-            // types were never recursed into for bound-checking either.
+            // `object{...}`'s own field types also need recursing into
+            // for bound-checking.
             Type::ObjectShape(fields) => {
                 for (_, t, _) in fields {
                     self.check_generic_bounds(t, label, span);
