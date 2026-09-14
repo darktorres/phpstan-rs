@@ -551,6 +551,7 @@ impl<'a> Checker<'a> {
         subject: &Expr,
         key: &Option<Expr>,
         value: &Expr,
+        by_ref: bool,
         body: &Stmt,
         locals: &mut Locals,
         declared_return: Option<&Type>,
@@ -681,6 +682,15 @@ impl<'a> Checker<'a> {
         } else {
             LoopZeroIterations::Possible { subject_exempt }
         };
+        // Captured from *inside* the last accepted pass, before
+        // `converge_loop_body`'s own "may not run" merge (which drops any
+        // name - `value`'s own included - that isn't present in both the
+        // pre-loop `entry` and the body's exit state) ever gets a chance
+        // to erase it. `converge_loop_body` only ever calls `run_pass`
+        // again when convergence *hasn't* been reached yet, so the value
+        // this ends up holding when it returns is always the one from
+        // whichever pass it actually accepted - never a stale earlier one.
+        let mut last_value_ty: Option<Type> = None;
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
@@ -703,6 +713,9 @@ impl<'a> Checker<'a> {
                 this.check_assignment_target(value, pass_locals, label);
                 this.bind_assignment_target(value, element_ty.clone(), pass_locals);
                 this.check_stmt(body, pass_locals, declared_return, label);
+                if let ExprKind::Variable(value_name) = &value.kind {
+                    last_value_ty = pass_locals.get(value_name).cloned();
+                }
             },
         );
         self.loop_depth -= 1;
@@ -710,5 +723,67 @@ impl<'a> Checker<'a> {
         for state in break_states {
             *locals = merge_scopes(locals, &state);
         }
+        // A by-ref value variable (`foreach ($items as &$item) { $item
+        // ['x'] = ...; }`) aliases into `subject`'s own underlying
+        // storage - a key/field the body writes into `$item` is really
+        // being written into whatever slot of `$subject` that iteration
+        // is currently pointing at, so it belongs in `$subject`'s own
+        // tracked element type for code reached after the loop, not just
+        // `$item`'s own (already-converged, but otherwise discarded)
+        // type. Scoped to the same "bare-variable subject, homogeneous
+        // element type" shape `array_element_type` above already commits
+        // to for binding the loop variable in the first place - real
+        // corpus false positive this fixes: `CategoryCatsRenderer::
+        // render`'s own `foreach ($infosOfImage as &$info) { $info
+        // ['src_image'] = new SrcImage(...); }`, where a later
+        // `$infosOfImage[$id]['src_image']` read (through a fresh `??`-
+        // defaulted dynamic-key lookup, past the loop) was flagged
+        // `shapeAccess.notFound` because `$infosOfImage`'s own tracked
+        // element type never picked up the field the loop unconditionally
+        // adds to every element. Unioned with the pre-loop element type
+        // (never narrower, so this can only add precision, never produce
+        // a new false positive) rather than replacing it outright - sound
+        // even when the loop body's own field-widening turns out to be
+        // conditional in some other caller shape this project hasn't
+        // seen yet.
+        if by_ref
+            && let ExprKind::Variable(subject_name) = &subject.kind
+            && let Some(old_element_ty) = Self::array_element_type(&subject_ty)
+            && let Some(final_value_ty) = last_value_ty
+            && let Some(current_subject_ty) = locals.get(subject_name).cloned()
+        {
+            let widened_element_ty = union_types(old_element_ty, final_value_ty);
+            locals.insert(
+                subject_name.clone(),
+                replace_array_element_type(&current_subject_ty, &widened_element_ty),
+            );
+        }
+    }
+}
+
+/// Rebuilds `ty` with its own homogeneous element type replaced by
+/// `new_elem`, recursing through `Union`/`Intersection` the same way
+/// `array_element_type` itself already looks through them to find one -
+/// leaves an `ArrayShape` (each field its own, independently meaningful
+/// type, not a single "the element type" to overwrite) and anything else
+/// `array_element_type` wouldn't have matched in the first place
+/// completely untouched, matching this fix's own deliberately narrow
+/// scope (see `check_foreach`'s own call site above).
+fn replace_array_element_type(ty: &Type, new_elem: &Type) -> Type {
+    match ty {
+        Type::Array(key, _) => Type::Array(key.clone(), Box::new(new_elem.clone())),
+        Type::Union(members) => Type::Union(
+            members
+                .iter()
+                .map(|m| replace_array_element_type(m, new_elem))
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .iter()
+                .map(|m| replace_array_element_type(m, new_elem))
+                .collect(),
+        ),
+        other => other.clone(),
     }
 }

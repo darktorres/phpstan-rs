@@ -418,6 +418,68 @@ fn a_foreach_mutating_its_own_subject_array_that_a_prior_maybe_empty_loop_built_
     );
 }
 
+// A real Piwigo corpus false positive, structurally distinct from the two
+// tests just above: those mutate the subject *directly* keyed by its own
+// loop key (`$items[$day][...] = ...`); this one mutates the subject only
+// *indirectly*, through a by-ref value variable that aliases into it
+// (`foreach ($infosOfImage as &$info) { $info['src_image'] = ...; }`,
+// `CategoryCatsRenderer::render`). `by_ref` used to be dropped entirely
+// by `check_foreach` (destructured in `stmt.rs` and never even passed
+// in) - a field the loop body writes into the by-ref alias never widened
+// `$infosOfImage`'s own tracked element type at all, so a later dynamic-
+// key read (`$infosOfImage[$id]['src_image']`) reported the key missing
+// even though every element unconditionally gets it.
+#[test]
+fn a_foreach_writing_into_a_by_ref_value_variable_widens_the_subjects_own_element_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param array<int, array{id: int}> $infos
+             */
+            function test(array $infos): void {
+                foreach ($infos as &$info) {
+                    $info['src_image'] = 'x';
+                }
+                unset($info);
+
+                $rep = $infos[1] ?? null;
+                $x = $rep === null ? null : $rep['src_image'];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// The negative case pinning why `by_ref` specifically has to gate this: a
+// plain (by-value) loop variable is its own independent copy - writing
+// into it can never affect the subject array's own real elements, so the
+// same key access past the loop must still be flagged.
+#[test]
+fn a_foreach_writing_into_a_plain_by_value_variable_does_not_widen_the_subject() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param array<int, array{id: int}> $infos
+             */
+            function test(array $infos): void {
+                foreach ($infos as $info) {
+                    $info['src_image'] = 'x';
+                }
+
+                $rep = $infos[1] ?? null;
+                $x = $rep === null ? null : $rep['src_image'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        "expected shapeAccess.notFound, got: {d:?}"
+    );
+}
+
 // Phase 12 Finding E: a real, pre-existing gap found by making
 // check_shape_key_access Union-aware and re-checking the real
 // corpus - PiwigoInfosSender::send's own $piwigoInfos becomes a real

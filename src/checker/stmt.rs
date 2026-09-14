@@ -374,9 +374,18 @@ impl<'a> Checker<'a> {
                 subject,
                 key,
                 value,
+                by_ref,
                 body,
-                ..
-            } => self.check_foreach(subject, key, value, body, locals, declared_return, label),
+            } => self.check_foreach(
+                subject,
+                key,
+                value,
+                *by_ref,
+                body,
+                locals,
+                declared_return,
+                label,
+            ),
             StmtKind::Switch { subject, cases } => {
                 self.check_switch(subject, cases, locals, declared_return, label)
             }
