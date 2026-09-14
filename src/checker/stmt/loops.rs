@@ -19,8 +19,7 @@ impl<'a> Checker<'a> {
         // like `BooleanNot`/`BooleanAnd`/`BooleanOr`) must run against
         // the converged fixed point, not just once against the pre-loop
         // entry `locals` before `converge_loop_body` runs - otherwise,
-        // e.g., `$end = false; while (!$end) { ...; $end = true; ... }`
-        // (`Piwigo\Admin\Extensions\CoreUpdateService::upgradeTo`):
+        // e.g., `$end = false; while (!$end) { ...; $end = true; ... }`:
         // `$end`'s pre-loop type is exactly `false`, so `!$end` looks
         // unconditionally `true` even though the loop body can reassign
         // it. Mirrors real PHPStan's own `WhileHandler::processStmt`,
@@ -40,12 +39,10 @@ impl<'a> Checker<'a> {
         // per-pass *copies* of the entry (`pass_locals`), never mutating
         // the real `locals` directly. A real PHP `while`'s condition
         // always runs at least once, unconditionally, regardless of how
-        // many times the body iterates - so a variable *the condition
-        // itself* assigns (`while (($x = f()) !== null) {...}`, a real,
-        // common idiom, real shape: `Symfony\Component\
-        // DependencyInjection\Compiler\AbstractRecursivePass::
-        // getConstructor`) must be treated as unconditionally defined
-        // afterward, unlike anything only the *body* conditionally
+        // many times the body iterates - so a variable the condition
+        // itself assigns (`while (($x = f()) !== null) {...}`, a real,
+        // common idiom) must be treated as unconditionally defined
+        // afterward, unlike anything only the body conditionally
         // defines - otherwise `merge_scopes` would drop it entirely
         // (present in the loop's exit state but never in the real
         // pre-loop `locals` it gets merged against). Mirrors real
@@ -82,15 +79,13 @@ impl<'a> Checker<'a> {
                 // `WhileLoopAlwaysTrueConditionRule` is: skipped when
                 // the loop is breakless (`stmt_contains_break` - this
                 // project's own deliberately conservative "any break
-                // anywhere" check, reused
-                // rather than re-deriving real PHPStan's own more
-                // precise per-level break/`continue N` analysis -
-                // a narrow, disclosed simplification, see
-                // ROADMAP), when the body yields (a legitimate
-                // infinite generator, not dead code), or when the
-                // enclosing function is declared `: never`
-                // (already documents "this never returns" on its
-                // own, redundant to also flag the loop).
+                // anywhere" check, reused rather than re-deriving real
+                // PHPStan's own more precise per-level break/
+                // `continue N` analysis), when the body yields (a
+                // legitimate infinite generator, not dead code), or when
+                // the enclosing function is declared `: never` (already
+                // documents "this never returns" on its own, redundant
+                // to also flag the loop).
                 if this.inferred_constant_condition(cond, pass_locals) == Some(false) {
                     this.report(
                         label.to_string(),
@@ -186,8 +181,7 @@ impl<'a> Checker<'a> {
         // the "continue" half of `cond`'s narrowing is a real, provable
         // fact at that pass's entry - the same narrowing a `while`
         // loop's convergence closure applies unconditionally on every
-        // pass, just shifted here to skip pass 0. Needed for real shape
-        // `Latte\Essential\CachingIterator::__construct`'s
+        // pass, just shifted here to skip pass 0. Needed for
         // `do { $iterator = $iterator->getIterator(); } while
         // (!$iterator instanceof \Iterator);`: without it, pass 2's
         // entry would widen `$iterator` all the way back to the
@@ -227,12 +221,11 @@ impl<'a> Checker<'a> {
         // approximate as any pass inside the loop -
         // `check_constant_numeric_comparison`/`check_constant_loose_
         // comparison`'s own `self.loop_depth > 0` guard needs to see it
-        // still incremented here (real shape: Symfony's own
-        // `LoggerTest`'s `do { ...; $attempts++; } while ((...) &&
-        // $attempts < 150);` - without it, `$attempts`'s
+        // still incremented here: for `do { ...; $attempts++; } while
+        // ((...) && $attempts < 150);`, without it `$attempts`'s
         // convergence-bounded range, nowhere near the real 150, would
         // make `$attempts < 150` look unconditionally, wrongly
-        // provable).
+        // provable.
         self.check_expr(cond, locals, label);
         self.loop_depth -= 1;
         // `DoWhileLoopConstantConditionRule`: real inferred-type
@@ -301,10 +294,8 @@ impl<'a> Checker<'a> {
         // iteration). Both halves need the identical treatment `While`
         // gets above: checking any of them once, up front, against the
         // pre-loop entry, would bypass the body's fixed-point
-        // convergence entirely (real shape:
-        // `QMultiToken::parseExpression`'s
-        // `for ($stop = false; !$stop && ...; $qi++)`, where `$stop` is
-        // reassigned inside the body).
+        // convergence entirely, e.g. `for ($stop = false; !$stop && ...;
+        // $qi++)`, where `$stop` is reassigned inside the body.
         match cond.last() {
             Some(c) => {
                 // Same reasoning as `While`'s arm above: a variable
@@ -512,8 +503,8 @@ impl<'a> Checker<'a> {
         // A bare `$variable` subject that the body mutates in place via
         // a nested write keyed by its own loop variable (`foreach
         // ($items as $day => $data) { $items[$day]['derivative'] = ...;
-        // }`, confirmed in `CalendarMonthly::buildMonthCalendar`) must
-        // never have its already-transformed shape re-widened back
+        // }`) must never have its already-transformed shape re-widened
+        // back
         // toward the stale pre-loop one - `converge_loop_body`'s own
         // `subject_exempt` keeps exactly this one name out of the
         // "may run zero times" merge every other variable now gets.
@@ -530,17 +521,15 @@ impl<'a> Checker<'a> {
         // pass, not just once).
         //
         // A `Type::ArrayShape` subject must not fall straight to the
-        // `Mixed` catch-all, discarding real, known field types (real
-        // shape: `MaintenanceActionDispatcher::dispatch`'s
+        // `Mixed` catch-all, discarding real, known field types, e.g.
         // `foreach ($versions as $key => $value) { $versions[$key] =
-        // preg_replace(..., $value); }`, where every field of
-        // `$versions` is actually a plain `string` - with `$value`
-        // inferred as `Mixed`, `preg_replace`'s own stub leaks a
-        // broader possibility into `$versions`'s re-widened element
-        // type). Joining every field's type (the same idea
-        // `write_index_into`'s own dynamic-key write branch uses) is
-        // exact when every field shares one type, still sound but
-        // coarser when they don't.
+        // preg_replace(..., $value); }` where every field of `$versions`
+        // is actually a plain `string` - with `$value` inferred as
+        // `Mixed`, `preg_replace`'s own stub leaks a broader possibility
+        // into `$versions`'s re-widened element type. Joining every
+        // field's type (the same idea `write_index_into`'s own
+        // dynamic-key write branch uses) is exact when every field
+        // shares one type, still sound but coarser when they don't.
         // `Self::array_element_type` also sees through
         // an `Intersection`-wrapped `list<T>`/`non-empty-
         // array<T>` - without it, `foreach` over one of those would
@@ -584,14 +573,13 @@ impl<'a> Checker<'a> {
         // pass, not just once before the first: real PHP rebinds a
         // foreach's loop variable(s) fresh from the subject on every
         // actual iteration, so a pass must never start from what the
-        // *previous* pass's body left the loop variable mutated to
-        // (real shape: `QNumericRangeScope::parse`'s
+        // *previous* pass's body left the loop variable mutated to, e.g.
         // `foreach ($range as $i => &$val) { ...; $val = floatval(...); }`
         // - a by-reference loop variable reassigned inside the body
         // would otherwise wrongly union its post-body `float` into the
-        // *next* pass's entry as `string|float`, even though each real
-        // iteration's `&$val` aliases a *different* array slot that
-        // pass's body never touched).
+        // next pass's entry as `string|float`, even though each real
+        // iteration's `&$val` aliases a different array slot that
+        // pass's body never touched.
         let entry = locals.clone();
         self.loop_depth += 1;
         // Mirrors real PHPStan's own `ForeachHandler::processStmt`'s
@@ -602,11 +590,10 @@ impl<'a> Checker<'a> {
         // merge with the pre-loop entry" treatment `Impossible` already
         // gives do-while/for(;;), not `Possible`'s merge (which would
         // otherwise widen back toward the stale pre-loop state even
-        // though every real iteration provably replaces it - real
-        // shape: `UserSortField::parseOrderClause`'s own
+        // though every real iteration provably replaces it), e.g.
         // `foreach (explode(',', $order) as $rawEntry)`, where
         // `explode()` on a provably non-empty `$order` is itself
-        // already a real `non-empty-list<string>`).
+        // already a real `non-empty-list<string>`.
         let zero_iterations = if Self::is_known_non_empty_array(&subject_ty) {
             LoopZeroIterations::Impossible
         } else {
@@ -658,14 +645,9 @@ impl<'a> Checker<'a> {
         // being written into whatever slot of `$subject` that iteration
         // is pointing at, so it belongs in `$subject`'s tracked element
         // type for code reached after the loop, not just `$item`'s own
-        // (otherwise discarded) type (real shape: `CategoryCatsRenderer::
-        // render`'s own `foreach ($infosOfImage as &$info) { $info
-        // ['src_image'] = new SrcImage(...); }`, where a later
-        // `$infosOfImage[$id]['src_image']` read past the loop was
-        // wrongly flagged `shapeAccess.notFound`). Unioned with the
-        // pre-loop element type rather than replacing it outright, so
-        // this can only add precision, never produce a new false
-        // positive.
+        // (otherwise discarded) type. Unioned with the pre-loop element
+        // type rather than replacing it outright, so this can only add
+        // precision, never produce a new false positive.
         if by_ref
             && let ExprKind::Variable(subject_name) = &subject.kind
             && let Some(old_element_ty) = Self::array_element_type(&subject_ty)

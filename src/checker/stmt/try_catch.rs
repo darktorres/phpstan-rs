@@ -15,74 +15,60 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        // Phase 68.2: `finally`'s own real entry scope is never just the
-        // try body's full-completion state (merged with each non-
-        // terminating catch's own end state, computed below into
-        // `locals` before `finally`'s own `check_block` runs) - real PHP
-        // can jump into `finally` from *any* point inside the try body,
-        // the moment an exception is thrown, including one thrown before
-        // the try body's first assignment ever ran. `check_try` has no
-        // real per-statement throw-point model (out of reach at
-        // reasonable size, the same reason `check_missing_checked_
-        // exceptions` stays a disclosed, narrower opt-in elsewhere) - a
-        // materially cheaper, still-sound approximation instead: merge
-        // this snapshot (the state genuinely true the instant the try
-        // body starts, before anything in it could have run at all) with
-        // the try/catch's own normal-completion state right before
-        // `finally` runs, rather than trusting only the latter. Real
-        // corpus false positive this fixes: Piwigo's own `tests/
-        // Integration/GroupServiceTest.php`, `$copyId = null;` reassigned
-        // only conditionally inside `try`, `finally` (via `array_filter`)
-        // seeing only the reassigned-non-null state and wrongly treating
-        // the array's own element type as unconditionally truthy.
+        // `finally`'s own real entry scope is never just the try body's
+        // full-completion state (merged with each non-terminating
+        // catch's own end state, computed below into `locals` before
+        // `finally`'s own `check_block` runs) - real PHP can jump into
+        // `finally` from any point inside the try body, the moment an
+        // exception is thrown, including one thrown before the try
+        // body's first assignment ever ran. `check_try` has no real
+        // per-statement throw-point model, so a materially cheaper,
+        // still-sound approximation is used instead: merge this
+        // snapshot (the state genuinely true the instant the try body
+        // starts, before anything in it could have run at all) with the
+        // try/catch's own normal-completion state right before
+        // `finally` runs, rather than trusting only the latter.
         let pre_try_locals = locals.clone();
         self.check_block(body, locals, declared_return, label);
         let try_end_locals = locals.clone();
         let try_terminates = body
             .last()
             .is_some_and(|s| self.always_terminates(s, &try_end_locals));
-        // Phase 42(4), `OverwrittenExitPointByFinallyRule`:
-        // gathers every concrete exit-point statement from the
-        // try body and each catch clause that itself always
-        // terminates - if the `finally` block below *also*
-        // unconditionally exits, every one of these gets
-        // silently discarded at runtime (real PHP's own well-
-        // known gotcha: a `finally`'s own `return`/`throw`/
-        // `break`/`continue` always wins, even over an in-
-        // flight exception). See `collect_exit_point_statements`'s
-        // own doc comment for why this only names the common
-        // `Block`/`If`-nested shapes rather than every construct
-        // `always_terminates` itself recognizes.
+        // `OverwrittenExitPointByFinallyRule`: gathers every concrete
+        // exit-point statement from the try body and each catch clause
+        // that itself always terminates - if the `finally` block below
+        // also unconditionally exits, every one of these gets silently
+        // discarded at runtime (real PHP's own well-known gotcha: a
+        // `finally`'s own `return`/`throw`/`break`/`continue` always
+        // wins, even over an in-flight exception). See
+        // `collect_exit_point_statements`'s doc comment for why this
+        // only names the common `Block`/`If`-nested shapes rather than
+        // every construct `always_terminates` itself recognizes.
         let mut try_catch_exit_points: Vec<&Stmt> = Vec::new();
         if try_terminates && let Some(s) = body.last() {
             try_catch_exit_points.extend(collect_exit_point_statements(s));
         }
         // Every reachable state after the whole try/catch - the
         // try body's own full-completion state, plus each catch
-        // clause's own ending state (a variable a catch clause
-        // assigns, like `$body = ...;`, previously vanished
-        // entirely here: `locals` kept only the try body's own
-        // state, discarding every catch's, matching every other
+        // clause's own ending state, matching every other
         // control-flow join this checker already does for
         // if/else - a branch that always terminates is excluded
-        // from the merge exactly the same way there too).
+        // from the merge exactly the same way there too.
         let mut end_states: Vec<Locals> = if try_terminates {
             Vec::new()
         } else {
             vec![try_end_locals]
         };
-        // Phase 42's own next-recommended step:
-        // `CatchWithUnthrownExceptionRule`'s "already caught"
-        // half (`catch.alreadyCaught`) - a real, unconditional
-        // PHP-level dead-code shape (PHP tries each `catch`
-        // clause in source order and stops at the first match,
-        // so a later clause every one of whose types is already
-        // a subtype of something an *earlier* clause caught can
-        // never actually run) that needs no throw-type tracking
-        // at all, only the registry's existing `is_subclass_of`
-        // - unlike this same rule's own "never thrown in the try
-        // block" half, which needs a real per-callee throw-type
-        // model this project doesn't have yet (still open).
+        // `CatchWithUnthrownExceptionRule`'s "already caught" half
+        // (`catch.alreadyCaught`) - a real, unconditional PHP-level
+        // dead-code shape (PHP tries each `catch` clause in source
+        // order and stops at the first match, so a later clause every
+        // one of whose types is already a subtype of something an
+        // earlier clause caught can never actually run) that needs no
+        // throw-type tracking at all, only the registry's existing
+        // `is_subclass_of` - unlike this same rule's own "never thrown
+        // in the try block" half, which needs a real per-callee
+        // throw-type model this project doesn't have yet.
         let mut previously_caught: Vec<Type> = Vec::new();
         for c in catches {
             // Scoped to this catch block only, in its own clone
@@ -91,26 +77,23 @@ impl<'a> Checker<'a> {
             // its catch block) and keeps one catch's binding from
             // leaking into a sibling catch or the code after the
             // whole try.
-            // Finding 57: every type in a multi-type catch must
-            // implement Throwable, independently of whatever
-            // Finding 27's own union-binding does with them - a
-            // real, unconditional PHP fatal error at
-            // declaration time otherwise ("Cannot catch X
+            // Every type in a multi-type catch must implement
+            // Throwable, independently of whatever the union-binding
+            // below does with them - a real, unconditional PHP fatal
+            // error at declaration time otherwise ("Cannot catch X
             // because it does not implement Throwable").
             for (i, t) in c.types.iter().enumerate() {
                 if let Type::Object(class, _) = self.resolve_name_expr(t) {
-                    // Phase 48: `CaughtExceptionExistenceRule`'s own
-                    // existence half, checked first - a typo'd/
-                    // missing exception class previously fell
-                    // straight through to `is_subclass_of`, which
-                    // silently treats a name the registry has no
-                    // entry for as "not a subclass of Throwable"
-                    // (indistinguishable from a real, existing,
-                    // non-Throwable class) and reported the
-                    // confusingly wrong "does not implement
-                    // Throwable" - `else if` here reports at most
-                    // one diagnostic per catch type instead of
-                    // both.
+                    // `CaughtExceptionExistenceRule`'s own existence
+                    // half, checked first - a typo'd/missing exception
+                    // class would otherwise fall straight through to
+                    // `is_subclass_of`, which silently treats a name
+                    // the registry has no entry for as "not a subclass
+                    // of Throwable" (indistinguishable from a real,
+                    // existing, non-Throwable class) and reports the
+                    // confusingly wrong "does not implement Throwable"
+                    // - the `else` here reports at most one diagnostic
+                    // per catch type instead of both.
                     if !self.class_name_exists(&class) {
                         self.report(
                             label.to_string(),
@@ -120,11 +103,9 @@ impl<'a> Checker<'a> {
                             // Real PHPStan's own
                             // `CaughtExceptionExistenceRule` reuses
                             // the generic `class.notFound`
-                            // identifier here too (confirmed
-                            // against `vendor/phpstan-src`) -
-                            // `catch.notThrowable` just below is
-                            // the one genuinely catch-specific
-                            // identifier this rule has.
+                            // identifier here too - `catch.notThrowable`
+                            // just below is the one genuinely
+                            // catch-specific identifier this rule has.
                             "class.notFound",
                         );
                     } else {
@@ -137,9 +118,9 @@ impl<'a> Checker<'a> {
                                 "catch.notThrowable",
                             );
                         }
-                        // Phase 48.H: `class.nameCase` - `t` is the raw,
-                        // as-written text; `types_spans` carries one span
-                        // per `types` entry, same index (`FunctionDecl::
+                        // `class.nameCase` - `t` is the raw, as-written
+                        // text; `types_spans` carries one span per
+                        // `types` entry, same index (`FunctionDecl::
                         // return_type_span`'s own precedent).
                         let span = c.types_spans.get(i).copied().unwrap_or(c.span);
                         self.check_class_name_case(label, t, span);
@@ -195,10 +176,9 @@ impl<'a> Checker<'a> {
                     }
                 };
                 purge_stale_narrowing_for(&mut catch_locals, var);
-                // Phase 17 follow-up: real declaration - `var_span`
-                // is always `Some` exactly when `var` is (the
-                // parser sets both together), `c.span` is a
-                // defensive fallback only.
+                // Real declaration - `var_span` is always `Some`
+                // exactly when `var` is (the parser sets both
+                // together), `c.span` is a defensive fallback only.
                 let var_span = c.var_span.unwrap_or(c.span);
                 self.probe_hit_at(var_span, &ty);
                 catch_locals.declare(var.clone(), ty, var_span);
@@ -223,22 +203,21 @@ impl<'a> Checker<'a> {
                 .fold(first, |acc, s| merge_scopes(&acc, &s));
         }
         if let Some(f) = finally {
-            // Phase 68.2: `finally`'s own body is checked against the
-            // widened entry scope (see this function's own doc comment
-            // above), in its own clone - not against `*locals` directly,
-            // which stays the real, narrower post-try/catch completion
-            // state real code reaching *after* the whole try/finally
-            // statement should see (the widening only exists to make
-            // `finally`'s *own* body type-check soundly against every
-            // point it could really be entered from, not to leak
-            // imprecision past it). Only a key `finally`'s own body
-            // actually reassigns to something different than its own
-            // widened entry carries forward onto the narrower state -
-            // everything it never touches keeps its narrower, more
-            // precise value. (A real, disclosed edge case this doesn't
-            // handle: `unset()`-ing a variable inside `finally` won't
-            // remove it from the narrower state afterward - accepted as
-            // part of this same "materially cheaper approximation.")
+            // `finally`'s own body is checked against the widened
+            // entry scope (see this function's doc comment above), in
+            // its own clone - not against `*locals` directly, which
+            // stays the real, narrower post-try/catch completion state
+            // real code reaching after the whole try/finally statement
+            // should see (the widening only exists to make `finally`'s
+            // own body type-check soundly against every point it could
+            // really be entered from, not to leak imprecision past
+            // it). Only a key `finally`'s own body actually reassigns
+            // to something different than its own widened entry
+            // carries forward onto the narrower state - everything it
+            // never touches keeps its narrower, more precise value.
+            // (`unset()`-ing a variable inside `finally` won't remove
+            // it from the narrower state afterward - a disclosed edge
+            // case of this same materially-cheaper approximation.)
             let finally_entry = merge_scopes(&pre_try_locals, locals);
             let mut finally_locals = finally_entry.clone();
             self.check_block(f, &mut finally_locals, declared_return, label);
@@ -251,12 +230,12 @@ impl<'a> Checker<'a> {
                     locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
                 }
             }
-            // Phase 42(4): only worth naming the finally block's
-            // own exit point(s) if there's actually something
-            // real on the try/catch side for them to overwrite -
-            // mirrors `OverwrittenExitPointByFinallyRule`'s own
-            // `count($node->getTryCatchExitPoints()) === 0`
-            // early return exactly.
+            // Only worth naming the finally block's own exit point(s)
+            // if there's actually something real on the try/catch side
+            // for them to overwrite - mirrors
+            // `OverwrittenExitPointByFinallyRule`'s own
+            // `count($node->getTryCatchExitPoints()) === 0` early
+            // return exactly.
             if !try_catch_exit_points.is_empty()
                 && let Some(last) = f.last()
                 && self.always_terminates(last, locals)
@@ -293,17 +272,13 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_throw(&mut self, e: &Expr, locals: &mut Locals, label: &str) {
-        // Finding 57: `throw` only accepts a real Throwable - a
-        // real, unconditional PHP fatal error otherwise,
-        // independent of anything about the thrown value at
-        // runtime. `thrown_value_not_throwable` (`checker/expr.rs`)
-        // handles the "don't guess" leniency for anything not
-        // concrete enough to judge (Mixed, a dynamic expression),
-        // and now also a `Union`/`Intersection`-typed value - a
-        // real bug found and fixed this session, this call site
-        // used to require literally `Type::Object` too, matching
-        // `ExprKind::Throw`'s own identical gap just fixed
-        // alongside it.
+        // `throw` only accepts a real Throwable - a real,
+        // unconditional PHP fatal error otherwise, independent of
+        // anything about the thrown value at runtime.
+        // `thrown_value_not_throwable` (`checker/expr.rs`) handles the
+        // "don't guess" leniency for anything not concrete enough to
+        // judge (Mixed, a dynamic expression), including a
+        // `Union`/`Intersection`-typed value.
         let thrown_ty = self.check_expr(e, locals, label);
         if let Some(class) = self.thrown_value_not_throwable(&thrown_ty) {
             self.report(
@@ -314,11 +289,9 @@ impl<'a> Checker<'a> {
                 "throw.notThrowable",
             );
         }
-        // Phase 42 Sub-item A: a real, explicit throw point - pushed
-        // unconditionally (even a not-provably-Throwable value, already
-        // flagged above in its own right) rather than trying to guess
-        // "should this count," matching this file's own "don't second-
-        // guess an already-reported diagnostic" convention elsewhere.
+        // A real, explicit throw point - pushed unconditionally (even a
+        // not-provably-Throwable value, already flagged above in its
+        // own right) rather than trying to guess "should this count."
         self.current_function_explicit_throw_points
             .push((thrown_ty.clone(), e.span));
         self.current_function_throw_points.push(thrown_ty);

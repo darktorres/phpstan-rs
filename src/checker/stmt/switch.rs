@@ -60,23 +60,22 @@ impl<'a> Checker<'a> {
             exit_states.push(locals.clone());
         }
         let case_count = cases.len();
-        // Phase 29: a bare `break;` written directly inside a
-        // case targets *this* switch, not any enclosing loop -
-        // pushing a frame here (discarded below, never read) only
-        // exists to intercept it, since `loop_break_states`'s
-        // depth-counting would otherwise attribute it to whichever
-        // loop happens to be open around this switch. This
-        // switch's own `exit_states` mechanism above already
-        // handles `break` completely on its own.
+        // A bare `break;` written directly inside a case targets
+        // this switch, not any enclosing loop - pushing a frame
+        // here (discarded below, never read) only exists to
+        // intercept it, since `loop_break_states`'s depth-counting
+        // would otherwise attribute it to whichever loop happens to
+        // be open around this switch. This switch's own
+        // `exit_states` mechanism above already handles `break`
+        // completely on its own.
         //
-        // Phase 55: `loop_continue_states` gets the identical
-        // push/pop, for the identical reason - real PHP's own
-        // `continue`/`break` both count a `switch` as one level
-        // (the well-known "bare `continue;` directly inside a
-        // `switch` behaves like `break;`" gotcha), so the two
-        // stacks must stay depth-aligned or `continue N`'s own
-        // frame-index math would attribute a level to the wrong
-        // enclosing loop.
+        // `loop_continue_states` gets the identical push/pop, for
+        // the identical reason - real PHP's own `continue`/`break`
+        // both count a `switch` as one level (the well-known "bare
+        // `continue;` directly inside a `switch` behaves like
+        // `break;`" gotcha), so the two stacks must stay
+        // depth-aligned or `continue N`'s own frame-index math
+        // would attribute a level to the wrong enclosing loop.
         self.loop_break_states.push(Vec::new());
         self.loop_continue_states.push(Vec::new());
         for (i, case) in cases.iter().enumerate() {
