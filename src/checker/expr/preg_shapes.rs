@@ -6,9 +6,7 @@ use crate::types::{AccessoryKind, Type};
 /// The type of one matched group's "leaf" value in `preg_match`'s own
 /// `$matches` shape - plain `string` normally, or the real, positional
 /// (not named-field) `[string, int]` tuple `PREG_OFFSET_CAPTURE`
-/// actually produces at runtime (the match text and its byte offset) -
-/// confirmed directly against a live PHP interpreter, not assumed from
-/// PHPStan's own different naming convention for the same idea.
+/// actually produces at runtime (the match text and its byte offset).
 pub(super) fn preg_leaf_type(offset_capture: bool) -> Type {
     if offset_capture {
         Type::ArrayShape(vec![
@@ -21,14 +19,13 @@ pub(super) fn preg_leaf_type(offset_capture: bool) -> Type {
 }
 
 /// A per-group leaf type, refined by that group's own literal-value
-/// enumeration (Task 1a) when available, else (Phase 72) by its own
-/// `RegexGroupFallback` tri-state - never applied to field `"0"` (the
-/// whole match), matching real PHPStan's own scope: confirmed live that
-/// even a fully-constant pattern like `/(a(?:x|y))/` gets its own
-/// overall match typed as a general refinement (`non-falsy-string`),
-/// never a literal union, so this project's own field-`"0"` handling
-/// (plain `leaf.clone()`, unchanged) already matches that scope without
-/// needing this helper at all.
+/// enumeration when available, else by its own `RegexGroupFallback`
+/// tri-state - never applied to field `"0"` (the whole match), matching
+/// real PHPStan's own scope: even a fully-constant pattern like
+/// `/(a(?:x|y))/` gets its own overall match typed as a general
+/// refinement (`non-falsy-string`), never a literal union, so this
+/// project's own field-`"0"` handling (plain `leaf.clone()`, unchanged)
+/// already matches that scope without needing this helper at all.
 fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type {
     if let Some(values) = &group.literal_values {
         let literal_ty = values
@@ -52,7 +49,7 @@ fn group_leaf_type(leaf: &Type, group: &regex_groups::RegexCaptureGroup) -> Type
 
 /// `Intersection([String, Accessory(kind)])` - the same representation
 /// `types::parse_type_string` builds for `numeric-string`/
-/// `non-empty-string` docblock pseudo-types (Phase 14), reused here so a
+/// `non-empty-string` docblock pseudo-types, reused here so a
 /// regex-derived refinement and a docblock-declared one are
 /// indistinguishable to the rest of the type system.
 fn accessory_string(kind: AccessoryKind) -> Type {
@@ -63,8 +60,7 @@ fn accessory_string(kind: AccessoryKind) -> Type {
 /// exact literal union or an accessory-refined string) into `leaf`:
 /// directly, for a plain `string` leaf, or into just the text slot of
 /// `PREG_OFFSET_CAPTURE`'s own `[string, int]` tuple, leaving the byte-
-/// offset slot untouched - unchanged from before Phase 72 split this out
-/// of `group_leaf_type` itself.
+/// offset slot untouched.
 fn refine_leaf(leaf: &Type, refined: Type) -> Type {
     match leaf {
         Type::String => refined,
@@ -89,8 +85,7 @@ fn refine_leaf(leaf: &Type, refined: Type) -> Type {
 ///
 /// `unmatched_as_null`: `PREG_UNMATCHED_AS_NULL` changes a
 /// non-participating optional group from "entirely absent from the
-/// array" to "always present, as `null`" - confirmed directly against a
-/// live PHP interpreter. A group that's never optional at all is
+/// array" to "always present, as `null`". A group that's never optional at all is
 /// unaffected either way, since it can never have a non-participating
 /// slot to turn nullable.
 pub(crate) fn preg_match_matches_shape(
@@ -99,10 +94,10 @@ pub(crate) fn preg_match_matches_shape(
     unmatched_as_null: bool,
 ) -> Type {
     let mut fields = vec![("0".to_string(), leaf.clone(), false)];
-    // Only a group within the *trailing* run of all-optional groups (from
+    // Only a group within the trailing run of all-optional groups (from
     // the pattern's own last group backward) can ever be entirely absent
     // from `$matches` - real PCRE only ever truncates the array from its
-    // own tail, confirmed live: `preg_match('/(a)(b)?(c)/', 'ac', $m)`
+    // own tail, e.g. `preg_match('/(a)(b)?(c)/', 'ac', $m)`
     // gives `$m = [0=>'ac', 1=>'a', 2=>'', 3=>'c']`, never omitting
     // `$m[2]`. An interior optional group (something required still
     // follows it) is always present instead, as `''` when it didn't
@@ -113,8 +108,8 @@ pub(crate) fn preg_match_matches_shape(
         // builder, for a group known to sit *before* the variant's own
         // matched branch - always present, forced to the empty string,
         // bypassing `literal_values` entirely even when the group has
-        // its own (confirmed: a forced group never unions in what it
-        // *could* have been).
+        // its own - a forced group never unions in what it could have
+        // been.
         if g.forced_empty {
             let ty = Type::StringLiteral(String::new());
             fields.push((g.number.to_string(), ty.clone(), false));
@@ -138,12 +133,12 @@ pub(crate) fn preg_match_matches_shape(
         // `''` is possible for any optional group except the absolute
         // last, independent of the trailing/interior split above - a
         // later trailing-optional group capturing something still
-        // back-fills an earlier one with `''` too (confirmed live via
+        // back-fills an earlier one with `''` too, e.g.
         // `/(x)(?:(a)|(b))/` matching `"xb"`: `$m = [0=>'xb', 1=>'x',
-        // 2=>'', 3=>'b']`). Scoped to a plain `string` leaf only: real
+        // 2=>'', 3=>'b']`. Scoped to a plain `string` leaf only: real
         // PCRE's own tuple shape for this under `PREG_OFFSET_CAPTURE` is
         // commonly documented as `['', -1]`, but that hasn't been
-        // checked directly the way every other fact here has, so this
+        // checked the way every other fact here has, so this
         // stays unapplied rather than guessed when `leaf` isn't exactly
         // `Type::String`. A no-op in the overwhelmingly common no-flags
         // case anyway (`union_types(String, StringLiteral(""))` already
@@ -183,7 +178,7 @@ pub(crate) fn build_matched_shape(
     // Case 1: exactly one optional top-level group - checked first,
     // matching real PHPStan's own `if`/`elseif` precedence (mutually
     // exclusive with case 2 below even when a pattern would technically
-    // also qualify for it, confirmed via `/(a)|x/`, which has exactly
+    // also qualify for it, e.g. `/(a)|x/`, which has exactly
     // one top-level group and so takes this path).
     if !unmatched_as_null && top_level.len() == 1 && top_level[0].optional {
         let target = top_level[0].number;
@@ -194,9 +189,9 @@ pub(crate) fn build_matched_shape(
                 ..g.clone()
             })
             .collect();
-        // The "without" variant is a *bare* `{0: subject}` shape (an
+        // The "without" variant is a bare `{0: subject}` shape (an
         // empty groups slice), not "every group except the target" -
-        // confirmed via `/(a(b))?/` -> `array{string, 'ab',
+        // e.g. `/(a(b))?/` -> `array{string, 'ab',
         // 'b'}|array{string}` (field 2, `(b)`'s own nested capture, is
         // entirely absent from the second variant, not present-but-
         // optional). Also structurally forced, not an arbitrary choice:
@@ -237,22 +232,22 @@ pub(crate) fn build_matched_shape(
         branches.dedup();
         // Iterating groups in number order, tracking a `before_combo`
         // flag that flips false the moment a group belonging to *this*
-        // branch is reached: any group encountered *while still before*
-        // the branch's own group(s) gets forced to `''` (never removed)
-        // - confirmed via `/(a)|(b)|(c)/`'s own branch-3 variant,
+        // branch is reached: any group encountered while still before
+        // the branch's own group(s) gets forced to `''` (never removed),
+        // e.g. `/(a)|(b)|(c)/`'s own branch-3 variant,
         // `array{string, '', '', 'c'}` (groups 1 and 2, from earlier
         // branches, both show as `''`). Only a sibling's group
         // encountered *after* is removed.
         let mut variants: Vec<Type> = branches
             .iter()
             .map(|&b| {
-                // Phase 72: a `(?|...)` branch-reset construct reuses
+                // A `(?|...)` branch-reset construct reuses
                 // the same public `.number` across branches (see
                 // `regex_groups::parse_capture_groups`'s own doc comment
                 // on the topic) - an earlier sibling sharing one of
-                // *this* branch's own numbers is really the same slot,
-                // not a distinct field to backfill with `''` (confirmed
-                // live: `(?|(\d+)|([a-z]+))` never produces two same-
+                // this branch's own numbers is really the same slot,
+                // not a distinct field to backfill with `''`
+                // (`(?|(\d+)|([a-z]+))` never produces two same-
                 // numbered fields, only ever one, holding whichever
                 // branch actually ran), so it's excluded entirely here
                 // instead of falling into the generic `before_combo`
@@ -295,9 +290,9 @@ pub(crate) fn build_matched_shape(
             })
             .collect();
         // The bare `{0: subject}` variant is added whenever some branch
-        // has zero groups *or* the whole alternation sits under an outer
-        // `?`/`*` (`alternation_wrapped_in_optional_quantifier`,
-        // confirmed via `/(?:(a)|(b))?/`) - either condition alone is
+        // has zero groups or the whole alternation sits under an outer
+        // `?`/`*` (`alternation_wrapped_in_optional_quantifier`, e.g.
+        // `/(?:(a)|(b))?/`) - either condition alone is
         // sufficient, matching real PHPStan's own `||`.
         if branches.len() != alternations_count
             || alternation_wrapped_in_optional_quantifier.contains(&alt_id)
@@ -315,9 +310,8 @@ pub(crate) fn build_matched_shape(
 
 /// Builds `preg_match_all`'s own `$matches` shape for its default
 /// `PREG_PATTERN_ORDER` mode - structurally different from
-/// `preg_match_matches_shape`'s single-match shape: confirmed directly
-/// against a live PHP interpreter that *every* key (`0`, each group
-/// number, each name) is always present, as an *array* of the leaf type,
+/// `preg_match_matches_shape`'s single-match shape: every key (`0`, each
+/// group number, each name) is always present, as an array of the leaf type,
 /// regardless of match count (a genuine zero-match call still populates
 /// every key with an empty array, not the whole thing collapsing to
 /// `[]`), and a group that doesn't participate in one particular match
