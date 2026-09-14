@@ -39,23 +39,17 @@ pub struct Config {
     pub baseline: Option<PathBuf>,
     pub strict_mixed_arrays: Option<bool>,
     /// Mirrors real PHPStan's own opt-in `checkUninitializedProperties`
-    /// parameter - see `registry::Registry::check_uninitialized_properties`'s
-    /// own doc comment for why this defaults to `false` (unset) rather
-    /// than running unconditionally like this project's other checks.
+    /// - see `registry::Registry::check_uninitialized_properties`.
     pub check_uninitialized_properties: Option<bool>,
-    /// Mirrors real PHPStan's own opt-in `featureToggles.internalTag`
-    /// parameter - see `registry::Registry::check_internal_usage`'s own
-    /// doc comment for why this defaults to `false` (unset) too.
+    /// Mirrors real PHPStan's own opt-in `featureToggles.internalTag` -
+    /// see `registry::Registry::check_internal_usage`.
     pub check_internal_usage: Option<bool>,
-    /// Mirrors real PHPStan's own opt-in `checkFunctionNameCase`
-    /// parameter - see `registry::
-    /// Registry::check_function_name_case`'s own doc comment for why
-    /// this defaults to `false` (unset) too.
+    /// Mirrors real PHPStan's own opt-in `checkFunctionNameCase` - see
+    /// `registry::Registry::check_function_name_case`.
     pub check_function_name_case: Option<bool>,
     /// Mirrors real PHPStan's own separate, opt-in
     /// `phpstan/phpstan-deprecation-rules` package - see
-    /// `registry::Registry::check_deprecated_usage`'s own doc comment
-    /// for why this defaults to `false` (unset) too.
+    /// `registry::Registry::check_deprecated_usage`.
     pub check_deprecated_usage: Option<bool>,
     /// Extra directories loaded for type-resolution context only - never
     /// analyzed or reported on. See `composer::discover_vendor_context`
@@ -64,60 +58,40 @@ pub struct Config {
     /// Disables the automatic Composer-autoloader-based `vendor/`
     /// context load (see `composer::discover_vendor_context`).
     pub no_composer: Option<bool>,
-    /// The project's target PHP version, as a `"major.minor"`
-    /// string (e.g. `"8.1"`) - see `php_version::parse_php_version` for
-    /// the exact accepted format. A plain `Option<String>` here rather
-    /// than a structured `(u8, u8)`, since TOML has no tuple literal and
-    /// `"8.1"` is what a user actually types; parsing (and erroring on a
-    /// malformed value) happens once, at the CLI/config merge point in
-    /// `main.rs`, the same place `baseline`/`scan_paths` are resolved
-    /// against the config file's own directory.
+    /// The project's target PHP version, as a `"major.minor"` string
+    /// (see `php_version::parse_php_version`) - a plain `String` since
+    /// TOML has no tuple literal and that's what a user actually types;
+    /// parsed once at the CLI/config merge point in `main.rs`.
     pub php_version: Option<String>,
     /// The genuinely-empty-concrete-method-body completeness check
     /// (`return.missing`/`return.never`), opt-in - see
-    /// `registry::Registry::check_empty_method_bodies`'s own doc
-    /// comment for why this defaults to `false` (unset), the same reason
-    /// `check_uninitialized_properties`/`check_internal_usage`/
-    /// `check_deprecated_usage` above all do.
+    /// `registry::Registry::check_empty_method_bodies`.
     pub check_empty_method_bodies: Option<bool>,
     /// Opt-in "missing checked exception" family - see
-    /// `registry::Registry::check_missing_checked_exceptions`'s own
-    /// doc comment for why this defaults to `false` (unset), the same
-    /// reason every other opt-in check above does.
+    /// `registry::Registry::check_missing_checked_exceptions`.
     pub check_missing_checked_exceptions: Option<bool>,
     /// Opt-in strict (vs. the default, castable) printf
-    /// placeholder-type matching mode - see `registry::Registry::
-    /// check_strict_printf_placeholder_types`'s own doc comment for why
-    /// this defaults to `false` (unset), the same reason every other
-    /// opt-in check above does.
+    /// placeholder-type matching mode - see
+    /// `registry::Registry::check_strict_printf_placeholder_types`.
     pub check_strict_printf_placeholder_types: Option<bool>,
     /// Mirrors real PHPStan's own opt-in
-    /// `checkTooWideThrowTypesInProtectedAndPublicMethods` parameter - see
-    /// `registry::Registry::check_too_wide_throw_type_in_protected_and_public_methods`'s
-    /// own doc comment for why this defaults to `false` (unset), the same
-    /// reason every other opt-in check above does.
+    /// `checkTooWideThrowTypesInProtectedAndPublicMethods` - see
+    /// `registry::Registry::check_too_wide_throw_type_in_protected_and_public_methods`.
     pub check_too_wide_throw_type_in_protected_and_public_methods: Option<bool>,
     /// The return-type analogue - see
-    /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
-    /// own doc comment for why this defaults to `false` (unset).
+    /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`.
     pub check_too_wide_return_type_in_protected_and_public_methods: Option<bool>,
     /// Opt-in `MethodThrowTypeCovarianceRule` - see
-    /// `registry::Registry::check_method_throw_type_covariance`'s own
-    /// doc comment for why this defaults to `false` (unset), the same
-    /// reason every other opt-in check above does.
+    /// `registry::Registry::check_method_throw_type_covariance`.
     pub check_method_throw_type_covariance: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
-    /// this project has no NEON parser and one isn't otherwise justified
-    /// (see `baseline.rs`'s own identical judgment for a related
-    /// mechanism), so a project's real `phpstan.neon` config is manually
-    /// re-typed here, the same way `paths`/`scan_paths` already are.
-    /// See `ignore_errors::IgnoreErrorEntry`'s own doc comment for the
-    /// exact field semantics.
+    /// this project has no NEON parser (see `baseline.rs`), so a
+    /// project's real `phpstan.neon` config is manually re-typed here.
+    /// See `ignore_errors::IgnoreErrorEntry` for field semantics.
     pub ignore_errors: Option<Vec<crate::ignore_errors::IgnoreErrorEntry>>,
-    /// A declarative, config-driven ban list -
-    /// `restricted_symbols::RestrictedSymbolEntry`'s own doc comment has
-    /// the full shape. Config-file-only, no CLI flag - a structured list
-    /// doesn't fit a boolean/string flag.
+    /// A declarative, config-driven ban list - see
+    /// `restricted_symbols::RestrictedSymbolEntry`. Config-file-only, no
+    /// CLI flag - a structured list doesn't fit a boolean/string one.
     ///
     /// ```toml
     /// [[restricted_symbols]]
@@ -129,25 +103,17 @@ pub struct Config {
     pub restricted_symbols: Option<Vec<crate::restricted_symbols::RestrictedSymbolEntry>>,
     /// Extra directories/files whose class-like declarations are
     /// designated overrides (e.g. a vendored `Imagick.stub.php`) rather
-    /// than a genuine accidental duplicate - mirrors `scan_paths`'s own
-    /// shape exactly (a directory, walked, or a single file listed
-    /// directly), and is unioned into it at load time so a `stub_paths`
-    /// entry also loads for type-resolution context.
-    /// The only consumer is `check_duplicate_class_declarations` below -
-    /// see `project::duplicate_class_sites::ClassDeclSite`'s own
-    /// `is_stub` field and `checker::duplicate_classes`'s own module doc
-    /// comment for why this distinction exists at all.
+    /// than a genuine accidental duplicate - mirrors `scan_paths`'s
+    /// shape, unioned into it at load time. See
+    /// `project::duplicate_class_sites::ClassDeclSite::is_stub`.
     pub stub_paths: Option<Vec<PathBuf>>,
     /// Opt-in whole-project duplicate function-declaration detection -
     /// see `registry::Registry::check_duplicate_function_declarations`'s
     /// own doc comment for why.
     pub check_duplicate_function_declarations: Option<bool>,
-    /// Opt-in whole-project duplicate class-like-declaration
-    /// detection - see `registry::Registry::check_duplicate_class_
-    /// declarations`'s own doc comment for why this defaults to `false`
-    /// (unset), the same reason every other opt-in check above does, and
-    /// for why this one specifically needs `stub_paths` correctly
-    /// populated before it's safe to turn on for a real project.
+    /// Opt-in whole-project duplicate class-like-declaration detection.
+    /// See `registry::Registry::check_duplicate_class_declarations` for
+    /// why this needs `stub_paths` correctly populated first.
     pub check_duplicate_class_declarations: Option<bool>,
 }
 
