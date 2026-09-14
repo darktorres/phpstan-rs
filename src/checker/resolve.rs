@@ -161,21 +161,18 @@ impl<'a> Checker<'a> {
     }
 
     /// The `current_class_template_params` equivalent for the current
-    /// function/method's own `@template`s (`self.current_method`, a
-    /// plain function's bare name or a method's bare name - `FunctionSig`
-    /// doesn't persist its own raw template *names* the way `ClassInfo`
-    /// does, so unlike the class-level lookup above, this reads them back
-    /// off `Type::TemplateParam` nodes already present in the signature's
-    /// own params/return type instead (each one, wherever `mark_template_
-    /// params` already found and marked it at registry-build time, still
-    /// carries its own full bound/variance/default metadata) - filtered
-    /// to `tp.scope == Some(current_method)` so an *inherited* class-level
-    /// template referenced in the same signature isn't double-counted
-    /// here too (already covered above). Only ever finds a template that
-    /// happens to appear somewhere in the signature itself - one declared
-    /// but used *only* inside e.g. a body-local `@var`, never in the
-    /// signature at all, isn't reachable this way; no current corpus
-    /// evidence of that narrower shape.
+    /// function/method's own `@template`s. `FunctionSig` doesn't persist
+    /// its own raw template *names* the way `ClassInfo` does, so unlike
+    /// the class-level lookup above, this reads them back off
+    /// `Type::TemplateParam` nodes already present in the signature's
+    /// params/return type (each still carrying its full
+    /// bound/variance/default metadata from `mark_template_params` at
+    /// registry-build time) - filtered to
+    /// `tp.scope == Some(current_method)` so an *inherited* class-level
+    /// template referenced in the same signature isn't double-counted.
+    /// Only ever finds a template that appears somewhere in the
+    /// signature itself; one declared but used only inside a body-local
+    /// `@var`, never in the signature, isn't reachable this way.
     fn current_function_template_params(
         &self,
     ) -> std::collections::HashMap<String, types::TemplateParam> {
@@ -185,15 +182,13 @@ impl<'a> Checker<'a> {
         let sig = match &self.current_class {
             Some(class) => self.registry.lookup_method(class, method_name),
             // A plain function's own `label`/`current_method` is
-            // deliberately the bare name (matching real PHPStan's own
+            // deliberately the bare name (matching real PHPStan's
             // uncluttered diagnostic messages), but `Registry::functions`
             // is keyed by each declaration's real FQN - a namespaced
-            // function's own bare name never matches there at all. Real
-            // corpus false positive this fixed: `php-standard-library`'s
-            // own `Psl\Dict\group_by()` - `lookup_function("group_by")`
-            // silently found nothing (there's no *global* function by
-            // that name), so this whole merge was a silent no-op for
-            // every namespaced function, the overwhelmingly common case.
+            // function's bare name never matches there directly (real
+            // shape: `php-standard-library`'s own `Psl\Dict\group_by()`
+            // - `lookup_function("group_by")` alone finds nothing, since
+            // there's no *global* function by that name).
             None => self
                 .registry
                 .lookup_function(&self.name_ctx.declared_name(method_name)),
@@ -209,30 +204,22 @@ impl<'a> Checker<'a> {
         out
     }
 
-    /// `FunctionDefinitionCheck`'s own `method.
-    /// templateTypeNotInParameter` half (confirmed by direct read,
-    /// `checkParametersAcceptor`'s shared tail, so this applies uniformly
-    /// to a function/method's own `@template` - real PHPStan runs the
-    /// identical check for a closure/arrow-fn too, but neither is indexed
-    /// into this project's own registry at all, so there's no persisted
-    /// `FunctionSig`/template-name list for either to run this against;
-    /// a real, disclosed architectural boundary, not an oversight).
-    /// Real PHPStan's `TypeTraverser`-based full-tree walk over every
-    /// parameter's own type (removing each template found from a working
-    /// "still missing" set) is exactly what the params-only pass below
-    /// re-derives; a template that only shows up somewhere in the return
-    /// type (the common, high-value real shape - a generic factory
-    /// method's own `@return T` with no `T`-typed parameter at all) is
-    /// what the difference against the params+return pass catches.
-    /// Deliberately narrower in one disclosed way: a template declared
-    /// but referenced *nowhere at all* in its own signature (not even the
-    /// return type) is invisible to this check too, since `FunctionSig`
-    /// has no separate record of a declared template's own bare name
-    /// independent of where it's actually used (see `current_function_
-    /// template_params`'s own doc comment for the identical limitation) -
-    /// the rarer edge case this project's own design explicitly leaves
-    /// uncaught rather than adding new template-name-tracking machinery
-    /// just for it.
+    /// `FunctionDefinitionCheck`'s own
+    /// `method.templateTypeNotInParameter` half - applies uniformly to a
+    /// function/method's own `@template` (real PHPStan runs the
+    /// identical check for a closure/arrow-fn too, but neither is
+    /// indexed into this project's registry, so there's no persisted
+    /// `FunctionSig`/template-name list for either to run against). Real
+    /// PHPStan's `TypeTraverser`-based full-tree walk over every
+    /// parameter's type is what the params-only pass below re-derives; a
+    /// template that only shows up in the return type (the common,
+    /// high-value shape - a generic factory method's `@return T` with no
+    /// `T`-typed parameter) is what the difference against the
+    /// params+return pass catches. Deliberately narrower in one way: a
+    /// template declared but referenced nowhere at all in its signature
+    /// is invisible to this check too, since `FunctionSig` has no
+    /// separate record of a declared template's bare name independent of
+    /// where it's used (see `current_function_template_params`).
     pub(crate) fn check_template_type_not_in_parameter(
         &mut self,
         sig: &FunctionSig,
