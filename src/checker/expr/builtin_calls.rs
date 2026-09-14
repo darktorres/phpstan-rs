@@ -15,25 +15,18 @@ use super::{
 };
 
 impl<'a> Checker<'a> {
-    /// Phase 12's bespoke per-function return-type extensions (real
-    /// PHPStan's own `src/Type/Php/` is 190 files of exactly this kind of
-    /// special-casing, not generic machinery) - `array_map`/`array_filter`
-    /// always return a bare, structureless `array` today (element type
-    /// `Mixed`), discarding real information already available: the
-    /// input array's own element type, and (for `array_map`) the
-    /// callback's own return type. Falls through to the ordinary
-    /// generic-template path (`infer_call_return_type`) for every other
-    /// function, and for any shape of these two this doesn't specially
-    /// handle.
-    /// Deliberately stays on the raw, positional `args` (not Item 1's own
-    /// per-parameter resolution) for every special case below - these are
-    /// a small, fixed set of well-known standard-library functions
-    /// nobody realistically calls with named arguments, so resolving
-    /// them by name would add risk (a resolved slice isn't sized the same
-    /// way a raw argument count is - see `check_args`'s own note on this
-    /// exact distinction) for no real benefit. Only the generic fallback
-    /// at the end needs the real resolution, computed here from the same
-    /// raw `args` this function already has.
+    /// Bespoke per-function return-type extensions, mirroring real
+    /// PHPStan's own `src/Type/Php/` (190 files of exactly this kind of
+    /// special-casing, not generic machinery). Falls through to the
+    /// ordinary generic-template path (`infer_call_return_type`) for
+    /// every other function, and for any shape one of these arms doesn't
+    /// specially handle.
+    ///
+    /// Deliberately stays on the raw, positional `args`, not a resolved
+    /// per-parameter slice - these are a small, fixed set of well-known
+    /// standard-library functions nobody realistically calls with named
+    /// arguments, and a resolved slice isn't sized the same way a raw
+    /// argument count is (see `check_args`'s note on that distinction).
     pub(crate) fn infer_builtin_call_return_type(
         &self,
         name: &str,
@@ -42,38 +35,29 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         match name {
-            // Phase 51: real PHPStan's own `AbsFunctionDynamicReturnTypeExtension`
-            // - delegates entirely to `Type::toAbsoluteNumber()`.
+            // Mirrors real PHPStan's `AbsFunctionDynamicReturnTypeExtension` -
+            // delegates entirely to `Type::toAbsoluteNumber()`.
             "abs" if args.len() == 1 => {
                 return to_absolute_number(&self.infer_expr(&args[0].value, locals));
             }
-            // Real PHPStan's own `StrlenFunctionReturnTypeExtension`
-            // (`vendor/phpstan-src`) additionally refines a literal or
-            // known-non-empty-string argument's own exact/minimum length -
-            // narrowed here to just the one part that's always true
-            // regardless of the argument (`strlen()` can never be
-            // negative), the single highest-value, zero-risk slice given
-            // this function's own massive corpus incidence (1061 files in
-            // this project's own Piwigo+vendor verification corpus).
+            // Narrowed to the one part that's always true regardless of
+            // the argument: `strlen()` can never be negative. Real
+            // PHPStan additionally refines a literal or known-non-empty-
+            // string argument's exact/minimum length; not modeled here.
             "strlen" if args.len() == 1 => {
                 return Type::IntRange(Some(0), None);
             }
-            // A top-10-bucket workflow found `sprintf()`/`vsprintf()` had
-            // zero dynamic-return-type handling at all - real PHPStan
-            // narrows to `non-falsy-string` whenever the format string is
-            // a literal whose own non-specifier literal text (with every
-            // real `%[argnum$][flags][width][.precision]specifier`
-            // sequence removed, matching this project's own existing
-            // `parse_format_specifiers`/`parse_positional_format_
-            // specifiers` grammar in `calls.rs`) is itself provably
+            // Narrows to `non-falsy-string` whenever the format string is
+            // a literal whose non-specifier literal text (with every real
+            // `%[argnum$][flags][width][.precision]specifier` sequence
+            // removed, via `parse_format_specifiers`/`parse_positional_
+            // format_specifiers` in `calls.rs`) is itself provably
             // non-falsy - the same reasoning `BinOp::Concat`/`ExprKind::
-            // Interpolated` already use (a guaranteed-present, non-empty,
-            // non-`'0'` literal chunk means the whole result can never be
-            // exactly `""`/`"0"`, regardless of what any specifier
-            // expands to). `sprintf_literal_remainder` returns `None` on
-            // anything it can't confidently parse (an unknown specifier
-            // character, mainly) - the same "don't guess" standard,
-            // never wrongly claiming non-falsy.
+            // Interpolated` use: a guaranteed-present, non-empty, non-`'0'`
+            // literal chunk means the result can never be exactly `""`/`"0"`,
+            // regardless of what any specifier expands to.
+            // `sprintf_literal_remainder` returns `None` on anything it
+            // can't confidently parse, never wrongly claiming non-falsy.
             "sprintf" | "vsprintf" if !args.is_empty() => {
                 if let Some(fmt) = literal_string_value(&args[0].value)
                     && let Some(remainder) = sprintf_literal_remainder(&fmt)
@@ -85,28 +69,18 @@ impl<'a> Checker<'a> {
                     ]);
                 }
             }
-            // Real PHPStan's own `VarExportFunctionReturnTypeExtension` -
-            // the native/stub signature is unconditionally `?string`
-            // (`$return` defaults to `false`, in which case `var_export`
-            // prints to stdout and returns `null`), but a literal `true`
-            // second argument means it always returns the real
-            // representation string instead - confirmed the stub's own
-            // declared `bool $return = false` shape via `phpstorm-stubs`.
-            // Scoped to the 2-argument, literal-`true` form specifically
-            // - anything else (omitted, a variable, `false`) keeps
-            // today's existing, correctly-nullable stub return type
-            // unchanged.
+            // The stub declares `?string` unconditionally (`$return`
+            // defaults to `false`, in which case `var_export` prints to
+            // stdout and returns `null`), but a literal `true` second
+            // argument means it always returns the representation string
+            // instead. Scoped to that exact 2-argument, literal-`true`
+            // form - anything else keeps the stub's nullable return type.
             "var_export" if args.len() == 2 && is_true_literal(&args[1].value) => {
                 return Type::String;
             }
-            // Real PHPStan's own `CountFunctionReturnTypeExtension` -
-            // narrowed to the plain 1-argument form (no `$mode` argument,
-            // i.e. always `COUNT_NORMAL`) real PHPStan's own
-            // `isNormalCount` treats as the same case anyway. A known
-            // `ArrayShape` with no optional field has an exact, literal
-            // count (`getArraySize()`'s own exact-`ConstantIntegerType`
-            // case) - anything else (an unshaped `Array`, an `ArrayShape`
-            // with any optional field, or a non-array `Countable`) still
+            // Narrowed to the plain 1-argument form (no `$mode`, i.e.
+            // always `COUNT_NORMAL`). A known `ArrayShape` with no
+            // optional field has an exact, literal count - anything else
             // gets the same always-true "never negative" floor `strlen`
             // above does.
             "count" | "sizeof" if args.len() == 1 => {
@@ -117,32 +91,24 @@ impl<'a> Checker<'a> {
                 }
                 return Type::IntRange(Some(0), None);
             }
-            // Real PHPStan's own `RandomIntFunctionReturnTypeExtension` -
             // `random_int`/`rand`/`mt_rand($min, $max)` always produce a
-            // value within `[$min, $max]` inclusive (confirmed directly
-            // via `php -r`); a non-literal, unbounded argument on either
-            // side degrades that side of the range to unbounded too,
-            // rather than guessing. The 0-argument `rand()`/`mt_rand()`
-            // form (real PHP's own implicit `[0, getrandmax()]`) is left
-            // as the stub's own plain `int` - `getrandmax()`'s own exact
-            // value isn't modeled anywhere in this project, and guessing
-            // a wrong upper bound would be worse than the stub's honest
+            // value within `[$min, $max]` inclusive; a non-literal,
+            // unbounded argument on either side degrades that side of the
+            // range to unbounded too, rather than guessing. The
+            // 0-argument form is left as the stub's plain `int` -
+            // `getrandmax()`'s exact value isn't modeled, and guessing a
+            // wrong upper bound would be worse than the stub's honest
             // `int`.
             "random_int" | "rand" | "mt_rand" if args.len() == 2 => {
                 let min = int_bound(&self.infer_expr(&args[0].value, locals), true);
                 let max = int_bound(&self.infer_expr(&args[1].value, locals), false);
                 return Type::IntRange(min, max);
             }
-            // Real PHPStan's own `HrtimeFunctionReturnTypeExtension` -
             // `hrtime()`/`hrtime(false)` return a 2-element list
-            // `[seconds, nanoseconds]` (`nanoseconds` always `< 1e9` by
-            // definition - it's the sub-second remainder); `hrtime(true)`
-            // instead collapses both into one `int|float` nanosecond
-            // count. A non-literal-bool argument can't rule either shape
-            // out, so both union together (matching real PHPStan's own
-            // `BenevolentUnionType` fallback for that case, minus the
-            // "benevolent" comparison-leniency wrapper this project has
-            // no equivalent concept for).
+            // `[seconds, nanoseconds]`; `hrtime(true)` instead collapses
+            // both into one `int|float` nanosecond count. A non-literal-
+            // bool argument can't rule either shape out, so both union
+            // together.
             "hrtime" if args.is_empty() => {
                 return hrtime_array_shape();
             }
@@ -153,54 +119,30 @@ impl<'a> Checker<'a> {
                     _ => union_types(hrtime_array_shape(), hrtime_number_type()),
                 };
             }
-            // Investigated and declined: real PHPStan's own
-            // `ArrayPopFunctionReturnTypeExtension`/
-            // `ArrayShiftFunctionReturnTypeExtension` (element type, or
-            // `null` when the argument is provably empty/unproven) was
-            // implemented and corpus-verified, then reverted. Two
-            // compounding problems, not just one: (1) the "provably
-            // non-empty -> non-nullable" half is unsound here - `predefine_
-            // byref_or_unknown_args` widens this same by-ref argument's
-            // own type immediately (dropping any non-empty marker, since
-            // popping a list's last element can empty it), correct for
-            // what the *argument* looks like after the call, but a
-            // *separate*, later re-inference of the very same call
-            // expression (`check_args`'s own `infer_expr` re-derivation
-            // for the argument-type check, when array_pop/array_shift is
-            // itself nested inside another call's argument) reads that
-            // same, already-widened `locals` entry - a known, pre-
-            // existing category in this project (an earlier `check_expr`-
-            // vs-`infer_expr` divergence for the same tree bit Phase 22's
-            // own ternary-narrowing work too), not something to
-            // re-architect here. (2) even the safe, always-nullable
-            // fallback (`elem_ty | null`, dropping that unsound half)
-            // still produced real, if individually defensible, noise
-            // across more than ten distinct real projects
-            // (`monolog/monolog`'s own `Logger::popHandler()`,
-            // `symfony/console`'s `OutputFormatterStyleStack::pop()`,
-            // `doctrine/orm`, `sentry/sentry`, `gettext/gettext`, ...) -
-            // every one a real `explode()`-then-`array_shift()` or an
-            // explicit `count() === 0` guard immediately before the
-            // pop/shift, both real, common idioms that genuinely
-            // guarantee non-emptiness in ways this project's own
-            // narrowing doesn't track, so the honestly-nullable type is
-            // technically defensible but not corpus-quiet enough to ship.
-            // `range()`'s own real stub (phpstorm-stubs' `@return array` -
-            // no refinement at all) gives no list-ness/element-type
-            // information whatsoever, but real PHPStan special-cases this
-            // function (its own `RangeFunctionReturnTypeExtension`): a
-            // real `range($low, $high)` call always walks `$low` to
-            // `$high` inclusive with sequential integer keys starting at
-            // 0 - genuinely a list, and never empty (even `range(5, 5)`
-            // produces `[5]`) - regardless of whether the bounds are
-            // literals this project could evaluate exactly. Scoped to
-            // int and single-character-string bounds (the two real
-            // corpus shapes - `range(1000, 1999)`, character-range
-            // idioms) with no 3rd `$step` argument (a non-default step
-            // can skip past `$high` without reaching it exactly, which
-            // doesn't change list-ness/non-emptiness but isn't needed by
-            // any real call site yet) - anything else falls through to
-            // the generic path below, unchanged.
+            // `array_pop`/`array_shift`'s element-or-null result type is
+            // deliberately NOT special-cased: `predefine_byref_or_unknown_
+            // args` widens this same by-ref argument's own type
+            // immediately, so a separate, later re-inference of the same
+            // call expression (e.g. when nested inside another call's
+            // argument) would read an already-widened `locals` entry,
+            // making a "provably non-empty -> non-nullable" narrowing
+            // unsound. Even the safe, always-nullable fallback
+            // (`elem_ty | null`) produced real noise for a common idiom -
+            // an `explode()`-then-`array_shift()` or an explicit
+            // `count() === 0` guard immediately before the pop/shift -
+            // that this project's narrowing doesn't track as
+            // non-emptiness.
+            //
+            // `range()`'s stub (`@return array`) gives no list-ness/
+            // element-type information, but a real `range($low, $high)`
+            // call always walks `$low` to `$high` inclusive with
+            // sequential integer keys starting at 0 - genuinely a list,
+            // and never empty (even `range(5, 5)` produces `[5]`) -
+            // regardless of whether the bounds are literals. Scoped to
+            // int and single-character-string bounds with no 3rd `$step`
+            // argument (a non-default step doesn't change list-ness/
+            // non-emptiness but isn't needed by any real call site yet) -
+            // anything else falls through to the generic path below.
             "range" if args.len() == 2 => {
                 let elem = match (
                     &self.infer_expr(&args[0].value, locals),
@@ -224,23 +166,16 @@ impl<'a> Checker<'a> {
                     ]);
                 }
             }
-            // `preg_split()`'s own real stub (phpstorm-stubs' `@return
-            // string[]|false` - the bare shorthand-array syntax, no
-            // list-ness) gives up exactly the same real information real
-            // PHPStan's own dedicated `PregSplitDynamicReturnTypeExtension`
-            // computes: splitting a string always produces sequential
-            // integer keys starting at 0, a real list, for any pattern/
-            // subject (literal or not) - real PHPStan only bothers
-            // constant-folding the *literal* case for maximum precision,
-            // but its own fallback for the general (non-literal) case,
-            // the only one worth modeling here, is exactly `list<string>
-            // |false>` (`list<non-empty-string>|false` when
-            // `PREG_SPLIT_NO_EMPTY` is one of the flags - checked the
-            // same lenient bitwise-or-chain-of-names way `parse_preg_
-            // flags` already does for `preg_match`, just without needing
-            // that function's own stricter "every flag must be
-            // recognized" requirement, since an unrecognized flag
-            // doesn't change list-ness/non-emptiness either way here).
+            // `preg_split()`'s stub (`@return string[]|false`) has no
+            // list-ness, but splitting a string always produces
+            // sequential integer keys starting at 0, for any pattern/
+            // subject: `list<string>|false` (`list<non-empty-string>|false`
+            // when `PREG_SPLIT_NO_EMPTY` is one of the flags - checked the
+            // same lenient bitwise-or-chain-of-names way `parse_preg_flags`
+            // does for `preg_match`, without needing that function's
+            // stricter "every flag must be recognized" requirement, since
+            // an unrecognized flag doesn't change list-ness/non-emptiness
+            // here).
             "preg_split" if (2..=4).contains(&args.len()) => {
                 let no_empty = args
                     .get(3)
@@ -259,11 +194,11 @@ impl<'a> Checker<'a> {
                 ]);
                 return union_types(list_ty, Type::False);
             }
-            // Phase 76: real PHPStan's own `FilterFunctionReturnTypeHelper`,
-            // scoped to what's statically provable - see `filter_validate_
-            // result`'s own doc comment for exactly what's modeled and
-            // what's deliberately not (a computed filter value, sanitize
-            // filters, `FILTER_DEFAULT`).
+            // Mirrors real PHPStan's `FilterFunctionReturnTypeHelper`,
+            // scoped to what's statically provable - see
+            // `filter_validate_result`'s doc comment for exactly what's
+            // modeled and what's deliberately not (a computed filter
+            // value, sanitize filters, `FILTER_DEFAULT`).
             "filter_var" if (2..=3).contains(&args.len()) => {
                 let flags_arg = args.get(2).map(|a| &a.value);
                 let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
@@ -280,30 +215,20 @@ impl<'a> Checker<'a> {
                     let force_array = flags_arg
                         .is_some_and(|e| contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY"));
                     let value_ty = self.infer_expr(&args[0].value, locals);
-                    // Sub-item A: `FILTER_REQUIRE_ARRAY` wins when both
-                    // are literally present (real PHPStan's own
-                    // precedence). Only the two *provable* shapes are
-                    // modeled (favor false negatives over replicating
-                    // PHPStan's full trinary-logic state machine) - a
-                    // `FILTER_REQUIRE_ARRAY` call on a not-provably-array
-                    // input falls straight through to the generic stub
-                    // below, unchanged.
+                    // `FILTER_REQUIRE_ARRAY` wins when both are literally
+                    // present, matching real PHPStan's precedence. Only
+                    // the two provable shapes are modeled (favor false
+                    // negatives over replicating PHPStan's full trinary-
+                    // logic state machine) - a `FILTER_REQUIRE_ARRAY` call
+                    // on a not-provably-array input falls through to the
+                    // generic stub below, unchanged.
                     if require_array && !Self::is_array_like(&value_ty) {
                         return Type::Mixed;
                     }
-                    // Real PHPStan's own `getType()` (`vendor/phpstan-src/
-                    // src/Type/Php/FilterFunctionReturnTypeHelper.php`):
-                    // the fallback is unioned into the *element* type
-                    // first (whenever the per-element value can't be
-                    // proven exact, which this project's own coarser
-                    // per-array-not-per-element inference always is), and
-                    // only *that* gets wrapped in the array - never a
-                    // bare, un-widened element type. Confirmed directly
-                    // by reading the real source: an earlier draft here
-                    // special-cased `FILTER_REQUIRE_ARRAY` to skip the
-                    // fallback-union entirely, a real, corrected bug
-                    // (`array<int>` instead of the real `array<int|
-                    // false>`).
+                    // The fallback is unioned into the *element* type
+                    // first, and only that gets wrapped in the array -
+                    // never a bare, un-widened element type (real PHP
+                    // gives `array<int|false>`, not `array<int>`).
                     let unioned = if throw_on_failure {
                         element_ty.clone()
                     } else {
@@ -320,45 +245,31 @@ impl<'a> Checker<'a> {
                     return unioned;
                 }
             }
-            // Phase 76 Sub-item C: `filter_input($type, $var_name,
-            // $filter, $flags)` - modeled as reading an unknown offset out
-            // of a synthetic `array<string, mixed>` (standing in for
-            // `$_GET`/`$_POST`/etc.), then delegating to the same `filter_
-            // validate_result` `filter_var` uses, shifted one argument
-            // position over. Real PHPStan's own trace (`getOffsetValueType`
-            // on an always-`maybe`-present synthetic array) collapses to
-            // unconditionally unioning in both `Type::Null` and `Type::
-            // False` regardless of `FILTER_NULL_ON_FAILURE` - a genuine,
-            // counter-intuitive but verified property (the flag changes
-            // *which* fallback attaches to which underlying cause, not
-            // whether both appear in the final union) - and this holds
-            // even when `FILTER_THROW_ON_FAILURE` is set, since that only
-            // strips the *validation-failure* fallback, never the
-            // "variable doesn't exist" one (a genuinely missing variable
-            // just returns `null` in real PHP, it doesn't throw). `$type`
-            // (`INPUT_GET`/`INPUT_POST`/...) is deliberately never
-            // inspected - this project has no "internal function throws
-            // TypeError" tracking to model an invalid `$type` with.
-            // `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` are deliberately
-            // not modeled here in this first cut (`filter_input`'s own
-            // input is always the synthetic array, so only sub-item A's
-            // unconditional-wrap case could ever apply, and it's not
-            // worth the extra branch without corpus evidence) - falls
-            // through to the generic stub, same as today.
+            // `filter_input($type, $var_name, $filter, $flags)` is
+            // modeled as reading an unknown offset out of a synthetic
+            // `array<string, mixed>` (standing in for `$_GET`/`$_POST`/
+            // etc.), then delegating to the same `filter_validate_result`
+            // `filter_var` uses, shifted one argument position over. The
+            // always-`maybe`-present synthetic array means both
+            // `Type::Null` and `Type::False` are unconditionally unioned
+            // in regardless of `FILTER_NULL_ON_FAILURE` - the flag changes
+            // which fallback attaches to which underlying cause, not
+            // whether both appear in the final union - and this holds
+            // even under `FILTER_THROW_ON_FAILURE`, which only strips the
+            // validation-failure fallback, never the "variable doesn't
+            // exist" one (a genuinely missing variable just returns
+            // `null`, it doesn't throw). `$type` is never inspected - this
+            // project has no "internal function throws TypeError"
+            // tracking to model an invalid one with.
             "filter_input" if (2..=4).contains(&args.len()) => {
                 let flags_arg = args.get(3).map(|a| &a.value);
                 let flags_ty = flags_arg.map(|e| self.infer_expr(e, locals));
                 // `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` aren't
-                // modeled for `filter_input` (unlike `filter_var` above) -
-                // `filter_input`'s own subject is always the synthetic
-                // `array<string, mixed>` standing in for `$_GET`/etc., so
-                // only sub-item A's unconditional-wrap case could ever
-                // apply, and it's not worth the extra branch without
-                // corpus evidence. This is a real, previously-missing
-                // check, not just a comment: without it, the plain scalar
-                // path below ran anyway, silently ignoring the flag
-                // instead of actually falling through to the generic stub
-                // as documented.
+                // modeled for `filter_input`: its subject is always the
+                // synthetic array, so only the unconditional-wrap case
+                // could ever apply, not worth the extra branch without
+                // corpus evidence - falls through to the generic stub
+                // instead of silently ignoring the flag.
                 if flags_arg.is_some_and(|e| {
                     contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
                         || contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY")
@@ -372,13 +283,10 @@ impl<'a> Checker<'a> {
                         flags_ty.as_ref(),
                     )
                 {
-                    // Order matches `Null` before the validation-failure
-                    // fallback deliberately - `union_types` preserves
-                    // first-seen insertion order in its own `Display`, and
-                    // `Null`-then-fallback-then-`False` is this project's
-                    // own established convention for this exact three-way
-                    // union (confirmed against the sibling `FILTER_NULL_
-                    // ON_FAILURE` test, which already expects this order).
+                    // `union_types` preserves first-seen insertion order
+                    // in its `Display`, so `Null`-then-fallback-then-
+                    // `False` matches this project's established
+                    // convention for this three-way union.
                     let mut result = element_ty;
                     result = union_types(result, Type::Null);
                     if !throw_on_failure {
@@ -387,26 +295,14 @@ impl<'a> Checker<'a> {
                     return union_types(result, Type::False);
                 }
             }
-            // Real PHPStan's own `MinMaxFunctionReturnTypeExtension`
-            // constant-folds a comparison when every argument is a known
-            // literal, falling back to `TypeCombinator::union(...$types)`
-            // otherwise (`vendor/phpstan-src`) - this project has no
-            // constant-value tracking as elaborate as real PHPStan's own
-            // `ConstantScalarType`/`ConstantArrayType`, so only that
-            // fallback path is ported: the union of every argument's own
-            // type, when none of them could be an array (real PHP's
-            // `min(array $value)`/`min(mixed $value, mixed ...$values)`
-            // overload split gives a single array argument entirely
-            // different, unmodeled comparison semantics this project
-            // doesn't attempt - `args.len() == 1` always means that form,
-            // so it's excluded here rather than guessed at). Without this,
-            // both functions' own vendored stub (`mixed` params, `mixed`
-            // return - matching real PHP's own native signature, with no
-            // template/generic typing at all) left every call `Mixed`,
-            // even the extremely common `min(int, int)`/`max(int, int)`
-            // shape - a real Piwigo corpus false positive this fixes
-            // (`PaginationService::createNavigationBar`'s own
-            // `min(intdiv($start, $nbElementPage) + 1, $maximum)`).
+            // Real PHPStan's `MinMaxFunctionReturnTypeExtension`
+            // constant-folds when every argument is a known literal,
+            // falling back to a union of every argument's type otherwise
+            // - only that fallback is ported here, since this project has
+            // no elaborate constant-value tracking. Excludes the single-
+            // array-argument overload (`min(array $value)`), which has
+            // entirely different, unmodeled comparison semantics -
+            // `args.len() == 1` always means that form.
             "min" | "max" if args.len() >= 2 && !args.iter().any(|a| a.spread) => {
                 let arg_types: Vec<Type> = args
                     .iter()
@@ -419,16 +315,10 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::Mixed);
                 }
             }
-            // PHP 8.4's `array_find`/`array_find_key` - real PHPStan's own
-            // `ArrayFind{,Key}FunctionReturnTypeExtension` resolves these
-            // to the array's own value/key type unioned with `null` (a
-            // "not found" outcome is always real); the vendored stub
-            // declares both `mixed`, with no template typing, matching
-            // `min`/`max` above - both had zero handling anywhere in this
-            // project, a real Piwigo corpus false positive
-            // (`HistoryService::logVisit`'s own `array_find($cachedSections,
-            // fn ($knownSection) => ...)`, cascading into `'section' =>
-            // $section` losing its own `?string` precision).
+            // PHP 8.4's `array_find`/`array_find_key`, mirroring real
+            // PHPStan's `ArrayFind{,Key}FunctionReturnTypeExtension`:
+            // resolves to the array's value/key type unioned with `null`,
+            // since a "not found" outcome is always real.
             "array_find" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = Self::array_element_type(&input_ty) {
@@ -453,80 +343,62 @@ impl<'a> Checker<'a> {
                         locals,
                     )
                 {
-                    // Phase 14: mapping never changes key structure or
-                    // element count, so any Accessory marker (list-ness/
-                    // non-emptiness) the input had survives onto the
-                    // result - verified via dumpType().
+                    // Mapping never changes key structure or element
+                    // count, so any Accessory marker (list-ness/non-
+                    // emptiness) the input had survives onto the result.
                     return rewrap_with_accessory_markers(mapped, &input_ty);
                 }
             }
             // Filtering never transforms elements, so the result is
             // simply whatever the input array's own type already is - no
-            // closure introspection needed at all. Real PHP requires at
-            // least 1 argument, but a syntactically-valid call passing
-            // zero (invalid at runtime, real code in the vendor/ corpus
-            // this project verifies against - a genuine, previously
-            // unguarded panic here, found via --check-project against
-            // the *full* corpus, not just first-party src/) still parses
-            // fine and must not be indexed into blindly.
+            // closure introspection needed. Real PHP requires at least 1
+            // argument, but a syntactically-valid zero-argument call
+            // (invalid at runtime, but real code in the corpus this
+            // project verifies against) still parses fine and must not be
+            // indexed into blindly.
             "array_filter" if !args.is_empty() => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    // Phase 14: filtering can both leave gaps in a
-                    // list's own sequential keys and empty out a
-                    // non-empty array - verified via dumpType() that
-                    // neither marker survives, so they're stripped
-                    // rather than passed through unchanged.
+                    // Filtering can both leave gaps in a list's sequential
+                    // keys and empty out a non-empty array, so neither
+                    // marker survives.
                     let stripped = strip_accessory_markers(arr_ty);
                     if args.len() >= 2 {
                         if is_null_filter_callback(&args[1].value) {
                             return strip_null_from_array_element(stripped);
                         }
-                        // A round of Piwigo-corpus bucketing found the
-                        // same real PHPStan extension for an
-                        // `instanceof`-shaped filter callback (`fn ($v):
-                        // bool => $v instanceof Target`) - narrows the
-                        // retained element type to `Target` specifically
-                        // (not just strips `Null`: an `A|B|null` element
+                        // An `instanceof`-shaped filter callback (`fn ($v):
+                        // bool => $v instanceof Target`) narrows the
+                        // retained element type to `Target` specifically -
+                        // not just strips `Null`: an `A|B|null` element
                         // type filtered by `instanceof B` keeps only `B`,
-                        // not `A` too), verified via dumpType(). Real
-                        // Piwigo code
-                        // (`BatchManagerGlobalPageRenderer::render`)
-                        // filters a `list<TagId|null>` from
-                        // `array_map(TagId::tryFrom(...), ...)` down to a
-                        // real `list<TagId>` this way.
+                        // not `A` too.
                         if let Some(class_name) = is_instanceof_filter_callback(&args[1].value) {
                             let target = self.resolve_name_expr(class_name);
                             return narrow_array_element_type_to(self.registry, stripped, &target);
                         }
                         // A native `is_string`/`is_int`/`is_float`/
-                        // `is_bool`/`is_null` type-check predicate -
-                        // verified via dumpType() to narrow the same way.
+                        // `is_bool`/`is_null` type-check predicate narrows
+                        // the same way.
                         if let Some(target) = is_type_check_filter_callback(&args[1].value) {
                             return narrow_array_element_type_to(self.registry, stripped, &target);
                         }
                     } else {
-                        // No callback at all - real PHP's own default
+                        // No callback at all - real PHP's default
                         // behavior, dropping every falsy element - is
-                        // exactly `narrow_type_excluding_falsy`'s own
-                        // job, verified via dumpType() (`list<TagId|null>`
-                        // -> `list<TagId>`; `list<int|null>` ->
-                        // `list<non-zero-int>`, stripping both `0` and
-                        // `null`, not just `null`). Real Piwigo code
-                        // (`TusUploadCompletionService::completePhoto`)
-                        // relies on exactly the object|null case.
+                        // exactly `narrow_type_excluding_falsy`'s job
+                        // (`list<int|null>` -> `list<non-zero-int>`,
+                        // stripping both `0` and `null`, not just `null`).
                         return narrow_array_element_type_excluding_falsy(stripped);
                     }
                     return stripped;
                 }
             }
-            // array_reduce(array $array, callable $callback, mixed
-            // $initial = null): mixed - a fold, so the result is
-            // ultimately whatever the callback's own return type is
-            // (each call's return becomes the next call's $carry). Binds
-            // the callback's two params: $carry to $initial's own type
-            // (Null when omitted, matching real PHP's own default), $item
-            // to the array's element type.
+            // A fold: the result is ultimately whatever the callback's
+            // own return type is (each call's return becomes the next
+            // call's $carry). Binds the callback's two params: $carry to
+            // $initial's type (Null when omitted, matching real PHP's
+            // default), $item to the array's element type.
             "array_reduce" if args.len() == 2 || args.len() == 3 => {
                 if let Some(item_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
@@ -544,29 +416,25 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // Combining never changes the values' own type - $keys
-            // becomes what our Type::Array can't represent at all (key
-            // types aren't tracked), so the result is simply $values'
-            // own type verbatim, the same "no transformation" shape as
+            // Combining never changes the values' own type - $keys become
+            // what `Type::Array` can't represent (key types aren't
+            // tracked), so the result is simply $values' own type
+            // verbatim, the same "no transformation" shape as
             // array_filter above.
             "array_combine" if args.len() == 2 => {
                 let values_ty = self.infer_expr(&args[1].value, locals);
                 if Self::is_array_like(&values_ty) {
-                    // Phase 14: the result is keyed by $keys, not
-                    // $values's own keys - verified via dumpType() that
-                    // any Accessory marker $values carried doesn't
-                    // survive, so it's stripped here too.
+                    // The result is keyed by $keys, not $values's own
+                    // keys, so any Accessory marker $values carried
+                    // doesn't survive.
                     return strip_accessory_markers(values_ty);
                 }
             }
-            // Phase 14: two new special cases, real precision rather
-            // than regression-avoidance - both preserve list-ness/
-            // non-emptiness through to their result when called with
-            // their own default arguments (verified via dumpType()),
-            // but not with `preserve_keys: true` (confirmed to
-            // genuinely break list-ness - original indices survive, no
-            // longer sequential from zero - so deliberately not handled
-            // here, matching real PHPStan's own behavior).
+            // Both preserve list-ness/non-emptiness through to their
+            // result when called with default arguments, but not with
+            // `preserve_keys: true` (original indices survive, no longer
+            // sequential from zero, matching real PHPStan's behavior) -
+            // deliberately not handled here.
             "array_slice"
                 if matches!(args.len(), 2..=3)
                     || (args.len() == 4 && is_false_literal(&args[3].value)) =>
@@ -584,11 +452,9 @@ impl<'a> Checker<'a> {
                     return rewrap_with_accessory_markers(elem_ty, &input_ty);
                 }
             }
-            // Phase 14: verified via dumpType() to *always* return
-            // list<V>, regardless of whether the input was already
-            // list-shaped (re-sequencing every key from zero is exactly
-            // what array_values does) - no existing special case here
-            // before this.
+            // Always returns list<V> regardless of whether the input was
+            // already list-shaped - re-sequencing every key from zero is
+            // exactly what array_values does.
             "array_values" if args.len() == 1 => {
                 if let Some(elem_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
@@ -600,47 +466,33 @@ impl<'a> Checker<'a> {
                 }
             }
             "array_unique" if !args.is_empty() => {
-                // Phase 14: removing a duplicate can leave a gap in the
-                // surviving sequential keys - verified via dumpType()
-                // that list-ness doesn't survive.
+                // Removing a duplicate can leave a gap in the surviving
+                // sequential keys, so list-ness doesn't survive.
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
                     return strip_accessory_markers(arr_ty);
                 }
             }
-            // Phase 73: real PHP always takes every kept key/value pair's
-            // own *type* straight from `$array` (the first argument) -
-            // every other argument only narrows *which* keys survive,
-            // never what type a surviving one holds. List-ness doesn't
-            // survive (a matching key can be anywhere in `$array`,
-            // leaving a gap in whatever sequential keys remain), same
-            // "don't guess past what's certain" leniency `array_unique`
-            // just above already applies to its own similar shape.
-            // Phase 74 follow-up: generalizes the identical shape to
-            // every other `array_diff*`/`array_udiff*`/`array_intersect*`/
-            // `array_uintersect*` sibling - none of them ever transforms
-            // a surviving element's own value (only *which* key/value
-            // pairs survive differs between them: by value, by key, by
-            // both, or via a user comparison callback for the `u`-
-            // prefixed variants), so every one shares `array_unique`/
-            // `array_intersect_key`'s identical "arg0's own type, minus
-            // whatever accessory markers, verbatim" result. Confirmed
-            // directly via `php -r`: `array_diff([10, 20, 30], [20])`
-            // returns `[0 => 10, 2 => 30]`, not re-sequenced - list-ness
-            // never survives here either, the same "don't guess past
-            // what's certain" leniency already established.
-            // A single spread argument (`array_intersect(...$arrays)`, a
-            // real corpus idiom - `SearchService::getRegularSearchResults`'s
-            // own `array_intersect(...array_values($imageIdsForFilter))`,
-            // reducing several parallel id-list filters down to one) has
-            // exactly one AST-level `Arg`, failing the plain `args.len() >=
-            // 2` gate below outright and falling all the way through to a
-            // bare `Mixed`/`array` fallback - unlike `array_merge`'s own
-            // sibling arm, which already unwraps a spread source one level
-            // to reach the arrays actually being merged. Mirrors that same
-            // unwrap here: the spread source's own *element* type stands in
-            // for "the first array argument" these functions already take
-            // every kept key/value pair's own type from verbatim.
+            // Real PHP always takes every kept key/value pair's type
+            // straight from `$array` (the first argument) - every other
+            // argument only narrows which keys survive, never what type a
+            // surviving one holds. List-ness doesn't survive (a matching
+            // key can be anywhere in `$array`, leaving a gap in whatever
+            // sequential keys remain), the same leniency `array_unique`
+            // above applies. Generalizes to every `array_diff*`/
+            // `array_udiff*`/`array_intersect*`/`array_uintersect*`
+            // sibling - none of them ever transforms a surviving
+            // element's value (only which key/value pairs survive
+            // differs), so every one shares this "arg0's type, minus
+            // accessory markers, verbatim" result.
+            //
+            // A single spread argument (`array_intersect(...$arrays)`)
+            // has exactly one AST-level `Arg`, failing the plain
+            // `args.len() >= 2` gate outright - unlike `array_merge`'s
+            // sibling arm, which already unwraps a spread source one
+            // level to reach the arrays actually being merged. Mirrors
+            // that unwrap here: the spread source's element type stands
+            // in for "the first array argument".
             "array_intersect_key"
             | "array_intersect"
             | "array_intersect_assoc"
@@ -671,12 +523,11 @@ impl<'a> Checker<'a> {
                     return strip_accessory_markers(arr_ty);
                 }
             }
-            // Phase 73: swaps keys and values - the result's own key
-            // type is `$array`'s *value* type, and vice versa. Verified
-            // directly via `php`: list-ness never survives (the new keys
-            // come from the old values, essentially never already
-            // `0, 1, 2, ...`), but non-emptiness does (flipping can't
-            // change whether there's at least one element).
+            // Swaps keys and values - the result's key type is `$array`'s
+            // value type, and vice versa. List-ness never survives (the
+            // new keys come from the old values, essentially never
+            // already `0, 1, 2, ...`), but non-emptiness does (flipping
+            // can't change whether there's at least one element).
             "array_flip" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
@@ -694,28 +545,25 @@ impl<'a> Checker<'a> {
                     };
                 }
             }
-            // Phase 73/74 follow-up: `array_pop`/`array_shift` remove and
-            // return the last/first element (by reference - the caller's
-            // own argument shrinks by one, deliberately not modeled here,
-            // only this expression's own *result* type is), or `null` on
-            // an already-empty array - the identical three-way "known
-            // empty / known non-empty / ambiguous" split `array_pointer_
-            // result` already implements for `reset`/`current`/`end`,
-            // just with `null` as the empty-marker instead of `false`
-            // (confirmed via `php`: both, unlike `current`, never
-            // additionally union with the marker once non-emptiness is
-            // already provable - same `force_union: false` shape).
+            // `array_pop`/`array_shift` remove and return the last/first
+            // element (by reference - the caller's argument shrinks by
+            // one, not modeled here; only this expression's result type
+            // is), or `null` on an already-empty array - the same
+            // three-way "known empty / known non-empty / ambiguous" split
+            // `array_pointer_result` implements for `reset`/`current`/
+            // `end`, just with `null` as the empty-marker instead of
+            // `false`, and neither additionally unions with the marker
+            // once non-emptiness is already provable (`force_union: false`).
             "array_pop" | "array_shift" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if let Some(elem_ty) = Self::array_element_type(&arr_ty) {
                     return Self::array_pointer_result(&arr_ty, elem_ty, Type::Null, false);
                 }
             }
-            // Phase 73/74 follow-up: `array_splice` returns an array of
-            // the *removed* elements (or `[]` if nothing was removed) -
-            // always the input's own value type, re-sequenced from zero
-            // (confirmed via `php`: the removed slice's own original
-            // keys are never preserved), non-emptiness never guaranteed
+            // `array_splice` returns an array of the removed elements (or
+            // `[]` if nothing was removed) - always the input's value
+            // type, re-sequenced from zero (the removed slice's original
+            // keys are never preserved); non-emptiness never guaranteed
             // (an explicit zero-length `$length` legitimately removes
             // nothing).
             "array_splice" if !args.is_empty() => {
@@ -727,21 +575,16 @@ impl<'a> Checker<'a> {
                     ]);
                 }
             }
-            // Phase 73/74 follow-up: `array_replace`/`array_replace_recursive`
-            // overlay every argument's own key/value pairs onto the
-            // first, later arguments winning any key collision - the
-            // result's own key type is the union of every argument's own
-            // key type, same for values (mirrors `array_merge`'s already-
-            // established key/value-union shape one call up in this same
-            // match, just without that function's own int-key
-            // renumbering quirk - `array_replace`, confirmed via `php`,
-            // always preserves int keys exactly as given, never
-            // renumbers them). List-ness/non-emptiness aren't tracked
-            // here (a later argument overwriting every key of an earlier,
-            // non-empty one is a real, if rare, way to end up with fewer
-            // surviving keys than any single argument had) - the same
-            // "don't guess past what's certain" leniency this file
-            // already applies elsewhere.
+            // `array_replace`/`array_replace_recursive` overlay every
+            // argument's key/value pairs onto the first, later arguments
+            // winning any key collision - the result's key type is the
+            // union of every argument's key type, same for values
+            // (mirrors `array_merge`'s key/value-union shape, without its
+            // int-key renumbering quirk - `array_replace` always
+            // preserves int keys exactly as given). List-ness/non-
+            // emptiness aren't tracked (a later argument overwriting
+            // every key of an earlier, non-empty one can leave fewer
+            // surviving keys than any single argument had).
             "array_replace" | "array_replace_recursive" if !args.is_empty() => {
                 let mut key_ty: Option<Type> = None;
                 let mut val_ty: Option<Type> = None;
@@ -760,16 +603,14 @@ impl<'a> Checker<'a> {
                     return Type::Array(Box::new(k), Box::new(v));
                 }
             }
-            // Phase 73/74 follow-up: `array_pad` pads (or truncates,
-            // negative `$size`) `$array` up to `abs($size)` elements with
-            // copies of `$value` - the result's own value type is the
-            // union of the input's own element type and the pad value's
-            // own type (confirmed via `php`: an already-long-enough array
-            // is returned completely unchanged, so the pad value's type
-            // never *replaces* the original, only ever widens it). Key
-            // type/list-ness aren't modeled precisely (padding can
-            // truncate from either end depending on `$size`'s sign,
-            // genuinely re-sequencing keys either way) - same leniency.
+            // `array_pad` pads (or truncates, negative `$size`) `$array`
+            // up to `abs($size)` elements with copies of `$value` - the
+            // result's value type is the union of the input's element
+            // type and the pad value's type (an already-long-enough
+            // array is returned unchanged, so the pad value's type never
+            // replaces the original, only widens it). Key type/list-ness
+            // aren't modeled precisely, since padding can truncate from
+            // either end depending on `$size`'s sign, re-sequencing keys.
             "array_pad" if args.len() == 3 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 let pad_ty = self.infer_expr(&args[2].value, locals);
@@ -780,13 +621,12 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            // Phase 73/74 follow-up: the result's keys are the *values*
-            // of `$array` (only `int|string` ones are legal at runtime -
-            // any other value type throws a real `TypeError`, so this
-            // doesn't attempt to narrow further based on the input's own
-            // value type precision), each mapped to its own occurrence
-            // count - real PHP always returns a plain `int` count,
-            // non-emptiness matching the input's.
+            // The result's keys are the values of `$array` (only
+            // `int|string` ones are legal at runtime - any other value
+            // type throws a `TypeError`, so this doesn't narrow further
+            // based on input value type precision), each mapped to its
+            // occurrence count - real PHP always returns a plain `int`
+            // count, non-emptiness matching the input's.
             "array_count_values" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
@@ -804,25 +644,19 @@ impl<'a> Checker<'a> {
                     };
                 }
             }
-            // Phase 73/74 follow-up: keys are re-cased (`CASE_UPPER`/
-            // `CASE_LOWER`) but never added, removed, or retyped - an
-            // `int` key is entirely unaffected (only a *string* key is
-            // ever re-cased at all), so unlike every other function in
-            // this match, the input's own type - key type, value type,
-            // list-ness, non-emptiness, all of it - survives completely
-            // unchanged. Confirmed via `php`: `array_change_key_case([0
-            // => 'a', 'Foo' => 'b'])` keeps key `0` as the int `0`, only
-            // `'Foo'` changes case.
+            // Keys are re-cased (`CASE_UPPER`/`CASE_LOWER`) but never
+            // added, removed, or retyped - an `int` key is entirely
+            // unaffected (only a string key is ever re-cased), so unlike
+            // every other function in this match, the input's own type
+            // survives completely unchanged.
             "array_change_key_case" if matches!(args.len(), 1..=2) => {
                 return self.infer_expr(&args[0].value, locals);
             }
-            // Phase 73/74 follow-up: with `$num` omitted or exactly the
-            // literal `1` (the overwhelmingly common real call shape),
-            // `array_rand` returns a single random *key* (never an
-            // array) - the input's own key type, not the bare `array|
-            // string|int` union its plain stub signature gives with no
-            // way to know which. A literal `$num` above `1` returns an
-            // array of that many keys instead - confirmed via `php`.
+            // With `$num` omitted or exactly the literal `1`, `array_rand`
+            // returns a single random key (never an array) - the input's
+            // key type, not the bare `array|string|int` union its plain
+            // stub signature gives with no way to know which. A literal
+            // `$num` above `1` returns an array of that many keys instead.
             "array_rand" if matches!(args.len(), 1..=2) => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 let num_literal = args
@@ -845,18 +679,13 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
-            // Phase 74: the internal-array-pointer family
-            // (`ArrayPointerFunctionsDynamicReturnTypeExtension`/
-            // `ArrayCurrentDynamicReturnTypeExtension`/
-            // `ArrayNextDynamicReturnTypeExtension` real PHPStan side) -
             // `reset`/`current`/`end` all report the array's own element
             // type (bare when it's provably non-empty, unioned with
-            // `false` otherwise, `false` alone when it's provably
-            // empty), the same three-way split `array_pointer_result`
-            // below shares with `key`. `next`/`prev` always union with
-            // `false` even when the array is provably non-empty -
-            // confirmed directly via `php`: moving the pointer can run
-            // off either end regardless of how many elements exist.
+            // `false` otherwise, `false` alone when it's provably empty),
+            // the same three-way split `array_pointer_result` below
+            // shares with `key`. `next`/`prev` always union with `false`
+            // even when the array is provably non-empty: moving the
+            // pointer can run off either end regardless of element count.
             "reset" | "current" | "end" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
@@ -887,57 +716,40 @@ impl<'a> Checker<'a> {
                     return Self::array_pointer_result(&arr_ty, key_ty, Type::Null, false);
                 }
             }
-            // A round of Piwigo-corpus bucketing after Phase 14 found this
-            // was the single largest remaining false-positive source:
-            // `array_merge(['a', 'b'], someListReturningCall())`, real
-            // code combining several list<T>-typed arrays into one, a
-            // common idiom now that list<T> is checked strictly. Verified
-            // via dumpType(): merging only list-like arguments stays a
-            // list (a literal, non-empty argument makes it a
-            // non-empty-list); merging in even one plain, unproven
-            // `array<T>` degrades list-ness for the whole result, same as
-            // a spread array literal's own degrade rule above - but the
-            // element-type union is still tracked precisely either way.
-            // General key-aware shape merging (`array_merge($shape, ...)`)
-            // is real PHPStan's own much richer behavior and deliberately
-            // not attempted here, matching Phase 14's own decision to
-            // leave array_merge itself unaudited beyond this.
+            // Merging only list-like arguments stays a list (a literal,
+            // non-empty argument makes it a non-empty-list); merging in
+            // even one plain, unproven `array<T>` degrades list-ness for
+            // the whole result, same as a spread array literal's degrade
+            // rule - but the element-type union is still tracked
+            // precisely either way. General key-aware shape merging
+            // (`array_merge($shape, ...)`) is real PHPStan's much richer
+            // behavior and deliberately not attempted here.
             "array_merge" if !args.is_empty() => {
                 let arg_types: Vec<Type> = args
                     .iter()
                     .map(|a| self.infer_expr(&a.value, locals))
                     .collect();
-                // When every argument's own exact fields are known
-                // (`array{...}`, e.g. merging a property's own default
-                // shape with a caller-supplied options shape), merge them
-                // field-by-field via the same rule a spread array literal
-                // uses - verified via dumpType() that array_merge follows
-                // the identical key rule (canonical int keys renumbered,
-                // other keys overwritten by the later argument).
-                // A spread argument (`array_merge(...$listOfLists)`, a
-                // real corpus pattern flattening a word=>list<int> map's
-                // own values - `SearchService::searchAllwords`) expands
+                // When every argument's exact fields are known
+                // (`array{...}`), merge them field-by-field via the same
+                // rule a spread array literal uses (canonical int keys
+                // renumbered, other keys overwritten by the later
+                // argument).
+                // A spread argument (`array_merge(...$listOfLists)`)
+                // expands
                 // to however many arrays that value itself holds at
                 // runtime, not one merge argument shaped like the
                 // array-of-arrays itself - never eligible for the
                 // fixed-arity precise shape merge below.
                 let has_spread = args.iter().any(|a| a.spread);
-                // Phase 68 follow-up: merging a known shape with one or
-                // more plain, unproven arrays (e.g. `array_merge($defaults,
-                // $options)`) used to fall all the way through to the
-                // generic branch below, discarding every known field name.
-                // Real PHPStan's own full-fidelity mixed-input algorithm
-                // (`vendor/phpstan-src/src/Type/Php/
-                // ArrayMergeFunctionDynamicReturnTypeExtension.php`) needs
-                // a `HasOffsetType`-equivalent accessory layer this
-                // project doesn't have (see ROADMAP's own "long tail"
-                // bullet) - deliberately not attempted here. Instead,
-                // cover the single most common corpus idiom (a
-                // config/options-array merge) by staying eligible only
-                // when no argument anywhere could contribute a canonical
-                // int key - sidesteps real PHP's int-key-renumbering
-                // semantics entirely, which is the actual reason real
-                // PHPStan's own algorithm is so large.
+                // Merging a known shape with one or more plain, unproven
+                // arrays (e.g. `array_merge($defaults, $options)`) needs a
+                // `HasOffsetType`-equivalent accessory layer this project
+                // doesn't have to fully replicate real PHPStan's mixed-
+                // input algorithm - deliberately not attempted. Instead,
+                // cover the common config/options-array merge idiom by
+                // staying eligible only when no argument could contribute
+                // a canonical int key, sidestepping real PHP's int-key-
+                // renumbering semantics entirely.
                 let all_string_keyed_or_shape = !has_spread
                     && arg_types.iter().any(|t| matches!(t, Type::ArrayShape(_)))
                     && arg_types.iter().all(|t| match t {
@@ -1072,18 +884,14 @@ impl<'a> Checker<'a> {
                     };
                 }
             }
-            // Both fill every slot with the same, already-known $value -
-            // no closure or element-type binding needed at all. Real
-            // PHPStan's own `ArrayFillFunctionReturnTypeExtension`
-            // (confirmed directly in `vendor/phpstan-src`) also marks the
-            // result `list`-accessory whenever the start index is
-            // provably `0`, and `non-empty`-accessory whenever the count
-            // is provably `>= 1` - added here for the identical reason
-            // every other array-shaped builtin in this match already
-            // carries those markers when it can: a caller merging this
-            // result back with a loop's own pre-loop `[]` (this session's
-            // `LoopZeroIterations` fix) otherwise sees a needlessly bare
-            // `array<V>`, discarding real, statically-known precision.
+            // Fills every slot with the same, already-known $value - no
+            // closure or element-type binding needed. Marks the result
+            // `list`-accessory whenever the start index is provably `0`,
+            // and `non-empty`-accessory whenever the count is provably
+            // `>= 1`, the same accessory markers every other array-shaped
+            // builtin in this match carries when it can (otherwise a
+            // caller merging this result back with a loop's pre-loop `[]`
+            // sees a needlessly bare `array<V>`).
             "array_fill" if args.len() == 3 => {
                 let base = Type::Array(
                     Box::new(Type::unknown_array_key()),
@@ -1109,10 +917,9 @@ impl<'a> Checker<'a> {
                     Type::Intersection(members)
                 };
             }
-            // Phase 73: `$keys`' own *elements* become the result's real
-            // keys - `array_fill_keys(['a', 'b'], 0)` really is
-            // `array<string, int>`, not the `array<int|string, int>`
-            // `unknown_array_key()` used to settle for unconditionally.
+            // `$keys`' own elements become the result's real keys -
+            // `array_fill_keys(['a', 'b'], 0)` really is `array<string,
+            // int>`, not a bare `unknown_array_key()`.
             "array_fill_keys" if args.len() == 2 => {
                 let keys_ty = self.infer_expr(&args[0].value, locals);
                 let key_ty =
@@ -1138,57 +945,31 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            // Extracts one named field from an array of known shapes
-            // (e.g. `array<array{id: int, name: string}>`) - only fires
-            // when the element type is a real, known ArrayShape and the
-            // column key is a compile-time-known literal, mirroring
-            // check_shape_key_access's own "only a literal, never a
-            // dynamic value" precedent.
-            // Phase 31: the real stub's own `@return int[]|string[]` -
-            // not a single homogeneous key type but a whole-array
-            // either-or, since a real array's keys could be all-int,
-            // all-string, or (rarer) a mix - printed as the confusing
-            // `array<int>|array<string>` seen in this corpus's own
-            // diagnostics. Scoped to the one-argument form (no
-            // `$filter_value`, which changes which keys survive in a way
-            // this doesn't try to predict) with a known `ArrayShape`
-            // argument, where every key is knowable up front: PHP itself
-            // casts a canonical non-negative-integer string key to a real
-            // int at the point the array was built, so this mirrors that
-            // per-key, folding into a real `int|string` union only when
-            // the shape's own keys are genuinely mixed.
-            // Round 13: verified via dumpType() - array_keys() always
-            // returns a real list (sequentially re-keyed from zero),
-            // regardless of whether the input array's own keys were
-            // already sequential - the same "always list<V>" shape
-            // array_values() already gets above.
-            // Corpus find: this arm used to gate on `args.len() == 1`
-            // only, so the 2-/3-arg `$search_value`/`$strict` form fell
-            // through to the bare stub's own useless `int[]|string[]`
-            // answer, surfacing as a spurious `int|string` for every
-            // reader of the result (`UserService::searchCaseUsername`'s
-            // own `array_keys($byLower, $usernameLower, true)[0]` against
-            // a declared `string` return type). `$search_value`/`$strict`
-            // only ever narrow *which* keys survive, never the key type
-            // itself - confirmed via `dumpType()` against real PHPStan,
-            // which returns the identical `list<string>` for the 3-arg
-            // form here that it does for the bare 1-arg form.
+            // Extracts one named field from an array of known shapes -
+            // only fires when the element type is a real, known
+            // ArrayShape and the column key is a compile-time-known
+            // literal, mirroring check_shape_key_access's "only a
+            // literal, never a dynamic value" precedent.
+            //
+            // `array_keys()` always returns a real list (sequentially
+            // re-keyed from zero), regardless of whether the input
+            // array's own keys were already sequential - the same
+            // "always list<V>" shape `array_values()` gets above. The
+            // 2-/3-arg `$search_value`/`$strict` form gets identical
+            // treatment: those arguments only narrow which keys survive,
+            // never the key type itself.
             "array_keys" if (1..=3).contains(&args.len()) => {
                 let arg_ty = self.infer_expr(&args[0].value, locals);
-                // Phase 50 follow-up: `array_key_type` now handles
-                // `ArrayShape` directly (a real union of each field's own
-                // key kind) - reused here for a *literal-shaped* argument
-                // only, not for a plain, non-shape `Type::Array`'s own key
-                // type. Real corpus false positive from trusting the
-                // latter too: this project's dynamic-key-write widening
-                // (`checker/assignment.rs`, a `$arr[$dynamicKey] = $v;`
-                // loop body) doesn't track the real key expression's own
-                // type precisely, so a plain `Type::Array`'s key type can
-                // already be a too-wide `unknown_array_key()` even when
-                // every real key written is always an `int` - the same
-                // disclosed, general gap the Phase 68 investigation found
-                // (not fixed here, out of scope). Only an `ArrayShape`'s
-                // own key type is trustworthy enough to propagate.
+                // `array_key_type` handles `ArrayShape` directly (a real
+                // union of each field's own key kind) - reused here for a
+                // literal-shaped argument only, not for a plain,
+                // non-shape `Type::Array`'s key type: this project's
+                // dynamic-key-write widening doesn't track the real key
+                // expression's type precisely, so a plain `Type::Array`'s
+                // key type can already be a too-wide `unknown_array_key()`
+                // even when every real key written is always an `int`.
+                // Only an `ArrayShape`'s own key type is trustworthy
+                // enough to propagate.
                 if is_or_wraps_array_shape(&arg_ty)
                     && let Some(key_ty) = Self::array_key_type(&arg_ty)
                 {
@@ -1198,11 +979,8 @@ impl<'a> Checker<'a> {
                     ]);
                 }
                 // The native stub's own `@return int[]|string[]` is real
-                // but useless without this project's own key-type
-                // tracking - falling through to it verbatim surfaced
-                // `int|string` for every reader of the result. Matches
-                // this project's own usual "don't know, don't guess
-                // beyond Mixed" default for an unprovable key type.
+                // but useless without this project's key-type tracking -
+                // falls back to `Mixed` rather than guess beyond it.
                 if Self::is_array_like(&arg_ty) {
                     return Type::Intersection(vec![
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
@@ -1214,15 +992,11 @@ impl<'a> Checker<'a> {
                 if let Some(row_ty) =
                     Self::array_element_type(&self.infer_expr(&args[0].value, locals))
                 {
-                    // A shaped row (`array{version: string, ...}`) looks
-                    // up the one named field; an unshaped row
-                    // (`array<string, mixed>`, the common real shape for
-                    // a raw DB-fetch row with no further refinement)
-                    // has no per-key precision to offer at all, so every
-                    // column read is simply the row's own uniform
-                    // element type - still real, useful information
-                    // (even when that's `Mixed`) that the row-shape-only
-                    // arm below used to give up on entirely.
+                    // A shaped row looks up the one named field; an
+                    // unshaped row (`array<string, mixed>`, the common
+                    // shape for a raw DB-fetch row) has no per-key
+                    // precision to offer, so every column read is simply
+                    // the row's own uniform element type.
                     let field_ty = match &row_ty {
                         Type::ArrayShape(fields) => literal_string_key(&args[1].value)
                             .and_then(|key| fields.iter().find(|(n, _, _)| *n == key))
@@ -1233,17 +1007,14 @@ impl<'a> Checker<'a> {
                     if let Some(field_ty) = field_ty {
                         let arr_ty =
                             Type::Array(Box::new(Type::unknown_array_key()), Box::new(field_ty));
-                        // A real Piwigo-corpus round found the
-                        // 2-argument form (no `$index_key`) missing its
-                        // own real list-ness entirely: `array_column()`
-                        // always builds a brand-new array with fresh
-                        // sequential integer keys starting at 0,
-                        // regardless of the input array's own keys - a
-                        // genuine list. The 3-argument form uses
-                        // `$index_key`'s own column values as the
-                        // result's keys instead, which generally aren't
-                        // sequential integers, so it deliberately keeps
-                        // today's plain, unmarked `Array`.
+                        // The 2-argument form (no `$index_key`) always
+                        // builds a brand-new array with fresh sequential
+                        // integer keys starting at 0, regardless of the
+                        // input array's own keys - a genuine list. The
+                        // 3-argument form uses `$index_key`'s column
+                        // values as the result's keys instead, which
+                        // generally aren't sequential integers, so it
+                        // keeps a plain, unmarked `Array`.
                         return if args.len() == 2 {
                             Type::Intersection(vec![
                                 arr_ty,
@@ -1256,31 +1027,24 @@ impl<'a> Checker<'a> {
                 }
             }
             // The real stub declares `array_search(mixed, array, bool):
-            // string|int|false` unconditionally - this project's own
-            // `Type::Array` has no key-type parameter at all (a known,
-            // sizable open gap - see Known limitations), so this can't
-            // generally narrow the key-type half the way real PHPStan's
-            // own `ArraySearchFunctionDynamicReturnTypeExtension`
-            // (delegating to the haystack array type's own `searchArray()`)
-            // does - but a *list*-typed haystack is a real, narrower
-            // special case this project already tracks precisely
-            // without any key-type machinery at all: a list's own keys
-            // are always sequential integers by definition, so
-            // searching one can only ever find an `int` key (or
-            // `false`), never `string`. Real corpus shape
-            // (`array_search($needle, $haystack, true)` on a `list<string>`
-            // haystack, narrowed to `int` after the caller's own
-            // `$index === false` guard).
+            // string|int|false` unconditionally - this project's
+            // `Type::Array` has no key-type parameter, so it can't
+            // generally narrow the key-type half the way real PHPStan
+            // does. But a list-typed haystack is a narrower special case
+            // it already tracks precisely without any key-type machinery:
+            // a list's keys are always sequential integers, so searching
+            // one can only ever find an `int` key (or `false`), never
+            // `string`.
             "array_search" if args.len() >= 2 => {
                 let haystack_ty = self.infer_expr(&args[1].value, locals);
                 if Checker::is_list_like(&haystack_ty) {
                     return union_types(Type::Int, Type::False);
                 }
-                // Phase 73: the same idea, one level less precise - a
-                // haystack whose own key type is confidently known (not
-                // just "definitely a list") narrows the found-key half
-                // of the result the same way, e.g. an `array<string,
-                // V>` haystack can only ever find a `string` key.
+                // Same idea, one level less precise - a haystack whose
+                // key type is confidently known (not just "definitely a
+                // list") narrows the found-key half the same way, e.g. an
+                // `array<string, V>` haystack can only ever find a
+                // `string` key.
                 if let Some(key_ty) = Self::array_key_type(&haystack_ty)
                     && key_ty != Type::unknown_array_key()
                 {
@@ -1288,48 +1052,34 @@ impl<'a> Checker<'a> {
                 }
             }
             // The real stub declares `version_compare(string, string,
-            // ?string $operator): int|bool` unconditionally (both PHP-
-            // version-gated overloads agree on this) - real PHPStan's
-            // own `VersionCompareFunctionDynamicReturnTypeExtension`
-            // narrows based purely on whether the 3rd `$operator`
-            // argument is syntactically *present* at all, regardless of
-            // its own value: present means the real return is `bool`
-            // (or `bool|null` pre-8.0, not modeled here - no corpus
-            // evidence for it), absent means it's always exactly one of
-            // `-1`/`0`/`1`, never `bool`. Scoped to the 2-argument form
-            // (real corpus shape: `static fn (string $a, string $b): int
-            // => version_compare($a, $b)`) - the 3-argument form falls
-            // through to the generic, already-correct-if-loose `int|bool`
-            // stub type unchanged.
+            // ?string $operator): int|bool` unconditionally, but whether
+            // the 3rd `$operator` argument is syntactically present (not
+            // its value) determines the real return: present means
+            // `bool`, absent means always exactly one of `-1`/`0`/`1`.
+            // Scoped to the 2-argument form; the 3-argument form falls
+            // through to the generic `int|bool` stub type unchanged.
             "version_compare" if args.len() == 2 => return Type::Int,
-            // Phase 32 Finding D: the real stub declares `microtime(bool
-            // $as_float = false): string|float` unconditionally - real
-            // PHPStan's own `MicrotimeFunctionReturnTypeExtension` narrows
-            // a literal `true` argument to plain `float`, a literal
-            // `false` (or no argument) to a string. `is_subtype`, not
-            // `==`, since a `Union` that happens to be all-`True` or
-            // all-`False` (e.g. narrowed from a wider type) should narrow
-            // the same way a bare `True`/`False` would.
+            // The real stub declares `microtime(bool $as_float = false):
+            // string|float` unconditionally; a literal `true` argument
+            // narrows to plain `float`, a literal `false` (or no
+            // argument) to a string. `is_subtype`, not `==`, since a
+            // `Union` that happens to be all-`True` or all-`False` (e.g.
+            // narrowed from a wider type) should narrow the same way a
+            // bare `True`/`False` would.
             "microtime" => match args.first().map(|a| self.infer_expr(&a.value, locals)) {
                 None => return Type::String,
                 Some(ty) if types::is_subtype(&ty, &Type::True) => return Type::Float,
                 Some(ty) if types::is_subtype(&ty, &Type::False) => return Type::String,
                 _ => {}
             },
-            // Phase 23: the real stubs declare these unconditionally
-            // unioned with `array` (`str_replace(...): array|string`),
-            // even though the function only ever returns an array when
-            // `$subject` itself is one - real PHPStan special-cases this
-            // via its own hand-written dynamic return type extension, not
-            // from the stub signature alone. Scoped to "subject is
-            // string-like" (`types::is_subtype` against `Type::String`,
-            // not a bare `==`) - a `Mixed`, a union, or a real array
-            // correctly keeps today's existing behavior, but so does a
-            // Phase 14 accessory-refined subject (`non-empty-string`
-            // parses to `Intersection([String, Accessory(_)])`, which a
-            // bare `== Type::String` silently stopped matching - a real
-            // corpus regression caught in round 11, `Lang::load()`'s own
-            // `$source_file !== ''`-narrowed subject).
+            // The real stubs declare these unconditionally unioned with
+            // `array` (`str_replace(...): array|string`), even though the
+            // function only ever returns an array when `$subject` itself
+            // is one. Scoped to "subject is string-like"
+            // (`types::is_subtype` against `Type::String`, not a bare
+            // `==`) - an accessory-refined subject (`non-empty-string`
+            // parses to `Intersection([String, Accessory(_)])`) would
+            // silently fail to match a bare `== Type::String`.
             "str_replace" | "str_ireplace" if args.len() == 3 || args.len() == 4 => {
                 if types::is_subtype(&self.infer_expr(&args[2].value, locals), &Type::String) {
                     return Type::String;
@@ -1352,32 +1102,25 @@ impl<'a> Checker<'a> {
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
-            // Phase 32 Finding E: the same subject-dependent-return-type
-            // family as the two arms above, missed by Phase 23/31 - the
-            // real stub is `substr_replace(array|string $string, ...):
-            // array|string`, and unlike `str_replace`'s subject at index
-            // 2, `substr_replace`'s own subject is index 0. Never returns
-            // `null`, so a plain early return suffices - no
-            // `strip_array_member` dance needed.
+            // Same subject-dependent-return-type family as the two arms
+            // above - the real stub is `substr_replace(array|string
+            // $string, ...): array|string`, and unlike `str_replace`'s
+            // subject at index 2, `substr_replace`'s subject is index 0.
+            // Never returns `null`, so a plain early return suffices.
             "substr_replace" if args.len() == 3 || args.len() == 4 => {
                 if types::is_subtype(&self.infer_expr(&args[0].value, locals), &Type::String) {
                     return Type::String;
                 }
             }
-            // Phase 13 Finding A: the real stub declares `getenv(?string
-            // $name = null, bool $local_only = false): array|string|false`
-            // unconditionally, but real PHP only ever returns `array` for
-            // a truly zero-argument call, and only ever returns
-            // `string|false` when `$name` is a real, non-null string -
-            // confirmed against real PHPStan's own `dumpType()` for every
-            // shape that matters, including the two easy-to-get-wrong
-            // ones: `getenv(null)` and `getenv(local_only: true)` (a named
-            // arg that leaves `$name` at its own `null` default) both
-            // still return the full, broad type, same as real PHPStan.
-            // `args.is_empty()` must be checked on the raw call syntax,
-            // before any named/positional resolution - resolving `name`
-            // to `None` also happens for `getenv(local_only: true)`,
-            // which must NOT get the plain-`array` answer.
+            // The real stub declares `getenv(?string $name = null, bool
+            // $local_only = false): array|string|false` unconditionally,
+            // but real PHP only returns `array` for a truly zero-argument
+            // call, and only `string|false` when `$name` is a real,
+            // non-null string. `args.is_empty()` must be checked on the
+            // raw call syntax, before any named/positional resolution -
+            // resolving `name` to `None` also happens for
+            // `getenv(local_only: true)`, which must NOT get the
+            // plain-`array` answer.
             "getenv" => {
                 if args.is_empty() {
                     return Type::Array(
@@ -1396,15 +1139,9 @@ impl<'a> Checker<'a> {
                     return Type::Union(vec![Type::String, Type::False]);
                 }
             }
-            // A round of Piwigo-corpus bucketing found this was the
-            // single largest non-array-related false-positive source: the
-            // native stub declares a plain `string|false`, but real
-            // PHPStan carries its own dynamic-return-type extension here
-            // - verified via dumpType() that a successful call always
-            // returns a real non-falsy-string, never ''/'0' - a common
-            // idiom being the exact site that broke without this: `$jar =
-            // tempnam(...); if ($jar === false) { throw ...; }` then
-            // passing `$jar` on to a `non-empty-string`-typed sink.
+            // The native stub declares a plain `string|false`, but a
+            // successful call always returns a real non-falsy-string,
+            // never `''`/`'0'`.
             "tempnam" if args.len() == 2 => {
                 return Type::Union(vec![
                     Type::Intersection(vec![
@@ -1414,23 +1151,13 @@ impl<'a> Checker<'a> {
                     Type::False,
                 ]);
             }
-            // Found while triaging the wider Piwigo corpus test suite:
-            // this project had no `str_repeat()` handling at all (a bare
-            // `string`, matching the native stub), while real PHPStan's
-            // own `StrRepeatFunctionReturnTypeExtension` (confirmed
-            // directly against `vendor/phpstan-src`) constant-folds a
-            // small literal-input/literal-count call outright, and
-            // otherwise still marks the result `non-falsy-string` when
-            // the input is itself non-falsy and the count is provably
-            // `>= 1`. Scoped to that same common, general case (not the
-            // extension's own further accessory tracking - literal-
-            // string/numeric-string/lowercase/uppercase propagation -
-            // real PHPStan's own value there rests on machinery
-            // (`isLiteralString`/`isNumericString`/...) this project
-            // doesn't otherwise track for plain strings). Real corpus
-            // false positive this fixes: `HtmlServiceTest`'s own
-            // `str_repeat(' ', 300)` fed into `toEndWith()`'s own
-            // `non-empty-string`-typed parameter.
+            // Constant-folds a small literal-input/literal-count call
+            // outright, and otherwise marks the result `non-falsy-string`
+            // when the input is itself non-falsy and the count is
+            // provably `>= 1`. Doesn't attempt real PHPStan's further
+            // accessory tracking (literal-string/numeric-string/
+            // lowercase/uppercase propagation), which rests on machinery
+            // this project doesn't otherwise track for plain strings.
             "str_repeat" if args.len() == 2 => {
                 let input_ty = self.infer_expr(&args[0].value, locals);
                 let count_ty = self.infer_expr(&args[1].value, locals);
@@ -1453,14 +1180,14 @@ impl<'a> Checker<'a> {
                 }
                 return Type::String;
             }
-            // Phase 75: `StrCaseFunctionsReturnTypeExtension` - a literal
-            // argument is constant-folded outright (ASCII-only, mirroring
-            // PHP 8.2+'s own locale-independent semantics - this
-            // project's own case-tracking is ASCII-only project-wide, see
-            // `AccessoryKind::LowercaseString`/`UppercaseString`'s own
-            // doc comment), otherwise the matching case accessory is
-            // composed with whatever numeric/non-empty/non-falsy
-            // accessory the argument already carried.
+            // Mirrors real PHPStan's `StrCaseFunctionsReturnTypeExtension` -
+            // a literal argument is constant-folded outright (ASCII-only,
+            // matching PHP 8.2+'s locale-independent semantics; this
+            // project's case-tracking is ASCII-only project-wide, see
+            // `AccessoryKind::LowercaseString`/`UppercaseString`'s doc
+            // comment), otherwise the matching case accessory is composed
+            // with whatever numeric/non-empty/non-falsy accessory the
+            // argument already carried.
             "strtolower" | "mb_strtolower" if !args.is_empty() => {
                 return self.infer_case_function_call(
                     &args[0].value,
@@ -1501,13 +1228,10 @@ impl<'a> Checker<'a> {
                     true,
                 );
             }
-            // Phase 75 correction: `mb_convert_case` was wrongly lumped
-            // in with `ucwords`/`mb_convert_kana` (which genuinely never
-            // touch these booleans) in an earlier pass of this plan -
-            // verified false by reading `StrCaseFunctionsReturnTypeExtension.
-            // php` directly: it derives the identical force/keep-
+            // Unlike `ucwords`/`mb_convert_kana` (which never touch these
+            // booleans), `mb_convert_case` derives the same force/keep-
             // lowercase/uppercase booleans from its resolvable `$mode`
-            // argument, composed through the exact same machinery.
+            // argument, composed through the identical machinery.
             "mb_convert_case" if args.len() >= 2 => {
                 let mode_ty = self.infer_expr(&args[1].value, locals);
                 let (force_lower, keep_lower, force_upper, keep_upper) =
@@ -1521,15 +1245,13 @@ impl<'a> Checker<'a> {
                     keep_upper,
                 );
             }
-            // The vendored stub's own `@return string[]|false` reflects
-            // PHP 7's behavior for an empty `$separator` - PHP 8+ throws a
-            // `ValueError` there instead of returning `false` at all, so
-            // real PHPStan's own dynamic-return-type extension drops
-            // `|false` entirely and always answers `non-empty-list<string>`
-            // - verified via dumpType(), even for a non-literal
+            // The vendored stub's `@return string[]|false` reflects PHP
+            // 7's behavior for an empty `$separator` - PHP 8+ throws a
+            // `ValueError` there instead of returning `false`, so this
+            // drops `|false` entirely and always answers
+            // `non-empty-list<string>`, even for a non-literal
             // `$separator` (there's no other way `explode()` can return
-            // fewer than 1 element). Real Piwigo code
-            // (GeneratedFileErrorMapper::lines) relies on exactly this.
+            // fewer than 1 element).
             "explode" if matches!(args.len(), 2..=3) => {
                 return Type::Intersection(vec![
                     Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::String)),
@@ -1538,13 +1260,8 @@ impl<'a> Checker<'a> {
                 ]);
             }
             // Same family as tempnam() above - the native stub declares a
-            // bare `array|false`, but real PHPStan's own dynamic-return-
-            // type extension always returns a real `list<string>` on
-            // success, confirmed via dumpType(). Real Piwigo code
-            // (StructuralTest's own findCallSitesInRootPhpFiles/
-            // findCallSitesInBinFiles) narrows away `false` via `$paths
-            // !== false ? $paths : []` and then relies on the result
-            // being a real `list<string>` of file paths.
+            // bare `array|false`, but a successful call always returns a
+            // real `list<string>`.
             "glob" if matches!(args.len(), 1..=2) => {
                 return Type::Union(vec![
                     Type::Intersection(vec![
@@ -1554,11 +1271,10 @@ impl<'a> Checker<'a> {
                     Type::False,
                 ]);
             }
-            // Same family, subject at index 1 - not evidenced directly in
-            // this corpus, but identical mechanism and real stub shape
-            // (`preg_replace_callback_array(array $pattern, array|string
-            // $subject, ...): array|string|null`), so kept alongside its
-            // siblings rather than left out for want of a diagnostic.
+            // Same family, subject at index 1 (`preg_replace_callback_array
+            // (array $pattern, array|string $subject, ...): array|string|
+            // null`) - strips the `array` member when `$subject` is
+            // provably a string.
             "preg_replace_callback_array"
                 if args.len() >= 2
                     && types::is_subtype(
@@ -1570,12 +1286,10 @@ impl<'a> Checker<'a> {
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
-            // `mb_convert_encoding()` has its own real dynamic extension,
+            // `mb_convert_encoding()`'s real dynamic extension is
             // considerably more involved (it also reasons about
             // `$from_encoding` to decide whether `false` stays possible) -
-            // only the array-stripping half is evidenced here
-            // (`CharsetHelper::convertCharset`'s `mb_convert_encoding($str,
-            // ...)` with `$str: string`), so that's all this implements.
+            // only the array-stripping half is implemented here.
             "mb_convert_encoding"
                 if args.len() >= 2
                     && types::is_subtype(
@@ -1587,29 +1301,22 @@ impl<'a> Checker<'a> {
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_array_member(generic);
             }
-            // Phase 32 Finding J: json_encode(...): string|false -
-            // passing JSON_THROW_ON_ERROR makes a real failure throw
-            // instead of returning false. Real PHPStan's own
-            // JsonThrowOnErrorDynamicReturnTypeExtension recognizes this
-            // via a bitwise-OR-aware constant check on the flags
-            // argument - `contains_json_throw_on_error` walks an
-            // arbitrary-depth `|`-chain the same way (real corpus shape:
-            // `JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT
-            // | JSON_THROW_ON_ERROR`), not just a bare constant.
+            // `json_encode(...): string|false` - passing
+            // `JSON_THROW_ON_ERROR` makes a real failure throw instead of
+            // returning false. `contains_json_throw_on_error` walks an
+            // arbitrary-depth `|`-chain, not just a bare constant, since
+            // the flag is commonly OR'd with others.
             "json_encode" if args.len() >= 2 && contains_json_throw_on_error(&args[1].value) => {
                 let resolved = resolve_call_args(args, &sig.params);
                 let generic = self.infer_call_return_type(sig, &resolved, locals);
                 return strip_type_member(generic, &Type::False);
             }
-            // Phase 34 Finding A: the real stub declares `curl_getinfo`
-            // unconditionally `mixed` - real PHPStan's own
-            // CurlGetinfoFunctionDynamicReturnTypeExtension maps a
-            // literal CURLINFO_* option constant to a concrete type
-            // instead. Scoped to the 2-arg form actually used anywhere
-            // in real code (a bare 1-arg `curl_getinfo($ch)` call
-            // returns a much bigger "all components" array shape this
-            // project doesn't model - falls through to today's `mixed`
-            // unchanged).
+            // The real stub declares `curl_getinfo` unconditionally
+            // `mixed` - maps a literal `CURLINFO_*` option constant to a
+            // concrete type instead. Scoped to the 2-arg form; a bare
+            // 1-arg `curl_getinfo($ch)` call returns a much bigger "all
+            // components" array shape this project doesn't model, and
+            // falls through to `mixed` unchanged.
             "curl_getinfo" if args.len() == 2 => {
                 if let ExprKind::Name(option_name) = &args[1].value.kind
                     && let Some(ty) =
@@ -1618,31 +1325,24 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
             }
-            // Phase 35 Finding E: the real stub declares `get_class`
-            // unconditionally `string` - real PHPStan's own
-            // GetClassDynamicReturnTypeExtension resolves the return type
-            // from the argument's own class instead, the same
-            // "the correct type lives in a dynamic extension, not the
-            // stub" shape `curl_getinfo`/`json_encode` above already
-            // establish. Scoped to the 1-arg form - the 0-arg form ("the
-            // calling object's own class") was removed in PHP 8. An
-            // argument whose own type isn't a concrete `Object` falls
-            // through to today's plain `string`, unchanged - matching
-            // real PHPStan's own fallback for the same case.
+            // The real stub declares `get_class` unconditionally
+            // `string` - resolves the return type from the argument's
+            // own class instead. Scoped to the 1-arg form; the 0-arg form
+            // ("the calling object's own class") was removed in PHP 8. An
+            // argument whose type isn't a concrete `Object` falls through
+            // to plain `string`, unchanged.
             "get_class" if args.len() == 1 => {
                 if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals) {
                     return Type::ClassString(Box::new(Type::Object(class, Vec::new())));
                 }
             }
-            // Phase 77: `get_called_class()`'s own real stub is
-            // unconditionally `string|false` - real PHPStan's own
-            // `GetCalledClassDynamicReturnTypeExtension` resolves it to
-            // `static::class`'s own type instead (`false` only when
-            // called outside any class). This project doesn't track true
-            // late static binding (`resolve_pseudo` already collapses
-            // `self`/`static` to the same `current_class`, documented on
-            // that function) - `current_class` is exactly that
-            // resolution, same source `self::class`/`static::class`
+            // `get_called_class()`'s stub is unconditionally
+            // `string|false` - resolves to `static::class`'s type instead
+            // (`false` only when called outside any class). This project
+            // doesn't track true late static binding (`resolve_pseudo`
+            // already collapses `self`/`static` to the same
+            // `current_class`) - `current_class` is exactly that
+            // resolution, the same source `self::class`/`static::class`
             // already use.
             "get_called_class" if args.is_empty() => {
                 return match &self.current_class {
@@ -1652,25 +1352,15 @@ impl<'a> Checker<'a> {
                     None => Type::False,
                 };
             }
-            // Phase 77: `get_parent_class($object_or_class)`'s own real
-            // stub is unconditionally `string|false` - real PHPStan's own
-            // `GetParentClassDynamicFunctionReturnTypeExtension` resolves
-            // it from the argument's own class instead, walking its real
-            // `extends` chain (the roadmap's own text additionally cites a
-            // 0-arg "current class context" form real PHPStan also
-            // supports - this project's own vendored stub
-            // (`vendor/phpstorm-stubs/Core/Core.php`) declares
-            // `$object_or_class` with no default, making it a required
-            // parameter here, so a 0-arg call already gets its own
-            // "expects at least 1 argument" diagnostic from `check_args`
-            // independently of this dynamic-return-type refinement; not
-            // worth a redundant, effectively-dead extra match arm for a
-            // shape this project's own stub already rejects). Falls
-            // through to today's plain `string|false` for anything
-            // `find_declared_parent_class` can't answer confidently (an
-            // unknown class, or a class literally declared with no parent
-            // gets a confident `false` instead - see that function's own
-            // doc comment).
+            // `get_parent_class($object_or_class)`'s stub is
+            // unconditionally `string|false` - resolves it from the
+            // argument's own class instead, walking its `extends` chain.
+            // The vendored stub declares `$object_or_class` with no
+            // default, so a 0-arg call already gets its own "expects at
+            // least 1 argument" diagnostic from `check_args`, independent
+            // of this refinement. Falls through to plain `string|false`
+            // for anything `find_declared_parent_class` can't answer
+            // confidently.
             "get_parent_class" if args.len() == 1 => {
                 if let Type::Object(class, _) = self.infer_expr(&args[0].value, locals)
                     && let Some(ty) = self.find_declared_parent_class(&class)
@@ -1678,29 +1368,22 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
             }
-            // Phase 77: `gettype()`'s own real stub is unconditionally
-            // `string` - real PHPStan's own
-            // `GettypeFunctionReturnTypeExtension` maps a concretely-known
-            // argument type to its own exact runtime type-name string
-            // instead (falling back to the full 10-name union only for a
-            // genuinely unknown argument, not worth replicating here -
-            // `gettype_result` below returns `None` for that case,
-            // leaving today's plain `string` unchanged).
+            // `gettype()`'s stub is unconditionally `string` - maps a
+            // concretely-known argument type to its exact runtime
+            // type-name string instead. `gettype_result` returns `None`
+            // for a genuinely unknown argument, leaving plain `string`
+            // unchanged.
             "gettype" if args.len() == 1 => {
                 if let Some(ty) = gettype_result(&self.infer_expr(&args[0].value, locals)) {
                     return ty;
                 }
             }
-            // Phase 77: `get_debug_type()`'s own real stub is
-            // unconditionally `string` - real PHPStan's own
-            // `GetDebugTypeFunctionReturnTypeExtension` maps a
-            // concretely-known argument type to its own exact
-            // `get_debug_type()`-flavored name instead (an object's own
-            // class name only when that class is `final` - a non-final
-            // class's actual runtime value could be any subclass, so its
-            // own real string can't be pinned down any tighter than
-            // `string`, exactly mirroring that real extension's own
-            // `isFinal()` check).
+            // `get_debug_type()`'s stub is unconditionally `string` - maps
+            // a concretely-known argument type to its exact
+            // `get_debug_type()`-flavored name instead: an object's own
+            // class name only when that class is `final`, since a
+            // non-final class's runtime value could be any subclass and
+            // can't be pinned down tighter than `string`.
             "get_debug_type" if args.len() == 1 => {
                 if let Some(ty) =
                     self.get_debug_type_result(&self.infer_expr(&args[0].value, locals))
@@ -1708,18 +1391,13 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
             }
-            // Phase 77: `date()`'s own real stub is unconditionally
-            // `string` - real PHPStan's own `DateFunctionReturnTypeHelper`
-            // observes each format character's own real output by
-            // actually calling PHP's `date()`. Scoped down to a purely
-            // static per-character classification instead (no runtime
-            // date simulation, unlike the DateTime/DOM/SimpleXML cluster
-            // Phase 78 covers) - `date_format_return_type` below only
-            // refines a literal format string composed entirely of
-            // recognized characters; anything else (a non-literal
-            // `$format`, or one containing an escape/punctuation
-            // character this table doesn't classify) falls through to
-            // today's plain `string`, unchanged.
+            // `date()`'s stub is unconditionally `string`. Real PHPStan
+            // observes each format character's real output by actually
+            // calling PHP's `date()`; this instead uses a purely static
+            // per-character classification (`date_format_return_type`
+            // below), refining only a literal format string composed
+            // entirely of recognized characters - anything else falls
+            // through to plain `string`, unchanged.
             "date" if !args.is_empty() => {
                 if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
                     && let Some(ty) = date_format_return_type(&format)
@@ -1727,14 +1405,11 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
             }
-            // Phase 77: `idate()`'s own real stub is unconditionally
-            // `int|false` - real PHPStan's own
-            // `IdateFunctionReturnTypeHelper` maps each single recognized
-            // format character to its own known numeric bound (`IntRange`
-            // is this project's own exact match for that). Scoped to a
-            // literal single-character format string, `idate()`'s only
-            // real accepted shape - anything else falls through to
-            // today's plain `int|false`, unchanged.
+            // `idate()`'s stub is unconditionally `int|false` - maps each
+            // single recognized format character to its known numeric
+            // bound (`IntRange`). Scoped to a literal single-character
+            // format string, `idate()`'s only real accepted shape -
+            // anything else falls through to plain `int|false`, unchanged.
             "idate" if !args.is_empty() => {
                 if let Type::StringLiteral(format) = self.infer_expr(&args[0].value, locals)
                     && let Some(c) = single_char(&format)
@@ -1743,34 +1418,22 @@ impl<'a> Checker<'a> {
                     return Type::IntRange(Some(min), Some(max));
                 }
             }
-            // Phase 77: `pathinfo($path)`'s own real stub is
-            // unconditionally `array` (the 2-arg `$flags` overload is
-            // `array|string`) - real PHPStan's own
-            // `PathinfoFunctionDynamicReturnTypeExtension` gives the
-            // 1-arg form a real shape: `basename`/`filename` always
-            // present, `extension` only when the path actually has one
-            // (simplified here to always-optional, since this project has
-            // no way to know a literal path has a dot in it), and -
-            // confirmed by direct read, not the "always present" this
-            // comment previously (wrongly) claimed - `dirname` itself is
-            // ALSO only unconditionally present when `$path`'s own type is
-            // provably `non-empty-string` (`!$pathType->isNonEmptyString()
-            // ->yes()` as the field's own `$optional` argument); otherwise
-            // it's optional too, since an empty `$path` makes `dirname`
-            // read back as `'.'` - the very definition of a non-empty
-            // string, not an absent offset - which does not contradict a
-            // plain `string`-typed argument's own key being genuinely
-            // *unprovable* either way. Real Piwigo corpus false positive
-            // this fixes: `ImageExtImagick::write`'s own
-            // `isset(pathinfo($path)['dirname'])` guard on a plain
-            // `string`-typed `$path` was flagged `isset.offset` ("always
-            // exists") when real PHPStan would not (its own dirname-
-            // optionality check plainly returns optional for an unproven
-            // `string`). Narrows the 2-arg form down to plain `string` for
-            // a literal single-component `PATHINFO_*` flag (everything but
-            // `PATHINFO_ALL`, which gets the same array shape as the 1-arg
-            // form). A non-literal `$flags` keeps today's `array|string`
-            // union, unchanged.
+            // The real stub is unconditionally `array` (the 2-arg
+            // `$flags` overload is `array|string`) - the 1-arg form gets
+            // a real shape: `basename`/`filename` always present,
+            // `extension` only when the path actually has one (simplified
+            // to always-optional, since this project can't know a
+            // literal path has a dot in it). `dirname` is only
+            // unconditionally present when `$path`'s type is provably
+            // `non-empty-string`; otherwise it's optional too, since an
+            // empty `$path` makes `dirname` read back as `'.'` (a real,
+            // present value, not an absent offset), which doesn't
+            // contradict a plain `string`-typed argument's key being
+            // genuinely unprovable either way. Narrows the 2-arg form
+            // down to plain `string` for a literal single-component
+            // `PATHINFO_*` flag (everything but `PATHINFO_ALL`, which
+            // gets the same array shape as the 1-arg form). A non-literal
+            // `$flags` keeps the `array|string` union, unchanged.
             "pathinfo" if args.len() == 1 => {
                 let path_ty = self.infer_expr(&args[0].value, locals);
                 return pathinfo_array_shape(&path_ty);
@@ -1786,20 +1449,15 @@ impl<'a> Checker<'a> {
                     };
                 }
             }
-            // Phase 77: `parse_url()`'s own real stub is unconditionally
-            // `array|string|int|false|null` - real PHPStan's own
-            // `ParseUrlFunctionDynamicReturnTypeExtension` narrows the
-            // no-`$component`/non-literal-`$component` form down to a
-            // real shape (every URL component optional, since none of
-            // them are guaranteed present) unioned with `false`, and the
-            // literal-`PHP_URL_*`-constant form down to that one
-            // component's own real type. Deliberately skips that real
-            // extension's own literal-`$url`-string special case (letting
-            // Rust's own `url`/regex-free code re-parse a URL exactly the
-            // way PHP's own C implementation does is real, evidenced
-            // complexity `curl_getinfo`/`json_encode` above don't need -
-            // not worth it for one function nothing in this project's own
-            // corpus needs that precision for).
+            // The real stub is unconditionally `array|string|int|false|
+            // null` - narrows the no-`$component`/non-literal-`$component`
+            // form down to a real shape (every URL component optional,
+            // since none are guaranteed present) unioned with `false`,
+            // and the literal-`PHP_URL_*`-constant form down to that
+            // one component's real type. Deliberately skips the literal-
+            // `$url`-string special case: re-parsing a URL exactly the
+            // way PHP's C implementation does isn't worth it for the
+            // precision gained here.
             "parse_url" if args.len() == 1 => {
                 return Type::Union(vec![parse_url_components_array_shape(), Type::False]);
             }
@@ -1811,22 +1469,17 @@ impl<'a> Checker<'a> {
                     return ty;
                 }
             }
-            // Phase 77: `sscanf($string, $format)`'s own real stub is
-            // unconditionally `array|null` - real PHPStan's own
-            // `SscanfFunctionDynamicReturnTypeExtension` walks a literal
-            // `$format` string's own `%`-specifiers (`%d`, `%5s`, ...) and
-            // builds one array field per specifier, each typed by its own
-            // conversion character (numeric conversions become `int`/
-            // `float`; anything else stays `string`, refined by any
-            // explicit field-width digits the same way that real
-            // extension's own length-based accessory choice does) -
-            // always nullable per element (a real trailing unmatched
-            // specifier leaves that slot `null`) and the whole array
-            // nullable too (a total match failure). Scoped to the 2-arg
-            // form (the 3+-arg by-reference-`$vars` form returns `int|
-            // null` instead, a materially different shape not modeled
-            // here) - a non-literal or entirely-unrecognized `$format`
-            // falls through to today's plain `array|null`, unchanged.
+            // `sscanf($string, $format)`'s stub is unconditionally
+            // `array|null` - walks a literal `$format` string's
+            // `%`-specifiers (`%d`, `%5s`, ...) and builds one array field
+            // per specifier, each typed by its conversion character
+            // (numeric conversions become `int`/`float`; anything else
+            // stays `string`) - always nullable per element (a trailing
+            // unmatched specifier leaves that slot `null`) and the whole
+            // array nullable too (a total match failure). Scoped to the
+            // 2-arg form; the 3+-arg by-reference-`$vars` form returns
+            // `int|null` instead, a materially different shape not
+            // modeled here.
             "sscanf" if args.len() == 2 => {
                 if let Type::StringLiteral(format) = self.infer_expr(&args[1].value, locals)
                     && let Some(fields) = sscanf_result_fields(&format)
@@ -1834,44 +1487,29 @@ impl<'a> Checker<'a> {
                     return Type::Union(vec![Type::ArrayShape(fields), Type::Null]);
                 }
             }
-            // Phase 77: `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()`
-            // share one real per-key shape (real PHPStan's own
-            // `StatDynamicReturnTypeExtension` covers exactly this set) -
-            // their own real stubs are unconditionally `array` (`fstat`)
-            // or `array|false`, discarding the real fixed 13-key shape
-            // (`dev`/`ino`/`mode`/... , every value an `int`) every one of
-            // them actually returns. `dio_stat()` shares the same shape
-            // under different key names (real PHPStan's own separate
-            // `DioStatDynamicFunctionReturnTypeExtension`), nullable
-            // rather than `false`-able on failure.
+            // `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()` share one
+            // real per-key shape - their stubs are unconditionally
+            // `array` (`fstat`) or `array|false`, discarding the fixed
+            // 13-key shape (`dev`/`ino`/`mode`/..., every value an `int`)
+            // every one of them actually returns. `dio_stat()` shares the
+            // same shape under different key names, nullable rather than
+            // `false`-able on failure.
             "stat" | "lstat" | "fstat" | "ssh2_sftp_stat" if args.len() == 1 => {
                 return Type::Union(vec![stat_array_shape(), Type::False]);
             }
             "dio_stat" if args.len() == 1 => {
                 return Type::Union(vec![dio_stat_array_shape(), Type::Null]);
             }
-            // Phase 77: `hash_algos()`/`openssl_get_cipher_methods()`/
-            // `mb_list_encodings()`'s own real stubs are unconditionally
-            // a bare `array` - real PHPStan doesn't type these calls
-            // themselves any more precisely either; its own
-            // `HashFunctionsReturnTypeExtension`/`OpenSslCipherMethods
-            // Provider`/`MbFunctionsReturnTypeExtensionTrait` instead
-            // call them for real at PHPStan's own analysis time to build
-            // a live allowlist validating *other* functions' string
-            // arguments against the actual host's installed algorithms/
-            // ciphers/encodings (`hash($algo, ...)`,
-            // `openssl_encrypt($data, $cipher, ...)`, `mb_convert_
-            // encoding($str, $to, ...)`) - a fundamentally different,
-            // heavier mechanism than a per-function return-type refinement,
-            // and one this project has no way to replicate without a
-            // hardcoded, platform/PHP-version-fragile literal snapshot
-            // (this static binary can't shell out to a live PHP+OpenSSL+
-            // mbstring build the way PHPStan's own PHP-hosted analysis
-            // does). What's implemented here is only the roadmap's other,
-            // genuinely static half: each of these three calls' own
-            // return value really is always a non-empty list of non-empty
-            // strings, real, evidenced information today's bare `array`
-            // throws away regardless of host/version.
+            // `hash_algos()`/`openssl_get_cipher_methods()`/
+            // `mb_list_encodings()`'s stubs are unconditionally a bare
+            // `array`. Real PHPStan calls these for real at analysis time
+            // to build a live allowlist against the host's installed
+            // algorithms/ciphers/encodings - a heavier mechanism this
+            // static binary can't replicate without shelling out to a
+            // live PHP build. What's implemented here is only the
+            // genuinely static half: each call's return value really is
+            // always a non-empty list of non-empty strings, regardless of
+            // host/version.
             "hash_algos" | "openssl_get_cipher_methods" | "mb_list_encodings"
                 if args.is_empty() =>
             {
@@ -1883,15 +1521,13 @@ impl<'a> Checker<'a> {
         self.infer_call_return_type(sig, &resolved, locals)
     }
 
-    /// `get_parent_class`'s own real per-class answer: `class`'s
-    /// registered `extends` chain gives a real, evidenced answer either
-    /// way - a real parent (`class-string<Parent>`) or a real "no parent"
-    /// (`false`, since a class with a known, empty `extends` genuinely has
-    /// none). `None` only for a class this registry has no entry for at
-    /// all (an external/unstubbed class) - there real PHPStan itself
-    /// stays uncertain (`class-string|false`), so this project's own
-    /// "don't guess" convention leaves today's plain `string|false`
-    /// unchanged rather than picking one side of that uncertainty.
+    /// `get_parent_class`'s per-class answer: `class`'s registered
+    /// `extends` chain gives an evidenced answer either way - a real
+    /// parent (`class-string<Parent>`) or a real "no parent" (`false`,
+    /// since a class with a known, empty `extends` genuinely has none).
+    /// `None` only for a class this registry has no entry for at all,
+    /// where the "don't guess" convention leaves plain `string|false`
+    /// unchanged rather than picking a side.
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
         let info = self.registry.classes.get(class)?;
         Some(match info.extends.first() {
@@ -1900,29 +1536,23 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// `get_debug_type()`'s own object case: a `final` class's own real
-    /// instances can only ever be that exact class (never a subclass, by
-    /// definition), so its own name is the one real, exact answer - a
-    /// non-`final` class's own real instance could be any subclass at
-    /// runtime, so the tightest honest answer stays plain `string` (real
-    /// PHPStan's own `GetDebugTypeFunctionReturnTypeExtension` makes this
-    /// exact same `isFinal()` distinction). A class this registry has no
-    /// entry for at all (external/unstubbed) is treated the same as
-    /// non-`final` - real PHPStan itself can't assume a class it hasn't
-    /// reflected is sealed either.
+    /// `get_debug_type()`'s object case: a `final` class's instances can
+    /// only ever be that exact class, so its name is the exact answer; a
+    /// non-`final` class's instance could be any subclass at runtime, so
+    /// the tightest honest answer stays plain `string`. A class this
+    /// registry has no entry for at all is treated the same as non-`final`.
     fn get_debug_type_result(&self, ty: &Type) -> Option<Type> {
         get_debug_type_for(ty, self.registry)
     }
 
-    /// Phase 74: the shared three-way split every internal-array-pointer
-    /// function's own return type follows - a provably empty `arr_ty`
-    /// always just reports `empty_marker` (`false` for `reset`/
-    /// `current`/`end`/`next`/`prev`, `null` for `key`/`array_key_first`/
-    /// `array_key_last`); a provably non-empty one reports the bare
-    /// `result_ty` (the element or key type) *unless* `force_union` -
+    /// The shared three-way split every internal-array-pointer function's
+    /// return type follows - a provably empty `arr_ty` always reports
+    /// `empty_marker` (`false` for `reset`/`current`/`end`/`next`/`prev`,
+    /// `null` for `key`/`array_key_first`/`array_key_last`); a provably
+    /// non-empty one reports the bare `result_ty` unless `force_union` -
     /// `next`/`prev` alone set it, since moving the pointer can run off
-    /// either end regardless of how many elements exist; anything else
-    /// (emptiness genuinely unknown) unions the two.
+    /// either end regardless of element count; anything else unions the
+    /// two.
     pub(crate) fn array_pointer_result(
         arr_ty: &Type,
         result_ty: Type,
@@ -1938,17 +1568,13 @@ impl<'a> Checker<'a> {
         union_types(result_ty, empty_marker)
     }
 
-    /// Phase 69: `PrintfParametersRule`'s own by-ref-output-variable-count
-    /// half, ported for `sscanf`/`fscanf`'s 3+-arg form (`sscanf($s, $fmt,
-    /// &$a, &$b, ...)`) - distinct from the already-shipped 2-arg
-    /// return-array form (`sscanf_result_fields`, used by
-    /// `infer_builtin_call_return_type`), which this deliberately never
-    /// touches (`args.len() >= 3` here vs. `== 2` there). Reuses
-    /// `parse_sscanf_format` (already hand-ported from real PHPStan's own
-    /// `SscanfFunctionDynamicReturnTypeExtension` regex for the 2-arg
-    /// form) as a faithful placeholder-count source, rather than
-    /// reimplementing real PHPStan's own live-`sscanf()`-shell-out
-    /// counting technique this project has no PHP runtime for.
+    /// `PrintfParametersRule`'s by-ref-output-variable-count half, for
+    /// `sscanf`/`fscanf`'s 3+-arg form (`sscanf($s, $fmt, &$a, &$b, ...)`),
+    /// distinct from the 2-arg return-array form (`sscanf_result_fields`,
+    /// used by `infer_builtin_call_return_type`), which this never
+    /// touches. Reuses `parse_sscanf_format` as a placeholder-count
+    /// source, rather than reimplementing real PHPStan's live-`sscanf()`-
+    /// shell-out counting, which this project has no PHP runtime for.
     pub(crate) fn check_scanf_argument_count(
         &mut self,
         name: &str,
@@ -1980,16 +1606,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 71: `FilterVarRule`'s own `filterVar.nullOnFailureAndThrowOnFailure`
-    /// check - `FILTER_NULL_ON_FAILURE` and `FILTER_THROW_ON_FAILURE`
-    /// (PHP 8.5+) are mutually exclusive `filter_var()`/`filter_input()`
-    /// flags; real PHP itself doesn't error, but the combination is
-    /// nonsensical (the failure can't simultaneously become `null` and
-    /// throw), so real PHPStan flags it unconditionally. Gated on a
-    /// configured `php_version` the same way `check_declared_purity_tag`'s
-    /// sibling version-gated checks already are - with no version
-    /// configured, this stays silent rather than assume PHP 8.5 is
-    /// intended.
+    /// Mirrors real PHPStan's `FilterVarRule`'s
+    /// `filterVar.nullOnFailureAndThrowOnFailure` check -
+    /// `FILTER_NULL_ON_FAILURE` and `FILTER_THROW_ON_FAILURE` (PHP 8.5+)
+    /// are mutually exclusive flags; real PHP doesn't error, but the
+    /// combination is nonsensical. Gated on a configured `php_version` -
+    /// with none configured, this stays silent rather than assume PHP 8.5
+    /// is intended.
     pub(crate) fn check_filter_var_flag_conflict(&mut self, args: &[Arg], span: Span, label: &str) {
         let Some(version) = self.registry.php_version else {
             return;
@@ -2013,18 +1636,15 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 75: shared by every `StrCaseFunctionsReturnTypeExtension`-
-    /// backed builtin (`strtolower`/`strtoupper`/`lcfirst`/`ucfirst` and
-    /// their `mb_` siblings, plus `mb_convert_case`) - a real port of
-    /// that extension's own two-tier algorithm: constant-fold a literal
-    /// argument outright (ASCII-only case flip, matching PHP 8.2+'s own
-    /// locale-independent semantics), otherwise compose the matching
-    /// case accessory (`force_lower`/`force_upper` always applies it;
-    /// `keep_lower`/`keep_upper` only when the argument already provably
-    /// carries it) with whatever numeric/non-falsy/non-empty accessory
-    /// the argument's own type already carries - unconditionally, not
-    /// gated on the literal-fold path succeeding, exactly mirroring the
-    /// real extension's own always-run second half.
+    /// Shared by every case-conversion builtin (`strtolower`/`strtoupper`/
+    /// `lcfirst`/`ucfirst` and their `mb_` siblings, plus
+    /// `mb_convert_case`): constant-folds a literal argument outright
+    /// (ASCII-only case flip, matching PHP 8.2+'s locale-independent
+    /// semantics), otherwise composes the matching case accessory
+    /// (`force_lower`/`force_upper` always applies it; `keep_lower`/
+    /// `keep_upper` only when the argument already provably carries it)
+    /// with whatever numeric/non-falsy/non-empty accessory the argument's
+    /// type already carries.
     fn infer_case_function_call(
         &self,
         arg: &Expr,
@@ -2095,17 +1715,13 @@ fn uppercase_first_char(s: &str) -> String {
     }
 }
 
-/// Phase 75: `mb_convert_case`'s own real `$mode` resolution
-/// (`StrCaseFunctionsReturnTypeExtension.php:82-106`) - derives the same
-/// four force/keep-lowercase/uppercase booleans every other case
-/// function above already has, from whichever `MB_CASE_*` constant
-/// value(s) `mode_ty` resolves to (a bare `Type::IntLiteral` for the
-/// overwhelmingly common single-constant call, or a `Union` of them for
-/// a conditional/computed mode - `real` PHPStan's own `TypeUtils::
-/// getConstantIntegers` collects from a `Union` the identical way).
+/// `mb_convert_case`'s `$mode` resolution - derives the same four
+/// force/keep-lowercase/uppercase booleans every other case function
+/// above has, from whichever `MB_CASE_*` constant value(s) `mode_ty`
+/// resolves to (a bare `Type::IntLiteral` for the common single-constant
+/// call, or a `Union` for a conditional/computed mode).
 /// `MB_CASE_FOLD`/`MB_CASE_FOLD_SIMPLE` (`3`/`7`) count toward `keep_*`
-/// but not `force_*`, matching the real extension's own `array_diff`
-/// membership checks exactly.
+/// but not `force_*`.
 fn mb_convert_case_flags(mode_ty: &Type) -> (bool, bool, bool, bool) {
     let modes = collect_int_literals(mode_ty);
     if modes.is_empty() {
@@ -2132,11 +1748,10 @@ fn is_var_named(e: &Expr, name: &str) -> bool {
 }
 
 /// Whether `ty` is a literal `Type::ArrayShape`, or an `Intersection`
-/// wrapping one (the accessory-marker-plus-shape combination `array_ops.rs`'s
-/// own `infer_array_literal_type` produces) - `array_keys()`'s own key-type
-/// propagation trusts `array_key_type`'s result only for this shape, not
-/// for a plain `Type::Array` (see that call site's own doc comment for
-/// why).
+/// wrapping one (the accessory-marker-plus-shape combination
+/// `array_ops.rs`'s `infer_array_literal_type` produces) - `array_keys()`'s
+/// key-type propagation trusts `array_key_type`'s result only for this
+/// shape, not for a plain `Type::Array` (see that call site's doc comment).
 fn is_or_wraps_array_shape(ty: &Type) -> bool {
     matches!(ty, Type::ArrayShape(_))
         || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::ArrayShape(_))))
@@ -2146,13 +1761,11 @@ fn is_null_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Null))
 }
 
-/// Recognizes exactly the callback shape real PHPStan's own
-/// `array_filter` extension does for an explicit null check: `fn ($v) =>
-/// $v !== null` (or `null !== $v`), as an arrow function or a closure
-/// whose only statement is the equivalent `return` - verified via
-/// dumpType(). Deliberately narrow, matching this project's own "verify
-/// the exact shape, then implement exactly that" convention rather than
-/// a general boolean-expression evaluator.
+/// Recognizes exactly the callback shape real PHPStan's `array_filter`
+/// extension does for an explicit null check: `fn ($v) => $v !== null`
+/// (or `null !== $v`), as an arrow function or a closure whose only
+/// statement is the equivalent `return`. Deliberately narrow, not a
+/// general boolean-expression evaluator.
 fn is_null_filter_callback(e: &Expr) -> bool {
     fn is_not_null_check(body: &Expr, param: &str) -> bool {
         matches!(&body.kind, ExprKind::Binary(BinOp::NotIdentical, l, r)
@@ -2173,11 +1786,10 @@ fn is_null_filter_callback(e: &Expr) -> bool {
     }
 }
 
-/// `array_filter`'s own explicit-null-filter callback (recognized by
+/// `array_filter`'s explicit-null-filter callback (recognized by
 /// `is_null_filter_callback` above) strips `Null` from the retained
 /// element type, not just the accessory markers every `array_filter`
-/// call already loses (`strip_accessory_markers`) - verified via
-/// dumpType().
+/// call already loses (`strip_accessory_markers`).
 fn strip_null_from_array_element(ty: Type) -> Type {
     match ty {
         Type::Array(key, elem) => {
@@ -2187,13 +1799,10 @@ fn strip_null_from_array_element(ty: Type) -> Type {
     }
 }
 
-/// Recognizes real PHPStan's own other recognized `array_filter` callback
-/// shape: `fn ($v): bool => $v instanceof Target` (or the equivalent
-/// single-statement closure) - returns `Target`'s own raw name string,
-/// for the caller to resolve. Shares `is_not_null_check`'s own
-/// arrow-fn/closure traversal shape via a local nested helper, same
-/// narrow, "verify the exact shape" scope as `is_null_filter_callback`
-/// above.
+/// Recognizes real PHPStan's other `array_filter` callback shape:
+/// `fn ($v): bool => $v instanceof Target` (or the equivalent
+/// single-statement closure) - returns `Target`'s raw name string, for
+/// the caller to resolve.
 fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
     fn as_instanceof_class<'a>(body: &'a Expr, param: &str) -> Option<&'a str> {
         match &body.kind {
@@ -2227,17 +1836,14 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
 /// predicate (`TagService::buildTagList`'s own `array_filter
 /// ($altNamesEvent->value, is_string(...))`) - verified via `dumpType()`
 /// that real PHPStan narrows the retained element type to exactly that
-/// type, the same way `is_instanceof_filter_callback` above already
-/// narrows to a class. Deliberately scoped to the handful of PHP's
-/// `is_*` predicates with an exact, unambiguous 1:1 `Type` mapping
-/// already in this project (`is_array`/`is_object`/`is_callable`/
-/// `is_numeric`/`is_scalar`/`is_iterable` all narrow to something wider
-/// than a single `Type` variant - a real, disclosed gap, not attempted
-/// here). Recognizes the first-class-callable form (`is_string(...)`,
-/// the actual corpus shape) alongside the same arrow-fn/closure
-/// wrapping shapes `is_instanceof_filter_callback` already handles, for
-/// consistency - `fn ($v) => is_string($v)` and the equivalent
-/// single-statement closure.
+/// type, the same way `is_instanceof_filter_callback` above narrows to a
+/// class. Deliberately scoped to the handful of PHP's `is_*` predicates
+/// with an exact, unambiguous 1:1 `Type` mapping already in this project
+/// (`is_array`/`is_object`/`is_callable`/`is_numeric`/`is_scalar`/
+/// `is_iterable` all narrow to something wider than a single `Type`
+/// variant, not attempted here). Recognizes the first-class-callable form
+/// (`is_string(...)`) alongside the same arrow-fn/closure wrapping shapes
+/// `is_instanceof_filter_callback` handles, for consistency.
 fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
     fn type_for_predicate(name: &str) -> Option<Type> {
         match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
@@ -2285,40 +1891,15 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
     }
 }
 
-/// Whether `target` (a bare `PREG_*`-style constant name) appears
-/// anywhere in `e`'s own `BitOr`/`Grouping` chain - a lenient scan,
-/// unlike `parse_preg_flags`'s own stricter "every leaf must be a
-/// recognized name" requirement: an unrecognized flag alongside
-/// `target` doesn't change what this is used for (`preg_split`'s own
-/// list-ness/non-emptiness), so there's no need to reject the whole
-/// expression over one, just answer "is `target` definitely one of
-/// them" for whatever it does recognize.
-/// Phase 76: `filter_var()`'s own `FILTER_VALIDATE_*` half of real
-/// PHPStan's `FilterFunctionReturnTypeHelper::getFilterTypeMap()` -
-/// deliberately excludes every `FILTER_SANITIZE_*` constant (they all
-/// map to plain `string`, exactly what the generic stub already
-/// declares, so there'd be nothing to gain by special-casing them) and
-/// `FILTER_DEFAULT`/`FILTER_UNSAFE_RAW` (real PHPStan's own logic for
-/// those depends on the *input* value's own type, not just the filter
-/// constant - genuinely more than this narrow slice attempts).
-/// Phase 76 follow-up: `flags_ty`'s own `'options'` key, if `flags_ty` is
-/// a real, literal array shape (`['options' => [...], ...]`) whose
-/// `'options'` value is itself a literal array shape - anything else
-/// (a dynamic/non-constant `options` value, or no `options` key at all)
-/// returns `None`, matching real PHPStan's own `getOptions()` "not a
-/// constant array -> no options recognized" leniency rather than
-/// guessing.
-/// Phase 76: the shared core of `filter_var`'s/`filter_input`'s own
-/// return-type inference - everything real PHPStan's own
-/// `FilterFunctionReturnTypeHelper::getType()` computes *before* the
-/// final union with the "validation failed" fallback, so each caller can
-/// apply the union/array-wrap logic appropriate to its own shape without
-/// duplicating the option-parsing. Returns `None` when `filter_name`
-/// isn't a literal `FILTER_VALIDATE_*` constant this project models at
-/// all (a computed filter value, a sanitize filter, `FILTER_DEFAULT` -
-/// real PHPStan's own logic for the latter two depends on the *input*
-/// value's own type, not just the filter constant, genuinely more than
-/// this slice attempts).
+/// The shared core of `filter_var`'s/`filter_input`'s return-type
+/// inference - everything computed before the final union with the
+/// "validation failed" fallback, so each caller can apply the union/
+/// array-wrap logic appropriate to its own shape without duplicating the
+/// option-parsing. Returns `None` when `filter_name` isn't a literal
+/// `FILTER_VALIDATE_*` constant this project models (a computed filter
+/// value, a sanitize filter, `FILTER_DEFAULT` - real PHPStan's logic for
+/// the latter two depends on the input value's own type, not just the
+/// filter constant).
 ///
 /// `(element_ty, fallback, throw_on_failure)`: `element_ty` is the
 /// successfully-validated value's own type (already `min_range`/
@@ -2350,18 +1931,12 @@ fn filter_validate_result(
     if !flags_is_options_array {
         return Some((base_ty, implicit_fallback, throw_on_failure));
     }
-    // A literal `['options' => ...]` shape whose own `'options'` value
-    // isn't itself a literal array (a real corpus shape: `['options' =>
-    // $dynamic]`) is genuinely un-analyzable - real PHPStan's own
-    // leniency here (`$hasOptions->maybe()` in `getType()`) still
-    // contributes *something* (folds back to the plain, options-free
-    // case), but this project's own `filter_var`/`filter_input` callers
-    // both want a much stronger "too complicated, give up on the whole
-    // call" signal instead: a `None` here, not `Some((base_ty, ...))`,
-    // is what lets them fall through to their own generic stub-type
-    // path. Distinct from "no `'options'` key was ever written at all"
-    // (the ordinary flags-only call, `filter_var($x, F, FILTER_FLAG)`),
-    // which correctly keeps using the plain per-filter base type below.
+    // A literal `['options' => ...]` shape whose 'options' value isn't
+    // itself a literal array is genuinely un-analyzable - callers want a
+    // "too complicated, give up on the whole call" signal (`None`), not
+    // `Some((base_ty, ...))`. Distinct from no 'options' key being
+    // written at all (the ordinary flags-only call), which correctly
+    // keeps using the plain per-filter base type below.
     let flags_ty_ref = flags_ty.expect("flags_is_options_array implies Some");
     let fields = filter_var_options_fields(flags_ty_ref);
     if fields.is_none()
@@ -2374,10 +1949,9 @@ fn filter_validate_result(
         return Some((base_ty, implicit_fallback, throw_on_failure));
     };
     let fallback = filter_var_option(fields, "default").unwrap_or(implicit_fallback);
-    // Real PHPStan's own `getFilterTypeOptions()`: only `FILTER_VALIDATE_
-    // INT` gets `min_range`/`max_range` treatment - `FILTER_VALIDATE_
-    // FLOAT` is deliberately excluded there too ("PHPStan does not yet
-    // support FloatRangeType"), and neither does this project.
+    // Only `FILTER_VALIDATE_INT` gets `min_range`/`max_range` treatment -
+    // `FILTER_VALIDATE_FLOAT` is excluded too, matching real PHPStan
+    // ("PHPStan does not yet support FloatRangeType").
     let element_ty = if filter_name == "FILTER_VALIDATE_INT" {
         let min = filter_var_option(fields, "min_range")
             .and_then(|t| int_range_bounds(&t))
@@ -2407,9 +1981,8 @@ fn filter_var_options_fields(flags_ty: &Type) -> Option<&Vec<(String, Type, bool
     }
 }
 
-/// One named option's own value type (`'default'`/`'min_range'`/
-/// `'max_range'`) out of an already-extracted `filter_var_options_fields`
-/// result.
+/// One named option's value type (`'default'`/`'min_range'`/`'max_range'`)
+/// out of an already-extracted `filter_var_options_fields` result.
 fn filter_var_option(fields: &[(String, Type, bool)], name: &str) -> Option<Type> {
     fields
         .iter()
@@ -2423,9 +1996,9 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
         "FILTER_VALIDATE_INT" => Some(Type::Int),
         "FILTER_VALIDATE_FLOAT" => Some(Type::Float),
         "FILTER_VALIDATE_DOMAIN" | "FILTER_VALIDATE_REGEXP" => Some(Type::String),
-        // Real PHPStan's own map: these three can never come back as the
-        // empty string on success (a validated IP/email/MAC address is
-        // never `''`), so it's `non-falsy-string`, not plain `string`.
+        // These can never come back as the empty string on success (a
+        // validated IP/email/MAC address is never `''`), so it's
+        // `non-falsy-string`, not plain `string`.
         "FILTER_VALIDATE_IP"
         | "FILTER_VALIDATE_EMAIL"
         | "FILTER_VALIDATE_MAC"
@@ -2437,6 +2010,12 @@ fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
     }
 }
 
+/// Whether `target` (a bare `PREG_*`-style constant name) appears anywhere
+/// in `e`'s `BitOr`/`Grouping` chain - a lenient scan, unlike
+/// `parse_preg_flags`'s stricter "every leaf must be a recognized name"
+/// requirement: an unrecognized flag alongside `target` doesn't change
+/// what this is used for, so it just answers "is `target` definitely one
+/// of them" for whatever it does recognize.
 pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
     match &e.kind {
         ExprKind::Name(name) => name.trim_start_matches('\\') == target,
@@ -2449,13 +2028,11 @@ pub(crate) fn contains_flag_name(e: &Expr, target: &str) -> bool {
 }
 
 /// `contains_flag_name`, additionally looking inside an options-array
-/// literal's own `'flags'` key (`filter_var($x, F, ['flags' => FILTER_X,
-/// 'options' => [...]])`) - the canonical spelling real PHPStan's own
-/// PHP 8.5 test fixture uses for `FILTER_THROW_ON_FAILURE`. Used by
-/// `check_filter_var_flag_conflict`; deliberately not folded into
+/// literal's `'flags'` key (`filter_var($x, F, ['flags' => FILTER_X,
+/// 'options' => [...]])`) - the spelling real PHPStan's PHP 8.5 test
+/// fixture uses for `FILTER_THROW_ON_FAILURE`. Not folded into
 /// `contains_flag_name` itself, which stays a narrow bitwise-or-chain
-/// scan for its own, unrelated call sites (min/max_range and friends
-/// never appear inside a `BitOr` chain the way a flag constant does).
+/// scan for its unrelated call sites.
 fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
     if contains_flag_name(e, target) {
         return true;
@@ -2475,9 +2052,9 @@ fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
     false
 }
 
-/// `array_filter`'s own `instanceof`-filter callback (recognized by
+/// `array_filter`'s `instanceof`-filter callback (recognized by
 /// `is_instanceof_filter_callback` above) narrows the retained element
-/// type to `target` specifically - verified via dumpType().
+/// type to `target` specifically.
 fn narrow_array_element_type_to(registry: &Registry, ty: Type, target: &Type) -> Type {
     match ty {
         Type::Array(key, elem) => {
@@ -2487,24 +2064,18 @@ fn narrow_array_element_type_to(registry: &Registry, ty: Type, target: &Type) ->
     }
 }
 
-/// `array_filter($x)` with no callback at all - real PHP's own default,
-/// dropping every falsy element - shares the exact same falsy-exclusion
-/// rule `!empty($x)`'s own narrowing already uses, verified via
-/// dumpType().
+/// `array_filter($x)` with no callback at all - real PHP's default,
+/// dropping every falsy element - shares the same falsy-exclusion rule
+/// `!empty($x)`'s narrowing already uses.
 fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
     match ty {
         Type::Array(key, elem) => Type::Array(key, Box::new(narrow_type_excluding_falsy(&elem))),
         // A fixed-position `ArrayShape` input needs the identical
         // narrowing applied per field, not just per homogeneous element
         // type - real PHP's no-callback filtering can drop a specific
-        // field entirely (not just narrow its type in place) when it's
-        // provably always-falsy, and can no longer *guarantee* a field's
-        // presence when it's merely *possibly* falsy. Real corpus false
-        // positive this fixes: `array_filter([$sourceId, $copyId])`
-        // (`$copyId: ?GroupId`) passed to a `list<GroupId>`-typed
-        // parameter - field `1`'s `null` member drops it from the shape
-        // when null, so it becomes optional rather than staying
-        // unconditionally required as `GroupId|null`.
+        // field entirely when it's provably always-falsy, and can no
+        // longer guarantee a field's presence when it's merely possibly
+        // falsy.
         Type::ArrayShape(fields) => Type::ArrayShape(
             fields
                 .into_iter()
@@ -2539,24 +2110,15 @@ fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
     }
 }
 
-/// Phase 14: drops any `Accessory` marker from `ty`, collapsing an
-/// Intersection back to its own plain base - used by array functions
-/// that can't guarantee they preserve list-ness/non-emptiness
-/// (`array_filter`/`array_combine`/`array_unique`).
+/// Drops any `Accessory` marker from `ty`, collapsing an Intersection
+/// back to its own plain base - used by array functions that can't
+/// guarantee they preserve list-ness/non-emptiness (`array_filter`/
+/// `array_combine`/`array_unique`).
 ///
-/// Phase 68 corpus find: a `Union` branch of `ty` (e.g. `non-empty-
-/// list<T>|array{}` - the real shape a loop-conditionally-appended
-/// array literal gets, one branch for "at least one append happened,"
-/// one for "zero iterations") used to fall straight to the `other => ty`
-/// case below untouched, silently leaving every member's own `Accessory`
-/// marker in place - only a *bare* `Intersection` at the very top level
-/// ever got stripped. Found via a real corpus false positive:
-/// `array_values(array_filter($imageIds, is_string(...)))` flagged as a
-/// no-op (`arrayValues.list`) because `array_filter`'s own 2-argument,
-/// non-null/non-instanceof-callback case (which calls this expecting
-/// list-ness genuinely gone) left the input's `non-empty-list<T>|
-/// array{}` completely unstripped, so `array_values`'s own `is_list_like`
-/// still saw it as list-shaped.
+/// Recurses into a `Union` branch of `ty` (e.g. `non-empty-list<T>|
+/// array{}` - the shape a loop-conditionally-appended array literal
+/// gets), not just a bare top-level `Intersection` - otherwise every
+/// member's `Accessory` marker survives unstripped.
 fn strip_accessory_markers(ty: Type) -> Type {
     match ty {
         Type::Intersection(members) => members
@@ -2572,21 +2134,18 @@ fn strip_accessory_markers(ty: Type) -> Type {
     }
 }
 
-/// Phase 14: rewraps `mapped_elem` in whatever `Accessory` markers
-/// `input_ty` had - list-ness/non-emptiness are unaffected by mapping/
-/// slicing/reversing with default arguments (none of which change key
-/// structure or element count) - used by `array_map`/`array_slice`/
-/// `array_reverse`'s own "preserve the input's own markers" cases.
+/// Rewraps `mapped_elem` in whatever `Accessory` markers `input_ty` had -
+/// list-ness/non-emptiness are unaffected by mapping/slicing/reversing
+/// with default arguments, none of which change key structure or element
+/// count - used by `array_map`/`array_slice`/`array_reverse`'s "preserve
+/// the input's own markers" cases.
 ///
-/// A Piwigo-corpus round found `input_ty` arriving here as a `Union` just
-/// as often as an `Intersection` - `$x = []; if (...) { foreach (...) {
-/// $x[] = ...; } }` control-flow-merges to `array{}|list<T>`, which is
-/// still every bit as list-like as a bare `list<T>` (`Checker::is_list_like`
-/// already recognizes this exact shape), but the original `Intersection`-
-/// only match silently dropped both markers the moment the input came from
-/// a merge rather than a single literal/return - verified via a direct
-/// repro (`array_map` over such a variable losing `list<>`-ness on its
-/// result).
+/// Also handles `input_ty` arriving as a `Union` rather than an
+/// `Intersection` - `$x = []; if (...) { foreach (...) { $x[] = ...; } }`
+/// control-flow-merges to `array{}|list<T>`, which is still every bit as
+/// list-like as a bare `list<T>` (`Checker::is_list_like` recognizes this
+/// shape), so it must not be dropped just because it came from a merge
+/// rather than a single literal/return.
 fn rewrap_with_accessory_markers(mapped_elem: Type, input_ty: &Type) -> Type {
     match input_ty {
         Type::Intersection(members) => {
@@ -2648,16 +2207,13 @@ fn strip_array_member(ty: Type) -> Type {
     }
 }
 
-/// The `json_encode`/Finding J counterpart of `strip_array_member` above -
-/// identical shape, filtering `Type::False` instead of `Array`/`ArrayShape`.
-/// Phase 76 Sub-item B follow-up: generalized from the original `strip_
-/// false_member` (still the exact behavior at `target: &Type::False`) -
-/// removes every occurrence of `target` from `ty`, collapsing an
-/// emptied/singleton union the same way. Used both by `json_encode`'s
-/// own `JSON_THROW_ON_ERROR` narrowing and `filter_var`'s/`filter_input`'s
-/// own `FILTER_THROW_ON_FAILURE` narrowing - the same "the failure-
-/// fallback member is definitely gone once the call is guaranteed to
-/// throw instead" shape, one member kind over.
+/// The counterpart of `strip_array_member` above, for an arbitrary
+/// `target` member instead of `Array`/`ArrayShape` - removes every
+/// occurrence of `target` from `ty`, collapsing an emptied/singleton
+/// union the same way. Used by both `json_encode`'s `JSON_THROW_ON_ERROR`
+/// narrowing and `filter_var`'s/`filter_input`'s `FILTER_THROW_ON_FAILURE`
+/// narrowing: the failure-fallback member is definitely gone once the
+/// call is guaranteed to throw instead.
 fn strip_type_member(ty: Type, target: &Type) -> Type {
     match ty {
         Type::Union(members) => {
@@ -2690,17 +2246,10 @@ fn contains_json_throw_on_error(e: &Expr) -> bool {
     }
 }
 
-/// `curl_getinfo($ch, CONSTANT)`'s own real per-option return type - Phase
-/// 34 Finding A originally curated ~20 of real PHPStan's own ~73-entry
-/// `CurlGetinfoFunctionDynamicReturnTypeExtension` table (only the
-/// constants this project's own verification corpus evidenced at the
-/// time); Phase 77 transcribes the rest of that real table verbatim
-/// (checked directly against
-/// `vendor/phpstan-src/src/Type/Php/CurlGetinfoFunctionDynamicReturnTypeExtension.php`),
-/// including its RTSP/proxy/microsecond/bignum/`_T`-suffixed variants.
-/// `None` for anything else (there is no real `CURLINFO_*` constant left
-/// uncovered) falls through to this project's existing generic (`mixed`)
-/// behavior, unchanged.
+/// `curl_getinfo($ch, CONSTANT)`'s per-option return type, transcribed
+/// from real PHPStan's `CurlGetinfoFunctionDynamicReturnTypeExtension`
+/// table, including its RTSP/proxy/microsecond/bignum/`_T`-suffixed
+/// variants. `None` falls through to the generic `mixed` behavior.
 fn curl_getinfo_component_type(name: &str) -> Option<Type> {
     let string_false = Type::Union(vec![Type::String, Type::False]);
     let int_false = Type::Union(vec![Type::Int, Type::False]);
@@ -2798,10 +2347,9 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
     })
 }
 
-/// `get_debug_type()`'s object case - shared free function (not a
-/// `Checker` method) so `Checker::get_debug_type_result`'s own union
-/// handling below can call it once per member without fighting the
-/// borrow checker over `&self`.
+/// `get_debug_type()`'s object case - a free function, not a `Checker`
+/// method, so `Checker::get_debug_type_result`'s union handling can call
+/// it once per member without fighting the borrow checker over `&self`.
 fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
     match ty {
         Type::Null => Some(Type::StringLiteral("null".to_string())),
@@ -2823,10 +2371,10 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
                 Type::String
             },
         ),
-        // Phase 79: an enum is always implicitly final (real PHP forbids
-        // `extends` on one entirely), so a specific case's own class name
-        // is always the exact runtime answer - same rule as the ordinary
-        // `Object` arm's own `is_final` branch above, just unconditional.
+        // An enum is always implicitly final (real PHP forbids `extends`
+        // on one entirely), so a specific case's class name is always the
+        // exact runtime answer - same rule as the `Object` arm's
+        // `is_final` branch above, just unconditional.
         Type::EnumCase(fqn, _) => Some(Type::StringLiteral(fqn.clone())),
         Type::Intersection(members) => members.iter().find_map(|m| get_debug_type_for(m, registry)),
         Type::Union(members) => {
@@ -2841,15 +2389,11 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
     }
 }
 
-/// `gettype()`'s own real per-kind runtime-string answer (real PHP's own
-/// historically-quirky names: `"boolean"`, `"integer"`, `"double"`,
-/// `"NULL"` - not `"bool"`/`"int"`/`"float"`/`"null"`, which is what
-/// `get_debug_type()` returns instead). `None` for anything this project
-/// can't confidently classify (`Mixed`, a bare unresolved `Callable`/
-/// `TemplateParam`, ...) - real PHPStan itself falls back to the full
-/// 10-name union for that case; this project's own "don't guess"
-/// convention leaves today's plain `string` unchanged instead, matching
-/// `curl_getinfo_component_type`'s own `None`-means-"unchanged" contract.
+/// `gettype()`'s per-kind runtime-string answer (real PHP's historically
+/// quirky names: `"boolean"`, `"integer"`, `"double"`, `"NULL"` - not
+/// `"bool"`/`"int"`/`"float"`/`"null"`, which is what `get_debug_type()`
+/// returns instead). `None` for anything this project can't confidently
+/// classify, leaving plain `string` unchanged instead of guessing.
 fn gettype_string_for(ty: &Type) -> Option<&'static str> {
     match ty {
         Type::String | Type::StringLiteral(_) => Some("string"),
@@ -2878,9 +2422,9 @@ fn gettype_result(ty: &Type) -> Option<Type> {
     }
 }
 
-/// Whether `s` is exactly one Unicode scalar value - `idate()`'s own
-/// format argument is only ever meaningfully a single character (real
-/// PHP itself only reads the first byte).
+/// Whether `s` is exactly one Unicode scalar value - `idate()`'s format
+/// argument is only ever meaningfully a single character (real PHP only
+/// reads the first byte).
 fn single_char(s: &str) -> Option<char> {
     let mut chars = s.chars();
     let c = chars.next()?;
@@ -2891,13 +2435,9 @@ fn single_char(s: &str) -> Option<char> {
 }
 
 /// Extracts a definite lower (`want_min: true`) or upper (`false`)
-/// integer bound from `ty` - a literal's own value, or `Type::IntRange`'s
-/// own matching side - `None` for anything else (a non-literal,
-/// non-range argument), meaning "unbounded" to whichever caller asked.
-/// Mirrors real PHPStan's own `RandomIntFunctionReturnTypeExtension::
-/// createRange`'s per-side `ConstantIntegerType`/`IntegerRangeType`
-/// extraction, minus its own Union-of-multiple-candidates case (not a
-/// real shape a `random_int`/`rand`/`mt_rand` argument takes).
+/// integer bound from `ty` - a literal's value, or `Type::IntRange`'s
+/// matching side - `None` for anything else, meaning "unbounded" to
+/// whichever caller asked.
 fn int_bound(ty: &Type, want_min: bool) -> Option<i64> {
     match ty {
         Type::IntLiteral(n) => Some(*n),
@@ -2912,20 +2452,13 @@ fn int_bound(ty: &Type, want_min: bool) -> Option<i64> {
     }
 }
 
-/// `idate()`'s own real per-character numeric bound - transcribed from
-/// real PHPStan's own `IdateFunctionReturnTypeHelper`
-/// (`vendor/phpstan-src/src/Type/Php/IdateFunctionReturnTypeHelper.php`),
-/// using this project's own `Type::IntRange` in place of that file's
-/// `IntegerRangeType::fromInterval`. A handful of real `idate()` format
-/// characters (`B`/`o`/`U`/`Y`/`Z`) are real, unbounded integers there -
-/// deliberately left out of this table (returning `None`, i.e. "no
-/// refinement") rather than mapped to plain `Int`, since `idate()`'s own
-/// stub already gives `int|false` and an unbounded `Int` here would only
-/// ever narrow away the `false` half for a recognized-but-unbounded
-/// character, a real claim this project can't back for every one of
-/// those five (real PHP does raise a `ValueError`/return `false` for a
-/// handful of other, truly unrecognized characters this table also
-/// doesn't distinguish from the unbounded five) - kept conservative.
+/// `idate()`'s per-character numeric bound, transcribed from real
+/// PHPStan's `IdateFunctionReturnTypeHelper`, using `Type::IntRange` in
+/// place of `IntegerRangeType::fromInterval`. A handful of real `idate()`
+/// format characters (`B`/`o`/`U`/`Y`/`Z`) are unbounded integers -
+/// deliberately left out (returning `None`) rather than mapped to plain
+/// `Int`, since that would narrow away the stub's `false` half for a
+/// character this project can't back that claim for.
 fn idate_format_char_range(c: char) -> Option<(i64, i64)> {
     match c {
         'd' | 'j' => Some((1, 31)),
@@ -2944,19 +2477,16 @@ fn idate_format_char_range(c: char) -> Option<(i64, i64)> {
     }
 }
 
-/// `date()`'s own per-character static classification: does this
-/// recognized format character always produce digits-only text (`Some(
-/// true)`), always produce text that isn't guaranteed numeric (`Some(
-/// false)`, month/day names, `am`/`pm`, timezone abbreviations, the `st`/
-/// `nd`/`rd`/`th` ordinal suffix, ...), or is it not a character this
-/// table classifies at all (`None` - an escape sequence or literal
-/// punctuation `date()` would echo back verbatim, which this project has
-/// no way to evaluate without actually running `date()`)? Transcribed
-/// from real PHPStan's own `DateFunctionReturnTypeHelper` (`vendor/
-/// phpstan-src/src/Type/Php/DateFunctionReturnTypeHelper.php`)'s own
-/// `switch` cases, collapsed from "the exact literal/numeric-string type"
-/// down to this coarser yes/no (Phase 77's own scope: a static table, not
-/// a runtime `date()` simulation).
+/// `date()`'s per-character static classification: does this recognized
+/// format character always produce digits-only text (`Some(true)`),
+/// always produce text that isn't guaranteed numeric (`Some(false)`,
+/// month/day names, `am`/`pm`, timezone abbreviations, the ordinal
+/// suffix, ...), or is it not a character this table classifies at all
+/// (`None` - an escape sequence or literal punctuation `date()` would
+/// echo back verbatim, unevaluable without actually running `date()`)?
+/// Transcribed from real PHPStan's `DateFunctionReturnTypeHelper`,
+/// collapsed from "the exact literal/numeric-string type" down to this
+/// coarser yes/no (a static table, not a runtime `date()` simulation).
 pub(crate) fn date_format_char_is_always_numeric(c: char) -> Option<bool> {
     match c {
         // Digits-only output: day/week/month/year numbers, hour/minute/
@@ -2978,18 +2508,16 @@ pub(crate) fn date_format_char_is_always_numeric(c: char) -> Option<bool> {
     }
 }
 
-/// `date($format)`'s own real return type for a literal `$format` -
-/// `None` (today's plain `string`, unchanged) unless every character is
-/// one `date_format_char_is_always_numeric` recognizes; a non-empty
-/// literal format then always produces non-empty text (`Accessory::
-/// NonEmptyString`), additionally numeric text
-/// (`Accessory::NumericString`) only when every character does.
+/// `date($format)`'s return type for a literal `$format` - `None` (plain
+/// `string`, unchanged) unless every character is one
+/// `date_format_char_is_always_numeric` recognizes; a non-empty literal
+/// format then always produces non-empty text (`NonEmptyString`),
+/// additionally numeric text (`NumericString`) only when every character
+/// does.
 pub(crate) fn date_format_return_type(format: &str) -> Option<Type> {
     if format.is_empty() {
-        // Real `date('')` returns `''` - a degenerate literal this
-        // project already infers precisely via the generic stub path
-        // (`ConstantStringType`-equivalent isn't modeled for `date()`
-        // itself here), not worth a special case.
+        // Real `date('')` returns `''`, already inferred precisely via
+        // the generic stub path - not worth a special case.
         return None;
     }
     let mut all_numeric = true;
@@ -3006,24 +2534,15 @@ pub(crate) fn date_format_return_type(format: &str) -> Option<Type> {
     Some(Type::Intersection(members))
 }
 
-/// `DateInterval::format($format)`'s own per-specifier substitution
-/// value for a *representative* zero-valued interval (`new DateInterval
-/// ('P0D')`), used only to derive structural accessory facts about the
-/// real output (never returned as a literal itself - the real interval's
-/// actual magnitude is unknown). Transcribed from real PHP's own
-/// documented `DateInterval::format()` specifier table. `%a` (total days)
-/// uses the same conservative `"(unknown)"` representative real PHPStan's
-/// own `DateIntervalFormatReturnTypeHelper` falls back to whenever it
-/// can't prove the receiver's `->days` is a real `int` (i.e. the common
-/// case here, since this project doesn't track that per-instance fact for
-/// an arbitrary `DateInterval`-typed value) - deliberately not the `diff()`-
-/// derived, real-int-`days` branch. `%R`/`%r` (sign) use real PHP's own
-/// positive/non-inverted representative (`"+"`/`""`) - the same
-/// unconditional simplification real PHPStan's own helper makes (it runs
-/// against one fixed representative object, never branching on inversion).
-/// Deliberately skips lowercase/uppercase accessory tracking (`%a` vs
-/// `%A`-style case distinctions elsewhere), matching this project's own
-/// established never-track-case-content precedent.
+/// `DateInterval::format($format)`'s per-specifier substitution value for
+/// a representative zero-valued interval (`new DateInterval('P0D')`),
+/// used only to derive structural accessory facts about the real output
+/// (never returned as a literal itself, since the real interval's
+/// magnitude is unknown). Transcribed from PHP's documented
+/// `DateInterval::format()` specifier table. `%a` (total days) uses the
+/// conservative `"(unknown)"` representative, since this project doesn't
+/// track a real `int` `->days` fact per-instance. `%R`/`%r` (sign) use
+/// the positive/non-inverted representative (`"+"`/`""`).
 fn date_interval_format_char_value(c: char) -> Option<&'static str> {
     match c {
         'Y' => Some("0000"),
@@ -3068,19 +2587,17 @@ fn date_interval_format_literal(format: &str) -> Option<String> {
     Some(out)
 }
 
-/// `DateInterval::format($format)`'s own real return type for a literal
-/// `$format` - `None` (today's plain `string`, unchanged) on anything
-/// `date_interval_format_literal` doesn't confidently substitute.
-/// Because every zero-width-varying specifier real PHP zero-pads to a
-/// fixed width (`%Y`/`%M`/.../`%F`) or substitutes a fixed non-numeric
-/// literal (`%R`, `%a`), the representative substitution's own accessory
-/// properties (non-empty, non-falsy, purely numeric) hold for *every*
-/// real interval magnitude, not just the zero one - genuinely sound, not
-/// an approximation, for those specifiers. `%r`/bare `%d`/`%m`/.../`%f`
-/// can legitimately format to `""`/`"0"` for a real interval (matching
-/// the representative exactly), so correctly contribute no extra
-/// accessory guarantee there, the same restraint real PHPStan's own
-/// helper shows.
+/// `DateInterval::format($format)`'s return type for a literal `$format` -
+/// `None` (plain `string`, unchanged) on anything
+/// `date_interval_format_literal` doesn't confidently substitute. Because
+/// every zero-width-varying specifier real PHP zero-pads to a fixed width
+/// (`%Y`/`%M`/.../`%F`) or substitutes a fixed non-numeric literal (`%R`,
+/// `%a`), the representative substitution's accessory properties
+/// (non-empty, non-falsy, purely numeric) hold for every real interval
+/// magnitude, not just the zero one - genuinely sound, not an
+/// approximation, for those specifiers. `%r`/bare `%d`/`%m`/.../`%f` can
+/// legitimately format to `""`/`"0"` for a real interval, so correctly
+/// contribute no extra accessory guarantee there.
 pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
     let value = date_interval_format_literal(format)?;
     let mut members = vec![Type::String];
@@ -3098,16 +2615,14 @@ pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
     Some(Type::Intersection(members))
 }
 
-/// `pathinfo($path)`'s own real 1-arg array shape - `basename`/`filename`
-/// always present, `extension` only when the path actually has a dot in
-/// it (simplified here to always-optional: this project has no way to
-/// know from `$path`'s own `Type` alone whether a literal path contains
-/// one). `dirname` mirrors real PHPStan's own `isNonEmptyString()`-driven
-/// optionality check exactly (see the 1-arg match arm above referencing
-/// this function) rather than being simplified the same way: unlike
-/// `extension`, `path_ty` being provably `non-empty-string` really is
-/// enough on its own to prove `dirname` present, with no further runtime
-/// fact (like where a dot falls) needed.
+/// `pathinfo($path)`'s 1-arg array shape - `basename`/`filename` always
+/// present, `extension` only when the path actually has a dot in it
+/// (simplified here to always-optional, since this project can't know
+/// from `$path`'s `Type` alone whether a literal path contains one).
+/// `dirname` mirrors real PHPStan's `isNonEmptyString()`-driven
+/// optionality check exactly: unlike `extension`, `path_ty` being
+/// provably `non-empty-string` is enough on its own to prove `dirname`
+/// present.
 fn pathinfo_array_shape(path_ty: &Type) -> Type {
     let dirname_optional = !string_type_has_accessory(path_ty, AccessoryKind::NonEmptyString);
     Type::ArrayShape(vec![
@@ -3118,11 +2633,9 @@ fn pathinfo_array_shape(path_ty: &Type) -> Type {
     ])
 }
 
-/// `parse_url($url)`'s own real "all components" array shape - every
-/// field genuinely optional (none of `scheme`/`host`/`user`/`pass`/
-/// `path`/`query`/`fragment`/`port` are guaranteed present in a real
-/// parsed URL), `port` alone typed `IntRange(0, 65535)` rather than plain
-/// `String` like the rest.
+/// `parse_url($url)`'s "all components" array shape - every field
+/// genuinely optional, `port` alone typed `IntRange(0, 65535)` rather
+/// than plain `String` like the rest.
 fn parse_url_components_array_shape() -> Type {
     Type::ArrayShape(vec![
         ("scheme".to_string(), Type::String, true),
@@ -3140,14 +2653,10 @@ fn parse_url_components_array_shape() -> Type {
     ])
 }
 
-/// `parse_url($url, PHP_URL_*)`'s own real per-component return type -
-/// transcribed from real PHPStan's own
-/// `ParseUrlFunctionDynamicReturnTypeExtension` (`vendor/phpstan-src/src/
-/// Type/Php/ParseUrlFunctionDynamicReturnTypeExtension.php`)'s own
-/// `$componentTypesPairedConstants` table, minus that real extension's
-/// own `AccessoryLowercaseStringType` refinement for a lowercase `$url`
-/// (this project has no equivalent accessory kind to carry that
-/// distinction - see `types::AccessoryKind`).
+/// `parse_url($url, PHP_URL_*)`'s per-component return type, transcribed
+/// from real PHPStan's `ParseUrlFunctionDynamicReturnTypeExtension`
+/// table, minus its `AccessoryLowercaseStringType` refinement for a
+/// lowercase `$url` (this project has no equivalent accessory kind).
 fn parse_url_component_type(name: &str) -> Option<Type> {
     let string_false_null = Type::Union(vec![Type::String, Type::False, Type::Null]);
     let port_false_null = Type::Union(vec![
@@ -3173,16 +2682,14 @@ enum SscanfSpecifier {
 }
 
 /// Strips every real `sprintf()`/`vsprintf()` conversion specifier
-/// (`%[argnum$][flags][width][.precision]specifier`, PHP's own actual
-/// grammar) from a literal format string, returning the concatenation of
-/// whatever literal text is left (`%%` collapsing to one literal `%`,
-/// same as real PHP). `None` on the first specifier this can't
-/// confidently parse to the end (an unrecognized conversion character,
-/// mainly) - the whole point here is proving the *remaining* literal
-/// text is non-falsy, so silently guessing past an unparseable specifier
-/// would risk claiming that about a format string this hasn't actually
-/// verified. A hand-rolled scan for the identical "no regex engine
-/// available" reason `parse_sscanf_format` just below already documents.
+/// (`%[argnum$][flags][width][.precision]specifier`) from a literal
+/// format string, returning the concatenation of whatever literal text is
+/// left (`%%` collapsing to one literal `%`). `None` on the first
+/// specifier this can't confidently parse to the end - the point here is
+/// proving the remaining literal text is non-falsy, so silently guessing
+/// past an unparseable specifier would risk a claim this hasn't verified.
+/// A hand-rolled scan since this project has no regex engine available
+/// (see `parse_sscanf_format` below).
 fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
     let chars: Vec<char> = fmt.chars().collect();
     let mut i = 0;
@@ -3248,24 +2755,18 @@ fn sprintf_literal_remainder(fmt: &str) -> Option<String> {
 
 /// Walks a literal `sscanf()`/`fscanf()` format string for every real
 /// conversion specifier (`%d`, `%5s`, `%[abc]`, ...) it contains, in
-/// order - a hand-rolled scan standing in for real PHPStan's own regex
+/// order - a hand-rolled scan standing in for real PHPStan's regex
 /// (`/%(\d*)(\[[^\]]+\]|[cdeEfosux]{1})/`), since this project has no
-/// regex engine available (see `Cargo.toml`). `None` when the format
-/// contains no recognized specifier at all (today's plain `array|null`
-/// stays unchanged) - an unterminated `%[...` bracket at the very end of
-/// the string stops the scan there (matching the regex's own behavior:
-/// it simply doesn't match past the point it can't close the bracket).
-/// Recognizes one specifier real PHPStan's own regex above doesn't -
-/// `%i` (base-auto-detected integer, confirmed live via `php -r` to be a
-/// real, working sscanf specifier real PHPStan's own regex simply
-/// misses) - a real corpus false positive otherwise for `check_scanf_
-/// argument_count` (Phase 69), which - unlike this function's other,
-/// pre-existing caller, the 2-arg return-shape inference, where an
-/// under-counted specifier only ever *loses precision* - treats
-/// `specs.len()` as an authoritative count compared exactly against the
-/// number of by-ref arguments given, so silently skipping a real `%i`
-/// specifier there produced an active, wrong "count mismatch" report,
-/// not just an imprecise shape.
+/// regex engine available. `None` when the format contains no recognized
+/// specifier at all. An unterminated `%[...` bracket at the end of the
+/// string stops the scan there, matching the regex's own behavior.
+/// Recognizes one specifier real PHPStan's regex doesn't - `%i`
+/// (base-auto-detected integer, a real, working sscanf specifier) -
+/// since `check_scanf_argument_count` treats `specs.len()` as an
+/// authoritative count compared exactly against the number of by-ref
+/// arguments given, so silently skipping a real `%i` specifier there
+/// would produce an active, wrong "count mismatch" report, not just an
+/// imprecise shape.
 fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier)>> {
     let chars: Vec<char> = format.chars().collect();
     let mut i = 0;
@@ -3315,10 +2816,9 @@ fn parse_sscanf_format(format: &str) -> Option<Vec<(Option<u32>, SscanfSpecifier
     if specs.is_empty() { None } else { Some(specs) }
 }
 
-/// One `sscanf()` field's own real type, given its own specifier and any
-/// explicit field-width digits - every field is nullable (a real trailing
-/// unmatched specifier leaves that slot `null`), mirroring real PHPStan's
-/// own `TypeCombinator::addNull` on each field.
+/// One `sscanf()` field's type, given its specifier and any explicit
+/// field-width digits - every field is nullable, since a trailing
+/// unmatched specifier leaves that slot `null`.
 fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
     let base = match specifier {
         SscanfSpecifier::Char('d' | 'o' | 'u' | 'x' | 'i') => Type::Int,
@@ -3338,12 +2838,11 @@ fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
     Type::Union(vec![base, Type::Null])
 }
 
-/// `sscanf($string, $format)`'s own real numeric-keyed result-array
-/// fields, one per conversion specifier `parse_sscanf_format` finds, in
-/// order - keyed by each field's own canonical string form of its
-/// integer index (`"0"`, `"1"`, ...), exactly how `Type::ArrayShape`
-/// itself already represents an int-keyed array elsewhere in this project
-/// (see `literal_string_key`).
+/// `sscanf($string, $format)`'s numeric-keyed result-array fields, one
+/// per conversion specifier `parse_sscanf_format` finds, in order - keyed
+/// by each field's canonical string form of its integer index (`"0"`,
+/// `"1"`, ...), the same way `Type::ArrayShape` represents an int-keyed
+/// array elsewhere in this project (see `literal_string_key`).
 fn sscanf_result_fields(format: &str) -> Option<Vec<(String, Type, bool)>> {
     let specs = parse_sscanf_format(format)?;
     Some(
@@ -3357,23 +2856,9 @@ fn sscanf_result_fields(format: &str) -> Option<Vec<(String, Type, bool)>> {
     )
 }
 
-/// `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()`'s own real, shared
-/// 13-key shape (transcribed from real PHPStan's own
-/// `StatDynamicReturnTypeExtension` - `vendor/phpstan-src/src/Type/Php/
-/// StatDynamicReturnTypeExtension.php`'s own `$keys`) - every value a
-/// real `int`. Real `stat()`'s own array is actually double-keyed, each
-/// value reachable by both its numeric position and its own string name;
-/// only the string-keyed half is modeled here, the way real code
-/// actually reads it (`$stat['size']`, not `$stat[7]`), matching this
-/// project's own established "model the evidenced access pattern, not
-/// the full PHP-internal shape" convention (`curl_getinfo`'s own 1-arg
-/// "all components" form is skipped for the identical reason).
-/// `hrtime(false)`/`hrtime()`'s own real 2-element `[seconds,
-/// nanoseconds]` list shape - transcribed from real PHPStan's own
-/// `HrtimeFunctionReturnTypeExtension`. `seconds` is always at least 1
-/// (real PHP's own monotonic clock, confirmed never `0` in practice -
-/// matches the vendored extension's own `IntegerRangeType::
-/// fromInterval(1, null)`); `nanoseconds` is always a sub-second
+/// `hrtime(false)`/`hrtime()`'s 2-element `[seconds, nanoseconds]` list
+/// shape. `seconds` is always at least 1 (real PHP's monotonic clock
+/// never returns `0` in practice); `nanoseconds` is always a sub-second
 /// remainder, `0` to `999_999_999` inclusive.
 fn hrtime_array_shape() -> Type {
     Type::ArrayShape(vec![
@@ -3386,11 +2871,16 @@ fn hrtime_array_shape() -> Type {
     ])
 }
 
-/// `hrtime(true)`'s own single-number nanosecond-count form.
+/// `hrtime(true)`'s single-number nanosecond-count form.
 fn hrtime_number_type() -> Type {
     Type::Union(vec![Type::IntRange(Some(1), None), Type::Float])
 }
 
+/// `stat()`/`lstat()`/`fstat()`/`ssh2_sftp_stat()`'s shared 13-key shape,
+/// every value a real `int`. Real `stat()`'s array is actually
+/// double-keyed, each value reachable by both its numeric position and
+/// its string name; only the string-keyed half is modeled here, the way
+/// real code actually reads it (`$stat['size']`, not `$stat[7]`).
 fn stat_array_shape() -> Type {
     Type::ArrayShape(
         [
@@ -3403,11 +2893,8 @@ fn stat_array_shape() -> Type {
     )
 }
 
-/// `dio_stat()`'s own real 13-key shape - transcribed from real PHPStan's
-/// own `DioStatDynamicFunctionReturnTypeExtension` (`vendor/phpstan-src/
-/// src/Type/Php/DioStatDynamicFunctionReturnTypeExtension.php`), the same
-/// values-are-all-`int` shape as `stat_array_shape` above under `dio_stat`'s
-/// own distinct key names.
+/// `dio_stat()`'s 13-key shape - the same values-are-all-`int` shape as
+/// `stat_array_shape` above, under `dio_stat`'s own distinct key names.
 fn dio_stat_array_shape() -> Type {
     Type::ArrayShape(
         [
@@ -3431,12 +2918,9 @@ fn dio_stat_array_shape() -> Type {
     )
 }
 
-/// `list<non-empty-string>` - `hash_algos()`/`openssl_get_cipher_methods(
-/// )`/`mb_list_encodings()`'s own real, evidenced return shape regardless
-/// of host/PHP version/installed extensions (see the match arm above
-/// referencing this function for why this project stops there, rather
-/// than also replicating what real PHPStan additionally does with these
-/// three functions' own real output).
+/// `list<non-empty-string>` - `hash_algos()`/`openssl_get_cipher_methods()`/
+/// `mb_list_encodings()`'s evidenced return shape regardless of host/PHP
+/// version/installed extensions.
 fn list_of_non_empty_strings() -> Type {
     Type::Intersection(vec![
         Type::Array(
