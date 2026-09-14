@@ -478,28 +478,23 @@ impl<'a> Checker<'a> {
     /// mistakes a generic placeholder for a missing class.
     ///
     /// Deliberately does NOT recurse into a class's own `@template`
-    /// argument list (`Object(name, args)`'s own `args`) - mirrors
-    /// `check_generic_bounds`/`is_type_fully_known`'s own identical,
-    /// deliberate leniency there (`checker/generics.rs`), for the exact
-    /// same real reason: a real corpus (Piwigo, checking against a
-    /// PHAR-bundled `phpstan/phpstan` with no loose source files at all)
-    /// found a generic argument referencing a real class this project's
-    /// own registry simply has no data for is common enough that
-    /// existence-checking it too would trade a missed rare typo for a
-    /// false positive on the ordinary case - the same tradeoff this
-    /// project already made once for bound-checking.
+    /// argument list (`Object(name, args)`'s own `args`), mirroring
+    /// `check_generic_bounds`/`is_type_fully_known`'s identical
+    /// leniency: a generic argument referencing a real class this
+    /// project's registry has no data for (e.g. a PHAR-bundled
+    /// `phpstan/phpstan`) is common enough that existence-checking it
+    /// too would trade a missed rare typo for a false positive on the
+    /// ordinary case.
     pub(crate) fn collect_unknown_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
-            // A call-site variance sentinel's own name is
-            // never a real class reference to flag - matches this
-            // function's own existing, deliberate leniency of not
-            // recursing into a generic argument list at all (see this
-            // function's own doc comment above), so the wrapped inner
-            // type isn't recursed into here either. `$$interface`/
-            // `$$trait` (`interface-string`/`trait-string`'s own
-            // internal bound) need the same exclusion - never a real
-            // class reference, checked by `ClassKind` directly at
-            // `registry::is_assignable`'s `ClassString` arm instead.
+            // A call-site variance sentinel's own name is never a real
+            // class reference to flag, matching this function's leniency
+            // of not recursing into a generic argument list at all - the
+            // wrapped inner type isn't recursed into here either.
+            // `$$interface`/`$$trait` (`interface-string`/`trait-string`'s
+            // internal bound) need the same exclusion, checked by
+            // `ClassKind` directly at `registry::is_assignable`'s
+            // `ClassString` arm instead.
             Type::Object(name, _)
                 if matches!(
                     name.as_str(),
@@ -525,8 +520,8 @@ impl<'a> Checker<'a> {
                     self.collect_unknown_class_names(t, out);
                 }
             }
-            // A real, previously-missing case: `object{...}`'s own field
-            // types were never checked for existence either.
+            // `object{...}`'s own field types need checking for
+            // existence too.
             Type::ObjectShape(fields) => {
                 for (_, t, _) in fields {
                     self.collect_unknown_class_names(t, out);
@@ -536,18 +531,15 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `FunctionDefinitionCheck`'s own "resolved but a trait"
-    /// half - `parameter.trait`/`return.trait`/`property.trait` (real
-    /// PHPStan, confirmed by direct read: a native type-hint resolving to
-    /// a real, indexed class that turns out to be a `trait` rather than a
-    /// class/interface/enum - real PHP itself rejects this at the engine
-    /// level, so this is always a real bug, never a corpus-noise risk).
-    /// Mirrors `collect_unknown_class_names`'s exact recursive shape
-    /// (including its identical, deliberate non-recursion into a class's
-    /// own `@template` argument list) - the two are mutually exclusive
-    /// per name (a name only ever reaches this function's own `out` once
-    /// `collect_unknown_class_names` has already confirmed it exists at
-    /// all), so no name is ever double-reported under both identifiers.
+    /// `FunctionDefinitionCheck`'s own "resolved but a trait" half -
+    /// `parameter.trait`/`return.trait`/`property.trait`: a native
+    /// type-hint resolving to a real, indexed class that turns out to be
+    /// a `trait` rather than a class/interface/enum. Real PHP itself
+    /// rejects this at the engine level, so this is always a real bug,
+    /// never a corpus-noise risk. Mirrors `collect_unknown_class_names`'s
+    /// exact recursive shape (including its non-recursion into a class's
+    /// `@template` argument list) - the two are mutually exclusive per
+    /// name, so no name is ever double-reported under both identifiers.
     pub(crate) fn collect_trait_class_names(&self, ty: &Type, out: &mut Vec<String>) {
         match ty {
             Type::Object(name, _)
@@ -589,12 +581,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The reporting half for `collect_trait_class_names` above - `identifier`
-    /// is one of `parameter.trait`/`return.trait`/`property.trait`
-    /// depending on the call site's own kind, matching real PHPStan's own
-    /// uniform "same message template as `class.notFound`, different
-    /// identifier" shape (confirmed by direct read of `FunctionDefinitionCheck`/
-    /// `ExistingClassesInPropertiesRule`).
+    /// The reporting half for `collect_trait_class_names` above -
+    /// `identifier` is one of `parameter.trait`/`return.trait`/
+    /// `property.trait` depending on the call site's kind, matching real
+    /// PHPStan's uniform "same message template as `class.notFound`,
+    /// different identifier" shape.
     pub(crate) fn check_type_trait_refs(
         &mut self,
         ty: &Type,
@@ -616,15 +607,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `parameter.noParent`/`return.noParent` - real
-    /// PHPStan's `NonexistentParentClassType` (`describe()` returns the
-    /// literal string `"parent"`, confirmed by direct read), produced
-    /// when a native `parent` type-hint is used on a class with no
-    /// `extends` ancestor at all. This project's own equivalent is
-    /// `resolve_pseudo` deliberately leaving a bare `Type::ParentRef`
-    /// unresolved in exactly that situation (see its own doc comment) -
-    /// `ty` here must already be the `resolve_pseudo`'d result, not the
-    /// raw pre-resolution type, or this can never find anything. Walks
+    /// `parameter.noParent`/`return.noParent` - real PHPStan's
+    /// `NonexistentParentClassType` (`describe()` returns the literal
+    /// string `"parent"`), produced when a native `parent` type-hint is
+    /// used on a class with no `extends` ancestor. This project's
+    /// equivalent is `resolve_pseudo` deliberately leaving a bare
+    /// `Type::ParentRef` unresolved in exactly that situation - `ty`
+    /// here must already be the `resolve_pseudo`'d result, not the raw
+    /// pre-resolution type, or this can never find anything. Walks
     /// the full type tree (unlike real PHPStan's own top-level-only
     /// `instanceof` check) since this project's own `Type` can nest a
     /// `ParentRef` inside a `Union` for the common `?parent` shape real
