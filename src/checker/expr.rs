@@ -27,10 +27,10 @@ use crate::checker::type_union::union_types;
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
 pub(crate) use ranges::{int_range_bounds, normalize_int_range};
 
-// Phase 42 Sub-item D: `checker::throws::dynamic` reuses this exact
-// bitwise-or-flag-chain scan for `JSON_THROW_ON_ERROR`/
-// `FILTER_THROW_ON_FAILURE`, the same helper `builtin_calls.rs`'s own
-// `json_encode`/`filter_var` return-type narrowing already uses.
+// `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for
+// `JSON_THROW_ON_ERROR`/`FILTER_THROW_ON_FAILURE`, the same helper
+// `builtin_calls.rs`'s `json_encode`/`filter_var` return-type narrowing
+// uses.
 pub(crate) use builtin_calls::contains_flag_name;
 pub(crate) use preg_shapes::build_matched_shape;
 use preg_shapes::{
@@ -38,37 +38,26 @@ use preg_shapes::{
     preg_match_matches_shape,
 };
 
-/// Phase 52: does unary `-`/`+`'s own numeric-string-to-int coercion
-/// apply to this operand's type - true for a bare `Type::String`/
-/// `Type::StringLiteral`, or a `numeric-string`-shaped `Intersection`
-/// (`String` alongside an accessory kind). Deliberately does NOT widen
-/// into a `Union`'s own members here (unlike `operators.rs`'s own
-/// leniency-tuned `is_exactly_string_operand`, tuned for suppressing a
-/// false invalid-operand flag rather than for this coercion decision) -
-/// `int|string` should keep its own original type, not collapse
-/// entirely to `Int` just because one member happens to be
-/// string-shaped.
+/// Does unary `-`/`+`'s numeric-string-to-int coercion apply to this
+/// operand's type - true for a bare `Type::String`/`Type::StringLiteral`,
+/// or a `numeric-string`-shaped `Intersection` (`String` alongside an
+/// accessory kind). Deliberately does NOT widen into a `Union`'s members
+/// here, unlike `operators.rs`'s leniency-tuned `is_exactly_string_operand`
+/// (tuned for suppressing a false invalid-operand flag, not this coercion
+/// decision) - `int|string` should keep its own type, not collapse
+/// entirely to `Int` just because one member is string-shaped.
 fn is_string_shaped(ty: &Type) -> bool {
     matches!(ty, Type::String | Type::StringLiteral(_))
         || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)))
 }
 
-/// Real corpus find (`Piwigo\Site\SiteRepository::findGalleriesUrlById`'s
-/// own `$id < -32768`): unary `-`'s own type-inference arm returned
-/// `inner_ty` completely unchanged for *both* `Neg` and `Plus` - correct
-/// for `+` (a true no-op on the value, only ever coercing a numeric
-/// string), but wrong for `-`, which was silently never negating a
-/// literal/range operand's own *value* at all - `-32768` inferred as
-/// `IntLiteral(32768)` (positive!), not `IntLiteral(-32768)`. Every
-/// consumer that only cares "is this an int" never noticed; this
-/// project's own range-based narrowing/constant-comparison machinery
-/// (which cares about the exact value) did, the moment anything started
-/// consuming it that way. `IntRange`'s own min/max swap on negation
-/// (`-int<a, b>` is `int<-b, -a>`, negation reverses order) mirrors real
-/// PHPStan's own `IntegerRangeType::equal()`-adjacent negation handling.
-/// Anything else (a bare `Type::Int`, `Type::Float`, ...) has no
-/// specific value to flip, so it's returned unchanged - exactly what the
-/// old code already did for those cases, correctly.
+/// Unary `-` negates a literal/range operand's actual value - `+` is a
+/// true no-op on the value (only ever coercing a numeric string), but `-`
+/// must flip it: `-32768` infers as `IntLiteral(-32768)`, not
+/// `IntLiteral(32768)`. `IntRange`'s min/max swap on negation (`-int<a,
+/// b>` is `int<-b, -a>`) mirrors real PHPStan's `IntegerRangeType`
+/// negation handling. Anything else (a bare `Type::Int`, `Type::Float`,
+/// ...) has no specific value to flip, so it's returned unchanged.
 fn negate_numeric_literal(ty: Type) -> Type {
     match ty {
         Type::IntLiteral(n) => Type::IntLiteral(-n),
@@ -78,29 +67,18 @@ fn negate_numeric_literal(ty: Type) -> Type {
     }
 }
 
-/// Phase 85: a bare `ExprKind::Name` with no registered global constant
-/// (`Checker::global_constant_type`, checked first at both call sites
-/// below - an *unresolved* name still stays `Mixed`, e.g. `PHP_EOL`/
-/// `M_PI`, real PHP-engine-provided constants this project's own
-/// registry has no declaration to index at all) - except `true`/`false`/
-/// `null`, real PHP *language* keywords rather than ordinary constants,
-/// and the one shape this project's own parser doesn't already fold
-/// into `ExprKind::Literal` itself: a fully-qualified reference
-/// (`\false`/`\true`/`\null`) parses as a plain `Name`, not the
-/// `Keyword::False`/`True`/`Null` token `parse_primary` matches directly
-/// for the unqualified form (real PHP itself treats both forms
-/// identically - `\false` unambiguously names the same global
-/// pseudo-constant `false` does, never a user-defined one, since PHP
-/// doesn't allow declaring a constant with one of these three names). A
-/// real, common corpus shape: Rector's own namespace-prefixing transform
-/// (`RectorPrefix...`) rewrites every unqualified global name to its
-/// fully-qualified form, including these three, across a large fraction
-/// of this corpus's `vendor/rector/rector/vendor/` and similar prefixed
-/// trees - previously silently `Mixed`, which fed straight into
-/// `apply_equality_narrowing`'s own `target_ty == Type::Mixed` bail-out,
-/// silently skipping every `\false === $x = fn()`-shaped guard's own
-/// narrowing (Symfony\Component\Filesystem\Path::getDirectory's real
-/// shape, found via Phase 85's own corpus check).
+/// A bare `ExprKind::Name` with no registered global constant (an
+/// unresolved name stays `Mixed`, e.g. `PHP_EOL`/`M_PI`) - except
+/// `true`/`false`/`null`, real PHP language keywords rather than
+/// ordinary constants. A fully-qualified reference (`\false`/`\true`/
+/// `\null`) parses as a plain `Name`, not the `Keyword::False`/`True`/
+/// `Null` token `parse_primary` matches directly for the unqualified
+/// form, even though real PHP treats both forms identically (PHP doesn't
+/// allow declaring a constant with one of these three names). Rector's
+/// namespace-prefixing transform rewrites every unqualified global name
+/// to its fully-qualified form, including these three, so without this,
+/// such a name stayed `Mixed` and silently skipped narrowing through
+/// `apply_equality_narrowing`'s `target_ty == Type::Mixed` bail-out.
 fn bare_name_literal_type(name: &str) -> Type {
     match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
         "true" => Type::True,
@@ -110,12 +88,11 @@ fn bare_name_literal_type(name: &str) -> Type {
     }
 }
 
-/// Phase 60: does `ty`'s own value-space unconditionally exclude `null`?
-/// `Mixed`/`Never` are left alone (a `Mixed` slot could always turn out
-/// to hold `null` at runtime; `Never` means unreachable code, not a real
-/// value to reason about) - everything else is settled by comparing
-/// against `narrow_type_excluding(ty, &Type::Null)` (the same "subtract
-/// null" operation `??`/`?->`'s own type inference already relies on
+/// Does `ty`'s value-space unconditionally exclude `null`? `Mixed`/`Never`
+/// are left alone (a `Mixed` slot could always turn out to hold `null` at
+/// runtime; `Never` means unreachable code) - everything else is settled
+/// by comparing against `narrow_type_excluding(ty, &Type::Null)` (the
+/// same "subtract null" operation `??`/`?->`'s type inference relies on
 /// elsewhere in this file): if removing `null` changes nothing, `ty`
 /// never carried it to begin with.
 pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
@@ -125,15 +102,14 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 impl<'a> Checker<'a> {
     #[hotpath::measure]
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
-        // Phase 71: see `Checker::in_bare_statement_position`'s own doc
-        // comment - taken (not just read) so it reads `true` only for
-        // the exact top-level expression `StmtKind::Expression` set it
-        // for, never for anything this match's own arms go on to
-        // recursively check via a nested `check_expr` call.
+        // See `Checker::in_bare_statement_position`'s doc comment - taken,
+        // not just read, so it reads `true` only for the exact top-level
+        // expression `StmtKind::Expression` set it for, never for
+        // anything this match's arms go on to recursively check via a
+        // nested `check_expr` call.
         let is_bare_statement = std::mem::take(&mut self.in_bare_statement_position);
-        // Phase 15 continuation: see `Checker::in_condition_position`'s
-        // own doc comment - same "take, not just read" reasoning as
-        // `is_bare_statement` just above.
+        // See `Checker::in_condition_position`'s doc comment - same
+        // "take, not just read" reasoning as `is_bare_statement` above.
         let is_condition_position = std::mem::take(&mut self.in_condition_position);
         let is_exempt_last_condition = std::mem::take(&mut self.in_exempt_last_condition);
         match &e.kind {
@@ -164,20 +140,16 @@ impl<'a> Checker<'a> {
                 }
                 // `PHPStan\Testing\assertType('expected type string', $expr)`
                 // is real PHPStan's own testing-DSL function, used
-                // throughout its vendored `tests/PHPStan/Analyser/nsrt/`
-                // fixture corpus (see Item 2 of the architecture-audit
-                // plan) to pin down an exact expected inferred type at a
-                // point of interest. Recognizing it here - comparing this
-                // project's own `infer_expr` result (rendered via `Type`'s
-                // existing PHPStan-style `Display` impl) against the
-                // literal expected string - turns that whole corpus into
-                // directly-runnable ground truth against this project's
-                // own checker, with no separate test harness needed.
-                // Real PHPStan itself treats this the same way (a no-op
-                // stub function whose call sites its *own* internal
-                // tooling specially recognizes), so this is additive,
-                // not a real diagnostic anyone would trip on outside of
-                // a fixture file that imports it.
+                // throughout its vendored fixture corpus to pin down an
+                // exact expected inferred type at a point of interest.
+                // Recognizing it here - comparing `infer_expr`'s result
+                // (rendered via `Type`'s PHPStan-style `Display` impl)
+                // against the literal expected string - turns that whole
+                // corpus into directly-runnable ground truth, with no
+                // separate test harness needed. Real PHPStan treats this
+                // the same way (a no-op stub function its own internal
+                // tooling specially recognizes), so it's additive, not a
+                // diagnostic anyone would trip on outside a fixture file.
                 if let ExprKind::Name(name) = &callee.kind
                     && (name == "assertType" || name.ends_with("\\assertType"))
                     && let [expected_arg, actual_arg] = args.as_slice()
@@ -198,17 +170,15 @@ impl<'a> Checker<'a> {
                     self.saw_dynamic_var_construct = true;
                 }
                 // `print $x` desugars to this same synthetic `Call(Name
-                // ("print"), [$x])` node (see the parser's own comment on
-                // that decision) - checked here, since `is_language_
-                // construct` below routes it away from ordinary
-                // signature-based argument checking entirely (`print`
-                // has no real signature to check against). Real PHPStan's
-                // own `PrintRule`/`PrintHandler` (`vendor/phpstan-src`):
-                // the operand must be string-coercible (`print.nonString`,
+                // ("print"), [$x])` node - checked here, since
+                // `is_language_construct` below routes it away from
+                // ordinary signature-based argument checking entirely
+                // (`print` has no real signature to check against). The
+                // operand must be string-coercible (`print.nonString`,
                 // distinct wording from `echo.nonString` - see
-                // `check_print_validity`'s own doc comment), it triggers
-                // the same implicit `__toString()` call `echo`/`(string)`
-                // do, and `print` itself always evaluates to the literal
+                // `check_print_validity`'s doc comment), it triggers the
+                // same implicit `__toString()` call `echo`/`(string)` do,
+                // and `print` itself always evaluates to the literal
                 // `int(1)`.
                 if let ExprKind::Name(name) = &callee.kind
                     && name == "print"
@@ -222,16 +192,13 @@ impl<'a> Checker<'a> {
                 // Resolved once up front (namespace/`use`-import rules
                 // applied, with the same global-namespace fallback real
                 // PHP gives an unqualified function call) so both the
-                // existing arg-checking path and the undefined-call
-                // diagnostic below see the same name(s) a real call would
-                // actually resolve to - previously `lookup_function` used
-                // the raw, unnormalized name, so e.g. `\class_exists(...)`
-                // silently skipped arg-checking even when the plain name
-                // was a known signature. `is_language_construct` is
-                // checked against the *original* name, before any
-                // namespace-qualification - `isset`/`empty`/etc. are
-                // never real namespaced symbols, unlike an actual function
-                // call, even though the parser models both the same way.
+                // arg-checking path and the undefined-call diagnostic
+                // below see the same name(s) a real call would actually
+                // resolve to. `is_language_construct` is checked against
+                // the original name, before any namespace-qualification -
+                // `isset`/`empty`/etc. are never real namespaced symbols,
+                // unlike an actual function call, even though the parser
+                // models both the same way.
                 let resolved_name = match &callee.kind {
                     ExprKind::Name(name) if is_language_construct(name) => None,
                     ExprKind::Name(name) => {
@@ -252,44 +219,35 @@ impl<'a> Checker<'a> {
                 let sig = resolved_name
                     .as_deref()
                     .and_then(|name| self.registry.lookup_function(name));
-                // Item 1: resolves the call's own arguments against the
-                // real signature (named/reordered-named arguments no
-                // longer get checked as if they were positional in
-                // written order) before any consumer below sees them.
+                // Resolves the call's arguments against the real
+                // signature (named/reordered-named arguments no longer
+                // get checked as if they were positional in written
+                // order) before any consumer below sees them.
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
-                // Real corpus find: `array_pop`/`array_shift`'s own
-                // by-ref first argument gets widened right below
-                // (`predefine_byref_or_unknown_args`'s own dedicated
-                // arm for these two - correctly dropping any known
-                // non-emptiness, since removing an element can leave
-                // `[]`) *before* this same call's own return type is
-                // computed further down - reading the *already-widened*
-                // array there made a provably non-empty array (Gettext's
-                // own `array_shift(explode(...))`, `explode()`'s own
-                // return type unconditionally non-empty) look like it
-                // could return `null`, when the value actually removed
-                // and returned is the pre-widening array's own,
-                // definitely-present first/last element. Captured here,
-                // before the widening runs, and substituted back in once
-                // the ordinary return-type computation below has run.
+                // `array_pop`/`array_shift`'s by-ref first argument gets
+                // widened right below (`predefine_byref_or_unknown_args`'s
+                // dedicated arm for these two - correctly dropping any
+                // known non-emptiness, since removing an element can
+                // leave `[]`) before this same call's return type is
+                // computed further down. Reading the already-widened
+                // array there made a provably non-empty array (e.g.
+                // `array_shift(explode(...))`, `explode()`'s return type
+                // unconditionally non-empty) look like it could return
+                // `null`, when the value actually removed and returned is
+                // the pre-widening array's definitely-present first/last
+                // element. Captured here, before the widening runs, and
+                // substituted back in once the return-type computation
+                // below has run.
                 //
-                // Disclosed residual, not fully closed by this: fixes
-                // the common `$x = array_shift($arr); needsFoo($x);`
-                // shape (this expression's own returned type, consumed
-                // by an assignment or `return`) but not `needsFoo(
-                // array_shift($arr))` (the identical call passed
-                // *directly* as another call's own argument) - argument-
-                // type checking (`check_args`, `checker/calls.rs`)
-                // independently re-derives each argument's type via
-                // `infer_expr` from whatever `locals` holds *then*,
-                // rather than reusing this already-corrected value, so
-                // it still sees the post-widening (nullable) answer.
-                // Fixing that would mean threading each argument's
-                // already-checked type through to `check_args` instead
-                // of letting it re-infer independently - a real,
-                // separate architecture change, out of scope here.
+                // Disclosed residual: fixes the common `$x =
+                // array_shift($arr); needsFoo($x);` shape but not
+                // `needsFoo(array_shift($arr))` (the identical call passed
+                // directly as another call's argument) - argument-type
+                // checking independently re-derives each argument's type
+                // via `infer_expr` from whatever `locals` holds then,
+                // rather than reusing this already-corrected value.
                 let array_shift_pop_pre_widen_ty: Option<Type> = matches!(
                     resolved_name.as_deref(),
                     Some("array_shift") | Some("array_pop")
@@ -304,19 +262,17 @@ impl<'a> Checker<'a> {
                     &resolved,
                     locals,
                 );
-                // Finding 1: `it`/`test`/`describe`/`beforeEach`/
-                // `afterEach`/`beforeAll`/`afterAll` rebind `$this` inside
-                // their closure/arrow-fn argument at runtime (Pest's own
+                // `it`/`test`/`describe`/`beforeEach`/`afterEach`/
+                // `beforeAll`/`afterAll` rebind `$this` inside their
+                // closure/arrow-fn argument at runtime (Pest's own
                 // `Closure::bindTo()`) - reuses the same
                 // check_closure_literal_with_this helper the
-                // Closure::bind/bindTo special case below already uses
-                // for the identical "externally-bound $this" shape. The
-                // base scanner never spells out Pest's own function names
-                // - it only asks pest_config::is_this_binding_call. Only
-                // a closure/arrow-fn *literal* argument is recognized,
-                // same restriction the existing bind/bindTo case already
-                // has - `it('...', $variableHoldingAClosure)` falls
-                // through to plain check_expr, unrebound.
+                // Closure::bind/bindTo special case below uses for the
+                // identical "externally-bound $this" shape. Only a
+                // closure/arrow-fn literal argument is recognized, the
+                // same restriction the bind/bindTo case has -
+                // `it('...', $variableHoldingAClosure)` falls through to
+                // plain check_expr, unrebound.
                 let is_this_binding_call = matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
                 // `isset($x['maybe_missing'])`/`empty($x['maybe_missing'])`
                 // are exactly PHP's own sanctioned way to safely probe a
@@ -331,13 +287,12 @@ impl<'a> Checker<'a> {
                 // like `is_language_construct` itself, since neither is a
                 // real, resolvable function call.
                 let is_existence_probe = matches!(&callee.kind, ExprKind::Name(name) if name == "isset" || name == "empty");
-                // Phase 60 follow-up: `isset($x)` and `empty($x)` each get
-                // their own verdict function - `null_probe_verdict` (just
-                // nullability) for the former, `empty_probe_verdict` (full
-                // falsiness, via `type_truthiness`) for the latter,
-                // matching real PHPStan's own `EmptyRule` requiring BOTH
-                // nullability *and* falsiness to be unambiguous before it
-                // says anything.
+                // `isset($x)` and `empty($x)` each get their own verdict
+                // function - `null_probe_verdict` (just nullability) for
+                // the former, `empty_probe_verdict` (full falsiness, via
+                // `type_truthiness`) for the latter, matching real
+                // PHPStan's `EmptyRule` requiring both nullability and
+                // falsiness to be unambiguous before it says anything.
                 let existence_probe_kind: Option<(&str, &str, NullProbeVerdictFn)> =
                     match &callee.kind {
                         ExprKind::Name(name) if name == "isset" => {
@@ -348,30 +303,29 @@ impl<'a> Checker<'a> {
                         }
                         _ => None,
                     };
-                // Phase 53: `array_map($callback, $items)`'s own
-                // contextual parameter-type injection - computed once,
-                // up front, from `$items`' own element type (not
-                // per-argument inside the loop below, since it's the
-                // *other* argument's own type this needs). Scoped to the
-                // common 2-arg single-array form, matching `infer_
-                // builtin_call_return_type`'s own identical restriction
-                // for the same function.
+                // `array_map($callback, $items)`'s contextual parameter-
+                // type injection - computed once, up front, from
+                // `$items`' element type (not per-argument inside the
+                // loop below, since it's the other argument's type this
+                // needs). Scoped to the common 2-arg single-array form,
+                // matching `infer_builtin_call_return_type`'s identical
+                // restriction for the same function.
                 let array_map_elem_override = (resolved_name.as_deref() == Some("array_map")
                     && args.len() == 2)
                     .then(|| self.infer_expr(&args[1].value, locals))
                     .and_then(|ty| Self::array_element_type(&ty));
-                // Phase 53 follow-up: the same contextual parameter-type
-                // injection as `array_map` just above, extended to
-                // `array_filter`/`usort`/`uasort`/`array_walk`/
-                // `preg_replace_callback` - each computes its own
-                // `(callback argument index, param overrides)` pair once
-                // up front, the identical shape `array_map_elem_override`
-                // already established, just generalized to a callback
-                // that isn't always argument 0 and doesn't always take
-                // exactly one parameter. `check_closure_literal_with_
-                // param_overrides`'s own exact-arity requirement already
-                // handles every mode/shape this doesn't specifically
-                // recognize (e.g. `array_filter`'s `ARRAY_FILTER_USE_*`
+                // The same contextual parameter-type injection as
+                // `array_map` above, extended to `array_filter`/`usort`/
+                // `uasort`/`array_walk`/`preg_replace_callback` - each
+                // computes its own `(callback argument index, param
+                // overrides)` pair once up front, the identical shape
+                // `array_map_elem_override` established, just
+                // generalized to a callback that isn't always argument 0
+                // and doesn't always take exactly one parameter.
+                // `check_closure_literal_with_param_overrides`'s
+                // exact-arity requirement already handles every mode/
+                // shape this doesn't specifically recognize (e.g.
+                // `array_filter`'s `ARRAY_FILTER_USE_*`
                 // modes, `array_walk`'s optional third `$arg` callback
                 // parameter) by simply falling back to a plain check,
                 // with no separate gate needed here.
@@ -425,17 +379,12 @@ impl<'a> Checker<'a> {
                         )
                     {
                         let this_ty = self.pest_this_type.clone();
-                        // Phase 57: Pest's own `$this`-binding (a real
-                        // `TestCase`-subclass instance, almost always)
-                        // grants the same private/protected access real
-                        // PHP's `Closure::bind`/`->bindTo()` third
-                        // argument does - without this, every real
-                        // corpus `it(...)`/`test(...)` closure calling
-                        // an inherited protected `TestCase` method
-                        // (`$this->expectErrorLog(...)`, a genuine,
-                        // common idiom) was wrongly flagged, since
-                        // `current_class` has no other way to reflect
-                        // Pest's own file-scoped binding.
+                        // Pest's `$this`-binding (a real `TestCase`-
+                        // subclass instance, almost always) grants the
+                        // same private/protected access real PHP's
+                        // `Closure::bind`/`->bindTo()` third argument does,
+                        // since `current_class` has no other way to
+                        // reflect Pest's file-scoped binding.
                         let scope_class = match &this_ty {
                             Type::Object(name, _) => Some(name.clone()),
                             _ => None,
@@ -500,15 +449,14 @@ impl<'a> Checker<'a> {
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
-                        // Phase 36: `@param-closure-this` - a Closure/
-                        // arrow-fn literal argument at this parameter's
-                        // position gets `$this` seeded to the tag's own
-                        // declared type, the same mechanism `Closure::
-                        // bind`/`->bindTo()` already use. Only fires for a
-                        // literal (matching real PHPStan's own
-                        // `resolveClosureThisType` restriction) - a
-                        // closure passed by variable falls through to the
-                        // plain `check_expr` below, unchanged.
+                        // `@param-closure-this` - a Closure/arrow-fn
+                        // literal argument at this parameter's position
+                        // gets `$this` seeded to the tag's declared type,
+                        // the same mechanism `Closure::bind`/`->bindTo()`
+                        // use. Only fires for a literal, matching real
+                        // PHPStan's `resolveClosureThisType` restriction -
+                        // a closure passed by variable falls through to
+                        // plain `check_expr`, unchanged.
                         self.check_closure_literal_with_this_and_scope(
                             unwrap_grouping(&a.value),
                             locals,
@@ -533,20 +481,20 @@ impl<'a> Checker<'a> {
                             label,
                         )
                     {
-                        // Phase 53 Sub-item B: a `Closure(...)`-shaped
-                        // PHPDoc parameter type gives an unhinted closure/
-                        // arrow-fn literal argument's own params their
-                        // declared types, the same contextual-checking
-                        // mechanism `array_map`/the four other special-
-                        // cased functions above already use.
+                        // A `Closure(...)`-shaped PHPDoc parameter type
+                        // gives an unhinted closure/arrow-fn literal
+                        // argument's params their declared types, the
+                        // same contextual-checking mechanism `array_map`/
+                        // the four other special-cased functions above
+                        // use.
                     } else {
                         self.check_expr(&a.value, locals, label);
                     }
                 }
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
-                        // Phase 42 Sub-item A/D: this function's own throw
-                        // contribution - tried before `sig.throws` itself.
+                        // This function's own throw contribution - tried
+                        // before `sig.throws` itself.
                         let bare = name
                             .rsplit('\\')
                             .next()
@@ -554,13 +502,9 @@ impl<'a> Checker<'a> {
                             .to_ascii_lowercase();
                         let dynamic_throw = self.dynamic_function_throw_type(&bare, args, locals);
                         self.record_call_throw_point(dynamic_throw, Some(sig));
-                        // Phase 67: `@internal`.
                         self.check_internal_function_call(name, sig, e.span, label);
-                        // Phase 67 follow-up: `restricted_symbols`.
                         self.check_restricted_function_call(name, e.span, label);
-                        // Phase 39: `@deprecated`.
                         self.check_deprecated_function_call(name, sig, e.span, label);
-                        // Phase 68: no-op array_filter()/array_values().
                         match name.as_str() {
                             "array_filter" => {
                                 self.check_array_filter_no_op(args, locals, label, e.span)
@@ -570,21 +514,17 @@ impl<'a> Checker<'a> {
                             }
                             _ => {}
                         }
-                        // Finding 29 / Phase 49: a spread argument
-                        // (`f(...$args)`) means the real argument
-                        // count/types past it aren't known statically -
-                        // `check_args` itself is now spread-aware (Phase
-                        // 49 Item 2: it stops trusting a count/"missing"
-                        // check at or past a spread's own position,
-                        // rather than this call site skipping the whole
-                        // check the way it previously had to), so it's
-                        // always worth calling. `check_format_string_call`
-                        // is NOT spread-aware (it walks `args[1..]`
-                        // strictly positionally against the format
-                        // string's own specifier count) and stays gated
-                        // on no spread being present, to avoid treating
-                        // the spread argument itself as filling one
-                        // specifier slot.
+                        // A spread argument (`f(...$args)`) means the
+                        // real argument count/types past it aren't known
+                        // statically - `check_args` is spread-aware (it
+                        // stops trusting a count/"missing" check at or
+                        // past a spread's position), so it's always worth
+                        // calling. `check_format_string_call` is NOT
+                        // spread-aware (it walks `args[1..]` strictly
+                        // positionally against the format string's
+                        // specifier count) and stays gated on no spread
+                        // being present, to avoid treating the spread
+                        // argument itself as filling one specifier slot.
                         self.check_args(CheckArgsCall {
                             callee_label: name,
                             sig,
@@ -603,11 +543,10 @@ impl<'a> Checker<'a> {
                         {
                             self.check_format_string_call(name, args, locals, label);
                         }
-                        // Phase 71: real PHP itself resolves `define`
-                        // case-insensitively like any other function
-                        // call - matched against just the last
-                        // namespace segment, the same as every other
-                        // by-name builtin special-case here.
+                        // Real PHP resolves `define` case-insensitively
+                        // like any other function call - matched against
+                        // just the last namespace segment, the same as
+                        // every other by-name builtin special-case here.
                         if name
                             .rsplit('\\')
                             .next()
@@ -667,20 +606,17 @@ impl<'a> Checker<'a> {
                             .to_ascii_lowercase(),
                     ) {
                         // Since resolve_function_candidates always
-                        // produces a definite name (there's no "can't
-                        // resolve" case left for functions the way
-                        // `ExprKind::New`'s class resolution still has for a
-                        // multi-segment name with no matching import),
-                        // every miss here is a real undefined-function
-                        // finding. Phase 71 Item 4: unless it's runtime-
+                        // produces a definite name (unlike `ExprKind::New`'s
+                        // class resolution, which still has a "can't
+                        // resolve" case for a multi-segment name with no
+                        // matching import), every miss here is a real
+                        // undefined-function finding, unless it's runtime-
                         // guarded by a `function_exists()` check this
-                        // project's own (necessarily less complete than a
-                        // live PHP process's) registry doesn't otherwise
-                        // know how to resolve - purely presentational
-                        // (doesn't affect `resolved_name`/`sig` above, so
-                        // argument checking against a "found" signature
-                        // still correctly never happens for a guarded,
-                        // still-genuinely-unresolvable call).
+                        // registry doesn't otherwise know how to resolve -
+                        // purely presentational, so argument checking
+                        // against a "found" signature still correctly
+                        // never happens for a guarded, still-genuinely-
+                        // unresolvable call.
                         self.report(
                             label.to_string(),
                             format!("call to undefined function {name}()"),
@@ -690,18 +626,14 @@ impl<'a> Checker<'a> {
                         );
                     }
                 } else if !matches!(&callee.kind, ExprKind::Name(_)) {
-                    // Phase 53 Sub-item C: `resolved_name` is `None` here
-                    // specifically because `callee` isn't a plain function-
-                    // name reference at all (`$fn(...)`, `$arr['key'](...)`,
+                    // `resolved_name` is `None` here specifically because
+                    // `callee` isn't a plain function-name reference at
+                    // all (`$fn(...)`, `$arr['key'](...)`,
                     // `($this->makeCallback())(...)`) - every language-
                     // construct name (`isset`, `print`, ...) that also
-                    // produces `None` above is excluded by the `ExprKind::
-                    // Name` guard, so this branch never fires for those,
-                    // unchanged from before. A real, previously-free bug
-                    // fixed along the way: this callee sub-expression was
-                    // never independently `check_expr`'d before, so e.g. an
-                    // undefined property read used as a callee (`($this->
-                    // missing)()`) produced zero diagnostics.
+                    // produces `None` above is excluded by the
+                    // `ExprKind::Name` guard, so this branch never fires
+                    // for those.
                     let callee_ty = self.check_expr(callee, locals, label);
                     if let Type::Callable(Some(callable_sig)) = callee_ty {
                         self.check_dynamic_callable_args(
@@ -712,36 +644,31 @@ impl<'a> Checker<'a> {
                             e.span,
                         );
                     }
-                    // Phase 42 Sub-item A: a `Closure(...)`-shaped PHPDoc
-                    // callable carries no `@throws` info of its own, and
-                    // any other dynamic-callee shape has even less to go
-                    // on - genuinely unbounded.
+                    // A `Closure(...)`-shaped PHPDoc callable carries no
+                    // `@throws` info of its own, and any other dynamic-
+                    // callee shape has even less to go on - genuinely
+                    // unbounded.
                     self.current_function_has_unannotated_call = true;
                 }
-                // Phase 12 Findings A/B/C: `preg_match`'s by-ref
-                // `$matches` shape, including `PREG_OFFSET_CAPTURE`/
-                // `PREG_UNMATCHED_AS_NULL` recognition - `parse_preg_flags`
-                // bails (`None`) on any other flag, leaving this whole
-                // check inert for it. Overrides the generic widening
+                // `preg_match`'s by-ref `$matches` shape, including
+                // `PREG_OFFSET_CAPTURE`/`PREG_UNMATCHED_AS_NULL`
+                // recognition - `parse_preg_flags` bails (`None`) on any
+                // other flag, leaving this whole check inert for it.
+                // Overrides the generic widening
                 // `predefine_byref_or_unknown_args` already did above,
                 // rather than replacing it - anything outside this scope
-                // keeps that call's own (Mixed-or-widened) fallback
-                // unchanged. Deliberately placed *after* `check_args`
-                // above, not right after `predefine_byref_or_unknown_args`
-                // like an earlier draft had it - a real bug found by
-                // testing, not just reasoned about: `check_args` checks
-                // whether the *argument* `$matches` is compatible with
-                // the declared `?array<string> $matches` parameter (the
+                // keeps that call's Mixed-or-widened fallback unchanged.
+                // Placed after `check_args` above, not right after
+                // `predefine_byref_or_unknown_args`: `check_args` checks
+                // whether the argument `$matches` is compatible with the
+                // declared `?array<string> $matches` parameter (the
                 // real phpstorm-stubs stub is more specific than the
                 // bare native `?array` hint), and that check needs to see
                 // `$matches`'s own *pre-call* type, not this override's
                 // freshly-computed *post-call* shape - placing this
-                // before `check_args` made every `$matches` shape whose
-                // leaf type isn't plain `string` (Finding B's `[string,
-                // int]` tuple, Finding C's `string|null`) spuriously fail
-                // that check, since Finding A's own all-`string`-leaves
-                // shape had accidentally masked the bug by coincidentally
-                // matching the declared type exactly.
+                // before `check_args` would make every `$matches` shape
+                // whose leaf type isn't plain `string` (a `[string, int]`
+                // tuple, or `string|null`) spuriously fail that check.
                 if resolved_name.as_deref() == Some("preg_match")
                     && resolved.get(1).copied().flatten().is_some()
                     && let Some(pattern_arg) = resolved.first().copied().flatten()
@@ -763,41 +690,36 @@ impl<'a> Checker<'a> {
                         &leaf,
                         flags.unmatched_as_null,
                     );
-                    // Phase 12 Finding E, Part 3: unioned with an empty
-                    // shape for the real `0`-return/no-match case (real
-                    // PHP genuinely sets `$matches = []` then) - sound on
-                    // its own only because `check_shape_key_access`/
-                    // `infer_expr`'s own `Index` arm are now `Union`-aware
-                    // (Part 1), and precision for the extremely common
-                    // `if (preg_match(...)) { use $matches }` idiom is
-                    // recovered by `apply_narrowing`'s own new
-                    // `preg_match_condition` recognizer (Part 2), not by
-                    // this unconditional type itself.
+                    // Unioned with an empty shape for the real
+                    // `0`-return/no-match case (real PHP genuinely sets
+                    // `$matches = []` then) - sound on its own only
+                    // because `check_shape_key_access`/`infer_expr`'s
+                    // `Index` arm are `Union`-aware, and precision for the
+                    // common `if (preg_match(...)) { use $matches }`
+                    // idiom is recovered by `apply_narrowing`'s
+                    // `preg_match_condition` recognizer, not by this
+                    // unconditional type itself.
                     let shape = union_types(matched, Type::ArrayShape(vec![]));
                     purge_stale_narrowing_for(locals, matches_name);
-                    // Phase 17 follow-up: `$matches` is very commonly
-                    // undeclared before this exact call - its real
-                    // first appearance, so `declare` when there's
-                    // nothing here yet to preserve (an already-existing
-                    // `$matches` keeps its own real provenance instead,
-                    // matching this file's own "call-effected type
-                    // change, not a new declaration" rule elsewhere).
+                    // `$matches` is very commonly undeclared before this
+                    // exact call - its real first appearance, so
+                    // `declare` when there's nothing here yet to preserve
+                    // (an already-existing `$matches` keeps its own real
+                    // provenance instead).
                     if locals.contains_key(matches_name) {
                         locals.insert(matches_name.clone(), shape);
                     } else {
                         locals.declare(matches_name.clone(), shape, matches_arg.span);
                     }
                 }
-                // Phase 12 Finding D: `preg_match_all`'s by-ref
-                // `$matches` shape - a sibling special case to
-                // `preg_match`'s own above, sharing the same pattern-
-                // parsing/flag-parsing/leaf-type machinery but building a
-                // structurally different shape (`PREG_PATTERN_ORDER`, the
-                // real default, groups results by capture group across
-                // every match; `PREG_SET_ORDER` groups them by match,
-                // reusing `preg_match_matches_shape` unchanged for each
-                // entry). Placed after `check_args`, same reasoning as
-                // Finding A/B/C just above.
+                // `preg_match_all`'s by-ref `$matches` shape - a sibling
+                // special case to `preg_match`'s above, sharing the same
+                // pattern-parsing/flag-parsing/leaf-type machinery but
+                // building a structurally different shape
+                // (`PREG_PATTERN_ORDER`, the real default, groups results
+                // by capture group across every match; `PREG_SET_ORDER`
+                // groups them by match, reusing `preg_match_matches_shape`
+                // unchanged for each entry).
                 if resolved_name.as_deref() == Some("preg_match_all")
                     && resolved.get(1).copied().flatten().is_some()
                     && let Some(pattern_arg) = resolved.first().copied().flatten()
@@ -829,38 +751,25 @@ impl<'a> Checker<'a> {
                         )
                     };
                     purge_stale_narrowing_for(locals, matches_name);
-                    // Phase 17 follow-up: same reasoning as `preg_match`'s
-                    // own identical treatment just above.
+                    // Same reasoning as `preg_match`'s identical treatment
+                    // above.
                     if locals.contains_key(matches_name) {
                         locals.insert(matches_name.clone(), shape);
                     } else {
                         locals.declare(matches_name.clone(), shape, matches_arg.span);
                     }
                 }
-                // A Piwigo/real-PHPStan corpus diff found `proc_open()`'s
-                // own by-ref `$pipes` out-parameter (its 3rd argument)
-                // left completely unspecialized, falling to `predefine_
-                // byref_or_unknown_args`'s generic `Mixed` leniency -
-                // real PHPStan types it via its own separate internal
-                // stub bundle (`vendor/phpstan-src/stubs/core.stub`,
-                // deliberately excluded from this project's own stub-
-                // generation pipeline - see `build.rs`'s own exclusion
-                // comment - a distinct resource from phpstorm-stubs this
-                // project doesn't ingest at all): `@template P of int`,
-                // `@param array<P, list<string>|resource> $descriptor_
-                // spec`, `@param-out array<P, resource> $pipes`. Real
-                // PHPStan actually correlates `$descriptor_spec`'s own
-                // literal keys into `P` (confirmed via `dumpType()`:
-                // `array<1|2, resource>` for a `[1 => ..., 2 => ...]`
-                // descriptor spec) - a real, disclosed precision gap this
-                // narrow fix doesn't chase (no template-binding-through-
-                // `@param-out` mechanism exists in this codebase to key
-                // off a *different* parameter's own literal keys), but a
-                // plain `array<int, resource>` is still exactly what real
-                // PHPStan's own corpus-evidenced case (`ImageStdParamsTest
-                // ::spawnBackgroundLockHolder`/`UploadServiceTest`'s
-                // identical helper, both declaring a plain `@return
-                // array{0: resource, 1: array<int, resource>}`) needs.
+                // `proc_open()`'s by-ref `$pipes` out-parameter (its 3rd
+                // argument) would otherwise fall to `predefine_byref_
+                // or_unknown_args`'s generic `Mixed` leniency, since its
+                // real stub (`@param-out array<P, resource> $pipes`,
+                // `@template P of int`) lives in a separate stub bundle
+                // this project doesn't ingest. Real PHPStan correlates
+                // `$descriptor_spec`'s literal keys into `P`; this project
+                // doesn't have a template-binding-through-`@param-out`
+                // mechanism to key off a different parameter's literal
+                // keys, but a plain `array<int, resource>` is still
+                // enough for the evidenced corpus case.
                 if resolved_name.as_deref() == Some("proc_open")
                     && let Some(pipes_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(pipes_name) = &pipes_arg.kind
@@ -899,10 +808,9 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
-                // Finding 49's other real shape: `(function () {...})
-                // ->bindTo($newThis, $scope)` - same idea as
-                // `Closure::bind`, just on the receiver instead of the
-                // first argument.
+                // `(function () {...})->bindTo($newThis, $scope)` - same
+                // idea as `Closure::bind`, just on the receiver instead
+                // of the first argument.
                 //
                 // The `bindTo` branch can't reuse `check_expr`'s own
                 // return value the way the ordinary branch below does -
@@ -933,13 +841,11 @@ impl<'a> Checker<'a> {
                 } else {
                     self.check_expr(recv, locals, label)
                 };
-                // Phase 17 Stage B: see `probe_span`'s own doc comment.
+                // See `probe_span`'s doc comment.
                 self.probe_hit_at(recv.span, &recv_ty);
-                // Phase 60: `$x?->method()` is pointless once `$x`'s own
-                // type already proves it's never null - mirrors real
-                // PHPStan's `NullsafeMethodCallRule` exactly (same
-                // identifier, same "only when definitely never null, not
-                // when definitely always null either" split). Guarded by
+                // `$x?->method()` is pointless once `$x`'s type already
+                // proves it's never null - mirrors real PHPStan's
+                // `NullsafeMethodCallRule` exactly. Guarded by
                 // `loop_depth`/`static_var_names` for the same reasons
                 // `check_pointless_null_probe` is - a receiver only ever
                 // widened to nullable on a later loop iteration or an
@@ -960,27 +866,19 @@ impl<'a> Checker<'a> {
                         "nullsafe.neverNull",
                     );
                 }
-                // Re-enabled (Phase 9.5): the registry is now
-                // namespace-aware, so a method lookup trusts the specific
-                // `ClassInfo` stored under a *fully-qualified* name, not a
-                // bare one two unrelated packages could collide on - see
-                // the module-level doc comment's "Known limitation" note,
-                // now resolved, for the full history.
-                //
-                // A `Union`/`Intersection` receiver (e.g. a multi-type
-                // `catch` variable, or an ordinarily union-typed
-                // parameter) used to fall to `_ => None` here entirely,
-                // silently skipping this whole check - `member_missing`
+                // A method lookup trusts the specific `ClassInfo` stored
+                // under a fully-qualified name, not a bare one two
+                // unrelated packages could collide on. `member_missing`
                 // below picks up the "should this be flagged" question
-                // for those cases instead, using a representative member
-                // (the first `Object` found) for argument-checking.
+                // for a `Union`/`Intersection` receiver (e.g. a multi-type
+                // `catch` variable), using a representative member (the
+                // first `Object` found) for argument-checking.
                 let recv_class = match &recv_ty {
                     Type::Object(class, type_args) => Some((class.clone(), type_args.clone())),
-                    // Phase 79: an enum can't be generic, so there's no
-                    // real template-args list to carry through here -
-                    // same as every other synthesized enum-instance type
-                    // this checker builds (`cases()`'s own element type,
-                    // `self_ty` in `ClassInfo::from_enum_decl`).
+                    // An enum can't be generic, so there's no real
+                    // template-args list to carry through here - same as
+                    // every other synthesized enum-instance type this
+                    // checker builds.
                     Type::EnumCase(fqn, _) => Some((fqn.clone(), Vec::new())),
                     Type::Union(members) | Type::Intersection(members) => {
                         members.iter().find_map(|m| match m {
@@ -993,40 +891,31 @@ impl<'a> Checker<'a> {
                     }
                     _ => None,
                 };
-                // Real bug found and fixed this session: `sig` (and every
-                // class-name-dependent decision below it - argument-type
-                // checking, visibility/`@internal`/`@deprecated`, the
-                // Doctrine special case, and the final return-type
-                // resolution) used to derive `class`/`owner` from
-                // `recv_class` above, which is picked purely to answer
-                // "is there any concrete class at all" (forward order,
-                // regardless of whether it actually has the method) - the
-                // same anti-pattern this session's own `find_method_
-                // receiver_class`/`find_property_receiver` already fix
-                // elsewhere. `find_method_receiver` searches every member
-                // (`Intersection` in reverse, preferring the narrower,
-                // just-`instanceof`-checked type - see `method_call_
-                // return_type`'s own doc comment for the real corpus bug
-                // this ordering fixes) for one that genuinely resolves
-                // the method, carrying its own type-args and declaring
-                // owner through in one pass. Substituted through the
-                // receiver's own carried type arguments (Phase 10),
-                // walking up to whichever ancestor actually declares the
-                // method if it's inherited (Phase 10.5) - a method
-                // declared `add(T $item)` on `Collection<User>`, or
-                // inherited from `Collection` by a concrete
+                // `sig` (and every class-name-dependent decision below
+                // it - argument-type checking, visibility/`@internal`/
+                // `@deprecated`, the Doctrine special case, and the final
+                // return-type resolution) must NOT derive `class`/`owner`
+                // from `recv_class` above, which is picked purely to
+                // answer "is there any concrete class at all," regardless
+                // of whether it actually has the method. `find_method_
+                // receiver` searches every member (`Intersection` in
+                // reverse, preferring the narrower, just-`instanceof`-
+                // checked type - see `method_call_return_type`'s doc
+                // comment) for one that genuinely resolves the method,
+                // carrying its type-args and declaring owner through in
+                // one pass. Substituted through the receiver's carried
+                // type arguments, walking up to whichever ancestor
+                // actually declares the method if it's inherited - a
+                // method declared `add(T $item)` on `Collection<User>`,
+                // or inherited from `Collection` by a concrete
                 // `IntCollection extends Collection<int>`, gets checked
                 // against `User`/`int`, not an unbound `T`/`Mixed`.
                 // `find_method_receiver` already applies class-template
-                // substitution inline (see its own doc comment) - `sig`
-                // just borrows the already-owned, already-substituted
-                // signature straight out of `receiver`'s tuple, no second
-                // clone/substitution here.
+                // substitution inline - `sig` just borrows the already-
+                // owned, already-substituted signature straight out of
+                // `receiver`'s tuple, no second clone/substitution here.
                 let receiver = self.find_method_receiver(&recv_ty, method);
                 let sig = receiver.as_ref().map(|(_, _, _, sig)| sig);
-                // Phase 40.C: folded in from `phpstan_api.rs`'s own
-                // previously-separate `Walker` pass - see each check's
-                // own doc comment.
                 if let Some((_, _, owner, _)) = &receiver
                     && let Some(s) = sig
                 {
@@ -1035,8 +924,7 @@ impl<'a> Checker<'a> {
                 if let Some((class, _)) = &recv_class {
                     self.check_node_connecting_attribute(class, method, args, e.span, label);
                 }
-                // Phase 42 Sub-item A/D: this method call's own throw
-                // contribution.
+                // This method call's own throw contribution.
                 if let Some((class, _, _, _)) = &receiver {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
                     self.record_call_throw_point(dynamic_throw, sig);
@@ -1059,8 +947,8 @@ impl<'a> Checker<'a> {
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
-                        // Phase 36: `@param-closure-this` - see
-                        // `ExprKind::Call`'s own identical branch.
+                        // `@param-closure-this` - see `ExprKind::Call`'s
+                        // identical branch.
                         self.check_closure_literal_with_this_and_scope(
                             unwrap_grouping(&a.value),
                             locals,
@@ -1073,31 +961,29 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some((class, _)) = &recv_class {
-                    // Checked *before* falling back to whether the
-                    // representative member's own `sig` was found: for a
+                    // Checked before falling back to whether the
+                    // representative member's `sig` was found: for a
                     // `Union`, the representative is just the first
                     // `Object` member encountered, which could easily be
-                    // one that *does* have the method even though another
+                    // one that does have the method even though another
                     // member doesn't - the real question is never "does
                     // the first member have it," it's "is it missing from
                     // any member (Union) / every member (Intersection)."
-                    // A class not known to the registry at all (an
-                    // unresolvable/uninstalled dependency, the same gap
-                    // `ExprKind::New`'s check documents) is left unchecked
-                    // rather than risking a false positive - only fires
-                    // once the class itself is confirmed known. `__call`
-                    // anywhere in the chain means any method name is
-                    // legitimately callable at runtime, so its presence
-                    // suppresses this entirely, the same way real
-                    // PHPStan treats it.
-                    // ROADMAP "Known but not yet scheduled": real
-                    // PHPStan's own `MethodExistsTypeSpecifyingExtension`
-                    // - a `method_exists($recv, 'name')` true branch
-                    // proves this exact call safe for the rest of that
-                    // branch, regardless of `$recv`'s own static type
-                    // (`Locals::guarded_methods`, set in `apply_
-                    // narrowing`). Only fires when the receiver is the
-                    // exact bare-variable shape the guard itself was
+                    // A class not known to the registry at all is left
+                    // unchecked rather than risking a false positive -
+                    // only fires once the class itself is confirmed
+                    // known. `__call` anywhere in the chain means any
+                    // method name is legitimately callable at runtime, so
+                    // its presence suppresses this entirely, matching
+                    // real PHPStan.
+                    // Mirrors real PHPStan's
+                    // `MethodExistsTypeSpecifyingExtension` - a
+                    // `method_exists($recv, 'name')` true branch proves
+                    // this exact call safe for the rest of that branch,
+                    // regardless of `$recv`'s static type
+                    // (`Locals::guarded_methods`, set in
+                    // `apply_narrowing`). Only fires when the receiver is
+                    // the exact bare-variable shape the guard was
                     // recorded against.
                     let method_exists_guarded = matches!(
                         &unwrap_grouping(recv).kind,
@@ -1121,10 +1007,10 @@ impl<'a> Checker<'a> {
                     } else if let Some((class, _, owner, _)) = &receiver
                         && let Some(sig) = sig
                     {
-                        // Phase 57: visibility. `owner`/`sig` both come
-                        // from the same `find_method_receiver` lookup
-                        // now, guaranteed consistent with each other -
-                        // no separate re-lookup needed.
+                        // `owner`/`sig` both come from the same
+                        // `find_method_receiver` lookup, guaranteed
+                        // consistent with each other - no separate
+                        // re-lookup needed.
                         self.check_member_visibility(MemberVisibilityCheck {
                             kind: "method",
                             owner,
@@ -1134,20 +1020,16 @@ impl<'a> Checker<'a> {
                             span: e.span,
                             label,
                         });
-                        // Phase 67: `@internal`.
                         self.check_internal_method_call(owner, method, sig, false, e.span, label);
-                        // Phase 67 follow-up: `restricted_symbols`.
                         self.check_restricted_method_call(owner, method, false, e.span, label);
-                        // Phase 39: `@deprecated`.
                         self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
-                        // Phase 78: `DOMDocument::createElement()`'s own
-                        // tag-name validation - independent of the
-                        // internal/deprecated checks just above.
+                        // `DOMDocument::createElement()`'s tag-name
+                        // validation - independent of the internal/
+                        // deprecated checks above.
                         self.check_dom_create_element(class, method, args, e.span, label);
-                        // Finding 29 / Phase 49: see the identical
-                        // comment on the plain-function Call arm above -
-                        // `check_args` is spread-aware now, so it's
-                        // always worth calling.
+                        // See the identical comment on the plain-function
+                        // Call arm above - `check_args` is spread-aware,
+                        // so it's always worth calling.
                         let qualified = format!("{class}::{method}");
                         self.check_args(CheckArgsCall {
                             callee_label: &qualified,
@@ -1161,27 +1043,16 @@ impl<'a> Checker<'a> {
                         });
                     }
                 }
-                // Real bug found and fixed this session: this arm used to
-                // re-derive the call's own return type independently
-                // (branching on `receiver`/`sig` directly, hand-rolling
-                // just the one Doctrine special case) instead of
-                // delegating to `method_call_return_type` - the same
-                // function `infer_expr`'s own identical arm already uses.
-                // The two had quietly drifted apart: every special case
-                // added to `method_call_return_type` since (Phase 78's
-                // `DateTimeInterface::format()`/`diff()`, `DateInterval::
-                // format()`, `SimpleXMLElement::asXML()`) silently never
-                // applied here, and even the plain `Union`/`Intersection`
-                // per-member precision `method_call_return_type` itself
-                // already has (see its own doc comment) was missing here
-                // too - concretely, `$diff = $a->diff($b); $diff->days;`
-                // (the assignment path, `check_expr`) inferred plain
-                // `DateInterval` for `$diff`, silently discarding the
-                // `days: int` refinement that the exact same call written
-                // as one direct chain (`$a->diff($b)->days`, the
-                // `infer_expr` path `PropertyAccess` walks through)
-                // already got right. Delegating here instead keeps the
-                // two paths permanently in sync.
+                // Delegates to `method_call_return_type`, the same
+                // function `infer_expr`'s identical arm uses, rather than
+                // re-deriving the return type independently - otherwise
+                // every special case in `method_call_return_type` (e.g.
+                // `DateTimeInterface::format()`/`diff()`,
+                // `DateInterval::format()`) would silently never apply
+                // here: `$diff = $a->diff($b); $diff->days;` would infer
+                // plain `DateInterval` for `$diff`, discarding the
+                // `days: int` refinement the identical call written as
+                // one direct chain (`$a->diff($b)->days`) gets right.
                 let result = self.method_call_return_type(&recv_ty, method, args, locals);
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
@@ -1206,28 +1077,16 @@ impl<'a> Checker<'a> {
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
                 self.check_expr(r, &mut narrowed, label);
-                // Phase 15, `BooleanAndConstantConditionRule`: real
-                // inferred-type trust - see `check_boolean_and_or`'s own
-                // doc comment (`checker/control_flow.rs`). Passes the
-                // *original*, pre-narrowing `locals` (not `narrowed`) -
+                // Mirrors real PHPStan's `BooleanAndConstantConditionRule` -
+                // see `check_boolean_and_or`'s doc comment. Passes the
+                // original, pre-narrowing `locals`, not `narrowed`:
                 // `check_boolean_and_or` narrows its own right-side/
-                // whole-result checks internally now; an earlier version
-                // passed the already-narrowed scope for every one of its
-                // three checks, including the left one, which was a real,
-                // now-fixed bug (see that function's own doc comment).
-                // `is_first_level` is `is_condition_position ||
-                // is_bare_statement` - confirmed directly against real
-                // PHPStan's own `isInFirstLevelStatement()`: a bare `$a &&
-                // $b;` used as its own statement (its result discarded)
-                // is checked with `ExpressionContext::createTopLevel()`
-                // the exact same way an `if`/`while`'s own direct
-                // condition is, not just the condition sites this
-                // project's own `in_condition_position` already covers.
-                // Real corpus false positive this fixes: `Piwigo\Url\
-                // UrlService::makeSectionInUrl`'s `isset($x) or
-                // trigger_error(...);` (`trigger_error()`'s own stub
-                // return type is exactly `true`, so the bare `or`'s own
-                // whole-result looked constantly true).
+                // whole-result checks internally. `is_first_level` is
+                // `is_condition_position || is_bare_statement`, matching
+                // real PHPStan's `isInFirstLevelStatement()`: a bare
+                // `$a && $b;` used as its own statement is checked with
+                // `ExpressionContext::createTopLevel()` the same way an
+                // `if`/`while`'s direct condition is.
                 self.check_boolean_and_or(
                     &BinOp::And,
                     l,
@@ -1245,10 +1104,8 @@ impl<'a> Checker<'a> {
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
                 self.check_expr(r, &mut narrowed, label);
-                // Phase 15, `BooleanOrConstantConditionRule`: same
-                // reasoning as `&&` above - passes the original,
-                // pre-narrowing `locals`, and the same `is_bare_statement`
-                // inclusion in `is_first_level`.
+                // Mirrors real PHPStan's `BooleanOrConstantConditionRule` -
+                // same reasoning as `&&` above.
                 self.check_boolean_and_or(
                     &BinOp::Or,
                     l,
@@ -1268,13 +1125,12 @@ impl<'a> Checker<'a> {
             // silences this for the whole dereference chain on the left
             // (`$config['key'] ?? 'default'` is just as warning-free as
             // a bare `$x ?? 'default'`), which is exactly what
-            // `check_expr_quiet_root` walks. `??`'s own result type is
-            // *usually* just the right side's type - reusing
-            // `check_expr(r, ...)`'s return value directly avoids a real,
-            // confirmed double-walk of `r` - except when `widen_coalesce_
-            // result` (Phase 22 Finding 4) says the left side's own type
-            // carries real information the right side's bare fallback
-            // would otherwise discard.
+            // `check_expr_quiet_root` walks. `??`'s result type is
+            // usually just the right side's type - reusing
+            // `check_expr(r, ...)`'s return value directly avoids a
+            // double-walk of `r` - except when `widen_coalesce_result`
+            // says the left side's type carries real information the
+            // right side's bare fallback would otherwise discard.
             ExprKind::Binary(BinOp::Coalesce, l, r) => {
                 self.check_expr_quiet_root(l, locals, label);
                 self.check_pointless_null_probe(
@@ -1304,16 +1160,12 @@ impl<'a> Checker<'a> {
                 self.check_division_by_literal_zero(op, r, &r_ty, r.span, label);
                 self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
                 self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
-                // Phase 15, `LogicalXorConstantConditionRule`: real
-                // inferred-type trust - see `check_logical_xor`'s own doc
-                // comment (`checker/control_flow.rs`). `BinOp::And`/`Or`
-                // are deliberately *not* handled here at all: they each
-                // have their own, separate, earlier-matching `ExprKind::
-                // Binary` arm above (short-circuit-narrowing-aware,
-                // matching real PHPStan's own `getRightScope()`), which
-                // this generic arm - the same one every *other* binary
-                // operator falls through to - never actually reaches for
-                // them.
+                // Mirrors real PHPStan's `LogicalXorConstantConditionRule` -
+                // see `check_logical_xor`'s doc comment. `BinOp::And`/`Or`
+                // are deliberately not handled here: they each have their
+                // own, earlier-matching `ExprKind::Binary` arm above
+                // (short-circuit-narrowing-aware), which this generic arm
+                // never reaches for them.
                 if *op == BinOp::LogicalXor {
                     self.check_logical_xor(l, r, locals, label);
                 }
@@ -1329,9 +1181,9 @@ impl<'a> Checker<'a> {
                         "variable.undefined",
                     );
                 }
-                // Phase 17 follow-up: see `Checker::probe_var_provenance`'s
-                // own doc comment - the exact same "stash it when the span
-                // matches" pattern `probe_hit` already uses.
+                // See `Checker::probe_var_provenance`'s doc comment - the
+                // same "stash it when the span matches" pattern
+                // `probe_hit` uses.
                 if self.probe_span.get() == Some(e.span) {
                     *self.probe_var_provenance.borrow_mut() = locals
                         .get_provenance(name)
@@ -1341,8 +1193,8 @@ impl<'a> Checker<'a> {
                     .get(name)
                     .cloned()
                     .unwrap_or_else(|| superglobal_default_type(name));
-                // Phase 17 follow-up: a read's own inferred type, for
-                // hover - see `Checker::probe_hit_at`'s own doc comment.
+                // A read's inferred type, for hover - see
+                // `Checker::probe_hit_at`'s doc comment.
                 self.probe_hit_at(e.span, &ty);
                 ty
             }
@@ -1352,56 +1204,45 @@ impl<'a> Checker<'a> {
             ) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_incdec_validity(op, inner, &inner_ty, e.span, label);
-                // See `advance_incdec_type`'s own doc comment for the
-                // real PHP null/bool/string semantics this computes.
+                // See `advance_incdec_type`'s doc comment for the real
+                // PHP null/bool/string semantics this computes.
                 //
                 // Computed against `inner_ty` (whatever `inner` itself
                 // just inferred as, any shape) rather than only a bare
                 // `locals.get(name)` lookup, and rebound via the same
                 // `bind_assignment_target` the `Assign`/`CompoundAssign`
-                // arms already use - a real corpus false positive this
-                // fixes: `++$arr[$k]` used to be gated behind `if let
-                // ExprKind::Variable(name) = &inner.kind`, so incrementing
-                // an array element never widened the array's own tracked
-                // shape at all (`CategoryService::saveCategoriesOrder`'s
-                // own `++$currentRankForIdUppercat[$idUppercat]` left that
-                // array's own element type frozen at whatever it was
-                // before, contributing to a real `mixed`-leak false
-                // positive downstream). `bind_assignment_target` is a
-                // strict superset of the old `locals.declare` call for the
+                // arms use: `++$arr[$k]` incrementing an array element
+                // must widen the array's tracked shape too, not just a
+                // bare variable's. `bind_assignment_target` is a strict
+                // superset of a plain `locals.declare` call for the
                 // `Variable` case (identical rebind, plus the general
-                // `narrowing_key` purge every other assignment already
-                // gets) and a safe no-op for any `inner` shape it doesn't
-                // specially handle (including `PropertyAccess` - a
-                // property's own read type is always its declared type,
-                // never a locally-tracked literal default the way a bare
-                // variable's is, so `$obj->prop++` has no equivalent
-                // observable gap to fix here regardless), exactly like
-                // before.
+                // `narrowing_key` purge every other assignment gets) and
+                // a safe no-op for any `inner` shape it doesn't specially
+                // handle (including `PropertyAccess` - a property's read
+                // type is always its declared type, never a locally-
+                // tracked literal default, so `$obj->prop++` has no
+                // equivalent gap to fix here).
                 let is_increment = matches!(op, UnaryOp::PreInc | UnaryOp::PostInc);
                 let updated = advance_incdec_type(&inner_ty, is_increment);
-                // Phase 17 follow-up: `$x++`/`$x--` is real, visible
-                // rebinding syntax, the same category as `$x += 1`.
+                // `$x++`/`$x--` is real, visible rebinding syntax, the
+                // same category as `$x += 1`.
                 self.bind_assignment_target(inner, updated, locals);
                 self.infer_expr(inner, locals)
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
                 self.check_expr(inner, locals, label);
-                // Phase 15, `BooleanNotConstantConditionRule`: real
-                // inferred-type trust, fires *anywhere* `!expr` appears
-                // (not just as a condition - `should_skip_constant_
-                // condition` excludes `!` from `if`/`while`/`ternary`'s
-                // own generic check specifically so this standalone rule
-                // is the one and only place it's caught, matching real
-                // PHPStan's own separation exactly). Note the inversion:
-                // negating an always-*true* inner expression makes the
-                // whole `!expr` always *false*, and vice versa - confirmed
-                // directly against `BooleanNotConstantConditionRule.php`,
-                // not assumed. `is_exempt_last_condition` (only ever `true`
-                // when this `!expr` is itself a genuine last-elseif-
-                // without-else's own condition, set by `check_if`) mirrors
-                // real PHPStan's own `isLast` exemption for this rule too -
-                // confirmed it has one, unlike `Ternary`'s.
+                // Mirrors real PHPStan's `BooleanNotConstantConditionRule` -
+                // fires anywhere `!expr` appears, not just as a condition
+                // (`should_skip_constant_condition` excludes `!` from
+                // `if`/`while`/`ternary`'s own generic check specifically
+                // so this standalone rule is the one place it's caught).
+                // Negating an always-true inner expression makes the
+                // whole `!expr` always false, and vice versa.
+                // `is_exempt_last_condition` (only ever `true` when this
+                // `!expr` is itself a genuine last-elseif-without-else
+                // condition, set by `check_if`) mirrors real PHPStan's
+                // `isLast` exemption for this rule too, unlike
+                // `Ternary`'s.
                 if let Some(inner_value) = self.inferred_constant_condition(inner, locals) {
                     let result_value = !inner_value;
                     if !(result_value && is_exempt_last_condition) {
@@ -1438,13 +1279,12 @@ impl<'a> Checker<'a> {
                     inner_ty
                 }
             }
-            // Phase 51: `IntegerRangeType::toBitwiseNotType()` - `~5`/
-            // `~$x` on a known int-literal/range-typed operand computes
-            // the real, order-reversed complement range instead of just
-            // passing the operand's own type through unchanged (still
-            // correct, if imprecise, for a plain unbounded `Int`/
-            // `String` - `~"hello"` is a real, still-string byte
-            // complement).
+            // Mirrors real PHPStan's `IntegerRangeType::toBitwiseNotType()` -
+            // `~5`/`~$x` on a known int-literal/range-typed operand
+            // computes the order-reversed complement range instead of
+            // just passing the operand's type through unchanged (still
+            // correct, if imprecise, for a plain unbounded `Int`/`String` -
+            // `~"hello"` is a real, still-string byte complement).
             ExprKind::Unary(op @ UnaryOp::BitNot, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_unary_operand_validity(op, &inner_ty, inner.span, label);
@@ -1454,9 +1294,9 @@ impl<'a> Checker<'a> {
             ExprKind::Cast(ty, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(ty, &inner_ty, inner.span, label);
-                // Phase 67/Phase 39 follow-up: an implicit `(string)` cast
-                // of an object triggers a real `__toString()` call - see
-                // `check_implicit_tostring_usage`'s own doc comment.
+                // An implicit `(string)` cast of an object triggers a
+                // real `__toString()` call - see
+                // `check_implicit_tostring_usage`'s doc comment.
                 if ty == "string" {
                     self.check_implicit_tostring_usage(&inner_ty, e.span, label);
                 }
@@ -1477,14 +1317,12 @@ impl<'a> Checker<'a> {
             // is exactly the right type for it, the same way it's used
             // for a function that always throws or exits.
             ExprKind::Throw(inner) => {
-                // Finding 57's own check, previously only wired for the
-                // `StmtKind::Throw` (bare `throw $x;` statement) shape -
-                // a `throw` *expression* (`$x ?? throw new Foo();`,
-                // `default => throw ...`, an arrow function body, ...)
-                // is the exact same language construct at runtime and
-                // accepts only a real Throwable just as unconditionally
-                // (a real PHP fatal error otherwise), but never ran this
-                // check at all until now.
+                // A `throw` expression (`$x ?? throw new Foo();`,
+                // `default => throw ...`, an arrow function body, ...) is
+                // the same language construct as a bare `throw $x;`
+                // statement at runtime and accepts only a real Throwable
+                // just as unconditionally (a real PHP fatal error
+                // otherwise).
                 let inner_ty = self.check_expr(inner, locals, label);
                 if let Some(class) = self.thrown_value_not_throwable(&inner_ty) {
                     self.report(
@@ -1495,8 +1333,8 @@ impl<'a> Checker<'a> {
                         "throw.notThrowable",
                     );
                 }
-                // Phase 42 Sub-item A: mirrors `check_throw`'s own
-                // identical recording for the statement form.
+                // Mirrors `check_throw`'s identical recording for the
+                // statement form.
                 self.current_function_explicit_throw_points
                     .push((inner_ty.clone(), inner.span));
                 self.current_function_throw_points.push(inner_ty);
@@ -1544,15 +1382,14 @@ impl<'a> Checker<'a> {
                     InstanceofTarget::Expr(inner_target) => {
                         self.check_expr(inner_target, locals, label);
                     }
-                    // Phase 48: `ExistingClassInInstanceOfRule`'s own
-                    // check - a dynamic target (`InstanceofTarget::Expr`,
-                    // handled above) never names a concrete class to
-                    // check existence for at all, only a literal one
-                    // does. `resolve_name_expr` already handles `self`/
-                    // `parent`/`static` (never flagged - see its own doc
-                    // comment), so anything that comes back as an
-                    // `Object` here is a genuine bare class-name
-                    // reference.
+                    // Mirrors real PHPStan's `ExistingClassInInstanceOfRule` -
+                    // a dynamic target (`InstanceofTarget::Expr`, handled
+                    // above) never names a concrete class to check
+                    // existence for, only a literal one does.
+                    // `resolve_name_expr` already handles `self`/`parent`/
+                    // `static` (never flagged - see its doc comment), so
+                    // anything that comes back as an `Object` here is a
+                    // genuine bare class-name reference.
                     InstanceofTarget::Name(name, name_span) => {
                         if let Type::Object(class, _) = self.resolve_name_expr(name) {
                             if !self.class_name_exists(&class) {
@@ -1564,9 +1401,9 @@ impl<'a> Checker<'a> {
                                     "class.notFound",
                                 );
                             } else {
-                                // Phase 48.H: `class.nameCase` - `name` is
-                                // the raw, as-written text, still a bare
-                                // string right here in the AST.
+                                // `class.nameCase` - `name` is the raw,
+                                // as-written text, still a bare string
+                                // right here in the AST.
                                 self.check_class_name_case(label, name, *name_span);
                                 self.check_internal_instanceof(&class, e.span, label);
                                 self.check_restricted_class_name_usage(
@@ -1583,10 +1420,9 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Assign(lhs, rhs) => {
                 let rhs_ty = self.check_expr(rhs, locals, label);
-                // Phase 65: `$this` is real PHP's own reserved,
-                // implicitly-bound reference to the current object -
-                // reassigning it is a real, unconditional fatal error
-                // ("Cannot re-assign $this."), confirmed directly.
+                // `$this` is real PHP's reserved, implicitly-bound
+                // reference to the current object - reassigning it is an
+                // unconditional fatal error ("Cannot re-assign $this.").
                 if matches!(&lhs.kind, ExprKind::Variable(v) if v == "this") {
                     self.report(
                         label.to_string(),
@@ -1605,9 +1441,8 @@ impl<'a> Checker<'a> {
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
-                // Phase 45 (45B): a bare by-ref-parameter variable
-                // directly assigned a value its own declared type can't
-                // hold.
+                // A bare by-ref-parameter variable directly assigned a
+                // value its declared type can't hold.
                 self.check_param_out_assignment(lhs, &rhs_ty, label);
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 self.record_condition_alias(lhs, rhs, locals);
@@ -1644,21 +1479,15 @@ impl<'a> Checker<'a> {
                     self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span, label);
                     self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span, label);
                 }
-                // Phase 17 follow-up: `$x += 1`/`$x ??= ...` is a real
-                // rebind of `$x` - generalized here (from a bare-`Variable`-
-                // only check) to route through the same `bind_assignment_
-                // target` every other assignment shape already uses, so a
-                // property/index target rebinds too, not just a bare
-                // local. Real corpus false positive this fixes:
-                // `ImageStdParams::getWatermark`'s own `$this->watermark
-                // ??= new WatermarkParams(); return $this->watermark;` -
-                // the property's own tracked type never actually updated
-                // before this fix (silently skipped, `lhs.kind` being a
-                // `PropertyAccess`, not a `Variable`), so the return
-                // still saw the stale, nullable pre-`??=` type.
+                // `$x += 1`/`$x ??= ...` is a real rebind of `$x` -
+                // routes through the same `bind_assignment_target` every
+                // other assignment shape uses, so a property/index target
+                // rebinds too, not just a bare local (a bare-`Variable`-
+                // only check would leave e.g. `$this->watermark ??= ...`
+                // never actually updating the property's tracked type).
                 let ty = self.infer_binary(op, lhs, rhs, locals);
-                // Phase 45 (45B): same by-ref-parameter check as plain
-                // `=`, against the compound operation's own real result.
+                // Same by-ref-parameter check as plain `=`, against the
+                // compound operation's own real result.
                 self.check_param_out_assignment(lhs, &ty, label);
                 self.bind_assignment_target(lhs, ty, locals);
                 Type::Mixed
@@ -1666,14 +1495,11 @@ impl<'a> Checker<'a> {
             ExprKind::Ternary(cond, then_, else_) => {
                 self.in_condition_position = true;
                 self.check_expr(cond, locals, label);
-                // Phase 15, `TernaryOperatorConstantConditionRule`: real
-                // inferred-type trust, same design as `If`/`While`/
-                // `DoWhile` (`checker/stmt.rs`'s own `check_if`) - no
-                // exclusions beyond `inferred_constant_condition`'s own
-                // shared ones, confirmed directly against `vendor/
-                // phpstan-src`: this one real rule has none of `BooleanAnd`
-                // /`BooleanOr`'s own `isLast`/first-level-statement
-                // complexity.
+                // Mirrors real PHPStan's `TernaryOperatorConstantConditionRule`,
+                // same design as `If`/`While`/`DoWhile` (`check_if`) - no
+                // exclusions beyond `inferred_constant_condition`'s shared
+                // ones; this rule has none of `BooleanAnd`/`BooleanOr`'s
+                // `isLast`/first-level-statement complexity.
                 if let Some(value) = self.inferred_constant_condition(cond, locals) {
                     self.report(
                         label.to_string(),
@@ -1695,42 +1521,18 @@ impl<'a> Checker<'a> {
                 // `$x === null ? "default" : $x` never benefits from the
                 // narrowing an equivalent `if` already gets.
                 //
-                // Deliberately **not** writing `merge_scopes(&then_locals,
+                // Deliberately does NOT write `merge_scopes(&then_locals,
                 // &else_locals)` back into the real `locals` afterward,
-                // unlike `StmtKind::If` - a real, previously-uninvestigated
-                // bug found via a Phase 12 corpus re-check traced this
-                // exact write-back as the root cause of a genuine
-                // divergence between `check_expr` and `infer_expr` (which
-                // can't do this at all - it only ever receives `&Locals`,
-                // never `&mut`) for the *same* expression tree.
-                // Minimized repro: `$collected === [] ? null :
-                // preg_replace('/.../', '', $collected[0])` - evaluating
-                // the *condition's own true branch* narrows `$collected`
-                // (declared `list<string>`) down to the literal empty
-                // shape `array{}` (`narrow_type_to`'s own blind
-                // `target.clone()` for a non-`Union` original, correct in
-                // isolation: if `$collected` really does equal `[]`, its
-                // type genuinely is the empty array). Writing that back
-                // into the outer scope via `merge_scopes` then unioned it
-                // with the else branch's own unnarrowed `list<string>`,
-                // permanently corrupting `$collected`'s tracked type to
-                // `array{}|list<string>` for anything checked afterward -
-                // here, a *second*, separate evaluation of the very same
-                // ternary (`check_property_assignment`'s own redundant
-                // `infer_expr` call on the same `rhs`), where indexing
-                // into the now-corrupted union's empty-shape member
-                // produced `Mixed`, defeating `preg_replace`'s own
-                // subject-type-dependent precision and leaking a spurious
-                // `array<string>` into the property-assignment mismatch.
-                // A ternary is an expression, not a control-flow
-                // statement: narrowing *within* evaluating `then_`/`else_`
-                // themselves (already achieved by `then_locals`/
-                // `else_locals` below) is exactly what the comment above
-                // is about and needs no further help: once the ternary as
-                // a whole finishes evaluating, only its *value* matters to
-                // whatever contains it, never which hypothetical branch's
-                // narrowing might have applied - the outer `locals` should
-                // come out exactly as they went in.
+                // unlike `StmtKind::If`: a ternary is an expression, not a
+                // control-flow statement. Once it finishes evaluating,
+                // only its value matters to whatever contains it, never
+                // which hypothetical branch's narrowing applied - the
+                // outer `locals` should come out exactly as they went in.
+                // Writing the merge back corrupted a variable's tracked
+                // type across a second, separate evaluation of the same
+                // ternary tree (`check_expr` and `infer_expr` diverging on
+                // the identical expression, since `infer_expr` only ever
+                // receives `&Locals`, never `&mut`).
                 let mut then_locals = locals.clone();
                 self.apply_narrowing(cond, &mut then_locals, true);
                 let then_ty = then_
@@ -1739,19 +1541,15 @@ impl<'a> Checker<'a> {
                 let mut else_locals = locals.clone();
                 self.apply_narrowing(cond, &mut else_locals, false);
                 let else_ty = self.check_expr(else_, &mut else_locals, label);
-                // Phase 23: `union_types`, not a raw `Type::Union(vec![...])`
-                // - either branch's own type is very commonly already a
-                // `Union` itself (e.g. a stub-declared `resource|false`),
-                // and a bare `vec![then_ty, else_ty]` nests it unflattened
-                // instead of merging its members in - a later `!== false`
-                // narrowing filters only the *outer* union's members, so
-                // it can strip a bare `false` sitting alongside the nested
-                // union but can't reach inside that union to strip its own
-                // `false` member. `union_types` already independently
-                // implements the same "either side Mixed => Mixed" /
-                // "equal sides collapse" rules this match used to
-                // duplicate by hand, so this also simplifies the two arms
-                // into one call.
+                // `union_types`, not a raw `Type::Union(vec![...])` -
+                // either branch's type is commonly already a `Union`
+                // itself (e.g. a stub-declared `resource|false`), and a
+                // bare `vec![then_ty, else_ty]` nests it unflattened
+                // instead of merging its members in: a later `!== false`
+                // narrowing filters only the outer union's members, so it
+                // can strip a bare `false` sitting alongside the nested
+                // union but can't reach inside it to strip its own
+                // `false` member.
                 match then_ty {
                     Some(then_ty) => union_types(then_ty, else_ty),
                     None => Type::Mixed,
@@ -1775,41 +1573,28 @@ impl<'a> Checker<'a> {
                         self.check_expr(i, locals, label);
                         self.check_shape_key_access(base, i, locals, label);
                         self.check_dim_fetch_key_type(base, i, locals, label);
-                        // Phase 32 Finding F (found while testing it): the
-                        // `Index` counterpart of `PropertyAccess`'s own
-                        // "check the narrowed key first" handling just
-                        // above - `check_expr` (unlike `infer_expr`, which
-                        // already does this for `Index`) went straight to
-                        // re-deriving the type from the base's own
-                        // declared/inferred shape, silently discarding
-                        // whatever `apply_narrowing` had written under
-                        // this exact `narrowing_key`. Real impact: a bare
-                        // `return $x['k'];` right after narrowing
-                        // `$x['k']` saw the un-narrowed type, while
-                        // passing the same expression as a function
-                        // argument (going through `infer_expr` for the
-                        // argument-type comparison) already didn't.
+                        // The `Index` counterpart of `PropertyAccess`'s
+                        // "check the narrowed key first" handling above -
+                        // without this, `check_expr` (unlike `infer_expr`,
+                        // which already does this for `Index`) would
+                        // re-derive the type from the base's declared/
+                        // inferred shape, discarding whatever
+                        // `apply_narrowing` had written under this exact
+                        // `narrowing_key`. A bare `return $x['k'];` right
+                        // after narrowing `$x['k']` would otherwise see
+                        // the un-narrowed type.
                         if let Some(key) = narrowing_key(e)
                             && let Some(narrowed) = locals.get(&key)
                         {
                             return narrowed.clone();
                         }
-                        // Real bug found and fixed this session: this used
-                        // to be its own hand-maintained inline copy of
-                        // `index_result_type` (the exact duplication this
-                        // module's own Phase 32 Finding F comment above
-                        // already flagged once, for the narrowing-key
-                        // fast path) - missing that function's own
-                        // `Type::Union`/`Type::Intersection` arms
-                        // entirely, so a container widened to a `Union`
-                        // across a loop's own multi-pass fixed-point
-                        // convergence (`converge_loop_body`) silently
-                        // fell to `Mixed` here even on a pass where
-                        // `infer_expr`'s identical read, going through
-                        // the real `index_result_type`, already resolved
-                        // it precisely. Calling the shared function
-                        // directly removes the whole duplicate-drift
-                        // class of bug, not just this one instance of it.
+                        // Calls the shared `index_result_type` directly,
+                        // rather than a hand-maintained inline copy of it,
+                        // so its `Type::Union`/`Type::Intersection` arms
+                        // stay in sync - a container widened to a `Union`
+                        // across a loop's multi-pass fixed-point
+                        // convergence must resolve here exactly as
+                        // `infer_expr`'s identical read does.
                         index_result_type(base_ty, literal_string_key(i).as_deref())
                     }
                     None => Type::Mixed,
@@ -1818,24 +1603,22 @@ impl<'a> Checker<'a> {
             ExprKind::New(class_expr, args) => {
                 // `new Foo()` never carries known type arguments itself -
                 // real PHP's constructor syntax has no way to write
-                // `new Foo<Bar>()` at all - but `infer_expr`'s own `New` arm
-                // (Phase 54/77 follow-up) binds them from the constructor's
-                // own arguments instead, the way real PHPStan does, when
-                // `Foo` is itself generic (`@template` on the class).
+                // `new Foo<Bar>()` at all - but `infer_expr`'s `New` arm
+                // binds them from the constructor's own arguments instead,
+                // the way real PHPStan does, when `Foo` is itself generic
+                // (`@template` on the class).
                 let new_ty = self.infer_expr(e, locals);
                 let resolved_class = match &new_ty {
                     Type::Object(class, _) => Some(class.clone()),
                     _ => None,
                 };
-                // Phase 48.1: rebind to the registry's own canonical-case
-                // spelling up front (once, here) rather than at each
-                // individual lookup below - `lookup_method`'s own
-                // ancestor-walk (`Registry::lookup_in_hierarchy_with_owner`)
-                // starts from an exact-case `self.classes.get(&current)`
-                // with no case-insensitive fallback of its own, so a
-                // differently-cased `new foo()` of a real `class Foo {}`
-                // would otherwise resolve no constructor at all even
-                // after the existence check below stops misreporting it.
+                // Rebind to the registry's canonical-case spelling up
+                // front, once, rather than at each individual lookup
+                // below - `lookup_method`'s ancestor-walk starts from an
+                // exact-case `self.classes.get(&current)` with no
+                // case-insensitive fallback, so a differently-cased
+                // `new foo()` of a real `class Foo {}` would otherwise
+                // resolve no constructor at all.
                 let resolved_class = resolved_class.map(|class| {
                     self.registry
                         .lookup_class(&class)
@@ -1864,8 +1647,8 @@ impl<'a> Checker<'a> {
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                         )
                     {
-                        // Phase 36: `@param-closure-this` - see
-                        // `ExprKind::Call`'s own identical branch.
+                        // `@param-closure-this` - see `ExprKind::Call`'s
+                        // identical branch.
                         self.check_closure_literal_with_this_and_scope(
                             unwrap_grouping(&a.value),
                             locals,
@@ -1878,30 +1661,24 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(class) = &resolved_class {
-                    // `resolved_class` is already the fully-qualified name
-                    // (`infer_expr`'s New arm resolves it via `name_ctx`),
-                    // so every miss here is a real undefined-class finding
-                    // - no "can't resolve a namespaced name" case left, the
-                    // way there used to be before Phase 9.5's namespace
-                    // support.
-                    // Phase 48.H: `class.nameCase` - the raw, as-written
-                    // name is still available directly on `class_expr`'s
-                    // own `ExprKind::Name` (a dynamic target, `new
-                    // $var()`, never reaches this arm at all - `resolved_
-                    // class` above is `None` for it). Unlike the earlier
-                    // `extends`/`implements`/`use` MVP, this needs no new
-                    // plumbing: unlike a PHPDoc-derived `Type`, which
-                    // this project's own type-parsing pipeline never
-                    // retains a per-reference raw spelling for, `new`'s
-                    // own class name is still a bare source string right
-                    // here in the AST, exactly like `instanceof`/`catch`
-                    // just below.
+                    // `resolved_class` is already the fully-qualified
+                    // name (`infer_expr`'s New arm resolves it via
+                    // `name_ctx`), so every miss here is a real
+                    // undefined-class finding - no "can't resolve a
+                    // namespaced name" case left.
+                    // `class.nameCase` - the raw, as-written name is
+                    // still available directly on `class_expr`'s
+                    // `ExprKind::Name` (a dynamic target, `new $var()`,
+                    // never reaches this arm - `resolved_class` above is
+                    // `None` for it). `new`'s class name is still a bare
+                    // source string right here in the AST, exactly like
+                    // `instanceof`/`catch` below.
                     if let ExprKind::Name(raw) = &class_expr.kind {
                         self.check_class_name_case(label, raw, class_expr.span);
                     }
-                    // Phase 67: `@internal` - called before the borrow
-                    // just below (this check does its own, separate
-                    // registry lookup) since it needs `&mut self`.
+                    // Called before the borrow just below (this check
+                    // does its own, separate registry lookup) since it
+                    // needs `&mut self`.
                     self.check_internal_instantiation(class, e.span, label);
                     self.check_restricted_class_name_usage(
                         class,
@@ -1909,26 +1686,22 @@ impl<'a> Checker<'a> {
                         e.span,
                         label,
                     );
-                    // Phase 39 follow-up: `@deprecated`.
                     self.check_deprecated_instantiation(class, e.span, label);
-                    // Phase 78: `DateInterval`'s own duration-string
-                    // constructor validation - independent of whether
-                    // the class is otherwise instantiable at all, so
-                    // this runs unconditionally before that dispatch.
+                    // `DateInterval`'s duration-string constructor
+                    // validation - independent of whether the class is
+                    // otherwise instantiable, so this runs unconditionally
+                    // before that dispatch.
                     self.check_date_interval_constructor(class, args, e.span, label);
-                    // Phase 78: `SimpleXMLElement`'s own construction
-                    // well-formedness validation - same shape.
+                    // `SimpleXMLElement`'s construction well-formedness
+                    // validation - same shape.
                     self.check_simplexml_element_constructor(class, args, e.span, label);
-                    // Phase 42 Sub-item A/D: this constructor's own throw
-                    // contribution.
+                    // This constructor's own throw contribution.
                     let dynamic_throw = self.dynamic_new_throw_type(class, args);
                     self.record_call_throw_point(dynamic_throw, ctor_sig);
-                    // Phase 48.1: case-insensitive lookup - a real,
-                    // previously-missed call site (this exact "instantiating
-                    // a differently-cased reference to a real class" shape
-                    // is the whole point of Phase 48.1, but this particular
-                    // choke point still used the raw, case-sensitive
-                    // `registry.classes.get` instead of `lookup_class`).
+                    // Case-insensitive lookup: instantiating a
+                    // differently-cased reference to a real class needs
+                    // `lookup_class`, not the raw, case-sensitive
+                    // `registry.classes.get`.
                     if let Some((_, info)) = self.registry.lookup_class(class) {
                         if info.kind == ClassKind::Interface {
                             self.report(
@@ -1952,10 +1725,9 @@ impl<'a> Checker<'a> {
                                 ),
                             );
                         } else if let Some(sig) = ctor_sig {
-                            // Finding 29 / Phase 49: see the identical
-                            // comment on the plain-function Call arm
-                            // above - `check_args` is spread-aware now,
-                            // so it's always worth calling.
+                            // See the identical comment on the plain-
+                            // function Call arm above - `check_args` is
+                            // spread-aware, so it's always worth calling.
                             self.check_args(CheckArgsCall {
                                 callee_label: &format!("{class}::__construct"),
                                 sig,
@@ -1988,26 +1760,18 @@ impl<'a> Checker<'a> {
                 // into the registry under any stable name - check_function
                 // only needs a FunctionDecl and a label to check against.
                 //
-                // Phase 90: `ancestor_sig` looks up the same method name
-                // directly against whichever real, already-registered
-                // interface/parent this anonymous class implements/
-                // extends (`extends` first, matching `Registry::
-                // lookup_ancestor_method_with_owner`'s own order) - real
-                // corpus false positive this fixes: the extremely common
-                // test-double shape (`new class implements
-                // HtmlRenderingInterface { public function
-                // nameCompare(array $a, array $b): int {...} }`, no own
-                // docblock, relying entirely on the interface's own
-                // `@param array<string, mixed>`) was never checked
-                // against the interface's own docblock at all, since an
+                // `ancestor_sig` looks up the same method name directly
+                // against whichever real, already-registered interface/
+                // parent this anonymous class implements/extends
+                // (`extends` first, matching `Registry::
+                // lookup_ancestor_method_with_owner`'s order), since an
                 // anonymous class's synthetic name is never indexed into
                 // the registry for `check_function`'s own `sig` lookup to
-                // find. Passed only as `check_missing_function_typehints`'s
-                // own fallback (see `check_function_with_ancestor_hint`'s
-                // doc comment for why it isn't substituted in more
-                // broadly) - this project still doesn't otherwise type-
-                // check an anonymous class's body against its own
-                // implemented interfaces at all (a separate, larger gap).
+                // find otherwise. Passed only as `check_missing_function_
+                // typehints`'s fallback (see `check_function_with_
+                // ancestor_hint`'s doc comment) - this project still
+                // doesn't otherwise type-check an anonymous class's body
+                // against its implemented interfaces.
                 for m in &decl.methods {
                     let ancestor_sig =
                         decl.extends
@@ -2025,7 +1789,7 @@ impl<'a> Checker<'a> {
                         ancestor_sig,
                     );
                 }
-                // Phase 37: its own properties'/consts' attributes too -
+                // Its own properties'/consts' attributes too -
                 // method/param attributes are already covered inside
                 // `check_function` above.
                 for p in &decl.properties {
@@ -2054,17 +1818,14 @@ impl<'a> Checker<'a> {
                 // byref/unknown args using the real signature before
                 // checking them, then the existence/arg-type check.
                 let resolved_class = self.resolve_static_class_name(class_name);
-                // Phase 57: `_with_owner`, not the plain `lookup_method`
-                // this used to call - visibility needs the *declaring*
-                // class, which can differ from `resolved_class` for an
-                // inherited method (`sig` itself stays exactly what it
-                // was before; only the extra `owner` half is new).
+                // `_with_owner`, not the plain `lookup_method` - the
+                // visibility check needs the *declaring* class, which can
+                // differ from `resolved_class` for an inherited method.
                 let sig_with_owner = resolved_class
                     .as_ref()
                     .and_then(|class| self.registry.lookup_method_with_owner(class, method));
                 let sig = sig_with_owner.as_ref().map(|(_, s)| *s);
-                // Phase 42 Sub-item A/D: this static call's own throw
-                // contribution.
+                // This static call's own throw contribution.
                 if let Some(class) = &resolved_class {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
                     self.record_call_throw_point(dynamic_throw, sig);
@@ -2075,8 +1836,8 @@ impl<'a> Checker<'a> {
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
                 self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
-                // Finding 49: `Closure::bind($closure, $newThis, $scope)`
-                // makes `$this` (and, for private/protected access, the
+                // `Closure::bind($closure, $newThis, $scope)` makes
+                // `$this` (and, for private/protected access, the
                 // calling scope) available inside a closure that
                 // otherwise wouldn't have it - real, idiomatic PHP for
                 // reaching into an object's state from outside its class.
@@ -2121,8 +1882,8 @@ impl<'a> Checker<'a> {
                                 ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
                             )
                         {
-                            // Phase 36: `@param-closure-this` - see
-                            // `ExprKind::Call`'s own identical branch.
+                            // `@param-closure-this` - see
+                            // `ExprKind::Call`'s identical branch.
                             self.check_closure_literal_with_this_and_scope(
                                 unwrap_grouping(&a.value),
                                 locals,
@@ -2136,16 +1897,15 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if let Some(class) = &resolved_class {
-                    // Phase 48.H: `class.nameCase` - `class_name` is the
-                    // raw, as-written text (`resolve_static_class_name`
-                    // above already resolved `self`/`parent`/`static`/a
+                    // `class.nameCase` - `class_name` is the raw,
+                    // as-written text (`resolve_static_class_name` above
+                    // already resolved `self`/`parent`/`static`/a
                     // variable target to `class`, but never touches
-                    // `class_name` itself; `check_class_name_case`'s own
+                    // `class_name` itself; `check_class_name_case`'s
                     // registry lookup harmlessly no-ops for a pseudo-
                     // keyword like `self` or a genuinely undefined class).
                     self.check_class_name_case(label, class_name, e.span);
                     if let Some(sig) = sig {
-                        // Phase 57: visibility.
                         if let Some((owner, _)) = &sig_with_owner {
                             self.check_member_visibility(MemberVisibilityCheck {
                                 kind: "staticMethod",
@@ -2156,16 +1916,14 @@ impl<'a> Checker<'a> {
                                 span: e.span,
                                 label,
                             });
-                            // Phase 67: `@internal`.
                             self.check_internal_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
                             self.check_restricted_method_call(owner, method, true, e.span, label);
-                            // Phase 39: `@deprecated`.
                             self.check_deprecated_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
-                            // Phase 57 follow-up:
+                            // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
                             // late-static-binding unsafety as the
                             // identical class-constant/static-property
@@ -2176,10 +1934,9 @@ impl<'a> Checker<'a> {
                                 );
                             }
                         }
-                        // Finding 29 / Phase 49: see the identical
-                        // comment on the plain-function Call arm above -
-                        // `check_args` is spread-aware now, so it's
-                        // always worth calling.
+                        // See the identical comment on the plain-
+                        // function Call arm above - `check_args` is
+                        // spread-aware, so it's always worth calling.
                         let qualified = format!("{class}::{method}");
                         self.check_args(CheckArgsCall {
                             callee_label: &qualified,
@@ -2207,14 +1964,12 @@ impl<'a> Checker<'a> {
                             "staticMethod.notFound",
                         );
                     } else if !self.registry.classes.contains_key(class) {
-                        // Phase 48.7: `StaticMethodCallCheck`'s own
-                        // "class doesn't exist at all" half - a real,
-                        // previously-silent gap: neither branch above
-                        // fires for a genuinely undefined class (no `sig`
-                        // to check args against, and the `contains_key`
-                        // guard on the undefined-method branch correctly
-                        // excludes it too), so a call like `NoSuchClass::
-                        // method()` produced zero diagnostics.
+                        // Mirrors real PHPStan's `StaticMethodCallCheck`'s
+                        // "class doesn't exist at all" half - neither
+                        // branch above fires for a genuinely undefined
+                        // class (no `sig` to check args against, and the
+                        // `contains_key` guard on the undefined-method
+                        // branch correctly excludes it too).
                         self.report(
                             label.to_string(),
                             format!("static method call target class {class} not found"),
@@ -2264,26 +2019,23 @@ impl<'a> Checker<'a> {
                 let Some(class) = self.resolve_static_class_name(class_name) else {
                     return Type::Mixed;
                 };
-                // Phase 48.H: rebind to the registry's own canonical-case
-                // spelling up front, same as `ExprKind::New`'s identical
-                // Phase 48.1 fix - without it, a differently-cased real
-                // reference (`base::CONST` for a real `class Base`) always
-                // fell into the "class doesn't exist" branch below before
-                // `check_class_name_case` ever got a chance to run,
-                // confirmed by this phase's own new tests.
+                // Rebind to the registry's canonical-case spelling up
+                // front, same as `ExprKind::New`'s identical fix - without
+                // it, a differently-cased real reference (`base::CONST`
+                // for a real `class Base`) always fell into the "class
+                // doesn't exist" branch below before `check_class_name_case`
+                // ever got a chance to run.
                 let class = self
                     .registry
                     .lookup_class(&class)
                     .map(|(canonical, _)| canonical.to_string())
                     .unwrap_or(class);
                 if !self.registry.classes.contains_key(&class) {
-                    // Phase 48.7: `AccessStaticPropertiesCheck`/
-                    // `ClassConstantRule`'s own "class doesn't exist at
-                    // all" half - a real, previously-silent gap
-                    // (confirmed directly: this whole arm used to return
-                    // `Type::Mixed` here with zero diagnostic, for both a
-                    // static-property and a class-constant reference on a
-                    // genuinely undefined class).
+                    // Mirrors real PHPStan's `AccessStaticPropertiesCheck`/
+                    // `ClassConstantRule`'s "class doesn't exist at all"
+                    // half, for both a static-property and a
+                    // class-constant reference on a genuinely undefined
+                    // class.
                     let subject = if member.starts_with('$') {
                         "static property access"
                     } else {
@@ -2298,24 +2050,21 @@ impl<'a> Checker<'a> {
                     );
                     return Type::Mixed;
                 }
-                // Phase 48.H: `class.nameCase` - `class_name` is the raw,
-                // as-written text (`resolve_static_class_name` above
-                // already resolved `self`/`parent`/`static`/a variable
-                // target to `class`, but never touches `class_name`
-                // itself).
+                // `class.nameCase` - `class_name` is the raw, as-written
+                // text (`resolve_static_class_name` above already
+                // resolved `self`/`parent`/`static`/a variable target to
+                // `class`, but never touches `class_name` itself).
                 self.check_class_name_case(label, class_name, e.span);
                 if let Some(prop_name) = member.strip_prefix('$') {
                     // Unlike an instance property, PHP has no legal way
-                    // to dynamically create a static property at all -
-                    // no "could be legitimate" case to stay lenient for
+                    // to dynamically create a static property at all - no
+                    // "could be legitimate" case to stay lenient for
                     // here, the way check_property_assignment's write
-                    // side has to for instance properties. Finding 9: a
-                    // property that exists but was declared as an
-                    // ordinary *instance* property is equally invalid
-                    // through `::` in real PHP ("Access to undeclared
-                    // static property") - from the caller's own
-                    // perspective there's no real static property by
-                    // this name either way, so both share one message.
+                    // side has to for instance properties. A property
+                    // declared as an ordinary instance property is
+                    // equally invalid through `::` in real PHP ("Access
+                    // to undeclared static property"), so both share one
+                    // message.
                     let prop_with_owner =
                         self.registry.lookup_property_with_owner(&class, prop_name);
                     let is_valid_static = prop_with_owner
@@ -2330,17 +2079,15 @@ impl<'a> Checker<'a> {
                             "staticProperty.notFound",
                         );
                     } else if let Some((owner, sig)) = &prop_with_owner {
-                        // Phase 67: `@internal`.
                         self.check_internal_property_access(owner, prop_name, sig, e.span, label);
                         self.check_restricted_property_access(
                             owner, prop_name, true, e.span, label,
                         );
-                        // Phase 39 follow-up: `@deprecated`.
                         self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
-                        // Phase 57 follow-up: a static property shares
-                        // the exact same visibility rules as an instance
-                        // one - confirmed directly via `php -r` as a real
-                        // "Cannot access private property" fatal error.
+                        // A static property shares the exact same
+                        // visibility rules as an instance one ("Cannot
+                        // access private property" is a real fatal error
+                        // either way).
                         self.check_member_visibility(MemberVisibilityCheck {
                             kind: "staticProperty",
                             owner,
@@ -2350,7 +2097,7 @@ impl<'a> Checker<'a> {
                             span: e.span,
                             label,
                         });
-                        // Phase 57 follow-up:
+                        // Mirrors real PHPStan's
                         // `AccessPrivatePropertyThroughStaticRule` - same
                         // late-static-binding unsafety as the identical
                         // class-constant rule above.
@@ -2375,15 +2122,11 @@ impl<'a> Checker<'a> {
                             "classConstant.notFound",
                         );
                     } else if let Some((owner, cs)) = &const_with_owner {
-                        // Phase 67: `@internal`.
                         self.check_internal_class_constant_access(owner, member, cs, e.span, label);
                         self.check_restricted_class_constant_access(owner, member, e.span, label);
-                        // Phase 39 follow-up: `@deprecated`.
                         self.check_deprecated_class_constant_access(
                             owner, member, cs, e.span, label,
                         );
-                        // Phase 57's own still-open item: constant
-                        // visibility.
                         self.check_member_visibility(MemberVisibilityCheck {
                             kind: "classConstant",
                             owner,
@@ -2393,7 +2136,8 @@ impl<'a> Checker<'a> {
                             span: e.span,
                             label,
                         });
-                        // Phase 57 follow-up: `AccessPrivateConstantThroughStaticRule`.
+                        // Mirrors real PHPStan's
+                        // `AccessPrivateConstantThroughStaticRule`.
                         if class_name == "static" && cs.visibility == Visibility::Private {
                             self.check_static_private_constant_access(owner, member, e.span, label);
                         }
@@ -2408,27 +2152,24 @@ impl<'a> Checker<'a> {
                 Type::Mixed
             }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
-                // Unlike a *write* (check_property_assignment, and the
+                // Unlike a write (check_property_assignment, and the
                 // Assign/ArrayLiteral-destructuring arms below that
                 // deliberately route a PropertyAccess target through only
                 // its base, not here) - a genuinely undeclared property
                 // creates nothing on read, it just returns null with a
                 // warning in real PHP (unless __get exists). So there's
                 // no "could be a legitimate dynamic property" case to
-                // stay lenient for here, the way there is on write.
-                // Same `Union`/`Intersection` handling as `MethodCall`
-                // just above, and the identical reasoning for why: a
-                // multi-type `catch` variable, or an ordinarily
-                // union-typed parameter, used to skip this check
-                // entirely rather than fall to `_ => {}`.
+                // stay lenient for here, the way there is on write. Same
+                // `Union`/`Intersection` handling as `MethodCall` above,
+                // for the identical reason: a multi-type `catch`
+                // variable, or an ordinarily union-typed parameter, must
+                // not skip this check entirely.
                 let base_ty = self.check_expr(base, locals, label);
-                // Phase 17 Stage B: see `probe_span`'s own doc comment.
+                // See `probe_span`'s doc comment.
                 self.probe_hit_at(base.span, &base_ty);
-                // Phase 60: `$x?->prop` is pointless once `$x`'s own type
-                // already proves it's never null - mirrors real PHPStan's
-                // `NullsafePropertyFetchRule` exactly (same identifier,
-                // same "only when definitely never null, not when
-                // definitely always null either" split). Guarded by
+                // `$x?->prop` is pointless once `$x`'s type already
+                // proves it's never null - mirrors real PHPStan's
+                // `NullsafePropertyFetchRule` exactly. Guarded by
                 // `loop_depth`/`static_var_names` - see the identical
                 // guard on the `MethodCall` arm above for why.
                 if *nullsafe
@@ -2446,28 +2187,25 @@ impl<'a> Checker<'a> {
                         "nullsafe.neverNull",
                     );
                 }
-                // Phase 22 Finding 1: a Pest `beforeEach(...)` closure's own
-                // `$this->prop = ...` legitimately defines a dynamic
-                // property every other Pest closure in the file/directory
-                // scope can read, real PHPUnit\Framework\TestCase
-                // declaration or not - see `pest_hook_properties`'s own
-                // doc comment. Keyed off the literal `$this` expression
-                // (unlike the real `pestphp/pest-plugin-phpstan`
-                // extension, which resolves by the base's type) - a
-                // disclosed, evidence-free simplification.
+                // A Pest `beforeEach(...)` closure's `$this->prop = ...`
+                // legitimately defines a dynamic property every other
+                // Pest closure in the file/directory scope can read, real
+                // PHPUnit\Framework\TestCase declaration or not - see
+                // `pest_hook_properties`'s doc comment. Keyed off the
+                // literal `$this` expression, unlike the real
+                // `pestphp/pest-plugin-phpstan` extension, which resolves
+                // by the base's type.
                 let is_pest_this = matches!(&base.kind, ExprKind::Variable(name) if name == "this");
-                // Phase 34 Finding D: `stdClass` (a real, registered,
-                // zero-property class in the vendored stubs -
-                // `Core/Core_c.php`'s own `class stdClass {}`) is PHP's
-                // canonical "arbitrary property bag" - real PHP (and
-                // real PHPStan) never flag a dynamic property read or
-                // write on it, by design. Scoped to *this* property-
-                // access call site only, not `member_confirmed_missing`
-                // itself, which two method-call checks below also share
-                // - an undefined *method* call on `stdClass` is still a
-                // real fatal error real PHPStan also flags.
-                // ROADMAP "Known but not yet scheduled": real PHPStan's
-                // own `PropertyExistsTypeSpecifyingExtension` - the
+                // `stdClass` (a real, registered, zero-property class in
+                // the vendored stubs) is PHP's canonical "arbitrary
+                // property bag" - real PHP (and real PHPStan) never flag
+                // a dynamic property read or write on it, by design.
+                // Scoped to this property-access call site only, not
+                // `member_confirmed_missing` itself, which two method-call
+                // checks below also share - an undefined method call on
+                // `stdClass` is still a real fatal error.
+                // Mirrors real PHPStan's
+                // `PropertyExistsTypeSpecifyingExtension` - the
                 // `property_exists()` mirror of the `method_exists()`
                 // guard on `MethodCall` above.
                 let property_exists_guarded = matches!(
@@ -2491,25 +2229,19 @@ impl<'a> Checker<'a> {
                         "property.notFound",
                     );
                 }
-                // Phase 57: visibility - only meaningful once the
-                // property is confirmed to exist at all (the block just
-                // above already handles "doesn't exist"). Real bug found
-                // and fixed this session: this used to match `Type::
-                // Object` directly, with no `Union`/`Intersection` case at
-                // all, silently skipping the check entirely for either
-                // shape. Deliberately *not* the same "just the first
-                // Object/EnumCase member, regardless of whether it
-                // actually has the property" shortcut `MethodCall`'s own
-                // `recv_class` extraction settles for a few hundred lines
-                // up: for an `Intersection` specifically, the property
-                // can easily live on a *different* member than whichever
-                // happens to come first (`View&Foo` where `View` is an
-                // unrelated interface and `$secret` is `Foo`'s own private
-                // property - the first-found `View` would never have it,
-                // silently skipping the check for exactly the shape this
-                // fix exists to catch). `find_property_owner` recurses
-                // through both `Union` and `Intersection`, keeping the
-                // first member that actually declares it.
+                // Visibility - only meaningful once the property is
+                // confirmed to exist at all. Deliberately not the same
+                // "just the first Object/EnumCase member, regardless of
+                // whether it actually has the property" shortcut
+                // `MethodCall`'s own `recv_class` extraction settles for:
+                // for an `Intersection`, the property can easily live on
+                // a different member than whichever happens to come
+                // first (`View&Foo` where `View` is an unrelated
+                // interface and `$secret` is `Foo`'s private property -
+                // the first-found `View` would never have it).
+                // `find_property_owner` recurses through both `Union` and
+                // `Intersection`, keeping the first member that actually
+                // declares it.
                 let owner_and_sig = self
                     .find_property_owner(&narrow_type_excluding(&base_ty, &Type::Null), prop)
                     .map(|(owner, p)| (owner, p.clone()));
@@ -2524,10 +2256,8 @@ impl<'a> Checker<'a> {
                         span: e.span,
                         label,
                     });
-                    // Phase 67: `@internal`.
                     self.check_internal_property_access(owner, prop, p, e.span, label);
                     self.check_restricted_property_access(owner, prop, false, e.span, label);
-                    // Phase 39 follow-up: `@deprecated`.
                     self.check_deprecated_property_access(owner, prop, p, e.span, label);
                 }
                 if let Some(base_key) = narrowing_key(base)
@@ -2535,12 +2265,10 @@ impl<'a> Checker<'a> {
                 {
                     return narrowed.clone();
                 }
-                // Phase 79/80's own `EnumCase`/`ObjectShape` precision and
-                // the general `Object` lookup all now live in
-                // `property_access_type` (shared with `infer_expr`'s own
-                // identical arm) - see its own doc comment for the real
-                // bug this factoring-out fixed (`Union`/`Intersection`
-                // bases silently falling to `Mixed`).
+                // `EnumCase`/`ObjectShape` precision and the general
+                // `Object` lookup all live in `property_access_type`,
+                // shared with `infer_expr`'s identical arm - see its doc
+                // comment.
                 let result =
                     self.property_access_type(&narrow_type_excluding(&base_ty, &Type::Null), prop);
                 if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed {
@@ -2563,29 +2291,23 @@ impl<'a> Checker<'a> {
                 Type::Mixed
             }
             ExprKind::Interpolated(parts) => {
-                // Real PHPStan's own `InvalidPartOfEncapsedStringRule`
+                // Mirrors real PHPStan's `InvalidPartOfEncapsedStringRule`
                 // (`encapsedStringPart.nonString`) - an interpolated
                 // `"{$x}"` part implicitly casts `$x` to string exactly
                 // like an explicit `(string)`/`echo`/`print` would (down
                 // to triggering the same `__toString()` call), so an
                 // array or an object with no usable `__toString()` there
-                // is a real, confirmed PHP fatal error ("Array to string
-                // conversion" / "Object of class X could not be
-                // converted to string"), not just a style nit. A raw
-                // literal text chunk between substitutions is itself
-                // modeled as a synthetic `Literal(String(_))` part
-                // (`build_interpolated`'s own doc comment) - skipped
-                // here the same way real PHPStan's own rule skips a
-                // plain `InterpolatedStringPart`, since it was never a
-                // real expression to begin with.
+                // is a real PHP fatal error, not just a style nit. A raw
+                // literal text chunk between substitutions is modeled as
+                // a synthetic `Literal(String(_))` part
+                // (`build_interpolated`'s doc comment) - skipped here,
+                // since it was never a real expression.
                 //
-                // One known, deliberate departure from real PHPStan's
-                // own message text: its wording embeds the part's
-                // original PHP source (`Part $obj->prop (Foo) of...`),
-                // printed via its own dedicated `ExprPrinter` - this
-                // project has no general expression-to-source printer to
-                // match that with, so the message here names only the
-                // type, not the source snippet.
+                // Deliberate departure from real PHPStan's message text:
+                // its wording embeds the part's original PHP source via
+                // its own `ExprPrinter`; this project has no general
+                // expression-to-source printer, so the message here names
+                // only the type, not the source snippet.
                 for p in parts {
                     let part_ty = self.check_expr(p, locals, label);
                     if matches!(&p.kind, ExprKind::Literal(Literal::String(_))) {
@@ -2614,17 +2336,16 @@ impl<'a> Checker<'a> {
                 self.check_expr(subject, locals, label);
                 // Real `match` has no fallthrough - each arm is mutually
                 // exclusive, so (unlike `switch`) a later arm/default can
-                // always safely assume every earlier arm's own condition
-                // was false. `match(true) { $cond => ... }` is a common,
-                // deliberate `switch`-replacement idiom specifically
-                // because each arm's own condition is checked with `===`
-                // - treat the arm's condition itself as an `if`-style
-                // condition in that case; otherwise narrow via an
-                // implicit `subject === cond` equality, the same as an
-                // ordinary `switch` case. Only attempted for a
-                // single-condition arm (`1, 2 => ...` multi-value arms
-                // fall back to unnarrowed, rather than guessing at a
-                // combined "or" narrowing).
+                // always safely assume every earlier arm's condition was
+                // false. `match(true) { $cond => ... }` is a common
+                // `switch`-replacement idiom, since each arm's condition
+                // is checked with `===` - treat the arm's condition
+                // itself as an `if`-style condition in that case;
+                // otherwise narrow via an implicit `subject === cond`
+                // equality, the same as an ordinary `switch` case. Only
+                // attempted for a single-condition arm - multi-value arms
+                // (`1, 2 => ...`) fall back to unnarrowed, rather than
+                // guessing at a combined "or" narrowing.
                 let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
                 let mut accumulated = locals.clone();
                 let mut merged: Option<Locals> = None;
@@ -2666,21 +2387,16 @@ impl<'a> Checker<'a> {
                 }
                 // Same "don't let an unknown arm compose into a partial
                 // Union that looks more precise than it is" rule Ternary
-                // applies (`union_types` already absorbs `Mixed`) - and,
-                // just as important, the same flattening `union_types`
-                // already gives every other multi-branch construct
-                // (`Ternary`, `??`, ...). Building a raw `Type::Union
-                // (deduped)` by hand here (this arm's own pre-fix shape)
-                // left a nested `Union` sitting as one opaque, un-
-                // flattened member whenever one arm's own result was
-                // already a Union (e.g. a ternary arm producing `null |
-                // string`) - a real, corpus-confirmed bug: a nested Union
-                // member breaks any consumer that walks a Union's own
-                // members expecting each to be a flat leaf type
-                // (`return_type_too_wide`'s own `flatten_union`, among
-                // others), since `is_assignable`/`is_subtype` then
-                // wrongly require the *whole* nested sub-Union to satisfy
-                // a comparison meant for just one of its members.
+                // applies (`union_types` absorbs `Mixed`), and the same
+                // flattening `union_types` gives every other multi-branch
+                // construct (`Ternary`, `??`, ...). A raw `Type::Union`
+                // built by hand here would leave a nested `Union` sitting
+                // as one opaque, unflattened member whenever one arm's
+                // result was already a Union - a nested Union member
+                // breaks any consumer that walks a Union's members
+                // expecting each to be a flat leaf type
+                // (`return_type_too_wide`'s `flatten_union`, among
+                // others).
                 result_types
                     .into_iter()
                     .reduce(union_types)
@@ -2695,12 +2411,9 @@ impl<'a> Checker<'a> {
                 attrs,
                 ..
             } => {
-                // Phase 37: `ClosureAttributesRule` - existence (already
-                // checked for every other attribute-bearing declaration)
-                // plus target-validity, both missing entirely for a
-                // closure expression's own `#[Attr]` group until now (a
-                // real, previously-undetected gap: this arm never called
-                // `check_attributes` at all, existence-only or otherwise).
+                // Mirrors real PHPStan's `ClosureAttributesRule` -
+                // existence plus target-validity for a closure
+                // expression's own `#[Attr]` group.
                 self.check_attributes(attrs, label);
                 self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function", label);
                 // Unlike an arrow function, a plain closure does NOT
@@ -2713,12 +2426,13 @@ impl<'a> Checker<'a> {
                 // as real PHP.
                 let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {
-                    // Phase 17 follow-up: real PHPStan's own
+                    // Mirrors real PHPStan's
                     // `InvalidLexicalVariablesInClosureUseRule` - `$this`,
-                    // a superglobal, or a name already used as a parameter
-                    // can never be captured via `use (...)` at all (a real
-                    // PHP compile error), distinct from - and checked
-                    // before - the plain "undefined variable" case below.
+                    // a superglobal, or a name already used as a
+                    // parameter can never be captured via `use (...)` at
+                    // all (a real PHP compile error), distinct from - and
+                    // checked before - the plain "undefined variable"
+                    // case below.
                     if u.name == "this" {
                         self.report_builder(
                             DiagnosticBuilder::new(
@@ -2768,23 +2482,21 @@ impl<'a> Checker<'a> {
                         );
                     }
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                    // Phase 17 follow-up: a captured variable's own real
-                    // declaration is wherever the *outer* scope already
-                    // says it is - copied across, not fabricated fresh at
-                    // this `use (...)` clause.
+                    // A captured variable's real declaration is wherever
+                    // the outer scope already says it is - copied across,
+                    // not fabricated fresh at this `use (...)` clause.
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
-                    // Phase 17: the `use (...)` clause's own capture token
-                    // is itself a real reference to the outer `$x` - same
-                    // probe hook `ExprKind::Variable` already has.
+                    // The `use (...)` clause's capture token is itself a
+                    // real reference to the outer `$x` - same probe hook
+                    // `ExprKind::Variable` has.
                     if self.probe_span.get() == Some(u.span) {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
-                    // Phase 17 follow-up: hovering the capture token
-                    // itself must show its type too, not just resolve
-                    // go-to-definition - the two probes are independent
-                    // (`probe_hit`/`probe_var_provenance`), and this loop
-                    // used to only ever feed the latter.
+                    // Hovering the capture token itself must show its
+                    // type too, not just resolve go-to-definition - the
+                    // two probes (`probe_hit`/`probe_var_provenance`) are
+                    // independent.
                     self.probe_hit_at(u.span, &ty);
                     closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
                 }
@@ -2795,12 +2507,13 @@ impl<'a> Checker<'a> {
                 for p in params {
                     let (ty, case_refs) =
                         self.resolve_type_hint_with_case_refs(p.type_hint.as_deref());
-                    // Phase 48: `ExistingClassesInClosureTypehintsRule`'s
-                    // own check - checked on the un-array-wrapped element
-                    // type below (a variadic parameter's own declared
-                    // type, not the `array` it collects into) so a
-                    // missing class inside e.g. `...Foo $items` is still
-                    // reported by its own real name, not `array`.
+                    // Mirrors real PHPStan's
+                    // `ExistingClassesInClosureTypehintsRule` - checked on
+                    // the un-array-wrapped element type below (a variadic
+                    // parameter's declared type, not the `array` it
+                    // collects into) so a missing class inside e.g.
+                    // `...Foo $items` is still reported by its real name,
+                    // not `array`.
                     self.check_type_class_names_exist(
                         &ty,
                         &format!("parameter ${} of anonymous function", p.name),
@@ -2839,13 +2552,13 @@ impl<'a> Checker<'a> {
                     "return.trait",
                 );
                 self.check_type_class_name_case(&declared_return_case_refs, &closure_label, e.span);
-                // Phase 48.E: `return.noParent` - `declared_return` above
-                // never went through `resolve_pseudo` (unlike `current_
-                // declared_return_type` a bit further down), so a fresh,
-                // one-off resolve against the closure's own enclosing
-                // class (`self.current_class`, not a `class_name`
-                // parameter - a closure has no signature of its own) is
-                // needed here too.
+                // `return.noParent` - `declared_return` above never went
+                // through `resolve_pseudo` (unlike `current_declared_
+                // return_type` further down), so a fresh, one-off resolve
+                // against the closure's enclosing class
+                // (`self.current_class`, not a `class_name` parameter - a
+                // closure has no signature of its own) is needed here
+                // too.
                 if let Some(c) = self.current_class.clone() {
                     let resolved_return =
                         self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), &c);
@@ -2857,10 +2570,8 @@ impl<'a> Checker<'a> {
                         "return.noParent",
                     );
                 }
-                // Phase 67 Item B: the identical `@internal` type-hint
-                // check a named function/method's own param/return list
-                // already gets - previously only ever run the existence
-                // check just above, never this one.
+                // The identical `@internal` type-hint check a named
+                // function/method's param/return list already gets.
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
@@ -2870,12 +2581,11 @@ impl<'a> Checker<'a> {
                     current_class_for_internal_check.as_deref(),
                     &closure_label,
                 );
-                // Finding 3: a generator-returning closure (`function ():
-                // Generator { if ($done) { return; } yield $x; }`, a
-                // plausible callback shape) needs the same
+                // A generator-returning closure needs the same
                 // current_function_is_generator save/set/restore
                 // check_function does for a named function/method -
-                // check_block never routes through check_function at all.
+                // check_block never routes through check_function at
+                // all.
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = body_contains_yield(body);
                 let previous_declared_return_type = self.current_declared_return_type.take();
@@ -2888,12 +2598,12 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
                 );
-                // Phase 42 Sub-item A: a closure's own throw points never
-                // belong to the *enclosing* function's own count (calling
-                // the closure, not merely declaring it, is what would
-                // matter, and this project doesn't model that) - starts
-                // fresh, discarded (not merged back) on restore, same
-                // shape as `current_function_is_generator` just above.
+                // A closure's own throw points never belong to the
+                // enclosing function's count (calling the closure, not
+                // merely declaring it, is what would matter, and this
+                // project doesn't model that) - starts fresh, discarded
+                // on restore, same shape as
+                // `current_function_is_generator` above.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
@@ -2912,53 +2622,41 @@ impl<'a> Checker<'a> {
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
-                // Phase 59: a `use(...)` capture never referenced anywhere
-                // in the closure's own body it was just checked against
-                // above. `ClosureUse` carries no span of its own (see its
-                // own doc comment), so every finding here anchors to the
-                // whole closure expression's span instead of the specific
-                // `$x` token.
+                // A `use(...)` capture never referenced anywhere in the
+                // closure's own body. `ClosureUse` carries no span of its
+                // own (see its doc comment), so every finding here
+                // anchors to the whole closure expression's span instead
+                // of the specific `$x` token.
                 self.check_unused_closure_uses(uses, body, &closure_label, e.span);
                 // A `use (&$x)` capture is a real reference - any
                 // mutation the closure body makes to `$x` is visible in
-                // the *declaring* scope too, from the closure literal's
-                // own point onward (conservatively: real PHP doesn't
-                // guarantee the closure is ever actually called, or
-                // called only once, so this widens rather than replaces
-                // outright - `union_types` with the pre-closure type
-                // covers "never called" the same way an `if` without an
-                // `else` already does for its own branch). A real
-                // Piwigo-corpus round found this missing entirely
-                // (`$seen = []; $client = new MockHttpClient(function (...)
-                // use (&$seen) { $seen[] = [...]; }); ...; $seen[0]`
-                // - a real, common test-double-recording idiom) - without
-                // it, every by-ref-captured variable's outer type stayed
-                // frozen at whatever it was *before* the closure literal,
-                // regardless of what the closure body's own checked
-                // effects on `closure_locals` actually were.
+                // the declaring scope too, from the closure literal's
+                // own point onward. Conservatively widens rather than
+                // replaces outright (real PHP doesn't guarantee the
+                // closure is ever actually called, or called only once) -
+                // `union_types` with the pre-closure type covers "never
+                // called" the same way an `if` without an `else` covers
+                // its own branch.
                 for u in uses {
                     if !u.by_ref {
                         continue;
                     }
                     let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     if !locals.contains_key(&u.name) {
-                        // Phase 17: real PHP auto-vivifies `$x` in the
-                        // outer/declaring scope the moment `use (&$x)`
-                        // captures an as-yet-undefined variable - the same
-                        // by-ref-argument auto-vivification this project
-                        // already models in
-                        // `predefine_byref_or_unknown_args`, now given a
-                        // real, navigable declaration site instead of
-                        // silently gaining a value with no provenance at
-                        // all.
+                        // Real PHP auto-vivifies `$x` in the outer/
+                        // declaring scope the moment `use (&$x)` captures
+                        // an as-yet-undefined variable - the same by-ref-
+                        // argument auto-vivification this project models
+                        // in `predefine_byref_or_unknown_args`, now given
+                        // a real, navigable declaration site.
                         locals.declare(u.name.clone(), mutated, u.span);
-                        // Phase 17: `locals.declare` above is this
-                        // variable's *only* provenance site in this case
-                        // (it didn't exist in the outer scope before), so
-                        // the probe hook above (fired on the first
-                        // uses-loop, before this variable existed in
+                        // `locals.declare` above is this variable's only
+                        // provenance site in this case (it didn't exist
+                        // in the outer scope before), so the probe hook
+                        // above (fired before this variable existed in
                         // `locals` at all) would have stashed an empty
-                        // set - correct it now that the real site is known.
+                        // set - correct it now that the real site is
+                        // known.
                         if self.probe_span.get() == Some(u.span) {
                             *self.probe_var_provenance.borrow_mut() =
                                 Some([u.span].into_iter().collect());
@@ -2977,8 +2675,8 @@ impl<'a> Checker<'a> {
                 attrs,
                 ..
             } => {
-                // Phase 37: `ArrowFunctionAttributesRule` - see the
-                // `Closure` arm's own identical comment just above.
+                // Mirrors real PHPStan's `ArrowFunctionAttributesRule` -
+                // see the `Closure` arm's identical comment above.
                 self.check_attributes(attrs, label);
                 self.check_attribute_targets(attrs, ATTRIBUTE_TARGET_FUNCTION, "function", label);
                 // An arrow function DOES automatically capture the whole
@@ -2988,11 +2686,10 @@ impl<'a> Checker<'a> {
                 for p in params {
                     let (ty, case_refs) =
                         self.resolve_type_hint_with_case_refs(p.type_hint.as_deref());
-                    // Phase 48:
-                    // `ExistingClassesInArrowFunctionTypehintsRule`'s own
-                    // check - same "check the element type, not the
-                    // variadic-collected `array`" reasoning as the
-                    // Closure arm above.
+                    // Mirrors real PHPStan's
+                    // `ExistingClassesInArrowFunctionTypehintsRule` - same
+                    // "check the element type, not the variadic-collected
+                    // `array`" reasoning as the Closure arm above.
                     self.check_type_class_names_exist(
                         &ty,
                         &format!("parameter ${} of arrow function", p.name),
@@ -3014,15 +2711,14 @@ impl<'a> Checker<'a> {
                     };
                     arrow_locals.declare(p.name.clone(), ty, p.name_span);
                 }
-                // Phase 70: an arrow function's own body is a single
-                // expression, not a `Vec<Stmt>` `body_contains_yield`
-                // can walk - `expr_contains_yield` is that same walk's
-                // expression-only counterpart. Same save/set/restore
-                // `check_function`/the Closure literal arms already do:
-                // `check_expr` never routes through `check_function`
-                // either, so without this, checking a generator arrow
-                // function here would leak the flag into whatever comes
-                // after it in the *enclosing* scope's own checking pass.
+                // An arrow function's body is a single expression, not
+                // a `Vec<Stmt>` `body_contains_yield` can walk -
+                // `expr_contains_yield` is that same walk's expression-
+                // only counterpart. Same save/set/restore
+                // `check_function`/the Closure literal arms do: without
+                // this, checking a generator arrow function here would
+                // leak the flag into whatever comes after it in the
+                // enclosing scope's checking pass.
                 let previous_generator_flag = self.current_function_is_generator;
                 self.current_function_is_generator = expr_contains_yield(body);
                 let declared_return = return_type
@@ -3034,8 +2730,7 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(t, c),
                         None => t.clone(),
                     });
-                // Phase 42 Sub-item A: same reasoning as the `Closure`
-                // arm just above.
+                // Same reasoning as the `Closure` arm above.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
@@ -3093,8 +2788,7 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                // Phase 67 Item B: see the `Closure` arm's own identical
-                // comment above.
+                // See the `Closure` arm's identical comment above.
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
@@ -3106,27 +2800,25 @@ impl<'a> Checker<'a> {
                 );
                 Type::Object("Closure".to_string(), Vec::new())
             }
-            // Finding 28: `foo(...)`/`$obj->method(...)`/`Class::method(...)`
-            // (PHP 8.1 first-class-callable syntax) always wraps a
+            // `foo(...)`/`$obj->method(...)`/`Class::method(...)` (PHP 8.1
+            // first-class-callable syntax) always wraps a
             // Call/MethodCall/StaticCall/DynamicMethodCall with an empty
-            // argument list (this project's own parser convention) - not
-            // dispatching to that inner node's own ordinary arm directly:
-            // its own `check_args` would misread "no arguments were
-            // written" as "zero arguments were passed to this call,"
-            // producing a false "expects at least N argument(s)"
-            // diagnostic for any real function/method with required
-            // parameters. So this checks only existence - the one thing
-            // that doesn't depend on argument count at all - mirroring
-            // each inner arm's own existence-check logic without its
-            // argument handling.
+            // argument list (this project's parser convention) - not
+            // dispatching to that inner node's ordinary arm directly:
+            // `check_args` would misread "no arguments were written" as
+            // "zero arguments were passed," producing a false "expects at
+            // least N argument(s)" diagnostic for any function/method
+            // with required parameters. So this checks only existence -
+            // the one thing that doesn't depend on argument count -
+            // mirroring each inner arm's existence-check logic without
+            // its argument handling.
             //
-            // Also runs visibility/`@internal`/`@deprecated` (real
-            // PHPStan's own version, per its own `StaticMethodCallableRule`,
-            // just re-runs the *ordinary* call-site checks against this
-            // same shape) - a real, previously-undetected gap: `Foo::
-            // method(...)`/`$obj->method(...)` used to run none of them,
-            // even though both produce a real, callable `Closure` bound to
-            // that exact method the same as an ordinary call would.
+            // Also runs visibility/`@internal`/`@deprecated` (mirroring
+            // real PHPStan's `StaticMethodCallableRule`, which just
+            // re-runs the ordinary call-site checks against this shape):
+            // both `Foo::method(...)` and `$obj->method(...)` produce a
+            // real, callable `Closure` bound to that exact method the
+            // same as an ordinary call would.
             ExprKind::FirstClassCallable(inner) => {
                 match &inner.kind {
                     ExprKind::Call(callee, _) => {
@@ -3161,9 +2853,9 @@ impl<'a> Checker<'a> {
                                         );
                                     }
                                     None => {
-                                        // Phase 71 Item 4: same `function_
-                                        // exists()`-guard suppression as
-                                        // the ordinary-call site above.
+                                        // Same `function_exists()`-guard
+                                        // suppression as the ordinary-call
+                                        // site above.
                                         let bare = primary
                                             .rsplit('\\')
                                             .next()
@@ -3324,10 +3016,10 @@ impl<'a> Checker<'a> {
             // (`strlen(...)`, `$obj->method(...)`), all produce a real
             // `Closure` instance at runtime in PHP - infer the same
             // `Object("Closure", ...)` the native `Closure` type hint
-            // itself now resolves to (rather than the broader
-            // `Type::Callable`, which `callable`-hinted parameters
-            // accept via `is_assignable`'s own separate leniency), so a
-            // strictly `Closure`-typed parameter correctly accepts them.
+            // resolves to (rather than the broader `Type::Callable`,
+            // which `callable`-hinted parameters accept via
+            // `is_assignable`'s separate leniency), so a strictly
+            // `Closure`-typed parameter correctly accepts them.
             ExprKind::FirstClassCallable(_)
             | ExprKind::Closure { .. }
             | ExprKind::ArrowFn { .. } => Type::Object("Closure".to_string(), Vec::new()),
@@ -3338,12 +3030,11 @@ impl<'a> Checker<'a> {
             } => {
                 // Same "don't let an unknown branch compose into a
                 // partial Union that looks more precise than it is" rule
-                // Ternary already applies, generalized to N arms plus an
-                // optional default - and the same per-arm narrowing
-                // `check_expr`'s own Match handling applies, so a
-                // `default` arm returning the match's own subject infers
-                // its real, narrowed type rather than the subject's
-                // unnarrowed original type.
+                // Ternary applies, generalized to N arms plus an optional
+                // default - and the same per-arm narrowing `check_expr`'s
+                // Match handling applies, so a `default` arm returning
+                // the match's subject infers its narrowed type rather
+                // than the subject's unnarrowed original type.
                 let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
                 let mut accumulated = locals.clone();
                 let mut result_types: Vec<Type> = Vec::new();
@@ -3367,10 +3058,9 @@ impl<'a> Checker<'a> {
                 if let Some(d) = default {
                     result_types.push(self.infer_expr(d, &accumulated));
                 }
-                // See `check_expr`'s identical arm's own doc comment for
+                // See `check_expr`'s identical arm's doc comment for
                 // why this must be a `union_types` reduction, not a raw
-                // dedup-then-`Type::Union(deduped)` construction (a real,
-                // corpus-confirmed nested-Union bug).
+                // dedup-then-`Type::Union(deduped)` construction.
                 result_types
                     .into_iter()
                     .reduce(union_types)
@@ -3433,16 +3123,16 @@ impl<'a> Checker<'a> {
                             None => raw,
                         }
                     }
-                    // Phase 54/77 follow-up: `new ReflectionClass($view)`-
-                    // shaped constructor-argument-driven class-level
-                    // generic inference - the same `bind_template_param`/
-                    // `TemplateBindings` primitive `infer_call_return_type`
-                    // already uses for ordinary call-site inference, just
-                    // binding against a constructor's own params instead of
-                    // a function's. Rebind to the registry's own canonical-
-                    // case spelling first (mirroring `check_expr`'s own
-                    // Phase 48.1 fix just below in this file) since `lookup_
-                    // method`'s ancestor walk needs exact case.
+                    // `new ReflectionClass($view)`-shaped constructor-
+                    // argument-driven class-level generic inference - the
+                    // same `bind_template_param`/`TemplateBindings`
+                    // primitive `infer_call_return_type` uses for
+                    // ordinary call-site inference, just binding against
+                    // a constructor's params instead of a function's.
+                    // Rebind to the registry's canonical-case spelling
+                    // first (mirroring `check_expr`'s identical fix)
+                    // since `lookup_method`'s ancestor walk needs exact
+                    // case.
                     _ => {
                         let resolved_name = self.name_ctx.resolve(name);
                         let canonical = self
@@ -3467,13 +3157,12 @@ impl<'a> Checker<'a> {
                                 for (param, slot) in sig.params.iter().zip(resolved_args.iter()) {
                                     let Some(arg) = slot else { continue };
                                     let arg_ty = self.infer_expr(arg, locals);
-                                    // Phase 54 follow-up: a bare string
-                                    // literal naming a real, registered
-                                    // class binds a `class-string<T>` slot
-                                    // exactly like an explicit `Foo::class`
-                                    // would (real PHPStan's own
-                                    // `ConstantStringType::isClassString()`
-                                    // treats the two identically).
+                                    // A bare string literal naming a
+                                    // real, registered class binds a
+                                    // `class-string<T>` slot exactly like
+                                    // an explicit `Foo::class` would,
+                                    // mirroring real PHPStan's
+                                    // `ConstantStringType::isClassString()`.
                                     let promoted = types::promote_class_string_literals(
                                         &param.ty,
                                         &arg_ty,
@@ -3486,32 +3175,21 @@ impl<'a> Checker<'a> {
                                     types::bind_template_param(&param.ty, &promoted, &mut bindings);
                                 }
                             }
-                            // A template the constructor's own arguments
-                            // never bound is left *erased* (trimmed off the
+                            // A template the constructor's arguments
+                            // never bound is left erased (trimmed off the
                             // trailing end, same as a real bare `new Box()`
                             // reference with fewer type arguments than
                             // declared) rather than eagerly filled with
-                            // `Mixed` - `class_template_bindings_rec` (Phase
-                            // 54) zips `templates` against this very args
-                            // list, and `substitute_scoped`'s own `@template
-                            // T = Default` fallback only ever triggers for a
-                            // name genuinely *absent* from that zip, not one
-                            // explicitly bound to `Mixed`. Regression found
-                            // via this project's own existing defaulting
-                            // test (`an_erased_generic_with_a_declared_
-                            // default_resolves_to_it_instead_of_mixed`): a
-                            // no-arg constructor was filling `[Mixed]`
-                            // in - defeating that class's own declared
-                            // default entirely. A template bound in the
-                            // *middle* with a later one still unbound has no
-                            // such "erase the tail" option (PHP's own
-                            // type-argument syntax can't skip a middle
-                            // position either), so it does still fall back
-                            // to `Mixed` there - a real, smaller-scope cut
-                            // (`ClassInfo` only persists template *names*
-                            // here, not the full `TemplateParam` metadata
-                            // `substitute_template`'s own richer fallback
-                            // needs), not an oversight.
+                            // `Mixed`: `substitute_scoped`'s `@template
+                            // T = Default` fallback only triggers for a
+                            // name genuinely absent from the zip against
+                            // `templates`, not one explicitly bound to
+                            // `Mixed`. A template bound in the middle
+                            // with a later one still unbound has no such
+                            // "erase the tail" option (PHP's type-argument
+                            // syntax can't skip a middle position
+                            // either), so it does still fall back to
+                            // `Mixed` there.
                             let last_bound = templates
                                 .iter()
                                 .rposition(|t| bindings.contains_key(t))
@@ -3615,8 +3293,8 @@ impl<'a> Checker<'a> {
                         let mut then_locals = locals.clone();
                         self.apply_narrowing(cond, &mut then_locals, true);
                         let then_ty = self.infer_expr(t, &then_locals);
-                        // Phase 23: see the parallel arm in `check_expr`
-                        // for why this must be `union_types`, not a raw
+                        // See the parallel arm in `check_expr` for why
+                        // this must be `union_types`, not a raw
                         // `Type::Union(vec![...])`.
                         union_types(then_ty, else_ty)
                     }
@@ -3624,17 +3302,15 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
-            // Phase 75: routed through the identical `resolve_concat_type`
-            // engine as `BinOp::Concat` just above, as a left-fold over
-            // each part (an interpolated string is exactly a chain of
-            // concatenations) - `check_expr`'s own separate `Interpolated`
-            // arm already walks each part for a *different* purpose
-            // (implicit `__toString()`/array-to-string checks), not reused
-            // here since it doesn't compute or return a refined type. An
-            // empty `parts` list can't occur in practice (the parser never
-            // produces an interpolated string with zero segments), but
-            // folds to plain `Type::String` rather than panicking if it
-            // somehow did.
+            // Routed through the identical `resolve_concat_type` engine
+            // as `BinOp::Concat`, as a left-fold over each part (an
+            // interpolated string is exactly a chain of concatenations) -
+            // `check_expr`'s separate `Interpolated` arm walks each part
+            // for a different purpose (implicit `__toString()`/array-to-
+            // string checks), not reused here since it doesn't compute or
+            // return a refined type. An empty `parts` list can't occur in
+            // practice, but folds to plain `Type::String` rather than
+            // panicking if it somehow did.
             ExprKind::Interpolated(parts) => parts
                 .iter()
                 .map(|p| self.infer_expr(p, locals))
@@ -3647,7 +3323,7 @@ impl<'a> Checker<'a> {
                     return narrowed.clone();
                 }
                 let base_ty = narrow_type_excluding(&self.infer_expr(base, locals), &Type::Null);
-                // See `property_access_type`'s own doc comment - shared
+                // See `property_access_type`'s doc comment - shared
                 // with `check_expr`'s identical arm.
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
@@ -3665,14 +3341,13 @@ impl<'a> Checker<'a> {
             // general preference for fewer false positives over catching
             // every possible runtime-undefined access.
             ExprKind::Index(base, Some(idx)) => {
-                // Phase 22: the `Index` counterpart of `PropertyAccess`'s
-                // own "check the narrowed key first" fast path just above
-                // - without this, `apply_narrowing` faithfully *wrote* a
-                // narrowed type under `narrowing_key`'s `"base[key]"`
-                // format (e.g. after `is_string($info['code'])`), but
-                // nothing ever *read* it back: this arm went straight to
-                // re-deriving the type from `$info`'s own declared/
-                // inferred shape, silently discarding the narrowing.
+                // The `Index` counterpart of `PropertyAccess`'s "check
+                // the narrowed key first" fast path above - without this,
+                // `apply_narrowing` writes a narrowed type under
+                // `narrowing_key`'s `"base[key]"` format (e.g. after
+                // `is_string($info['code'])`), but nothing reads it back:
+                // this arm would re-derive the type from `$info`'s
+                // declared/inferred shape, discarding the narrowing.
                 if let Some(key) = narrowing_key(e)
                     && let Some(narrowed) = locals.get(&key)
                 {
@@ -3684,13 +3359,10 @@ impl<'a> Checker<'a> {
             ExprKind::Name(name) => self
                 .global_constant_type(name)
                 .unwrap_or_else(|| bare_name_literal_type(name)),
-            // Phase 70.A: mirrors `check_expr`'s own `ExprKind::Yield`/
-            // `YieldFrom` arms - needed here too, not just there, since
-            // `assertType()`'s own testing-DSL recognition (this file,
-            // above) computes its "actual" type via `infer_expr`, not
-            // `check_expr`, so a bare `Mixed` fallback here would silently
-            // stay wrong for every `assertType('...', yield ...)` fixture
-            // regardless of `check_expr`'s own, already-correct arm.
+            // Mirrors `check_expr`'s `ExprKind::Yield`/`YieldFrom` arms -
+            // needed here too, since `assertType()`'s testing-DSL
+            // recognition computes its "actual" type via `infer_expr`,
+            // not `check_expr`.
             ExprKind::Yield(_, _) => self
                 .current_declared_return_type
                 .as_ref()
@@ -3713,11 +3385,11 @@ impl<'a> Checker<'a> {
     /// callback's `$carry`/`$item` params at once. Only the common
     /// exact-arity, non-variadic, non-by-ref shape is handled - a
     /// mismatched param count, or any variadic/by-ref param, safely
-    /// returns `None`, falling back to the caller's own generic
-    /// (imprecise but correct) behavior. Mirrors the closure-capture-
-    /// scope construction `check_expr`'s own `ExprKind::Closure`/
-    /// `ExprKind::ArrowFn` arms already do, but on this separate,
-    /// read-only inference pass rather than the diagnostic-producing one.
+    /// returns `None`, falling back to the caller's generic (imprecise
+    /// but correct) behavior. Mirrors the closure-capture-scope
+    /// construction `check_expr`'s `ExprKind::Closure`/`ExprKind::ArrowFn`
+    /// arms do, but on this separate, read-only inference pass rather
+    /// than the diagnostic-producing one.
     pub(crate) fn infer_closure_return_with_param_overrides(
         &self,
         callback: &Expr,
@@ -3773,7 +3445,7 @@ impl<'a> Checker<'a> {
                     closure_locals.insert(p.name.clone(), ty.clone());
                 }
                 // Only the common single-implicit-return-statement body
-                // shape is handled (mirrors check_shape_key_access's own
+                // shape is handled (mirrors check_shape_key_access's
                 // "only handle the shape that actually comes up, don't
                 // guess at the rest" precedent) - a closure with a more
                 // complex body safely falls back to None too.
@@ -3787,19 +3459,15 @@ impl<'a> Checker<'a> {
                     _ => None,
                 }
             }
-            // A round of Piwigo-corpus bucketing found a first-class
-            // callable (`intval(...)`, `TagId::from(...)`, PHP 8.1) used
-            // as `array_map`'s own callback fell to this function's own
-            // `_ => None` fallback, discarding every bit of precision
-            // (both list-ness/non-emptiness *and* the mapped element
-            // type) the array_map special case above this one otherwise
-            // provides - an extremely common idiom in this corpus (over
-            // 140 first-party call sites: `array_map(intval(...), ...)`
-            // alone is 76). Resolves the wrapped call's own signature and
-            // binds `param_overrides` against its declared parameter
-            // types the same way `infer_call_return_type` already does
-            // for an ordinary call, just without real argument
-            // expressions to read types from.
+            // A first-class callable (`intval(...)`, `TagId::from(...)`,
+            // PHP 8.1) used as `array_map`'s callback would otherwise
+            // fall to this function's `_ => None`, discarding the
+            // list-ness/non-emptiness/mapped-element-type precision the
+            // array_map special case provides. Resolves the wrapped
+            // call's signature and binds `param_overrides` against its
+            // declared parameter types the same way
+            // `infer_call_return_type` does for an ordinary call, just
+            // without real argument expressions to read types from.
             ExprKind::FirstClassCallable(inner) => {
                 // `class` is the owner to resolve a `self`/`static`
                 // pseudo-return through (`TagId::tryFrom(...): ?self`) -
@@ -3852,58 +3520,47 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 22 Finding 4: `??`'s result is *usually* just `r`'s own
-    /// type (`ExprKind::Binary(BinOp::Coalesce, ...)` and this function's
-    /// own `BinOp::Coalesce` arm both start from `r_ty` alone) - widening
-    /// away from that is deliberately narrow, not a blanket "always union
-    /// `non_null(l)` with `r`" fix: that would pollute the extremely
-    /// common and currently-precise `$x ?? 'literal'` pattern (where
-    /// `$x`'s real type is often genuinely `Mixed`) with unwanted `Mixed`
-    /// noise across a much broader, currently-well-served set of call
-    /// sites. Only widens when `l`'s real non-null type is `Type::Array`
-    /// (generic/unshaped) and `r`'s own type is a narrower
-    /// `Type::ArrayShape` - `$details = $row->details ?? [];` where
-    /// `$row->details: ?array` genuinely holds arbitrary keys at runtime
-    /// collapsed to the literal empty `[]` shape from the fallback alone,
-    /// so every later `$details['key']` read looked like a typo.
-    /// Deliberately not covering the sibling cases disclosed in
-    /// ROADMAP.md's own Phase 22 write-up (`l`'s non-null type being a
-    /// *different* non-empty `ArrayShape`, or `r` being a `Union`
-    /// containing one) - no corpus evidence either occurs, same class of
-    /// bug, left for a future pass if one turns up.
+    /// `??`'s result is usually just `r`'s type (`ExprKind::Binary(
+    /// BinOp::Coalesce, ...)` and this function's `BinOp::Coalesce` arm
+    /// both start from `r_ty` alone) - widening away from that is
+    /// deliberately narrow, not a blanket "always union `non_null(l)`
+    /// with `r`" fix: that would pollute the common and currently-precise
+    /// `$x ?? 'literal'` pattern (where `$x`'s real type is often
+    /// genuinely `Mixed`) with unwanted `Mixed` noise across a much
+    /// broader, currently-well-served set of call sites. Only widens when
+    /// `l`'s real non-null type is `Type::Array` (generic/unshaped) and
+    /// `r`'s type is a narrower `Type::ArrayShape` - `$details =
+    /// $row->details ?? [];` where `$row->details: ?array` genuinely
+    /// holds arbitrary keys at runtime, which would otherwise collapse to
+    /// the literal empty `[]` shape from the fallback alone, making every
+    /// later `$details['key']` read look like a typo.
     fn widen_coalesce_result(&self, l: &Expr, r_ty: Type, locals: &Locals) -> Type {
         // `$x ?? null` is a real, if unusual, no-op: if `$x` is null the
-        // result is null either way, and otherwise the result is
-        // exactly `$x` itself - so its own type is exactly `$x`'s own
-        // type, unnarrowed, not the literal `r_ty` (`Type::Null`) this
-        // function otherwise trusts as the fallback's own type. A round
-        // of Piwigo-corpus bucketing found this collapsing an
-        // unshaped-array element read (`$post['selection'] ?? null`,
-        // `$post: array` with no shape, so `Mixed`) all the way down to
-        // bare `Type::Null` - real corpus code checks the *original*
-        // expression with `is_array($selection_raw)` immediately after,
-        // which should still be checking a real `Mixed`, not a value
-        // this checker had already convinced itself could only be null.
+        // result is null either way, and otherwise the result is exactly
+        // `$x` itself - so its type is exactly `$x`'s own type,
+        // unnarrowed, not the literal `r_ty` (`Type::Null`) this function
+        // otherwise trusts as the fallback's type. Otherwise an unshaped-
+        // array element read (`$post['selection'] ?? null`, `$post:
+        // array` with no shape, so `Mixed`) would collapse all the way
+        // down to bare `Type::Null`, when code checking the original
+        // expression with `is_array($selection_raw)` immediately after
+        // should still be checking a real `Mixed`.
         if r_ty == Type::Null {
             let l_ty = self.infer_expr(l, locals);
-            // Phase 94: the no-op reasoning above only actually holds
-            // when `l` is a bare variable - `locals`'s own tracked type
-            // for one already reflects every way it can be null (a
-            // prior narrowing, an untyped param, ...), so trusting it
-            // completely is correct. An array/property access (or any
-            // other expression `??` exists specifically *because* this
-            // checker can't otherwise prove is always set) is different:
-            // `infer_expr` for `$group[$index]` on an `array<int,
-            // string>`-typed `$group` returns plain `string`, with no
-            // notion of "the key might not exist" folded in at all - the
-            // exact real-PHP case `?? null` idiomatically guards
-            // against. Real corpus false positive: `$val = $group[$index]
-            // ?? null; return $val ?? '';` - `$val`'s own stored type
-            // came out non-nullable, so the second, genuinely-needed
-            // `?? ''` was flagged as checking an already-non-nullable
-            // variable. Unioning `Null` back in here is always safe for
-            // the already-covered `Mixed` case too (`union_types` already
-            // collapses `Mixed | Null` back to plain `Mixed`).
+            // The no-op reasoning above only holds when `l` is a bare
+            // variable - `locals`'s tracked type for one already
+            // reflects every way it can be null (a prior narrowing, an
+            // untyped param, ...), so trusting it completely is correct.
+            // An array/property access (or any other expression `??`
+            // exists specifically because this checker can't otherwise
+            // prove is always set) is different: `infer_expr` for
+            // `$group[$index]` on an `array<int, string>`-typed `$group`
+            // returns plain `string`, with no "the key might not exist"
+            // notion folded in - the exact real-PHP case `?? null`
+            // idiomatically guards against. Unioning `Null` back in here
+            // is always safe for the already-covered `Mixed` case too
+            // (`union_types` collapses `Mixed | Null` back to plain
+            // `Mixed`).
             return if matches!(l.kind, ExprKind::Variable(_)) {
                 l_ty
             } else {
@@ -3912,84 +3569,63 @@ impl<'a> Checker<'a> {
         }
         let l_ty = narrow_type_excluding(&self.infer_expr(l, locals), &Type::Null);
         // `$x ?? throw new Foo();` (or any other never-returning right
-        // side: `exit`, a `never`-typed call) - a real, corpus-evidenced
-        // idiom (`revolt/event-loop`'s own `AbstractDriver::enable()`/
-        // `isEnabled()`/`isReferenced()`, `latte/latte`'s own parser,
-        // several others). Found the hard way: falling through to the
-        // generic `_ => r_ty` fallback below made the *whole* expression
-        // - and by extension any `$x = ... ?? throw ...;` assignment
-        // statement built from it - infer as `Type::Never` itself,
-        // which `always_terminates`'s own `StmtKind::Expression` case
-        // (`self.infer_expr(e, locals) == Type::Never`) then read as
-        // "this plain assignment statement always ends control flow,"
-        // wrongly marking every real statement after it unreachable
-        // (`deadCode.unreachable`'s own corpus verification is what
-        // surfaced this). The real semantics: reaching anything *past*
-        // this expression at all already proves the right side never
-        // ran, so the result is exactly the left side's own (non-null)
-        // type, the same as the `?? null` case above already computes.
+        // side: `exit`, a `never`-typed call) - falling through to the
+        // generic `_ => r_ty` fallback below would make the whole
+        // expression, and by extension any `$x = ... ?? throw ...;`
+        // assignment statement built from it, infer as `Type::Never`
+        // itself, which `always_terminates`'s `StmtKind::Expression` case
+        // then reads as "this plain assignment statement always ends
+        // control flow," wrongly marking every statement after it
+        // unreachable. The real semantics: reaching anything past this
+        // expression at all already proves the right side never ran, so
+        // the result is exactly the left side's own non-null type, the
+        // same as the `?? null` case above computes.
         if r_ty == Type::Never {
             return l_ty;
         }
-        // Phase 14: still scoped to exactly `Type::Array` on the left,
-        // matching this function's own documented, deliberately narrow
-        // boundary (an ArrayShape on the left stays uncovered, same as
-        // before) - only widened to also recognize a `list<T>`/
-        // `non-empty-array<T>`-typed left side (a real `Intersection`
-        // now), which would otherwise lose its real type here the exact
-        // same way a plain `Type::Array` used to.
+        // Still scoped to exactly `Type::Array` on the left, matching
+        // this function's documented, deliberately narrow boundary (an
+        // ArrayShape on the left stays uncovered) - also recognizes a
+        // `list<T>`/`non-empty-array<T>`-typed left side (a real
+        // `Intersection`), which would otherwise lose its type here the
+        // same way a plain `Type::Array` would.
         let l_is_array = matches!(l_ty, Type::Array(_, _))
             || matches!(&l_ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(_, _))));
         match &r_ty {
             Type::ArrayShape(_) if l_is_array => l_ty,
-            // Phase 15 continuation: the general case was discarding
-            // `l_ty` entirely, keeping only `r_ty` - wrong for `??`'s own
-            // semantics regardless of precision: the result is `$expr`
-            // itself when it's not null (already computed above, with
-            // `Null` excluded) *or* `$default` when it is - a real union
-            // of both outcomes, not "the default's type, unconditionally"
-            // (which happened to look like a narrow-imprecision problem -
-            // `$x = $expr ?? false;` collapsing to the bare literal
-            // `false` whenever `$expr`'s own type isn't confidently known
-            // - but was actually just this fallback throwing `l_ty` away
-            // outright, confirmed by reading the surrounding early-return
-            // cases above, which *do* union `Null` back into `l_ty` for
-            // the `?? null` case specifically; this arm never had the
-            // equivalent treatment for every other right-hand type).
+            // The general case must not discard `l_ty` entirely, keeping
+            // only `r_ty` - that's wrong for `??`'s semantics regardless
+            // of precision: the result is `$expr` itself when it's not
+            // null (already computed above, with `Null` excluded) or
+            // `$default` when it is - a real union of both outcomes, not
+            // "the default's type, unconditionally."
             _ => union_types(l_ty, r_ty),
         }
     }
 
     pub(crate) fn infer_binary(&self, op: &BinOp, l: &Expr, r: &Expr, locals: &Locals) -> Type {
         match op {
-            // Phase 75: `resolve_concat_type` (`checker/narrowing/
-            // accessory_range.rs`) - a full port of real PHPStan's own
-            // `InitializerExprTypeResolver::resolveConcatType`, replacing
-            // this arm's own earlier, narrower "either side non-falsy"
-            // special case (Round 12's own `dumpType()`-verified finding,
-            // still covered as one case among several the ported
-            // algorithm itself handles): real constant-folding for two
-            // literal operands, and AND/OR composition of every accessory
-            // kind (`NonFalsyString`/`NonEmptyString`/`LiteralString`/
-            // `LowercaseString`/`UppercaseString`/`NumericString`), not
-            // just non-falsiness.
+            // `resolve_concat_type` is a full port of real PHPStan's
+            // `InitializerExprTypeResolver::resolveConcatType`: real
+            // constant-folding for two literal operands, and AND/OR
+            // composition of every accessory kind (`NonFalsyString`/
+            // `NonEmptyString`/`LiteralString`/`LowercaseString`/
+            // `UppercaseString`/`NumericString`), not just non-falsiness.
             BinOp::Concat => {
                 resolve_concat_type(&self.infer_expr(l, locals), &self.infer_expr(r, locals))
             }
-            // Phase 15 continuation: real constant folding, confirmed
-            // directly against `vendor/phpstan-src`'s own
+            // Real constant folding, mirroring real PHPStan's
             // `BooleanAndHandler`/`BooleanOrHandler::resolveType` -
-            // without this, `check_boolean_and_or`'s own "whole result"
+            // without this, `check_boolean_and_or`'s "whole result"
             // diagnostic (`booleanAnd.always*`/`booleanOr.always*`) could
             // never fire at all, since it has nothing but a permanent
-            // bare `Type::Bool` to ever match against. Mirrors real
-            // PHPStan's exact short-circuit algorithm: a definitely-false
-            // left side makes `&&`'s result definitely false without
-            // even considering the right side; otherwise the right side
-            // is inferred against `l`'s own truthy-narrowed scope (the
-            // same `apply_narrowing` every call site already narrows
-            // into before checking the right operand) since that's the
-            // only scope the right side is ever actually reached in.
+            // bare `Type::Bool` to match against. A definitely-false left
+            // side makes `&&`'s result definitely false without even
+            // considering the right side; otherwise the right side is
+            // inferred against `l`'s truthy-narrowed scope (the same
+            // `apply_narrowing` every call site narrows into before
+            // checking the right operand), since that's the only scope
+            // the right side is ever actually reached in.
             BinOp::And => {
                 let l_ty = self.infer_expr(l, locals);
                 if matches!(l_ty, Type::False) {
@@ -4032,8 +3668,8 @@ impl<'a> Checker<'a> {
                 _ => Type::Bool,
             },
             BinOp::Identical | BinOp::NotIdentical => Type::Bool,
-            // Phase 55 follow-up, `ConstantLooseComparisonRule`:
-            // `loose_compare_literals`'s own doc comment has the full
+            // Mirrors real PHPStan's `ConstantLooseComparisonRule` -
+            // `loose_compare_literals`'s doc comment has the full
             // scope/version-gating reasoning.
             BinOp::Eq | BinOp::NotEq => {
                 let lt = self.infer_expr(l, locals);
@@ -4050,21 +3686,19 @@ impl<'a> Checker<'a> {
                     None => Type::Bool,
                 }
             }
-            // Phase 15 follow-up, real PHPStan's own
-            // `NumberComparisonOperatorsConstantConditionRule`: the exact
-            // same relationship as `Eq`/`NotEq` just above has to its own
-            // `ConstantLooseComparisonRule` - a real, standalone rule,
-            // never folded into `if`/`while`'s own generic constant-
-            // condition family (confirmed directly against `vendor/
-            // phpstan-src`: it's its own `#[RegisteredRule]`, with its
-            // own `smaller.always*`/`greater.always*`/`smallerOrEqual.
-            // always*`/`greaterOrEqual.always*` identifiers, not `if.
-            // always*`). `should_skip_constant_condition` (`checker/
-            // control_flow.rs`) already excludes all four of these ops
-            // from the generic `if`/`while` path for exactly this reason -
-            // this constant-folding half only feeds `check_constant_
-            // numeric_comparison`'s own standalone diagnostic below, not
-            // that generic path at all.
+            // Mirrors real PHPStan's
+            // `NumberComparisonOperatorsConstantConditionRule`: the same
+            // relationship as `Eq`/`NotEq` above has to
+            // `ConstantLooseComparisonRule` - a standalone rule, never
+            // folded into `if`/`while`'s generic constant-condition
+            // family (its own `smaller.always*`/`greater.always*`/
+            // `smallerOrEqual.always*`/`greaterOrEqual.always*`
+            // identifiers, not `if.always*`).
+            // `should_skip_constant_condition` (`checker/control_flow.rs`)
+            // already excludes all four of these ops from the generic
+            // `if`/`while` path - this constant-folding half only feeds
+            // `check_constant_numeric_comparison`'s standalone diagnostic
+            // below.
             BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
@@ -4082,13 +3716,12 @@ impl<'a> Checker<'a> {
             // its single most common real use is returning a value
             // directly from a comparator (`usort`/`uasort`/...).
             //
-            // Phase 81: `GMP`/`BcMath\Number`'s own overloaded spaceship
-            // still returns the same `-1|0|1` range, just computed by the
-            // object's own comparison rather than a plain numeric one -
+            // `GMP`/`BcMath\Number`'s overloaded spaceship still returns
+            // the same `-1|0|1` range, just computed by the object's own
+            // comparison rather than a plain numeric one -
             // `binary_operator_overload_result` produces the identical
-            // `IntRange(-1, 1)` either way, so this only refines *how*
-            // precisely non-overloaded spaceship is typed too (a real,
-            // if incidental, improvement over the previous bare `Int`).
+            // `IntRange(-1, 1)` either way, so this also refines how
+            // precisely non-overloaded spaceship is typed.
             BinOp::Spaceship => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
@@ -4103,49 +3736,25 @@ impl<'a> Checker<'a> {
                 }
                 // `+` on two arrays is PHP's array-union operator, not
                 // arithmetic - it keeps every key from the left operand,
-                // filling in any key only present on the right. This used
-                // to collapse straight to `array<array-key, mixed>`
-                // unconditionally, discarding both operands' own key/value
-                // types entirely - a real corpus false-positive source
-                // (found via a Piwigo/real-PHPStan corpus diff, "Cluster
-                // C"): `$merged = $filters + $functions;` on two real
-                // `array<string, callable>`-typed values (Latte's own
-                // `Engine::getFilters()`/`getFunctions()`, both
-                // `@return array<string, callable>`) made every `foreach
-                // ($merged as $name => ...)`'s `$name` infer as `int|
-                // string`, cascading into `strtolower($name)`/
-                // `strtoupper($name)`/etc. false positives project-wide.
-                // Real PHPStan's own `InitializerExprTypeResolver::
-                // getPlusType`'s general (non-constant-array) case computes
-                // the key type as the union of both operands' iterable key
-                // types (collapsing back to the shared type when they
-                // already agree, verified directly against real PHPStan's
-                // own source at
-                // `Reflection/InitializerExprTypeResolver.php:1600-1666`)
-                // and the value type as the union of both operands'
-                // iterable value types - mirrored here via the same
-                // `array_key_type`/`array_element_type` helpers this
-                // file's other array-consuming call sites already use.
-                // Deliberately NOT porting the *constant-array* branch
-                // just above that one in real PHPStan (a full
-                // `ConstantArrayTypeBuilder`-style per-offset merge that
-                // preserves an exact literal `array{...}` shape when both
-                // operands are literal shapes) - a real, disclosed
-                // precision gap for `array{a: int} + array{b: string}`-
-                // shaped operands (falls back to the general `Array(key,
-                // val)` union case below instead of a precise merged
-                // shape), not a soundness gap: the result is still a real,
-                // provably-correct supertype, just not maximally precise.
-                // That merge's own real semantics turn out to be
-                // genuinely intricate (an optional left-hand key's value
-                // is *not* unioned with the right side, only a
-                // *non*-optional one is, to account for key-type
-                // near-equality across the two constant arrays) - a
-                // separate, structurally different feature from this
-                // fix, not attempted here.
-                // Phase 14: `is_array_like` sees through a `list<T>`/
+                // filling in any key only present on the right. Computes
+                // the key type as the union of both operands' iterable
+                // key types (collapsing back to the shared type when they
+                // already agree, mirroring real PHPStan's
+                // `InitializerExprTypeResolver::getPlusType`'s general
+                // non-constant-array case) and the value type as the
+                // union of both operands' iterable value types, via the
+                // same `array_key_type`/`array_element_type` helpers this
+                // file's other array-consuming call sites use.
+                // Deliberately doesn't port real PHPStan's constant-array
+                // branch (a full `ConstantArrayTypeBuilder`-style
+                // per-offset merge that preserves an exact literal
+                // `array{...}` shape when both operands are literal
+                // shapes) - a precision gap for `array{a: int} +
+                // array{b: string}`-shaped operands, not a soundness gap:
+                // the result is still a real, provably-correct supertype.
+                // `is_array_like` sees through a `list<T>`/
                 // `non-empty-array<T>`-typed operand too - without it, a
-                // `list<T> + list<T>` silently fell through to numeric
+                // `list<T> + list<T>` would fall through to numeric
                 // addition instead of array union.
                 if Self::is_array_like(&lt) && Self::is_array_like(&rt) {
                     let key_ty = match (Self::array_key_type(&lt), Self::array_key_type(&rt)) {
@@ -4181,24 +3790,14 @@ impl<'a> Checker<'a> {
                 if lt == Type::Float || rt == Type::Float {
                     return Type::Float;
                 }
-                // Phase 15 continuation: real, if narrow, `int<min,max>`
-                // arithmetic - confirmed directly against `vendor/
-                // phpstan-src`'s own `InitializerExprTypeResolver::
-                // getPlusType`/`integerRangeMath`'s `BinaryOp\Plus` arm
-                // (an unbounded end propagates as unbounded; a bounded one
-                // shifts by the same amount, exactly mirrored here). Real
-                // corpus false positive this fixes: `strpos()`'s own
-                // `$offset` parameter (typed `int<0, max>`) collapsing to
-                // bare `Int` the moment it's reassigned via `$offset =
-                // $pos + 1;` inside a loop - surfaced only once the
-                // `While`-condition convergence fix (this session) made
-                // `strpos()`'s own later, real re-check of `$offset`
-                // visible at all. Deliberately narrower than real
-                // PHPStan's own full range-arithmetic surface (`Mul`/`Div`'s
-                // own negative/positive-interval splitting isn't
-                // replicated - no corpus evidence needs it, and it's
-                // meaningfully more involved to transcribe correctly) -
-                // falls through to the existing plain `Int` answer
+                // Real, if narrow, `int<min,max>` arithmetic, mirroring
+                // real PHPStan's `InitializerExprTypeResolver::
+                // getPlusType`/`integerRangeMath`'s `BinaryOp\Plus` arm:
+                // an unbounded end propagates as unbounded; a bounded one
+                // shifts by the same amount. Deliberately narrower than
+                // real PHPStan's full range-arithmetic surface (`Mul`/
+                // `Div`'s negative/positive-interval splitting isn't
+                // replicated) - falls through to the plain `Int` answer
                 // whenever either side isn't range-representable.
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                     (int_range_bounds(&lt), int_range_bounds(&rt))
@@ -4284,11 +3883,11 @@ impl<'a> Checker<'a> {
             // either side was a float - unlike Add/Sub/Mul/Pow, there is
             // no float-promotion rule for these.
             //
-            // Phase 81: except when GMP (all five) or `BcMath\Number`
-            // (`%` only - it doesn't overload the bitwise/shift operators
-            // at all, per `binary_operator_overload_result`'s own gate)
-            // is genuinely involved, which yields the object type back
-            // instead of a plain `int`.
+            // Except when GMP (all five) or `BcMath\Number` (`%` only -
+            // it doesn't overload the bitwise/shift operators at all, per
+            // `binary_operator_overload_result`'s own gate) is genuinely
+            // involved, which yields the object type back instead of a
+            // plain `int`.
             BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
@@ -4331,12 +3930,11 @@ impl<'a> Checker<'a> {
                     Type::Int
                 }
             }
-            // Phase 13 Finding C: verified against real PHPStan's own
-            // dumpType() - `/` gives `int|float` unconditionally whenever
-            // it can't prove `float` is involved, even for two fully
-            // unknown operands (not only when both are provably `int`),
-            // and `float` whenever either operand is. Mirrors the
-            // Add/Sub/Mul/Pow float-promotion shape directly above,
+            // `/` gives `int|float` unconditionally whenever it can't
+            // prove `float` is involved, even for two fully unknown
+            // operands (not only when both are provably `int`), and
+            // `float` whenever either operand is - the same
+            // Add/Sub/Mul/Pow float-promotion shape above, with
             // `Union([Int, Float])` in place of a bare `Int` as the
             // "float not proven" answer.
             BinOp::Div => {
@@ -4368,15 +3966,15 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 22 Finding 6: after checking `&&`/`||`'s right operand against a
-/// cloned, possibly-narrowed `Locals`, merges back only the keys that are
-/// both new (absent from `locals` before checking the right operand) and
-/// a real PHP variable name (`is_real_variable_key`) - a genuine
-/// definitional side effect (a by-ref out-param like `preg_match`'s
-/// `$matches`, or a plain assignment) written as the right operand of
-/// `&&`/`and`/`||`/`or` should persist regardless of the whole
-/// expression's truth value, matching this codebase's "assume it might
-/// be defined" philosophy elsewhere (`predefine_byref_or_unknown_args`).
+/// After checking `&&`/`||`'s right operand against a cloned, possibly-
+/// narrowed `Locals`, merges back only the keys that are both new (absent
+/// from `locals` before checking the right operand) and a real PHP
+/// variable name (`is_real_variable_key`) - a genuine definitional side
+/// effect (a by-ref out-param like `preg_match`'s `$matches`, or a plain
+/// assignment) written as the right operand of `&&`/`and`/`||`/`or`
+/// should persist regardless of the whole expression's truth value,
+/// matching this codebase's "assume it might be defined" philosophy
+/// elsewhere (`predefine_byref_or_unknown_args`).
 ///
 /// Narrowing-derived synthetic keys (`narrowing_key`'s own
 /// `"base->prop"`/`"base[key]"` shapes) must **not** be merged this way,
@@ -4398,63 +3996,42 @@ impl<'a> Checker<'a> {
 fn merge_new_variable_definitions(locals: &mut Locals, narrowed: &Locals) {
     for (key, ty) in narrowed.iter() {
         if is_real_variable_key(key) && !locals.contains_key(key) {
-            // Phase 17 follow-up: `key`'s own real declaration (a
-            // by-ref out-param, or a plain assignment) already recorded
-            // its true provenance inside `narrowed` when it happened -
-            // carried across unchanged here, not fabricated fresh at
-            // this merge point (which isn't itself where the variable
-            // was declared).
+            // `key`'s real declaration (a by-ref out-param, or a plain
+            // assignment) already recorded its true provenance inside
+            // `narrowed` when it happened - carried across unchanged
+            // here, not fabricated fresh at this merge point.
             let provenance = narrowed.get_provenance(key).cloned().unwrap_or_default();
             locals.insert_with_provenance(key.clone(), ty.clone(), provenance);
         }
     }
 }
 
-/// The type of `container[key]` for a known container type - shared by
-/// `infer_expr`'s own `Index` arm and its own recursion into a
-/// `Type::Union`'s members. Phase 12 Finding E: `preg_match`'s own
-/// `Union` of `ArrayShape`s (the matched shape, unioned with an empty one
-/// for the no-match case) needs this same per-key resolution combined
-/// across every member via `union_types`, not silently dropped to
-/// `Mixed` for the whole type the moment it's a `Union` at all - though
-/// for that *specific* pair of members, the combined result still lands
-/// on `Mixed` anyway (the empty-shape member never has any real group's
-/// key, so its own fallback below is always `Mixed`, which `union_types`
-/// unconditionally absorbs into) - real, general infrastructure for a
-/// `Union` whose members *agree* on a key's type, not what recovers
-/// precision for `preg_match`'s own common case (that's `apply_narrowing`'s
-/// own new `preg_match_condition` recognizer, `checker/narrowing.rs`).
 /// Real PHP: incrementing `null` produces `int(1)`; decrementing `null`,
 /// and either direction on a `bool`, is a no-op (the value is unchanged) -
 /// only the null-to-int case actually changes the tracked type. A string
-/// operand's own exact value isn't modeled precisely enough to
-/// distinguish numeric from alphanumeric-increment behavior, so it
-/// conservatively stays a string either way.
+/// operand's exact value isn't modeled precisely enough to distinguish
+/// numeric from alphanumeric-increment behavior, so it conservatively
+/// stays a string either way.
 ///
 /// Recurses through a `Union` the same established way `write_index_into`/
-/// `index_result_type` already do (advance each member independently,
-/// `reduce(union_types)` back into one type) - a real corpus false
-/// positive found while tracing a *different* fix
-/// (`CategoryService::saveCategoriesOrder`'s own dynamically-keyed
-/// counter): a container widened to `Null|Int` across a loop's own
-/// multi-pass fixed-point convergence (the counter's very first touch
-/// contributing the `Null` branch, an already-incremented later pass
-/// contributing `Int`) stayed frozen at that same `Null|Int` forever once
-/// this whole match had no `Union` case at all - even though incrementing
-/// *either* member alone always produces a real number regardless.
+/// `index_result_type` do (advance each member independently,
+/// `reduce(union_types)` back into one type) - without this, a container
+/// widened to `Null|Int` across a loop's multi-pass fixed-point
+/// convergence (the counter's first touch contributing the `Null`
+/// branch, an already-incremented later pass contributing `Int`) would
+/// stay frozen at that same `Null|Int` forever, even though incrementing
+/// either member alone always produces a real number.
 fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
     match ty {
         Type::Null if is_increment => Type::Int,
-        // Real corpus find: a literal/range-typed operand used to pass
-        // straight through unchanged here - `++$x`/`--$x` on
-        // `IntLiteral(0)` stayed exactly `IntLiteral(0)` forever, never
-        // actually advancing - the identical "value never applied" bug
-        // class `negate_numeric_literal`'s own doc comment already found
-        // for unary `-`. A counter incremented inside a loop then checked
-        // afterward (`$n = 0; foreach (...) { ...; $n++; } if ($n > 0)`,
-        // a real, extremely common idiom) looked "always false" against a
-        // check that only fires once anything actually consumes the
-        // literal's own exact value.
+        // A literal/range-typed operand must not pass straight through
+        // unchanged: `++$x`/`--$x` on `IntLiteral(0)` needs to actually
+        // advance, the same "value never applied" bug class
+        // `negate_numeric_literal`'s doc comment covers for unary `-`. A
+        // counter incremented inside a loop then checked afterward
+        // (`$n = 0; foreach (...) { ...; $n++; } if ($n > 0)`) would
+        // otherwise look "always false" against a check that only fires
+        // once anything actually consumes the literal's exact value.
         Type::IntLiteral(n) => Type::IntLiteral(if is_increment { n + 1 } else { n - 1 }),
         Type::FloatLiteral(f) => Type::FloatLiteral(if is_increment { f + 1.0 } else { f - 1.0 }),
         Type::IntRange(min, max) => {
@@ -4470,33 +4047,38 @@ fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
     }
 }
 
+/// The type of `container[key]` for a known container type - shared by
+/// `infer_expr`'s `Index` arm and its own recursion into a
+/// `Type::Union`'s members. `preg_match`'s `Union` of `ArrayShape`s (the
+/// matched shape, unioned with an empty one for the no-match case) needs
+/// this same per-key resolution combined across every member via
+/// `union_types`, rather than silently dropping to `Mixed` for the whole
+/// type just because it's a `Union` - general infrastructure for a
+/// `Union` whose members agree on a key's type, not what recovers
+/// precision for `preg_match`'s common case (that's `apply_narrowing`'s
+/// `preg_match_condition` recognizer, `checker/narrowing.rs`).
 fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
     match container_ty {
         Type::Array(_, inner) => *inner,
-        // A genuinely empty shape has zero possible keys, so a *dynamic*
-        // key read is unconditionally real PHP's own "undefined array
-        // key" warning, returning `null` - a real corpus false positive
-        // this fixes: `$counts = []; ... = ++$counts[$c];` (auto-
-        // vivifying a fresh dynamic key) used to read back bare `Mixed`
-        // instead of `Null`, so the increment arm's own `Null -> Int`
-        // transition (`advance_incdec_type`) never engaged, leaving the
-        // whole counter frozen at `Mixed` from its very first touch
-        // onward.
+        // A genuinely empty shape has zero possible keys, so a dynamic
+        // key read is unconditionally real PHP's "undefined array key"
+        // warning, returning `null` - without this, an incremented,
+        // auto-vivifying fresh dynamic key (`$counts = []; ... =
+        // ++$counts[$c];`) would read back bare `Mixed` instead of
+        // `Null`, so the increment arm's `Null -> Int` transition
+        // (`advance_incdec_type`) would never engage.
         //
-        // Deliberately scoped to a *dynamic* key only (`key.is_none()`),
-        // not a literal one too - `preg_match`'s own by-ref `$matches`
-        // shape (`tests/preg_and_regex.rs`'s own `preg_match_required_
-        // group_is_accepted_as_a_string_parameter`) is a `Union` whose
-        // "no match" branch is exactly this same empty shape, and a
-        // *literal*-keyed read there (`$matches[1]`, unconditionally,
-        // with no narrowing) is this project's own deliberate, disclosed
-        // leniency: absorbing into `Mixed` rather than sharpening to
-        // `|null` and forcing every unnarrowed `$matches[N]` access to
-        // handle a null case most real callers never bother to. A
-        // literal key miss already has its own separate "key not found"
-        // diagnostic path (`check_shape_key_access`) regardless of what
-        // this function returns, so leaving that case as `Mixed` costs
-        // nothing.
+        // Scoped to a dynamic key only (`key.is_none()`), not a literal
+        // one too - `preg_match`'s by-ref `$matches` shape is a `Union`
+        // whose "no match" branch is exactly this same empty shape, and
+        // a literal-keyed read there (`$matches[1]`, unconditionally,
+        // with no narrowing) is this project's deliberate leniency:
+        // absorbing into `Mixed` rather than sharpening to `|null` and
+        // forcing every unnarrowed `$matches[N]` access to handle a null
+        // case most callers never bother to. A literal key miss already
+        // has its own "key not found" diagnostic path
+        // (`check_shape_key_access`) regardless of what this function
+        // returns.
         Type::ArrayShape(fields) if fields.is_empty() && key.is_none() => Type::Null,
         Type::ArrayShape(fields) => key
             .and_then(|k| fields.into_iter().find(|(name, _, _)| name == k))
@@ -4507,10 +4089,10 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
             .map(|m| index_result_type(m, key))
             .reduce(union_types)
             .unwrap_or(Type::Mixed),
-        // Phase 14: a `list<T>`/`non-empty-array<T>`-typed value is a
-        // real `Intersection([Array(T), Accessory(_)])` now, not plain
+        // A `list<T>`/`non-empty-array<T>`-typed value is a real
+        // `Intersection([Array(T), Accessory(_)])`, not plain
         // `Array(T)` - without this, indexing into one (`$listArg[0]`)
-        // silently fell to `Mixed` below.
+        // would fall to `Mixed`.
         Type::Intersection(members) => members
             .into_iter()
             .find_map(|m| Checker::array_element_type(&m))
@@ -4520,20 +4102,18 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
 }
 
 /// Whether `ty` is provably a `non-falsy-string` (non-empty and never
-/// exactly `"0"`). Phase 75: now a one-line delegate to the generalized
-/// `string_type_has_accessory` (`checker/narrowing/accessory_range.rs`) -
-/// every existing call site keeps working unchanged.
+/// exactly `"0"`) - a one-line delegate to the generalized
+/// `string_type_has_accessory`.
 fn is_non_falsy_string(ty: &Type) -> bool {
     string_type_has_accessory(ty, AccessoryKind::NonFalsyString)
 }
 
-/// Phase 50 (reattempt): whether `ty` is confidently array-shaped for
-/// `check_dim_fetch_key_type`'s own purposes - a bare `Array`/
-/// `ArrayShape`, or a `Union` where *every* member is (recursively, so a
-/// union of unions still counts) - anything else (`Mixed`, an object,
-/// or a `Union` mixing array and non-array members) is "don't know,"
-/// matching this project's leniency elsewhere rather than real
-/// PHPStan's own tri-state `isArray()` grading.
+/// Whether `ty` is confidently array-shaped for
+/// `check_dim_fetch_key_type`'s purposes - a bare `Array`/`ArrayShape`,
+/// or a `Union` where every member is (recursively, so a union of unions
+/// still counts) - anything else is "don't know," matching this
+/// project's leniency elsewhere rather than real PHPStan's tri-state
+/// `isArray()` grading.
 pub(crate) fn is_confidently_array(ty: &Type) -> bool {
     match ty {
         Type::Array(..) | Type::ArrayShape(_) => true,
@@ -4542,25 +4122,21 @@ pub(crate) fn is_confidently_array(ty: &Type) -> bool {
     }
 }
 
-/// Phase 50: whether `ty` is a type PHP itself can NEVER legally use as
-/// an array key (`int`/`string`/`bool`/`float`/`null` all being legal -
-/// PHP coerces the latter three at runtime) - `Some(description)` only
-/// when every part of `ty` is confidently illegal, `None` (silently
-/// allowed) for anything ambiguous (`Mixed`, a union mixing legal and
-/// illegal members, an unresolved template, ...), matching this
-/// project's "don't guess" leniency everywhere else. A `Type::Object`
-/// covers both a real class instance and this project's own `resource`/
-/// `Closure`-as-object representations - none of which PHP ever accepts
-/// as a key either, even one with a real `__toString()` (array-key
-/// coercion has no string-cast fallback the way string CONTEXT does).
-/// Phase 50: `php_version` is `None` (this project's own "no target
-/// configured, don't check" convention every other `PhpFeature`-gated
-/// rule already uses) unless the caller has a real, configured
-/// `Registry::php_version` to check against - matching real PHPStan's own
-/// `AllowedArrayKeysTypes::getType`, whose `float`/`null` legality
-/// literally depends on the target `PhpVersion` (`null` unconditionally
-/// allowed with none configured, matching real PHPStan's own `$phpVersion
-/// === null` branch there too).
+/// Whether `ty` is a type PHP itself can never legally use as an array
+/// key (`int`/`string`/`bool`/`float`/`null` all being legal - PHP
+/// coerces the latter three at runtime) - `Some(description)` only when
+/// every part of `ty` is confidently illegal, `None` for anything
+/// ambiguous (`Mixed`, a union mixing legal and illegal members, an
+/// unresolved template, ...), matching this project's "don't guess"
+/// leniency elsewhere. A `Type::Object` covers both a real class
+/// instance and this project's `resource`/`Closure`-as-object
+/// representations - none of which PHP ever accepts as a key, even one
+/// with a real `__toString()` (array-key coercion has no string-cast
+/// fallback the way string context does). `php_version` is `None` (this
+/// project's "no target configured, don't check" convention) unless the
+/// caller has a real, configured `Registry::php_version` to check
+/// against, mirroring real PHPStan's `AllowedArrayKeysTypes::getType`,
+/// whose `float`/`null` legality depends on the target `PhpVersion`.
 pub(crate) fn invalid_array_key_description(
     ty: &Type,
     php_version: Option<crate::php_version::PhpVersion>,
@@ -4617,15 +4193,15 @@ impl<'a> Checker<'a> {
     /// (`checker/control_flow.rs`) recognizes a terminating expression
     /// statement via exactly `infer_expr(e, locals) == Type::Never` - without
     /// this, a guard clause built on `exit()`/`die()` instead of `return`/
-    /// `throw` (extremely common in this codebase's CLI tools and test
-    /// fixtures) was never recognized as terminating, leaking its own
-    /// never-actually-reached branch's narrowing into the surrounding scope.
+    /// `throw` (common in this codebase's CLI tools and test fixtures) would
+    /// never be recognized as terminating, leaking its never-actually-
+    /// reached branch's narrowing into the surrounding scope.
     ///
-    /// Phase 53 Sub-item C: gained `&self`/`locals` so a callee whose own
-    /// inferred type is a shaped `Closure(...)` (`Type::Callable(Some(sig))`)
-    /// can fall back to that shape's own declared return type instead of
-    /// `Mixed` - the same real bug fix `check_expr`'s own dynamic-call
-    /// branch makes on the diagnostic-producing side.
+    /// Takes `&self`/`locals` so a callee whose inferred type is a shaped
+    /// `Closure(...)` (`Type::Callable(Some(sig))`) can fall back to that
+    /// shape's declared return type instead of `Mixed` - the same fix
+    /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
+    /// side.
     fn call_fallback_return_type(&self, callee: &Expr, locals: &Locals) -> Type {
         match &callee.kind {
             ExprKind::Name(name)
@@ -4633,26 +4209,19 @@ impl<'a> Checker<'a> {
             {
                 Type::Never
             }
-            // `print` always evaluates to the literal `int(1)` in real PHP -
-            // confirmed directly against `vendor/phpstan-src`'s own
-            // `PrintHandler::resolveType`, which returns `new
-            // ConstantIntegerType(1)` unconditionally.
+            // `print` always evaluates to the literal `int(1)` in real
+            // PHP, mirroring `PrintHandler::resolveType`, which returns
+            // `ConstantIntegerType(1)` unconditionally.
             ExprKind::Name(name) if name == "print" => Type::IntLiteral(1),
             // `isset(...)`/`empty(...)` are real PHP language constructs
-            // that always evaluate to a real `bool` when read as a value
-            // (not just narrowed as a condition) - `is_language_construct`
+            // that always evaluate to a real `bool` when read as a value,
+            // not just narrowed as a condition - `is_language_construct`
             // routes both away from ever resolving a real signature here
             // (`sig` stays `None`, so this whole function is the only
-            // place their own call-expression type gets decided), and
+            // place their call-expression type gets decided), and
             // `self.infer_expr(callee, locals)` on the bare `Name` below
-            // has no special case for either, silently collapsing to
-            // `Mixed`. Real corpus false positive this fixes:
-            // `SiteUpdateSubController::handle`'s own `$sync_meta_value =
-            // isset($post['sync_meta']);` (a bare `isset()`, not gated
-            // behind a `&&` - which happened to mask this exact bug for
-            // its own sibling assignments by computing `&&`'s own result
-            // type independently of `isset`'s) fed into a docblock-typed
-            // `array{..., sync_meta: bool, ...}` shape a few lines later.
+            // has no special case for either, which would otherwise
+            // silently collapse to `Mixed`.
             ExprKind::Name(name) if name == "isset" || name == "empty" => Type::Bool,
             _ => match self.infer_expr(callee, locals) {
                 Type::Callable(Some(sig)) => (*sig.return_type).clone(),
@@ -4664,44 +4233,39 @@ impl<'a> Checker<'a> {
 
 /// Whether a `Type::ArrayShape` key string is one PHP itself would have
 /// already cast to a real integer at the point the array was built -
-/// PHP's own rule: a decimal string with no leading zero (unless it's
+/// PHP's rule: a decimal string with no leading zero (unless it's
 /// exactly `"0"`) and no leading `+`. Deliberately doesn't handle a
-/// leading `-` (a negative-integer key string, real but rare enough as a
-/// literal shape key that no evidence calls for it) - misclassifying one
-/// as a string key here is the same safe-by-omission default this
-/// project uses throughout rather than a wrong answer.
+/// leading `-` (a negative-integer key string) - misclassifying one as a
+/// string key here is the same safe-by-omission default this project
+/// uses throughout rather than a wrong answer.
 pub(crate) fn is_canonical_int_key(key: &str) -> bool {
     crate::types::canonical_int_key(key).is_some()
 }
 
-/// Phase 14: whether `e` is the literal `false` - used to scope
-/// `array_slice`/`array_reverse`'s own `$preserve_keys` argument to
-/// exactly the default-matching case (omitted, or explicitly `false`).
+/// Whether `e` is the literal `false` - used to scope
+/// `array_slice`/`array_reverse`'s `$preserve_keys` argument to exactly
+/// the default-matching case (omitted, or explicitly `false`).
 fn is_false_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(false)))
 }
 
-/// The `true`-literal mirror of `is_false_literal` just above - used by
-/// `var_export()`'s own dynamic-return-type narrowing (`builtin_calls.rs`)
-/// to recognize its `$return` argument's default-matching-but-inverted
-/// case (explicitly `true`, unlike `$preserve_keys`'s "omitted or
-/// `false`" default).
+/// The `true`-literal mirror of `is_false_literal` above - used by
+/// `var_export()`'s dynamic-return-type narrowing to recognize its
+/// `$return` argument's default-matching-but-inverted case (explicitly
+/// `true`, unlike `$preserve_keys`'s "omitted or `false`" default).
 fn is_true_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
 }
 
-/// Whether `class::$method()` is Doctrine's own `AbstractQuery::getResult()`
-/// (or an override/inheritor of it, e.g. `Query::getResult()`) - the native
-/// stub declares a bare `mixed` return with no docblock refinement at all.
-/// Real PHPStan's own `phpstan-doctrine` extension gives this a much
-/// richer, query-builder-aware entity type (full DQL SELECT/FROM
+/// Whether `class::$method()` is Doctrine's `AbstractQuery::getResult()`
+/// (or an override/inheritor of it, e.g. `Query::getResult()`) - the
+/// native stub declares a bare `mixed` return with no docblock
+/// refinement. Real PHPStan's `phpstan-doctrine` extension gives this a
+/// much richer, query-builder-aware entity type (full DQL SELECT/FROM
 /// introspection, tracking `indexBy()` too) this project has no way to
-/// replicate - a sizable feature on its own - but the narrower, still
-/// real and bounded fact it always proves is worth having on its own:
-/// a non-`indexBy()`'d query's own result is always a real,
-/// sequentially-keyed list, confirmed via dumpType(). Zero `indexBy()`
-/// call sites exist anywhere in this corpus, the one case that would
-/// break this simplification.
+/// replicate, but the narrower, bounded fact it always proves is worth
+/// having on its own: a non-`indexBy()`'d query's result is always a
+/// real, sequentially-keyed list.
 pub(crate) fn is_doctrine_query_get_result(
     checker: &Checker<'_>,
     class: &str,
@@ -4721,11 +4285,11 @@ pub(crate) fn doctrine_query_result_list_type() -> Type {
 }
 
 /// Peels through any `(...)`-grouping wrapper(s) to the real expression
-/// underneath - `ExprKind::Grouping` is a genuine, distinct AST node
-/// (not something parens collapse away during parsing), so a
-/// closure-literal-shaped check like Finding 49's own `Closure::bind`/
-/// `->bindTo()` special-casing needs to see through
-/// `(function () {...})` the same as a bare `function () {...}`.
+/// underneath - `ExprKind::Grouping` is a genuine, distinct AST node,
+/// not something parens collapse away during parsing, so a closure-
+/// literal-shaped check like the `Closure::bind`/`->bindTo()` special-
+/// casing needs to see through `(function () {...})` the same as a bare
+/// `function () {...}`.
 pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
     match &e.kind {
         ExprKind::Grouping(inner) => unwrap_grouping(inner),
@@ -4734,26 +4298,14 @@ pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
 }
 
 impl<'a> Checker<'a> {
-    /// Real bug found via corpus verification: a `match(true) { $a, $b =>
-    /// X, ... }` arm listing more than one condition for the same result
-    /// (real PHP semantics: the arm runs iff `$a || $b`) got *no*
-    /// narrowing applied to its own body at all - only a single-
-    /// condition arm did (`if let [only_cond] = conds.as_slice()`,
-    /// this method's own pre-fix call sites). `$uri`'s type inside such
-    /// an arm therefore stayed the full, unnarrowed subject type even
-    /// after e.g. four `instanceof` checks - normally invisible (most
-    /// consumers never noticed the arm's own contributed type was wider
-    /// than it should be), until fixing `Match`'s own union-flattening
-    /// bug (see the sibling fix a few commits up) started properly
-    /// merging that leftover width into the whole match expression's own
-    /// composite type, producing a real, corpus-confirmed false
-    /// `argument.type` positive (`League\Uri\Modifier::wrap()`, a
-    /// `match (true) { $uri instanceof A, $uri instanceof B, ... => $uri
-    /// }` arm). Fix: narrow by each listed condition independently (same
-    /// single-condition logic, once per condition) starting from the same
-    /// baseline, then OR-merge the results via `merge_scopes` - the same
-    /// combinator already used to merge sibling *arms'* own locals,
-    /// applied here across one arm's own multiple conditions instead.
+    /// A `match(true) { $a, $b => X, ... }` arm listing more than one
+    /// condition for the same result (real PHP semantics: the arm runs
+    /// iff `$a || $b`) needs narrowing applied to its body just as much
+    /// as a single-condition arm does - narrow by each listed condition
+    /// independently (same single-condition logic, once per condition)
+    /// starting from the same baseline, then OR-merge the results via
+    /// `merge_scopes`, the same combinator used to merge sibling arms'
+    /// locals, applied here across one arm's multiple conditions.
     fn narrow_match_arm_conditions(
         &self,
         subject: &Expr,
@@ -4782,23 +4334,18 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Real bug found via Piwigo corpus verification (Phase 45/item 11): PHP's
-/// `?->` short-circuits the *entire remaining postfix chain* to `null`,
-/// not just the single arrow it's written on - `$a?->b->c` means
+/// PHP's `?->` short-circuits the entire remaining postfix chain to
+/// `null`, not just the single arrow it's written on - `$a?->b->c` means
 /// `$a === null ? null : $a->b->c`, so the composite expression's type
-/// must include `Null` even though only the first link is nullsafe.
-/// `$a?->b->c`'s inner `?->b` node already unions `Null` into its own
-/// result correctly; the bug was the outer, plain `->c` node silently
-/// dropping that inherited nullability instead of forwarding it, because
-/// it only ever checked its *own* `nullsafe` flag, never whether an
-/// earlier link in the same chain already used one. Deliberately checks
-/// only the direct base-chain lineage (not into unrelated
-/// subexpressions like call arguments), and deliberately does *not*
-/// apply to a base that's nullable for some *other* reason with no
-/// nullsafe anywhere in its chain (e.g. a plain `$nullableVar->prop`) -
-/// that's a real, already-diagnosed mistake elsewhere, and re-widening
-/// its result to include `Null` here would risk masking further bugs
-/// behind a spurious extra nullable, not fixing anything.
+/// must include `Null` even though only the first link is nullsafe. The
+/// outer, plain `->c` node must forward that inherited nullability
+/// rather than only checking its own `nullsafe` flag. Checks only the
+/// direct base-chain lineage (not into unrelated subexpressions like
+/// call arguments), and deliberately does not apply to a base that's
+/// nullable for some other reason with no nullsafe anywhere in its chain
+/// (e.g. a plain `$nullableVar->prop`) - that's a real mistake elsewhere,
+/// and re-widening its result to include `Null` here would risk masking
+/// further bugs rather than fixing anything.
 pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
     match &base.kind {
         ExprKind::PropertyAccess(inner, _, nullsafe) => {
