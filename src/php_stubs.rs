@@ -1,13 +1,9 @@
 //! Generates built-in function signatures by parsing real stub sources
 //! with this project's own lexer/parser/registry, rather than
-//! hand-transcribing approximations one function at a time. A hand-
-//! curated overlay (`stubs.rs`) existed alongside this before Phase 8
-//! ingested the real stub corpus below, but every name it covered turned
-//! out to already be present here too (`Registry::merge_stubs`'s
-//! first-registered-wins semantics meant the overlay had already become
-//! dead weight, not an active correction layer) - removed rather than
-//! kept as a doc-comment inaccuracy waiting to mislead the next person
-//! who reads it (Finding 5 from the architecture audit).
+//! hand-transcribing approximations one function at a time. This project
+//! has no general hand-curated stub-overlay mechanism - see
+//! `patch_array_multisort_by_ref` below for the one narrow,
+//! explicitly-justified post-generation patch that exists instead.
 //!
 //! The vendored corpus, under `vendor/phpstorm-stubs/`, is
 //! `jetbrains/phpstorm-stubs` at commit
@@ -30,27 +26,19 @@
 //! automatically at build time against a pinned tag; here it's a fixed,
 //! manually-refreshed one.
 //!
-//! `PHPSTAN_SRC_SOURCES` (Finding 4): a second vendored corpus,
+//! `PHPSTAN_SRC_SOURCES`: a second vendored corpus,
 //! `vendor/phpstan-src/src/` - real PHPStan's own MIT-licensed runtime
-//! source (already vendored in this project, previously only used to
-//! derive test fixtures - see the many `// Derived from vendor/
-//! phpstan-src/tests/...` comments throughout `checker.rs`), reused here
-//! for the identical reason `phpstorm-stubs` is: a real corpus vendor
-//! package authoring a PHPStan rule/extension references `PHPStan\Type\*`/
-//! `PHPStan\Rules\Rule`/etc., none of which exist as scannable source in
-//! `phpstan/phpstan`'s own phar distribution. `generated_stubs`/
-//! `generated_stub_classes` chain `PHPSTAN_SRC_SOURCES` in after
-//! `PHPSTORM_STUBS_SOURCES`, so real PHP builtins keep their existing
-//! first-occurrence-wins priority - phpstan-src can only add names, never
-//! take priority over one phpstorm-stubs already claimed. Confirmed
-//! before landing this: `phpstan-rs check vendor/phpstan-src/src` (0 of
-//! 1793 files failed to parse) and `phpstan-rs check-project
-//! vendor/phpstan-src/src` (the full `Registry::build`/`ClassInfo::
-//! from_decl` path this pipeline actually exercises, a strict superset of
-//! what stub generation needs) both completed cleanly with no panic. Not
-//! closed by this: `vendor/phpstan-src/src` itself references classes
-//! from its own dependency, `nikic/php-doc-parser` (`PHPStan\PhpDocParser//! Ast\Type\*`), not vendored here - a smaller, disclosed residual (see
-//! `ROADMAP.md`'s "Known limitations").
+//! source, reused here for the identical reason `phpstorm-stubs` is: a
+//! vendor package authoring a PHPStan rule/extension references
+//! `PHPStan\Type\*`/`PHPStan\Rules\Rule`/etc., none of which exist as
+//! scannable source in `phpstan/phpstan`'s own phar distribution.
+//! `generated_stubs`/`generated_stub_classes` chain `PHPSTAN_SRC_SOURCES`
+//! in after `PHPSTORM_STUBS_SOURCES`, so real PHP builtins keep their
+//! existing first-occurrence-wins priority - phpstan-src can only add
+//! names, never take priority over one phpstorm-stubs already claimed.
+//! Not closed by this: `vendor/phpstan-src/src` itself references
+//! classes from its own dependency, `nikic/php-doc-parser`
+//! (`PHPStan\PhpDocParser\Ast\Type\*`), not vendored here.
 
 use crate::lexer::Lexer;
 use crate::parser::Parser;
@@ -83,29 +71,27 @@ pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
         .collect()
 }
 
-/// Phase 89: phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
+/// phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
 /// genuinely accurate) declaration of `array_multisort`'s variadic tail
 /// is `&...$rest` - every "rest" argument marked by-reference uniformly.
 /// Real PHP's own actual runtime behavior for this specific function is
 /// looser than that declaration suggests, though: a call like
 /// `array_multisort($a, SORT_DESC, SORT_NUMERIC, $b)` legitimately
 /// passes literal sort-order/sort-flag constants into by-ref-declared
-/// positions, which every *other* by-ref parameter in the entire
+/// positions, which every other by-ref parameter in the entire
 /// language would reject outright ("Only variables can be passed by
 /// reference"). Real PHPStan's own bundled `resources/functionMap.php`
-/// (confirmed directly) declares this same function with a *plain*,
+/// declares this same function with a plain,
 /// non-`&`-prefixed signature (`SignatureMapParser`'s own convention:
-/// a `&`-prefixed parameter *name* is what marks by-ref, and this
+/// a `&`-prefixed parameter name is what marks by-ref, and this
 /// project's entry has none) - i.e. real PHPStan deliberately treats
 /// none of `array_multisort`'s arguments as reference-checked at all,
 /// the exact trade-off (losing precision on the genuinely-by-ref array
 /// slots to avoid a false positive on the interleaved sort-flag ones)
 /// mirrored here. This project has no general hand-curated stub-overlay
-/// mechanism any more (see this module's own doc comment - the last one
-/// was dead code, removed before Phase 8) - a single, narrow, explicitly
-/// justified post-generation patch for the one function this project's
-/// own real corpus actually evidenced the gap on is more honest than
-/// reintroducing a whole overlay system for it.
+/// mechanism - a single, narrow, explicitly justified post-generation
+/// patch for this one function is more honest than reintroducing a
+/// whole overlay system for it.
 fn patch_array_multisort_by_ref(stubs: &mut [(String, FunctionSig)]) {
     for (name, sig) in stubs.iter_mut() {
         if name != "array_multisort" {
@@ -121,7 +107,7 @@ fn patch_array_multisort_by_ref(stubs: &mut [(String, FunctionSig)]) {
 /// `array` (no refining PHPDoc tag) - real PHPStan hardcodes the same
 /// `list<array{function: string, ...}>` shape `Exception::getTrace()`
 /// shares (`backtrace_frame_list_type`, `patch_reflection_and_exception_
-/// list_types`'s own doc comment), confirmed via `\PHPStan\dumpType()`.
+/// list_types`'s own doc comment).
 fn patch_debug_backtrace(stubs: &mut [(String, FunctionSig)]) {
     for (name, sig) in stubs.iter_mut() {
         if name == "debug_backtrace" {
@@ -135,35 +121,25 @@ fn patch_debug_backtrace(stubs: &mut [(String, FunctionSig)]) {
 /// such refinement, so this is phpstorm-stubs' own text going further
 /// than the runtime signature itself, the same situation `patch_array_
 /// multisort_by_ref` above documents in general. Real PHPStan's own
-/// `resources/functionMap.php` declares `usleep` with a *plain* `int`
-/// parameter (no range) - and, confirmed directly via `\PHPStan\
-/// dumpType()`/a real `vendor/bin/phpstan analyse` run at level 10 with
-/// `bleedingEdge.neon`, neither an unconstrained `int` variable nor a
-/// literal `-5` passed to `usleep()` is flagged at all. `NativeFunction
-/// ReflectionProvider::findFunctionReflection` (`vendor/phpstan-src/src/
-/// Reflection/SignatureMap/NativeFunctionReflectionProvider.php`)
-/// explains why: any function `functionMap.php` already covers (the
-/// overwhelming majority of internal functions, `usleep` included) never
-/// even reaches phpstorm-stubs' own PHPDoc for its native parameter
-/// types - only PHPStan's own separate, much smaller internal `stubs/`
-/// bundle (a distinct resource from phpstorm-stubs) can refine a
+/// `resources/functionMap.php` declares `usleep` with a plain `int`
+/// parameter (no range), and neither an unconstrained `int` variable nor
+/// a literal `-5` passed to `usleep()` is flagged at all. `NativeFunction
+/// ReflectionProvider::findFunctionReflection` explains why: any
+/// function `functionMap.php` already covers (the overwhelming majority
+/// of internal functions, `usleep` included) never even reaches
+/// phpstorm-stubs' own PHPDoc for its native parameter types - only
+/// PHPStan's own separate, much smaller internal `stubs/` bundle (a
+/// distinct resource from phpstorm-stubs) can refine a
 /// `functionMap.php`-covered signature further, and it has no entry for
-/// `usleep`. Real Piwigo corpus false positive this fixes:
-/// `RegisterControllerTest::registerMaturedKey`'s own `usleep((int)
-/// ($remainingSeconds * 1_000_000))` inside an `if ($remainingSeconds >
-/// 0)` guard - flagged here because this project has no float-range-
-/// narrowing mechanism to prove the cast's own result is non-negative,
-/// a gap that's moot once `usleep`'s own parameter is corrected to match
-/// what real PHPStan actually checks against.
+/// `usleep`.
 ///
-/// This is likely one instance of a broader, unconfirmed pattern (any
+/// This is likely one instance of a broader pattern (any
 /// `functionMap.php`-covered function whose phpstorm-stubs PHPDoc adds a
 /// refinement `functionMap.php` itself doesn't have could be equally
-/// unenforced by real PHPStan) - not chased further without more direct
-/// corpus evidence, the same narrow, one-function-at-a-time discipline
-/// `patch_array_multisort_by_ref` above already established rather than
-/// reintroducing a whole stub-overlay system for a still-hypothetical
-/// wider gap.
+/// unenforced by real PHPStan) - not chased further, the same narrow,
+/// one-function-at-a-time discipline `patch_array_multisort_by_ref`
+/// above already established rather than reintroducing a whole
+/// stub-overlay system for a still-hypothetical wider gap.
 fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
     for (name, sig) in stubs.iter_mut() {
         if name == "usleep" {
@@ -174,57 +150,42 @@ fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
     }
 }
 
-/// The broader, previously-"unconfirmed" pattern `patch_usleep`'s own doc
-/// comment names above, now confirmed and closed with direct evidence
-/// rather than chased further speculatively: phpstorm-stubs' own
-/// `#[ArrayShape(["key" => "type", ...])]` attribute (a JetBrains/
-/// PhpStorm IDE-inspection convention) is never read by real PHPStan at
-/// all - confirmed by a direct grep of the vendored `vendor/phpstan-src/
-/// src/` tree, zero occurrences of "ArrayShape" anywhere in it, for any
-/// function or method, stub-covered or not. A prior version of this
-/// project's stub-generation pipeline (`registry::function_sig::from_decl`)
-/// grafted that attribute's own shape onto any bare `array`/`array|X`
-/// return type unconditionally, on the mistaken premise that real PHPStan
-/// reads it directly - producing an over-precise shape for every one of
-/// the ~85 real occurrences across the vendored phpstorm-stubs corpus,
-/// regardless of what real PHPStan's own bundled `resources/
-/// functionMap.php` (the actual source real PHPStan uses for a stub
-/// function's native signature - `NativeFunctionReflectionProvider`
-/// returns a `functionMap.php`-based reflection before phpstorm-stubs' own
-/// attributes are ever reachable) says for that same function. Two real
-/// Piwigo corpus false positives this caused, both traced directly to
-/// `functionMap.php` giving the function a bare, unshaped type while the
-/// (never-consulted-by-real-PHPStan) attribute gave phpstan-rs a precise
-/// one: `ImageBackend::getGraphicsLibrary`'s own `gd_info()['GD Version']
-/// ?? null` (`nullCoalesce.offset` - `functionMap.php`'s own `'gd_info' =>
-/// ['array']` has no shape at all) and `ImageExtImagick::write`'s own
-/// `isset(pathinfo($path)['dirname'])` (`isset.offset` - `functionMap.php`'s
-/// own `'pathinfo' => ['array|string', ...]`, likewise bare).
+/// Phpstorm-stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute
+/// (a JetBrains/PhpStorm IDE-inspection convention) is never read by
+/// real PHPStan at all - zero occurrences of "ArrayShape" anywhere in
+/// the vendored `vendor/phpstan-src/src/` tree, for any function or
+/// method, stub-covered or not. Grafting that attribute's own shape onto
+/// a bare `array`/`array|X` return type unconditionally (as an earlier
+/// version of this project's stub-generation pipeline did) produces an
+/// over-precise shape for every one of the ~85 real occurrences across
+/// the vendored phpstorm-stubs corpus, regardless of what real PHPStan's
+/// own bundled `resources/functionMap.php` (the actual source real
+/// PHPStan uses for a stub function's native signature -
+/// `NativeFunctionReflectionProvider` returns a `functionMap.php`-based
+/// reflection before phpstorm-stubs' own attributes are ever reachable)
+/// says for that same function.
 ///
-/// `pathinfo()` itself needed a patch here too, for a reason distinct from
-/// (and additional to) removing the attribute mechanism: unlike every
-/// other function checked here, its own phpstorm-stubs docblock *also*
-/// carries a genuine, machine-parseable `@return string|array{dirname:
-/// string, basename: string, extension: string, filename: string}` type
-/// tag, independent of its `#[ArrayShape(...)]` attribute - so the
-/// ordinary docblock-parsing pipeline alone (nothing attribute-specific)
-/// would still produce the same over-precise *native signature* even
-/// after the attribute mechanism was removed. Confirmed no sibling case
-/// exists by checking every other function this patch covers for a real
-/// `array{` shape tag of its own (all bare prose), not assumed. This
-/// doesn't actually close the real Piwigo corpus false positive, though -
+/// `pathinfo()` itself needs a patch here too, for a reason distinct
+/// from removing the attribute mechanism: unlike every other function
+/// checked here, its own phpstorm-stubs docblock also carries a genuine,
+/// machine-parseable `@return string|array{dirname: string, basename:
+/// string, extension: string, filename: string}` type tag, independent
+/// of its `#[ArrayShape(...)]` attribute - so the ordinary
+/// docblock-parsing pipeline alone (nothing attribute-specific) would
+/// still produce the same over-precise native signature even after the
+/// attribute mechanism is removed. This doesn't actually close the
+/// `pathinfo()` false positive, though -
 /// `checker::expr::builtin_calls::pathinfo_array_shape`'s own dedicated
 /// call-site special case (mirroring real PHPStan's own
 /// `PathinfoFunctionDynamicReturnTypeExtension`, a real dynamic-return-
 /// type extension, not a `functionMap.php`-vs-attribute precision
 /// question at all) unconditionally overrides whatever this bare-signature
 /// patch gives `pathinfo` for every ordinary call - see that function's
-/// own doc comment for the actual fix (a real, separate `dirname`-
-/// optionality bug in that call-site special case, not this one).
+/// own doc comment for the actual fix.
 ///
 /// The fix removed the general (wrong) mechanism entirely - see `registry::
 /// function_sig::from_decl`'s own history - rather than special-casing
-/// individual functions to *suppress* it, since the mechanism's own
+/// individual functions to suppress it, since the mechanism's own
 /// premise never held for any function. This patch restores real
 /// precision only where `functionMap.php` genuinely gives one, transcribed
 /// directly from that file's own type text (not from phpstorm-stubs' own
@@ -232,26 +193,23 @@ fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
 /// `imagecolorsforindex`'s own real shape uses `int<0, 255>`/`int<0, 127>`
 /// ranges, not the attribute's plain `int`) - the same one-function-at-a-
 /// time, `functionMap.php`-verified discipline `patch_debug_backtrace`/
-/// `patch_usleep` already established, just covering every function this
-/// investigation actually checked rather than the single one direct
-/// corpus evidence first surfaced. Every function `functionMap.php` itself
-/// leaves bare (`gd_info`, `pathinfo`, and the many others `#[ArrayShape]`
-/// used to over-refine) intentionally gets no patch at all here - bare is
-/// the correct, real-PHPStan-matching answer for those, not an oversight.
-/// Not ported: `date_sun_info` (`functionMap.php`'s own type wraps its
-/// shape in a `__benevolent<...>` marker this project's type-string parser
-/// doesn't model - a distinct, narrower gap, not chased here);
-/// `opcache_get_configuration` (`functionMap.php` does give it a real,
-/// deeply-nested shape, but one large enough that hand-transcribing it
-/// here risked a silent typo for essentially no real corpus payoff -
-/// left bare rather than risk shipping a subtly-wrong shape unverified);
-/// and every method-only occurrence of `#[ArrayShape]` (`Imagick`/
-/// `PDOStatement`/`Phar`/`SQLite3`, ~22 sites) - `functionMap.php` only
-/// ever covers top-level functions, never methods, and none of these
-/// classes have a real PHPStan-bundled dynamic-return-type extension
-/// either, so bare (whatever the native/PHPDoc return type already
-/// resolves to) is already the correct real-PHPStan-matching answer for
-/// all of them too.
+/// `patch_usleep` already established. Every function `functionMap.php`
+/// itself leaves bare (`gd_info`, `pathinfo`, and the many others
+/// `#[ArrayShape]` used to over-refine) intentionally gets no patch at
+/// all here - bare is the correct, real-PHPStan-matching answer for
+/// those, not an oversight. Not ported: `date_sun_info`
+/// (`functionMap.php`'s own type wraps its shape in a
+/// `__benevolent<...>` marker this project's type-string parser doesn't
+/// model); `opcache_get_configuration` (`functionMap.php` does give it a
+/// real, deeply-nested shape, but one large enough that hand-transcribing
+/// it here risks a silent typo for little real payoff - left bare rather
+/// than risk shipping a subtly-wrong shape unverified); and every
+/// method-only occurrence of `#[ArrayShape]` (`Imagick`/`PDOStatement`/
+/// `Phar`/`SQLite3`, ~22 sites) - `functionMap.php` only ever covers
+/// top-level functions, never methods, and none of these classes have a
+/// real PHPStan-bundled dynamic-return-type extension either, so bare
+/// (whatever the native/PHPDoc return type already resolves to) is
+/// already the correct real-PHPStan-matching answer for all of them too.
 fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
     let date_parse_shape = types::parse_type_string(
         "array{year: int|false, month: int|false, day: int|false, hour: int|false, \
@@ -373,17 +331,15 @@ fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
 /// merged (first occurrence wins). A few functions are declared more than
 /// once across the corpus (e.g. a version-conditional pair of signatures
 /// for the same function in different files); taking the first is a
-/// simplification, not a precision-critical choice, since `stubs.rs`'s
-/// hand-curated overlay is what wins for anything precision-sensitive.
+/// simplification, not a precision-critical choice.
 pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
-    // Chaining PHPSTAN_SRC_SOURCES in (Finding 4) took the combined
+    // Chaining PHPSTAN_SRC_SOURCES in took the combined
     // corpus from 558 to 2351 files - re-parsing that from scratch on
-    // every call (as this used to do) is fine for the real CLI binary,
-    // which calls this exactly once per process, but made the test suite
-    // (hundreds of `diagnostics_for`/`Project::new` calls, each
-    // previously re-parsing the whole corpus independently) measurably
-    // slower - confirmed directly: the lib test suite went from ~40s to
-    // ~143s. `LazyLock` computes the expensive part (parsing every file)
+    // every call is fine for the real CLI binary, which calls this
+    // exactly once per process, but makes the test suite (hundreds of
+    // `diagnostics_for`/`Project::new` calls, each independently
+    // re-parsing the whole corpus) measurably slower.
+    // `LazyLock` computes the expensive part (parsing every file)
     // exactly once per process regardless of caller count; each call
     // here still returns a fresh, independently-owned `Vec` (cloning
     // already-built `FunctionSig`s, not re-parsing anything) so this
@@ -413,7 +369,7 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
 }
 
 /// Parses one stub file's source into `(name, ClassInfo)` pairs for every
-/// class/interface/enum it declares - undefined-class detection (Phase 9)
+/// class/interface/enum it declares - undefined-class detection
 /// needs built-in classes to actually be known, the same way
 /// undefined-function detection needs `generated_stubs`' functions to be
 /// known; without this, every reference to a built-in like `Exception` or
@@ -440,7 +396,7 @@ pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
         .collect()
 }
 
-/// ROADMAP "Known but not yet scheduled": the constant-side sibling of
+/// The constant-side sibling of
 /// `generate_classes_from_source` just above - undefined-`use const`/
 /// bare-constant detection needs built-in/extension constants
 /// (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually be
@@ -490,25 +446,20 @@ pub fn generated_stub_constants() -> Vec<(String, Type)> {
     CACHE.clone()
 }
 
-/// Phase 54/77 follow-up: real phpstorm-stubs' own `ReflectionClass::
-/// __construct` (confirmed directly, `vendor/phpstorm-stubs/Reflection/
-/// ReflectionClass.php`) declares its single parameter's own `@param` tag
-/// as `class-string<T>|T $objectOrClass`, referencing the class's own
-/// `@template T of object` - but that doc type never reaches `ParamSig::ty`
-/// (confirmed directly: `new ReflectionClass($x)` binds nothing, and a
-/// deliberately-mistyped call still only reports the native `object|string`
-/// hint in its error message, not the union with `class-string<T>`) - a
-/// real, disclosed gap in this project's own doc-merge pipeline for a
-/// parameter whose native hint additionally carries phpstorm-stubs' own
-/// `#[LanguageLevelTypeAware(...)]` attribute, not chased down further
-/// here since item 4a's own general constructor-binding mechanism already
-/// verified correct for the identical `class-string<T>|T` shape on a
-/// project-local class with no such attribute. Reuses the exact template
+/// Real phpstorm-stubs' own `ReflectionClass::__construct`
+/// (`vendor/phpstorm-stubs/Reflection/ReflectionClass.php`) declares its
+/// single parameter's own `@param` tag as `class-string<T>|T
+/// $objectOrClass`, referencing the class's own `@template T of object`,
+/// but that doc type never reaches `ParamSig::ty` (`new
+/// ReflectionClass($x)` binds nothing, and a deliberately-mistyped call
+/// still only reports the native `object|string` hint in its error
+/// message, not the union with `class-string<T>`) - a gap in this
+/// project's own doc-merge pipeline for a parameter whose native hint
+/// additionally carries phpstorm-stubs' own
+/// `#[LanguageLevelTypeAware(...)]` attribute. Reuses the exact template
 /// metadata `ReflectionClass`'s own already-correctly-parsed `ClassInfo`
 /// carries for `T` (`templates`/`template_bounds`/`covariant_templates`/
-/// `contravariant_templates`/`template_defaults` - all four already
-/// correctly populated, confirmed via `ReflectionClass<Foo>` parsing and
-/// resolving fine as an explicit type reference) rather than hand-guessing
+/// `contravariant_templates`/`template_defaults`) rather than hand-guessing
 /// a fresh bound/variance/default - `TemplateParam` is a plain value type,
 /// not identity-sensitive, so building one from those exact field values
 /// is equivalent to "reusing" any other node that would carry them.
@@ -577,19 +528,15 @@ fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo
     // directory from the `vendor/phpstan-src/src/` runtime source this
     // project already vendors for symbol resolution) that this project
     // doesn't otherwise ingest - a small, targeted patch here, mirroring
-    // this same function's own constructor-param patch just above,
-    // matches this project's existing "hand-patch this one specific,
-    // confirmed ReflectionClass generic gap" precedent far better than
-    // standing up a second stub-source ingestion pipeline for one
-    // missing tag in one file. Real corpus false positive this fixes:
-    // `MailServiceTestTransportSwap::with`'s own `$reflClass->
-    // newInstanceArgs($args)` returning `T|null` instead of plain `T`.
+    // this same function's own constructor-param patch just above, is
+    // more proportionate than standing up a second stub-source
+    // ingestion pipeline for one missing tag in one file.
     if let Some(new_instance_args) = info.methods.get_mut("newInstanceArgs") {
         new_instance_args.return_type = Type::TemplateParam(tp);
     }
 }
 
-/// Phase 77: `ReflectionMethod`/`ReflectionProperty` are not generic in
+/// `ReflectionMethod`/`ReflectionProperty` are not generic in
 /// real phpstorm-stubs at all - unlike `ReflectionClass`'s own real `T`
 /// (patched just above), this synthesizes a brand-new `@template-covariant
 /// TClass of object` on both, purely as an internal enrichment, so that:
@@ -605,11 +552,9 @@ fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo
 /// No new substitution engine work was needed for this: `checker::
 /// generics::substitute_class_templates`'s existing `substitute_scoped`
 /// already recurses through a returned `Type::Object`'s own type-argument
-/// list (Phase 54's own "mirrors `types::substitute_template`'s identical
-/// fix" arm) - the identical mechanism any ordinary fluent generic
+/// list - the identical mechanism any ordinary fluent generic
 /// collection API (a `Collection<T>`-shaped method returning another
-/// `Collection<T>`) already relies on, confirmed by direct read before
-/// writing this patch rather than assumed.
+/// `Collection<T>`) already relies on.
 ///
 /// Because this template doesn't exist in real PHPStan's own stubs at
 /// all, it must also be exempted from `missingType.generics`
@@ -714,8 +659,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(String, ClassI
 /// The PHP 8 `debug_backtrace()`/`Throwable::getTrace()`-shaped "trace
 /// frame" array: `list<array{function: string, line?: int, file?: string,
 /// class?: string, type?: '->'|'::', args?: list<mixed>, object?:
-/// object}>`, confirmed directly via `\PHPStan\dumpType()` against the
-/// real `phpstan/phpstan` phar (real PHPStan hardcodes this via its own
+/// object}>` (real PHPStan hardcodes this via its own
 /// dynamic-return-type extensions, not from either function's own bare
 /// `array`-returning stub text).
 fn backtrace_frame_list_type() -> Type {
@@ -756,27 +700,15 @@ fn backtrace_frame_list_type() -> Type {
     ])
 }
 
-/// Two real, corpus-verified `list<T>` precision gaps found by diffing
-/// phpstan-rs's own scoped Piwigo corpus run against a real `vendor/
-/// bin/phpstan analyse` run on the same corpus and tracing the
-/// discrepancy to source: neither phpstorm-stubs nor this project's own
-/// `class_info.rs`/`php_stubs.rs` mark these two methods' return type
-/// with the `list` accessory at all (both are a bare native `array`,
-/// with no refining PHPDoc tag in phpstorm-stubs either), while real
-/// PHPStan's own dynamic-return-type extensions do - confirmed directly
-/// via `\PHPStan\dumpType()` against the real phar, not assumed from
-/// stub text alone.
+/// Two `list<T>` precision gaps: neither phpstorm-stubs nor this
+/// project's own `class_info.rs`/`php_stubs.rs` mark these two methods'
+/// return type with the `list` accessory at all (both are a bare native
+/// `array`, with no refining PHPDoc tag in phpstorm-stubs either), while
+/// real PHPStan's own dynamic-return-type extensions do.
 /// - `ReflectionFunctionAbstract::getParameters()` -> `list<
-///   ReflectionParameter>`. Real corpus false positive this fixes:
-///   `Piwigo\Tools\PhpStan\Latte\ShimClassGenerator::generate()`'s own
-///   `array_map(..., $reflection->getParameters())` result, expected as
-///   `list<string>` by `renderMethod()`'s own signature, inferred as
-///   bare `array<string>` without this.
+///   ReflectionParameter>`.
 /// - `Exception`/`Error::getTrace()` -> the shared `backtrace_frame_
-///   list_type()` shape above. Real corpus false positive this fixes:
-///   `SensitiveParameterTest`'s own `sensitiveParameterTestTraceContains(
-///   $exception->getTrace(), ...)` calls (3 real sites), expecting
-///   exactly this shape.
+///   list_type()` shape above.
 fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]) {
     if let Some((_, info)) = classes
         .iter_mut()
@@ -792,8 +724,8 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]
         ]);
     }
     // Both `Exception`/`Error`'s own real phpstorm-stubs `getTrace()`
-    // declarations are `final` (confirmed directly - neither is ever
-    // overridden further down either hierarchy), so patching these two
+    // declarations are `final` (neither is ever overridden further down
+    // either hierarchy), so patching these two
     // concrete classes directly, rather than the `Throwable` interface
     // they both also implement, covers every real throwable via
     // ordinary inheritance.
