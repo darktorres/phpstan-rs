@@ -277,11 +277,10 @@ impl FunctionSig {
     // `@phpstan-type` table (`ClassInfo::from_decl`'s own `build_type_
     // aliases`) - empty for a plain top-level function or an enum's own
     // synthesized method (neither has a class-level docblock these could
-    // meaningfully come from). A method's *own* docblock declaring
-    // further `@phpstan-type`s of its own isn't supported - real
-    // PHPStan allows this too, but every real corpus shape found so far
-    // (`json-schema`'s own `ErrorBag`) declares aliases once, on the
-    // class, referenced from many members - not attempted here.
+    // meaningfully come from). A method's own docblock declaring further
+    // `@phpstan-type`s of its own isn't supported - real code
+    // overwhelmingly declares aliases once, on the class, referenced
+    // from many members - not attempted here.
     pub(crate) fn from_decl(
         f: &FunctionDecl,
         ctx: &NameContext,
@@ -598,20 +597,14 @@ impl FunctionSig {
             // as any other not-yet-classified signature.
             purity_dependencies: None,
             is_transitively_pure: false,
-            // `||`, not `&&`: a real corpus find (Piwigo's own vendored
-            // *copy* of `jetbrains/phpstorm-stubs`, analyzed as ordinary
-            // project source rather than excluded like this project's
-            // own scoped config does - the unscoped, whole-`vendor/`
-            // corpus check specifically) - merging a stub-derived
-            // signature (this project's own internal `header()` stub)
-            // with a *second*, independently-parsed declaration of the
-            // same name (Piwigo's own vendored stub file, itself
-            // *also* just as fake/bodyless) must stay excluded from
-            // purity classification either way, since neither body is a
-            // real implementation - hardcoding `false` here (an earlier
-            // version of this fix) silently un-marked exactly this
-            // shape and reintroduced the original `header()`/`exit()`
-            // false-positive bug through a second path.
+            // `||`, not `&&`: merging a stub-derived signature with a
+            // *second*, independently-parsed declaration of the same
+            // name (e.g. a vendored copy of the same stub file, itself
+            // also just as fake/bodyless) must stay excluded from purity
+            // classification either way, since neither body is a real
+            // implementation - hardcoding `false` here would silently
+            // un-mark exactly this shape and reintroduce a `header()`/
+            // `exit()`-style false positive.
             is_stub: self.is_stub || other.is_stub,
             // `&&`, not `||`: a real declaration on *either* side of a
             // merge (this function's own doc comment - both sides are
