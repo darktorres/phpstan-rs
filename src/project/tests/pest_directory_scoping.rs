@@ -171,8 +171,7 @@ fn pest_directory_scoped_before_each_property_does_not_leak_outside_its_director
     // `pest_file_outside_the_bound_directory_...`'s own established
     // pattern) - without a concrete class, `$this` resolves to Mixed
     // in this bare test harness (no real PHPUnit\Framework\TestCase
-    // registered) and undefined-property checking never fires at all,
-    // regardless of this finding's own fix.
+    // registered) and undefined-property checking never fires at all.
     let mut project = Project::new();
     project
         .load_file(

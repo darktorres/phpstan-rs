@@ -1,12 +1,12 @@
-//! Phase 67: the `@internal` restricted-usage engine
-//! (`checker::internal_usage`) - off by default (`Registry::
-//! check_internal_usage`, mirroring real PHPStan's own opt-in
-//! `featureToggles.internalTag`), so every test here needs it turned on
-//! to see anything. Cross-namespace access is exercised with multiple
-//! `namespace X;` statements in one source string - this project's own
-//! `NameContext` switches on every top-level `Namespace` statement it
-//! sees, the same shape a real `namespace A {} namespace B {}`
-//! brace-delimited multi-namespace file produces.
+//! The `@internal` restricted-usage engine (`checker::internal_usage`),
+//! off by default (`Registry::check_internal_usage`, mirroring real
+//! PHPStan's own opt-in `featureToggles.internalTag`), so every test
+//! here needs it turned on to see anything. Cross-namespace access is
+//! exercised with multiple `namespace X;` statements in one source
+//! string - this project's own `NameContext` switches on every
+//! top-level `Namespace` statement it sees, the same shape a real
+//! `namespace A {} namespace B {}` brace-delimited multi-namespace file
+//! produces.
 
 use super::helpers::*;
 
@@ -252,8 +252,8 @@ fn reading_a_constant_of_an_internal_class_is_flagged() {
     );
 }
 
-// Phase 67 follow-up: a constant's own individual `@internal` tag - not
-// just its declaring class's - is now tracked too.
+// A constant's own individual `@internal` tag - not just its declaring
+// class's - is tracked too.
 
 #[test]
 fn reading_an_internal_constant_of_an_otherwise_public_class_is_flagged() {
@@ -430,10 +430,8 @@ fn a_global_namespace_internal_class_accessed_from_within_itself_is_never_flagge
 
 #[test]
 fn writing_a_property_of_an_internal_class_is_flagged() {
-    // Previously a real, undetected gap (see ROADMAP.md's own Phase 67
-    // entry): a plain write reaches `check_property_assignment`
-    // directly, not the `ExprKind::PropertyAccess` read arm that
-    // already carried this check.
+    // A plain write reaches `check_property_assignment` directly, not
+    // the `ExprKind::PropertyAccess` read arm - both need this check.
     let d = diagnostics_for(
         r#"<?php
             namespace Vendor\Internal;
@@ -708,8 +706,8 @@ fn catching_a_non_throwable_internal_class_still_reports_both_diagnostics_indepe
     );
 }
 
-// Phase 67 sub-item A: `extends`/`implements`/trait-use for the
-// `@internal` class-name-usage check.
+// `extends`/`implements`/trait-use for the `@internal`
+// class-name-usage check.
 
 #[test]
 fn extending_an_internal_class_from_a_different_root_namespace_is_flagged() {
@@ -865,7 +863,7 @@ fn extending_a_non_internal_class_is_never_flagged() {
     );
 }
 
-// Phase 67 Item B: `param`/`return` native type-hints for the `@internal`
+// `param`/`return` native type-hints for the `@internal`
 // class-name-usage check.
 
 #[test]
@@ -1017,11 +1015,10 @@ fn a_docblock_only_param_tag_referencing_an_internal_class_is_never_flagged() {
     );
 }
 
-// ROADMAP correction: first-class-callable syntax (`$foo->bar(...)`/
-// `Foo::bar(...)`) already runs the same `@internal` checks an ordinary
-// call gets - `d4efb41` wired `check_internal_method_call` into
-// ExprKind::FirstClassCallable's MethodCall/StaticCall arms. ROADMAP's own
-// "still open" note was stale; these two shapes were simply untested.
+// First-class-callable syntax (`$foo->bar(...)`/`Foo::bar(...)`) runs
+// the same `@internal` checks an ordinary call gets
+// (`check_internal_method_call`, wired into
+// ExprKind::FirstClassCallable's MethodCall/StaticCall arms).
 
 #[test]
 fn a_first_class_callable_of_an_internal_method_is_flagged() {
@@ -1068,11 +1065,10 @@ fn a_first_class_callable_of_an_internal_static_method_is_flagged() {
     );
 }
 
-// Phase 67 Item B: a closure/arrow-fn literal's own native param/return
-// type-hints only ever got the existence check before, never this one -
-// `function (InternalClass $f): InternalClass {}` silently passed
-// --check-internal-usage where the identical named-function signature
-// already correctly flagged it.
+// A closure/arrow-fn literal's own native param/return type-hints need
+// this check too, not just the existence check -
+// `function (InternalClass $f): InternalClass {}` must be flagged the
+// same way the identical named-function signature is.
 
 #[test]
 fn a_closure_parameter_typehint_referencing_an_internal_class_is_flagged() {

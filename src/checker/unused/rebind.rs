@@ -142,8 +142,8 @@ fn scan_expr_for_rebinds(
 ) {
     match &expr.kind {
         // `Closure::bind($closure, $newThis, $scope)` - real, idiomatic
-        // scope-widening (see `checker/expr.rs`'s own Finding 49 handling
-        // of the identical call, which this mirrors).
+        // scope-widening (see `checker/expr.rs`'s own handling of the
+        // identical call, which this mirrors).
         ExprKind::StaticCall(class, method, args) if class == "Closure" && method == "bind" => {
             record_rebind_scope(args.get(2), ctx, targets, escape_all);
         }

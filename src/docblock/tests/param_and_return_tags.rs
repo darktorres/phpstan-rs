@@ -45,16 +45,14 @@ fn a_documented_variadic_param_s_ellipsis_prefixed_name_is_still_recognized() {
     assert_eq!(block.params.get("nums"), Some(&"int".to_string()));
 }
 
-// Real corpus find: a Piwigo docblock running its own description text
-// straight into the parameter name with no separating space
+// A Piwigo docblock running its own description text straight into the
+// parameter name with no separating space
 // (`NotificationByMailSubController::doTimeoutTreatment`'s own `@param
 // array<int|string, mixed> $post: handle()'s own local post working
-// copy...`) left the trailing `:` attached to the extracted name -
-// `split_whitespace` alone can't tell a real word-boundary from `:`, so
-// the type was silently stored under `"post:"`, a key the real parameter
-// (`"post"`) never looks up, discarding the doc type entirely (a real
-// missingType.iterableValue false positive on an otherwise fully-typed
-// parameter).
+// copy...`) must not leave the trailing `:` attached to the extracted
+// name - `split_whitespace` alone can't tell a real word-boundary from
+// `:`, which would otherwise store the type under `"post:"`, a key the
+// real parameter (`"post"`) never looks up.
 #[test]
 fn a_param_tag_whose_description_runs_into_the_name_with_a_colon_is_still_recognized() {
     let block = parse(
@@ -196,13 +194,10 @@ fn param_type_with_internal_spaces_still_finds_the_variable_name() {
 
 #[test]
 fn a_return_type_wrapped_across_multiple_lines_is_not_truncated() {
-    // Real, common style for documenting a large DTO's shape (found
-    // via a genuine false-positive return-type mismatch this exact
-    // bug caused on real code): line-by-line parsing used to hand
-    // take_type_token only the first physical line's text, silently
-    // truncating at the line break with an unclosed `{` - producing
-    // a malformed type string that then got treated as a bogus class
-    // name and namespace-mangled downstream.
+    // A real, common style for documenting a large DTO's shape,
+    // spanning multiple physical lines - `take_type_token` must see the
+    // whole multi-line type, not just the first physical line (which
+    // would leave an unclosed `{`).
     let block = parse(
         r#"/**
          * @return array{id: int, file: string, date_available: ?string,
@@ -220,12 +215,11 @@ fn a_return_type_wrapped_across_multiple_lines_is_not_truncated() {
 
 #[test]
 fn a_var_type_wrapped_across_multiple_lines_with_trailing_line_comments_strips_them() {
-    // Real corpus shape (pestphp/pest-plugin-browser's own
-    // JavaScriptSerializer::parseValue): each wrapped shape field
-    // carries its own trailing `// description`. Before this fix, the
-    // comment text got spliced straight into the joined type string and
-    // `take_type_token` parsed "// null" as a bare class-like name,
-    // corrupting the whole shape into garbage.
+    // pestphp/pest-plugin-browser's own
+    // JavaScriptSerializer::parseValue: each wrapped shape field carries
+    // its own trailing `// description`, which must not get spliced into
+    // the joined type string - `take_type_token` would otherwise parse
+    // "// null" as a bare class-like name, corrupting the whole shape.
     let block = parse(
         r#"/**
          * @var array{
@@ -288,12 +282,11 @@ fn phpstan_template_extends_and_implements_are_recognized() {
 
 #[test]
 fn a_real_phpstan_conditional_return_type_is_captured_as_its_own_raw_token() {
-    // Doctrine DBAL's own DriverManager::getConnection(). Phase 80
-    // follow-up: `Type::Conditional`/`resolve_conditional` now do real
-    // per-call-site binding, so this raw token is captured like any
-    // other `@return` type instead of being deliberately dropped -
-    // `take_type_token`'s own balanced-parens grab already produces the
-    // exact substring `types::parse_type_string` needs.
+    // Doctrine DBAL's own DriverManager::getConnection().
+    // `Type::Conditional`/`resolve_conditional` do real per-call-site
+    // binding, so this raw token is captured like any other `@return`
+    // type - `take_type_token`'s own balanced-parens grab already
+    // produces the exact substring `types::parse_type_string` needs.
     let block = parse(
         r#"/**
          * @template T of Connection

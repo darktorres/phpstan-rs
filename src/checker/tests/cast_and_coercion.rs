@@ -1,5 +1,5 @@
-//! Phase 51: InvalidCastRule (`cast.int`/`cast.double`/`cast.string`),
-//! EchoRule (`echo.nonString`), and PrintRule (`print.nonString`) - a
+//! InvalidCastRule (`cast.int`/`cast.double`/`cast.string`), EchoRule
+//! (`echo.nonString`), and PrintRule (`print.nonString`) - a
 //! cast/echo/print whose operand's own type PHP itself cannot legally
 //! coerce that way.
 
@@ -66,13 +66,13 @@ fn casting_a_plain_object_with_no_tostring_to_int_is_flagged() {
     assert_eq!(d[0].identifier, "cast.int");
 }
 
-// Real gap found and fixed this session: `type_to_integer` matched
-// `Type::Object` directly, with a bare `Type::Union` case but no
-// `Type::Intersection` one - falling to the permissive `_ =>
-// Some(Type::Int)` catch-all meant `(int) $x` on an intersection of two
-// non-castable objects (a real, common shape: `narrow_instanceof_true`'s
-// own deliberate design intersects an unrelated-looking `instanceof`
-// target with the original type) was never flagged.
+// `type_to_integer` must handle `Type::Intersection`, not just a bare
+// `Type::Object`/`Type::Union` falling through to the permissive
+// `_ => Some(Type::Int)` catch-all - `(int) $x` on an intersection of
+// two non-castable objects (a real, common shape:
+// `narrow_instanceof_true`'s own deliberate design intersects an
+// unrelated-looking `instanceof` target with the original type) must
+// still be flagged.
 #[test]
 fn casting_an_intersection_of_two_non_castable_objects_to_int_is_flagged() {
     let d = diagnostics_for(

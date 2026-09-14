@@ -1,11 +1,9 @@
-//! Phase 40.C: `phpstanApi.method`/`phpParser.nodeConnectingAttribute` -
-//! folded into the main `Checker` pass from `phpstan_api.rs`'s own
-//! previously-separate `Walker`, which already covers every *other*
-//! PHPStan-API-usage check (`src/checker/phpstan_api/tests.rs`). General
-//! receiver-type inference here recognizes every receiver shape the main
-//! checker's own `find_method_receiver` does, not just a directly-typed
-//! parameter or `$this->prop` - the previous walker's own narrower
-//! coverage is what these tests replace.
+//! `phpstanApi.method`/`phpParser.nodeConnectingAttribute` - part of the
+//! main `Checker` pass, alongside every *other* PHPStan-API-usage check
+//! (`src/checker/phpstan_api/tests.rs`). General receiver-type inference
+//! here recognizes every receiver shape the main checker's own
+//! `find_method_receiver` does, not just a directly-typed parameter or
+//! `$this->prop`.
 //!
 //! Every fixture declares both the fake `PHPStan\...`-namespaced stub and
 //! the consuming code in one source string (unlike `phpstan_api/tests.rs`'s
@@ -214,10 +212,9 @@ fn the_check_is_silent_when_phpstan_api_check_enabled_is_off() {
     );
 }
 
-// A real receiver shape the old, syntactically-typed-only walker could
-// never recognize at all: a method call chained straight off another
-// method call's own return type, resolved purely through general
-// inference (`find_method_receiver`) - not a directly-typed parameter or
+// A method call chained straight off another method call's own return
+// type, resolved purely through general inference
+// (`find_method_receiver`) - not a directly-typed parameter or
 // `$this->prop`.
 #[test]
 fn calling_a_method_through_a_chained_call_return_type_is_flagged() {
@@ -245,7 +242,7 @@ fn calling_a_method_through_a_chained_call_return_type_is_flagged() {
     );
 }
 
-// Phase 40.F: `NodeConnectingVisitorAttributesRule` - `$node->getAttribute
+// `NodeConnectingVisitorAttributesRule` - `$node->getAttribute
 // ('parent'|'previous'|'next')` no longer works, only inside a class
 // implementing a `PHPStan\*` interface, only on a real `PhpParser\Node`
 // (sub)type receiver.

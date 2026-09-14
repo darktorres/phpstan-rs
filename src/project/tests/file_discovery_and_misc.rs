@@ -26,9 +26,8 @@ fn default_is_equivalent_to_new() {
 
 #[test]
 fn check_all_covers_every_loaded_file_not_just_one() {
-    // check_all is a thin fold over the already-well-tested check_file
-    // (and is what --check-project actually calls), but had zero
-    // direct test executions per cargo llvm-cov - cheap to close.
+    // check_all is a thin fold over the already-well-tested check_file,
+    // and is what --check-project actually calls.
     let mut project = Project::new();
     project
         .load_file(
@@ -106,18 +105,15 @@ fn cross_file_use_import_and_method_calls_resolve_correctly() {
 
 #[test]
 fn deferred_registry_passes_all_run_through_the_real_project_path() {
-    // Real bug found via corpus verification, not exercised by any
-    // existing test: `Registry::resolve_method_tags`/`resolve_deferred_
-    // type_imports`/`resolve_deferred_mixins` are only ever called from
-    // `Registry::index_and_flatten` - which every *checker-level* test
-    // helper (`diagnostics_for`, `Registry::build`) goes through, but
     // `Project::finish_loading`/`update_file` (what `check-project` and
-    // the LSP actually use) call the individual passes directly instead
-    // and had never been updated to include these three, silently making
-    // @method/@mixin/cross-class @phpstan-import-type all non-functional
-    // through the real CLI despite passing every checker-level test.
-    // One project, exercising all three at once, through `check_all` -
-    // exactly what `--check-project` itself calls.
+    // the LSP actually use) call the individual registry passes
+    // directly rather than through `Registry::index_and_flatten` - they
+    // must still include `resolve_method_tags`/
+    // `resolve_deferred_type_imports`/`resolve_deferred_mixins`, or
+    // @method/@mixin/cross-class @phpstan-import-type silently stop
+    // working through the real CLI. One project, exercising all three
+    // at once, through `check_all` - exactly what `--check-project`
+    // itself calls.
     let mut project = Project::new();
     project
         .load_file(

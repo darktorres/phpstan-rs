@@ -25,7 +25,7 @@ pub(crate) struct ClassDeclSite {
 
 /// Every top-level class-like's own unconditional declaration site(s),
 /// across the whole project - a straight port of `DuplicateFunctionSites`
-/// to class-likes (Phase 83), plus the `is_stub` field above. Gated behind
+/// to class-likes, plus the `is_stub` field above. Gated behind
 /// `Registry::check_duplicate_class_declarations` (opt-in, unlike
 /// `DuplicateFunctionSites`, which has no such gate - see that field's own
 /// doc comment for why this one needs it and the function-side precedent
