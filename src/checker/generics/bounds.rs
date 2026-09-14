@@ -179,19 +179,19 @@ impl<'a> Checker<'a> {
                 members.iter().all(|m| self.is_type_fully_known(m))
             }
             Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
-            // A real, previously-missing case: `object{...}`'s own field
-            // types were never checked either.
+            // `object{...}`'s own field types need checking too.
             Type::ObjectShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
             _ => true,
         }
     }
 
-    /// `check_generic_bounds` for everything a class declares outside its
-    /// own methods (which `check_function` already covers per-method):
-    /// every property's type, plus its own `@extends`/`@implements`
-    /// arguments - both are real places a generic bound violation can be
-    /// written (`class Bad extends Collection<NotAShape> {}`) without
-    /// ever showing up in a method signature at all.
+    /// `check_generic_bounds` for everything a class declares outside
+    /// its own methods (which `check_function` already covers
+    /// per-method): every property's type, plus its
+    /// `@extends`/`@implements` arguments - both are real places a
+    /// generic bound violation can be written
+    /// (`class Bad extends Collection<NotAShape> {}`) without ever
+    /// showing up in a method signature.
     pub(crate) fn check_class_generic_bounds(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -229,15 +229,13 @@ impl<'a> Checker<'a> {
         self.check_property_tag_types(fqn, c);
         self.check_ancestor_generic_bounds(fqn, c.span);
         // `TemplateTypeCheck`'s own declaration-validity family,
-        // class-level (real PHPStan's own per-kind rule split -
+        // class-level (real PHPStan's per-kind rule split -
         // `ClassTemplateTypeRule`/`InterfaceTemplateTypeRule`/
-        // `TraitTemplateTypeRule` - all funnel into the identical shared
-        // check, so one call site covers all three; an enum's own
-        // separate, already-shipped `check_enum_template_tag`/
-        // `enum.generic` check is `EnumTemplateTypeRule`'s own real
-        // counterpart, confirmed by direct read that real PHPStan
-        // excludes enums from `ClassTemplateTypeRule` entirely rather
-        // than layering this family on top of `enum.generic` too).
+        // `TraitTemplateTypeRule` all funnel into the identical shared
+        // check); an enum's own separate `check_enum_template_tag`/
+        // `enum.generic` check is `EnumTemplateTypeRule`'s real
+        // counterpart, since real PHPStan excludes enums from
+        // `ClassTemplateTypeRule` entirely.
         if !info.templates.is_empty() {
             let display_name = format!("{} {fqn}", class_kind_identifier(&c.kind));
             let templates = info.templates.clone();
@@ -256,33 +254,26 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `@property`/`@property-read`/
-    /// `@property-write`'s *validation* half (real PHPStan's own
-    /// `PropertyTagCheck`) - parsing and inference already shipped back
-    /// (`ClassInfo::from_decl` already synthesizes
-    /// every tag into a real, resolved `PropertySig`, exactly the way a
-    /// magic `__get`/`__set`-backed property needs); only the diagnostic
-    /// layer checking the tag's own declared type was missing. Mirrors
-    /// the identical `check_generic_bounds`/`check_type_class_names_exist`
-    /// pair the loop just above already runs for a class's own *real*
-    /// properties, applied to every `@property`-family tag on this
-    /// class's own doc comment instead. Re-parses `c.doc_comment` fresh
-    /// (the same pattern `check_enum_template_tag` already uses) rather
-    /// than threading a `DocBlock` through from wherever the registry
-    /// last parsed one, since the checker doesn't keep it around after
+    /// `@property`/`@property-read`/`@property-write`'s *validation*
+    /// half (real PHPStan's own `PropertyTagCheck`) - parsing and
+    /// inference already happen in `ClassInfo::from_decl` (which
+    /// synthesizes every tag into a real, resolved `PropertySig`); this
+    /// adds the diagnostic layer checking the tag's declared type.
+    /// Mirrors the `check_generic_bounds`/`check_type_class_names_exist`
+    /// pair the loop above runs for a class's *real* properties, applied
+    /// to every `@property`-family tag instead. Re-parses
+    /// `c.doc_comment` fresh (same pattern `check_enum_template_tag`
+    /// uses), since the checker doesn't keep a `DocBlock` around after
     /// indexing.
     ///
-    /// Deliberately narrower than real PHPStan's own `PropertyTagCheck`
-    /// in one way: looks the tag's *name* up in the already-resolved
-    /// `info.properties` map (which only ever holds one winning entry per
-    /// name - a real, physically-declared property of the same name
-    /// always wins over a tag, `ClassInfo::from_decl`'s own `or_insert_
-    /// with` above) rather than independently re-resolving each tag's own
-    /// type from scratch. This means a `@property` tag whose name is
-    /// shadowed by a real property of the same name checks the *real*
-    /// property's type instead of the tag's own - a redundant/self-
-    /// contradictory declaration style with no confirmed corpus incidence,
-    /// not the common case this check exists for.
+    /// Deliberately narrower than real PHPStan's `PropertyTagCheck` in
+    /// one way: looks the tag's *name* up in the already-resolved
+    /// `info.properties` map (which only holds one winning entry per
+    /// name - a real, physically-declared property always wins over a
+    /// tag) rather than independently re-resolving each tag's type from
+    /// scratch, so a `@property` tag shadowed by a real property of the
+    /// same name checks the *real* property's type instead of the tag's
+    /// own.
     fn check_property_tag_types(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(raw) = &c.doc_comment else {
             return;
