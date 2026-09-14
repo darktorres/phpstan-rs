@@ -510,12 +510,10 @@ impl<'a> Checker<'a> {
     /// generalized to take a bare `params`/`return_type` pair instead of a
     /// whole `&FunctionDecl` - `ExprKind::Closure`/`ArrowFn` (`checker/
     /// expr.rs`) share this exact shape but aren't `FunctionDecl`s (no
-    /// `FunctionDecl` wrapper exists for a closure literal at all), and
-    /// previously fell through to only ever running the existence check,
-    /// never this one (a real, previously-undetected gap: `function
-    /// (InternalClass $f): InternalClass {}` silently passed
-    /// `--check-internal-usage` where the identical named-function
-    /// signature correctly flagged it). `is_method` only picks the
+    /// `FunctionDecl` wrapper exists for a closure literal at all), so
+    /// this needs to run for them too: `function (InternalClass $f):
+    /// InternalClass {}` must be flagged the same way the identical
+    /// named-function signature is. `is_method` only picks the
     /// message's own "method"/"function" word - a closure/arrow-fn uses
     /// neither (real PHPStan has no separate rule for this shape at all
     /// to match wording against), so callers outside a class-scoped named
