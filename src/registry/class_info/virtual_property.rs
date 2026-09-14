@@ -9,18 +9,14 @@ use crate::registry::name_context::{
 use crate::types::{TemplateParam, Type};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
-/// accept a wider type than the property's own backing/read type - a real
-/// Piwigo pattern (`CurrentConfig`'s own `apiKeyDuration`/`chmodValue`/
-/// `defaultFiltersViews`/etc.): `public array $x { set(array $value) {
-/// $this->x = sanitize($value); } }` does its own coercion inside the hook
-/// body before the real assignment ever happens. A property write is
-/// checked against this parameter's own native type when present - the
-/// hook's own doc comment (if any) isn't captured by the parser at all
-/// (out of scope, same as the rest of a hook body), so only the native
-/// type hint is available, which is exactly what every corpus case above
-/// already declares. No hook, or an implicit `set { ... }` with no
-/// parameter list, returns `None` - the property's own type stays the
-/// write sink, unchanged.
+/// accept a wider type than the property's own backing/read type -
+/// `public array $x { set(array $value) { $this->x = sanitize($value); } }`
+/// does its own coercion inside the hook body before the real assignment
+/// happens. A property write is checked against this parameter's native
+/// type when present - the hook's own doc comment (if any) isn't captured
+/// by the parser at all, so only the native type hint is available. No
+/// hook, or an implicit `set { ... }` with no parameter list, returns
+/// `None` - the property's type stays the write sink, unchanged.
 pub(crate) fn property_hook_set_type(
     hooks: Option<&PropertyHooks>,
     template_params: &HashMap<String, TemplateParam>,
@@ -31,22 +27,17 @@ pub(crate) fn property_hook_set_type(
     };
     let ty = resolve_type(None, param.type_hint.as_deref());
     let ty = mark_template_params(ty, template_params);
-    // Phase 48 follow-up (item 6a): `set_ty`'s own case_refs equivalent -
-    // this call was missing entirely before, unlike the sibling `ty`
-    // field's construction two lines above its own call site.
     let mut case_refs = Vec::new();
     collect_class_name_case_refs(&ty, ctx, &mut case_refs);
     (Some(resolve_names_in_type(ty, ctx)), case_refs)
 }
 
-/// Phase 43: whether either hook of `hooks` references `$this->prop_name`
-/// anywhere in its own body - see `PropertySig::is_virtual`'s own doc
-/// comment for the full, empirically-verified rule this mirrors. `get`
-/// and `set` are checked independently and OR'd together: real PHP makes
-/// the whole property non-virtual the moment *either* hook references the
-/// backing storage, even if the other one never does (confirmed
-/// empirically: a `get` that reads it with a `set` that never writes it
-/// is still non-virtual, and vice versa).
+/// Whether either hook of `hooks` references `$this->prop_name` anywhere
+/// in its body - see `PropertySig::is_virtual`'s doc comment for the
+/// full, empirically-verified rule this mirrors. `get` and `set` are
+/// checked independently and OR'd together: real PHP makes the whole
+/// property non-virtual the moment either hook references the backing
+/// storage, even if the other never does.
 pub(crate) fn hooks_reference_backing_storage(hooks: &PropertyHooks, prop_name: &str) -> bool {
     hooks
         .get
@@ -74,16 +65,16 @@ pub(crate) fn hook_body_references_property(body: &PropertyHookBody, prop_name: 
     }
 }
 
-/// Deliberately checks *every* occurrence of `$this->prop_name` - a read,
-/// a bare unused statement, an `isset()`/`unset()` argument, or a write
-/// target - uniformly, since real PHP's own virtual-property algorithm
-/// doesn't distinguish between them either (confirmed empirically: a bare
-/// `$this->x;` statement with no use at all still makes the property
-/// non-virtual). `expr_children`/`stmt_children` already stop at a nested
-/// closure/arrow-fn/anonymous-class boundary (see their own module doc
-/// comment in `ast_walk.rs`) - exactly the scope boundary real PHP's own
-/// algorithm respects too, confirmed by the same empirical probe (a
-/// `$this->propName` read inside a nested closure/arrow-fn does NOT count).
+/// Deliberately checks every occurrence of `$this->prop_name` - a read, a
+/// bare unused statement, an `isset()`/`unset()` argument, or a write
+/// target - uniformly, since real PHP's virtual-property algorithm
+/// doesn't distinguish between them either (a bare `$this->x;` statement
+/// with no use at all still makes the property non-virtual).
+/// `expr_children`/`stmt_children` already stop at a nested closure/
+/// arrow-fn/anonymous-class boundary (see their module doc comment in
+/// `ast_walk.rs`) - exactly the scope boundary real PHP's algorithm
+/// respects too (a `$this->propName` read inside a nested closure/
+/// arrow-fn does NOT count).
 fn stmt_references_property(stmt: &Stmt, prop_name: &str) -> bool {
     stmt_expr_fields(stmt)
         .into_iter()
