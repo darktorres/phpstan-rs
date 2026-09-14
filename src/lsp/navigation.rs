@@ -1,5 +1,5 @@
-//! Phase 17 Stage A: "what symbol is at this (file, position)" - the
-//! shared first step both hover and go-to-definition need. Walks a
+//! "What symbol is at this (file, position)" - the shared first step
+//! both hover and go-to-definition need. Walks a
 //! file's AST (already retained by `Project`, see `Project::ast`)
 //! looking for the innermost name reference or declaration whose span
 //! contains the cursor, resolving it against the file's own namespace/
@@ -25,12 +25,10 @@
 //! this module has none of. `lsp.rs`'s own orchestration runs a real,
 //! throwaway `Checker` probe for both (`Resolved::Instance`/`Resolved::
 //! VariableRead`'s own doc comments), reusing the checker's already-
-//! correct, corpus-verified flow-sensitive analysis (branch merging,
-//! loop fixed-point convergence, termination-pruning) rather than a
-//! second, hand-rolled approximation of it - see `Checker::probe_var_
-//! provenance`'s own doc comment in `checker.rs` for the full design and
-//! why an earlier version of this module's own hand-rolled arm-merging
-//! heuristic was replaced with this.
+//! correct flow-sensitive analysis (branch merging, loop fixed-point
+//! convergence, termination-pruning) rather than a second, hand-rolled
+//! approximation of it - see `Checker::probe_var_provenance`'s own doc
+//! comment in `checker.rs` for the full design.
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
@@ -50,7 +48,7 @@ pub(crate) enum Resolved {
     /// `lookup_const`, tried in that order by the caller) since a plain
     /// name reference alone doesn't say which kind it is.
     Member(String, String),
-    /// Phase 17 Stage B: an instance receiver's own member access
+    /// An instance receiver's own member access
     /// (`$x->method()`/`$x->prop`) - resolving *which* member this is
     /// needs `$x`'s inferred type, which needs the checker's own
     /// machinery, not just a name lookup. Everything `lsp.rs`'s own
@@ -72,18 +70,18 @@ pub(crate) enum Resolved {
     /// name) - always same-file, and the click's own position already
     /// *is* the answer for go-to-definition, so no probe is needed for
     /// that. `scope`/`is_static`/`class` exist for hover's own sake only
-    /// (Phase 17 follow-up: what type does this declaration itself bind?,
-    /// which genuinely needs a probe - e.g. a `foreach` binding's type
-    /// depends on inferring the iterable), mirroring `VariableRead`'s
-    /// identical fields below.
+    /// (what type does this declaration itself bind? - which genuinely
+    /// needs a probe, e.g. a `foreach` binding's type depends on
+    /// inferring the iterable), mirroring `VariableRead`'s identical
+    /// fields below.
     VariableSelf {
         span: Span,
         scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
     },
-    /// Phase 17 follow-up: a local variable *read* - resolved via a real,
-    /// checker-driven reaching-definitions probe (`Checker::probe_span`/
+    /// A local variable *read* - resolved via a real, checker-driven
+    /// reaching-definitions probe (`Checker::probe_span`/
     /// `probe_var_provenance`, the same mechanism `Instance` above uses
     /// for a receiver's own type), not a hand-rolled approximation. Might
     /// resolve to more than one real declaration site when the read is
@@ -178,8 +176,8 @@ struct Walker<'a> {
     // request, the same cost `ProbeScope::Function` already accepts for
     // an ordinary function-scoped probe).
     top_level_stmts: &'a [Stmt],
-    // Phase 17 Stage B / follow-up: an owned clone (not a borrow - see
-    // `ProbeScope`'s own doc comment for why) of whichever *named*
+    // An owned clone (not a borrow - see `ProbeScope`'s own doc comment
+    // for why) of whichever *named*
     // `FunctionDecl`/`MethodDecl` currently encloses the statement being
     // walked, updated on entry to `function` and restored on exit -
     // `None` at top-level script scope, in which case a probe request
@@ -561,8 +559,8 @@ impl<'a> Walker<'a> {
                 for p in params {
                     self.param(p, ctx, current_class, best);
                 }
-                // Phase 17: a `use (&$x)`/`use ($x)` capture is itself a
-                // real, navigable reference to the outer scope's `$x` -
+                // A `use (&$x)`/`use ($x)` capture is itself a real,
+                // navigable reference to the outer scope's `$x` -
                 // resolved the same way an ordinary variable read is
                 // (`probe_scope()` called *before* recursing into `body`,
                 // since `current_function` is deliberately never updated
