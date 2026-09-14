@@ -1,6 +1,5 @@
-//! Phase 54's last build item: `Rules/Generics/CrossCheckInterfacesHelper.php`,
-//! ported directly (confirmed by reading it in full, `vendor/phpstan-src`) -
-//! walks every path by which a class/interface/enum reaches the same
+//! `Rules/Generics/CrossCheckInterfacesHelper.php`,
+//! ported directly - walks every path by which a class/interface/enum reaches the same
 //! generic interface (its own `@extends`/`@implements` plus every
 //! ancestor's own, recursively) and flags it if two different paths pin
 //! that interface's same `@template` parameter to two different concrete
@@ -20,11 +19,8 @@
 //! single-target search, just without stopping at the first match: every
 //! reachable interface is recorded, and a second, differently-bound
 //! reach of the same one is what triggers `generics.interfaceConflict`.
-//! No local corpus evidence for this shape (not mechanically greppable
-//! the way `@use<Args>` was) - a false-negative-coverage investment, not
-//! a corpus-driven fix, so every judgment call below is made in the
-//! "favor false negatives over false positives" direction this project
-//! has held throughout.
+//! Every judgment call below is made in the "favor false negatives
+//! over false positives" direction this project has held throughout.
 
 use std::collections::{HashMap, HashSet};
 
@@ -36,8 +32,8 @@ use crate::types::{self, TemplateParam, Type, Variance};
 impl<'a> Checker<'a> {
     /// Entry point - called once per class/interface/enum declaration
     /// alongside `check_ancestor_generic_bounds`'s own `extends`/
-    /// `implements`/`@use` checking (Phase 66's precedent for sharing one
-    /// call site across all three declaration kinds).
+    /// `implements`/`@use` checking (sharing one call site across all
+    /// three declaration kinds).
     pub(crate) fn check_cross_path_interface_conflicts(&mut self, fqn: &str, span: Span) {
         let Some(root_info) = self.registry.classes.get(fqn) else {
             return;
@@ -141,9 +137,7 @@ impl<'a> Checker<'a> {
             self.visit_ancestor(iface, &concrete_args, found, diagnostics, &visited);
         }
 
-        // Real corpus false positive (`friendsofphp/php-cs-fixer`'s own
-        // `AbstractFixer` subclasses - confirmed by direct read): a class
-        // extending a genuinely *non-generic* parent has no `@extends`
+        // A class extending a genuinely non-generic parent has no `@extends`
         // tag to write at all (nothing generic to pass through), so
         // `extends_args` is empty not because this project failed to
         // parse one but because there is none - walking into that parent
