@@ -4,26 +4,16 @@ use crate::token::Span;
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
-    /// Resolves `self`/`static`/`parent` to a concrete `Object` relative to
-    /// `defining_class` - the class whose signature this type came from.
-    /// `self`/`static` both collapse to the same class here since we don't
-    /// track late static binding through actual runtime dispatch; `parent`
-    /// resolves via the registry's extends chain, falling back to leaving
-    /// it unresolved if the class has no declared parent (so it still hits
-    /// the permissive Object fallback in `is_subtype`/`is_assignable`
-    /// rather than being wrongly flagged).
     /// Resolves a bare name exactly as it appears at an expression site
     /// (`new Foo()`, `$x instanceof Foo`, ...) to the concrete `Type` it
     /// refers to - `self`/`parent`/`static` need `resolve_pseudo` against
-    /// the class currently being checked, everything else goes through
+    /// the class currently being checked; everything else goes through
     /// `name_ctx.resolve` (namespace/`use`-import resolution) as an
-    /// ordinary class reference. A real bug this fixed: `apply_narrowing`'s
-    /// `instanceof` handling used to treat `self`/`parent`/`static` as
-    /// literal class names to look up via `name_ctx.resolve` directly
-    /// (`$future instanceof self` in real code became a nonsensical
-    /// `Amp\self` "class" once namespace-qualification existed to make
-    /// the mistake visible) - `infer_expr`'s `ExprKind::New` arm already got
-    /// this right; `apply_narrowing` never shared that logic.
+    /// ordinary class reference. `apply_narrowing`'s `instanceof` handling
+    /// needs this too, not just `name_ctx.resolve` directly - otherwise
+    /// `self`/`parent`/`static` get treated as literal class names
+    /// (`$future instanceof self` in real code would become a
+    /// nonsensical `Amp\self` "class").
     pub(crate) fn resolve_name_expr(&self, name: &str) -> Type {
         match name {
             "self" | "parent" | "static" => {
@@ -298,20 +288,24 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves `self`/`static`/`parent` to a concrete class - recurses
-    /// into `Union`/`Intersection`/`Array`/`ArrayShape` the same way
-    /// `types::substitute_template` does, not just the bare top-level
-    /// case. A real, previously-live gap this found: the extremely
-    /// common nullable-self return type (`?self`/`self|null`, e.g.
-    /// `tryFromArray`-style factory methods) never resolved at all
-    /// before this - only a *bare* `self` return type ever reached the
-    /// `SelfRef` arm directly, so `self` wrapped in *any* union stayed
-    /// unresolved, and `is_assignable`/`is_subtype` have no arm at all
-    /// for a concrete class instance satisfying a still-unresolved
-    /// `SelfRef` (only the reverse direction, `self` satisfying a
-    /// concrete class, is handled) - a real return-type mismatch was
-    /// reported on entirely correct code returning `new self(...)` or
-    /// `null` from a `?self`-typed method.
+    /// Resolves `self`/`static`/`parent` to a concrete `Object` relative
+    /// to `defining_class` - the class whose signature this type came
+    /// from. `self`/`static` both collapse to the same class here, since
+    /// this project doesn't track late static binding through actual
+    /// runtime dispatch; `parent` resolves via the registry's `extends`
+    /// chain, falling back to leaving it unresolved if the class has no
+    /// declared parent (so it still hits the permissive `Object`
+    /// fallback in `is_subtype`/`is_assignable` rather than being
+    /// wrongly flagged).
+    ///
+    /// Recurses into `Union`/`Intersection`/`Array`/`ArrayShape` the same
+    /// way `types::substitute_template` does, not just the bare
+    /// top-level case - needed for the common nullable-self return type
+    /// (`?self`/`self|null`, e.g. `tryFromArray`-style factory methods):
+    /// `is_assignable`/`is_subtype` have no arm for a concrete class
+    /// instance satisfying a still-unresolved `SelfRef` (only the
+    /// reverse direction is handled), so a bare `self` return type
+    /// wrapped in any union must be resolved here first.
     pub(crate) fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
             Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
