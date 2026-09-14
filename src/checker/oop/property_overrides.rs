@@ -6,31 +6,26 @@ use crate::registry::PropertySig;
 use crate::token::Span;
 
 impl<'a> Checker<'a> {
-    /// Real PHPStan's `OverridingPropertyRule` equivalent: the mismatch
+    /// Mirrors real PHPStan's `OverridingPropertyRule`: the mismatch
     /// kinds answerable with fields `PropertyDecl`/`PropertySig` already
-    /// carry (`is_static`/`is_readonly`/`visibility` - all three
-    /// confirmed directly via `php -r` as real, unconditional fatal
-    /// errors, in whichever direction is checked below; the *other*
-    /// direction of each is real, legal PHP and deliberately left
-    /// unflagged), plus native-type-variance (`property.nativeType`/
-    /// `.missingNativeType`/`.extraNativeType` - real PHP requires a
-    /// property's own type to match its ancestor's *exactly*,
-    /// invariantly, unlike a method's covariant return type), checked at
-    /// the native level via `PropertySig::ty_native`/`has_native_type`
-    /// (mirroring `ParamSig`'s identical split - see `check_property_
-    /// native_type_override`'s own doc comment for why a plain, already-
-    /// docblock-merged `ty` comparison would have risked the identical
-    /// false-positive class `method.childReturnType`'s own doc comment
-    /// already found and fixed for methods). A promoted constructor
-    /// property is a real property for override purposes too (confirmed
-    /// directly: `class Child extends Base { public function
-    /// __construct(public readonly int $x) {} }` overriding a plain
-    /// `Base::$x` still fatals the identical way) - checked via the
-    /// shared `check_one_property_override` helper below, once per
-    /// plain declaration and once per promoted `__construct` parameter.
-    /// A promoted property is never `static` (no such syntax exists),
-    /// which `own_sig.is_static: false` encodes directly rather than
-    /// guessing.
+    /// carry (`is_static`/`is_readonly`/`visibility` - all three real,
+    /// unconditional fatal errors in whichever direction is checked
+    /// below; the other direction of each is real, legal PHP and
+    /// deliberately left unflagged), plus native-type-variance
+    /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType` -
+    /// real PHP requires a property's type to match its ancestor's
+    /// exactly, invariantly, unlike a method's covariant return type),
+    /// checked at the native level via `PropertySig::ty_native`/
+    /// `has_native_type` (mirroring `ParamSig`'s identical split - see
+    /// `check_property_native_type_override`'s doc comment for why a
+    /// plain, already-docblock-merged `ty` comparison would risk the
+    /// identical false-positive class `method.childReturnType`'s doc
+    /// comment found and fixed for methods). A promoted constructor
+    /// property is a real property for override purposes too - checked
+    /// via the shared `check_one_property_override` helper below, once
+    /// per plain declaration and once per promoted `__construct`
+    /// parameter. A promoted property is never `static` (no such syntax
+    /// exists), which `own_sig.is_static: false` encodes directly.
     pub(crate) fn check_property_overrides(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -59,18 +54,18 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 64 Item 5: `OverridingPropertyRule`'s own `hasOverrideAttribute`/
+    /// Mirrors `OverridingPropertyRule`'s `hasOverrideAttribute`/
     /// `filterOverrideAttribute` half for properties - the method-level
     /// equivalent already exists (`FunctionSig::has_override_attr`,
     /// `check_one_method_override`); a property needs no analogous
-    /// registry field, since (unlike a method) it's never hoisted through
-    /// a separate trait-merge lookup path before this check runs - `p.attrs`/
-    /// `param.attrs` on the class's own textual declaration is already
-    /// the complete, real answer. A `private` ancestor property doesn't
-    /// count as a real override target here, mirroring `check_one_
-    /// property_override`'s own identical exemption just below (an
-    /// unrelated declaration, not something `#[Override]` could
-    /// meaningfully claim to override).
+    /// registry field, since (unlike a method) it's never hoisted
+    /// through a separate trait-merge lookup path before this check
+    /// runs - `p.attrs`/`param.attrs` on the class's own textual
+    /// declaration is already the complete, real answer. A private
+    /// ancestor property doesn't count as a real override target here,
+    /// mirroring `check_one_property_override`'s identical exemption
+    /// below (an unrelated declaration, not something `#[Override]`
+    /// could meaningfully claim to override).
     fn check_property_override_attribute(
         &mut self,
         fqn: &str,
@@ -84,17 +79,16 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        // Phase 37: `#[\Override]` on a *property* is only real PHP
-        // syntax from 8.5 on (confirmed against real PHPStan's own
-        // `PropertyAttributesRule`) - below that, real PHPStan flags this
-        // unconditionally, independent of whether the property would
-        // otherwise be a real, matching override. Unlike this project's
-        // usual "no version configured, don't check" convention, this
-        // still runs both checks regardless - the two conditions are
-        // genuinely orthogonal (a real ancestor mismatch is still a real
-        // ancestor mismatch on any PHP version), matching real PHPStan's
-        // own two independent rules, which can both fire on the same
-        // property at once.
+        // `#[\Override]` on a property is only real PHP syntax from 8.5
+        // on, mirroring real PHPStan's `PropertyAttributesRule` - below
+        // that, real PHPStan flags this unconditionally, independent of
+        // whether the property would otherwise be a real, matching
+        // override. Unlike this project's usual "no version configured,
+        // don't check" convention, this still runs both checks
+        // regardless - the two conditions are genuinely orthogonal (a
+        // real ancestor mismatch is still a real ancestor mismatch on
+        // any PHP version), matching real PHPStan's two independent
+        // rules, which can both fire on the same property at once.
         if let Some(version) = self.registry.php_version
             && !PhpFeature::OverrideAttributeOnProperty.is_available(version)
         {
@@ -137,13 +131,13 @@ impl<'a> Checker<'a> {
         own_sig: &PropertySig,
         span: Span,
     ) {
-        // Phase 64 Item 3: overriding a `final` property is a real,
-        // unconditional PHP fatal error (PHP 8.4+) - same "runs before
-        // every other exemption below" ordering `check_one_method_
-        // override`'s own final-ancestor check already uses. `is_by_phpdoc`
-        // is `@final`'s own docblock-only sibling - see `check_one_method_
-        // override`'s own identical comment for why the two need
-        // different wording/identifier/`nonIgnorable()`-ness.
+        // Overriding a `final` property is a real, unconditional PHP
+        // fatal error (PHP 8.4+) - same "runs before every other
+        // exemption below" ordering `check_one_method_override`'s
+        // final-ancestor check uses. `is_by_phpdoc` is `@final`'s
+        // docblock-only sibling - see `check_one_method_override`'s
+        // identical comment for why the two need different wording/
+        // identifier/`nonIgnorable()`-ness.
         if let Some((ancestor, is_by_phpdoc)) =
             self.registry.find_final_ancestor_property(fqn, name)
         {
@@ -168,9 +162,9 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        // A `private` ancestor property is an unrelated declaration, not
-        // a real override target - same reasoning as `check_method_
-        // overrides`'s identical exemption.
+        // A private ancestor property is an unrelated declaration, not
+        // a real override target - same reasoning as
+        // `check_method_overrides`'s identical exemption.
         if ancestor_sig.visibility == Visibility::Private {
             return;
         }
@@ -216,8 +210,8 @@ impl<'a> Checker<'a> {
                 "property.readOnly",
             );
         }
-        // Same two-way visibility-narrowing split `check_method_
-        // overrides` already uses, one member kind over.
+        // Same two-way visibility-narrowing split `check_method_overrides`
+        // uses, one member kind over.
         let narrows_visibility = match ancestor_sig.visibility {
             Visibility::Public => own_sig.visibility != Visibility::Public,
             Visibility::Protected => own_sig.visibility == Visibility::Private,
@@ -246,27 +240,25 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// `OverridingPropertyRule`'s own native-type-variance half
-    /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType`) -
-    /// the one sub-item this phase's own header doc comment above used to
-    /// name as still-open, now that `PropertySig::ty_native`/
-    /// `has_native_type` exist (mirroring `ParamSig`'s identical split).
-    /// Checked purely at the native level, exactly like every other
-    /// override-compatibility check in this file and `method_overrides.rs`,
-    /// since real PHP itself only ever enforces this invariantly against
-    /// the native type, never the PHPDoc-merged one. Deliberately doesn't
-    /// attempt real PHPStan's own further hook-driven contravariant/
-    /// covariant refinement (only reachable when a property is virtual/
-    /// abstract *and* asymmetrically readable-xor-writable), since this
-    /// project's own hook-variance model doesn't track per-direction
-    /// native types precisely enough to draw that distinction safely, so
-    /// every mismatch here uses the same "must be exactly equal" rule
-    /// real PHPStan's own plain (non-hook) branch already uses, matching
-    /// this project's convention of a disclosed, narrower cut over a
-    /// guess. Equality is checked bidirectionally through `is_assignable`
-    /// (not raw `Type` `PartialEq`, which is sensitive to union-member
-    /// order), the same shape `resolve_pseudo`'d comparisons throughout
-    /// this checker already use for two types that must genuinely match.
+    /// `OverridingPropertyRule`'s native-type-variance half
+    /// (`property.nativeType`/`.missingNativeType`/`.extraNativeType`),
+    /// via `PropertySig::ty_native`/`has_native_type` (mirroring
+    /// `ParamSig`'s identical split). Checked purely at the native
+    /// level, exactly like every other override-compatibility check in
+    /// this file and `method_overrides.rs`, since real PHP itself only
+    /// ever enforces this invariantly against the native type, never the
+    /// PHPDoc-merged one. Deliberately doesn't attempt real PHPStan's
+    /// further hook-driven contravariant/covariant refinement (only
+    /// reachable when a property is virtual/abstract and asymmetrically
+    /// readable-xor-writable), since this project's hook-variance model
+    /// doesn't track per-direction native types precisely enough to draw
+    /// that distinction safely, so every mismatch here uses the same
+    /// "must be exactly equal" rule real PHPStan's plain (non-hook)
+    /// branch uses. Equality is checked bidirectionally through
+    /// `is_assignable` (not raw `Type` `PartialEq`, which is sensitive
+    /// to union-member order), the same shape `resolve_pseudo`'d
+    /// comparisons throughout this checker use for two types that must
+    /// genuinely match.
     fn check_property_native_type_override(
         &mut self,
         fqn: &str,
@@ -330,14 +322,12 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 64 Item 1: `OverridingPropertyRule`'s own property-hook half -
-    /// `notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`,
-    /// confirmed live (see this phase's own investigation notes). Gated
-    /// on `ancestor_sig.is_virtual || own_sig.is_virtual` first - an
-    /// ordinary, non-hooked property on either side is unconditionally
-    /// both readable and writable, so nothing here could ever apply to
-    /// the vast majority of properties (avoids any risk of regressing
-    /// them).
+    /// `OverridingPropertyRule`'s property-hook half -
+    /// `notReadable`/`notWritable`/`abstractOverridingNonAbstractHook`.
+    /// Gated on `ancestor_sig.is_virtual || own_sig.is_virtual` first -
+    /// an ordinary, non-hooked property on either side is unconditionally
+    /// both readable and writable, so nothing here applies to the vast
+    /// majority of properties.
     fn check_property_hook_override(
         &mut self,
         fqn: &str,
