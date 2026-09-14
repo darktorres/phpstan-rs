@@ -1,4 +1,4 @@
-//! Tests for parsing the Phase 40 `@api`/`@api-do-not-implement` tags.
+//! Tests for parsing `@api`/`@api-do-not-implement` tags.
 use super::super::*;
 
 #[test]

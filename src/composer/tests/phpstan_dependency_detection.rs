@@ -1,4 +1,4 @@
-//! Phase 40: detecting a `phpstan/phpstan`/`phpstan/extension-installer`
+//! Detecting a `phpstan/phpstan`/`phpstan/extension-installer`
 //! Composer dependency, the gate `checker::phpstan_api` runs behind.
 
 use super::super::*;

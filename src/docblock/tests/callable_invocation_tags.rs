@@ -1,5 +1,5 @@
 //! `@param-immediately-invoked-callable`/`@param-later-invoked-callable`/
-//! `@param-closure-this` tags (Phase 36).
+//! `@param-closure-this` tags.
 use super::super::*;
 
 #[test]

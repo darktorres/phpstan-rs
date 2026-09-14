@@ -1,5 +1,4 @@
-//! Phase 18 Axis 2: `reflection_rule::ReflectionRule` + `Project::
-//! run_reflection_rules`.
+//! `reflection_rule::ReflectionRule` + `Project::run_reflection_rules`.
 
 use super::super::*;
 use crate::checker::Diagnostic;

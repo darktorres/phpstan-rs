@@ -1,4 +1,4 @@
-//! Phase 36: `@param-immediately-invoked-callable`/`@param-later-invoked-callable`/
+//! `@param-immediately-invoked-callable`/`@param-later-invoked-callable`/
 //! `@param-closure-this` declaration-time validation
 //! (`checker::noop::check_declared_param_callable_tags`).
 

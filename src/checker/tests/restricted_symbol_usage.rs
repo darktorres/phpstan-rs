@@ -1,5 +1,5 @@
-//! Phase 67: the declarative, config-driven `restricted_symbols` list -
-//! one behavior-per-test, mirroring `internal_usage.rs`'s own test style.
+//! The declarative, config-driven `restricted_symbols` list - one
+//! behavior-per-test, mirroring `internal_usage.rs`'s own test style.
 
 use super::helpers::*;
 use crate::restricted_symbols::{RestrictedSymbolEntry, RestrictedSymbolKind, RestrictedSymbols};

@@ -93,8 +93,6 @@ fn parses_a_union_bound() {
 
 #[test]
 fn parses_a_template_default() {
-    // Phase 54: `@template T = Default` - previously silently dropped
-    // entirely (no field existed to hold it at all).
     let block = parse("/** @template T = int */");
     assert_eq!(block.templates, vec!["T".to_string()]);
     assert_eq!(block.template_defaults.get("T"), Some(&"int".to_string()));
