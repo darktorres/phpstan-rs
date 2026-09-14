@@ -14,18 +14,16 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
-        // Phase 15 continuation: real bug found and fixed this
-        // session - the condition's own constant-condition check
-        // (and, transitively, any standalone check reached while
-        // checking it, like `BooleanNot`/`BooleanAnd`/`BooleanOr`)
-        // used to run exactly once, against the pre-loop entry
-        // `locals`, *before* `converge_loop_body` ever ran -
-        // completely bypassing Phase 55's own fixed-point
-        // convergence. Real corpus false positive this produced:
-        // `$end = false; while (!$end) { ...; $end = true; ... }`
+        // The condition's own constant-condition check (and,
+        // transitively, any standalone check reached while checking
+        // it, like `BooleanNot`/`BooleanAnd`/`BooleanOr`) must run
+        // against the converged fixed point, not just once against
+        // the pre-loop entry `locals` before `converge_loop_body` ever
+        // runs - otherwise, e.g., `$end = false; while (!$end) {
+        // ...; $end = true; ... }`
         // (`Piwigo\Admin\Extensions\CoreUpdateService::upgradeTo`)
         // - `$end`'s pre-loop type is exactly `false`, so `!$end`
-        // looked unconditionally `true` even though the loop body
+        // looks unconditionally `true` even though the loop body
         // can reassign it. Confirmed directly against real
         // PHPStan's own `WhileHandler::processStmt`: it re-
         // evaluates the condition at the top of *every*
@@ -86,12 +84,11 @@ impl<'a> Checker<'a> {
             |this, pass_locals, declared_return, label, _pass| {
                 this.in_condition_position = true;
                 this.check_expr(cond, pass_locals, label);
-                // Phase 15, `WhileLoopAlwaysFalseConditionRule`/
+                // `WhileLoopAlwaysFalseConditionRule`/
                 // `WhileLoopAlwaysTrueConditionRule`: real
                 // inferred-type trust (`inferred_constant_
-                // condition`), matching real PHPStan's own design
-                // now that both reasons the original version was
-                // reverted are fixed - see `check_if`'s own doc
+                // condition`), matching real PHPStan's own design -
+                // see `check_if`'s own doc
                 // comment. `alwaysFalse` has no exclusions,
                 // matching real PHPStan's own rule exactly.
                 // `alwaysTrue` is gated the same way real
@@ -183,7 +180,7 @@ impl<'a> Checker<'a> {
             // below - a `break` doesn't mean `cond` went false, so
             // those states must not be narrowed as if it had.
             self.apply_narrowing(cond, locals, false);
-            // Phase 29: fold in every `break`-reached state too -
+            // Fold in every `break`-reached state too -
             // see `loop_break_states`'s own doc comment on
             // `Checker`.
             for state in break_states {
@@ -267,7 +264,7 @@ impl<'a> Checker<'a> {
         // wrongly provable.
         self.check_expr(cond, locals, label);
         self.loop_depth -= 1;
-        // Phase 15, `DoWhileLoopConstantConditionRule`: real
+        // `DoWhileLoopConstantConditionRule`: real
         // inferred-type trust, same as `If`/`While` above. Both
         // directions are gated on breakless-ness here (confirmed
         // directly against real PHPStan's own rule): `alwaysFalse`
@@ -306,7 +303,7 @@ impl<'a> Checker<'a> {
         // folding in break-reached states below, same reasoning
         // as `While` - a `break` doesn't mean `cond` went false.
         self.apply_narrowing(cond, locals, false);
-        // Phase 29: fold in every `break`-reached state too - see
+        // Fold in every `break`-reached state too - see
         // `loop_break_states`'s own doc comment on `Checker`.
         for state in break_states {
             *locals = merge_scopes(locals, &state);
@@ -335,12 +332,11 @@ impl<'a> Checker<'a> {
         // but that side effect happens every iteration, not just
         // once). Both halves - the non-last expressions here, and
         // the last one's own check moved into the convergence
-        // closure below - need the identical Phase 15 continuation
-        // fix (the same real bug this session's own `While` fix
-        // addresses: checking any of them once, up front, against
-        // the pre-loop entry, would bypass Phase 55's fixed-point
-        // convergence entirely, the exact false positive real
-        // corpus code hit - `QMultiToken::parseExpression`'s
+        // closure below - need the identical treatment `While` gets
+        // above: checking any of them once, up front, against the
+        // pre-loop entry, would bypass the body's fixed-point
+        // convergence entirely (real shape:
+        // `QMultiToken::parseExpression`'s
         // `for ($stop = false; !$stop && ...; $qi++)`, where
         // `$stop` is reassigned inside the body).
         match cond.last() {
@@ -399,7 +395,7 @@ impl<'a> Checker<'a> {
                 // below, same reasoning as `While` - a `break`
                 // doesn't mean `cond` went false.
                 self.apply_narrowing(c, locals, false);
-                // Phase 29: fold in every `break`-reached state
+                // Fold in every `break`-reached state
                 // too - see `loop_break_states`'s own doc comment
                 // on `Checker`.
                 for state in break_states {
@@ -413,7 +409,7 @@ impl<'a> Checker<'a> {
                 // least once - no "may run zero times" merge is
                 // needed or correct here. The only way code after
                 // this loop is ever reached at all is via a
-                // `break` somewhere inside it (Phase 29) - folded
+                // `break` somewhere inside it - folded
                 // in additively on top of the direct body-check,
                 // rather than trying to model "unreachable if no
                 // break exists" precisely.
@@ -445,7 +441,7 @@ impl<'a> Checker<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    /// Phase 70.C: `array_element_type`/`array_key_type`'s own parallel
+    /// `array_element_type`/`array_key_type`'s own parallel
     /// case for an object-shaped `foreach` subject - `Traversable`,
     /// `Iterator`, `Generator` (a real `Iterator` descendant), or
     /// `IteratorAggregate`. Returns `(key type, value type)`.
@@ -577,10 +573,9 @@ impl<'a> Checker<'a> {
         // below (see that closure's own comment for why every
         // pass, not just once).
         //
-        // Phase 12 (unplanned follow-on): a `Type::ArrayShape`
-        // subject used to fall straight to the `Mixed` catch-all,
-        // discarding real, known field types - a real corpus false
-        // positive this surfaced: `MaintenanceActionDispatcher::
+        // A `Type::ArrayShape` subject must not fall straight to the
+        // `Mixed` catch-all, discarding real, known field types (real
+        // shape: `MaintenanceActionDispatcher::
         // dispatch`'s `foreach ($versions as $key => $value) {
         // $versions[$key] = preg_replace(..., $value); }`, where
         // every field of `$versions` is actually a plain `string`.
@@ -596,14 +591,13 @@ impl<'a> Checker<'a> {
         // exact when every field shares one type (the common case
         // this false positive came from), still sound but coarser
         // when they don't.
-        // Phase 14: `Self::array_element_type` also sees through
+        // `Self::array_element_type` also sees through
         // an `Intersection`-wrapped `list<T>`/`non-empty-
-        // array<T>` - without it, `foreach` over one of those
-        // silently inferred `Mixed` for the loop variable, a
-        // real, confirmed regression (one of the most common
-        // constructs in real PHP).
-        // Phase 70.C: an array-shaped subject keeps taking the pre-
-        // existing, array-specific path unchanged; anything that path
+        // array<T>` - without it, `foreach` over one of those would
+        // silently infer `Mixed` for the loop variable, one of the
+        // most common constructs in real PHP.
+        // An array-shaped subject keeps taking the array-specific
+        // path unchanged; anything that path
         // can't handle (an object) now tries `iterable_element_type`
         // before finally giving up to `Mixed`/`Mixed` - see that
         // function's own doc comment for exactly what it covers
@@ -617,9 +611,8 @@ impl<'a> Checker<'a> {
                 .iterable_element_type(&subject_ty)
                 .unwrap_or((Type::Mixed, Type::Mixed)),
         };
-        // Phase 29 (superseded by this session's `LoopZeroIterations`
-        // fix - see `converge_loop_body`'s own doc comment): `Foreach`
-        // now gets the same "may run zero times" merge with the
+        // See `converge_loop_body`'s own doc comment: `Foreach`
+        // gets the same "may run zero times" merge with the
         // pre-loop state `While`/`For` already had, for every variable
         // *except* `subject_exempt` above - a bare `$variable` subject
         // the body mutates in place via a nested write keyed by its own
@@ -633,7 +626,7 @@ impl<'a> Checker<'a> {
         // `loop_break_states` closes exactly that gap, without
         // touching the single-representative-pass model otherwise.
         //
-        // Phase 55: the body itself now converges to a fixed point
+        // The body itself converges to a fixed point
         // across up to 3 passes (see `converge_loop_body`'s own doc
         // comment) - a variable reassigned inside the body is no
         // longer stuck at its pre-loop type for the whole check.
