@@ -1,6 +1,6 @@
 use crate::token::Span;
 
-/// Phase 37: one `Name(args)` entry inside an attribute group
+/// One `Name(args)` entry inside an attribute group
 /// (`#[Name(args), ...]`). `name` is the raw (possibly
 /// namespaced/backslashed) class name exactly as `parse_qualified_name`
 /// reads it, resolved against the
@@ -117,11 +117,11 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub struct CatchClause {
     pub types: Vec<String>,
-    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment,
-    // one span per `types` entry (same index).
+    // See `FunctionDecl::return_type_span`'s own doc comment, one span
+    // per `types` entry (same index).
     pub types_spans: Vec<Span>,
     pub var: Option<String>,
-    // Phase 17: `var`'s own `$name` token span, populated at the same
+    // `var`'s own `$name` token span, populated at the same
     // parse point `var` itself is consumed - `None` exactly when `var` is
     // (a catch clause with no bound variable, `catch (Foo) {}`).
     pub var_span: Option<Span>,
@@ -132,14 +132,14 @@ pub struct CatchClause {
 #[derive(Debug, Clone)]
 pub struct Param {
     pub name: String,
-    // Phase 17: this parameter's own `$name` token's span - populated by
+    // This parameter's own `$name` token's span - populated by
     // the parser at the exact point it consumes it (`expect_variable`),
     // needed for local-variable-declaration navigation (a read inside the
     // function body jumping back to its own parameter).
     pub name_span: Span,
     pub type_hint: Option<String>,
-    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment -
-    // identical shape and purpose, one level down.
+    // See `FunctionDecl::return_type_span`'s own doc comment - identical
+    // shape and purpose, one level down.
     pub type_hint_span: Option<Span>,
     pub default: Option<Expr>,
     pub by_ref: bool,
@@ -150,22 +150,21 @@ pub struct Param {
     // `public readonly int $id` in a promoted constructor parameter.
     // Meaningless when promoted_visibility is None.
     pub promoted_readonly: bool,
-    // Phase 64 Item 3: `public final int $id` in a promoted constructor
-    // parameter - real, valid PHP (confirmed via `php -l`), unlike
-    // `abstract` (an abstract constructor can't declare any promoted
-    // property at all - real fatal error). Meaningless when
-    // promoted_visibility is None.
+    // `public final int $id` in a promoted constructor parameter -
+    // real, valid PHP, unlike `abstract` (an abstract constructor can't
+    // declare any promoted property at all - real fatal error).
+    // Meaningless when promoted_visibility is None.
     pub promoted_final: bool,
     // A promoted property's own hooks, defined inline in the constructor's
     // parameter list rather than on an ordinary property declaration.
     // Boxed because PropertyHooks::set itself embeds a Param - unboxed,
     // Param would have infinite size.
     pub hooks: Option<Box<PropertyHooks>>,
-    // Phase 37: `#[Attr]` groups written directly on this parameter
+    // `#[Attr]` groups written directly on this parameter
     // (`function f(#[SensitiveParameter] string $password) {}`) - empty
     // for the overwhelming majority of parameters, which have none.
     pub attrs: Vec<Attribute>,
-    // Phase 93: raw `/** ... */` text immediately preceding this
+    // Raw `/** ... */` text immediately preceding this
     // parameter, if any - real, idiomatic PHP for a promoted
     // constructor property (`/** @var array<string, mixed>|null */
     // public ?array $details,`), since it doubles as that property's own
@@ -177,7 +176,7 @@ pub struct Param {
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
     pub name: String,
-    // Phase 17: this function/method's own name token's span - `span`
+    // This function/method's own name token's span - `span`
     // below covers the *whole* declaration (from `function`/its
     // modifiers through the closing brace), which is where the LSP's own
     // go-to-definition would otherwise have to land instead of on the
@@ -185,7 +184,7 @@ pub struct FunctionDecl {
     pub name_span: Span,
     pub params: Vec<Param>,
     pub return_type: Option<String>,
-    // Phase 17: the return type hint's own span (covering the whole
+    // The return type hint's own span (covering the whole
     // hint text - `?Foo`, `Foo|Bar`, ... - not a per-identifier span;
     // the LSP's own text-split utility recovers those on demand from
     // this span's source text). `None` exactly when `return_type` is.
@@ -193,7 +192,7 @@ pub struct FunctionDecl {
     pub body: Vec<Stmt>,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<String>,
-    // Phase 37: `#[Attr]` groups preceding this declaration - shared by a
+    // `#[Attr]` groups preceding this declaration - shared by a
     // top-level function and (via `MethodDecl.function`) a class method,
     // since real PHP attaches attributes to the same source position
     // either way (before any `public`/`static`/... modifiers).
@@ -211,7 +210,7 @@ pub enum Visibility {
 #[derive(Debug, Clone)]
 pub struct PropertyDecl {
     pub name: String,
-    // Phase 17: see `FunctionDecl::name_span`'s own doc comment.
+    // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     pub visibility: Visibility,
     // PHP 8.4 asymmetric visibility (`public private(set) string $x;`) -
@@ -219,18 +218,18 @@ pub struct PropertyDecl {
     // separately from `visibility` above (which always stays the
     // *read*-side visibility). `None` for an ordinary, symmetric
     // property, in which case a write is checked against `visibility`
-    // itself, same as before this field existed.
+    // itself.
     pub write_visibility: Option<Visibility>,
     pub is_static: bool,
     pub is_readonly: bool,
-    // PHP 8.4 `final`/`abstract` property modifiers (Phase 64 Item 3) -
-    // `is_abstract_member`/`is_final_member` were already parsed for
-    // `MethodDecl`/`ClassConst`, just never threaded through to a plain
-    // property declaration until now.
+    // PHP 8.4 `final`/`abstract` property modifiers -
+    // `is_abstract_member`/`is_final_member` are also parsed for
+    // `MethodDecl`/`ClassConst`, threaded through here for a plain
+    // property declaration too.
     pub is_abstract: bool,
     pub is_final: bool,
     pub type_hint: Option<String>,
-    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment.
+    // See `FunctionDecl::return_type_span`'s own doc comment.
     pub type_hint_span: Option<Span>,
     pub default: Option<Expr>,
     pub doc_comment: Option<String>,
@@ -240,7 +239,7 @@ pub struct PropertyDecl {
     // with no function-like registry entry to check them against) - out of
     // scope for now, same as FirstClassCallable's args.
     pub hooks: Option<PropertyHooks>,
-    // Phase 37: `#[Attr]` groups preceding this property declaration.
+    // `#[Attr]` groups preceding this property declaration.
     pub attrs: Vec<Attribute>,
     pub span: Span,
 }
@@ -251,7 +250,7 @@ pub enum PropertyHookBody {
     Arrow(Expr),
     // `get { ... }` / `set(...) { ... }`
     Block(Vec<Stmt>),
-    // Phase 64 Item 1: `get;` / `set(...);` - a hook declared, with no
+    // `get;` / `set(...);` - a hook declared, with no
     // body at all (only legal inside an abstract class/interface). Real
     // PHP distinguishes this from "no hook declared" (`PropertyHooks::
     // get`/`set` staying `None`) - `hasHook()` needs to answer "is a
@@ -266,19 +265,19 @@ pub struct PropertyHooks {
     // PHP allows there; None when the hook omits it (`set { ... }` uses an
     // implicit $value).
     pub set: Option<(Option<Param>, PropertyHookBody)>,
-    // Phase 37: the `#[Attr]` group(s) immediately preceding this hook's
+    // The `#[Attr]` group(s) immediately preceding this hook's
     // own `get`/`set` keyword - see `PropertyHookAttributesRule`. Empty
     // (not `None`) when the hook has no attributes, matching every other
     // `attrs: Vec<Attribute>` field in this file.
     pub get_attrs: Vec<Attribute>,
     pub set_attrs: Vec<Attribute>,
-    // Phase 42: the `/** ... */` doc comment immediately preceding this
+    // The `/** ... */` doc comment immediately preceding this
     // hook's own `get`/`set` keyword (after any `#[Attr]` group(s)) -
     // mirrors `FunctionDecl::doc_comment` exactly, needed so a hook can
     // carry its own `@throws` tag the same way an ordinary method does.
     pub get_doc: Option<String>,
     pub set_doc: Option<String>,
-    // Phase 42: whether this hook itself carries its own `final` modifier
+    // Whether this hook itself carries its own `final` modifier
     // (independent of the property's own/declaring class's finality) -
     // see `TooWideMethodThrowTypeRule`'s property-hook sibling's own gate.
     pub get_final: bool,
@@ -299,23 +298,22 @@ pub struct MethodDecl {
 pub struct UseImport {
     pub path: String,
     pub alias: Option<String>,
-    // Phase 48: which of PHP's three `use`-import namespaces this member
-    // belongs to (`use Foo;` vs `use function foo;` vs `use const FOO;`) -
-    // needed because only a class-shaped and function-shaped import are
-    // ever existence-checkable against this project's own registry (a
-    // plain `use Foo;` isn't checked for existence at all, matching real
-    // PHPStan's own `ExistingNamesInUseRule`, which - confirmed directly
-    // against its source - only ever calls `checkClassNames` with a `null`
-    // usage location for the class case, i.e. only case-sensitivity/
-    // forbidden-name checking, never a `hasClass` existence check; a class
-    // reference is only ever existence-checked at the point it's actually
-    // *used*, not merely imported). `use const` existence is deliberately
-    // left unchecked here too - this project has no project-wide global-
-    // constant registry to check it against at all (`ast::StmtKind::
-    // GlobalConst` is currently only used to *infer a value's type*, not
-    // indexed into any name table), and PHP's own huge, extension-
-    // dependent built-in constant surface makes a half-built one worse
-    // than none.
+    // Which of PHP's three `use`-import namespaces this member belongs
+    // to (`use Foo;` vs `use function foo;` vs `use const FOO;`) - needed
+    // because only a class-shaped and function-shaped import are ever
+    // existence-checkable against this project's own registry (a plain
+    // `use Foo;` isn't checked for existence at all, matching real
+    // PHPStan's own `ExistingNamesInUseRule`, which only ever calls
+    // `checkClassNames` with a `null` usage location for the class case,
+    // i.e. only case-sensitivity/forbidden-name checking, never a
+    // `hasClass` existence check; a class reference is only ever
+    // existence-checked at the point it's actually *used*, not merely
+    // imported). `use const` existence is deliberately left unchecked
+    // here too - this project has no project-wide global-constant
+    // registry to check it against at all (`ast::StmtKind::GlobalConst`
+    // is currently only used to *infer a value's type*, not indexed into
+    // any name table), and PHP's own huge, extension-dependent built-in
+    // constant surface makes a half-built one worse than none.
     pub kind: UseKind,
 }
 
@@ -330,15 +328,13 @@ pub enum UseKind {
 #[derive(Debug, Clone)]
 pub struct ClassConst {
     pub name: String,
-    // Phase 17: see `FunctionDecl::name_span`'s own doc comment.
+    // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     pub value: Expr,
-    // Phase 59: the `public`/`private`/`protected` modifier a real class's
-    // own `const` declaration can carry (PHP 7.1+) - parsed by both
-    // `parser/classes.rs` call sites already (into a local `visibility`
-    // that used to be discarded once `Const` was reached), but never kept
-    // on the node itself until `UnusedPrivateConstantRule` needed to tell
-    // a private constant candidate apart from a public/protected one.
+    // The `public`/`private`/`protected` modifier a real class's own
+    // `const` declaration can carry (PHP 7.1+), needed by
+    // `UnusedPrivateConstantRule` to tell a private constant candidate
+    // apart from a public/protected one.
     // `Visibility::Public` for the top-level (non-class) `const NAME =
     // value;` statement, which reuses this same struct shape (see
     // `StmtKind::GlobalConst`'s own doc comment) but has no visibility
@@ -354,28 +350,23 @@ pub struct ClassConst {
     // top-level (non-class) `const` statement path, which doesn't thread
     // a doc comment through at all.
     pub doc_comment: Option<String>,
-    // Phase 37: `#[Attr]` groups preceding this const declaration - the
+    // `#[Attr]` groups preceding this const declaration - the
     // same group applies to every name in a comma-separated
     // `const A = 1, B = 2;` list, mirroring how `visibility`/`doc_comment`
     // are already cloned onto each one.
     pub attrs: Vec<Attribute>,
-    // PHP 8.3 typed class constants (`const TYPE NAME = value;`) - parsed
-    // by both `parser/classes.rs` call sites already (via `parse_type_
-    // hint`), but the result used to be discarded immediately, only kept
-    // around to advance the parser past the tokens. Same "one type
-    // applies to every name in a comma-separated list" cloning as
-    // `visibility`/`doc_comment`/`attrs` above.
+    // PHP 8.3 typed class constants (`const TYPE NAME = value;`) - same
+    // "one type applies to every name in a comma-separated list" cloning
+    // as `visibility`/`doc_comment`/`attrs` above.
     pub type_hint: Option<String>,
-    // Phase 17: see `FunctionDecl::return_type_span`'s own doc comment -
-    // also cloned onto every name in a comma-separated list.
+    // See `FunctionDecl::return_type_span`'s own doc comment - also
+    // cloned onto every name in a comma-separated list.
     pub type_hint_span: Option<Span>,
-    // PHP 8.1+ `final const` - parsed by both `parser/classes.rs` call
-    // sites' own shared modifier loop already (into a local
-    // `is_final_member` shared with methods/properties), but never kept
-    // on the node itself until `FinalConstantRule`/`FinalPrivateConstantRule`
-    // needed to tell a `final` constant apart from an ordinary one.
-    // Always `false` for the top-level (non-class) `const NAME = value;`
-    // statement - real PHP has no `final` syntax there at all.
+    // PHP 8.1+ `final const`, needed by
+    // `FinalConstantRule`/`FinalPrivateConstantRule` to tell a `final`
+    // constant apart from an ordinary one. Always `false` for the
+    // top-level (non-class) `const NAME = value;` statement - real PHP
+    // has no `final` syntax there at all.
     pub is_final: bool,
     pub span: Span,
 }
@@ -391,25 +382,24 @@ pub enum ClassKind {
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
     pub name: String,
-    // Phase 17: see `FunctionDecl::name_span`'s own doc comment. For an
+    // See `FunctionDecl::name_span`'s own doc comment. For an
     // anonymous class (which has no real name to navigate to at all -
     // `name` is the synthetic placeholder `"class@anonymous"`) this is
     // just `span` again, never actually looked up by name.
     pub name_span: Span,
     pub kind: ClassKind,
     pub extends: Vec<String>,
-    // Phase 17: one span per `extends` entry, same index, same purpose
+    // One span per `extends` entry, same index, same purpose
     // as `FunctionDecl::return_type_span`.
     pub extends_spans: Vec<Span>,
     pub implements: Vec<String>,
     pub implements_spans: Vec<Span>,
     pub is_abstract: bool,
     pub is_final: bool,
-    // Phase 37: `readonly class` (PHP 8.2) - parsed already (spread onto
-    // each own property in `parse_class_body`, via the parser's own
-    // `class_is_readonly` local), but never surfaced at the class level
-    // itself until now. Needed by `check_class_like_marker_attributes`'s
-    // own `#[\AllowDynamicProperties]`-on-a-readonly-class check (real
+    // `readonly class` (PHP 8.2), surfaced at the class level (in
+    // addition to being spread onto each own property in
+    // `parse_class_body`) for `check_class_like_marker_attributes`'s own
+    // `#[\AllowDynamicProperties]`-on-a-readonly-class check (real
     // PHPStan's own `ClassAttributesRule`).
     pub is_readonly: bool,
     pub properties: Vec<PropertyDecl>,
@@ -423,33 +413,30 @@ pub struct ClassDecl {
     // same shape as `uses_spans`. All names from one `use A, B;` statement
     // share the same entry (real PHP allows only one doc comment per
     // statement, however many trait names it lists). Needed for `@use
-    // Trait<Args>` (Phase 54): real PHPStan resolves that tag from the
-    // `TraitUse` statement's own doc comment specifically, confirmed
-    // directly against real corpus usage (`vendor/phpstan-src`'s own
-    // `TemplateObjectType`: `/** @use TemplateTypeTrait<ObjectType> */`
-    // sits directly above `use TemplateTypeTrait;`, not on the class's own
-    // separate top-of-class docblock).
+    // Trait<Args>`: real PHPStan resolves that tag from the `TraitUse`
+    // statement's own doc comment specifically (`vendor/phpstan-src`'s
+    // own `TemplateObjectType`:
+    // `/** @use TemplateTypeTrait<ObjectType> */` sits directly above
+    // `use TemplateTypeTrait;`, not on the class's own separate
+    // top-of-class docblock).
     pub uses_doc_comments: Vec<Option<String>>,
     // `use A, B { B::hello as helloB; }` - each `as`-clause that
     // introduces a new name for an existing trait method (a
     // visibility-only `as public;` with no new name isn't captured, since
     // it doesn't need any registration). `insteadof` conflict-resolution
     // clauses are parsed (so the file doesn't fail to parse) but not
-    // modeled here - not needed to fix Finding 30's own `as`-alias gap.
+    // modeled here.
     pub trait_aliases: Vec<TraitAlias>,
     // Every method/property name mentioned in ANY adaptation clause at
     // all (`insteadof` or `as`, including a visibility-only `as public;`)
-    // - Finding 58's own trait-conflict check needs this to know a name
-    // the class author already explicitly addressed, even though this
-    // project doesn't model *which* trait `insteadof` actually picked.
+    // - the trait-conflict check needs this to know a name the class
+    // author already explicitly addressed, even though this project
+    // doesn't model *which* trait `insteadof` actually picked.
     pub resolved_trait_conflicts: Vec<String>,
     // The class's own `/** ... */` doc comment, if any - needed for its
-    // own `@template T` declarations (class-level generics). Previously
-    // never captured at all: the parser only called `take_doc_comment`
-    // before a `function`/property declaration, never before
-    // `class`/`interface`/`trait`.
+    // own `@template T` declarations (class-level generics).
     pub doc_comment: Option<String>,
-    // Phase 37: `#[Attr]` groups preceding this class/interface/trait
+    // `#[Attr]` groups preceding this class/interface/trait
     // declaration (e.g. `#[Attribute(Attribute::TARGET_CLASS)]`, marking
     // the class itself usable as an attribute).
     pub attrs: Vec<Attribute>,
@@ -459,12 +446,12 @@ pub struct ClassDecl {
 #[derive(Debug, Clone)]
 pub struct EnumCase {
     pub name: String,
-    // Phase 17: see `FunctionDecl::name_span`'s own doc comment.
+    // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
     // one (`case Hearts;`).
     pub value: Option<Expr>,
-    // Phase 37: `#[Attr]` groups preceding this case.
+    // `#[Attr]` groups preceding this case.
     pub attrs: Vec<Attribute>,
     pub span: Span,
 }
@@ -487,10 +474,10 @@ pub struct EnumDecl {
     pub uses_doc_comments: Vec<Option<String>>,
     pub trait_aliases: Vec<TraitAlias>,
     pub resolved_trait_conflicts: Vec<String>,
-    // The enum's own `/** ... */` doc comment, if any (Phase 66) - needed
+    // The enum's own `/** ... */` doc comment, if any - needed
     // only to reject a stray `@template` tag (enums can't be generic).
     pub doc_comment: Option<String>,
-    // Phase 37: `#[Attr]` groups preceding this enum declaration.
+    // `#[Attr]` groups preceding this enum declaration.
     pub attrs: Vec<Attribute>,
     pub span: Span,
 }
@@ -505,9 +492,9 @@ pub struct TraitAlias {
 
 /// One argument in a call's own argument list (`Call`/`New`/`MethodCall`/
 /// `DynamicMethodCall`/`StaticCall`/`NewAnonymousClass` all hold
-/// `Vec<Arg>`, not a bare `Vec<Expr>`) - replaces what used to be a plain
-/// `Expr`, since a call's real argument-to-parameter mapping depends on
-/// more than just each argument's own written order: `name` is
+/// `Vec<Arg>`, not a bare `Vec<Expr>`), since a call's real
+/// argument-to-parameter mapping depends on more than just each
+/// argument's own written order: `name` is
 /// `Some("matches")` for a named argument (`matches: $m`), letting a
 /// resolver match it against the right declared parameter regardless of
 /// where it appears among the arguments (real PHP itself doesn't require
@@ -529,8 +516,8 @@ pub struct Arg {
 /// element. `spread` is `true` for `...$other` (PHP's own array-unpacking
 /// syntax inside a literal, not the same construct as a call's own
 /// spread argument even though it shares the same `...` token) -
-/// Finding 48's own per-element shape inference (`infer_expr`'s
-/// `ArrayLiteral` arm) needs to know this to avoid treating a spread
+/// per-element shape inference (`infer_expr`'s `ArrayLiteral` arm)
+/// needs to know this to avoid treating a spread
 /// element's own expression as if it were meant to occupy one specific
 /// key: real PHP inserts a variable number of the spread value's own
 /// elements at that point, shifting every subsequent positional key by
@@ -606,7 +593,7 @@ pub enum UnaryOp {
 pub struct ClosureUse {
     pub name: String,
     pub by_ref: bool,
-    // Phase 17: the captured variable's own name span - lets a `use (&$x)`
+    // The captured variable's own name span - lets a `use (&$x)`
     // capture that auto-vivifies `$x` in the outer scope (see
     // `checker::calls::check_closure_literal_with_this_and_scope`'s sibling
     // write-back logic) declare a real, navigable definition site for it,
@@ -619,7 +606,7 @@ pub struct ClosureUse {
 // $className`, `$x instanceof $obj`) for a runtime-determined class.
 #[derive(Debug, Clone)]
 pub enum InstanceofTarget {
-    // Phase 17: the `Span` is the class-name token's own span - see
+    // The `Span` is the class-name token's own span - see
     // `FunctionDecl::name_span`'s own doc comment for why this differs
     // from `Instanceof`'s own (whole-expression) span.
     Name(String, Span),
@@ -710,7 +697,7 @@ pub enum ExprKind {
         is_static: bool,
         by_ref: bool,
         return_type: Option<String>,
-        // Phase 37: `#[Attr]` groups on the closure expression itself
+        // `#[Attr]` groups on the closure expression itself
         // (`$f = #[Foo] function () {};`), not on any of its parameters.
         attrs: Vec<Attribute>,
     },
@@ -719,7 +706,7 @@ pub enum ExprKind {
         body: Box<Expr>,
         is_static: bool,
         return_type: Option<String>,
-        // Phase 37: see `Closure.attrs` above.
+        // See `Closure.attrs` above.
         attrs: Vec<Attribute>,
     },
     Match {
