@@ -834,25 +834,18 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             }
         }
         // `interface-string`/`trait-string` (bare form): real PHPStan
-        // itself gives these **no** distinguishing semantics from bare
-        // `class-string` (`TypeNodeResolver.php` builds the identical
-        // untyped `ClassStringType()` for all three) - but that's not by
-        // itself a reason to skip real content verification in this
-        // project (explicit project decision: phpstan-rs is allowed to
-        // check things more strictly than real PHPStan does). `ClassInfo`
-        // already tracks exactly the distinction needed
+        // gives these no distinguishing semantics from bare
+        // `class-string`, but this project checks more strictly.
+        // `ClassInfo` already tracks the distinction needed
         // (`ClassKind::Interface`/`ClassKind::Trait`), so these route
-        // through `Type::ClassString` bound to one of this project's own
-        // internal `$$`-prefixed sentinel markers (the same convention
-        // already used for `$$valueof`/`$$covariant`/`$$contravariant`/
-        // `$$bivariant`) - `registry::is_assignable`'s `ClassString`
-        // arm special-cases these two sentinel names to check the
+        // through `Type::ClassString` bound to an internal `$$`-prefixed
+        // sentinel marker (same convention as `$$valueof`/`$$covariant`/
+        // etc.) - `registry::is_assignable`'s `ClassString` arm
+        // special-cases these two sentinel names to check the
         // candidate's real `ClassKind` instead of walking class
-        // hierarchy (see that file). No generic `<T>` form - real
-        // PHPStan has none for `trait-string` at all, and `interface-
-        // string<T>` would need the *same* class to be simultaneously a
-        // real interface and a subtype of `T`, a combination with no
-        // real corpus evidence calling for it.
+        // hierarchy. No generic `<T>` form: real PHPStan has none for
+        // `trait-string`, and `interface-string<T>` has no real corpus
+        // evidence calling for it.
         "interface-string" => Type::ClassString(Box::new(Type::Object(
             "$$interface".to_string(),
             Vec::new(),
@@ -864,8 +857,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // carries a real, template-bindable inner type when given one -
         // needed for `@template R of Base` / `@param class-string<R> $x`
         // shapes to bind `R` from a real `Foo::class` argument. A bare
-        // `class-string` (no `<T>`, the common case) has nothing to
-        // preserve and stays plain `String`, unchanged from before.
+        // `class-string` has nothing to preserve and stays plain
+        // `String`.
         "class-string" => match generic_args {
             [] => Type::String,
             [single] => Type::ClassString(Box::new(parse_type_string(single))),
@@ -874,58 +867,40 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "bool" | "boolean" => Type::Bool,
         "true" => Type::True,
         "false" => Type::False,
-        // Real, documented PHPStan/Psalm pseudo-types - without these
-        // they fell through to the generic-user-class branch below and
-        // got treated as a literal (nonsensical) class reference, the
-        // same failure mode this whole match arm already exists to avoid
-        // for its other keywords. `numeric` is an honest approximation
-        // of real PHPStan's own `int|float|numeric-string` - this
-        // project doesn't model numeric-string as a distinct literal-set
-        // from plain `string` anyway, so `string` is the closest fit.
+        // Real, documented PHPStan/Psalm pseudo-types. `numeric` is an
+        // honest approximation of real PHPStan's own
+        // `int|float|numeric-string`: this project doesn't model
+        // numeric-string as a distinct literal-set from plain `string`,
+        // so `string` is the closest fit.
         "array-key" => Type::Union(vec![Type::Int, Type::String]),
         "scalar" => Type::Union(vec![Type::Int, Type::Float, Type::String, Type::Bool]),
         "numeric" => Type::Union(vec![Type::Int, Type::Float, Type::String]),
         // A real, if untyped-at-the-language-level, PHP value kind
-        // (file/curl/... handles) that still appears constantly in real
-        // docblocks - represented the same way the native `object` hint
-        // is (a sentinel `Object`, not a real class), and given the same
-        // namespace-qualification exemption below for the same reason:
-        // "resource" isn't a real class reference to resolve per-file.
+        // (file/curl/... handles) - represented the same way the native
+        // `object` hint is (a sentinel `Object`, not a real class), with
+        // the same namespace-qualification exemption below: "resource"
+        // isn't a real class reference to resolve per-file.
         "resource" => Type::Object("resource".to_string(), Vec::new()),
         // `value-of<T>`/`key-of<T>` - real PHPStan's own
-        // `ValueOfType`/`KeyOfType`, both `LateResolvableType`s evaluated
-        // against `T`'s own resolved type only once actually needed. This
-        // project has no general lazy/deferred type-resolution mechanism
-        // (adding one would touch every exhaustive `match` over `Type`
-        // across the codebase, for a rarely-used feature) - `T` itself
-        // already parsing to a real `Array`/`ArrayShape` needs no registry
-        // access at all and is resolved immediately below (real PHPStan's
-        // own `key-of<T>` never special-cases an enum either, only
-        // `value-of<T>` does, confirmed directly against `KeyOfType::
-        // getResult()`/`ValueOfType::getResult()`).
-        //
-        // `T` naming a bare class/enum reference (no
-        // template args) is exactly real PHPStan's own `value-of<T>`-on-an-
-        // enum special case (`key-of<T>` on a class/enum has no real
-        // PHPStan special case at all - it just falls to `getIterableKeyType()`,
-        // `Mixed` for an ordinary class, so it's left unchanged below) -
-        // this one case genuinely needs registry access this parse-time
-        // function doesn't have, so it's encoded as a sentinel
-        // (`Type::Object("$$valueof", [Type::Object(name, [])])`) instead
-        // of guessed at here, resolved once real class/enum data exists by
-        // `Registry::resolve_deferred_value_of` (`registry.rs`) - the same
-        // "encode a special case via an existing variant, guarded by an
-        // impossible name" idiom `"resource"`/`"object"` above already
-        // use (`$` can never appear in a real PHP identifier, so this can
-        // never collide with a genuine class/enum/template-param/type-
-        // alias name anywhere else in the type tree).
+        // `ValueOfType`/`KeyOfType`, both evaluated against `T`'s
+        // resolved type only once needed. This project has no general
+        // lazy/deferred type-resolution mechanism, so `T` parsing to a
+        // real `Array`/`ArrayShape` (needing no registry access) is
+        // resolved immediately below; `T` naming a bare class/enum
+        // reference is real PHPStan's own `value-of<T>`-on-an-enum
+        // special case (`key-of<T>` has no such case) and genuinely
+        // needs registry access this parse-time function doesn't have,
+        // so it's encoded as a sentinel
+        // (`Type::Object("$$valueof", [Type::Object(name, [])])`),
+        // resolved later by `Registry::resolve_deferred_value_of` - the
+        // same "impossible name" idiom `"resource"`/`"object"` use
+        // (`$` can never appear in a real PHP identifier).
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 Type::Array(_, value) => *value,
-                // The unsealed-shape sentinel (`try_parse_array_shape`'s
-                // own doc comment) is never a real field - filtered out
-                // before counting/collecting, the same way `Registry::
-                // is_assignable`'s own `ArrayShape` arms already have to.
+                // The unsealed-shape sentinel is never a real field -
+                // filtered out before counting/collecting, the same way
+                // `registry::is_assignable`'s `ArrayShape` arms do.
                 Type::ArrayShape(fields) => {
                     let fields: Vec<_> = fields
                         .into_iter()
