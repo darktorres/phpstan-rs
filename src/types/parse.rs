@@ -180,19 +180,14 @@ fn split_top_level(s: &str, sep: char) -> Vec<&str> {
 
 /// PHPStan's own conditional return type syntax: `($param is SomeType ?
 /// TrueType : FalseType)` - real PHPStan evaluates this per call site,
-/// binding `$param`'s own actual argument; this project has no
-/// per-call-site type-expression evaluation at all. Previously, the
-/// DNF-group unwrap right above this function's own caller silently
-/// mis-parsed the whole expression as an ordinary intersection group,
-/// mangling it into nonsense (`$param`/`is`/etc. each getting treated as
-/// class-name fragments, then namespace-qualified into garbage like
-/// `Piwigo\Mail\$action`). Takes the safe, imprecise-but-correct answer
-/// instead: the union of both branches, matching "can't evaluate, don't
-/// guess which one" the same way this project's other unevaluable-
-/// expression leniency already works elsewhere. Requires the literal
-/// `is`/`?`/`:` tokens at the top level (`split_top_level`'s own
-/// bracket-depth tracking) so this never misfires on an ordinary DNF
-/// group, which has no ternary syntax at all.
+/// binding `$param`'s actual argument; this project has no per-call-site
+/// type-expression evaluation, so it must not let the DNF-group unwrap
+/// above this function's caller mis-parse the whole expression as an
+/// ordinary intersection group (mangling `$param`/`is`/etc. into
+/// namespace-qualified garbage). Takes the safe answer instead: the
+/// union of both branches. Requires the literal `is`/`?`/`:` tokens at
+/// the top level (`split_top_level`'s bracket-depth tracking) so this
+/// never misfires on an ordinary DNF group, which has no ternary syntax.
 fn try_parse_conditional_type(s: &str) -> Option<Type> {
     let q_parts = split_top_level(s, '?');
     let [cond, branches] = q_parts.as_slice() else {
@@ -215,11 +210,8 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     let if_true = parse_type_string(true_branch);
     let if_false = parse_type_string(false_branch);
     // Only a bare `$param` subject is modeled (real PHPStan also allows a
-    // non-parameter type-expression subject, e.g. a template name, which
-    // this project doesn't represent) - fall back to the same eager
-    // union this parser always produced before `Type::Conditional`
-    // existed, the correct "can't resolve, don't guess" default for that
-    // unmodeled shape.
+    // non-parameter type-expression subject, e.g. a template name) -
+    // fall back to the eager union for that unmodeled shape.
     let Some(subject) = subject_raw.trim().strip_prefix('$') else {
         return Some(if if_true == if_false {
             if_true
@@ -236,18 +228,14 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     })
 }
 
-/// `array{name: string, age?: int}` - PHPDoc's structural array shape.
-/// Field values can themselves be full type strings (unions, generics,
-/// nested shapes), so each is re-run through `parse_type_string`.
 /// `try_parse_array_shape`'s own field accumulator - overwrites an
 /// already-present field with the same key in place (last-one-wins),
-/// rather than blindly appending a second entry under the same key,
-/// matching real PHPStan's own `ConstantArrayTypeBuilder::setOffsetValueType`
-/// (a later `setOffsetValueType` call for an already-seen key always
-/// replaces it, never duplicates it). A real, reachable shape without
-/// this: an explicit `0:` field colliding with an earlier *positional*
+/// matching real PHPStan's own
+/// `ConstantArrayTypeBuilder::setOffsetValueType` (a later call for an
+/// already-seen key always replaces it, never duplicates it). Reachable
+/// via an explicit `0:` field colliding with an earlier *positional*
 /// field's own auto-numbered index (`array{int, 0: string}`), or a
-/// literal duplicate key written twice (`array{1: int, 1: string}`).
+/// literal duplicate key (`array{1: int, 1: string}`).
 fn push_shape_field(fields: &mut Vec<(String, Type, bool)>, key: String, ty: Type, optional: bool) {
     match fields.iter_mut().find(|(k, _, _)| *k == key) {
         Some(field) => *field = (key, ty, optional),
@@ -255,6 +243,9 @@ fn push_shape_field(fields: &mut Vec<(String, Type, bool)>, key: String, ty: Typ
     }
 }
 
+/// `array{name: string, age?: int}` - PHPDoc's structural array shape.
+/// Field values can themselves be full type strings (unions, generics,
+/// nested shapes), so each is re-run through `parse_type_string`.
 fn try_parse_array_shape(s: &str) -> Option<Type> {
     let lower = s.to_ascii_lowercase();
     if !lower.starts_with("array") {
@@ -276,35 +267,24 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
         // PHPStan/Psalm's "unsealed shape" marker (`...<string, mixed>`
         // or bare `...`) says the array may carry other, unlisted keys
         // too. Recorded as a sentinel field (`"..."`, impossible to
-        // collide with any real key this same grammar could ever parse -
-        // `looks_like_shape_key` only ever accepts a bare integer, a
-        // quoted string, or a bare-identifier-shaped token, never three
-        // literal dots) rather than the value's own type, which this
-        // project doesn't attempt to track precisely for the unsealed
-        // portion (`Type::Mixed`, matching a plain `array`'s own
-        // unknown-value-type default) - `is_unsealed_shape`/
-        // `narrowing::narrow_array_shape_by_key_presence`'s own doc
-        // comment cover how this gets consumed. Previously silently
-        // discarded entirely (found the hard way: `?` below used to
-        // propagate this field's missing `:` into failing the ENTIRE
-        // shape parse, silently falling through to treating the whole
-        // `array{...}` text as a literal, then namespace-mangled, class
-        // name - degrading just this one field, rather than aborting
-        // every other real field alongside it, is still the right
-        // choice, just no longer a silent no-op once degraded).
+        // collide with any real key this grammar could parse) rather
+        // than tracking the unsealed portion's value type precisely
+        // (`Type::Mixed`, matching a plain `array`'s unknown-value-type
+        // default) - see `is_unsealed_shape`/
+        // `narrowing::narrow_array_shape_by_key_presence` for how this
+        // gets consumed.
         if field_str.starts_with("...") {
             fields.push(("...".to_string(), Type::Mixed, false));
             continue;
         }
-        // A *positional* (unkeyed) field
-        // (`array{int, string}`, real PHPStan/Psalm tuple syntax) has no
-        // `key:` prefix at all - `split_once(':')` alone can't tell that
-        // apart from a keyed field whose own type happens to contain a
-        // colon (`Closure(int): string`), so `looks_like_shape_key` also
-        // checks that whatever comes before the candidate colon is
-        // actually shaped like a key before trusting the split. Numbers
-        // a positional field the same way `infer_array_literal_type`
-        // numbers a real array literal's own positional elements, so a
+        // A *positional* (unkeyed) field (`array{int, string}`, real
+        // PHPStan/Psalm tuple syntax) has no `key:` prefix - `split_once
+        // (':')` alone can't tell that apart from a keyed field whose
+        // type happens to contain a colon (`Closure(int): string`), so
+        // `looks_like_shape_key` also checks that whatever precedes the
+        // candidate colon is actually shaped like a key. Numbers a
+        // positional field the same way `infer_array_literal_type`
+        // numbers a real array literal's positional elements, so a
         // doc-declared shape and a real literal's inferred shape end up
         // structurally identical.
         let keyed = field_str
