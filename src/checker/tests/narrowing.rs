@@ -3,10 +3,8 @@
 use super::super::*;
 use super::helpers::*;
 
-// Phase 32 Finding K, real shape: `ImageDerivativeController::
-// parseRequest`'s `$pos = strrpos($req, '.'); $pos !== false ||
-// $this->ierror('Missing .', 400); $ext = substr($req, $pos);` -
-// `ierror(): never` is a real PHP `never` return type.
+// `$pos !== false || $this->ierror('Missing .');` where `ierror()`
+// has a real PHP `never` return type.
 #[test]
 fn a_bare_or_statement_with_a_never_returning_right_side_narrows_the_left() {
     let d = diagnostics_for(
@@ -49,13 +47,11 @@ fn a_bare_or_statement_does_not_narrow_when_the_right_side_isnt_never() {
     );
 }
 
-// Real shape: `Piwigo\Tag\TagService::getTagIds(string|array<string>
-// $rawTags, ...)`: `if (! is_array($rawTags)) { $rawTags =
-// explode(',', $rawTags); }` - `is_array()`'s registered target is
-// generic `Type::Array(Mixed)`; the specific-element `Array(String)`
-// member used to survive the exclusion untouched (`Array(String) !=
-// Array(Mixed)`), keeping the full `string|array<string>` type going
-// into `explode()`'s plain-`string` argument.
+// `is_array()`'s registered target is generic `Type::Array(Mixed)`;
+// excluding it must also exclude a specific-element `Array(String)`
+// member, not just an exact `Array(Mixed)` match, or the full
+// `string|array<string>` type would still flow into `explode()`'s
+// plain-`string` argument.
 #[test]
 fn is_array_false_branch_excludes_a_specific_element_array_member_too() {
     let d = diagnostics_for(
@@ -72,12 +68,9 @@ fn is_array_false_branch_excludes_a_specific_element_array_member_too() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real shape: `Piwigo\Section\SectionInitializer::parse()`'s
-// `$rewritten = is_string($rewritten) ? $rewritten : '';` then
-// `str_replace('//', '/', $rewritten)` - the ternary's own
-// `union_types(String, StringLiteral(""))` used to keep both members,
-// so `$rewritten` never matched `str_replace`'s subject-narrowing
-// `== Type::String` check again.
+// A ternary's own `union_types(String, StringLiteral(""))` must
+// collapse to plain `String`, or `$rewritten` would never match
+// `str_replace`'s subject-narrowing `== Type::String` check again.
 #[test]
 fn str_replace_narrows_a_subject_built_from_a_ternarys_string_and_string_literal_branches() {
     let d = diagnostics_for(
@@ -92,12 +85,10 @@ fn str_replace_narrows_a_subject_built_from_a_ternarys_string_and_string_literal
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// The false-branch side of Phase 28's `is_scalar` special case was
-// outright broken with no diagnostic in this corpus surfacing it:
-// `narrow_type_excluding(current, is_scalar's 4-member target)`
-// filtered via `*m != excluded`, and no real member is ever
-// structurally equal to the whole 4-member union, so `!is_scalar($x)`
-// never excluded anything, silently.
+// `narrow_type_excluding` must exclude each of `is_scalar`'s 4-member
+// target individually, not filter by exact structural equality against
+// the whole union - no real member is ever equal to the whole 4-member
+// union, so `!is_scalar($x)` would never exclude anything.
 #[test]
 fn is_scalar_false_branch_actually_excludes_the_scalar_members() {
     let d = diagnostics_for(
@@ -114,10 +105,9 @@ fn is_scalar_false_branch_actually_excludes_the_scalar_members() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// `apply_phpunit_assertion_narrowing` (Phase 27) shares the exact same
-// bug as `is_array()` above, found via this finding's own caller
-// audit: `assertIsArray($x)` with `$x: array<string>|int` used to
-// fall back to the imprecise generic `array` for the same reason.
+// `apply_phpunit_assertion_narrowing` shares the same requirement as
+// `is_array()` above: `assertIsArray($x)` with `$x: array<string>|int`
+// must keep the specific element type, not fall back to generic `array`.
 #[test]
 fn assert_is_array_keeps_a_specific_element_type_not_the_generic_array() {
     let d = diagnostics_for(
@@ -191,21 +181,16 @@ fn is_string_narrowing_catches_misuse_inside_the_guarded_branch() {
 
 #[test]
 fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
-    // Phase 12 item 6: widened narrowing_type_for_predicate's table
-    // to is_callable, the one predicate from the roadmap's own list
-    // that actually fits this mechanism (a single-arg call narrowing
-    // a bare variable to one concrete Type). The others on that list
-    // (class_exists/function_exists/in_array/array_key_exists/
-    // method_exists/property_exists) are all real PHP predicates but
-    // don't fit this table at all - they're either 2-arg calls (this
-    // project's narrowing only matches a single-arg predicate call)
-    // or don't narrow a *value's type* the way is_string/is_array/etc.
-    // do, so they were deliberately not force-fit here. method_exists/
-    // property_exists later got their own, structurally different
-    // mechanism instead (Locals::guarded_methods/guarded_properties,
-    // mirroring guarded_functions - see the tests below), since they
-    // assert an independent capability fact about the receiver rather
-    // than narrowing its own type.
+    // `is_callable` fits `narrowing_type_for_predicate`'s table: a
+    // single-arg call narrowing a bare variable to one concrete Type.
+    // Other predicates like `class_exists`/`function_exists`/
+    // `in_array`/`array_key_exists` don't fit - they're either 2-arg
+    // calls or don't narrow a value's type the way `is_string`/
+    // `is_array` do. `method_exists`/`property_exists` instead use a
+    // structurally different mechanism (`Locals::guarded_methods`/
+    // `guarded_properties`, mirroring `guarded_functions` - see the
+    // tests below), since they assert an independent capability fact
+    // about the receiver rather than narrowing its own type.
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $x): int { return $x; }
@@ -221,13 +206,10 @@ fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
     assert!(d[0].message.contains("needsInt"), "got: {d:?}");
 }
 
-// ROADMAP "Known but not yet scheduled": real PHPStan's own
-// `MethodExistsTypeSpecifyingExtension`/`PropertyExistsTypeSpecifyingExtension`
-// (`Accessory\HasMethodType`/`HasPropertyType`) - real corpus false
-// positive this fixes: Piwigo's own `ImageBackend::destroy()`
-// (`if (method_exists($image, 'destroy')) { $image->destroy(); }`,
-// `$image`'s declared `ImageInterface` type never declares `destroy()`
-// at all).
+// Mirrors real PHPStan's own `MethodExistsTypeSpecifyingExtension`
+// (`Accessory\HasMethodType`): `if (method_exists($image, 'destroy'))
+// { $image->destroy(); }` must not flag a call to a method not on the
+// receiver's own declared type.
 #[test]
 fn method_exists_guards_a_call_to_a_method_not_on_the_declared_type() {
     let d = diagnostics_for(
@@ -350,11 +332,10 @@ fn method_exists_guard_from_only_one_branch_does_not_survive_the_merge() {
     );
 }
 
-// Phase 28, real shape: `proc_open()`/`fsockopen()` return
-// `resource|false`, and this corpus's test helpers guard every one of
-// them with `if (! is_resource($x)) { throw ...; }` before
-// `fclose`/`fwrite`/`fread`/`proc_close`/etc. - `is_resource` was
-// simply missing from `narrowing_type_for_predicate`'s table.
+// `proc_open()`/`fsockopen()` return `resource|false`, and code
+// commonly guards them with `if (! is_resource($x)) { throw ...; }`
+// before `fclose`/`fwrite`/`fread`/`proc_close`/etc. - `is_resource`
+// must be in `narrowing_type_for_predicate`'s table.
 #[test]
 fn is_resource_narrowing_excludes_false() {
     let d = diagnostics_for(
@@ -394,12 +375,9 @@ fn is_scalar_narrows_to_the_four_scalar_types() {
     assert!(d[0].message.contains("needsInt"), "got: {d:?}");
 }
 
-// Phase 13 Finding B: real shape from
-// `SectionPopulator::computeMetaRobots`'s own
-// `is_countable($page_tag_ids) and count($page_tag_ids) > 1` -
 // `count()` on anything but `array|Countable` is a real PHP 8+
-// `TypeError`, and `is_countable` wasn't in
-// `narrowing_type_for_predicate` at all.
+// `TypeError`, so `is_countable` must narrow via
+// `narrowing_type_for_predicate` before a following `count()` call.
 #[test]
 fn is_countable_narrows_a_possibly_null_value_before_count() {
     let d = diagnostics_for(
@@ -432,8 +410,8 @@ fn is_countable_false_branch_excludes_array_and_countable() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 14 Task 6: narrowing sources for the new refinement types,
-// each verified against real PHPStan's own dumpType().
+// Narrowing sources for the accessory refinement types, each verified
+// against real PHPStan's own dumpType().
 #[test]
 fn not_equal_empty_string_narrows_to_non_empty_string() {
     let d = diagnostics_for(
@@ -451,10 +429,9 @@ fn not_equal_empty_string_narrows_to_non_empty_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found `$x !== []` (the array
-// equivalent of the string idiom just above) was never handled at
-// all - `is_known_single_value` didn't recognize an empty array
-// literal as exhaustively single-valued the way it already does a
+// `$x !== []` (the array equivalent of the string idiom just above)
+// needs `is_known_single_value` to recognize an empty array literal
+// as exhaustively single-valued, the same way it already does a
 // literal string/int - verified against real PHPStan's own
 // dumpType() for both a plain array and an already-list-typed value.
 #[test]
@@ -587,14 +564,11 @@ fn count_greater_than_zero_narrows_to_non_empty_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`SiteUpdateSubController::handle`): `upgrade_array_to_non_
-// empty` had no `Type::Union` arm at all, so a loop-built array whose
-// own type is a real `Union` including an empty-`ArrayShape`
-// alternative (this session's own `LoopZeroIterations` fix: the loop
-// might never have run, leaving the array at its pre-loop `[]`) fell
-// straight to `_ => ty.clone()`, silently *not* stripping that
-// alternative out even though `count($x) > 0` disproves it outright.
+// `upgrade_array_to_non_empty` needs a `Type::Union` arm: a loop-built
+// array whose type is a `Union` including an empty-`ArrayShape`
+// alternative (the loop might never have run, leaving the array at its
+// pre-loop `[]`) must have that alternative stripped once
+// `count($x) > 0` disproves it, not fall through unchanged.
 #[test]
 fn count_greater_than_zero_narrows_a_union_with_an_empty_shape_alternative() {
     let d = diagnostics_for(
@@ -615,11 +589,10 @@ fn count_greater_than_zero_narrows_a_union_with_an_empty_shape_alternative() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus find (Piwigo's own `ImageDerivativeController::
-// parseCustomParams`): `if (count($x) < 1) { neverReturns(); }` (a real,
-// `never`-typed early-exit idiom) proves the exact same "`$x` is non-
-// empty" fact on the surviving path as the direct `count($x) > 0` form
-// above - just phrased as the *false* branch of the mirrored comparison.
+// `if (count($x) < 1) { bail(); }` (a `never`-typed early-exit idiom)
+// proves the exact same "`$x` is non-empty" fact on the surviving path
+// as the direct `count($x) > 0` form above - just phrased as the false
+// branch of the mirrored comparison.
 #[test]
 fn count_less_than_one_in_a_terminating_branch_narrows_to_non_empty_array() {
     let d = diagnostics_for(
@@ -694,9 +667,9 @@ fn reversed_count_comparison_in_a_terminating_branch_narrows_to_non_empty_array(
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 55: a bare `count($x)` truthiness check (no explicit `> 0`/
-// `>= 1` comparison) - the same "provably non-empty" fact the
-// comparison form above already proves.
+// A bare `count($x)` truthiness check (no explicit `> 0`/`>= 1`
+// comparison) - the same "provably non-empty" fact the comparison form
+// above already proves.
 #[test]
 fn a_bare_count_truthiness_check_narrows_to_non_empty_array() {
     let d = diagnostics_for(
@@ -719,8 +692,8 @@ fn a_bare_count_truthiness_check_narrows_to_non_empty_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 55's own still-open list: `array_is_list($x)` - a real,
-// webmozart/assert-style `is_array($x) && array_is_list($x)` idiom.
+// `array_is_list($x)` - a common `is_array($x) && array_is_list($x)`
+// idiom.
 
 #[test]
 fn array_is_list_narrows_to_a_real_list() {
@@ -774,8 +747,8 @@ fn failing_array_is_list_proves_nothing_more_specific() {
     );
 }
 
-// Phase 55's own still-open list: `str_contains`/`str_starts_with`/
-// `str_ends_with` with a non-empty literal needle - real PHPStan's own
+// `str_contains`/`str_starts_with`/`str_ends_with` with a non-empty
+// literal needle, mirroring real PHPStan's own
 // `StrContainingTypeSpecifyingExtension`.
 
 #[test]
@@ -836,8 +809,8 @@ fn str_contains_with_a_literal_zero_needle_narrows_to_non_empty_not_non_falsy() 
 
 #[test]
 fn str_contains_composes_with_a_negated_guard_clause() {
-    // The exact real-corpus idiom: `if (!str_contains($x, 'foo')) {
-    // return; }` - only the code past the guard should see the upgrade.
+    // `if (!str_contains($x, 'foo')) { return; }` - only the code past
+    // the guard should see the upgrade.
     let d = diagnostics_for(
         r#"<?php
             /** @param non-falsy-string $x */
@@ -896,9 +869,8 @@ fn a_guard_clause_on_a_negated_bare_count_still_narrows_past_it() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 55: the trivial `is_iterable()` quick win named explicitly in
-// the roadmap's own phase text - narrows to `array|Traversable`, real
-// PHP's own native `iterable` type hint's own definition.
+// `is_iterable()` narrows to `array|Traversable`, real PHP's own
+// native `iterable` type hint's own definition.
 #[test]
 fn is_iterable_narrows_a_mixed_typed_value_to_array_or_traversable() {
     let d = diagnostics_for(
@@ -914,18 +886,12 @@ fn is_iterable_narrows_a_mixed_typed_value_to_array_or_traversable() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 55: a real corpus check on this same phase's own `is_iterable`
-// addition found a much bigger, general, pre-existing gap: a fully-
-// qualified predicate call (`\is_array($x)`, real, common defensive-
-// global-namespace style pervasive in Rector-prefixed vendor code) kept
-// its leading backslash in `ExprKind::Name`, and every name comparison
-// in `apply_narrowing`'s own dispatch was a bare string equality with
-// no normalization - unlike ordinary call resolution (`name_ctx::
-// resolve_function_candidates`), which already handles this correctly
-// elsewhere. Real shape: symfony/type-info's own `TypeFactoryTrait::
-// fromValue` narrowing `mixed $value` via `is_iterable($value)` then
-// `\is_array($value)` - the second, backslash-prefixed check silently
-// failed to narrow further at all.
+// A fully-qualified predicate call (`\is_array($x)`, a common
+// defensive-global-namespace style) keeps its leading backslash in
+// `ExprKind::Name`, so `apply_narrowing`'s own dispatch must normalize
+// it before the bare string comparison, unlike ordinary call resolution
+// (`name_ctx::resolve_function_candidates`), which already handles
+// this correctly elsewhere.
 #[test]
 fn a_fully_qualified_predicate_call_still_narrows() {
     let d = diagnostics_for(
@@ -984,11 +950,9 @@ fn is_numeric_false_branch_leaves_a_string_unchanged() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Phase 52's own corpus check (`NumberComparator::__construct`) found
-// this exact shape genuinely unflagged: `is_numeric()`'s upgrade must
-// stack onto an already-refined string (`non-empty-string` here, e.g.
-// from a preg_match() capture group), not silently no-op just because
-// it wasn't a bare `string`.
+// `is_numeric()`'s upgrade must stack onto an already-refined string
+// (`non-empty-string` here, e.g. from a `preg_match()` capture group),
+// not silently no-op just because it wasn't a bare `string`.
 #[test]
 fn is_numeric_upgrades_an_already_non_empty_string_to_numeric_string_too() {
     let d = diagnostics_for(
@@ -1051,19 +1015,16 @@ fn instanceof_narrows_to_the_checked_class_in_a_namespaced_file() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found instanceof's own true
-// branch unconditionally replaced the checked variable's type with
-// just the target class/interface, discarding whatever it was
-// already known to be - correct for the common down-cast (a known
-// parent narrowed to a known child) or nullable-narrowing (?Foo
-// narrowed to Foo) shape, but wrong when the target is an unrelated
-// *sibling* interface: real Piwigo code (Template\Renderer::render)
-// takes a single `View $view` parameter through three independent,
-// sequential `if ($view instanceof SomeOtherInterface)` checks -
-// each one was discarding the fact that `$view` is still a `View`,
-// so a later use of `$view` as a plain `View` (unconditionally,
-// after all three checks) saw a nonsensical accumulated union of
-// bare, unrelated interfaces instead.
+// `instanceof`'s true branch must not unconditionally replace the
+// checked variable's type with just the target class/interface,
+// discarding whatever it was already known to be - correct for the
+// common down-cast (a known parent narrowed to a known child) or
+// nullable-narrowing (`?Foo` narrowed to `Foo`) shape, but wrong when
+// the target is an unrelated sibling interface: a parameter passing
+// through several independent, sequential `if ($x instanceof
+// SomeOtherInterface)` checks must still be usable as its original
+// type afterward, not collapse into a nonsensical accumulated union of
+// bare, unrelated interfaces.
 #[test]
 fn instanceof_against_an_unrelated_interface_keeps_the_original_type_too() {
     let d = diagnostics_for(
@@ -1098,15 +1059,13 @@ fn instanceof_against_an_unrelated_interface_also_narrows_to_the_new_interface()
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session, and the highest-impact instance
-// of this project's own Union/Intersection anti-pattern found so far:
-// the `MethodCall` case just above only ever exercises `check_expr`'s
-// own separate MethodCall arm (diagnostics/narrowing purposes) - a
-// *different*, parallel implementation in `infer_expr` (the core type-
-// *inference* path, used whenever a method call's own return type needs
-// computing without also running full diagnostics) had the identical
-// `Object`/`EnumCase`-only match with no `Union`/`Intersection` case,
-// silently collapsing the whole call's return type to `Type::Mixed`.
+// The `MethodCall` case just above only exercises `check_expr`'s own
+// separate MethodCall arm (diagnostics/narrowing purposes) -
+// `infer_expr` (the core type-*inference* path, used whenever a method
+// call's own return type needs computing without also running full
+// diagnostics) needs the identical `Union`/`Intersection` handling too,
+// or it silently collapses the whole call's return type to
+// `Type::Mixed`.
 #[test]
 fn a_method_call_on_an_intersection_receiver_infers_its_real_return_type() {
     let d = diagnostics_for(
@@ -1126,21 +1085,15 @@ fn a_method_call_on_an_intersection_receiver_infers_its_real_return_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session, discovered via a real corpus
-// false positive `method_call_return_type`'s own Intersection fix
-// (immediately above) newly made reachable: `narrow_instanceof_true`
-// always builds `Intersection([original_type, target_type])` - the
-// broader, pre-existing type first, the just-`instanceof`-checked,
-// narrower type last. Searching members in that same (forward) order
-// meant a same-named method declared on *both* the broader original
-// type and the narrower target resolved to the broader type's own
-// (possibly less precise) signature first - real corpus shape:
-// `Rector\Php54\...\RemoveZeroBreakContinueRector`'s own `$staticType
-// instanceof ConstantIntegerType`, where a shared `PHPStan\Type\Type`-
-// family method the narrower type itself overrides more precisely was
-// found on the broader interface first, producing a bogus argument-type
-// mismatch. Fixed by searching `Intersection` members in reverse - the
-// narrower, just-checked type is always last, so it's now checked first.
+// `narrow_instanceof_true` always builds `Intersection([original_type,
+// target_type])` - the broader, pre-existing type first, the
+// just-`instanceof`-checked, narrower type last. Member lookup must
+// search in reverse order, checking the narrower, just-checked type
+// first: searching forward would let a same-named method declared on
+// both the broader original type and the narrower target resolve to
+// the broader type's own possibly-less-precise signature, producing a
+// bogus argument-type mismatch when the narrower type overrides it
+// more precisely.
 #[test]
 fn a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own_override() {
     let d = diagnostics_for(
@@ -1158,21 +1111,19 @@ fn a_method_declared_on_both_intersection_members_prefers_the_narrower_types_own
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session, in `check_expr`'s own separate
-// `MethodCall` arm this time (not `infer_expr`'s, fixed just above) -
-// its own `recv_class` extraction was *also* used to resolve the
-// method's real signature/owner for argument-type checking and
-// visibility/`@internal`/`@deprecated`, using a plain "first Object/
-// EnumCase member, regardless of whether it actually declares the
-// method" pick (kept, correctly, for the separate existence-check gate,
-// but wrongly reused here too). `assertType` alone can't observe this -
-// it reads `infer_expr`'s own result, not `check_expr`'s - so this test
-// instead checks a `check_expr`-only side effect: a same-named method
-// declared on *both* intersection members with *different* visibility.
-// `HasValue::value()` (the narrower, correctly-preferred member) is
-// private; `View::value()` (the broader, previously wrongly-preferred
-// member) is public - the bug silently allowed the call by resolving
-// against `View`'s own public declaration instead.
+// `check_expr`'s own separate `MethodCall` arm (not `infer_expr`'s,
+// covered just above) - `check_expr`'s own `recv_class` extraction is
+// also used to resolve
+// the method's real signature/owner for argument-type checking and
+// visibility/`@internal`/`@deprecated` - it must prefer the narrower,
+// just-checked member over the broader one, the same reverse-search
+// requirement as `infer_expr` above. `assertType` alone can't observe
+// this - it reads `infer_expr`'s own result, not `check_expr`'s - so
+// this test instead checks a `check_expr`-only side effect: a
+// same-named method declared on both intersection members with
+// different visibility. `HasValue::value()` (the narrower, correctly-
+// preferred member) is private; `View::value()` (the broader member)
+// is public.
 #[test]
 fn a_method_call_through_an_intersection_checks_visibility_against_the_narrower_types_own_override()
 {
@@ -1214,23 +1165,16 @@ fn a_method_call_on_a_union_of_two_classes_unions_their_return_types() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session: `check_expr`'s/`infer_expr`'s
-// own `PropertyAccess` arms matched `Object`/`EnumCase`/`ObjectShape`
-// directly with no `Union`/`Intersection` arm at all, so a *property*
-// access (unlike the `MethodCall` case just above, which already handled
-// this) on the exact same kind of `View&HasPageAssets` intersection fell
-// straight to `Type::Mixed`. Real corpus false positive this traces to:
-// `PhpParser\Node\Stmt\ClassMethod::$stmts` resolving to bare `Mixed`
-// the moment its receiver was narrowed via `instanceof` from the
-// `PhpParser\Node` interface (PhpParser's own AST routes every concrete
-// node type through an interface this way, not a common base class).
+// `check_expr`'s/`infer_expr`'s own `PropertyAccess` arms need a
+// `Union`/`Intersection` arm, not just `Object`/`EnumCase`/`ObjectShape`
+// - a property access (unlike the `MethodCall` case just above) on the
+// same kind of `View&HasPageAssets` intersection must not fall
+// straight to `Type::Mixed` just because the receiver was narrowed via
+// `instanceof` from an interface.
 #[test]
 fn instanceof_against_an_unrelated_class_also_resolves_a_property_on_the_intersection() {
-    // Interfaces can't declare properties in real PHP, so the property-
-    // bearing side here is a plain, otherwise-unrelated class - matching
-    // the real bug's own shape exactly (`PhpParser\Node`, an interface,
-    // narrowed via `instanceof PhpParser\Node\Stmt\ClassMethod`, a class
-    // with its own real `$stmts` property).
+    // Interfaces can't declare properties in real PHP, so the
+    // property-bearing side here is a plain, otherwise-unrelated class.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -1246,10 +1190,10 @@ fn instanceof_against_an_unrelated_class_also_resolves_a_property_on_the_interse
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real refinement made this session: a `Union`-typed property access
-// used the same "first member found wins" shortcut correct for an
-// `Intersection`, but wrong for a `Union` - the value is only ever *one*
-// of `A`/`B` at a time, so two members declaring the property with
+// A `Union`-typed property access needs different handling than an
+// `Intersection`'s "first member found wins" shortcut - the value is
+// only ever one of `A`/`B` at a time, so two members declaring the
+// property with
 // different types genuinely means the read's own type is the union of
 // both, not just whichever member happened to come first.
 #[test]
@@ -1267,16 +1211,13 @@ fn a_property_read_through_a_union_of_two_classes_unions_their_declared_types() 
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session, immediately after the one
-// above: the visibility/`@internal`/`@deprecated` checks right next to
-// the type-resolution fix also matched `Type::Object` directly, with no
-// `Union`/`Intersection` case, silently skipping the check entirely for
-// either shape - unlike `MethodCall`'s own identical checks, which
-// already extract a representative class from a `Union`/`Intersection`
-// receiver. Deliberately verifies the property lives on the *second*
-// intersection member (`Foo`, not the first-checked `View`) - a plain
-// "first Object member found" shortcut (the one `MethodCall` itself
-// settles for) would still miss this.
+// The visibility/`@internal`/`@deprecated` checks need a `Union`/
+// `Intersection` case too, not just `Type::Object` directly, matching
+// `MethodCall`'s own identical checks, which already extract a
+// representative class from a `Union`/`Intersection` receiver.
+// Deliberately verifies the property lives on the second intersection
+// member (`Foo`, not the first-checked `View`) - a plain "first Object
+// member found" shortcut would still miss this.
 #[test]
 fn instanceof_against_an_unrelated_class_still_flags_a_private_property_on_the_intersection() {
     let d = diagnostics_for(
@@ -1300,13 +1241,12 @@ fn instanceof_against_an_unrelated_class_still_flags_a_private_property_on_the_i
 }
 
 // The write-side counterpart of the test above: `check_property_
-// assignment` (`checker/assignment.rs`) had the identical bug - required
-// the target's own type to be literally `Type::Object`, silently
-// skipping *every* one of its checks (visibility, readonly, `@internal`/
-// `@deprecated`, and the assigned value's own type) for a `Union`/
-// `Intersection`-typed target instead. Both the visibility violation and
-// the type mismatch are checked in one test since both come from the
-// same now-fixed early-return.
+// assignment` (`checker/assignment.rs`) needs the same `Union`/
+// `Intersection` handling, or it silently skips every one of its checks
+// (visibility, readonly, `@internal`/`@deprecated`, and the assigned
+// value's own type) for such a target. Both the visibility violation
+// and the type mismatch are checked in one test since both come from
+// the same code path.
 #[test]
 fn instanceof_against_an_unrelated_class_still_checks_a_write_to_a_property_on_the_intersection() {
     let d = diagnostics_for(
@@ -1333,15 +1273,13 @@ fn instanceof_against_an_unrelated_class_still_checks_a_write_to_a_property_on_t
     );
 }
 
-// Real corpus false positive: amphp/http-client's own `Http1Connection::
-// watchIdleConnection()` - a *nullable* property/variable checked against
-// an unrelated interface. `?Socket instanceof ResourceStream` used to
-// fall all the way through to "just trust the checked class" (losing
-// `Socket` entirely, not merely its own nullability) because `is_object_
-// like` rejected the whole still-nullable `Union([Socket, Null])`
-// outright - `null` needs dropping first (a true `instanceof` can never
-// itself be `null`), not treated as disqualifying the rest of the union
-// from being object-like.
+// A nullable property/variable checked against an unrelated interface:
+// `?Socket instanceof ResourceStream` must not fall all the way through
+// to "just trust the checked class" (losing `Socket` entirely, not
+// merely its own nullability) just because `is_object_like` sees the
+// still-nullable `Union([Socket, Null])` - `null` needs dropping first
+// (a true `instanceof` can never itself be `null`), not treated as
+// disqualifying the rest of the union from being object-like.
 #[test]
 fn instanceof_against_an_unrelated_interface_on_a_nullable_type_keeps_the_original_type_too() {
     let d = diagnostics_for(
@@ -1385,13 +1323,12 @@ fn instanceof_true_on_a_provably_non_object_type_does_not_build_a_nonsense_inter
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real shape: Template\Renderer::render's own three independent,
-// sequential instanceof checks on the same View $view parameter -
-// after the first check's own if/no-else merge turns $view into a
-// real Union of object-like branches, a *second* instanceof check
-// against an unrelated interface must still combine correctly, not
-// fall back to bare-trust-the-target the moment current stops being
-// a single plain Object.
+// Three independent, sequential `instanceof` checks on the same
+// parameter: after the first check's own if/no-else merge turns the
+// variable into a real Union of object-like branches, a second
+// `instanceof` check against an unrelated interface must still combine
+// correctly, not fall back to bare-trust-the-target the moment current
+// stops being a single plain Object.
 #[test]
 fn a_second_independent_instanceof_check_still_combines_after_the_first_ones_own_merge() {
     let d = diagnostics_for(
@@ -1436,7 +1373,6 @@ fn instanceof_narrowing_down_a_class_hierarchy_still_replaces_the_type_entirely(
 
 #[test]
 fn instanceof_false_branch_drops_the_checked_class_from_a_union() {
-    // Phase 33 Finding 1: BrowserTestHelpers::dbEscape's real shape.
     let d = diagnostics_for(
         r#"<?php
             class Mysqli {}
@@ -1487,16 +1423,14 @@ fn instanceof_false_branch_against_an_unrelated_class_leaves_the_type_untouched(
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive: `Symfony\Component\Messenger\MessageBus::
-// dispatch()`'s own `while ($x instanceof IteratorAggregate) { $x = $x->
-// getIterator(); }` - PHP's own `Traversable` is a marker interface
-// userland code can never implement directly, only through one of its
-// exactly two direct subinterfaces (`Iterator`, `IteratorAggregate`), so
-// excluding one after the loop structurally proves the other. Before this
-// fix, `narrow_type_excluding` had no special case for this relationship
-// at all, leaving the loop-exit type bare `Traversable` (which declares
-// no methods of its own) and wrongly flagging every one of `rewind()`/
-// `valid()`/`current()` as undefined.
+// `while ($x instanceof IteratorAggregate) { $x = $x->getIterator(); }`
+// - PHP's own `Traversable` is a marker interface userland code can
+// never implement directly, only through one of its exactly two direct
+// subinterfaces (`Iterator`, `IteratorAggregate`), so `narrow_type_
+// excluding` needs a special case: excluding one after the loop
+// structurally proves the other, and the loop-exit type must not stay
+// bare `Traversable` (which declares no methods of its own), wrongly
+// flagging every one of `rewind()`/`valid()`/`current()` as undefined.
 #[test]
 fn a_while_loop_excluding_iterator_aggregate_narrows_traversable_to_iterator() {
     let d = diagnostics_for(
@@ -1515,14 +1449,12 @@ fn a_while_loop_excluding_iterator_aggregate_narrows_traversable_to_iterator() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`PictureModifyPageRenderer::render`): `in_array_target_type`
-// required *every* haystack element to be a plain `ExprKind::Literal`,
-// so a haystack mixing literals with a bare empty-array literal (`[]`,
-// parsed as `ExprKind::ArrayLiteral`, not `Literal`) bailed the whole
-// function to `None` - silently narrowing *none* of the haystack's
-// values, not just the array one, even though `[]` is exactly as
-// statically provable a single exact type (`Type::ArrayShape(vec![])`)
+// `in_array_target_type` must not require every haystack element to be
+// a plain `ExprKind::Literal`: a haystack mixing literals with a bare
+// empty-array literal (`[]`, parsed as `ExprKind::ArrayLiteral`, not
+// `Literal`) must not bail the whole function to `None`, silently
+// narrowing none of the haystack's values, even though `[]` is exactly
+// as statically provable a single exact type (`Type::ArrayShape(vec![])`)
 // as any scalar literal.
 #[test]
 fn in_array_strict_with_an_empty_array_literal_in_the_haystack_still_narrows() {
@@ -1543,11 +1475,10 @@ fn in_array_strict_with_an_empty_array_literal_in_the_haystack_still_narrows() {
 
 #[test]
 fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
-    // Phase 33 Finding 2: CatPermSubmitRequest::fromArray's real
-    // shape - $post['status'] ?? null infers Mixed (an unshaped
-    // `array`'s own element type; see widen_coalesce_result's own
-    // `?? null` no-op case), so this exercises narrow_type_to's
-    // non-Union fallback too.
+    // `$post['status'] ?? null` infers Mixed (an unshaped `array`'s own
+    // element type; see `widen_coalesce_result`'s own `?? null` no-op
+    // case), so this exercises `narrow_type_to`'s non-Union fallback
+    // too.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1563,16 +1494,14 @@ fn in_array_strict_narrows_the_true_branch_to_the_haystacks_literal_union() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus shape (BatchManagerGlobalRequest::fromArrays):
 // `$x ?? null` is a real no-op - if `$x` is null the result is null
 // either way, and otherwise it's exactly `$x` - so its own type must
-// be exactly `$x`'s own (unnarrowed) type, not the literal `Type::Null`
-// `widen_coalesce_result` used to trust as the fallback's own type
-// whenever the right side was a bare `null`. That silently collapsed
-// an unshaped array read (`$post['selection'] ?? null`, `$post: array`
-// with no shape, hence `Mixed`) down to provably-null, so a later
+// be exactly `$x`'s own (unnarrowed) type, not the literal `Type::Null`,
+// even when the right side is a bare `null`. Otherwise an unshaped
+// array read (`$post['selection'] ?? null`, `$post: array` with no
+// shape, hence `Mixed`) would collapse to provably-null, so a later
 // `is_array(...)` check on it - genuinely checking a real `Mixed`
-// value - never had a chance to actually narrow anything.
+// value - would never have a chance to actually narrow anything.
 #[test]
 fn coalesce_with_a_null_fallback_keeps_the_left_sides_own_type() {
     let d = diagnostics_for(
@@ -1590,17 +1519,15 @@ fn coalesce_with_a_null_fallback_keeps_the_left_sides_own_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 94: the no-op reasoning above only actually holds for a bare
-// variable on the left - an array-index access whose own value type is
-// concrete and non-nullable (unlike the Mixed case above) must still
-// have `Null` unioned back in, since `infer_expr` for a plain
+// The no-op reasoning above only actually holds for a bare variable on
+// the left - an array-index access whose own value type is concrete
+// and non-nullable (unlike the Mixed case above) must still have
+// `Null` unioned back in, since `infer_expr` for a plain
 // `array<int, string>`-typed array's index access has no notion of "the
 // key might not exist" at all, the exact real-PHP case `?? null` exists
-// to guard against. Real corpus false positive: `Piwigo\Core\Lang::
-// fromLangArray()` - `$val = $group[$index] ?? null; return $val ?? '';`
-// - `$val`'s own stored type came out non-nullable, so the second,
-// genuinely-needed `?? ''` was flagged as checking an already-
-// non-nullable variable.
+// to guard against. Otherwise `$val = $data[$index] ?? null; return
+// $val ?? '';` would flag the second, genuinely-needed `?? ''` as
+// checking an already-non-nullable variable.
 #[test]
 fn coalesce_with_a_null_fallback_still_unions_null_for_a_non_nullable_array_access() {
     let d = diagnostics_for(
@@ -1685,13 +1612,12 @@ fn array_key_exists_false_branch_keeps_only_shapes_lacking_the_key() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false negative found while triaging the wider Piwigo
-// corpus (`qexprDateData`): the dispatch above required a literal
-// `Literal::String` key specifically, so `array_key_exists(0, $x)` (an
-// int-literal key - just as common a shape as a string-literal one,
-// e.g. a tuple/numeric-shape check) never triggered this narrowing at
-// all, keeping a `Union` member that couldn't possibly have offset `0`
-// in the first place (it only has *string*-named fields).
+// The dispatch above must not require a literal `Literal::String` key
+// specifically: `array_key_exists(0, $x)` (an int-literal key - just as
+// common a shape as a string-literal one, e.g. a tuple/numeric-shape
+// check) must also trigger this narrowing, excluding a `Union` member
+// that couldn't possibly have offset `0` in the first place (it only
+// has string-named fields).
 #[test]
 fn array_key_exists_with_an_int_literal_key_also_narrows() {
     let d = diagnostics_for(
@@ -1742,12 +1668,10 @@ fn array_key_exists_on_a_plain_array_leaves_the_type_untouched() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 50/73-74: `array_key_exists`'s own `HasOffsetValueType`
-// equivalent - narrowing the *specific element access* (`$x['key']`),
-// not just `$x`'s own overall type, via this project's existing
-// composite `narrowing_key` mechanism rather than a new accessory-type
-// hierarchy. See `array_value_type_for_key`'s own doc comment for the
-// full architectural finding.
+// `array_key_exists`'s own `HasOffsetValueType` equivalent - narrowing
+// the specific element access (`$x['key']`), not just `$x`'s own
+// overall type, via this project's existing composite `narrowing_key`
+// mechanism rather than a new accessory-type hierarchy.
 #[test]
 fn array_key_exists_on_a_plain_array_narrows_the_specific_element_access() {
     let d = diagnostics_for(
@@ -1799,7 +1723,6 @@ fn array_value_type_for_key_returns_none_for_a_missing_shape_key() {
 
 #[test]
 fn is_string_narrows_a_variable_subscript_array_index_expression() {
-    // Phase 33 Finding 5: Translator::translate's real shape.
     let d = diagnostics_for(
         r#"<?php
             class Translator {
@@ -1927,9 +1850,6 @@ fn reassigning_an_unrelated_variable_does_not_purge_narrowing() {
 
 #[test]
 fn or_of_same_key_predicates_narrows_the_true_branch_to_their_union() {
-    // Phase 34 Finding B: CalendarMonthly::buildMonthCalendar's real
-    // shape - $year infers Type::Null before this fix
-    // (widen_coalesce_result's own fallback for a Mixed left side).
     let d = diagnostics_for(
         r#"<?php
             function needsIntOrString(int|string $x): void {}
@@ -1948,13 +1868,11 @@ fn or_of_same_key_predicates_narrows_the_true_branch_to_their_union() {
 
 #[test]
 fn an_or_of_instanceof_checks_on_the_same_variable_narrows_to_their_union() {
-    // Phase 51's own cast-validity check surfaced this real gap
-    // (latte/latte's own PrintContext::objectProperty/memberAsString,
-    // `$node instanceof A || $node instanceof B ? (string) $node :
-    // ...`) - or_chain_narrowing_target had no leaf for `instanceof` at
-    // all, so this fell all the way through to "no narrowing," and the
-    // cast was checked against the un-narrowed base class instead of
-    // the two Stringable subclasses proven by the condition.
+    // `or_chain_narrowing_target` needs a leaf for `instanceof`: without
+    // one, `$node instanceof A || $node instanceof B ? (string) $node :
+    // ...` falls all the way through to "no narrowing," and the cast is
+    // checked against the un-narrowed base class instead of the two
+    // Stringable subclasses proven by the condition.
     let d = diagnostics_for(
         r#"<?php
             class Base {}
@@ -2004,14 +1922,10 @@ fn or_of_predicates_on_different_keys_narrows_neither() {
 
 #[test]
 fn or_of_and_of_negated_predicates_on_different_keys_narrows_each_independently() {
-    // Real shape: CommentRepository::findAllWithConditions/findList (7
-    // sites) - previously undiagnosed as needing "its own sizable
-    // narrowing-engine feature" (multi-variable compound-boolean
-    // narrowing). Each `||` leaf is `!isA($v) && !isB($v)` for a
-    // *different* $v - De Morgan on the outer `||`'s false branch
-    // (already handled) decomposes to one independent `&&`-false-branch
-    // narrowing per leaf (newly handled), each touching only its own
-    // key, so no cross-key reasoning is actually needed here at all.
+    // Each `||` leaf is `!isA($v) && !isB($v)` for a different `$v` -
+    // De Morgan on the outer `||`'s false branch decomposes to one
+    // independent `&&`-false-branch narrowing per leaf, each touching
+    // only its own key, so no cross-key reasoning is needed here.
     let d = diagnostics_for(
         r#"<?php
             function wantsThree(int|string $a, int|string $b, bool|int $c): void {}
@@ -2030,10 +1944,8 @@ fn or_of_and_of_negated_predicates_on_different_keys_narrows_each_independently(
 
 #[test]
 fn assert_instanceof_narrows_for_the_rest_of_the_block() {
-    // Real shape: vendor/pestphp/pest-plugin-mutate's own
-    // AbstractFunctionCallUnwrapMutator::mutate() does exactly this -
     // `assert($node instanceof FuncCall); $node->args` - real PHPStan
-    // documents support for narrowing on assert() the same as `if`.
+    // documents support for narrowing on `assert()` the same as `if`.
     let d = diagnostics_for(
         r#"<?php
             class Node {}
@@ -2047,15 +1959,12 @@ fn assert_instanceof_narrows_for_the_rest_of_the_block() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive, surfaced by Phase 55's own fixed-point loop
-// convergence: amphp/http-client's `FollowRedirects::removeDotSegments`
-// opens every loop iteration with `\assert(\is_string($input));`, written
-// fully-qualified throughout (a common defensive-global-namespace style).
-// `apply_narrowing`'s own `ExprKind::Call` arm already strips a leading
-// backslash before comparing against `is_string`/`is_array`/etc (see its
-// own comment), but this statement-level `assert(...)` recognition didn't
-// - so the fully-qualified form was silently never treated as a narrowing
-// statement at all, only its bare (`assert(...)`) spelling.
+// A fully-qualified `\assert(...)` call (a common defensive-global-
+// namespace style) must be treated as a narrowing statement too, not
+// just its bare `assert(...)` spelling. `apply_narrowing`'s own
+// `ExprKind::Call` arm already strips a leading backslash before
+// comparing against `is_string`/`is_array`/etc, but the statement-level
+// `assert(...)` recognition needs the same handling.
 #[test]
 fn a_fully_qualified_assert_call_still_narrows() {
     let d = diagnostics_for(
@@ -2086,14 +1995,12 @@ fn assert_without_a_matching_narrowing_shape_is_a_harmless_no_op() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 27, real shape: real PHPUnit tests throughout this corpus
-// narrow via assertion calls instead of an `if`-guard - `$output =
-// ob_get_clean(); self::assertIsString($output);
-// self::assertStringContainsString(...);` - real PHPStan documents
-// support for exactly this via its own `phpstan/phpstan-phpunit`
-// extension, which this project doesn't depend on, so it's
-// replicated directly. Matches the same "statement narrows
-// unconditionally" shape `assert($cond)` already gets above.
+// Real PHPUnit tests commonly narrow via assertion calls instead of an
+// `if`-guard - `$output = ob_get_clean(); self::assertIsString($output);`
+// - real PHPStan documents support for exactly this via its own
+// `phpstan/phpstan-phpunit` extension, which this project doesn't
+// depend on, so it's replicated directly. Matches the same "statement
+// narrows unconditionally" shape `assert($cond)` already gets above.
 #[test]
 fn phpunit_assert_is_string_narrows_for_the_rest_of_the_block() {
     let d = diagnostics_for(
@@ -2115,18 +2022,16 @@ fn phpunit_assert_is_string_narrows_for_the_rest_of_the_block() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real, previously-live bug found while triaging the wider Piwigo corpus
-// test suite (`ImageStdParamsTest`/`UploadServiceTest`'s own
-// `spawnBackgroundLockHolder()` helper): `assertIsResource`'s own
-// narrowing target is a `Type::Object("resource", ...)` (this project's
-// fixed pseudo-type sentinel for PHP's native resource type, unlike
-// every sibling `assertIs*` target which narrows to a bare native type)
-// - `registry::is_assignable`'s own "an unresolved `@phpstan-type`-alias
-// object name, stay lenient" arm (`assignability.rs`) matched `resource`
-// too (it's never a key in `self.classes` either, exactly like a
-// genuinely-unresolvable alias), so `narrow_type_to`'s own `Union` arm
-// wrongly kept `Type::False` as "still possibly assignable to
-// `resource`" and never actually stripped it.
+// `assertIsResource`'s own narrowing target is a
+// `Type::Object("resource", ...)` (this project's fixed pseudo-type
+// sentinel for PHP's native resource type, unlike every sibling
+// `assertIs*` target which narrows to a bare native type) -
+// `registry::is_assignable`'s own "an unresolved `@phpstan-type`-alias
+// object name, stay lenient" arm (`assignability.rs`) must not also
+// match `resource` (it's never a key in `self.classes` either, exactly
+// like a genuinely-unresolvable alias), or `narrow_type_to`'s own
+// `Union` arm would wrongly keep `Type::False` as "still possibly
+// assignable to `resource`" and never actually strip it.
 #[test]
 fn phpunit_assert_is_resource_narrows_away_false() {
     let d = diagnostics_for(
@@ -2289,15 +2194,14 @@ fn or_short_circuit_narrows_its_right_operand_on_the_false_branch() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Parser-level fix (not `merge_new_variable_definitions`'s own
-// mechanism, already proven correct by the by-ref-out-param test right
-// below this one) - a plain `$x = expr` assignment nested unparenthesized
-// as `&&`'s/`||`'s own RHS used to parse into the wrong tree shape
-// entirely (`($cond && $x) = expr` instead of real PHP's own `$cond &&
-// ($x = expr)`), so `$x` never looked assigned to anything downstream,
-// regardless of how correct the checker's own narrowing/definite-
-// assignment merge logic already was. Real corpus false positive:
-// symfony/console's own `Application.php`.
+// A parser-level requirement (not `merge_new_variable_definitions`'s
+// own mechanism, already proven correct by the by-ref-out-param test
+// right below this one) - a plain `$x = expr` assignment nested
+// unparenthesized as `&&`'s/`||`'s own RHS must parse as real PHP's
+// own `$cond && ($x = expr)`, not `($cond && $x) = expr`, or `$x`
+// never looks assigned to anything downstream, regardless of how
+// correct the checker's own narrowing/definite-assignment merge logic
+// already is.
 #[test]
 fn an_assignment_nested_as_and_s_rhs_defines_the_variable_in_the_if_body() {
     let d = diagnostics_for(
@@ -2337,15 +2241,12 @@ fn an_assignment_nested_as_or_s_rhs_defines_the_variable_afterward() {
 
 #[test]
 fn a_by_ref_out_param_defined_on_the_right_of_and_is_readable_afterward() {
-    // Phase 22 Finding 6, real shape: Piwigo\Admin\AdminShell::
-    // runDispatch's `if (isset(...) and is_string(...) and (bool)
-    // preg_match(..., $matches)) { ... reads $matches ... }` -
-    // `$matches` is `preg_match`'s by-ref out-param, defined as a
-    // side effect of evaluating the right operand of a chained
-    // `and`/`&&`. `check_expr`'s `Binary(And, l, r)` arm used to
-    // check `r` against a *clone* of `locals` that got discarded
-    // once the expression finished, so this definition never
-    // reached the real `locals` the enclosing `if`'s body sees.
+    // `$matches` is `preg_match`'s by-ref out-param, defined as a side
+    // effect of evaluating the right operand of a chained `and`/`&&`.
+    // `check_expr`'s `Binary(And, l, r)` arm must check `r` against the
+    // real `locals`, not a clone that gets discarded once the
+    // expression finishes, or this definition never reaches the real
+    // `locals` the enclosing `if`'s body sees.
     let d = diagnostics_for(
         r#"<?php
             function f(string $subject): void {
@@ -2361,16 +2262,14 @@ fn a_by_ref_out_param_defined_on_the_right_of_and_is_readable_afterward() {
 
 #[test]
 fn instanceof_narrowing_inside_and_does_not_leak_into_the_else_branch() {
-    // The critical regression test for Finding 6's own fix: a naive
-    // "merge every newly-inserted key back into locals" (rather than
-    // only real variable names) would insert `apply_narrowing`'s own
-    // synthetic `"arg->value"` narrowing key into the real `locals`
-    // *before* the `if`'s then/else split even runs - contaminating
-    // the `else` branch (where the condition was false, so
-    // `$arg->value` is NOT known to be a `Variable`) with the
-    // narrowed-to type. A test that only covers the by-ref-in-`&&`
-    // shape above would still pass under that broken version and
-    // would not catch this.
+    // A naive "merge every newly-inserted key back into locals" (rather
+    // than only real variable names) would insert `apply_narrowing`'s
+    // own synthetic `"arg->value"` narrowing key into the real `locals`
+    // before the `if`'s then/else split even runs - contaminating the
+    // `else` branch (where the condition was false, so `$arg->value` is
+    // NOT known to be a `Variable`) with the narrowed-to type. A test
+    // that only covers the by-ref-in-`&&` shape above would still pass
+    // under that broken version and would not catch this.
     let d = diagnostics_for(
         r#"<?php
             class Base {}
@@ -2393,14 +2292,10 @@ fn instanceof_narrowing_inside_and_does_not_leak_into_the_else_branch() {
 
 #[test]
 fn is_string_narrows_a_literal_array_index_expression() {
-    // Phase 22, real shape: Piwigo\Template\Template::__construct's
-    // `if (isset($lang_info['jquery_code']) and is_string($lang_info
-    // ['jquery_code']) and ...) { ... str_replace('-', '_',
-    // $lang_info['jquery_code']) ... }` - `narrowing_key` (and every
-    // `apply_narrowing` call site consuming it) used to require a
-    // bare `ExprKind::Variable` directly, so `is_string(...)` never
-    // narrowed a literal-key array-index expression the way it
-    // already narrowed a property chain.
+    // `narrowing_key` (and every `apply_narrowing` call site consuming
+    // it) must not require a bare `ExprKind::Variable` directly:
+    // `is_string(...)` must also narrow a literal-key array-index
+    // expression the way it already narrows a property chain.
     let d = diagnostics_for(
         r#"<?php
             /** @param array{code?: string|null} $info */
@@ -2439,11 +2334,9 @@ fn is_string_narrows_a_literal_array_index_expression_read_back_via_a_bare_retur
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 32 Finding G, real shape: `PasswordController::resetPassword`'s
-// `$user_id = (bool) $reset_password_key_result ? ... :
-// $this->resetPasswordCode();` (both branches `false|int`) then `if (!
-// is_numeric($user_id)) { return false; }` before `UserId::from
-// ($user_id)` (expects plain `int`).
+// A ternary yielding `false|int` on both branches, then
+// `if (! is_numeric($user_id)) { return false; }` before a call
+// expecting a plain `int`.
 #[test]
 fn is_numeric_narrows_the_true_branch_by_excluding_bool_and_null() {
     let d = diagnostics_for(
@@ -2514,13 +2407,10 @@ fn equality_narrows_a_literal_array_index_expression() {
 
 #[test]
 fn is_string_narrows_an_assignment_nested_in_its_own_argument() {
-    // Phase 23, real shape: Piwigo\Admin\Extensions\
-    // CoreUpdateService::checkPiwigoUpgrade's
-    // `is_string($result = @HttpClientService::fetch(...))` -
-    // `narrowing_key` used to return None for an Assign expression, so
-    // this extremely common "assign-then-check" idiom was never
-    // narrowed at all, even though the assignment itself already
-    // defined `$result` correctly.
+    // `narrowing_key` must not return `None` for an Assign expression:
+    // the extremely common "assign-then-check" idiom
+    // (`is_string($result = fetch())`) must be narrowed, even though
+    // the assignment itself already defines `$result` correctly.
     let d = diagnostics_for(
         r#"<?php
             function fetch(): string|false { return 'x'; }
@@ -2535,15 +2425,12 @@ fn is_string_narrows_an_assignment_nested_in_its_own_argument() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 26, real shape: Piwigo\Admin\Extensions\
-// ExtensionScanner::scanDirectoryEntries's `while (($file =
-// readdir($dir)) !== false) { ... preg_match(..., $file) ... }` -
-// real PHP *requires* the parens here (`=` binds looser than `!==`,
-// so `$file = readdir($dir) !== false` would parse as `$file =
-// (readdir($dir) !== false)` instead), so the extremely common
-// "assign-then-check" idiom is almost always wrapped in a `Grouping`
-// node - `narrowing_key` never saw through it to reach the `Assign`
-// arm Phase 23 added underneath.
+// `while (($file = readdir($dir)) !== false) { ... }` - real PHP
+// requires the parens here (`=` binds looser than `!==`, so `$file =
+// readdir($dir) !== false` would parse as `$file = (readdir($dir) !==
+// false)` instead), so the extremely common "assign-then-check" idiom
+// is almost always wrapped in a `Grouping` node - `narrowing_key` must
+// see through it to reach the `Assign` arm underneath.
 #[test]
 fn is_string_narrows_a_parenthesized_assignment_in_a_while_condition() {
     let d = diagnostics_for(
@@ -2559,19 +2446,13 @@ fn is_string_narrows_a_parenthesized_assignment_in_a_while_condition() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 85, real shape: Symfony\Component\Filesystem\Path::getDirectory's
-// `if (false !== $schemeSeparatorPosition = strpos($path, '://'))
-// { substr($path, 0, $schemeSeparatorPosition + 3); }` - no parens
+// `if (false !== $pos = strpos($path, '://')) { ... }` - no parens
 // around the assignment at all, relying on real PHP's own grammar
 // letting `variable '=' expr` nest directly as a comparison operator's
-// operand (fixed at the parser level in `parse_assignment_tail`, see
-// its own doc comment). Before that parser fix, `$schemeSeparatorPosition`
-// never got bound to `strpos()`'s own `int|false` return type at all
-// (a stale, pre-assignment type persisted past the guard); now that it
-// does, this exercises the *narrowing* half specifically - the existing
-// `ExprKind::Assign` arm in `narrowing_key` (Phase 23) already covers
-// it once the parser hands it the right AST shape, no separate
-// narrowing fix needed.
+// operand (parser-level, `parse_assignment_tail`). This exercises the
+// narrowing half specifically - the existing `ExprKind::Assign` arm in
+// `narrowing_key` already covers it once the parser hands it the right
+// AST shape.
 #[test]
 fn identity_comparison_narrows_an_unparenthesized_assignment_nested_in_an_if_condition() {
     let d = diagnostics_for(
@@ -2587,17 +2468,15 @@ fn identity_comparison_narrows_an_unparenthesized_assignment_nested_in_an_if_con
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 85, real shape: Symfony\Component\Filesystem\Path::getDirectory
-// again, but through Rector's own namespace-prefixing transform, which
-// rewrites every unqualified global name (including `true`/`false`/
-// `null`) to its fully-qualified form: `if (\false === $x = strrpos(...))`.
-// A fully-qualified `\false` parses as a plain `ExprKind::Name`, not the
-// `Literal(Bool(false))` a bare `false` gets via `parse_primary`'s own
-// `Keyword::False` match - previously silently `Type::Mixed` (no global-
-// constant table exists for `PHP_EOL`-style names either, a deliberate,
-// separate scope boundary this doesn't touch), which fed straight into
+// A fully-qualified reference to a global keyword-name
+// (`if (\false === $x = strrpos(...))`, e.g. from a namespace-prefixing
+// code transform that rewrites unqualified `true`/`false`/`null` to
+// their fully-qualified form). A fully-qualified `\false` parses as a
+// plain `ExprKind::Name`, not the `Literal(Bool(false))` a bare `false`
+// gets via `parse_primary`'s own `Keyword::False` match, so it must not
+// silently read as `Type::Mixed` and fall into
 // `apply_equality_narrowing`'s own `target_ty == Type::Mixed` bail-out,
-// silently skipping the guard's own narrowing entirely.
+// skipping the guard's own narrowing entirely.
 #[test]
 fn identity_comparison_narrows_through_a_fully_qualified_false_literal() {
     let d = diagnostics_for(
@@ -2630,11 +2509,10 @@ fn fully_qualified_true_false_and_null_infer_as_their_own_literal_types() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 26, real shape: Piwigo\Admin\Image\ImageBackend::webpInfo's
-// `$fp = fopen(...); if (! (bool) $fp) { throw ...; } fread($fp,
-// 25);` - a common, explicit style for a truthiness guard. `(bool)`
-// doesn't change which values are truthy/falsy, but `apply_narrowing`
-// had no arm for `Cast` at all, so the guard was never recognized.
+// `if (! (bool) $fp) { throw ...; }` - a common, explicit style for a
+// truthiness guard. `(bool)` doesn't change which values are
+// truthy/falsy, so `apply_narrowing` needs an arm for `Cast` too, or
+// the guard is never recognized.
 #[test]
 fn a_bool_cast_truthiness_guard_narrows_like_a_bare_variable_check() {
     let d = diagnostics_for(
@@ -2653,10 +2531,9 @@ fn a_bool_cast_truthiness_guard_narrows_like_a_bare_variable_check() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 32 Finding F, real shape: `BrowserTestHelpers::apiFetch`'s
-// `is_int($decoded['status'] ?? null)` - `narrowing_key` had no arm
-// for a `??`-wrapped expression at all, so this common
-// "narrow-an-array-element-that-might-be-absent" idiom never narrowed
+// `is_int($decoded['status'] ?? null)` - `narrowing_key` needs an arm
+// for a `??`-wrapped expression too, or this common
+// "narrow-an-array-element-that-might-be-absent" idiom never narrows
 // `$decoded['status']` itself.
 #[test]
 fn is_int_narrows_through_a_null_coalesce_fallback() {
@@ -2722,16 +2599,13 @@ fn is_int_does_not_narrow_through_a_variable_coalesce_fallback() {
     );
 }
 
-// Real, general unsoundness bug found via a Phase 12 corpus re-check
-// (`CategoryUpdateController::__invoke`, minimized here) that first
-// looked like a cross-file registry-timing mystery but turned out to
-// be a plain, always-reproducible narrowing bug: `apply_equality_
-// narrowing`'s exclusion branch was using the *other side's own
-// static type* (`Bool`, a general type covering both `true`/`false`,
-// not one specific value) the same way it uses a genuine single-value
-// exclusion (`Null`/`True`/`False`/a literal) - wrongly collapsing an
-// already-known `bool` to `Type::Never` the moment it was compared
-// `!==` against another `bool`-typed (but not literally known) value.
+// `apply_equality_narrowing`'s exclusion branch must not use the other
+// side's own static type (`Bool`, a general type covering both
+// `true`/`false`, not one specific value) the same way it uses a
+// genuine single-value exclusion (`Null`/`True`/`False`/a literal), or
+// it wrongly collapses an already-known `bool` to `Type::Never` the
+// moment it's compared `!==` against another `bool`-typed (but not
+// literally known) value.
 #[test]
 fn not_identical_to_a_non_literal_bool_does_not_collapse_the_narrowed_type_to_never() {
     let d = diagnostics_for(
@@ -2748,18 +2622,12 @@ fn not_identical_to_a_non_literal_bool_does_not_collapse_the_narrowed_type_to_ne
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Round 14 of the Piwigo corpus cleanup: `narrow_type_to`'s own
-// non-Union fallback unconditionally returned the comparison
-// target's type, discarding a narrower `original` - a real
-// unsoundness bug on the *true* branch of `===`, the opposite
-// direction from the `!==`-exclusion bug above. Real corpus shape
-// (`PictureController::__invoke`, minimized here): `$image_id`
-// (a definite `int`) compared `===` against `getRefererImageId()`
-// (`int|null`) inside an unrelated `if`/`else` that never reassigns
-// `$image_id` - the pre-existing code widened `$image_id` itself to
-// `int|null` on the true branch, corrupting every downstream use for
-// the rest of the function even though neither branch ever assigns
-// to it.
+// `narrow_type_to`'s own non-Union fallback must not unconditionally
+// return the comparison target's type, discarding a narrower
+// `original` - a definite `int` compared `===` against an `int|null`
+// value inside an unrelated `if`/`else` that never reassigns it must
+// not have its own type widened to `int|null` on the true branch,
+// corrupting every downstream use for the rest of the function.
 #[test]
 fn identical_to_a_broader_typed_value_does_not_widen_the_narrower_side() {
     let d = diagnostics_for(
@@ -2779,18 +2647,16 @@ fn identical_to_a_broader_typed_value_does_not_widen_the_narrower_side() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real, general bug found via a Phase 12 corpus re-check (minimized
-// from `HtmlServiceTestFatalErrorCaller::call`): `check_expr`'s own
-// `Ternary` arm wrote `merge_scopes(then_locals, else_locals)` back
-// into the *outer* locals, unlike a `Ternary` used as a value inside
-// a larger expression ever should - a ternary's own condition
-// narrowing a *param* (`$collected` here) down to the literal empty
-// shape on its true branch then got permanently unioned into
-// `$collected`'s real, tracked type for everything checked
-// afterward, including a second, independent evaluation of the exact
-// same sub-expression - here, `preg_replace`'s own subject-type
-// check saw the corrupted union instead of `$collected[0]`'s real
-// `string` type, losing its precise return type.
+// `check_expr`'s own `Ternary` arm must not write
+// `merge_scopes(then_locals, else_locals)` back into the outer locals
+// - a ternary's own condition narrowing a param (`$collected` here)
+// down to the literal empty shape on its true branch must not get
+// permanently unioned into `$collected`'s real, tracked type for
+// everything checked afterward, including a second, independent
+// evaluation of the exact same sub-expression, or a later
+// `preg_replace`'s own subject-type check would see the corrupted
+// union instead of `$collected[0]`'s real `string` type, losing its
+// precise return type.
 #[test]
 fn a_ternarys_own_condition_narrowing_does_not_leak_past_the_ternary() {
     let d = diagnostics_for(
@@ -2810,17 +2676,15 @@ fn a_ternarys_own_condition_narrowing_does_not_leak_past_the_ternary() {
 
 #[test]
 fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_type_behind() {
-    // Phase 22, real shape: a lazy-init idiom
-    // (Piwigo\Asset\ViteManifest::entries) - `if ($this->entries ===
-    // null) { $this->entries = [...]; } return $this->entries;`.
-    // `apply_equality_narrowing` correctly narrows `$this->entries`
-    // to `null` for the *condition's own* branch, but
-    // `bind_assignment_target` had no `PropertyAccess` arm at all, so
-    // the reassignment inside the `if` body never updated that same
-    // synthetic narrowing-key entry - `infer_expr`'s own "check
-    // narrowed key first" fast path kept reading back the stale
-    // `null` instead of the real, newly-assigned array, so the
-    // return type looked nullable when it never could be.
+    // A lazy-init idiom: `if ($this->entries === null) { $this->entries
+    // = [...]; } return $this->entries;`. `apply_equality_narrowing`
+    // correctly narrows `$this->entries` to `null` for the condition's
+    // own branch, but `bind_assignment_target` needs a `PropertyAccess`
+    // arm too, or the reassignment inside the `if` body never updates
+    // that same synthetic narrowing-key entry - `infer_expr`'s own
+    // "check narrowed key first" fast path would keep reading back the
+    // stale `null` instead of the real, newly-assigned array, making
+    // the return type look nullable when it never could be.
     let d = diagnostics_for(
         r#"<?php
             class Cache {
@@ -2847,17 +2711,16 @@ fn reassigning_a_property_after_narrowing_it_does_not_leave_the_stale_narrowed_t
 
 #[test]
 fn instanceof_self_narrows_to_the_real_enclosing_class_not_a_literal_self() {
-    // Real, common pattern (amphp/amp's Future::iterate does exactly
-    // this: `if ($future instanceof self)`) - apply_narrowing's
-    // instanceof handling used to treat "self"/"parent"/"static" as
-    // ordinary bare class names to resolve via name_ctx.resolve
-    // directly, instead of through resolve_pseudo against the
-    // enclosing class the way every other self/parent/static site
-    // already does. In a namespaced file this narrowed to a
-    // nonsensical class name ("App\self") instead of the real one
-    // ("App\Box") - which would have looked like *no* diagnostics at
-    // all below (a bogus, not-in-the-registry class silently
-    // suppresses the undefined-method check), not a wrong one, so
+    // `if ($x instanceof self)` - `apply_narrowing`'s instanceof
+    // handling must not treat "self"/"parent"/"static" as ordinary
+    // bare class names to resolve via `name_ctx.resolve` directly;
+    // it needs to go through `resolve_pseudo` against the enclosing
+    // class the way every other self/parent/static site already does.
+    // In a namespaced file getting this wrong narrows to a nonsensical
+    // class name ("App\self") instead of the real one ("App\Box") -
+    // which looks like no diagnostics at all below (a bogus,
+    // not-in-the-registry class silently suppresses the undefined-
+    // method check), not a wrong one, so
     // this asserts a diagnostic *does* appear, to actually
     // distinguish correct narrowing from the old silent failure.
     let d = diagnostics_for(
@@ -2884,9 +2747,8 @@ fn instanceof_self_narrows_to_the_real_enclosing_class_not_a_literal_self() {
 fn negated_instanceof_guard_clause_narrows_past_the_if() {
     // `if (! $x instanceof Y) { throw ...; }` must narrow $x to Y for
     // the code after the guard - depends on `!` correctly binding
-    // looser than `instanceof` at the parser level (a real bug this
-    // session found and fixed: it used to parse as `(!$x) instanceof
-    // Y`, which silently narrowed nothing).
+    // looser than `instanceof` at the parser level, not parsing as
+    // `(!$x) instanceof Y`, which would silently narrow nothing.
     let d = diagnostics_for(
         r#"<?php
             interface Base {}
@@ -2910,16 +2772,15 @@ fn negated_instanceof_guard_clause_narrows_past_the_if() {
 
 #[test]
 fn an_inline_var_annotation_on_a_later_statement_narrows_a_generically_typed_read() {
-    // Phase 35 Finding F: the real `StructuralTest::findCallSites`
-    // shape, reduced - `$file` comes back from `current()`'s own
-    // generic (untyped, so `mixed`) return, an inline `/** @var
-    // FakeFileInfo9921 $file */` sits on an unrelated `if` statement that
-    // merely reads it, and code after that `if` calls a method only
-    // `FakeFileInfo9921` has. Without the annotation, `$file` stays
-    // `mixed` and this method call is never checked at all (this
-    // project's usual mixed-argument/mixed-receiver leniency) - so a
-    // real "undefined method" diagnostic here proves the annotation
-    // actually took effect, not just that nothing was flagged.
+    // `$file` comes back from `current()`'s own generic (untyped, so
+    // `mixed`) return, an inline `/** @var FakeFileInfo9921 $file */`
+    // sits on an unrelated `if` statement that merely reads it, and
+    // code after that `if` calls a method only `FakeFileInfo9921` has.
+    // Without the annotation, `$file` stays `mixed` and this method
+    // call is never checked at all (this project's usual mixed-
+    // argument/mixed-receiver leniency) - so a real "undefined method"
+    // diagnostic here proves the annotation actually took effect, not
+    // just that nothing was flagged.
     let d = diagnostics_for(
         r#"<?php
             class FakeFileInfo9921 {}
@@ -2996,8 +2857,7 @@ fn a_named_inline_var_annotation_on_its_own_assignment_also_overrides_it() {
 #[test]
 fn an_inline_var_override_is_invalidated_by_a_later_real_reassignment() {
     // The override correctly gets invalidated by a later real
-    // reassignment of the same variable - Phase 33 Finding 5's own
-    // purge-on-reassignment, exercised through this new call site.
+    // reassignment of the same variable (purge-on-reassignment).
     let d = diagnostics_for(
         r#"<?php
             class FakeFileInfo9921 {}
@@ -3115,8 +2975,8 @@ fn empty_guard_narrows_past_the_if() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 23 Finding 1: `isset($x)`'s truthy branch narrows away `Null`,
-// the single most common PHP nullability idiom - previously a no-op.
+// `isset($x)`'s truthy branch narrows away `Null`, the single most
+// common PHP nullability idiom.
 #[test]
 fn isset_guard_narrows_null_away_in_the_truthy_branch() {
     let d = diagnostics_for(
@@ -3148,13 +3008,12 @@ fn isset_guard_narrows_a_property_access_too() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive: Monolog's own `MongoDBHandler::write()`'s
 // `isset($this->manager, $this->namespace)` - real PHP's `isset()` is
 // genuinely variadic (`isset($a, $b)` means `isset($a) && isset($b)`,
-// every argument must be set), but the narrowing dispatch above only
-// ever matched a *single*-argument call (`[single_arg]`'s own slice
-// pattern), silently narrowing none of a multi-argument isset()'s
-// arguments at all - not just the ones past the first.
+// every argument must be set), so the narrowing dispatch above must
+// not only match a single-argument call (`[single_arg]`'s own slice
+// pattern), or it silently narrows none of a multi-argument isset()'s
+// arguments - not just the ones past the first.
 #[test]
 fn a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch() {
     let d = diagnostics_for(
@@ -3170,10 +3029,8 @@ fn a_multi_argument_isset_narrows_every_argument_in_the_truthy_branch() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found a static property
-// (`self::$prop !== null`) had no narrowing key at all - only an
-// instance property's `->` chain was handled. Real Piwigo test code
-// (BrowserTestHelpers::adminSessionCookies) relies on exactly this.
+// A static property (`self::$prop !== null`) needs a narrowing key
+// too, not just an instance property's `->` chain.
 #[test]
 fn a_static_property_is_narrowed_by_an_equality_check_too() {
     let d = diagnostics_for(
@@ -3231,8 +3088,8 @@ fn isset_false_branch_is_not_narrowed() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Finding 55 from the architecture audit - ternary/switch/match never
-// applied condition-based narrowing at all, for any condition shape.
+// ternary/switch/match all need condition-based narrowing, for any
+// condition shape.
 
 #[test]
 fn ternary_narrows_both_branches() {
@@ -3264,12 +3121,11 @@ fn ternary_narrows_both_branches() {
     assert_eq!(wrong.len(), 1, "got: {wrong:?}");
 }
 
-// Phase 23 Finding 4, real shape: `$handle = $filename !== null ?
-// @fopen($filename, 'wb') : false;` - fopen()'s own type is already a
-// Union (`resource|false`); combining it with the ternary's other
-// branch via a raw `Type::Union(vec![then_ty, else_ty])` nested that
-// whole union unflattened, so a later `!== false` narrowing on the
-// outer union couldn't reach the `false` still hiding inside it.
+// `$handle = $filename !== null ? @fopen($filename, 'wb') : false;` -
+// `fopen()`'s own type is already a Union (`resource|false`);
+// combining it with the ternary's other branch must flatten that
+// nested union, or a later `!== false` narrowing on the outer union
+// can't reach the `false` still hiding inside it.
 #[test]
 fn ternary_flattens_a_branch_that_is_itself_already_a_union() {
     let d = diagnostics_for(
@@ -3338,15 +3194,15 @@ fn switch_fallthrough_case_does_not_leak_its_own_narrowing_past_a_later_terminat
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 15's own disclosed `exits_function_or_loop` gap, the `Try` half:
-// before this fix, a switch's own *last* case ending in a `try`/`catch`
-// that unconditionally exits (both the `try` body and every `catch`
-// return/throw) fell through `exits_function_or_loop`'s catch-all `_ =>
-// false` arm, wrongly concluding that case's own locals "reach after the
-// switch" (`reaches_after_switch`'s `is_last && !exits_function_or_loop`
-// arm). Merging that case's locals (where `$result` was never assigned)
-// into the switch's real exit state (`case null`'s, where it was) made
-// `$result` look only maybe-defined after the switch.
+// `exits_function_or_loop`'s `Try` handling: a switch's own last case
+// ending in a `try`/`catch` that unconditionally exits (both the `try`
+// body and every `catch` return/throw) must not fall through its
+// catch-all `_ => false` arm, wrongly concluding that case's own
+// locals "reach after the switch" (`reaches_after_switch`'s
+// `is_last && !exits_function_or_loop` arm) - merging that case's
+// locals (where `$result` was never assigned) into the switch's real
+// exit state (`case null`'s, where it was) would make `$result` look
+// only maybe-defined after the switch.
 #[test]
 fn switch_last_case_ending_in_a_try_catch_does_not_reach_after_the_switch() {
     let d = diagnostics_for(
@@ -3412,10 +3268,10 @@ fn match_on_a_real_subject_narrows_via_implicit_equality() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 26 from the architecture audit - `??`/`??=`'s left side was
-// checked for "undefined variable"/"undefined property" like an
-// ordinary read, even though both are specifically designed to be
-// warning-free for a variable/property that isn't set at all.
+// `??`/`??=`'s left side must not be checked for "undefined
+// variable"/"undefined property" like an ordinary read - both are
+// specifically designed to be warning-free for a variable/property
+// that isn't set at all.
 
 #[test]
 fn coalesce_does_not_flag_a_conditionally_assigned_variable_as_undefined() {
@@ -3444,13 +3300,12 @@ fn coalesce_does_not_flag_an_undefined_array_key_root_variable() {
 
 #[test]
 fn coalesce_widens_to_the_left_side_s_array_type_when_the_fallback_is_a_narrower_shape() {
-    // Phase 22 Finding 4, real shape: Piwigo\Activity\Projection\
-    // SystemActivityLogEntry::$details is `public ?array $details`;
-    // `$details = $row->details ?? [];` used to collapse the whole
-    // expression's type to the literal empty `[]` shape from the
-    // fallback alone, discarding that `$row->details`'s own real,
-    // non-empty-capable `?array` type could hold arbitrary keys -
-    // every later `$details['key']` read then looked like a typo.
+    // `$details = $row->details ?? [];` where `$row->details` is
+    // `public ?array $details` must not collapse the whole expression's
+    // type to the literal empty `[]` shape from the fallback alone,
+    // discarding that `$row->details`'s own real, non-empty-capable
+    // `?array` type could hold arbitrary keys - otherwise every later
+    // `$details['key']` read looks like a typo.
     let d = diagnostics_for(
         r#"<?php
             class Row { public ?array $details; }
@@ -3465,11 +3320,10 @@ fn coalesce_widens_to_the_left_side_s_array_type_when_the_fallback_is_a_narrower
 
 #[test]
 fn coalesce_still_collapses_to_the_fallback_for_an_ordinary_mixed_left_side() {
-    // The common, currently-precise case Finding 4's own fix must
-    // not regress: when the left side's real type isn't an
-    // informative `Type::Array`, `??`'s result stays exactly the
-    // fallback's own (here, literal string) type - not blanket
-    // `Mixed` from unioning in `$x`'s own type.
+    // The common, currently-precise case: when the left side's real
+    // type isn't an informative `Type::Array`, `??`'s result stays
+    // exactly the fallback's own (here, literal string) type - not
+    // blanket `Mixed` from unioning in `$x`'s own type.
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $x): int { return $x; }
@@ -3519,9 +3373,9 @@ fn coalesce_assign_does_not_flag_its_own_left_side_as_undefined() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 17 from the architecture audit - loose equality (`==`) was
-// narrowed exactly like strict equality (`===`), discarding every
-// other value PHP's own type-juggling rules also match.
+// Loose equality (`==`) must not narrow exactly like strict equality
+// (`===`), which would discard every other value PHP's own
+// type-juggling rules also match.
 
 #[test]
 fn loose_equality_does_not_narrow_to_the_literal_compared_to_value() {
@@ -3702,9 +3556,9 @@ fn for_loop_narrows_the_negated_condition_after_exit() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 15 from the architecture audit - the nullsafe operator
-// (?->) and plain -> produced identical AST nodes, so infer_expr
-// never knew a nullsafe access's result could be null.
+// The nullsafe operator (?->) and plain -> must not produce identical
+// AST nodes, or `infer_expr` never knows a nullsafe access's result
+// could be null.
 
 #[test]
 fn nullsafe_method_call_result_is_implicitly_nullable() {
@@ -3759,17 +3613,16 @@ fn plain_arrow_on_a_non_nullable_receiver_is_unaffected() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Corpus-verified real shape (Symfony DependencyInjection's own
-// `AbstractRecursivePass::getReflectionMethod()`): reassigning a
-// variable inside a middle `&&` conjunct must be visible to a *later*
-// conjunct in the same condition, not just to code after the whole `if`.
-// `apply_narrowing`'s own `Binary(And, ...)` composition re-derives each
-// operand's effect independently of whatever `check_expr` already
-// computed while checking it for diagnostics, so without a dedicated
-// `ExprKind::Assign` arm there, the reassignment was invisible to
-// `$r->isPublic()` two conjuncts later - `$r` still looked like its
-// pre-assignment `ReflectionClass`, wrongly flagging `isPublic()` (a
-// real `ReflectionMethod` method) as undefined.
+// Reassigning a variable inside a middle `&&` conjunct must be visible
+// to a later conjunct in the same condition, not just to code after
+// the whole `if`. `apply_narrowing`'s own `Binary(And, ...)`
+// composition re-derives each operand's effect independently of
+// whatever `check_expr` already computed while checking it for
+// diagnostics, so it needs a dedicated `ExprKind::Assign` arm there, or
+// the reassignment is invisible to `$r->isPublic()` two conjuncts
+// later - `$r` still looking like its pre-assignment `ReflectionClass`,
+// wrongly flagging `isPublic()` (a real `ReflectionMethod` method) as
+// undefined.
 #[test]
 fn a_reassignment_in_a_middle_and_conjunct_is_visible_to_a_later_conjunct() {
     let d = diagnostics_for(
@@ -3807,11 +3660,10 @@ fn a_reassignment_in_a_middle_or_conjunct_is_visible_to_a_later_conjunct() {
     );
 }
 
-// Phase 55 follow-up: `<`/`>`/`<=`/`>=` against a literal narrows a
-// plain/ranged int variable's own range - scoped to a single literal
-// bound and a numeric-only current type, matching this project's own
-// "no loose-comparison modeling" precedent (see `comparison_narrowed_
-// bounds`'s own doc comment).
+// `<`/`>`/`<=`/`>=` against a literal narrows a plain/ranged int
+// variable's own range - scoped to a single literal bound and a
+// numeric-only current type (see `comparison_narrowed_bounds`'s own
+// doc comment).
 
 #[test]
 fn less_than_a_literal_narrows_the_upper_bound_exclusive() {
@@ -3962,9 +3814,8 @@ fn comparison_on_a_non_numeric_current_type_is_never_narrowed() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// ROADMAP "Known but not yet scheduled" follow-up: the narrow slice of
-// real PHPStan's own `ConditionalExpressionHolder` this project builds -
-// correlating a *second* variable's narrowing to a first variable's own
+// A narrow slice of real PHPStan's own `ConditionalExpressionHolder` -
+// correlating a second variable's narrowing to a first variable's own
 // truthiness, for the single-hop case (`$ok = <condition>; if ($ok)
 // {...}`), by storing the RHS condition expression and replaying it
 // through the already-correct `apply_narrowing` recursion.
