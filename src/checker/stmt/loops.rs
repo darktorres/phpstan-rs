@@ -531,22 +531,16 @@ impl<'a> Checker<'a> {
         //
         // A `Type::ArrayShape` subject must not fall straight to the
         // `Mixed` catch-all, discarding real, known field types (real
-        // shape: `MaintenanceActionDispatcher::
-        // dispatch`'s `foreach ($versions as $key => $value) {
-        // $versions[$key] = preg_replace(..., $value); }`, where
-        // every field of `$versions` is actually a plain `string`.
-        // With `$value` inferred as `Mixed`, `preg_replace`'s own
-        // stub (which returns a broader type for a
-        // statically-unknown subject) leaked an `array<string>`
-        // possibility into `$versions`'s own re-widened element
-        // type that stuck around once Finding E's `Union`-awareness
-        // stopped silently collapsing it. Joining every field's own
-        // type (the same "give the reader every field's type is at
-        // least possible" idea `write_index_into`'s own dynamic-key
-        // write branch already uses) is real, if narrow, precision:
-        // exact when every field shares one type (the common case
-        // this false positive came from), still sound but coarser
-        // when they don't.
+        // shape: `MaintenanceActionDispatcher::dispatch`'s
+        // `foreach ($versions as $key => $value) { $versions[$key] =
+        // preg_replace(..., $value); }`, where every field of
+        // `$versions` is actually a plain `string` - with `$value`
+        // inferred as `Mixed`, `preg_replace`'s own stub leaks a
+        // broader possibility into `$versions`'s re-widened element
+        // type). Joining every field's type (the same idea
+        // `write_index_into`'s own dynamic-key write branch uses) is
+        // exact when every field shares one type, still sound but
+        // coarser when they don't.
         // `Self::array_element_type` also sees through
         // an `Intersection`-wrapped `list<T>`/`non-empty-
         // array<T>` - without it, `foreach` over one of those would
@@ -567,78 +561,64 @@ impl<'a> Checker<'a> {
                 .iterable_element_type(&subject_ty)
                 .unwrap_or((Type::Mixed, Type::Mixed)),
         };
-        // See `converge_loop_body`'s own doc comment: `Foreach`
-        // gets the same "may run zero times" merge with the
-        // pre-loop state `While`/`For` already had, for every variable
-        // *except* `subject_exempt` above - a bare `$variable` subject
-        // the body mutates in place via a nested write keyed by its own
-        // loop variable keeps its own post-body shape untouched, rather
-        // than being widened back with the stale pre-loop one. A
-        // `break` reached anywhere in `body` had its own state
-        // silently discarded from everything past the loop -
-        // `always_terminates` correctly stops a break-ending
-        // branch from leaking into the *rest of its own block*,
-        // but nothing captured it for the loop's own exit state.
-        // `loop_break_states` closes exactly that gap, without
-        // touching the single-representative-pass model otherwise.
+        // See `converge_loop_body`'s own doc comment: `Foreach` gets
+        // the same "may run zero times" merge with the pre-loop state
+        // `While`/`For` already had, for every variable *except*
+        // `subject_exempt` above - a bare `$variable` subject the body
+        // mutates in place via a nested write keyed by its own loop
+        // variable keeps its post-body shape untouched, rather than
+        // being widened back with the stale pre-loop one.
+        // `loop_break_states` captures every `break`-reached state for
+        // the loop's exit state, since `always_terminates` only stops a
+        // break-ending branch from leaking into the *rest of its own
+        // block*.
         //
-        // The body itself converges to a fixed point
-        // across up to 3 passes (see `converge_loop_body`'s own doc
-        // comment) - a variable reassigned inside the body is no
-        // longer stuck at its pre-loop type for the whole check.
-        // The *entry* state fed to every pass, and the final
-        // result, are both still `locals` directly - never merged
-        // with a separate pre-loop snapshot, preserving the
-        // deliberate zero-iterations trade-off described above
-        // exactly. Only the within/across-iteration staleness this
-        // phase targets is fixed.
+        // The body converges to a fixed point across up to 3 passes
+        // (see `converge_loop_body`) - a variable reassigned inside the
+        // body is no longer stuck at its pre-loop type for the whole
+        // check. The *entry* state fed to every pass, and the final
+        // result, are both still `locals` directly, preserving the
+        // zero-iterations trade-off described above.
         //
-        // The key/value binding itself is re-applied at the start
-        // of *every* pass, not just once before the first - real
-        // PHP rebinds a foreach's loop variable(s) fresh from the
-        // subject on every actual iteration, so a pass must never
-        // start from what the *previous* pass's body left the
-        // loop variable mutated to. Confirmed necessary by a real
-        // corpus false positive this exact ordering fixed:
-        // `QNumericRangeScope::parse`'s `foreach ($range as $i =>
-        // &$val) { ...; $val = floatval(...); }` - a by-reference
-        // loop variable reassigned inside the body would otherwise
-        // wrongly union its post-body `float` into the *next*
-        // pass's entry as `string|float`, even though each real
-        // iteration's `&$val` aliases a *different* array slot
-        // that pass's body never touched.
+        // The key/value binding is re-applied at the start of *every*
+        // pass, not just once before the first: real PHP rebinds a
+        // foreach's loop variable(s) fresh from the subject on every
+        // actual iteration, so a pass must never start from what the
+        // *previous* pass's body left the loop variable mutated to
+        // (real shape: `QNumericRangeScope::parse`'s
+        // `foreach ($range as $i => &$val) { ...; $val = floatval(...); }`
+        // - a by-reference loop variable reassigned inside the body
+        // would otherwise wrongly union its post-body `float` into the
+        // *next* pass's entry as `string|float`, even though each real
+        // iteration's `&$val` aliases a *different* array slot that
+        // pass's body never touched).
         let entry = locals.clone();
         self.loop_depth += 1;
         // Mirrors real PHPStan's own `ForeachHandler::processStmt`'s
-        // third, `isIterableAtLeastOnce()->yes()` branch (confirmed
-        // directly against `vendor/phpstan-src`): a subject that's
-        // *provably* non-empty (`explode()`'s own always-non-empty-list
-        // return, a non-empty `ArrayShape` literal, ...) never runs zero
-        // times, so it gets the exact same "no merge with the pre-loop
-        // entry at all" treatment `Impossible` already gives do-while/
-        // for(;;) - not `Possible`'s merge, which would otherwise widen
-        // back toward the stale pre-loop state even though every real
-        // iteration provably replaces it. Real corpus false positive
-        // this fixes: `UserSortField::parseOrderClause`'s own `foreach
-        // (explode(',', $order) as $rawEntry)` - `explode()` on a
-        // provably non-empty `$order` (an earlier guard clause already
-        // returns early on an empty one) is itself already a real
-        // `non-empty-list<string>`, so `$clauses` can never actually end
-        // up its own stale pre-loop `[]` - merging that back in produced
-        // a spurious `array{}` alternative in the return type.
+        // third, `isIterableAtLeastOnce()->yes()` branch: a subject
+        // that's *provably* non-empty (`explode()`'s own
+        // always-non-empty-list return, a non-empty `ArrayShape`
+        // literal, ...) never runs zero times, so it gets the same "no
+        // merge with the pre-loop entry" treatment `Impossible` already
+        // gives do-while/for(;;), not `Possible`'s merge (which would
+        // otherwise widen back toward the stale pre-loop state even
+        // though every real iteration provably replaces it - real
+        // shape: `UserSortField::parseOrderClause`'s own
+        // `foreach (explode(',', $order) as $rawEntry)`, where
+        // `explode()` on a provably non-empty `$order` is itself
+        // already a real `non-empty-list<string>`).
         let zero_iterations = if Self::is_known_non_empty_array(&subject_ty) {
             LoopZeroIterations::Impossible
         } else {
             LoopZeroIterations::Possible { subject_exempt }
         };
         // Captured from *inside* the last accepted pass, before
-        // `converge_loop_body`'s own "may not run" merge (which drops any
-        // name - `value`'s own included - that isn't present in both the
-        // pre-loop `entry` and the body's exit state) ever gets a chance
-        // to erase it. `converge_loop_body` only ever calls `run_pass`
-        // again when convergence *hasn't* been reached yet, so the value
-        // this ends up holding when it returns is always the one from
-        // whichever pass it actually accepted - never a stale earlier one.
+        // `converge_loop_body`'s own "may not run" merge (which drops
+        // any name, `value`'s included, not present in both the
+        // pre-loop `entry` and the body's exit state) can erase it.
+        // `converge_loop_body` only calls `run_pass` again when
+        // convergence hasn't been reached yet, so this always ends up
+        // holding the value from whichever pass was actually accepted.
         let mut last_value_ty: Option<Type> = None;
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
