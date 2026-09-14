@@ -246,8 +246,8 @@ pub(crate) fn walk_expr_for_members(
         ExprKind::StaticCall(class_ref, name, _) if class_ref_is_self(class_ref, fqn, ctx) => {
             usage.methods.insert(name.clone());
         }
-        // `$obj->{$expr}` / `$obj->$name(...)` - the roadmap's own
-        // called-out dynamic-member-access escape hatch.
+        // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
+        // access this walker can't attribute to any specific member.
         ExprKind::DynamicPropertyAccess(..) | ExprKind::DynamicMethodCall(..) => {
             usage.escaped = true;
         }
@@ -274,9 +274,9 @@ pub(crate) fn walk_expr_for_members(
         // generic `Vec<&Expr>` shape). Without these arms, a private
         // member referenced only from inside a closure/arrow function
         // (`array_map`/`usort`/`preg_replace_callback`/
-        // `register_shutdown_function`/a transactional closure, ...) was
-        // invisible to this walker and wrongly reported unused - confirmed
-        // against 8 independent Piwigo corpus instances.
+        // `register_shutdown_function`/a transactional closure, ...)
+        // would otherwise be invisible to this walker and wrongly
+        // reported unused.
         ExprKind::Closure { params, body, .. } => {
             for p in params {
                 if let Some(d) = &p.default {

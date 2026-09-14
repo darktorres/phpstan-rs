@@ -1,29 +1,15 @@
-//! Phase 59: the unused-symbol detection subsystem - one variable/member-
-//! usage walker, applied at four call sites (constructor parameters,
-//! closure `use(...)` captures, and private class consts/methods/
-//! properties) to back five diagnostics: `UnusedConstructorParametersRule`-
-//! style, `UnusedClosureUsesRule`-style, `UnusedPrivateConstantRule`,
-//! `UnusedPrivateMethodRule`, and `UnusedPrivatePropertyRule` (this last
-//! one with real PHPStan's own five distinct read/write message shapes -
-//! see `PrivatePropertyState::message` below).
+//! The unused-symbol detection subsystem - one variable/member-usage
+//! walker, applied at four call sites (constructor parameters, closure
+//! `use(...)` captures, and private class consts/methods/properties) to
+//! back five diagnostics: constructor-parameter, closure-use, private
+//! constant, private method, and private property (this last one with
+//! five distinct read/write message shapes).
 //!
-//! Deliberately scoped down from the roadmap phase text in one place: real
-//! PHPStan's own `UnusedConstructorParametersRule` (the one rule this
-//! project's Phase 59 phase text actually names) checks *only*
-//! `__construct` parameters, never an arbitrary function/method's - a
-//! general "this parameter is never read" rule is far noisier in real code
-//! (an interface implementation's parameter, an overridden method's
-//! parameter, an `array_map`/`usort` callback's parameter, ... all
-//! routinely go unused without being a bug) and isn't what real PHPStan
-//! ships at all. This module follows the named rule, not the broader
-//! "function/method parameters" phrase earlier in the same paragraph.
-//!
-//! Grounded directly against the real rule sources this project doesn't
-//! vendor by default (`vendor/phpstan-src/src/Rules/{Classes,Functions,
-//! DeadCode}/Unused*.php` and their shared `UnusedFunctionParametersCheck`)
-//! rather than guessed from the phase text alone - message wording is
-//! adapted to this project's own lowercase, un-punctuated diagnostic style
-//! (see `checker/oop.rs`'s existing messages), not copied verbatim.
+//! Scoped to only `__construct` parameters, never an arbitrary
+//! function/method's - a general "this parameter is never read" rule is
+//! far noisier in real code (an interface implementation's parameter, an
+//! overridden method's parameter, an `array_map`/`usort` callback's
+//! parameter, ... all routinely go unused without being a bug).
 
 use crate::ast::*;
 use crate::checker::Checker;
@@ -41,13 +27,12 @@ pub(crate) use rebind::scan_program_for_rebind_targets;
 use var_usage::collect_var_usage;
 
 impl<'a> Checker<'a> {
-    /// Phase 59: flags a `__construct` parameter never referenced anywhere
-    /// in the constructor's own body - deliberately scoped to constructors
-    /// only (real PHPStan's own `UnusedConstructorParametersRule`, not a
-    /// general "unused parameter" rule - see this module's own doc comment
-    /// for why). Constructor property promotion (`private int $id`) is
-    /// exempt: the promotion itself is an implicit `$this->id = $id`
-    /// assignment, a real use, even when the body never reads `$id` again.
+    /// Flags a `__construct` parameter never referenced anywhere in the
+    /// constructor's own body - scoped to constructors only, not a
+    /// general "unused parameter" rule. Constructor property promotion
+    /// (`private int $id`) is exempt: the promotion itself is an implicit
+    /// `$this->id = $id` assignment, a real use, even when the body never
+    /// reads `$id` again.
     pub(crate) fn check_unused_constructor_parameters(
         &mut self,
         f: &FunctionDecl,
@@ -83,14 +68,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 59: flags a closure `use ($x)`/`use (&$x)` capture never
-    /// referenced anywhere in the closure's own body - real PHPStan's own
-    /// `UnusedClosureUsesRule`. Applies to every closure regardless of
-    /// where it appears (unlike constructor parameters, an explicit
-    /// `use(...)` clause is always the closure author's own deliberate
-    /// choice, never dictated by an interface/override signature, so this
-    /// carries none of the false-positive risk a general unused-parameter
-    /// check would).
+    /// Flags a closure `use ($x)`/`use (&$x)` capture never referenced
+    /// anywhere in the closure's own body. Applies to every closure
+    /// regardless of where it appears: unlike constructor parameters, an
+    /// explicit `use(...)` clause is always the closure author's own
+    /// deliberate choice, never dictated by an interface/override
+    /// signature, so this carries none of the false-positive risk a
+    /// general unused-parameter check would.
     pub(crate) fn check_unused_closure_uses(
         &mut self,
         uses: &[ClosureUse],
@@ -116,14 +100,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 59: flags a private const/method/property never referenced
-    /// anywhere in this class's own declared bodies - real PHPStan's
-    /// `UnusedPrivateConstantRule`/`UnusedPrivateMethodRule`/
-    /// `UnusedPrivatePropertyRule`. Scanning only `methods`/`properties`/
-    /// `consts` exactly as declared on this one `ClassDecl`/`EnumDecl`
-    /// (never the registry's own trait-flattened `ClassInfo`) means a
-    /// trait-provided member is never a candidate here at all - matching
-    /// real PHPStan's explicit `isDeclaredInTrait()` exclusion, for free.
+    /// Flags a private const/method/property never referenced anywhere in
+    /// this class's own declared bodies. Scanning only
+    /// `methods`/`properties`/`consts` exactly as declared on this one
+    /// `ClassDecl`/`EnumDecl` (never the registry's own trait-flattened
+    /// `ClassInfo`) means a trait-provided member is never a candidate
+    /// here at all.
     pub(crate) fn check_unused_private_members(
         &mut self,
         fqn: &str,
@@ -153,25 +135,21 @@ impl<'a> Checker<'a> {
             // `new self()` assignment or `instanceof self` check doesn't
             // depend on any alias already being known, so one top-to-
             // bottom pass finds all of them regardless of order); pass 2
-            // (now with complete alias knowledge from the start)
-            // correctly attributes every aliased-variable read/write/call
-            // even when it textually precedes the statement that
-            // established the alias. HashSet inserts are idempotent, so
-            // the redundant work in pass 1's own read/write/method
-            // accounting is harmless, not a correctness risk. See
-            // `MemberUsage::aliases`'s own doc comment.
+            // (now with complete alias knowledge from the start) correctly
+            // attributes every aliased-variable read/write/call even when
+            // it textually precedes the statement that established the
+            // alias. HashSet inserts are idempotent, so the redundant work
+            // in pass 1's own read/write/method accounting is harmless.
             walk_stmt_body_for_members(&m.function.body, fqn, &self.name_ctx, &mut usage);
             walk_stmt_body_for_members(&m.function.body, fqn, &self.name_ctx, &mut usage);
         }
         if let Some(ctor) = ctor {
             for p in &ctor.function.params {
                 if let Some(d) = &p.default {
-                    // A property/constructor-param default must be a
-                    // PHP constant expression - no assignment or
-                    // `instanceof` can appear in one, so `usage.aliases`
-                    // can never be populated here; cleared anyway rather
-                    // than relying on that argument to justify skipping
-                    // it.
+                    // A property/constructor-param default must be a PHP
+                    // constant expression - no assignment or `instanceof`
+                    // can appear in one, so `usage.aliases` can never be
+                    // populated here; cleared anyway.
                     usage.aliases.clear();
                     walk_expr_for_members(d, fqn, &self.name_ctx, &mut usage);
                 }
@@ -282,14 +260,12 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The shared read/write-state-to-message logic behind
-    /// `UnusedPrivatePropertyRule`'s five distinct shapes - see this
-    /// module's own doc comment. `@phpstan-always-read`/`@phpstan-always-
-    /// written` (checked directly against the raw doc-comment text, the
-    /// same substring check real PHPStan's own configurable tag list
-    /// uses) let a property genuinely read/written only through
-    /// reflection, serialization, or a magic method suppress a false
-    /// report the same way real PHPStan's extension point does.
+    /// The shared read/write-state-to-message logic behind the private-
+    /// property check's five distinct shapes. `@phpstan-always-read`/
+    /// `@phpstan-always-written` (checked directly against the raw
+    /// doc-comment text) let a property genuinely read/written only
+    /// through reflection, serialization, or a magic method suppress a
+    /// false report.
     #[allow(clippy::too_many_arguments)]
     fn report_unused_property(
         &mut self,
@@ -314,10 +290,6 @@ impl<'a> Checker<'a> {
         } else {
             "property"
         };
-        // Identifiers match real PHPStan's own UnusedPrivatePropertyRule
-        // one-for-one (property.unused/.neverRead/.onlyWritten/
-        // .neverWritten/.onlyRead - vendor/phpstan-src's own five
-        // ->identifier(...) calls).
         let (message, identifier) = if !read {
             if !written {
                 (

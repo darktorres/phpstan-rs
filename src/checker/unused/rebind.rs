@@ -10,16 +10,14 @@ use crate::registry::NameContext;
 // ---------------------------------------------------------------------
 
 /// A whole-program pre-pass (unlike every other walker in this module,
-/// which deliberately stops at a nested function/class declaration - this
-/// one needs to see into every one of them, since a `Closure::bind` call
-/// reaching into class `Foo`'s private members can appear in a completely
+/// which stops at a nested function/class declaration - this one needs
+/// to see into every one of them, since a `Closure::bind` call reaching
+/// into class `Foo`'s private members can appear in a completely
 /// unrelated top-level function, nowhere near `Foo`'s own declaration).
-/// Returns the set of classes a *literal* `Foo::class` scope argument
+/// Returns the set of classes a literal `Foo::class` scope argument
 /// names, plus a coarser "give up entirely" flag for a bind/bindTo call
-/// whose scope this project can't resolve without real type inference (an
-/// omitted scope, or an arbitrary expression) - see the two call sites'
-/// own doc comments for why either one short-circuits
-/// `check_unused_private_members` rather than risk a false report.
+/// whose scope this project can't resolve without real type inference
+/// (an omitted scope, or an arbitrary expression).
 pub(crate) fn scan_program_for_rebind_targets(
     program: &[Stmt],
     ctx: &NameContext,

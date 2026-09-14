@@ -8,13 +8,12 @@ use crate::ast_walk::{expr_children, stmt_children};
 // ---------------------------------------------------------------------
 
 /// The result of walking one function/closure body for "which variable
-/// names does it reference anywhere" - deliberately *any* occurrence
-/// (read, write, or a nested closure's own `use(...)` capture of the same
-/// name), not just a provably-read one: this project treats a false
-/// "unused" report as much worse than a missed one (see the project's own
-/// conventions), and a parameter that's merely reassigned without ever
-/// being read again is a real but much subtler bug than an unused-
-/// parameter check is meant to catch.
+/// names does it reference anywhere" - any occurrence (read, write, or a
+/// nested closure's own `use(...)` capture of the same name), not just a
+/// provably-read one: a false "unused" report is treated as much worse
+/// than a missed one, and a parameter that's merely reassigned without
+/// ever being read again is a subtler bug than an unused-parameter check
+/// is meant to catch.
 pub(crate) enum VarUsage {
     Names(HashSet<String>),
     /// Something that reads variables by a name this walk can't resolve
