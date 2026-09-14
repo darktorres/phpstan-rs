@@ -714,13 +714,10 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
 
 fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]) -> Type {
     match bare.to_ascii_lowercase().as_str() {
-        // `int<min, max>` and its named shorthands are real
-        // ranges now, not aliased to plain `Int` - `IntRange` fully
-        // replaces `Int`'s own range, the same relationship `IntLiteral`
-        // has to `Int`. `int`/`integer` additionally read `generic_args`
-        // when present (`int<0, 255>`, already structurally parsed as
-        // generic args today) - a malformed bound falls back to plain
-        // `Type::Int` rather than guessing.
+        // `int<min, max>` and its named shorthands are real ranges,
+        // not aliased to plain `Int`. `int`/`integer` also read
+        // `generic_args` when present (`int<0, 255>`) - a malformed
+        // bound falls back to plain `Type::Int` rather than guessing.
         "int" | "integer" => match generic_args {
             [min, max] => match (parse_int_bound(min), parse_int_bound(max)) {
                 (Some(min), Some(max)) => Type::IntRange(min, max),
@@ -739,46 +736,30 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::IntRange(Some(1), None),
         ]),
         // `int-mask<Flag::*>`/`int-mask-of<Flag::*>` - real PHPStan
-        // expands these into a real union of every combinable bitmask
-        // value, which this project has no way to enumerate without
-        // resolving the referenced class constants (the same "no lazy/
-        // deferred resolution" boundary `value-of`/`key-of` below already
-        // hit). Falling through to the generic class-name branch instead
-        // produced a bogus namespace-qualified "class" like `Composer\
-        // Pcre\int-mask<Composer\Pcre\PREG_UNMATCHED_AS_NULL>`, which
-        // then failed every ordinary `int`-typed assignability check -
-        // a real corpus false positive. Degrading to plain `Type::Int`
-        // (the pseudo-type's own real underlying kind) is a strict
-        // improvement, matching this project's own "don't guess past
-        // what's verifiable" convention for the string-identity pseudo-
-        // types just below. Any `<...>` generic argument is parsed (via
-        // the caller's existing generic-arg splitting) and simply
-        // discarded here, not left unconsumed.
+        // expands these into a union of every combinable bitmask value,
+        // which this project can't enumerate without resolving the
+        // referenced class constants (same boundary `value-of`/`key-of`
+        // below hit). Degrades to plain `Type::Int` (the pseudo-type's
+        // real underlying kind) rather than falling through to the
+        // generic class-name branch, which would produce a bogus
+        // namespace-qualified "class" that fails every ordinary
+        // `int`-typed assignability check.
         "int-mask" | "int-mask-of" => Type::Int,
         "float" | "double" => Type::Float,
         // The accessory-refined string pseudo-types are real
         // `Intersection([String, Accessory(_)])` types, mirroring real
-        // PHPStan's own `IntersectionType([StringType, AccessoryXType])`
-        // representation. `callable-string`/`trait-string`/
-        // `interface-string`/`enum-string` stay aliased to plain
-        // `string`: each names "a string believed to hold a specific kind
-        // of identifier," with no literal-based or narrowing-based way
-        // for this project to ever verify content - `class-string`'s own
-        // optional `<Foo>` generic argument is similarly just dropped
-        // rather than tracked.
+        // PHPStan's own `IntersectionType([StringType, AccessoryXType])`.
+        // `callable-string`/`trait-string`/`interface-string`/
+        // `enum-string` stay aliased to plain `string`: each names "a
+        // string believed to hold a specific kind of identifier," with
+        // no way for this project to verify content.
         //
         // `lowercase-string`/`uppercase-string`/`non-empty-
         // lowercase-string`/`non-empty-uppercase-string` are unlike
-        // `callable-string`/`trait-string`/etc.: case-content genuinely
-        // *is* something this project can prove -
-        // `types::subtype`'s own `LowercaseString`/`UppercaseString`
-        // literal-fact arms, and the case-tracking
-        // producers `strtolower`/`strtoupper`/etc. now wire (`checker/
-        // expr/builtin_calls.rs`), give these two real, checkable
-        // content. Routed through the identical `Intersection([String,
-        // Accessory(_)])` machinery as `non-empty-string`/`numeric-string`
-        // just above, rather than staying degraded now that a real
-        // producer/consumer pipeline exists for them.
+        // those: case-content genuinely *is* provable, via
+        // `types::subtype`'s `LowercaseString`/`UppercaseString`
+        // literal-fact arms and the `strtolower`/`strtoupper`/etc.
+        // case-tracking producers (`checker/expr/builtin_calls.rs`).
         "lowercase-string" => Type::Intersection(vec![
             Type::String,
             Type::Accessory(AccessoryKind::LowercaseString),
@@ -798,15 +779,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::Accessory(AccessoryKind::UppercaseString),
         ]),
         // `decimal-int-string` mirrors real PHPStan's own
-        // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`
-        // (`TypeNodeResolver.php`) - the `inverse` variant (`non-decimal-
-        // int-string`) stays unaliased/undegraded-to-string here (falls
-        // through to the generic-class-name branch, same as any other
-        // unrecognized name) since it needs the wholly separate dynamic-
-        // array-key-narrowing consumer this phase deliberately doesn't
-        // build (see this phase's own Deferred/declined note) - aliasing
-        // it to a kind with no real consumer would be a silent, false
-        // claim of support.
+        // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`.
+        // The `inverse` variant (`non-decimal-int-string`) stays
+        // unaliased (falls through to the generic-class-name branch)
+        // since it needs a wholly separate dynamic-array-key-narrowing
+        // consumer this project doesn't build - aliasing it to a kind
+        // with no real consumer would be a silent, false claim of
+        // support.
         "decimal-int-string" => Type::Intersection(vec![
             Type::String,
             Type::Accessory(AccessoryKind::DecimalIntegerString),
@@ -829,12 +808,9 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         ]),
         "string" => Type::String,
         // `callable-string` mirrors real PHPStan's own resolution
-        // (`TypeNodeResolver.php`: `IntersectionType([StringType,
-        // CallableType])`) - architecturally unrelated to the
-        // `class-string` family below despite the shared "-string" name,
-        // and the identical `Intersection([String, X])` shape this
-        // file's own `non-empty-string`/`numeric-string` arms already
-        // use just above.
+        // (`IntersectionType([StringType, CallableType])`) -
+        // architecturally unrelated to the `class-string` family below
+        // despite the shared "-string" name.
         "callable-string" => Type::Intersection(vec![Type::String, Type::Callable(None)]),
         // `enum-string`/`enum-string<T>` mirror real PHPStan's own
         // `GenericClassStringType(UnitEnum)`/`GenericClassStringType(T &
