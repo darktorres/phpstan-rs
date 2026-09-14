@@ -54,13 +54,13 @@ impl fmt::Display for Type {
                     .collect();
                 write!(f, "object{{{}}}", parts.join(", "))
             }
-            // Phase 54: call-site variance sentinels print in real
-            // PHPStan's own `GenericTypeNode::__toString()` format
-            // (`covariant Foo`/`contravariant Foo`/`*`) rather than
-            // leaking the internal `"$$covariant"<Foo>`-shaped sentinel
-            // name into a real diagnostic message - unlike `"$$valueof"`
-            // (Phase 80), which is always resolved away before display,
-            // these persist in the type tree as a permanent annotation.
+            // Call-site variance sentinels print in real PHPStan's own
+            // `GenericTypeNode::__toString()` format (`covariant Foo`/
+            // `contravariant Foo`/`*`) rather than leaking the internal
+            // `"$$covariant"<Foo>`-shaped sentinel name into a real
+            // diagnostic message - unlike `"$$valueof"`, which is always
+            // resolved away before display, these persist in the type
+            // tree as a permanent annotation.
             Type::Object(name, args) if name == "$$bivariant" => write!(f, "*"),
             Type::Object(name, args) if name == "$$covariant" => {
                 write!(f, "covariant {}", args[0])
@@ -152,7 +152,7 @@ fn accessory_kind_name(kind: AccessoryKind) -> &'static str {
 }
 
 /// Recognizes the canonical `[base, Accessory(kind), ...]` shapes
-/// `parse_type_keyword_or_class` constructs (Phase 14) and renders them
+/// `parse_type_keyword_or_class` constructs and renders them
 /// as PHPStan's own atomic pseudo-type name, rather than the generic
 /// `&`-joined form `Type::Intersection`'s own `Display` otherwise uses
 /// (correct for a real user intersection like `Countable&Iterator`, but
@@ -170,14 +170,12 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         _ => None,
     }) {
         let is_list = has(AccessoryKind::ArrayList);
-        // Phase 73 corpus find: this used to discard the key type
-        // entirely, always formatting via the plain, key-less `<V>`
-        // form (or nothing, for `Mixed`) - harmless while every
-        // accessory-marked array this project produced also had an
-        // unknown key, but `array_flip()`'s own new key/value-swapping
-        // return type can genuinely carry a known, non-default key
-        // (e.g. `non-empty-array<string, int>`) that this was silently
-        // rendering as `non-empty-array<int>`. Mirrors `Type::Array`'s
+        // The key type must not be discarded in favor of always
+        // formatting via the plain, key-less `<V>` form (or nothing, for
+        // `Mixed`): `array_flip()`'s own key/value-swapping return type
+        // can genuinely carry a known, non-default key (e.g.
+        // `non-empty-array<string, int>`), which would otherwise render
+        // as `non-empty-array<int>`. Mirrors `Type::Array`'s
         // own `Display` arm just above: a known key always shows both
         // positions, even when the value happens to be `Mixed`. Never
         // shown for a `list`/`non-empty-list`, though, even though its
@@ -201,18 +199,15 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         };
     }
     if members.contains(&Type::String) {
-        // Phase 75: a generic ordered-parts join, replacing the old fixed
-        // 4-tuple match - behavior-preserving for every existing
-        // singleton case (each still produces the exact same name it
-        // always did), but also correctly composes a combination none of
-        // those 4 tuples covered (e.g. `date('Y')`'s own real
-        // `non-empty-numeric-string`, silently mis-rendered via the raw
-        // `&`-joined fallback before this fix) and the two new case-
-        // tracking kinds this phase adds. No `VerbosityLevel` concept
-        // exists anywhere in this project (real PHPStan hides `lowercase`/
-        // `uppercase` unless asked for "precise" verbosity) - always
-        // showing every part is strictly more informative, in-bounds per
-        // "stricter than PHPStan is fine."
+        // A generic ordered-parts join correctly composes any
+        // combination of accessory kinds (e.g. `date('Y')`'s own real
+        // `non-empty-numeric-string`) rather than only a fixed set of
+        // singleton cases, falling back to the raw `&`-joined form
+        // otherwise. No `VerbosityLevel` concept exists anywhere in this
+        // project (real PHPStan hides `lowercase`/`uppercase` unless
+        // asked for "precise" verbosity) - always showing every part is
+        // strictly more informative, in-bounds per "stricter than
+        // PHPStan is fine."
         let mut parts: Vec<&str> = Vec::new();
         if has(AccessoryKind::NonFalsyString) {
             parts.push("non-falsy");
