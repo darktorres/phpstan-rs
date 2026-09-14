@@ -1,28 +1,21 @@
-//! Phase 41 stage 1 (see ROADMAP.md's own recommendation: "NoopRule +
-//! the four `WithoutSideEffectsRule`s [M effort, ships fast, no purity
-//! model needed]") - real PHPStan's `Rules\DeadCode\NoopRule`, narrowed
+//! Real PHPStan's `Rules\DeadCode\NoopRule`, narrowed
 //! to the slice this project's own AST can support without ambiguity.
 //!
-//! **The gate that matters most, found by reading real PHPStan's own
-//! source rather than guessing**: `NoopRule` doesn't itself decide
+//! **The gate that matters most**: `NoopRule` doesn't itself decide
 //! whether a bare-statement expression "does nothing" - it only runs at
 //! all once `Analyser\StmtHandler\ExpressionHandler` has already
-//! established the *whole* expression has zero impure points and zero
-//! explicit throw points (`vendor/phpstan-src/src/Analyser/StmtHandler/
-//! ExpressionHandler.php`). Without an equivalent gate here, this check
+//! established the whole expression has zero impure points and zero
+//! explicit throw points. Without an equivalent gate here, this check
 //! would misfire on `$cond || $this->die('message');`'s own well-known
-//! "guard or die" idiom - a real, legitimate corpus pattern this exact
-//! file's neighbor (`checker/stmt.rs`'s own "Phase 32 Finding K") has
-//! dedicated narrowing support for, whose top-level shape (a bare `||`
-//! statement) is otherwise indistinguishable from a genuine no-op.
+//! "guard or die" idiom, whose top-level shape (a bare `||` statement)
+//! is otherwise indistinguishable from a genuine no-op.
 //! `expr_is_side_effect_free` below is a syntactic approximation of that
 //! same "zero impure points" precondition - no attempt at real purity
-//! *inference* (`@phpstan-pure` tags, transitive call-graph purity -
-//! Phase 41's own later, XL-effort stage), just a conservative "does
-//! this subtree contain anything that could possibly do something"
-//! scan. Conservative in the safe direction throughout: anything this
-//! can't prove side-effect-free is treated as side-effecting, never the
-//! other way around.
+//! inference (`@phpstan-pure` tags, transitive call-graph purity), just
+//! a conservative "does this subtree contain anything that could
+//! possibly do something" scan. Conservative in the safe direction
+//! throughout: anything this can't prove side-effect-free is treated as
+//! side-effecting, never the other way around.
 //!
 //! Real PHPStan's version additionally splits `and`/`or`
 //! (`Node\Expr\BinaryOp\LogicalAnd`/`LogicalOr`) from `&&`/`||`
@@ -55,11 +48,11 @@
 //! Still open: the four `CallToFunctionStatementWithoutSideEffectsRule`/
 //! `*MethodStatement*`/`*StaticMethodStatement*`/`*ConstructorStatement*`
 //! rules (a call/`new` whose own signature is known to have no side
-//! effects - needs real purity data this project doesn't track yet, the
-//! same Phase 41 gap), and the generic "any other side-effect-free bare
-//! expression" `expr.resultUnused` fallback (needs a source-expression
-//! printer this project doesn't have, to name the useless expression in
-//! the message).
+//! effects - needs real purity data this project doesn't track yet),
+//! and the generic "any other side-effect-free bare expression"
+//! `expr.resultUnused` fallback (needs a source-expression printer this
+//! project doesn't have, to name the useless expression in the
+//! message).
 
 use crate::ast::{BinOp, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
@@ -129,7 +122,7 @@ impl<'a> Checker<'a> {
         self.report(label.to_string(), message, e.span, 4, identifier);
     }
 
-    /// Phase 41/82's transitive-purity payoff: a bare, statement-level
+    /// The transitive-purity payoff: a bare, statement-level
     /// call whose target `registry::purity::Registry::
     /// resolve_transitive_purity` proved effect-free is dead code, the
     /// exact same family as `check_noop_statement` above (a discarded
@@ -256,28 +249,27 @@ impl<'a> Checker<'a> {
         self.report(label.to_string(), message, e.span, 4, identifier);
     }
 
-    /// `@phpstan-pure`/`@phpstan-impure` tag validation (Phase 41 follow-
-    /// up) - real PHPStan's own `FunctionPurityCheck`, scoped to the one
-    /// direction this project's own *binary* purity classification
+    /// `@phpstan-pure`/`@phpstan-impure` tag validation - real PHPStan's
+    /// own `FunctionPurityCheck`, scoped to the one direction this
+    /// project's own binary purity classification
     /// (`FunctionSig::is_transitively_pure` - deliberately not the
     /// richer per-point `certain`/`maybe` taxonomy real PHPStan's own
-    /// version needs, see Phase 41's own Done writeup) can support
-    /// without a real risk of false positives: a declaration tagged
-    /// `@phpstan-impure` that this project's own classifier *proves*
-    /// pure (`impureFunction.pure`/`impureMethod.pure`, confirmed
-    /// directly against real PHPStan's own identical identifier/message
-    /// pair). The opposite direction (`@phpstan-pure` tagged on
-    /// something the classifier calls impure) is deliberately **not**
-    /// built - `is_transitively_pure == false` conflates "genuinely
-    /// impure" with "unknown, so conservatively disqualified" (an
-    /// unresolvable receiver unconditionally disqualifies a declaration
-    /// here, per this project's own disclosed precision limit versus
-    /// real PHPStan), so flagging that direction would misfire on every
-    /// actually-pure function this project simply can't *prove* pure -
-    /// the same "favor false negatives" precedent this project holds
-    /// throughout, applied to which *direction* of a two-way check is
-    /// safe to build at all, not just how each one individually is
-    /// worded.
+    /// version needs) can support without a real risk of false
+    /// positives: a declaration tagged `@phpstan-impure` that this
+    /// project's own classifier proves pure
+    /// (`impureFunction.pure`/`impureMethod.pure`, matching real
+    /// PHPStan's own identical identifier/message pair). The opposite
+    /// direction (`@phpstan-pure` tagged on something the classifier
+    /// calls impure) is deliberately not built - `is_transitively_pure
+    /// == false` conflates "genuinely impure" with "unknown, so
+    /// conservatively disqualified" (an unresolvable receiver
+    /// unconditionally disqualifies a declaration here, per this
+    /// project's own disclosed precision limit versus real PHPStan), so
+    /// flagging that direction would misfire on every actually-pure
+    /// function this project simply can't prove pure - the same "favor
+    /// false negatives" precedent this project holds throughout, applied
+    /// to which direction of a two-way check is safe to build at all,
+    /// not just how each one individually is worded.
     pub(crate) fn check_declared_purity_tag(
         &mut self,
         f: &FunctionDecl,
@@ -317,25 +309,22 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 41 follow-up: `Rules/Pure/FunctionPurityCheck.php`'s own
+    /// `Rules/Pure/FunctionPurityCheck.php`'s own
     /// remaining three diagnostics for a declaration real PHPStan
     /// considers pure - `pure{Function,Method}.parameterByRef`,
     /// `pure{Function,Method}.void`, and per-construct `impure.<id>`/
     /// `possiblyImpure.<id>` (`registry::collect_impure_points`'s own
-    /// doc comment has the full identifier/certain-vs-maybe mapping,
-    /// read directly from `vendor/phpstan-src`).
+    /// doc comment has the full identifier/certain-vs-maybe mapping).
     ///
-    /// Gated on an *explicit* `@phpstan-pure`/`@pure` tag only, **not**
-    /// `sig.is_transitively_pure` alone - a real, corpus-confirmed
-    /// finding, not the original design: real PHPStan's own reflection
+    /// Gated on an explicit `@phpstan-pure`/`@pure` tag only, not
+    /// `sig.is_transitively_pure` alone: real PHPStan's own reflection
     /// layer can infer purity without any tag at all, but doing the same
-    /// here made every one of these four diagnostics fire on any
+    /// here would make every one of these four diagnostics fire on any
     /// ordinary, untagged void function/method the classifier happens to
     /// prove pure (an extremely common, unremarkable shape - a short
-    /// helper with no observable side effects, tagged or not) - 287 of
-    /// this project's own existing tests broke the moment this ran
-    /// untagged, each for a real void method nobody ever meant to
-    /// annotate as `@phpstan-pure`. Requiring the tag matches this same
+    /// helper with no observable side effects, tagged or not), for a
+    /// real void method nobody ever meant to annotate as
+    /// `@phpstan-pure`. Requiring the tag matches this same
     /// file's own `check_declared_purity_tag`'s already-working
     /// precedent (also tag-gated, not classifier-alone) and is the only
     /// way to keep this new family from being a broad, unwanted-by-
@@ -439,7 +428,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 36: declaration-time validation for `@param-immediately-
+    /// Declaration-time validation for `@param-immediately-
     /// invoked-callable`/`@param-later-invoked-callable`
     /// (`IncompatibleParamImmediatelyInvokedCallableRule`) and
     /// `@param-closure-this` (`IncompatiblePhpDocTypeCheck`'s own
@@ -533,8 +522,8 @@ impl<'a> Checker<'a> {
     /// soundly narrowing a type but the wrong one for this "could this
     /// ever be `target`" query; without this, a real, legal `?callable`
     /// parameter would be wrongly flagged since `Null` alone isn't a
-    /// callable/Closure. Both guards are real, corpus-shaped false-
-    /// positive classes, not hypothetical.
+    /// callable/Closure. Both guards protect against real false-positive
+    /// classes, not hypothetical ones.
     pub(crate) fn param_type_could_satisfy(&self, ty: &Type, target: &Type) -> bool {
         match ty {
             Type::Mixed => true,
