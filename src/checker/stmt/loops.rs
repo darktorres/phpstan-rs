@@ -235,17 +235,15 @@ impl<'a> Checker<'a> {
         // provable).
         self.check_expr(cond, locals, label);
         self.loop_depth -= 1;
-        // `DoWhileLoopConstantConditionRule`: real
-        // inferred-type trust, same as `If`/`While` above. Both
-        // directions are gated on breakless-ness here (confirmed
-        // directly against real PHPStan's own rule): `alwaysFalse`
-        // skips when the body has a `break` (`do { ...; if ($x)
-        // break; ... } while (false);` is a real, common
-        // "structured goto" idiom, not dead code); `alwaysTrue`
-        // skips on the same `stmt_contains_break` check plus a
-        // yield check (no `declared_return: never` exclusion here
-        // - confirmed real PHPStan's own rule doesn't have one,
-        // unlike `While`'s).
+        // `DoWhileLoopConstantConditionRule`: real inferred-type
+        // trust, same as `If`/`While` above. Both directions are gated
+        // on breakless-ness here: `alwaysFalse` skips when the body has
+        // a `break` (`do { ...; if ($x) break; ... } while (false);` is
+        // a real, common "structured goto" idiom, not dead code);
+        // `alwaysTrue` skips on the same `stmt_contains_break` check
+        // plus a yield check (no `declared_return: never` exclusion
+        // here, unlike `While`'s - real PHPStan's rule doesn't have
+        // one).
         if self.inferred_constant_condition(cond, locals) == Some(false) {
             if !stmt_contains_break(body) {
                 self.report(
@@ -297,33 +295,29 @@ impl<'a> Checker<'a> {
         }
         // A real `for`'s condition slot can hold several
         // comma-separated expressions, *all* of which real PHP
-        // re-evaluates on every single pass through the condition
-        // (only the *last* one's truthiness actually gates the
-        // loop - the others are there purely for a side effect,
-        // but that side effect happens every iteration, not just
-        // once). Both halves - the non-last expressions here, and
-        // the last one's own check moved into the convergence
-        // closure below - need the identical treatment `While` gets
-        // above: checking any of them once, up front, against the
+        // re-evaluates on every pass through the condition (only the
+        // *last* one's truthiness gates the loop - the others are there
+        // purely for a side effect, which still happens every
+        // iteration). Both halves need the identical treatment `While`
+        // gets above: checking any of them once, up front, against the
         // pre-loop entry, would bypass the body's fixed-point
         // convergence entirely (real shape:
         // `QMultiToken::parseExpression`'s
-        // `for ($stop = false; !$stop && ...; $qi++)`, where
-        // `$stop` is reassigned inside the body).
+        // `for ($stop = false; !$stop && ...; $qi++)`, where `$stop` is
+        // reassigned inside the body).
         match cond.last() {
             Some(c) => {
-                // Same real bug and fix as `While`'s own arm
-                // above: a variable *any* condition expression
-                // itself assigns (`for (;; ($x = f()) !== null; )`,
-                // unusual but real) must be unconditionally
-                // defined afterward, since a `for`'s condition
-                // always runs at least once regardless of body
-                // iterations - a quiet, diagnostics-discarded
-                // evaluation against the real pre-loop `locals`
-                // binds every condition expression's own side
-                // effect (not just the last one's) before the
-                // convergence-aware, diagnostic-bearing walk runs
-                // against per-pass copies.
+                // Same reasoning as `While`'s arm above: a variable
+                // *any* condition expression assigns
+                // (`for (;; ($x = f()) !== null; )`, unusual but real)
+                // must be unconditionally defined afterward, since a
+                // `for`'s condition always runs at least once regardless
+                // of body iterations - a quiet, diagnostics-discarded
+                // evaluation against the real pre-loop `locals` binds
+                // every condition expression's side effect (not just
+                // the last one's) before the convergence-aware,
+                // diagnostic-bearing walk runs against per-pass
+                // copies.
                 let diagnostics_before = self.diagnostics.len();
                 for e in cond.iter() {
                     self.check_expr(e, locals, label);
@@ -357,10 +351,9 @@ impl<'a> Checker<'a> {
                     },
                 );
                 self.loop_depth -= 1;
-                // Same "may run zero times" merge `While` uses,
-                // for the same reason - unlike before this fix,
-                // this is no longer treated as if the body always
-                // executes exactly once.
+                // Same "may run zero times" merge `While` uses, for
+                // the same reason - the body isn't treated as if it
+                // always executes exactly once.
                 *locals = merge_scopes(locals, &body_locals);
                 // Applied *before* folding in break-reached states
                 // below, same reasoning as `While` - a `break`
