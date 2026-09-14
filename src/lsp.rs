@@ -9,8 +9,8 @@
 //! rolling the LSP/JSON-RPC layer specifically stopped being the more
 //! consistent choice once those were already dependencies.
 //!
-//! `checker::Diagnostic` carries a real `Span` (Phase 11), converted here
-//! to LSP's 0-indexed line/character convention. The `location` symbolic
+//! `checker::Diagnostic` carries a real `Span`, converted here to LSP's
+//! 0-indexed line/character convention. The `location` symbolic
 //! label (e.g. `"ClassName::methodName"`) is still folded into the
 //! message text rather than dropped - LSP has no field for it. Known
 //! remaining imprecision: LSP wants UTF-16 code-unit columns, and this
@@ -49,14 +49,13 @@ use protocol::{
     to_lsp_range, uri_to_path, write_message,
 };
 
-/// Phase 17 Stage B: every `Object` class name reachable from a
-/// `Checker::probe_hit` result, in order - a bare `Object`, or (a real,
-/// common shape for a receiver built from more than one code path) *every*
-/// `Object` member of a `Union`/`Intersection`, not just the first -
-/// `resolve_member_owners` below decides which of these candidates
-/// actually has the member being navigated to. Empty for anything else
-/// (`Mixed`, a scalar, ...) - an un-inferrable receiver resolves to
-/// nothing, never a guess.
+/// Every `Object` class name reachable from a `Checker::probe_hit`
+/// result, in order - a bare `Object`, or (a receiver built from more
+/// than one code path) every `Object` member of a `Union`/`Intersection`,
+/// not just the first - `resolve_member_owners` below decides which of
+/// these candidates actually has the member being navigated to. Empty
+/// for anything else (`Mixed`, a scalar, ...) - an un-inferrable
+/// receiver resolves to nothing, never a guess.
 fn type_to_classes(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(class, _) => out.push(class.clone()),
@@ -69,15 +68,14 @@ fn type_to_classes(ty: &Type, out: &mut Vec<String>) {
     }
 }
 
-/// Phase 17 follow-up: resolves a receiver's own (possibly multi-class)
-/// type down to every class that actually declares `member` - a
-/// `Union`/`Intersection` receiver can have more than one real answer
-/// (`(Foo&Bar) $x` where both declare `greet()`), each a genuinely
-/// separate, correct navigation target, not an arbitrary "first one
-/// wins" guess. Deduped by the member's *declaring* owner (not the
-/// candidate class itself), via `lookup_*_with_owner`'s own hierarchy
-/// walk - two union members that both inherit the same declaration
-/// collapse to one entry, not a spurious duplicate.
+/// Resolves a receiver's own (possibly multi-class) type down to every
+/// class that actually declares `member` - a `Union`/`Intersection`
+/// receiver can have more than one real answer (`(Foo&Bar) $x` where
+/// both declare `greet()`), each a genuinely separate, correct
+/// navigation target, not an arbitrary "first one wins" guess. Deduped
+/// by the member's declaring owner (not the candidate class itself), via
+/// `lookup_*_with_owner`'s own hierarchy walk - two union members that
+/// both inherit the same declaration collapse to one entry.
 fn resolve_member_owners(
     registry: &crate::registry::Registry,
     ty: &Type,
@@ -121,9 +119,9 @@ struct Server {
 impl Server {
     fn new() -> Self {
         let mut project = Project::new();
-        // Phase 17: hover/definition's own text-split technique needs
-        // each file's exact source text - see `Project::retain_source`'s
-        // own doc comment for why this is opt-in and off elsewhere.
+        // hover/definition's own text-split technique needs each file's
+        // exact source text - see `Project::retain_source`'s own doc
+        // comment for why this is opt-in and off elsewhere.
         project.set_retain_source(true);
         Server {
             project,
@@ -173,11 +171,10 @@ impl Server {
         self.open_uris.insert(path.clone(), uri.clone());
         // Same graceful-degradation as load_workspace, and more exposed
         // in practice here: momentarily-invalid syntax is the normal
-        // state while a file is being typed, not an edge case. A parse
-        // failure here used to unwind and take down the whole LSP server
-        // process for the rest of the editing session, not just fail to
-        // analyze this one file - update_file's own Result now makes
-        // that a plain, recoverable Err instead.
+        // state while a file is being typed, not an edge case.
+        // `update_file`'s `Result` makes a parse failure here a plain,
+        // recoverable `Err` rather than unwinding and taking down the
+        // whole LSP server process.
         let results = match self.project.update_file(&path, text) {
             Ok(results) => results,
             Err(e) => {
@@ -205,12 +202,12 @@ impl Server {
             .collect()
     }
 
-    /// Phase 17 Stage A: `navigation::resolve_at` finds *what* symbol is
-    /// under the cursor; this formats *what the registry already knows*
-    /// about it into hover text. `None` for anything unresolved (a local
-    /// variable's own read/declaration included - a real position, just
-    /// not one hover has anything useful to say about) - a valid "no
-    /// hover here" per the LSP spec, not an error.
+    /// `navigation::resolve_at` finds what symbol is under the cursor;
+    /// this formats what the registry already knows about it into hover
+    /// text. `None` for anything unresolved (a local variable's own
+    /// read/declaration included - a real position, just not one hover
+    /// has anything useful to say about) - a valid "no hover here" per
+    /// the LSP spec, not an error.
     fn hover(&self, uri: &Uri, position: LspPosition) -> Option<Hover> {
         let path = uri_to_path(uri)?;
         let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
@@ -258,13 +255,12 @@ impl Server {
                 let owners = resolve_member_owners(registry, &ty, member);
                 self.format_member_hover_multi(&owners, member)
             }
-            // Phase 17 follow-up: a local variable's own declaration/read -
-            // no registry signature exists for it, but its inferred type
-            // is answerable via the identical throwaway-`Checker` probe
-            // `Instance` above already uses (`probe_receiver_type`'s own
-            // signature already matches both variants' fields exactly -
-            // "what type is at this span, in this scope" is the same
-            // question either way, not something specific to a receiver).
+            // A local variable's own declaration/read - no registry
+            // signature exists for it, but its inferred type is
+            // answerable via the identical throwaway-`Checker` probe
+            // `Instance` above already uses ("what type is at this span,
+            // in this scope" is the same question either way, not
+            // something specific to a receiver).
             navigation::Resolved::VariableSelf {
                 span,
                 scope,
@@ -297,13 +293,13 @@ impl Server {
         None
     }
 
-    /// Phase 17 follow-up: `owners` is every class (from
-    /// `resolve_member_owners`) that actually declares `name` - almost
-    /// always exactly one, but a real `Union`/`Intersection` receiver can
-    /// have more than one genuinely correct answer. Joins every one that
-    /// resolves with `" | "` rather than picking an arbitrary first, the
-    /// same "don't guess, show everything real" principle `definition`'s
-    /// own multi-location response applies below.
+    /// `owners` is every class (from `resolve_member_owners`) that
+    /// actually declares `name` - almost always exactly one, but a real
+    /// `Union`/`Intersection` receiver can have more than one genuinely
+    /// correct answer. Joins every one that resolves with `" | "` rather
+    /// than picking an arbitrary first, the same "don't guess, show
+    /// everything real" principle `definition`'s own multi-location
+    /// response applies below.
     fn format_member_hover_multi(&self, owners: &[String], name: &str) -> Option<String> {
         let texts: Vec<String> = owners
             .iter()
@@ -316,9 +312,9 @@ impl Server {
         }
     }
 
-    /// Phase 17 Stage B: runs the checker over just `scope` (a throwaway
-    /// `Checker`, scoped to this one request - see `Checker::probe_span`'s
-    /// own doc comment) to learn `receiver_span`'s own inferred type.
+    /// Runs the checker over just `scope` (a throwaway `Checker`, scoped
+    /// to this one request - see `Checker::probe_span`'s own doc comment)
+    /// to learn `receiver_span`'s own inferred type.
     /// Also the mechanism a receiver inside a nested closure/arrow-fn
     /// body resolves through: a `ProbeScope::Function` is always the
     /// enclosing *named* function/method (`lsp::navigation`'s own
@@ -326,9 +322,9 @@ impl Server {
     /// doc comment for why), and `check_function`'s own ordinary
     /// recursion into that closure's body already reaches `probe_span`
     /// the same way a real `check-project` pass would. `ProbeScope::
-    /// TopLevel` (Phase 17 follow-up) is the same idea one level up: a
-    /// receiver/read at top-level script scope re-checks the whole
-    /// file's own top-level statements via `check_program` instead.
+    /// TopLevel` is the same idea one level up: a receiver/read at
+    /// top-level script scope re-checks the whole file's own top-level
+    /// statements via `check_program` instead.
     fn probe_receiver_type(
         &self,
         receiver_span: Span,
@@ -342,17 +338,17 @@ impl Server {
         checker.probe_hit.into_inner()
     }
 
-    /// Phase 17 follow-up: the local-variable-read counterpart of
-    /// `probe_receiver_type` above - same throwaway-`Checker`-per-request
-    /// mechanism, reading back `probe_var_provenance` instead of `probe_
-    /// hit`. See `Checker::probe_var_provenance`'s own doc comment
-    /// (`checker.rs`) for the full reaching-definitions design this reads
-    /// the result of. Empty when nothing was tracked for this read at all
+    /// The local-variable-read counterpart of `probe_receiver_type`
+    /// above - same throwaway-`Checker`-per-request mechanism, reading
+    /// back `probe_var_provenance` instead of `probe_hit`. See
+    /// `Checker::probe_var_provenance`'s own doc comment (`checker.rs`)
+    /// for the full reaching-definitions design this reads the result
+    /// of. Empty when nothing was tracked for this read at all
     /// (`Locals::track` was off - can't happen here, since this method
     /// itself is what turns it on via `probe_span` - or the name
-    /// genuinely has no known declaration in scope, a real, if unusual,
-    /// possibility this project's own `variable.undefined` diagnostic
-    /// would already have flagged).
+    /// genuinely has no known declaration in scope, a possibility this
+    /// project's own `variable.undefined` diagnostic would already have
+    /// flagged).
     fn probe_variable_provenance(
         &self,
         span: Span,
@@ -392,11 +388,10 @@ impl Server {
         }
     }
 
-    /// Phase 17 Stage A: the `navigation::Resolved` symbol's own
-    /// declaration site, via `Project::decl_locations` - `None` when
-    /// nothing resolved, or (a real, if rare, possibility) a symbol
-    /// resolved by name but declared nowhere this project has loaded
-    /// (an undefined reference - already flagged by an ordinary
+    /// The `navigation::Resolved` symbol's own declaration site, via
+    /// `Project::decl_locations` - `None` when nothing resolved, or a
+    /// symbol resolved by name but declared nowhere this project has
+    /// loaded (an undefined reference - already flagged by an ordinary
     /// diagnostic, not this method's job to report again).
     fn definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
         let path = uri_to_path(uri)?;
@@ -410,11 +405,11 @@ impl Server {
             navigation::Resolved::VariableSelf { span, .. } => {
                 return Some(GotoDefinitionResponse::Scalar(self.location(&path, *span)));
             }
-            // Phase 17 follow-up: a real reaching-definitions probe -
-            // usually one location; more than one exactly when the read
-            // is only reachable through mutually exclusive branches that
-            // assign it differently (see `Resolved::VariableRead`'s own
-            // doc comment) - the same `Array`-vs-`Scalar` choice the
+            // A real reaching-definitions probe - usually one location;
+            // more than one exactly when the read is only reachable
+            // through mutually exclusive branches that assign it
+            // differently (see `Resolved::VariableRead`'s own doc
+            // comment) - the same `Array`-vs-`Scalar` choice the
             // `Instance` arm below makes for a `Union`/`Intersection`
             // receiver.
             navigation::Resolved::VariableRead {
@@ -458,13 +453,13 @@ impl Server {
                     self.location(target_path, *span),
                 ))
             }
-            // Phase 17 follow-up: a `Union`/`Intersection` receiver can
-            // resolve `member` against more than one real owner class -
-            // every one that actually declares it becomes its own
-            // `Location`, not just the first found. `GotoDefinitionResponse
-            // ::Array` is exactly LSP's own way to offer an editor more
-            // than one real jump target (rendered as a picker), rather
-            // than this server silently guessing which one the user meant.
+            // A `Union`/`Intersection` receiver can resolve `member`
+            // against more than one real owner class - every one that
+            // actually declares it becomes its own `Location`, not just
+            // the first found. `GotoDefinitionResponse::Array` is
+            // exactly LSP's own way to offer an editor more than one
+            // real jump target (rendered as a picker), rather than this
+            // server silently guessing which one the user meant.
             navigation::Resolved::Instance {
                 receiver_span,
                 member,
