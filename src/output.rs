@@ -1,4 +1,4 @@
-//! Phase 16: CI-friendly diagnostic output formats for `check-project`.
+//! CI-friendly diagnostic output formats for `check-project`.
 //!
 //! This project's original `path:line:col: location: message` text format
 //! stays the default and is unaffected by anything here - it's what a
@@ -14,14 +14,12 @@
 //! enclosing function/method/class a finding was reported against - e.g.
 //! `"f"` or `"Shape::area"`, sometimes the catch-all `"<main>"` for
 //! top-level script code), not a rule ID, so it's surfaced below under
-//! that same honest name rather than mislabeled "identifier"/"rule". Phase
-//! 47 (merged after this phase was originally written) added a real
-//! stable per-check `identifier` field to `Diagnostic` - both formats
-//! below now surface it too: `json` as its own `identifier` field per
-//! message, `checkstyle` as the `source` attribute (the field most
-//! Checkstyle-consuming tools treat as a rule name for grouping/
-//! suppression), with `location` folded into the message text there
-//! instead so neither piece of context is lost.
+//! that same honest name rather than mislabeled "identifier"/"rule".
+//! `Diagnostic`'s stable per-check `identifier` field is also surfaced:
+//! `json` as its own `identifier` field per message, `checkstyle` as the
+//! `source` attribute (the field most Checkstyle-consuming tools treat as
+//! a rule name for grouping/suppression), with `location` folded into
+//! the message text there instead so neither piece of context is lost.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
@@ -32,7 +30,7 @@ use crate::checker::Diagnostic;
 
 /// Selects how `check-project` renders its diagnostics. `Text` (the
 /// default) is this project's original human-readable format; `Json` and
-/// `Checkstyle` are Phase 16's CI-consumable additions. A plain
+/// `Checkstyle` are CI-consumable additions. A plain
 /// `#[derive(clap::ValueEnum)]` rather than hand-rolled `FromStr`/error
 /// message - clap already renders a helpful "invalid value 'x' for
 /// '--format <FORMAT>' [possible values: text, json, checkstyle]" on a bad
@@ -155,7 +153,7 @@ pub fn render_json(results: &HashMap<PathBuf, Vec<Diagnostic>>, files_checked: u
 /// project's own 0-6 `level` scale, so there's no non-arbitrary mapping to
 /// pick between (real PHPStan's own Checkstyle-shaped formatter makes the
 /// same simplification: every finding is an "error"). `source` carries
-/// this diagnostic's real, stable `identifier` (Phase 47) prefixed with
+/// this diagnostic's real, stable `identifier` prefixed with
 /// `phpstan-rs.`, mirroring the dotted-class-name convention most
 /// Checkstyle producers use for `source` - the field most Checkstyle-
 /// consuming tools group/suppress by, so a real rule identifier belongs
