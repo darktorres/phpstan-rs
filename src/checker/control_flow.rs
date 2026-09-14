@@ -23,12 +23,8 @@ pub(crate) use generators::{
 /// arm and `Checker::exits_function_or_loop` - both independently need
 /// the identical "is this case's own last statement break-equivalent"
 /// question, and getting it wrong the same way in only one of the two
-/// would have left the other producing a different, inconsistent answer
-/// for the exact same case. Real corpus false positive this fixes (found
-/// verifying the `exits_function_or_loop` fix alone wasn't enough - a
-/// switch statement ending in a break-equivalent `continue;` was *also*
-/// still being counted by `always_terminates` as if it were a real
-/// function-level exit, wrongly marking code after the switch dead).
+/// would leave the other producing a different, inconsistent answer for
+/// the exact same case.
 ///
 /// Recurses through `Block`/`If` (a case whose own last statement is
 /// `if ($c) { continue; } else { continue; }` unconditionally exits the
@@ -65,8 +61,7 @@ pub(crate) fn is_switch_break_equivalent(stmt: &Stmt) -> bool {
 }
 
 /// `converge_loop_body`'s own "could this loop have run zero times"
-/// parameter - see that function's doc comment for the real corpus false
-/// positives each variant fixes.
+/// parameter.
 pub(crate) enum LoopZeroIterations<'a> {
     /// `do`-`while`/`for (;;)` - the body always runs at least once by
     /// construction (no condition is ever checked *before* the first
@@ -105,10 +100,9 @@ impl<'a> Checker<'a> {
             // not just the last one, is sound proof the whole block
             // does - once reached, execution never falls through to
             // whatever (if anything) comes after it, dead code or not.
-            // Phase 15's own `deadCode.unreachable` (`check_block`) is
-            // this arm's mirror image: it's the one that actually names
-            // that dead code, while this arm just needs to know it
-            // exists.
+            // `deadCode.unreachable` (`check_block`) is this arm's
+            // mirror image: it's the one that actually names that dead
+            // code, while this arm just needs to know it exists.
             StmtKind::Block(stmts) => stmts.iter().any(|s| self.always_terminates(s, locals)),
             StmtKind::If {
                 then_branch,
@@ -129,23 +123,12 @@ impl<'a> Checker<'a> {
             // body (`case a: case b: ...`, a pure fallthrough label) is
             // skipped rather than required to independently terminate -
             // only the eventual non-empty body it falls into needs to.
-            //
-            // A real, corpus-found bug lived here for a while (found via
-            // `deadCode.unreachable`'s own corpus verification, in an
-            // otherwise-unrelated phase): "the eventual non-empty body it
-            // falls into" was this comment's own already-correct intent,
-            // but the code below it never actually walked forward to find
-            // that later body - it treated *any* empty case, including
-            // one with no later non-empty case left to fall into at all
-            // (`case PREG_NO_ERROR: case PREG_INTERNAL_ERROR: default:`
-            // as the switch's own last, entirely-empty tail, a real,
-            // common "explicitly do nothing for these" idiom -
-            // `phpdocumentor/reflection-docblock`'s own `PcreException`,
-            // `doctrine/orm`'s own `Lexer`/`Parser`), as vacuously fine -
-            // wrongly concluding the whole switch always terminates when
-            // that trailing-empty path actually just falls out the
-            // bottom, same as if there were no `default` label there at
-            // all.
+            // An empty case with no later non-empty case to fall into at
+            // all (`case A: case B: default:` as the switch's own last,
+            // entirely-empty tail, a common "explicitly do nothing for
+            // these" idiom) must not be treated as vacuously fine - that
+            // trailing-empty path actually just falls out the bottom,
+            // same as if there were no `default` label there at all.
             StmtKind::Switch { cases, .. } => {
                 cases.iter().any(|c| c.test.is_none())
                     && cases.iter().enumerate().all(|(i, c)| {
@@ -185,29 +168,24 @@ impl<'a> Checker<'a> {
                             .is_some_and(|s| self.always_terminates(s, locals))
                     })
             }
-            // A round of Piwigo-corpus bucketing found `while (true) {
-            // ...; if (...) { return $x; } }` (real shape,
-            // `NotificationController::findAvailableFeedId`, a
-            // find-a-free-key retry loop) flagged as possibly falling
-            // off the function's own end - a literal `true`/non-zero
-            // condition never lets the loop exit by itself, so the only
-            // way past it at all is whatever `return`/`throw` inside
-            // its body runs, exactly what `always_terminates` already
-            // exists to recognize for every other construct.
-            // Deliberately conservative about `break`: any `Break`
-            // statement *anywhere* in the body - even one that actually
-            // targets a different, nested loop/switch - counts as "this
-            // loop might exit on its own," never wrongly concluding
-            // termination. `goto`/`label` share the same theoretical
-            // gap `always_terminates` already has everywhere else (see
-            // Phase 15's own note on this).
+            // `while (true) { ...; if (...) { return $x; } }` (a
+            // find-a-free-key retry loop) must not be flagged as
+            // possibly falling off the function's own end - a literal
+            // `true`/non-zero condition never lets the loop exit by
+            // itself, so the only way past it at all is whatever
+            // `return`/`throw` inside its body runs, exactly what
+            // `always_terminates` already exists to recognize for every
+            // other construct. Deliberately conservative about `break`:
+            // any `Break` statement anywhere in the body - even one that
+            // actually targets a different, nested loop/switch - counts
+            // as "this loop might exit on its own," never wrongly
+            // concluding termination.
             StmtKind::While { cond, body } => is_truthy_literal(cond) && !stmt_contains_break(body),
             // Same idiom, `for`'s own real spelling: `for ($i = 0; true;
-            // $i++) { ... }` (real shape, `HttpClientService::
-            // guardedRequest`, a redirect-following retry loop) - a
-            // `for` with no condition at all (`for (;;)`) is PHP's own
-            // "no condition means always true," same real semantics as
-            // an explicit truthy literal.
+            // $i++) { ... }` (a redirect-following retry loop) - a `for`
+            // with no condition at all (`for (;;)`) is PHP's own "no
+            // condition means always true," same real semantics as an
+            // explicit truthy literal.
             StmtKind::For { cond, body, .. } => {
                 cond.last().is_none_or(is_truthy_literal) && !stmt_contains_break(body)
             }
@@ -239,11 +217,7 @@ impl<'a> Checker<'a> {
             // `break`-equivalent: it exits the switch, not any enclosing
             // loop, so code after the switch *is* reached. Only a level
             // that explicitly escapes past the switch (`continue 2;` or
-            // higher) still counts as exiting. Confirmed live, this
-            // session, per the user's own explicit "do all those narrow
-            // [items], our corpus not having them is not a reason not to
-            // do them" - re-verified directly against `php -r` semantics,
-            // not merely inferred.
+            // higher) still counts as exiting.
             StmtKind::Continue(level) => matches!(level, Some(n) if *n > 1),
             StmtKind::Break(_) => false,
             StmtKind::Expression(e) => self.infer_expr(e, locals) == Type::Never,
@@ -260,40 +234,20 @@ impl<'a> Checker<'a> {
                         .as_deref()
                         .is_some_and(|e| self.exits_function_or_loop(e, locals))
             }
-            // Phase 15's own disclosed gap, half closed: a `try`/`catch`
-            // introduces no new `break`/`continue` scope of its own (a
-            // bare `continue;` inside a `try` still targets whatever
-            // loop/switch already enclosed the `try`, exactly as if the
-            // `try` weren't there), so recursing the identical way
-            // `always_terminates`'s own `Try` arm does - just through
-            // `exits_function_or_loop` instead - is sound with no extra
-            // level-counting to get right. The *other* half of the
-            // originally-disclosed gap (a nested `Switch` as a case's own
-            // last statement) is deliberately still not handled here: a
-            // nested switch *does* introduce a new level for `break`/
-            // `continue` purposes, so correctly answering "does this
-            // nested switch exit the outer function/loop" needs the
-            // nested switch's own `continue N` levels reinterpreted one
-            // level shallower before recursing - real complexity, not
-            // effort, and the exact reason this half was originally left
-            // out (see this function's own doc comment above).
-            // Phase 15's own disclosed gap, half closed: a `try`/`catch`
-            // introduces no new `break`/`continue` scope of its own (a
-            // bare `continue;` inside a `try` still targets whatever
-            // loop/switch already enclosed the `try`, exactly as if the
-            // `try` weren't there), so recursing the identical way
-            // `always_terminates`'s own `Try` arm does - just through
-            // `exits_function_or_loop` instead - is sound with no extra
-            // level-counting to get right. The *other* half of the
-            // originally-disclosed gap (a nested `Switch` as a case's own
-            // last statement) is deliberately still not handled here: a
-            // nested switch *does* introduce a new level for `break`/
-            // `continue` purposes, so correctly answering "does this
-            // nested switch exit the outer function/loop" needs the
-            // nested switch's own `continue N` levels reinterpreted one
-            // level shallower before recursing - real complexity, not
-            // effort, and the exact reason this half was originally left
-            // out (see this function's own doc comment above).
+            // A `try`/`catch` introduces no new `break`/`continue` scope
+            // of its own (a bare `continue;` inside a `try` still
+            // targets whatever loop/switch already enclosed the `try`,
+            // exactly as if the `try` weren't there), so recursing the
+            // identical way `always_terminates`'s own `Try` arm does -
+            // just through `exits_function_or_loop` instead - is sound
+            // with no extra level-counting to get right. A nested
+            // `Switch` as a case's own last statement is deliberately
+            // still not handled here: a nested switch does introduce a
+            // new level for `break`/`continue` purposes, so correctly
+            // answering "does this nested switch exit the outer
+            // function/loop" would need the nested switch's own
+            // `continue N` levels reinterpreted one level shallower
+            // before recursing.
             StmtKind::Try { body, catches, .. } => {
                 body.last()
                     .is_some_and(|s| self.exits_function_or_loop(s, locals))
@@ -307,17 +261,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 55: fixed-point convergence for a loop body (`While`/
-    /// `DoWhile`/`For`/`Foreach` in `checker/stmt.rs`), replacing what used
-    /// to be a single `check_stmt(body, ...)` call. Without this, a
-    /// variable reassigned inside the loop body keeps its pre-loop-entry
-    /// type for the *entire* single-pass check - `check_block`'s own doc
-    /// comment (above `Phase 15 item (1)`) traces the exact false-positive
-    /// this caused for the reverted `UnreachableStatementRule`.
+    /// Fixed-point convergence for a loop body (`While`/`DoWhile`/`For`/
+    /// `Foreach` in `checker/stmt.rs`) - without this, a variable
+    /// reassigned inside the loop body keeps its pre-loop-entry type for
+    /// the entire single-pass check, which `check_block`'s own doc
+    /// comment traces the exact false-positive for.
     ///
     /// Mirrors real PHPStan's own approach (`NodeScopeResolver::
-    /// LOOP_SCOPE_ITERATIONS = 3`, confirmed directly against
-    /// `vendor/phpstan-src`): run the body against a candidate entry state,
+    /// LOOP_SCOPE_ITERATIONS = 3`): run the body against a candidate entry state,
     /// see whether unioning the result back with the true pre-loop `entry`
     /// changes anything: if not, the state has converged and this pass's
     /// diagnostics are correct as reported; if so, its diagnostics were
@@ -341,14 +292,9 @@ impl<'a> Checker<'a> {
     /// `break_states` is. Without this, a variable reassigned *only* on a
     /// path that ends in `continue` never contributed to `next_entry` at
     /// all (the fall-through-only `merge_scopes(entry, &body_locals)`
-    /// below never reflects it), so convergence wrongly concluded
-    /// "nothing changed" after a single pass and kept that pass's own
+    /// below never reflects it), so convergence would wrongly conclude
+    /// "nothing changed" after a single pass and keep that pass's own
     /// diagnostics - computed against the stale, pre-reassignment entry.
-    /// Real corpus false positive this fixes: sebastian/diff's own
-    /// `Parser::parse`, whose `if ($diff !== null) { ... }` guard sits
-    /// inside a branch that always ends in `continue` - `$diff` never
-    /// looked reassignable at all without this, so the guard's own
-    /// `!== null` narrowing wrongly saw `Type::Never` on every pass.
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,
@@ -360,14 +306,12 @@ impl<'a> Checker<'a> {
         // the loop's own comment below for exactly how). A `do`-`while`/
         // `for (;;)` is the one real exception: its own body always runs
         // at least once by construction (no condition is ever checked
-        // *before* the first pass), so `check_do_while`/`check_for`'s own
+        // before the first pass), so `check_do_while`/`check_for`'s own
         // no-condition arm pass `Impossible` to skip that merge entirely -
-        // real corpus false positive this distinction fixes:
-        // `PageAssets::promoteLoadModes`'s own `do { $changed = false;
-        // ...; } while ($changed);` and `Symfony\Logger`'s own
-        // `LoggerTest` both rely on a body-only local staying defined
-        // afterward, which merging it away (as if the loop might never
-        // have run) wrongly flagged `variable.undefined`.
+        // otherwise a body-only local (`do { $changed = false; ...; }
+        // while ($changed);`) that must stay defined afterward would be
+        // merged away as if the loop might never have run, wrongly
+        // flagging `variable.undefined`.
         zero_iterations: LoopZeroIterations<'_>,
         mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
     ) -> (Locals, Vec<Locals>) {
@@ -387,66 +331,47 @@ impl<'a> Checker<'a> {
                 next_entry = merge_scopes(&next_entry, state);
             }
             if next_entry == pass_entry || is_last_allowed_pass {
-                // Bug found and fixed this session: `continue_states`
-                // above only ever fed `next_entry` (deciding the *next*
-                // pass's own entry, and whether convergence has been
-                // reached) - the kept pass's own `body_locals`, actually
-                // returned to the caller as "the loop's exit state," was
-                // always the bare fallthrough-only state, silently
-                // dropping every `continue`-reached state from the very
-                // same pass. A variable only ever assigned on the non-
-                // `continue` path (`foreach (...) { if ($x) { continue; }
-                // $flag = true; }`) therefore looked unconditionally
-                // assigned after the loop instead of "maybe assigned,
-                // maybe not" - a real corpus false positive this exact
-                // gap produced once `BooleanNotConstantConditionRule`
-                // started exercising it (`Piwigo\Db\BatchWriter::updateRow`).
-                // The fix folds the same `continue_states` into the
-                // *returned* state too - on the loop's own last logical
-                // iteration, a `continue` there is just as valid an exit
-                // path as an ordinary fallthrough, the identical
+                // The kept pass's own `body_locals`, returned to the
+                // caller as "the loop's exit state," is the bare
+                // fallthrough-only state on its own - `continue_states`
+                // must be folded in here too, or a variable only ever
+                // assigned on the non-`continue` path (`foreach (...) {
+                // if ($x) { continue; } $flag = true; }`) would look
+                // unconditionally assigned after the loop instead of
+                // "maybe assigned, maybe not." On the loop's own last
+                // logical iteration, a `continue` there is just as valid
+                // an exit path as an ordinary fallthrough, the identical
                 // fallthrough-vs-break distinction every caller already
                 // folds `break_states` back in for afterward.
                 let mut exit_locals = body_locals;
                 for state in &continue_states {
                     exit_locals = merge_scopes(&exit_locals, state);
                 }
-                // A real, previously-live bug found and fixed this
-                // session: a variable only ever assigned *inside* the
-                // loop body but genuinely tracked before it too (`$x =
-                // null; foreach (...) { $x = ...; }`) needs the *same*
-                // "maybe never touched" treatment as one introduced fresh
-                // inside the body - both must union with whatever `entry`
-                // already held for that name, not just adopt the body's
-                // own post-iteration value outright (tried as "keep
-                // pre-existing names exactly as `exit_locals` left them,
-                // only drop brand-new ones" first; real corpus find this
-                // undersized: `UploadService::addUploadedFile`'s own
-                // `$file_path = null; foreach (...) { $file_path =
-                // $row->path; }` pre-declares `$file_path`, so it's
-                // "already existing" by that narrower rule, silently
-                // losing its own real `null` possibility). `next_entry`
-                // (computed just above - `merge_scopes(entry,
-                // &body_locals)`, `continue_states` already folded in)
-                // already does exactly this for *every* name uniformly:
-                // union one present in both, drop one present only in
+                // A variable only ever assigned inside the loop body but
+                // genuinely tracked before it too (`$x = null; foreach
+                // (...) { $x = ...; }`) needs the same "maybe never
+                // touched" treatment as one introduced fresh inside the
+                // body - both must union with whatever `entry` already
+                // held for that name, not just adopt the body's own
+                // post-iteration value outright. `next_entry` (computed
+                // just above - `merge_scopes(entry, &body_locals)`,
+                // `continue_states` already folded in) already does
+                // exactly this for every name uniformly: union one
+                // present in both, drop one present only in
                 // `body_locals`.
                 //
                 // The one real exception - `LoopZeroIterations::Possible`'s
                 // own `subject_exempt`, a `foreach`'s own iterated subject
-                // when it's a bare `$variable` - is the *other* real,
-                // previously-live regression this whole feature already
-                // found and reverted once (see the git history on this
-                // exact line): a `foreach` mutating its own subject array
-                // in place (`CalendarMonthly::buildMonthCalendar`'s own
-                // `foreach ($items as $day => ...) { $items[$day]
-                // ['derivative'] = ...; }`) must never have its already-
-                // transformed shape re-widened back toward the stale
-                // pre-loop one `entry` still holds for that *same*
-                // variable - every key really iterated over gets the
-                // loop's own treatment, never the old one. Restored from
-                // `exit_locals`'s own (pre-union) value after the general
-                // union, rather than being excluded from it.
+                // when it's a bare `$variable` - is a `foreach` mutating
+                // its own subject array in place (`foreach ($items as
+                // $day => ...) { $items[$day]['derivative'] = ...; }`),
+                // which must never have its already-transformed shape
+                // re-widened back toward the stale pre-loop one `entry`
+                // still holds for that same variable - every key really
+                // iterated over gets the loop's own treatment, never the
+                // old one. Restored from `exit_locals`'s own (pre-union)
+                // value after the general union, rather than being
+                // excluded from it.
                 if let LoopZeroIterations::Possible { subject_exempt } = zero_iterations {
                     let subject_override =
                         subject_exempt.and_then(|name| exit_locals.get(name).cloned());
@@ -469,20 +394,18 @@ impl<'a> Checker<'a> {
 /// present in only one branch was introduced there and can't be assumed to
 /// exist afterward, so it's dropped rather than carried forward unsoundly.
 ///
-/// Phase 17 follow-up: `provenance` is merged the same way `types` is -
-/// the *union* of both sides' known declaration spans for a name present
-/// in both, since either branch could be the one that actually ran. This
-/// is the one function every multi-way join in this checker already
-/// routes through (`Switch`'s own `exit_states` fold, `Try`'s own `end_
-/// states` fold, `converge_loop_body`'s own fixed-point loop) - fixing
+/// `provenance` is merged the same way `types` is - the union of both
+/// sides' known declaration spans for a name present in both, since
+/// either branch could be the one that actually ran. This is the one
+/// function every multi-way join in this checker already routes through
+/// (`Switch`'s own `exit_states` fold, `Try`'s own `end_states` fold,
+/// `converge_loop_body`'s own fixed-point loop) - fixing
 /// provenance-merging here once is what makes every one of those inherit
-/// real reaching-definitions precision, including this project's own
-/// already-correct termination-pruning (`always_terminates`) and break/
-/// continue handling (`loop_break_states`/`loop_continue_states`), with
-/// no further change needed at any of those call sites.
+/// real reaching-definitions precision, with no further change needed
+/// at any of those call sites.
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = then_locals.fresh_scope();
-    // Phase 71 Item 4: a `function_exists()` guard only survives a merge
+    // A `function_exists()` guard only survives a merge
     // point when both incoming branches agree it's guaranteed - the same
     // reasoning every other narrowed fact here already gets (`union_types`
     // above widens a type across both branches; a guard, being a boolean
@@ -500,10 +423,10 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         .guarded_functions
         .clone()
         .intersection(else_locals.guarded_functions.clone());
-    // ROADMAP "Known but not yet scheduled": identical intersection
-    // treatment for the method_exists()/property_exists() guard sets -
-    // a member is only still provably guarded after an if/else join when
-    // *both* branches proved it, same as guarded_functions above.
+    // Identical intersection treatment for the
+    // method_exists()/property_exists() guard sets - a member is only
+    // still provably guarded after an if/else join when both branches
+    // proved it, same as guarded_functions above.
     merged.guarded_methods = then_locals
         .guarded_methods
         .clone()
@@ -512,8 +435,8 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         .guarded_properties
         .clone()
         .intersection(else_locals.guarded_properties.clone());
-    // ROADMAP "Known but not yet scheduled" follow-up: a condition alias
-    // only survives a merge point when both incoming branches still
+    // A condition alias only survives a merge point when both incoming
+    // branches still
     // agree on the exact same stored condition - `Rc::ptr_eq` (not a
     // deep `Expr` comparison) is a correct, cheap test for this: it's
     // exactly true whenever both branches inherited the alias unchanged
@@ -556,7 +479,7 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
     merged
 }
 
-/// Phase 42(4), `OverwrittenExitPointByFinallyRule`: collects the
+/// `OverwrittenExitPointByFinallyRule`: collects the
 /// concrete `return`/`throw`/`break`/`continue` statement(s) that make
 /// `stmt` genuinely exit - the same question `always_terminates` already
 /// answers as a bare `bool`, but naming *which* statement(s) so a
@@ -620,42 +543,33 @@ pub(crate) fn exit_point_description(stmt: &Stmt) -> &'static str {
 /// termination conclusion, so there's no need to track which specific
 /// loop/switch a given `break`'s own level actually targets.
 ///
-/// Phase 15: widened from private to `pub(crate)` - `checker/stmt.rs`'s
-/// own new constant-condition checks (`literal_truthiness`'s callers)
-/// reuse this exact same conservatism for their own `while (true)`/
-/// `do {} while (true)`/`do {} while (false)` exclusions, real PHPStan's
-/// own `WhileLoopAlwaysTrueConditionRule`/`DoWhileLoopConstantCondition
-/// Rule` breakless-detection.
+/// `checker/stmt.rs`'s own constant-condition checks
+/// (`literal_truthiness`'s callers) reuse this exact same conservatism
+/// for their own `while (true)`/`do {} while (true)`/`do {} while
+/// (false)` exclusions, real PHPStan's own
+/// `WhileLoopAlwaysTrueConditionRule`/`DoWhileLoopConstantConditionRule`
+/// breakless-detection.
 pub(crate) fn stmt_contains_break(stmt: &Stmt) -> bool {
     matches!(stmt.kind, StmtKind::Break(_))
         || stmt_children(stmt).into_iter().any(stmt_contains_break)
 }
 
-/// A second, real gap in `while`/`do-while`'s own "always true" breakless
-/// detection, found re-examining Phase 15's own disclosed Pending entry
-/// ("breakless-detection reuses `stmt_contains_break`'s own 'any break
-/// anywhere' conservatism... a narrow, disclosed simplification") against
-/// real PHPStan's own actual source rather than trusting the prior
-/// write-up: `WhileLoopAlwaysTrueConditionRule`'s real suppression logic
-/// (`BreaklessWhileLoopNode::getExitPoints()`, confirmed directly against
-/// `vendor/phpstan-src`) treats *any* loop exit point that isn't a
-/// `break` or a bare/level-1 `continue` as disqualifying - not just a
-/// `continue` whose own level escapes past this loop (the only half the
-/// prior write-up named), but a `return`/`throw` reachable inside the
-/// loop body at all. Neither was checked here before this fix, and both
-/// have real, live corpus false positives: `PhpBench\Path\Path::
-/// getLongestCommonBasePath()`'s own `while (true) { ...; continue 2; }`
-/// (no literal `break` anywhere, vendored identically in `symfony/
-/// filesystem`, Rector's and easy-coding-standard's own bundled copies -
-/// four duplicate false positives from one real gap) and `Amp\Http\
-/// Server\Driver\Http1Driver::handleClient()`'s own `while (true) { ...;
-/// return; ... }`. Same maximally-conservative "anywhere in the subtree,
-/// not reachability-checked" traversal `stmt_contains_break` already
-/// uses (and for the identical reason: over-suppressing only ever misses
-/// a diagnostic, never fabricates one) - a `continue`/`return`/`throw`
+/// `while`/`do-while`'s own "always true" breakless detection needs more
+/// than just `stmt_contains_break`:
+/// `WhileLoopAlwaysTrueConditionRule`'s real suppression logic
+/// (`BreaklessWhileLoopNode::getExitPoints()`) treats any loop exit
+/// point that isn't a `break` or a bare/level-1 `continue` as
+/// disqualifying - not just a `continue` whose own level escapes past
+/// this loop, but a `return`/`throw` reachable inside the loop body at
+/// all (e.g. `while (true) { ...; continue 2; }` with no literal
+/// `break` anywhere, or `while (true) { ...; return; ... }`). Same
+/// maximally-conservative "anywhere in the subtree, not
+/// reachability-checked" traversal `stmt_contains_break` already uses
+/// (and for the identical reason: over-suppressing only ever misses a
+/// diagnostic, never fabricates one) - a `continue`/`return`/`throw`
 /// buried inside a nested `if`/`switch` still disqualifies, matching
-/// `getExitPoints()`'s own set of *possible* exits regardless of how
-/// deep the conditional nesting is.
+/// `getExitPoints()`'s own set of possible exits regardless of how deep
+/// the conditional nesting is.
 pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
     matches!(
         stmt.kind,
@@ -671,28 +585,22 @@ pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
 /// aware" traversal `stmt_contains_break` already uses, for the
 /// identical reason: real PHP does constrain which labels a given
 /// `goto` may legally reach (it can't jump into a loop/switch/try from
-/// outside it), but this project has no goto/label CFG at all (a
-/// disclosed, permanent-for-now gap - ROADMAP), so recovering *which*
-/// `goto` can reach *which* specific label isn't attempted; only "is
-/// this label a real jump target from *somewhere* in this function"
-/// matters here, and getting that wrong in the conservative direction
-/// only ever suppresses a diagnostic, never fabricates one. Computed
-/// once per function/closure body (see `Checker::current_function_goto_
-/// targets`'s own doc comment) and consulted by `check_block`'s own
-/// `deadCode.unreachable` check: a labeled statement immediately
-/// following one that "always terminates" isn't unreachable at all if
-/// some earlier `goto` in the same function can jump straight to it.
-/// Real corpus false positive this fixes: `Amp\Http\Client\Connection\
-/// Internal\Http1Parser::parse()`'s own `return $response; body_identity:
-/// { ... }`, where `goto body_identity;` (twice, higher up in the same
-/// function - a real, hand-written HTTP/1.1 parsing state machine) is
-/// exactly this shape.
+/// outside it), but this project has no goto/label CFG at all, so
+/// recovering which `goto` can reach which specific label isn't
+/// attempted; only "is this label a real jump target from somewhere in
+/// this function" matters here, and getting that wrong in the
+/// conservative direction only ever suppresses a diagnostic, never
+/// fabricates one. Computed once per function/closure body (see
+/// `Checker::current_function_goto_targets`'s own doc comment) and
+/// consulted by `check_block`'s own `deadCode.unreachable` check: a
+/// labeled statement immediately following one that "always terminates"
+/// isn't unreachable at all if some earlier `goto` in the same function
+/// can jump straight to it.
 pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> std::collections::HashSet<String> {
     // `any_stmt_child` (non-allocating - see its own doc comment) instead
     // of `stmt_children`/a `for` loop: this runs on every function/
     // method/closure body checked, a real, measured cost at that call
-    // volume; found and fixed via a perf-optimization investigation
-    // workflow. The closure always returns `false`, so `any_stmt_child`
+    // volume. The closure always returns `false`, so `any_stmt_child`
     // never short-circuits - every child gets visited, matching the
     // original unconditional `for child in stmt_children(stmt) { ... }`
     // loop exactly.
