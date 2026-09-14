@@ -608,7 +608,9 @@ losing the fact that `DoctrineTransport` also implements
 
 Two real, distinct bugs, both needed for the fix to actually take
 effect (confirmed by testing each independently - fixing only one still
-left the corpus case broken):
+left the corpus case broken) - **plus a real regression in the first
+attempt at fixing bug 1, caught by the unscoped corpus diff and
+corrected in the same round**, all landed together as the final shape:
 
 1. `checker/generics/substitution.rs::substitute_class_templates`'s own
    fast path bailed whenever `owner` (from `lookup_method_with_owner` -
@@ -617,17 +619,13 @@ left the corpus case broken):
    unedited, but wrong when `owner` directly re-declares an interface
    method (required, since it's implementing one) while the method's own
    effective type still carries a `TemplateParam` scoped to that
-   interface, not to `owner`. Fixed: `owner` having no templates of its
-   own no longer means nothing to substitute - a new `signature_
-   references_any_template` cheap pre-check (gating the expensive path so
-   the overwhelmingly common non-generic case stays exactly as fast as
-   before) triggers a walk of `owner`'s *own* ancestors for one with a
-   real, non-empty concrete binding for whatever scope the signature's
-   own `TemplateParam`s actually reference, contributing a `(scope,
-   bindings)` pair per ancestor found - composed via a `fold`, so a
-   signature referencing templates from more than one distinct ancestor
-   is handled too, not just the single-scope case the fast path already
-   covered.
+   interface, not to `owner`. A `signature_references_any_template`
+   cheap pre-check (gating a walk of `owner`'s own ancestors for a real
+   concrete binding, so the overwhelmingly common non-generic case stays
+   exactly as fast as before) now covers this case too, kept as a
+   defense-in-depth safety net for *external call-site* resolution -
+   but, per the regression below, it is not where the real fix ended up
+   living for the corpus case that motivated all this.
 2. Separately, `registry/resolve.rs`'s own docblock-inheritance backfill
    pass never even let a class-scoped ancestor template reach `owner`'s
    signature in the first place - `type_mentions_foreign_scoped_
@@ -635,27 +633,54 @@ left the corpus case broken):
    template not scoped to the method itself, a deliberate, historically-
    corpus-justified fix (this same file's own doc comment cites a real,
    previously-confirmed Doctrine `ClassMetadataFactory`/`getAllMetadata()`
-   false positive from backfilling such a template *before* fix 1 above
-   existed, when nothing could ever resolve it afterward and it leaked
-   out unresolved). Fixed: replaced with `template_param_scopes_all_
-   safe_to_backfill`, allowing the backfill exactly when the class being
-   backfilled onto has a real, *non-empty* concrete binding for that
-   scope (computed once per class via `class_template_bindings`, not
-   merely "is this ancestor name reachable at all" - a real, existing
-   regression test caught that laxer version letting a still-genuinely-
-   unresolvable *erased* generic reference, no `<Concrete>` argument
-   anywhere, through, which fix 1 would then also fail to resolve, same
-   as before this whole round). A bare, erased `implements Container`
-   with no type argument still correctly refuses backfill and stays
-   `Mixed`, unchanged.
+   false positive from backfilling such a template before this whole
+   round, when nothing could ever resolve it afterward and it leaked out
+   unresolved). Replaced with `template_param_scopes_all_safe_to_
+   backfill`: allows the backfill exactly when the class being backfilled
+   onto has a real, *non-empty* concrete binding for that scope (computed
+   once per class via `class_template_bindings`, not merely "is this
+   ancestor name reachable at all" - a real, existing regression test
+   caught a laxer version letting a still-genuinely-unresolvable *erased*
+   generic reference, no `<Concrete>` argument anywhere, through). A
+   bare, erased `implements Container` with no type argument still
+   correctly refuses backfill and stays `Mixed`, unchanged.
 
-Verified against 3 repros: the original `MessengerFactory`-shaped case,
+**The regression, and its fix - the part that actually closes the
+corpus case.** The first shipped version resolved the now-permitted
+class-scoped template only at fix 1's own *external call-site*
+resolution, leaving a raw, still-templated `TemplateParam` sitting in
+the backfilled signature itself. That's fine for a call from elsewhere,
+but a signature is also read directly to check its *own declaring
+class's own method body* (seeding `locals` for its own parameters) - a
+path with no "external call site" to resolve anything through at all.
+Caught by the *unscoped* corpus diff, not the scoped one (Piwigo has no
+matching shape): `Composer\Pcre\PHPStan\InvalidRegexPatternRule`
+implementing real PHPStan's own `Rule<TNodeType>` (`@param TNodeType
+$node` on the interface's own `processNode()`) left `$node`'s own local
+type literally named `"TNodeType"` the instant its own body called
+`$this->extractPatterns($node, ...)`. Fixed properly by resolving a
+class-scoped ancestor template *eagerly*, at backfill time (new
+`Registry::substitute_class_scoped_ancestor_templates` in `registry/
+generics.rs` - `registry` cannot depend on `checker`, so this couldn't
+reuse fix 1's own substitution helper) - matching real PHPStan's own
+mechanism exactly (`ResolvedPhpDocBlock::resolveTemplateTypeInTag`
+substitutes through `getActiveTemplateTypeMap()` immediately, at
+docblock-merge time, confirmed by direct read), not merely checking a
+binding is *available* and deferring substitution to whichever call
+path happens to read the signature next.
+
+Verified against 4 repros: the original `MessengerFactory`-shaped case,
 a `new X()->method()`-vs-variable-mediated-call pair (both work
-identically), and the exact historical Doctrine `ClassMetadataFactory`
-shape the backfill guard's own doc comment cites (now resolves
-correctly with both fixes together; verified broken with either fix
-alone). Full test suite green including the pre-existing regression
-test for the erased case.
+identically), the exact historical Doctrine `ClassMetadataFactory` shape
+the backfill guard's own doc comment cites, and the `InvalidRegexPattern
+Rule`-shaped own-body-self-check case the regression needed. Full test
+suite green including the pre-existing regression test for the erased
+case. Unscoped corpus diff before the regression fix: 507 removed/58
+added; after: 445 removed/43 added, with the specific `TNodeType`-shaped
+leak pattern completely gone from the remaining 43 - spot-checked, not
+chased to zero (some are genuine new precision; one confirmed sample is
+a pre-existing, unrelated Psalm-`@psalm-type`-alias gap this project has
+no reason to resolve, newly reached rather than newly broken).
 
 **Subtyping properties via proptest, and two real soundness bugs found
 by it** (Phase 19). `src/types/tests/subtyping_properties.rs`: a
