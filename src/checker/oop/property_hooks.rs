@@ -17,30 +17,24 @@ impl<'a> Checker<'a> {
     /// half (see below for why only the native half, not its docblock-
     /// merged sibling), and `ExistingClassesInPropertyHookTypehintsRule`'s
     /// existence-check half for the `set` hook's own parameter type,
-    /// combined into one per-property pass. Each hook's own body is also
-    /// checked as a real function-like scope here - modeled directly on
-    /// `checker/expr.rs`'s existing `ExprKind::Closure`/`ExprKind::ArrowFn`
-    /// handling (fresh `locals`, explicit `$this` binding, generator-flag/
-    /// goto-targets save-restore), NOT on `check_function`'s registry-
+    /// combined into one per-property pass. Each hook's own body is
+    /// checked as a real function-like scope here - modeled on
+    /// `checker/expr.rs`'s `ExprKind::Closure`/`ExprKind::ArrowFn` handling
+    /// (fresh `locals`, explicit `$this` binding, generator-flag/
+    /// goto-targets save-restore), not `check_function`'s registry-
     /// `FunctionSig`-lookup path: that path runs a lot of method-specific
     /// machinery (attribute-target validation for *methods*, `#[Override]`/
     /// `#[NoDiscard]`, first-class-callable eligibility) that would be
-    /// actively wrong for a hook, which - unlike a real method - is never
-    /// itself callable as `$obj->get()`.
+    /// wrong for a hook, which - unlike a real method - is never itself
+    /// callable as `$obj->get()`.
     ///
-    /// Only plain property declarations (`c.properties`) are covered - a
-    /// promoted constructor property can also carry its own inline hooks
-    /// (`Param::hooks`), but nothing in this project's registry resolves
-    /// `set_ty`/`is_virtual` for that shape yet either (confirmed:
-    /// `property_hook_set_type` takes a `&PropertyDecl`, structurally
-    /// unable to accept a `&Param`) - a real, disclosed residual gap, not
-    /// a promoted constructor property (`Param::hooks`) is
-    /// checked too, via a second loop mirroring `check_property_overrides`'s
-    /// own established precedent for the identical "plain declaration vs.
-    /// promoted constructor parameter" split - reusing the exact same
-    /// `check_get_hook`/`check_set_hook` logic (generalized to take
-    /// scalar `name`/`span`/`type_hint` instead of a whole `&PropertyDecl`
-    /// for exactly this reason).
+    /// Covers both a plain property declaration's own hooks (`c.properties`)
+    /// and a promoted constructor property's inline hooks (`Param::hooks`),
+    /// via a second loop mirroring `check_property_overrides`'s own "plain
+    /// declaration vs. promoted constructor parameter" split - both reuse
+    /// the same `check_get_hook`/`check_set_hook` logic (taking scalar
+    /// `name`/`span`/`type_hint` instead of a whole `&PropertyDecl` for
+    /// exactly this reason).
     pub(crate) fn check_property_hooks(&mut self, fqn: &str, c: &ClassDecl) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
@@ -149,9 +143,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves a hook's own `@throws` tag
-    /// (`get_doc`/`set_doc`) into a real
-    /// `Type`, mirroring `FunctionSig::from_decl`'s own `throws` field
+    /// Resolves a hook's own `@throws` tag (`get_doc`/`set_doc`) into a
+    /// real `Type`, mirroring `FunctionSig::from_decl`'s own `throws` field
     /// resolution - but computed directly at check time rather than
     /// cached on a registry-side signature, since a property hook has no
     /// `FunctionSig` of its own at all (`check_property_hooks` reads
@@ -168,10 +161,10 @@ impl<'a> Checker<'a> {
         })
     }
 
-    /// `TooWideMethodThrowTypeRule`'s property-hook sibling,
+    /// Mirrors `TooWideMethodThrowTypeRule`'s property-hook sibling,
     /// `TooWidePropertyHookThrowTypeRule` (`vendor/phpstan-src/src/Rules/
-    /// Exceptions/TooWidePropertyHookThrowTypeRule.php`, confirmed by
-    /// direct read) - simpler than the method version's own gate (no
+    /// Exceptions/TooWidePropertyHookThrowTypeRule.php`) - simpler than
+    /// the method version's own gate (no
     /// `isFirstDeclaration` exemption at all): skip unless the property
     /// is private, the declaring class is final, the property itself is
     /// declared final, the hook itself is declared final, or the same
@@ -219,10 +212,9 @@ impl<'a> Checker<'a> {
     ) {
         let label = format!("{fqn}::${name} (get hook)");
         self.check_hook_attributes(attrs, &label);
-        // `InvalidThrowsPhpDocValueRule`'s
-        // own `@throws`-validity check runs against `InPropertyHookNode`
-        // regardless of whether the hook has a real body (confirmed
-        // directly, `vendor/phpstan-src`) - unlike the too-wide/missing
+        // `InvalidThrowsPhpDocValueRule`'s own `@throws`-validity check
+        // runs against `InPropertyHookNode` regardless of whether the
+        // hook has a real body - unlike the too-wide/missing
         // checks further below, which need a real statement result to
         // compare against and so run only once this whole function's own
         // "does this hook have a body at all" gate has already passed.
@@ -291,11 +283,9 @@ impl<'a> Checker<'a> {
             &mut self.current_declared_return_type,
             declared_return.clone(),
         );
-        // Same reasoning as every other function-
-        // shaped save/restore site - `TooWidePropertyHookThrowTypeRule`
-        // itself isn't ported (out of this phase's own scope), but a real
-        // `throw` inside a hook body must still not leak into whatever
-        // gets checked next.
+        // Same reasoning as every other function-shaped save/restore
+        // site: a real `throw` inside a hook body must still not leak
+        // into whatever gets checked next.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_unannotated_call =
             std::mem::take(&mut self.current_function_has_unannotated_call);
@@ -411,9 +401,8 @@ impl<'a> Checker<'a> {
     ) {
         let label = format!("{fqn}::${name} (set hook)");
         self.check_hook_attributes(attrs, &label);
-        // See `check_get_hook`'s own
-        // identical comment - this validity check runs regardless of
-        // whether the hook has a real body.
+        // See `check_get_hook`'s own identical comment - this validity
+        // check runs regardless of whether the hook has a real body.
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {
             self.check_throws_tag_validity(throws, span, &label);
@@ -463,10 +452,9 @@ impl<'a> Checker<'a> {
         // `checkPhpDocMethodSignatures`-gated check) is deliberately
         // skipped, mirroring this project's own established default for
         // override compatibility generally: real PHPStan's own flag
-        // defaults off (confirmed neither Piwigo's own `phpstan.neon` nor
-        // this project's corpus config enables it - see
-        // `FunctionSig::return_type_native`'s own doc comment for the
-        // identical reasoning already applied to method overrides).
+        // defaults off - see `FunctionSig::return_type_native`'s own
+        // doc comment for the identical reasoning already applied to
+        // method overrides.
         let param_has_native = param.is_some_and(|p| p.type_hint.is_some());
         let prop_has_native = type_hint.is_some();
         match (prop_has_native, param_has_native) {
@@ -578,8 +566,7 @@ impl<'a> Checker<'a> {
             &mut self.current_declared_return_type,
             declared_return.clone(),
         );
-        // See `check_get_hook`'s own identical
-        // comment.
+        // See `check_get_hook`'s own identical comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_unannotated_call =
             std::mem::take(&mut self.current_function_has_unannotated_call);
@@ -612,8 +599,8 @@ impl<'a> Checker<'a> {
             }
             PropertyHookBody::Abstract => {}
         }
-        // See `check_get_hook`'s own
-        // identical comment - unlike that function, `check_set_hook` never
+        // See `check_get_hook`'s own identical comment - unlike that
+        // function, `check_set_hook` never
         // returns early for an abstract body, so the "nothing thrown at
         // all" false-positive flood `TooWideMethodThrowTypeRule` already
         // discloses (`checker/throws/too_wide.rs`'s own module doc

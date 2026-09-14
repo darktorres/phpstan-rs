@@ -32,19 +32,19 @@ pub struct ParamSig {
     // (see that field's own doc comment): real PHP/PHPStan only enforce
     // method-override Liskov-compatibility at this native level by
     // default. `check_one_method_override`'s own param-narrowing check
-    // used to compare the merged `ty` instead - real corpus false
-    // positive, the extremely common Rector/PHPStan-`Collector<T>` idiom
-    // of narrowing a parameter via `@param` alone while leaving a wide
-    // native hint (`refactor(Node $node)`, narrowed only via `@param
-    // SpecificNode $node`) was wrongly flagged as an LSP violation real
-    // PHPStan doesn't, by default, check at all. Every other reader of
+    // must compare `ty_native`, not the merged `ty` - otherwise the
+    // extremely common Rector/PHPStan-`Collector<T>` idiom of narrowing
+    // a parameter via `@param` alone while leaving a wide native hint
+    // (`refactor(Node $node)`, narrowed only via `@param
+    // SpecificNode $node`) would be wrongly flagged as an LSP violation
+    // real PHPStan doesn't, by default, check at all. Every other reader of
     // `ty` correctly wants the merged, docblock-refined type and must
     // keep using it unchanged.
     pub ty_native: Type,
     pub variadic: bool,
     pub has_default: bool,
     pub by_ref: bool,
-    // Phase 87 (PHPDoc-inheritance backfill): starts as `true` only when
+    // Starts as `true` only when
     // this parameter's own `@param` tag was present on this
     // declaration's own docblock (i.e. `from_decl`'s own `doc_ty` was
     // `Some`) - `false` means `ty` is really just `ty_native` (or a
@@ -61,27 +61,25 @@ pub struct ParamSig {
     // inherit, not even from a bare native hint) must gate the merge
     // rather than the ancestor's `ty` being merely present.
     pub has_own_doc: bool,
-    // Phase 88: whether *this declaration's own* native hint/`@param`
-    // text (whichever produced `ty`) spells out `mixed` somewhere,
-    // explicitly - computed once in `from_decl` via `checker::
-    // has_explicit_mixed_nested_somewhere`, the exact same text this
-    // parameter's own `doc_ty`/native hint locals already are. Exists
-    // because `checker::missing_typehint`'s own "was `mixed` written on
-    // purpose" rule used to *re-derive* this by re-reading the checked
-    // declaration's own raw AST text at check time - correct as long as
-    // a type only ever came from that same declaration's own docblock,
-    // which stopped being true the moment `Registry::
-    // flatten_phpdoc_inheritance` (Phase 87) could hand `ty` down from a
-    // *different* declaration's docblock instead. That pass copies this
-    // field alongside `ty` whenever it backfills a position, so an
-    // inherited `array<string, mixed>`/nested-`mixed` type is still
-    // correctly recognized as deliberate, not "no type given at all" -
-    // real corpus false positive this fixes: every one of Piwigo's
+    // Whether *this declaration's own* native hint/`@param` text
+    // (whichever produced `ty`) spells out `mixed` somewhere, explicitly
+    // - computed once in `from_decl` via
+    // `checker::has_explicit_mixed_nested_somewhere`, the exact same
+    // text this parameter's own `doc_ty`/native hint locals already are.
+    // `checker::missing_typehint`'s own "was `mixed` written on purpose"
+    // rule can't just re-derive this by re-reading the checked
+    // declaration's own raw AST text at check time, because `ty` can
+    // come from a *different* declaration's docblock once
+    // `Registry::flatten_phpdoc_inheritance` backfills it. That pass
+    // copies this field alongside `ty` whenever it backfills a position,
+    // so an inherited `array<string, mixed>`/nested-`mixed` type is
+    // still correctly recognized as deliberate, not "no type given at
+    // all" (real shape: every one of Piwigo's
     // `UrlServiceInterface`/`ExposesPageData`/... implementors and test
     // doubles that correctly omit their own docblock in favor of the
-    // interface's.
+    // interface's).
     pub explicit_mixed_hint: bool,
-    // Phase 48 follow-up (item 7b): every class-name reference `ty`
+    // Every class-name reference `ty`
     // carries, as `(raw-as-written, resolved-FQN)` pairs - collected via
     // `collect_class_name_case_refs` right after `mark_template_params`
     // (so a real `@template` name is never mistaken for a stray class
@@ -93,7 +91,7 @@ pub struct ParamSig {
     // correctness hazard (the raw text was written under an *ancestor*
     // file's own `use` imports, not this checker's own `name_ctx`).
     pub case_refs: Vec<(String, String)>,
-    // Phase 36: `@param-closure-this Type $name`'s own resolved `Type` -
+    // `@param-closure-this Type $name`'s own resolved `Type` -
     // what `$this` becomes inside a `Closure`/`ArrowFn` literal argument
     // passed at this parameter's position, resolved through the same
     // template-marking + name-resolution pipeline `@param`'s own `ty`
@@ -103,7 +101,7 @@ pub struct ParamSig {
     // check_closure_literal_with_this_and_scope`, the same mechanism
     // `Closure::bind`/`->bindTo()` already use.
     pub closure_this_type: Option<Type>,
-    // Phase 45 (item 11): `@param-out Type $name`'s own resolved `Type` -
+    // `@param-out Type $name`'s own resolved `Type` -
     // the widened type this by-ref parameter's own value is guaranteed
     // to hold once the function returns. Resolved through the identical
     // mark-then-resolve-then-substitute pipeline `ty`/`closure_this_type`
@@ -124,13 +122,12 @@ pub struct FunctionSig {
     // `@return` docblock refinement - real PHP only ever enforces
     // override-compatibility (Liskov) at this native level, and by
     // default so does real PHPStan (`checkPhpDocMethodSignatures` is off
-    // unless a project opts in, confirmed neither Piwigo's own
-    // `phpstan.neon` nor this project's own corpus config does).
+    // unless a project opts in).
     // `check_method_overrides`'s own return-type check is the only
     // reader - every other consumer of a function's return type wants
     // the docblock-refined `return_type` above instead.
     pub return_type_native: Type,
-    // Phase 87 (PHPDoc-inheritance backfill): the `ParamSig::has_own_doc`
+    // The `ParamSig::has_own_doc`
     // equivalent for the return position - starts `true` only when this
     // declaration's own docblock carried an `@return` tag (`from_decl`'s
     // own `doc_return` was `Some`), mirroring real PHPStan's
@@ -139,13 +136,13 @@ pub struct FunctionSig {
     // comment for why `flatten_phpdoc_inheritance` also sets this to
     // `true` once it backfills `return_type` from an ancestor.
     pub return_has_own_doc: bool,
-    // Phase 48 follow-up (item 7b): `ParamSig::case_refs`'s own return-
+    // `ParamSig::case_refs`'s own return-
     // position equivalent - see that field's own doc comment.
     pub return_case_refs: Vec<(String, String)>,
-    // Phase 88: the `ParamSig::explicit_mixed_hint` equivalent for the
+    // The `ParamSig::explicit_mixed_hint` equivalent for the
     // return position - see that field's own doc comment.
     pub return_explicit_mixed_hint: bool,
-    // Phase 37: PHP 8.5's `#[\NoDiscard]` marker attribute - `true` when
+    // PHP 8.5's `#[\NoDiscard]` marker attribute - `true` when
     // this declaration carries one, meaning a bare, unused call to it
     // (`foo();` on its own line, return value neither assigned nor
     // otherwise consumed) is a real diagnostic
@@ -156,13 +153,13 @@ pub struct FunctionSig {
     // since real PHP's own `#[NoDiscard]` is always the single, global-
     // namespace one - there's no other class this could plausibly mean).
     pub no_discard: bool,
-    // Phase 57: `public`/`private`/`protected` - `Visibility::Public` for
+    // `public`/`private`/`protected` - `Visibility::Public` for
     // every plain top-level function (PHP has no way to declare one
     // otherwise), a method's own declared visibility otherwise. Threaded
     // through so a call site can enforce access legality the same way
     // `PropertySig::visibility` does for properties.
     pub visibility: Visibility,
-    // Phase 67: `@internal` on this function/method's own doc comment -
+    // `@internal` on this function/method's own doc comment -
     // see `docblock::DocBlock::internal`'s own doc comment for what it
     // means and how it's gated. A method also counts as internal when
     // its *declaring class* does, but that half is checked separately
@@ -170,28 +167,28 @@ pub struct FunctionSig {
     // has the declaring class in hand - this field only ever reflects
     // the member's own tag.
     pub is_internal: bool,
-    // Phase 40: `@api` on this function/method's own doc comment -
+    // `@api` on this function/method's own doc comment -
     // real PHPStan's `ApiMethodCallRule`/`ApiInstantiationRule` check
     // both the declaring class's own `@api` AND the member's own -
     // `ClassInfo::is_api` only ever covered the former. `DocBlock::api`
     // already exists and is parsed; this is a direct reuse, not new
     // parsing.
     pub is_api: bool,
-    // Phase 64 follow-up: PHP 8.3's `#[\Override]` marker - `true` when
+    // PHP 8.3's `#[\Override]` marker - `true` when
     // this declaration carries one. Stored here (mirroring `no_discard`
     // exactly, including its "short-name-only, no namespace resolution"
     // matching convention) rather than checked straight off a fresh
     // `MethodDecl`'s own AST, because a method needs this checked in the
     // context of whichever *using class*'s ancestor chain applies - a
     // trait's own method carrying `#[Override]` is only ever a real
-    // fatal error relative to a class that later `use`s it (confirmed
-    // directly: the same trait method is fine when the using class has a
+    // fatal error relative to a class that later `use`s it (the same
+    // trait method is fine when the using class has a
     // real ancestor to satisfy it, and fatals - attributed to the
     // *using class's* own method name, not the trait's - when it
     // doesn't), so this needs to survive `flatten_traits`' merge the
     // same way `no_discard` already does.
     pub has_override_attr: bool,
-    // Phase 39: `@deprecated` on this function/method's own doc comment -
+    // `@deprecated` on this function/method's own doc comment -
     // see `docblock::DocBlock::deprecated`'s own doc comment for what it
     // means and how it's gated. Deliberately scoped to the function/
     // method's own tag only, unlike `is_internal`'s "declaring class
@@ -202,17 +199,13 @@ pub struct FunctionSig {
     // better-reflection`, not vendored here), so it's left unclaimed
     // rather than guessed.
     pub deprecated: Option<String>,
-    // Phase 42's own self-contained first slice: `@throws` on this
-    // function/method's own doc comment, resolved and unioned across
-    // every tag present (`docblock::DocBlock::throws`'s own doc comment
-    // explains why it's a `Vec` there) - `None` when no `@throws` tag
-    // exists at all, distinct from a real, resolvable-but-empty case
-    // (there isn't one - a tag with no type text simply isn't recorded
-    // by `docblock::parse` in the first place). Not yet consumed by any
-    // checker code - the base model this phase's later stages (a real
-    // body walk collecting `throw` statements, transitive union across
-    // the call graph, the opt-in "missing checked exception" rule
-    // family) build on.
+    // `@throws` on this function/method's own doc comment, resolved
+    // and unioned across every tag present (`docblock::DocBlock::throws`'s
+    // own doc comment explains why it's a `Vec` there) - `None` when no
+    // `@throws` tag exists at all, distinct from a real,
+    // resolvable-but-empty case (there isn't one - a tag with no type
+    // text simply isn't recorded by `docblock::parse` in the first
+    // place).
     pub throws: Option<Type>,
     // `@phpstan-assert`-family tags (`docblock::DocBlock::assert_if_true`'s
     // own doc comment has the full picture), resolved into a real `Type`
@@ -224,7 +217,7 @@ pub struct FunctionSig {
     pub assert_if_true: Vec<AssertInfo>,
     pub assert_if_false: Vec<AssertInfo>,
     pub assert: Vec<AssertInfo>,
-    // Phase 62 (premature-access dataflow): this declaration's own real
+    // This declaration's own real
     // AST body, when it has one - `None` for every synthesized signature
     // this registry ever builds without a real, parseable declaration
     // behind it (a built-in enum method, a native stdlib stub with no
@@ -241,7 +234,7 @@ pub struct FunctionSig {
     // `php_stubs.rs`'s own generated-stub caches are `LazyLock<Vec<(String,
     // FunctionSig)>>` statics, which require `Send + Sync`.
     pub body: Option<Arc<Vec<Stmt>>>,
-    // Phase 41/82 (transitive purity): `None` until `Registry::
+    // `None` until `Registry::
     // resolve_transitive_purity` classifies this declaration's own body
     // (`registry::purity::classify_body`) - stays `None` forever for
     // every synthesized signature with no real body (`body` is also
@@ -259,18 +252,17 @@ pub struct FunctionSig {
     // diagnostic (a bare, discarded call to a now-pure declaration)
     // actually reads.
     pub is_transitively_pure: bool,
-    // Phase 41/82: `true` for every signature `php_stubs.rs` generates
-    // from vendored `phpstorm-stubs`/`phpstan-src` source - a real,
-    // necessary exclusion found via corpus verification, not assumed:
-    // a stub file's own function/method body is *always* empty (`{}`) -
-    // real PHP builtins like `header()`/`exit()`/`class_exists()` are
-    // natively implemented, real side effects included, with nothing
-    // resembling their actual behavior expressed in PHP at all. Without
-    // this flag, `registry::purity::classify_body` would see an empty
+    // `true` for every signature `php_stubs.rs` generates from
+    // vendored `phpstorm-stubs`/`phpstan-src` source - a stub file's own
+    // function/method body is *always* empty (`{}`) - real PHP builtins
+    // like `header()`/`exit()`/`class_exists()` are natively
+    // implemented, real side effects included, with nothing resembling
+    // their actual behavior expressed in PHP at all. Without this flag,
+    // `registry::purity::classify_body` would see an empty
     // body and wrongly conclude every one of PHP's own thousands of
-    // built-in functions is provably pure - confirmed directly: the
-    // very first full-corpus verification round flagged `header()` as
-    // dead code. `false` for every real, first-party declaration
+    // built-in functions is provably pure (e.g. `header()` would look
+    // like dead code when its return value is discarded). `false` for
+    // every real, first-party declaration
     // (`from_decl`'s own construction has no way to know it's *inside*
     // a stub file at parse time - `php_stubs.rs`'s own
     // `generate_from_source`/`generate_classes_from_source` set this
@@ -283,12 +275,11 @@ pub struct FunctionSig {
     // (`cases()`/`from()`/`tryFrom()`). `false` for every real
     // declaration, including one merged from two real overloads
     // (`merge`'s own `&&` - a real declaration on *either* side of a
-    // merge makes the result real too). Found necessary via corpus
-    // verification, not assumed: `Registry::required_abstract_methods`'s
+    // merge makes the result real too). `Registry::required_abstract_methods`'s
     // own "an interface's own declared methods are all required" rule
-    // used to scan an interface's `methods` map indiscriminately,
-    // wrongly treating a purely magic `@method` tag on an interface
-    // (real corpus shape: Tracy's own `IBarPanel`, `@method ?string
+    // must not scan an interface's `methods` map indiscriminately - it
+    // would otherwise wrongly treat a purely magic `@method` tag on an
+    // interface (real shape: Tracy's own `IBarPanel`, `@method ?string
     // getAgentInfo()`) as something every implementor must also define a
     // real, textual method for - `@method` only ever documents a
     // magic-`__call`-backed capability, never a requirement.
@@ -312,33 +303,33 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
         ExprKind::Literal(Literal::Bool(true)) => Type::True,
         ExprKind::Literal(Literal::Bool(false)) => Type::False,
         ExprKind::Literal(Literal::Null) => Type::Null,
-        // Phase 23: `const int OFF = -1;` parses as a literal `1` wrapped
+        // `const int OFF = -1;` parses as a literal `1` wrapped
         // in a unary negation, not a single negative-literal token - a
         // negative-valued typed constant (real shape: `Piwigo\Core\
         // Logger::OFF`, the one negative severity level alongside seven
-        // non-negative ones) otherwise silently fell to `Mixed` below.
+        // non-negative ones) would otherwise silently fall to `Mixed`
+        // below.
         ExprKind::Unary(crate::ast::UnaryOp::Neg, inner) => match &inner.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(-n),
             ExprKind::Literal(Literal::Float(_)) => Type::Float,
             _ => Type::Mixed,
         },
-        // A round of Piwigo-corpus bucketing found this real, common
-        // shape (`AppInfo::URL = 'https://' . self::DOMAIN;`) - a
-        // const's own value referencing *another* const via `self::`
+        // A real, common shape (`AppInfo::URL = 'https://' . self::DOMAIN;`)
+        // - a const's own value referencing *another* const via `self::`
         // can't be resolved here at all (this function has no class
         // context, and no registry to look the other const up in even
         // if it did), but real PHP string concatenation always
         // produces a `string` regardless of either operand's own type,
         // so this is sound information even without resolving anything
-        // - unlike falling back to `Mixed` below, which silently
-        // widened every array literal/argument this const then fed
+        // - unlike falling back to `Mixed` below, which would silently
+        // widen every array literal/argument this const then feeds
         // into.
         ExprKind::Binary(crate::ast::BinOp::Concat, ..) => Type::String,
         _ => Type::Mixed,
     }
 }
 
-/// Phase 37: whether an `Attribute`'s own raw (possibly namespaced) name
+/// Whether an `Attribute`'s own raw (possibly namespaced) name
 /// names the real PHP 8.5 `#[\NoDiscard]` marker - real PHPStan's own
 /// `NativeFunctionReflection::mustUseReturnValue` matches by short name
 /// only, case-insensitively (`strtolower($attrib->getName()) ===
@@ -355,16 +346,15 @@ pub(crate) fn is_no_discard_attribute_name(name: &str) -> bool {
         .eq_ignore_ascii_case("NoDiscard")
 }
 
-/// Phase 64 follow-up: same idea as `is_no_discard_attribute_name` just
+/// Same idea as `is_no_discard_attribute_name` just
 /// above, for PHP 8.3's `#[\Override]` marker - real PHPStan's own
 /// `OverridingMethodRule::hasOverrideAttribute` matches the identical way
 /// (`$attr->name->toLowerString() === 'override'` - short-name-only,
 /// case-insensitive, no fully-resolved namespace check), deliberately
 /// *not* the stricter engine-level namespace resolution the real PHP
-/// runtime itself performs for this same attribute (confirmed directly:
-/// a userland `App\Override` class doesn't trigger the real fatal error
-/// at all) - this project follows real PHPStan's own rule here, not the
-/// engine.
+/// runtime itself performs for this same attribute (a userland
+/// `App\Override` class doesn't trigger the real fatal error at all) -
+/// this project follows real PHPStan's own rule here, not the engine.
 pub(crate) fn is_override_attribute_name(name: &str) -> bool {
     name.trim_start_matches('\\')
         .rsplit('\\')
@@ -373,18 +363,18 @@ pub(crate) fn is_override_attribute_name(name: &str) -> bool {
         .eq_ignore_ascii_case("Override")
 }
 
-/// Phase 37: same idea again, for PHP 8.4's native `#[\Deprecated]`
+/// Same idea again, for PHP 8.4's native `#[\Deprecated]`
 /// marker - real PHPStan's own `ClassAttributesRule`/`TraitAttributesRule`
 /// both use `getAttributes('Deprecated')`, a bare short-name match against
 /// the class-like node's *own* `reflectionClass`-level attributes (not the
 /// general-purpose, fully-resolved `attribute.notFound`/`.target` engine
 /// this project's `check_attributes`/`check_attribute_targets` already
 /// run) - this is a real, unconditional PHP fatal error on a class/
-/// interface/enum declaration (confirmed directly: `#[\Deprecated] class
+/// interface/enum declaration (`#[\Deprecated] class
 /// Foo {}` fatals "Cannot apply #[\Deprecated] to class Foo"), and a
-/// PHP-8.5-gated one on a trait (confirmed directly: real, silent-until-
-/// 8.5 support - a real deprecation warning fires when the trait is used,
-/// not a fatal error).
+/// PHP-8.5-gated one on a trait (silent until 8.5 support - a real
+/// deprecation warning fires when the trait is used, not a fatal
+/// error).
 pub(crate) fn is_deprecated_attribute_name(name: &str) -> bool {
     name.trim_start_matches('\\')
         .rsplit('\\')
@@ -393,7 +383,7 @@ pub(crate) fn is_deprecated_attribute_name(name: &str) -> bool {
         .eq_ignore_ascii_case("Deprecated")
 }
 
-/// Phase 37: same idea again, for PHP 8.2's native
+/// Same idea again, for PHP 8.2's native
 /// `#[\AllowDynamicProperties]` marker - real PHPStan's own
 /// `ClassAttributesRule`/`TraitAttributesRule`, flagging it as pointless/
 /// wrong on a `readonly class`, `enum`, `interface`, or (unconditionally)
@@ -447,7 +437,7 @@ impl FunctionSig {
             .params
             .iter()
             .map(|p| {
-                // Phase 93: a promoted constructor property very commonly
+                // A promoted constructor property very commonly
                 // carries its own inline `/** @var T */` directly above
                 // it (real idiom - it doubles as that property's own
                 // docblock), rather than an `@param $name` tag on the
@@ -499,7 +489,7 @@ impl FunctionSig {
                     || doc
                         .as_ref()
                         .is_some_and(|d| d.optional_params.contains(&p.name));
-                // Phase 36: `@param-closure-this Type $name` - resolved
+                // `@param-closure-this Type $name` - resolved
                 // through the identical mark-then-resolve-then-substitute
                 // pipeline `ty` above already uses for the same reason
                 // (a generic class/function's own `@template` name, or a
@@ -513,7 +503,7 @@ impl FunctionSig {
                         let ty = resolve_names_in_type(ty, ctx);
                         substitute_type_aliases(ty, class_type_aliases)
                     });
-                // Phase 45: mirrors `closure_this_type`'s own resolution
+                // Mirrors `closure_this_type`'s own resolution
                 // pipeline exactly.
                 let out_ty = doc
                     .as_ref()
@@ -620,7 +610,7 @@ impl FunctionSig {
         }
     }
 
-    /// Phase 32 Finding C: merges two *unconditional* declarations of the
+    /// Merges two *unconditional* declarations of the
     /// same function name - the real-overload shape phpstorm-stubs uses
     /// for `strtr` (a 3-string-argument form and a 2-argument, `array
     /// $replace_pairs` form, as two separate top-level declarations
@@ -821,7 +811,7 @@ fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
 
 /// Renders `sig` as a real PHP-looking signature (`strlen(string $string):
 /// int<0, max>`) - shared between the `demo` subcommand's own output and
-/// the LSP's hover text (Phase 17), so the two never drift apart.
+/// the LSP's hover text, so the two never drift apart.
 pub fn format_signature(name: &str, sig: &FunctionSig) -> String {
     let params: Vec<String> = sig
         .params
