@@ -1,4 +1,4 @@
-//! Phase 39: `@deprecated` usage warnings, gated behind `Registry::
+//! `@deprecated` usage warnings, gated behind `Registry::
 //! check_deprecated_usage` (default off - see its own doc comment).
 //! Mirrors the highest-value shapes of real PHPStan's own separate
 //! `phpstan/phpstan-deprecation-rules` package: a plain function call
@@ -8,10 +8,7 @@
 //! class-constant access (`classConstant.deprecated`), and instantiation
 //! (`new.deprecated`).
 //!
-//! Phase 39.1/39.2 (grounded directly against the real, unvendored
-//! `phpstan/phpstan-deprecation-rules` package's own
-//! `Rules/Deprecations/*.php` sources, not guessed): a class-level
-//! `@deprecated` DOES cascade to every member usage - checked first, as
+//! A class-level `@deprecated` cascades to every member usage - checked first, as
 //! its own separate branch, independently of whether the member itself
 //! also carries `@deprecated` (real PHPStan never stacks both
 //! diagnostics for the same usage). And unlike `checker::internal_usage`,
@@ -47,12 +44,12 @@ impl<'a> Checker<'a> {
     }
 
     /// `method.deprecated`/`staticMethod.deprecated` - an instance or
-    /// static method call. Phase 39.1: the *declaring class*'s own
+    /// static method call. The declaring class's own
     /// `@deprecated` cascades to every member usage, checked first and
     /// independently of the method's own tag - matches real PHPStan's
     /// own `RestrictedDeprecatedMethodUsageExtension`, which checks
     /// `getDeclaringClass()->isDeprecated()` before the member's own tag
-    /// and never stacks both diagnostics. Phase 39.5: `__toString`'s own
+    /// and never stacks both diagnostics. `__toString`'s own
     /// tag gets a dedicated string-cast message/identifier instead of the
     /// generic one, but only in the own-tag branch (after the cascade
     /// branch has already had its chance to return) - matches real
@@ -121,7 +118,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `property.deprecated`/`staticProperty.deprecated` - an instance or
-    /// static property access. Phase 39.1: same declaring-class cascade
+    /// static property access. Same declaring-class cascade
     /// as `check_deprecated_method_call` above.
     pub(crate) fn check_deprecated_property_access(
         &mut self,
@@ -173,8 +170,8 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// `classConstant.deprecated` - a class-constant access. Phase 39.1:
-    /// same declaring-class cascade as the two functions above.
+    /// `classConstant.deprecated` - a class-constant access. Same
+    /// declaring-class cascade as the two functions above.
     pub(crate) fn check_deprecated_class_constant_access(
         &mut self,
         owner: &str,
@@ -252,7 +249,7 @@ fn deprecation_message(subject: &str, reason: &str) -> String {
     }
 }
 
-/// Phase 39.1: the declaring-class cascade's own message shape - `sentence`
+/// The declaring-class cascade's own message shape - `sentence`
 /// is already a complete, period-terminated sentence (e.g. `"Call to
 /// method foo() of deprecated class Bar."`), matching real PHPStan's own
 /// `RestrictedDeprecated*UsageExtension` messages, which append the
