@@ -405,47 +405,39 @@ impl<'a> Checker<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
-    /// `array_element_type`/`array_key_type`'s own parallel
-    /// case for an object-shaped `foreach` subject - `Traversable`,
-    /// `Iterator`, `Generator` (a real `Iterator` descendant), or
-    /// `IteratorAggregate`. Returns `(key type, value type)`.
-    /// Deliberately not folded into `array_element_type`/`array_key_type`
-    /// themselves (both plain free functions, no registry access) -
-    /// every other caller of those two genuinely never has an object
-    /// subject, and this needs `&self.registry` throughout.
+    /// `array_element_type`/`array_key_type`'s own parallel case for
+    /// an object-shaped `foreach` subject - `Traversable`, `Iterator`,
+    /// `Generator` (a real `Iterator` descendant), or
+    /// `IteratorAggregate`. Returns `(key type, value type)`. Deliberately
+    /// not folded into `array_element_type`/`array_key_type` themselves
+    /// (both plain free functions, no registry access), since every
+    /// other caller of those two never has an object subject.
     ///
-    /// Targets `Iterator`/`IteratorAggregate` directly rather than the
-    /// plan's originally-suggested common ancestor `Traversable` - a
-    /// real, verified reason, not a stylistic choice: `Traversable`'s own
-    /// phpstorm-stubs declaration (`vendor/phpstorm-stubs/Core/Core_c.php`)
-    /// has no real `@template` tag of its own, only a `@template-extends
-    /// iterable<TKey, TValue>` referencing the `iterable` *pseudo*-type
-    /// (which `types::parse_type_string` desugars straight to `array|
-    /// Traversable` before any template ever attaches) - `Registry::
-    /// class_template_bindings(_, _, "Traversable")` would always return
-    /// an empty map, no matter what's passed in, since `ClassInfo::
-    /// templates` for `Traversable` itself is empty. `Iterator`/
-    /// `IteratorAggregate` both carry real, functional `@template TKey`/
-    /// `@template-covariant TValue` tags of their own, and every real,
-    /// concrete `Traversable` implementor is required by the PHP engine
-    /// itself to implement one of the two (`Traversable` can't be
-    /// implemented directly - a real fatal error) - so this covers every
-    /// concrete case; a variable statically typed as the bare `Traversable`
-    /// interface itself (or a raw `Traversable<K,V>` docblock reference,
-    /// never actually widened to a real implementor) is the one
-    /// remaining, narrow gap, and falls back to `None`/`Mixed` like any
-    /// other unresolvable case in this project.
+    /// Targets `Iterator`/`IteratorAggregate` directly rather than their
+    /// common ancestor `Traversable`: `Traversable`'s own phpstorm-stubs
+    /// declaration has no real `@template` tag, only a
+    /// `@template-extends iterable<TKey, TValue>` referencing the
+    /// `iterable` *pseudo*-type (which desugars to `array|Traversable`
+    /// before any template attaches), so
+    /// `Registry::class_template_bindings(_, _, "Traversable")` would
+    /// always return an empty map. `Iterator`/`IteratorAggregate` both
+    /// carry real, functional `@template TKey`/`@template-covariant
+    /// TValue` tags, and every real, concrete `Traversable` implementor
+    /// is required by the PHP engine to implement one of the two
+    /// (`Traversable` can't be implemented directly), so this covers
+    /// every concrete case; a variable statically typed as the bare
+    /// `Traversable` interface itself is the one remaining gap, falling
+    /// back to `None`/`Mixed`.
     ///
     /// `IteratorAggregate` resolves through its own `getIterator()`'s
     /// declared return type first (real, common shape: `getIterator():
-    /// Iterator<K, V>` rather than the class itself declaring `@template-
-    /// implements Traversable<K,V>`) - only falling back to `Iterator
-    /// Aggregate`'s own template bindings directly when that return type
-    /// doesn't resolve any further (e.g. a bare, non-generic `Iterator`/
-    /// `Traversable` return hint) - a small, deliberate leniency beyond
-    /// what real PHPStan's own method-return-type-only resolution does,
-    /// since the interface's own declared generics are still a real,
-    /// likely-correct answer in that case.
+    /// Iterator<K, V>` rather than the class itself declaring
+    /// `@template-implements Traversable<K,V>`), only falling back to
+    /// `IteratorAggregate`'s own template bindings directly when that
+    /// return type doesn't resolve further - a small leniency beyond
+    /// what real PHPStan's method-return-type-only resolution does,
+    /// since the interface's declared generics are still a likely-correct
+    /// answer in that case.
     fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
         match ty {
             Type::Object(name, args) => {
