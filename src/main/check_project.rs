@@ -65,13 +65,11 @@ fn read_and_parse_file(path: &Path, is_stub: bool) -> Option<(String, project::P
 /// correctly-attributed number in the hotpath report (`collect_php_files`
 /// itself is deliberately left unmeasured - see its own doc comment for
 /// why a self-recursive function's own aggregate would be misleading).
-/// Measured on the Symfony monorepo (a perf-optimization investigation
-/// workflow's own follow-up): 386.72ms of a 23.89s run, 1.62% - small
-/// enough that parallelizing isn't worth it next to the already-parallel
-/// parse/check phases, though collection order is discarded immediately
-/// by the `sort()`/`dedup()` calls right here, so it would be safe to if
-/// this ever became the dominant cost on a corpus with far more
-/// directories than files.
+/// Small enough on a real monorepo that parallelizing isn't worth it next
+/// to the already-parallel parse/check phases, though collection order
+/// is discarded immediately by the `sort()`/`dedup()` calls right here,
+/// so it would be safe to if this ever became the dominant cost on a
+/// corpus with far more directories than files.
 #[hotpath::measure]
 fn collect_analyze_and_context_files(
     dirs: &[PathBuf],
@@ -94,10 +92,10 @@ fn collect_analyze_and_context_files(
     (analyze_files, context_files)
 }
 
-// Phase 40's own new `phpstan_api_check_enabled` gate pushed this past
-// clippy's default 7-argument threshold - every argument here is already
-// its own independently-meaningful CLI-level setting (not a group crying
-// out for a struct), so silencing the lint for this one, single-call-site
+// Past clippy's default 7-argument threshold - every argument here is
+// already its own independently-meaningful CLI-level setting (not a
+// group crying out for a struct), so silencing the lint for this one,
+// single-call-site
 // wiring function reads clearer than a bag-of-fields options type would
 // (mirrors this project's own existing `#[allow(clippy::type_complexity)]`
 // precedent in `parser/classes.rs`: a real, deliberate exception, not a
@@ -134,10 +132,10 @@ fn run_check_project(
 ) {
     // Deterministic load order matters now in a way it didn't for
     // --check (parse-only): a real corpus can genuinely declare the same
-    // fully-qualified class name twice (verified: multiple vendored
-    // copies of nikic/php-parser bundled by different tools, none of
-    // them php-scoper-prefixed relative to each other) - readdir order
-    // is filesystem-dependent, so without sorting, which declaration
+    // fully-qualified class name twice (e.g. multiple vendored copies of
+    // the same library bundled by different tools, none php-scoper-
+    // prefixed relative to each other) - readdir order is filesystem-
+    // dependent, so without sorting, which declaration
     // "wins" the registry slot (and therefore which one's real methods
     // are visible) could silently vary between runs on different
     // machines or filesystems - `collect_analyze_and_context_files`'s own
@@ -175,10 +173,10 @@ fn run_check_project(
 
     // A bare rayon pool uses the default (small) OS worker-thread stack -
     // the sibling `check` command's own `WORKER_STACK_SIZE` precedent
-    // (check.rs) and its doc comment record a real, non-adversarial stack
-    // overflow at ~200-300 levels of nested parens on a default-sized
-    // thread stack, well short of the parser's own `MAX_EXPR_DEPTH=1000`
-    // guard - relevant to both phases below, since parsing recurses
+    // (check.rs) records a real, non-adversarial stack overflow at
+    // ~200-300 levels of nested parens on a default-sized thread stack,
+    // well short of the parser's own `MAX_EXPR_DEPTH=1000` guard -
+    // relevant to both phases below, since parsing recurses
     // through the same shape of nesting and the checker's own recursive
     // AST walk (`checker/expr.rs` etc.) has no depth guard of its own
     // either. One call-local pool (not `build_global()`) shared by both
@@ -196,11 +194,10 @@ fn run_check_project(
     // Lexing+parsing each file is embarrassingly parallel - a pure
     // computation over one file's own source text, with no dependency on
     // (or mutation of) `project`'s shared registry at all (see
-    // `read_and_parse_file`/`ParsedFile`'s own doc comments). Measured on
-    // a full real-world monorepo corpus: once `check_file` below was
-    // already parallelized, sequential lexing+parsing became the
-    // dominant remaining cost - ~63% of total wall time - which is what
-    // this loop exists to close.
+    // `read_and_parse_file`/`ParsedFile`'s own doc comments). Once
+    // `check_file` below is parallelized, sequential lexing+parsing
+    // becomes the dominant remaining cost on a large real-world monorepo,
+    // which is what this loop exists to close.
     //
     // `context_files` and `analyze_files` are parsed in one combined
     // `par_iter()` call, not two separate ones - each `pool.install(||
@@ -214,9 +211,8 @@ fn run_check_project(
     // order, so `combined_parsed.split_off(context_files.len())` cleanly
     // recovers each list's own results in their own original order - the
     // downstream `zip(context_files.iter(), ...)`/`zip(analyze_files.
-    // iter(), ...)` insert loops below are unchanged either way. Found
-    // via a perf-optimization investigation workflow.
-    // Phase 83: every real on-disk file reachable through a configured
+    // iter(), ...)` insert loops below are unchanged either way.
+    // Every real on-disk file reachable through a configured
     // `stub_paths` entry (a directory, walked, or a single file listed
     // directly - `collect_php_files` already handles both) - tags
     // `DuplicateClassSites`' own `is_stub` provenance per file, so a
@@ -453,14 +449,12 @@ pub(crate) fn run_check_project_command(
     config: Option<PathBuf>,
     format: Option<OutputFormat>,
 ) {
-    // Finding 8: a config file's own `paths`/`baseline`/
-    // `scan_paths` are conventionally relative to the config file
-    // itself (matching every comparable format - .gitignore,
-    // tsconfig.json, real PHPStan's own neon includes - and this
-    // project's own module-doc example), not to whatever
-    // directory the invoking shell happens to be in. Captured
-    // here, before `config` is shadowed by the loaded
-    // `config::Config` below, since the parsed struct itself
+    // A config file's own `paths`/`baseline`/`scan_paths` are
+    // conventionally relative to the config file itself (matching every
+    // comparable format - .gitignore, tsconfig.json, real PHPStan's own
+    // neon includes), not to whatever directory the invoking shell
+    // happens to be in. Captured here, before `config` is shadowed by
+    // the loaded `config::Config` below, since the parsed struct itself
     // doesn't carry its own source path.
     let config_dir = config
         .as_deref()
@@ -497,11 +491,10 @@ pub(crate) fn run_check_project_command(
         eprintln!("no paths given on the command line or in the config file");
         std::process::exit(1);
     }
-    // Phase 84: `configured_level` is the raw, pre-collapse value -
-    // `None` when neither the CLI flag nor the config key set one at
-    // all, distinct from `level` below (which always collapses to a
-    // concrete `u8`, defaulting to `MAX_LEVEL`, purely for diagnostic
-    // filtering).
+    // `configured_level` is the raw, pre-collapse value - `None` when
+    // neither the CLI flag nor the config key set one at all, distinct
+    // from `level` below (which always collapses to a concrete `u8`,
+    // defaulting to `MAX_LEVEL`, purely for diagnostic filtering).
     let configured_level = level.or(config.level);
     let level = level.or(config.level).unwrap_or(MAX_LEVEL);
     let strict_mixed_arrays = strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
@@ -564,9 +557,9 @@ pub(crate) fn run_check_project_command(
     };
     let no_composer = no_composer || config.no_composer.unwrap_or(false);
 
-    // Phase 83: mirrors `scan_dirs`'s own resolution exactly (CLI flag
-    // wins, else the config key, resolved against the config file's own
-    // directory) - a `stub_paths` entry is unioned into `scan_dirs` below
+    // Mirrors `scan_dirs`'s own resolution exactly (CLI flag wins, else
+    // the config key, resolved against the config file's own directory)
+    // - a `stub_paths` entry is unioned into `scan_dirs` below
     // so it still loads for type-resolution context exactly as before
     // (nothing about the existing merge-into-registry behavior changes),
     // while also being kept separately so `run_check_project` can walk it
@@ -585,13 +578,12 @@ pub(crate) fn run_check_project_command(
     scan_dirs.extend(stub_dirs.iter().cloned());
 
     let mut scan_files = Vec::new();
-    // Phase 40: gated the same way as the vendor-context load just
-    // above (both need the project's own `composer.json`, and
-    // `--no-composer` already means "don't consult Composer at
-    // all for this run") - a project with no real
-    // `phpstan/phpstan`/`phpstan/extension-installer` dependency
-    // has no backward-compatibility promise to check anything
-    // against.
+    // Gated the same way as the vendor-context load just above (both
+    // need the project's own `composer.json`, and `--no-composer`
+    // already means "don't consult Composer at all for this run") - a
+    // project with no real `phpstan/phpstan`/`phpstan/extension-
+    // installer` dependency has no backward-compatibility promise to
+    // check anything against.
     let mut phpstan_api_check_enabled = false;
     if !no_composer {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
