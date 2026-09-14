@@ -9,7 +9,7 @@ use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
 impl<'a> Checker<'a> {
-    /// Phase 68: `DuplicateKeysInLiteralArraysRule` - a later literal key
+    /// `DuplicateKeysInLiteralArraysRule` - a later literal key
     /// silently overwrites an earlier one at runtime (real PHP raises no
     /// warning either), almost always a real bug (a copy-pasted entry
     /// whose key was never updated) rather than an intentional
@@ -56,12 +56,12 @@ impl<'a> Checker<'a> {
                         next_index = next_index.max(n + 1);
                         n.to_string()
                     }
-                    // Phase 50: a negative int key literal parses as
-                    // unary negation of a positive int literal, not a
-                    // single negative `Literal::Int` token - without this
-                    // arm, a literal negative key (`-5 => ...`) fell into
-                    // the catch-all below and silently abandoned
-                    // duplicate-key checking for the *whole* array
+                    // A negative int key literal parses as unary
+                    // negation of a positive int literal, not a single
+                    // negative `Literal::Int` token - without this arm,
+                    // a literal negative key (`-5 => ...`) would fall
+                    // into the catch-all below and silently abandon
+                    // duplicate-key checking for the whole array
                     // literal, not just that one item.
                     ExprKind::Unary(UnaryOp::Neg, inner) => match &inner.kind {
                         ExprKind::Literal(Literal::Int(n)) => {
@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
                         }
                         _ => return,
                     },
-                    // Phase 68.4: real PHPStan's own key resolution goes
+                    // Real PHPStan's own key resolution goes
                     // well beyond a bare AST literal (a class constant, a
                     // `defined()` constant, any statically-known-scalar
                     // expression) - routing through the same `infer_expr`
@@ -127,14 +127,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Finding 48: an array literal's own element types were never
-    /// inferred precisely - every literal read as `Array(Mixed)`
-    /// regardless of its actual contents, which silently defeated
-    /// `strict_mixed_arrays` (Phase 11 Stage 5) for its own headline use
-    /// case (checking a hand-written literal against a declared shape)
-    /// and made any destructuring from an inline literal lose all
-    /// per-position precision (Finding 42's own gap, from the same root
-    /// cause). Builds a real `Type::ArrayShape`, keyed by each literal
+    /// An array literal's own element types must be inferred precisely:
+    /// reading every literal as `Array(Mixed)` regardless of its
+    /// actual contents would silently defeat `strict_mixed_arrays` for
+    /// its own headline use case (checking a hand-written literal
+    /// against a declared shape) and make any destructuring from an
+    /// inline literal lose all per-position precision. Builds a real
+    /// `Type::ArrayShape`, keyed by each literal
     /// key (or, for a positional element, PHP's own real auto-index
     /// rule: one past the highest explicit integer key seen so far, not
     /// just a running count - `[5 => 'a', 'b']`'s `'b'` really is key
@@ -385,7 +384,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 71: `UselessFunctionReturnValueRule` -
+    /// `UselessFunctionReturnValueRule` -
     /// `var_export`/`print_r`/`highlight_string` all share the same
     /// `bool $return = false` last parameter: printing directly and
     /// returning a useless `null`/`true` when it's omitted or literally
@@ -438,37 +437,20 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 68 / 68.1 / 68.4: `ArrayFilterRule` - `arrayFilter.empty`
+    /// `ArrayFilterRule` - `arrayFilter.empty`
     /// (real PHP's own default no-callback "drop every falsy element"
     /// behavior on a provably-empty array) and the other two real PHPStan
     /// sub-checks (`arrayFilter.same`/`arrayFilter.alwaysEmpty`, gated on
-    /// the array's own *element* type being provably always-truthy/
+    /// the array's own element type being provably always-truthy/
     /// always-falsy) are all unconditional, matching real PHPStan's own
     /// unconditional level-5 default for this exact check (no separate
     /// opt-in `featureToggles.*` parameter exists for it there either).
-    /// `arrayFilter.same`/`.alwaysEmpty` were previously gated behind
-    /// `Registry::check_array_filter_falsy_noop` (default `false`) after
-    /// an *earlier* attempt at them was dropped entirely for two
-    /// confirmed corpus false positives, both since root-caused (Phase
-    /// 68.2/68.3) to independent variable-type-tracking imprecision, not
-    /// this check's own logic: a dynamic-key index-assignment inside a
-    /// loop's `if`-branch not correctly widening the tracked element type
-    /// across the branch (`vendor/symfony/var-exporter/ProxyHelper.php`'s
-    /// `$abstractProperties[$name] = new \ReflectionProperty(...)` vs
-    /// `$abstractProperties[$name] = false;`, inferred as bare
-    /// `array<false>` - the object-valued branch went missing entirely),
-    /// and a `try { $x = ...; } finally { array_filter([..., $x]); }`
-    /// shape not accounting for the possibility the assignment inside
-    /// `try` never ran (Piwigo's own
-    /// `tests/Integration/GroupServiceTest.php`, `$copyId = null;`
-    /// reassigned only conditionally inside `try`, inferred as bare
-    /// `GroupId` with the `null` branch dropped). Both root causes are now
-    /// fixed (see ROADMAP.md); a fresh scoped+unscoped corpus re-run with
-    /// the flag on produced byte-identical output to the flag being off
-    /// (zero new findings anywhere, not just the two originally-disclosed
-    /// false positives staying silent), so the gate itself - which real
-    /// PHPStan never had in the first place - was removed rather than
-    /// flipped on by default.
+    /// This relies on accurate variable-type-tracking through loops and
+    /// try/finally to avoid false positives - a dynamic-key
+    /// index-assignment inside a loop's `if`-branch must correctly widen
+    /// the tracked element type across the branch, and a `try { $x =
+    /// ...; } finally { array_filter([..., $x]); }` shape must account
+    /// for the possibility the assignment inside `try` never ran.
     pub(crate) fn check_array_filter_no_op(
         &mut self,
         args: &[Arg],
@@ -523,7 +505,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 68: `ArrayValuesRule` - a no-op both when the input is
+    /// `ArrayValuesRule` - a no-op both when the input is
     /// provably empty and when it's already list-shaped (`is_list_like`,
     /// the same accessory-marker check this call's own return-type
     /// inference already relies on to know it *always* produces a fresh
@@ -569,7 +551,7 @@ impl<'a> Checker<'a> {
     /// `int`) and substitutes the result into the return type. A signature
     /// with no templates at all is untouched (the common case, cheap).
     ///
-    /// Phase 80 follow-up: also resolves a `Type::Conditional` in the
+    /// Also resolves a `Type::Conditional` in the
     /// (already template-substituted) return type - `param_bindings`
     /// (parameter *name* -> actual argument type) is a deliberately
     /// separate map from `bindings` above (template *name* -> bound type),
@@ -588,7 +570,7 @@ impl<'a> Checker<'a> {
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
             let Some(arg) = slot else { continue };
             let arg_ty = self.infer_expr(arg, locals);
-            // Phase 54 follow-up: same literal-class-string promotion as
+            // Same literal-class-string promotion as
             // the `ExprKind::New` constructor-binding arm - only for
             // template binding, never for `param_bindings` (which feeds
             // `resolve_conditional`'s `$x is T` checks and must see the
@@ -603,7 +585,7 @@ impl<'a> Checker<'a> {
         types::resolve_conditional(&substituted, &param_bindings)
     }
 
-    /// Phase 79: `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal
+    /// `Suit::from(1)`/`Suit::tryFrom(1)` called with a literal
     /// argument that provably matches one specific case's own backing
     /// value narrows past the synthesized `self`/`?self` signature
     /// straight to that case's own singleton type -
@@ -636,16 +618,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Finding 48 made a literal array's own inferred type a real
-    /// `Type::ArrayShape` instead of always `Array(Mixed)` - every one of
-    /// Phase 12's own special cases below that used to pattern-match
-    /// `Type::Array(elem_ty)` directly needs this instead, so
-    /// `array_map(fn($x) => ..., [1, 2, 3])` (a literal, now a shape) keeps
-    /// working the same way it already did for a plain `array<int>`-typed
+    /// A literal array's own inferred type is a real
+    /// `Type::ArrayShape` instead of always `Array(Mixed)`, so a caller
+    /// that pattern-matches `Type::Array(elem_ty)` directly needs
+    /// `array_element_type` instead, so
+    /// `array_map(fn($x) => ..., [1, 2, 3])` (a literal shape) keeps
+    /// working the same way it already does for a plain `array<int>`-typed
     /// variable. A shape's own "effective element type" is the union of
     /// every field's type (`Mixed` for an empty literal - nothing to infer
     /// a narrower type from).
-    /// Phase 50: real PHPStan's `InvalidKeyInArrayItemRule` - an array
+    /// Real PHPStan's `InvalidKeyInArrayItemRule` - an array
     /// literal's own key expression (`[$key => $value]`) must be a type
     /// PHP itself accepts as an array key at runtime (`int`/`string`,
     /// plus `bool`/`float`/`null`, which PHP silently coerces) - anything
@@ -676,32 +658,25 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 50 (reattempt): real PHPStan's `InvalidKeyInArrayDimFetchRule`,
-    /// `offsetAccess.invalidOffset` - confirmed directly against
-    /// `vendor/phpstan-src` that this is genuinely the *same* check as
+    /// Real PHPStan's `InvalidKeyInArrayDimFetchRule`,
+    /// `offsetAccess.invalidOffset` - genuinely the same check as
     /// `check_array_item_key_type` above (its own `AllowedArrayKeysTypes`
     /// legal-key-type set, same non-strict default), just applied to a
     /// dim-fetch's own dimension expression (`$arr[$key]`) instead of an
     /// array literal's key - not something that also needs to know
-    /// `$arr`'s own *declared* key type (a different, separate concern
+    /// `$arr`'s own declared key type (a different, separate concern
     /// this project doesn't model for dim-fetch at all - `ExprKind::
     /// Index`'s own value-type inference already gives up to `Mixed` for
     /// anything but a plain `Array`/`ArrayShape` base).
     ///
-    /// A first attempt at this exact rule was built, corpus-verified,
-    /// then reverted (see ROADMAP.md's own **Reverted** section) after
-    /// finding +31 false positives, all traced to a used generic
-    /// template parameter's type leaking through as a bogus, namespace-
-    /// qualified `Object` reference instead of staying `Type::
-    /// TemplateParam` (real example: `amphp/sync`'s own `PriorityQueue<T
-    /// of int|string>`) - reusing this project's *own*, already-shared
-    /// `invalid_array_key_description` verbatim sidesteps that: it has no
-    /// arm for `Type::TemplateParam` at all, so it already falls to the
-    /// safe "don't know, don't flag" catch-all for one, exactly the
-    /// leniency a still-generic key type needs. Confirmed via a
-    /// dedicated regression test mirroring the exact `PriorityQueue<T of
-    /// int|string>` shape, and via a full corpus diff after landing (see
-    /// ROADMAP.md's own Phase 50 entry).
+    /// A used generic template parameter's type could otherwise leak
+    /// through as a bogus, namespace-qualified `Object` reference instead
+    /// of staying `Type::TemplateParam` (e.g. `amphp/sync`'s own
+    /// `PriorityQueue<T of int|string>`) - reusing this project's own,
+    /// already-shared `invalid_array_key_description` verbatim sidesteps
+    /// that: it has no arm for `Type::TemplateParam` at all, so it
+    /// already falls to the safe "don't know, don't flag" catch-all for
+    /// one, exactly the leniency a still-generic key type needs.
     ///
     /// Fires on both a read (`$arr[$key]`) and a write (`$arr[$key] =
     /// ...`) - unlike `check_shape_key_access` (which deliberately skips
@@ -713,7 +688,7 @@ impl<'a> Checker<'a> {
     ///
     /// Only fires when `base`'s own inferred type is confidently
     /// array-shaped (a bare `Array`/`ArrayShape`, or a `Union` where
-    /// *every* member is) - `Mixed`, an `ArrayAccess`-implementing
+    /// every member is) - `Mixed`, an `ArrayAccess`-implementing
     /// object (offset access on one isn't modeled at all), or a `Union`
     /// mixing array and non-array members are all "don't know," matching
     /// this project's usual leniency rather than real PHPStan's own
@@ -731,20 +706,15 @@ impl<'a> Checker<'a> {
             return;
         }
         let idx_ty = self.infer_expr(idx, locals);
-        // A real, corpus-found residual of a pre-existing, disclosed gap
-        // (`DocBlock::type_aliases`'s own doc comment: `@phpstan-import-
-        // type Name from Class`, importing a `@phpstan-type` alias
-        // declared on a *different* class, is "a distinct, separate tag
-        // this project doesn't parse") - the unresolved alias name falls
-        // through as a bogus, unrecognized `Object`, which this check
-        // would otherwise misread as a confirmed-illegal key type instead
-        // of "don't know" (real corpus shapes: `phpunit/php-code-coverage`'s
-        // own `TestIndexType`, `php-cs-fixer`'s own `_ImportType`, both
-        // `@phpstan-import-type`). `is_type_fully_known` is the same
-        // "every `Object` reference is either a recognized pseudo-type or
-        // a genuinely registered class" guard `check_generic_bounds`
-        // already trusts for the identical reason - not new leniency
-        // invented for this check.
+        // An unresolved `@phpstan-import-type Name from Class` alias
+        // (`DocBlock::type_aliases`'s own doc comment: a distinct,
+        // separate tag this project doesn't parse) falls through as a
+        // bogus, unrecognized `Object`, which this check would otherwise
+        // misread as a confirmed-illegal key type instead of "don't
+        // know". `is_type_fully_known` is the same "every `Object`
+        // reference is either a recognized pseudo-type or a genuinely
+        // registered class" guard `check_generic_bounds` already trusts
+        // for the identical reason.
         if !self.is_type_fully_known(&idx_ty) {
             return;
         }
@@ -770,16 +740,14 @@ impl<'a> Checker<'a> {
                     .reduce(union_types)
                     .unwrap_or(Type::Mixed),
             ),
-            // Phase 14: a `list<T>`/`non-empty-array<T>`-typed value is a
-            // real `Intersection([Array(T), Accessory(_)])` now, not
+            // A `list<T>`/`non-empty-array<T>`-typed value is a
+            // real `Intersection([Array(T), Accessory(_)])`, not
             // plain `Array(T)` - without this, every one of this
             // function's own callers (`array_map`/`array_reduce`/
-            // `array_chunk`/`array_column`) silently stopped recognizing
-            // such a value as an array at all.
+            // `array_chunk`/`array_column`) would silently stop
+            // recognizing such a value as an array at all.
             Type::Intersection(members) => members.iter().find_map(Self::array_element_type),
-            // A round of Piwigo-corpus bucketing found this was missing
-            // the single most common way a real variable's type actually
-            // arrives here: a `Union` of array-like branches from a
+            // A `Union` of array-like branches from a
             // control-flow merge (`$x = []; if (...) { foreach (...) {
             // $x[] = ...; } }` - the "0 iterations" branch stays
             // `array{}`, the "≥1" branch becomes a real list, and an
@@ -811,15 +779,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 73/50 follow-up: `array_element_type`'s own key-side
+    /// `array_element_type`'s own key-side
     /// counterpart. A bare `Type::Array` (or one wrapped in the
     /// `list<T>`/`non-empty-array<T>` `Intersection` shape) carries a
-    /// real key type directly; an `ArrayShape`'s own key type is now
-    /// `types::shape_key_type` (Phase 50, also reused directly by
+    /// real key type directly; an `ArrayShape`'s own key type is
+    /// `types::shape_key_type`, also reused directly by
     /// `registry::assignability`/`types::subtype` for the identical
-    /// reasoning against a real `Type::Array`'s own declared key type -
-    /// this function used to duplicate that same union-of-per-field-kind
-    /// logic locally). `shape_key_type`'s own `Type::Never` (no real,
+    /// reasoning against a real `Type::Array`'s own declared key type.
+    /// `shape_key_type`'s own `Type::Never` (no real,
     /// non-"..." field at all - see its own doc comment for the `"..."`
     /// unsealed-tail-sentinel skip and why) maps back to `None` here, this
     /// function's own existing "don't know" answer, matching every
@@ -836,7 +803,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 14: whether `ty` is array-shaped at all - for sites that
+    /// Whether `ty` is array-shaped at all - for sites that
     /// only need "is this even an array," not the unwrapped element
     /// type `array_element_type` above provides. Sees through a
     /// `list<T>`/`non-empty-array<T>`-typed value the same way, and
@@ -850,7 +817,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 68.1: real PHP truthiness classification for `array_filter()`'s
+/// Real PHP truthiness classification for `array_filter()`'s
 /// own `arrayFilter.same`/`arrayFilter.alwaysEmpty` checks - `Some(true)`
 /// when `ty` is confidently *always* falsy, `Some(false)` when it's
 /// confidently *never* falsy, `None` when it's ambiguous (real PHPStan's
@@ -887,16 +854,13 @@ fn array_filter_element_falsy_verdict(ty: &Type) -> Option<bool> {
         // A `non-falsy-string` (never `""`/`"0"`) or `non-empty-array`
         // (never the empty array) accessory intersection is confidently
         // never falsy, whatever its own unrefined base type is. `list`
-        // (`AccessoryKind::ArrayList`) deliberately does *not* qualify on
-        // its own - real bug found via this item's own corpus
-        // verification (`Deptrac\...\EventHelper::unmatchedSkippedViolations`,
-        // `array<string, list<string>>`): `list<T>` only promises
-        // sequential int keys, never non-emptiness - `[]` is a
-        // perfectly real, empty `list<T>` (confirmed against
-        // `types::parse::parse_type_string`'s own `"list"` arm, which
-        // adds `ArrayList` alone, `NonEmptyArray` only for `non-empty-
-        // list`) - so `list<T>`'s own truthiness stays genuinely
-        // ambiguous, matching real PHPStan exactly.
+        // (`AccessoryKind::ArrayList`) deliberately does not qualify on
+        // its own: `list<T>` only promises sequential int keys, never
+        // non-emptiness - `[]` is a perfectly real, empty `list<T>`
+        // (`types::parse::parse_type_string`'s own `"list"` arm adds
+        // `ArrayList` alone, `NonEmptyArray` only for `non-empty-list`)
+        // - so `list<T>`'s own truthiness stays genuinely ambiguous,
+        // matching real PHPStan exactly.
         Type::Intersection(members) => members
             .iter()
             .any(|m| {
