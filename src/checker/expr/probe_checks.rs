@@ -26,25 +26,22 @@ impl<'a> Checker<'a> {
     /// `bare_name_literal_type`'s existing `Mixed` fallback in place.
     pub(crate) fn global_constant_type(&self, name: &str) -> Option<Type> {
         let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-        // Real, serious corpus find: `PHP_VERSION_ID`'s own vendored
-        // `phpstorm-stubs` declaration (`Core/Core_d.php`) is a literal
-        // `define('PHP_VERSION_ID', 50306)` - phpstorm-stubs' own
-        // generation environment's *actual* PHP version at the time it
-        // was captured, baked in as if it were a real, permanent
-        // constant value. Trusting that as this constant's own type
-        // meant `PHP_VERSION_ID >= 80300`-style portability checks
-        // (extremely common throughout the real vendor ecosystem, e.g.
-        // amphp's own PHP 8.3+ feature gates) looked provably,
-        // unconditionally *false* everywhere, the moment anything
-        // consumed the exact literal value for a "provably constant"
-        // purpose - this project's own `--php-version`/`php_version`
-        // config key (`php_version.rs`) exists for exactly this
-        // ambiguity, and is the right source of truth here instead: an
-        // `IntRange` spanning every possible patch digit (0-99, real
-        // PHP's own patch component, never modeled beyond major.minor -
-        // see `php_version.rs`'s own doc comment) when configured, or a
-        // fully unbounded `Type::Int` - genuinely unknown, not a
-        // specific literal - when it isn't.
+        // `PHP_VERSION_ID`'s own vendored `phpstorm-stubs` declaration
+        // (`Core/Core_d.php`) is a literal `define('PHP_VERSION_ID',
+        // 50306)` - phpstorm-stubs' own generation environment's actual
+        // PHP version at the time it was captured, baked in as if it
+        // were a real, permanent constant value. Trusting that as this
+        // constant's own type would make `PHP_VERSION_ID >= 80300`-style
+        // portability checks (common throughout the real vendor
+        // ecosystem) look provably, unconditionally false everywhere,
+        // the moment anything consumed the exact literal value for a
+        // "provably constant" purpose - this project's own
+        // `--php-version`/`php_version` config key (`php_version.rs`)
+        // exists for exactly this ambiguity, and is the right source of
+        // truth here instead: an `IntRange` spanning every possible
+        // patch digit (0-99, real PHP's own patch component, never
+        // modeled beyond major.minor) when configured, or a fully
+        // unbounded `Type::Int` when it isn't.
         if primary == "PHP_VERSION_ID" || fallback.as_deref() == Some("PHP_VERSION_ID") {
             return Some(match self.registry.php_version {
                 Some((major, minor)) => {
@@ -82,11 +79,11 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         label: &str,
     ) -> Type {
-        // Every arm here is consumed only for its side effects - see this
-        // function's own doc comment and Phase 3's plan note: neither `??`
-        // nor `??=` (its only two call sites) depend on the quiet-checked
-        // left side's own type, so the exact value returned doesn't matter
-        // beyond satisfying the type system post-unification.
+        // Every arm here is consumed only for its side effects - neither
+        // `??` nor `??=` (its only two call sites) depend on the
+        // quiet-checked left side's own type, so the exact value
+        // returned doesn't matter beyond satisfying the type system
+        // post-unification.
         match &e.kind {
             ExprKind::Variable(_) => {
                 // Deliberately not `check_expr` - a bare variable here is
@@ -114,7 +111,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 60: `isset($x)`/`empty($x)`/`$x ?? ...`/`$x ??= ...` where
+    /// `isset($x)`/`empty($x)`/`$x ?? ...`/`$x ??= ...` where
     /// `$x` is a bare, already-guaranteed-defined local - `locals`
     /// itself is this project's own "definitely bound on every path"
     /// signal (`merge_scopes` drops a variable entirely rather than
@@ -141,25 +138,21 @@ impl<'a> Checker<'a> {
         if is_superglobal(name) {
             return;
         }
-        // Phase 60 corpus find: inside a loop body, `locals`'s own
-        // tracked type only reflects a single, non-iterated pass through
-        // it (see `Checker::loop_depth`'s own doc comment) - a variable
+        // Inside a loop body, `locals`'s own tracked type only reflects
+        // a single, non-iterated pass through it (see
+        // `Checker::loop_depth`'s own doc comment) - a variable
         // initialized to a narrow type once before the loop, then
         // self-referentially widened only via the very statement being
-        // checked here (`$err ??= $e;` inside a loop's own `catch`,
-        // Symfony's own `AbstractObjectNormalizer::
-        // validateAndDenormalize` real shape), looks "always null" on
-        // this first pass even though a real second-or-later iteration
-        // would see otherwise.
+        // checked here (`$err ??= $e;` inside a loop's own `catch`)
+        // looks "always null" on this first pass even though a real
+        // second-or-later iteration would see otherwise.
         if self.loop_depth > 0 {
             return;
         }
-        // Phase 60 corpus find: a `static` local can carry a value left
-        // over from an earlier call - see `Checker::static_var_names`'s
-        // own doc comment (real shape: Symfony's own `HttpClient::
-        // create()`'s `static $curlVersion = null; $curlVersion ??=
-        // curl_version();`, confirmed genuinely silent in real PHPStan
-        // too).
+        // A `static` local can carry a value left over from an earlier
+        // call - see `Checker::static_var_names`'s own doc comment
+        // (e.g. `static $curlVersion = null; $curlVersion ??=
+        // curl_version();`, genuinely silent in real PHPStan too).
         if self.static_var_names.contains(name) {
             return;
         }
@@ -178,10 +171,10 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 60: the offset/property-chain counterpart of
+    /// The offset/property-chain counterpart of
     /// `check_pointless_null_probe` just above - mirrors real PHPStan's
-    /// own recursive `IssetabilityDescriptor::resolve`/`IssetCheck::doCheck`
-    /// (`vendor/phpstan-src`, confirmed directly, not assumed), walking
+    /// own recursive `IssetabilityDescriptor::resolve`/`IssetCheck::doCheck`,
+    /// walking
     /// `e`'s own `Index`/`PropertyAccess` chain base-first (the same
     /// recursion shape `check_expr_quiet_root` already uses, for a
     /// different reason). Returns the resolved leaf's own value type once
@@ -274,7 +267,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 60: `isset($x->prop)`/`isset($x['key'])`/`$x->prop ?? ...`/
+    /// `isset($x->prop)`/`isset($x['key'])`/`$x->prop ?? ...`/
     /// `$x['key'] ?? ...` where every link in the chain is provably
     /// always-present - the entry point into `resolve_always_exists`
     /// just above, called alongside (never instead of)
@@ -349,7 +342,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 55 follow-up, real PHPStan's own `ConstantLooseComparisonRule`
+    /// Real PHPStan's own `ConstantLooseComparisonRule`
     /// (level 4): flags a `==`/`!=` whose outcome is provably constant
     /// from both operands' own literal types - `loose_compare_literals`'s
     /// own doc comment has the full scope/version-gating reasoning.
@@ -408,7 +401,7 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 15 follow-up, real PHPStan's own
+    /// Real PHPStan's own
     /// `NumberComparisonOperatorsConstantConditionRule` (level 4): flags a
     /// `</>/<=/>=` comparison whose outcome is provably constant from
     /// both operands' known int ranges - `numeric_comparison_bounds`/
@@ -418,9 +411,8 @@ impl<'a> Checker<'a> {
     /// (its own standalone rule, fired on every occurrence, not folded
     /// into `if`/`while`'s own generic constant-condition family). Real
     /// identifiers/wording (`smaller`/`greater`/`smallerOrEqual`/
-    /// `greaterOrEqual`, confirmed directly against `vendor/phpstan-src`)
-    /// are PHP's own operator names, not this project's own `Lt`/`Gt`/...
-    /// spelling.
+    /// `greaterOrEqual`) are PHP's own operator names, not this
+    /// project's own `Lt`/`Gt`/... spelling.
     ///
     /// Guarded on `self.loop_depth == 0` for the identical reason
     /// `check_pointless_null_probe` already is: this project's own loop
@@ -430,16 +422,13 @@ impl<'a> Checker<'a> {
     /// pass, sees `$j` as some specific (if widening) literal/range
     /// rather than the fully general `int` real PHPStan's own genuine
     /// fixed-point solver would settle on, so "provably true/false"
-    /// here inside a loop is systematically unsound - a real corpus
-    /// false positive this guard fixes: the single most common loop
-    /// idiom in PHP (`0 < 3` "always true") would otherwise misfire on
-    /// every ordinary counting loop. Also guarded on neither operand
-    /// reading a property (`expr_reads_a_property`'s own doc comment) -
-    /// a second real corpus false positive this same guard fixes
-    /// (`Piwigo\Admin\Integrity\CheckIntegrity::check`'s own `if
-    /// (count($this->retrieve_list) > 0)`, checked right after an
-    /// intervening method call this project doesn't model as
-    /// potentially repopulating that property).
+    /// here inside a loop would be systematically unsound - the single
+    /// most common loop idiom in PHP (`0 < 3` "always true") would
+    /// otherwise misfire on every ordinary counting loop. Also guarded
+    /// on neither operand reading a property
+    /// (`expr_reads_a_property`'s own doc comment) - an intervening
+    /// method call between two reads of the same property is not
+    /// modeled as potentially repopulating it.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_constant_numeric_comparison(
         &mut self,
