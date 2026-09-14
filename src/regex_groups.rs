@@ -30,17 +30,14 @@ pub(crate) struct RegexCaptureGroup {
     /// optional top-level group" / "exactly one top-level alternation"
     /// tagged-union dispatch (`checker::expr::build_matched_shape`).
     pub top_level: bool,
-    /// `true` only when this group is *directly* the atom a zero-min
-    /// quantifier applies to (`(a)?`) - **not** propagated through an
+    /// `true` only when this group is directly the atom a zero-min
+    /// quantifier applies to (`(a)?`) - not propagated through an
     /// intervening non-capturing wrapper (`(?:(a))?` does not set this
-    /// on group 1). A real, non-obvious correction found only by testing
-    /// against real PHPStan, not by re-reading source: real PHPStan's
-    /// own `inOptionalQuantification` is captured as a constructor
-    /// parameter at the exact moment a group object is built, then
-    /// unconditionally reset to `false` before recursing into children
-    /// unless the current node is itself a quantification - so it
-    /// resets at every non-quantification node, including a bare
-    /// non-capturing wrapper.
+    /// on group 1), mirroring real PHPStan's `inOptionalQuantification`:
+    /// captured as a constructor parameter at the exact moment a group
+    /// object is built, then unconditionally reset to `false` before
+    /// recursing into children unless the current node is itself a
+    /// quantification.
     pub in_optional_quantification: bool,
     /// Which real (2+ branch) alternation, and which branch, this
     /// group's own *innermost enclosing* alternation is - `None` if
@@ -61,21 +58,20 @@ pub(crate) struct RegexCaptureGroup {
     /// combination yet, and adding a case for it now would be dead code
     /// with no caller to exercise it.
     pub forced_empty: bool,
-    /// Phase 72: a tri-state fallback for a group whose body isn't a
-    /// finite, exactly-enumerable set (`literal_values: None`) but is
-    /// still statically provable to be *shaped* a certain way -
-    /// `NumericString` when every possible match consists solely of
-    /// ASCII digit characters and can never be empty (e.g. `(\d+)`,
-    /// `([0-9]+)`), `NonEmptyString` when it can never be empty but
-    /// isn't provably digits-only (e.g. `([a-z]+)`), `Unknown` when
-    /// neither is provable - the safe, unchanged-from-before default,
-    /// degrading to plain `string` exactly as before this phase.
-    /// Computed purely from the group's own body shape (length/character-
-    /// set), independent of `literal_values` and of how many times the
-    /// *group itself* might be repeated from outside - only ever
-    /// consulted by `checker::expr::preg_shapes::group_leaf_type` when
+    /// A tri-state fallback for a group whose body isn't a finite,
+    /// exactly-enumerable set (`literal_values: None`) but is still
+    /// statically provable to be shaped a certain way - `NumericString`
+    /// when every possible match consists solely of ASCII digit
+    /// characters and can never be empty (e.g. `(\d+)`, `([0-9]+)`),
+    /// `NonEmptyString` when it can never be empty but isn't provably
+    /// digits-only (e.g. `([a-z]+)`), `Unknown` when neither is provable
+    /// (degrading to plain `string`). Computed purely from the group's
+    /// own body shape (length/character-set), independent of
+    /// `literal_values` and of how many times the group itself might be
+    /// repeated from outside - only consulted by
+    /// `checker::expr::preg_shapes::group_leaf_type` when
     /// `literal_values` is `None` (an exact enumeration is always more
-    /// precise than this fallback, never overridden by it).
+    /// precise, never overridden by this fallback).
     pub fallback: RegexGroupFallback,
 }
 
@@ -89,11 +85,11 @@ pub(crate) enum RegexGroupFallback {
 }
 
 /// A deeply-nested pattern is a real stack-overflow risk via this
-/// scanner's own recursive descent, not just a slowness one - the same
-/// class of bug Phase 20 found and fixed for the main expression parser
-/// (`src/parser.rs`'s `MAX_EXPR_DEPTH`). This scanner already returns
-/// `Option` everywhere, so exceeding this just bails like any other
-/// unsupported construct, no panic needed.
+/// scanner's recursive descent, not just a slowness one - the same class
+/// of concern `src/parser.rs`'s `MAX_EXPR_DEPTH` guards against for the
+/// main expression parser. This scanner already returns `Option`
+/// everywhere, so exceeding this just bails like any other unsupported
+/// construct, no panic needed.
 const MAX_GROUP_DEPTH: usize = 200;
 
 /// Caps every literal-value cross-product step (concatenation, bounded-
@@ -110,8 +106,7 @@ const LITERAL_ENUM_LIMIT: usize = 32;
 /// `{0,1000000}` times would keep the result at exactly one string the
 /// whole way, never tripping the result-size cap, while still looping a
 /// million times to get there - a real performance concern this bounds
-/// directly, the same "don't trust an untrusted-shaped input without an
-/// explicit termination argument" precedent Phase 20 already established.
+/// directly.
 const MAX_QUANTIFIER_REPEAT: u64 = 1000;
 
 /// The full result of parsing a pattern's own structure: its capturing
@@ -148,11 +143,10 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPatter
     // doesn't attempt - bail before structural scanning even starts. `i`
     // (case-insensitive) doesn't change the grammar, only whether
     // literal-value tracking is safe - handled below, not a full bail.
-    // `x` (free-spacing mode) is Phase 72's own addition: it only
-    // changes *tokenization* (unescaped whitespace and `#`-comments
-    // outside a character class are skipped between tokens), which
-    // `Scanner::skip_free_spacing` handles inline, so it no longer needs
-    // a bail either.
+    // `x` (free-spacing mode) only changes tokenization (unescaped
+    // whitespace and `#`-comments outside a character class are skipped
+    // between tokens), which `Scanner::skip_free_spacing` handles
+    // inline, so it needs no bail either.
     if modifiers.contains('J') {
         return None;
     }
@@ -164,32 +158,29 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPatter
         // cleanly. Never guess past this point.
         return None;
     }
-    // Phase 72: a `(?|...)` branch-reset construct (see
+    // A `(?|...)` branch-reset construct (see
     // `Scanner::scan_branch_reset_alternation`) legitimately reuses the
-    // same public group `.number` across its own branches - real PCRE
-    // fact, confirmed live, e.g. `(?|(\d+)|([a-z]+))` has exactly one
-    // group, number 1, shared by both branches, never two. Resolving
-    // *which* branch's own value should show up under that one shared
-    // key - correctly excluding a sibling branch's same-numbered entry
-    // rather than wrongly treating it as a distinct field to backfill
-    // with `''` - is something `checker::expr::build_matched_shape`'s
-    // own tagged-union dispatch only does right in one specific shape
-    // (the whole top-level pattern being exactly that one alternation);
-    // `preg_match_all`'s own flat, unconditional shape-builders never go
+    // same public group `.number` across its own branches, matching
+    // real PCRE fact - e.g. `(?|(\d+)|([a-z]+))` has exactly one group,
+    // number 1, shared by both branches, never two. Resolving which
+    // branch's value should show up under that one shared key -
+    // correctly excluding a sibling branch's same-numbered entry rather
+    // than wrongly treating it as a distinct field to backfill with `''`
+    // - is something `checker::expr::build_matched_shape`'s tagged-union
+    // dispatch only does right in one specific shape (the whole
+    // top-level pattern being exactly that one alternation);
+    // `preg_match_all`'s flat, unconditional shape-builders never go
     // through that dispatch at all. Rather than risk emitting a shape
     // with two same-numbered fields for every other placement, this
-    // bails outright on ANY duplicate number, full stop - always safe
-    // (`$matches` is simply left untouched, this scanner's own standing
-    // contract), at the cost of not typing `$matches` for a branch-reset
-    // construct whose branches *do* each capture something. Still a real
-    // improvement over the pre-Phase-72 status quo (an unconditional
-    // bail on any `(?|` at all, anywhere in the pattern): a branch-reset
-    // with at most one group total across all its branches (no reuse
-    // possible), or one combined with otherwise-ordinary structure, now
-    // resolves correctly, and a group declared *after* one now numbers
-    // correctly too (`(?|(a)(b)|(c))(d)` renumbers `(d)` to 3, confirmed
-    // live against a real PHP interpreter - matching real PCRE's own
-    // "resume from the highest number reached in any branch" rule).
+    // bails outright on any duplicate number, always safe (`$matches`
+    // is simply left untouched), at the cost of not typing `$matches`
+    // for a branch-reset construct whose branches do each capture
+    // something. A branch-reset with at most one group total across all
+    // its branches (no reuse possible), or one combined with otherwise-
+    // ordinary structure, still resolves correctly, and a group declared
+    // after one still numbers correctly too (`(?|(a)(b)|(c))(d)`
+    // renumbers `(d)` to 3, matching real PCRE's "resume from the
+    // highest number reached in any branch" rule).
     let mut seen_numbers: Vec<usize> = Vec::with_capacity(scanner.groups.len());
     for g in &scanner.groups {
         if seen_numbers.contains(&g.number) {
@@ -215,21 +206,18 @@ pub(crate) fn parse_capture_groups(pattern_literal: &str) -> Option<ParsedPatter
 /// everything after that (short of trailing whitespace) is the modifier
 /// string.
 ///
-/// Real, corpus-confirmed gap: real PHP's own `ext/pcre` skips leading
-/// whitespace before reading the delimiter (and tolerates trailing
-/// whitespace after the modifiers), confirmed live - `preg_split("
-/// /abc/x", ...)` (a literal leading space) compiles and runs with no
-/// error. This isn't a contrived case: PHP's own flexible heredoc/nowdoc
-/// indentation stripping (7.3+) only removes whitespace common with the
-/// *closing marker's* own indentation, so a multi-line `/x`-flagged
-/// regex written with nested, readable indentation (matching the
-/// pattern's own `(?(DEFINE)...)` nesting depth, deeper than the closing
-/// marker) legitimately keeps literal leading spaces before its real
-/// delimiter - Symfony's own `OptionsResolver::splitOutsideParenthesis()`
-/// is exactly this shape. Treating the literal first byte as the
-/// delimiter regardless (this function's own pre-fix behavior) produced
-/// a false "Unknown modifier" `regexp.pattern` diagnostic on that exact,
-/// real, working pattern.
+/// Real PHP's `ext/pcre` skips leading whitespace before reading the
+/// delimiter (and tolerates trailing whitespace after the modifiers) -
+/// `preg_split(" /abc/x", ...)` (a literal leading space) compiles and
+/// runs with no error. This isn't a contrived case: PHP's flexible
+/// heredoc/nowdoc indentation stripping (7.3+) only removes whitespace
+/// common with the closing marker's own indentation, so a multi-line
+/// `/x`-flagged regex written with nested, readable indentation
+/// (matching the pattern's own `(?(DEFINE)...)` nesting depth, deeper
+/// than the closing marker) legitimately keeps literal leading spaces
+/// before its real delimiter. Treating the literal first byte as the
+/// delimiter regardless would produce a false "Unknown modifier"
+/// `regexp.pattern` diagnostic on that exact, real, working pattern.
 pub(crate) fn split_delimiters_and_modifiers(pattern: &str) -> Option<(&str, &str)> {
     fn is_php_pattern_whitespace(c: char) -> bool {
         matches!(c, ' ' | '\t' | '\n' | '\r' | '\u{0B}' | '\u{0C}')
@@ -577,7 +565,7 @@ impl Scanner {
     /// own id/branch-count record, literal-value union, and the
     /// `min_len` (minimum across branches - only one ever runs) /
     /// `digits_only` (AND across branches - whichever runs must still
-    /// satisfy it) combination Phase 72 adds.
+    /// satisfy it) combination.
     fn combine_branches(&mut self, branches: Vec<AtomResult>) -> AtomResult {
         let multi_branch = branches.len() > 1;
         let alt_id = self.next_alternation_id;
@@ -882,11 +870,10 @@ impl Scanner {
     /// literal, then an ordinary member. Character classes never contain
     /// real groups, and are never literal-tracked (no corpus evidence
     /// calls for enumerating even a trivial `[a]`). Returns whether the
-    /// class is provably digit-only (Phase 72's own
-    /// `class_body_is_digits_only`, computed *before* consuming, since
-    /// that check is a read-only lookahead over the same span this then
-    /// consumes for real) - `None` still means "malformed/unterminated,"
-    /// same as before this phase.
+    /// class is provably digit-only (`class_body_is_digits_only`,
+    /// computed before consuming, since that check is a read-only
+    /// lookahead over the same span this then consumes for real) -
+    /// `None` means "malformed/unterminated."
     fn scan_character_class(&mut self) -> Option<bool> {
         let digits_only = self.class_body_is_digits_only(self.pos + 1);
         self.pos += 1; // the opening `[`
@@ -1291,11 +1278,10 @@ impl Scanner {
             return None;
         }
         self.groups[idx].literal_values = body.literal_values.clone();
-        // Phase 72: computed unconditionally (not only when
-        // `literal_values` ends up `None`) - `group_leaf_type` is the
-        // one that decides literal enumeration always wins when both are
-        // available, so there's no need to duplicate that priority
-        // check here too.
+        // Computed unconditionally (not only when `literal_values` ends
+        // up `None`) - `group_leaf_type` is the one that decides literal
+        // enumeration always wins when both are available, so there's
+        // no need to duplicate that priority check here too.
         self.groups[idx].fallback = if body.min_len == 0 {
             RegexGroupFallback::Unknown
         } else if body.digits_only {
@@ -1336,15 +1322,14 @@ impl Scanner {
 
     /// A lookahead/lookbehind (`(?=...)`, `(?!...)`, `(?<=...)`,
     /// `(?<!...)`) - zero-width, so its own contribution to whatever
-    /// contains it is always the empty string, *never* its own
-    /// interior's literal computation (a real bug found and fixed while
-    /// designing this: `(a(?=b))` genuinely captures only `"a"`,
-    /// confirmed live - treating a lookaround like an ordinary
-    /// non-capturing group would silently compute the wrong literal
-    /// `"ab"`). The interior is still fully scanned as normal for
-    /// group-counting and for any *nested* capturing group's own
-    /// `literal_values` (`(?=(a))`'s own group 1 really is `'a'` if it
-    /// participates) - only this construct's own contribution is forced.
+    /// contains it is always the empty string, never its interior's
+    /// literal computation: `(a(?=b))` genuinely captures only `"a"`,
+    /// so treating a lookaround like an ordinary non-capturing group
+    /// would silently compute the wrong literal `"ab"`. The interior is
+    /// still fully scanned as normal for group-counting and for any
+    /// nested capturing group's `literal_values` (`(?=(a))`'s group 1
+    /// really is `'a'` if it participates) - only this construct's own
+    /// contribution is forced.
     fn finish_lookaround(&mut self) -> Option<AtomResult> {
         let body = self.scan_alternation()?;
         if !self.eat(')') {
