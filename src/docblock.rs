@@ -1,301 +1,165 @@
 use std::collections::{HashMap, HashSet};
 
 /// A parsed subset of a `/** ... */` doc comment: just the tags this
-/// prototype's type checker can use (`@param`, `@return`, `@var`). Types are
-/// kept as raw strings here, resolved through `types::parse_type_string`
-/// only where a caller actually needs a `Type` - this module doesn't depend
-/// on `types` at all, so it can't unintentionally do (or fail to do) any
-/// resolution work of its own.
+/// checker can use (`@param`, `@return`, `@var`, ...). Types are kept as
+/// raw strings here, resolved through `types::parse_type_string` only
+/// where a caller needs a `Type` - this module doesn't depend on `types`
+/// at all.
 ///
-/// Deliberately does not parse conditional return types - those need real
-/// per-call-site type parameter binding, not just parsing. `@param`/
-/// `@return`/`@var` cover PHPDoc's single biggest practical win with the
-/// least machinery: adding a type to something a native hint can't express
-/// (an untyped param/property, a native `array` refined to a shape or
-/// generic, or PHP versions without union types).
+/// Deliberately does not parse conditional return types - those need
+/// real per-call-site type parameter binding, not just parsing.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
     pub params: HashMap<String, String>,
-    // `@param-out Type $name` - the widened type a
-    // by-ref parameter's own value is guaranteed to hold once the
-    // function returns (real PHPStan's own way of documenting a by-ref
-    // "output" parameter beyond what its native type alone commits to).
-    // Parsed the identical way `params` above is - see `apply_tag`'s own
-    // `"param-out"` arm.
+    // `@param-out Type $name` - the widened type a by-ref parameter's
+    // value is guaranteed to hold once the function returns.
     pub param_out: HashMap<String, String>,
     pub return_type: Option<String>,
     pub var_type: Option<String>,
-    // The `$name` half of `@var Type $name`, when present - the common
-    // property-level `@var Type` (no name) form leaves this `None`; an
-    // inline `@var` on an arbitrary statement (checker::stmt) uses this to
-    // know which variable it names, when the bare form's own "assumed from
-    // the statement's own single assignment target" heuristic doesn't
-    // apply (e.g. a comment naming a variable other than the one that
-    // immediately follows it).
+    // The `$name` half of `@var Type $name`, when present - used when an
+    // inline `@var` (checker::stmt) names a variable other than the
+    // statement's own single assignment target.
     pub var_name: Option<String>,
-    // `@template T` names, in declaration order (order matters for
-    // positional binding - see `registry::ClassInfo::templates`).
+    // `@template T` names, in declaration order (positional binding -
+    // see `registry::ClassInfo::templates`).
     pub templates: Vec<String>,
-    // `@template T of Bound` - the bound text for whichever of `templates`
-    // above declared one (the bound-enforcement half of `@template T of Bound`). A `T` with
-    // no `of` clause simply has no entry here.
+    // `@template T of Bound` - the bound text, when declared.
     pub template_bounds: HashMap<String, String>,
-    // `@template T = Default` - the default-type text for
-    // whichever of `templates` above declared one, used when an "erased"
-    // reference (fewer type arguments than declared, including a bare
-    // one with none at all) leaves this name unbound instead of falling
-    // back to `Mixed` unconditionally. A `T` with no `=` clause simply
-    // has no entry here, same shape as `template_bounds` just above.
+    // `@template T = Default` - the default-type text, used when an
+    // "erased" reference leaves this name unbound instead of falling
+    // back to `Mixed`.
     pub template_defaults: HashMap<String, String>,
-    // Names from `templates` above additionally declared
-    // `@template-covariant`/`@template-contravariant` (the variance half of `@template-covariant`/`@template-contravariant`) - a name absent from both stays invariant, this project's default.
+    // `@template-covariant`/`@template-contravariant` - a name absent
+    // from both stays invariant, this project's default.
     pub covariant_templates: HashSet<String>,
     pub contravariant_templates: HashSet<String>,
-    // Names of `@param`s tagged `[optional]` - a real, longstanding PHP
-    // manual/phpstorm-stubs convention marking a native parameter as
-    // conceptually optional even when its own signature has no `= value`
-    // default (phpstorm-stubs models several functions, e.g. `mt_rand`'s
-    // `$max` and `array_keys`'s `$filter_value`, only as their
+    // Names of `@param`s tagged `[optional]` - marks a native parameter
+    // as conceptually optional with no `= value` default (phpstorm-stubs
+    // models several functions, e.g. `mt_rand`'s `$max`, only as their
     // highest-arity overload this way).
     pub optional_params: HashSet<String>,
-    // `@extends Parent<Arg, ...>` - fixes (some of) the parent class's own
-    // `@template` names for every instance of this class, regardless of
-    // whether this class is itself generic. At most one is
-    // meaningful (a class has a single native `extends`), so the last one
-    // seen wins, matching every other single-valued tag here.
+    // `@extends Parent<Arg, ...>` - fixes the parent class's own
+    // `@template` names. At most one is meaningful (a class has a single
+    // native `extends`), so the last seen wins.
     pub extends: Option<String>,
-    // `@implements Iface<Arg, ...>` - same idea as `extends`, but a class
-    // can `implements` more than one interface at once, so every tag is
-    // kept (each one names which interface it applies to via its own
-    // leading type name).
+    // `@implements Iface<Arg, ...>` - a class can `implements` several
+    // interfaces, so every tag is kept.
     pub implements: Vec<String>,
-    // `@use Trait<Arg, ...>` - same idea as `implements`, but
-    // for a generic trait named in this class's own `use` statement(s). A
-    // class can `use` more than one trait at once, so every tag is kept.
+    // `@use Trait<Arg, ...>` - same idea, for a generic trait in this
+    // class's own `use` statement(s).
     pub uses: Vec<String>,
-    // `@property`/`@property-read`/`@property-write Type $name` (Phase
-    // 13 Finding D) - magic properties, typically backed by `__get`/
-    // `__set`, declared on a class's own docblock rather than a real
-    // field. A class can declare many, so every tag is kept.
+    // `@property`/`@property-read`/`@property-write Type $name` - magic
+    // properties, typically backed by `__get`/`__set`.
     pub properties: Vec<PropertyTag>,
-    // Real PHPStan's own backward-compatibility-promise marker
-    // - a class/interface/trait tagged `@api` is safe for a third-party
-    // extension author to reference; anything else may change in a minor
-    // version with no notice. Consumed by `checker::phpstan_api`, gated
-    // behind the analyzed project actually depending on `phpstan/phpstan`
-    // (see `composer::detect_phpstan_dependency`).
+    // Real PHPStan's own backward-compatibility-promise marker - an
+    // `@api`-tagged class/interface/trait is safe for a third-party
+    // extension author to reference. Consumed by `checker::phpstan_api`,
+    // gated on the project actually depending on `phpstan/phpstan`.
     pub api: bool,
-    // `@api-do-not-implement` (always found paired with a plain `@api` on
-    // the same docblock in real PHPStan's own source, confirmed directly
-    // against a fresh `phpstan/phpstan-src` clone - e.g.
-    // `Analyser/Scope.php`, `Reflection/ReflectionProvider.php`) - an
-    // `@api` interface/class additionally marked this way may gain new
-    // abstract members in a minor version, so third-party code must not
-    // `implements`/`extends` it, even though calling its existing methods
-    // is still fully covered. Implies `api` on its own (see `apply_tag`'s
-    // "api-do-not-implement" arm) so a docblock that only ever writes the
-    // longer tag alone still counts as covered for a plain reference.
+    // `@api-do-not-implement` - an `@api` interface/class marked this way
+    // may gain new abstract members in a minor version, so third-party
+    // code must not `implements`/`extends` it. Implies `api`.
     pub api_do_not_implement: bool,
-    // `@internal` - marks a class/interface/trait/enum,
-    // function, method, or property as usable only from within its own
-    // declaring "root" (top-level) namespace, the common Composer-
-    // package-as-top-level-namespace convention. Consumed by
-    // `checker::internal_usage`, gated behind
+    // `@internal` - usable only from within its own declaring "root"
+    // namespace. Consumed by `checker::internal_usage`, gated behind
     // `Registry::check_internal_usage` (default off, matching real
-    // PHPStan's own `featureToggles.internalTag: false` - this rule
-    // family isn't part of any of the standard level 0-10 rule sets
-    // either).
+    // PHPStan's `featureToggles.internalTag: false`).
     pub internal: bool,
-    // `@phpstan-consistent-constructor` - a class-level bare marker (no
-    // value, same shape as `@api`/`@internal` above): every subclass's
-    // own `__construct` must match this class's own exactly (arity,
-    // types, visibility - the identical compatibility rules an ordinary
-    // method override already gets, deliberately exempted for `__construct`
-    // otherwise, real PHP's own default). Consumed by `Registry::
-    // find_consistent_constructor_ancestor`/`checker::oop::check_one_
-    // method_override`'s own `__construct` special case.
+    // `@phpstan-consistent-constructor` - every subclass's own
+    // `__construct` must match this class's exactly (real PHP itself
+    // exempts `__construct` from ordinary override compatibility).
+    // Consumed by `Registry::find_consistent_constructor_ancestor`.
     pub consistent_constructor: bool,
-    // `@readonly` (also `@phpstan-readonly`, recognized for free via this
-    // project's own established "second pass strips `phpstan-`, same
-    // arm" mechanism - real PHPStan's own further aliases, `@psalm-
-    // readonly`/`@phan-read-only`, aren't chased, matching this project's
-    // own "`@phpstan-*` and bare, not every third-party tool's own
-    // spelling" scope elsewhere) - a property-level
-    // bare marker (no value): the docblock-only precursor to PHP 8.1's
-    // native `readonly` keyword, folded into `PropertySig::is_readonly`
-    // at `ClassInfo::from_decl` time so it flows through the exact same
-    // enforcement/variance/override machinery a native `readonly`
-    // property already gets - a deliberate simplification versus real
-    // PHPStan's own separate `ReadOnlyByPhpDocPropertyAssignRule` (a
-    // distinct rule, its own three diagnostic identifiers), matching
-    // this project's own already-simpler single-identifier native-
-    // `readonly` enforcement (`checker/assignment.rs`'s own
-    // `property.readOnlyAssignNotInConstructor`, itself already a
-    // pragmatic collapse of real PHPStan's own multi-identifier native
-    // rule). `@phpstan-readonly-allow-private-mutation`'s own narrower
-    // exemption (writable from any method in the declaring class, not
-    // just the constructor) isn't modeled - a real, disclosed precision
-    // gap, low corpus value for a rare tag variant.
+    // `@readonly` (also `@phpstan-readonly`) - the docblock-only
+    // precursor to PHP 8.1's native `readonly`, folded into
+    // `PropertySig::is_readonly` at `ClassInfo::from_decl` time so it
+    // flows through the same enforcement/variance/override machinery a
+    // native `readonly` property gets.
+    // `@phpstan-readonly-allow-private-mutation`'s narrower exemption
+    // isn't modeled.
     pub readonly: bool,
-    // `@phpstan-immutable` - class-level only (real
-    // PHPStan never recognizes this tag on a property, unlike `readonly`
-    // just above). `ClassReflection::isImmutable()` treats this OR
-    // `@phpstan-readonly` on the class identically; `readonly` above
-    // already covers that second half, so `ClassInfo::from_decl`/
-    // `from_enum_decl` compute `is_immutable` as `immutable || readonly`
-    // rather than duplicating that OR here.
+    // `@phpstan-immutable` - class-level only. `ClassReflection::
+    // isImmutable()` treats this OR `@phpstan-readonly` on the class
+    // identically; `ClassInfo::from_decl`/`from_enum_decl` compute
+    // `is_immutable` as `immutable || readonly`.
     pub immutable: bool,
-    // `@final` (also `@phpstan-final`, recognized for free via
-    // the same "second pass strips `phpstan-`, same arm" mechanism
-    // `readonly` above already uses) - a bare marker (no value, same
-    // shape as `@internal`) declaring a method/property `final` without
-    // real PHP's own native keyword, a purely static-analysis convention
-    // real PHP itself never enforces. Consumed by `ClassInfo::final_
-    // methods_by_phpdoc`/`final_properties_by_phpdoc`, checked alongside
-    // (real-keyword-final taking priority, matching real PHPStan's own
-    // if/elseif order) the already-built native-keyword override check.
+    // `@final` (also `@phpstan-final`) - declares a method/property
+    // `final` without real PHP's native keyword. Consumed by
+    // `ClassInfo::final_methods_by_phpdoc`/`final_properties_by_phpdoc`.
     pub is_final: bool,
-    // `@phpstan-pure`/`@phpstan-impure` - bare markers declaring a
-    // function/method's own intended purity, checked against this
-    // project's own computed classification
-    // (`checker::noop::check_declared_purity_tag`) rather than trusted
-    // outright. `pure` is parsed but not currently consumed anywhere -
-    // see that function's own doc comment for why only the `impure`
-    // direction is safe to check with this project's own binary (not
-    // `certain`/`maybe`-graded) purity model.
+    // `@phpstan-pure`/`@phpstan-impure` - checked against this project's
+    // own computed purity classification rather than trusted outright
+    // (`checker::noop::check_declared_purity_tag`). `pure` is parsed but
+    // not currently consumed.
     pub pure: bool,
     pub impure: bool,
-    // `@deprecated` on a class/interface/trait/enum, function,
-    // method, property, or class constant - `None` when the tag isn't
-    // present at all; `Some(message)` when it is, where `message` is
-    // everything after the tag name, trimmed (`Some(String::new())` for
-    // a bare `@deprecated` with no reason given, a real, common shape -
-    // confirmed directly: 491 real files in this project's own Piwigo+
-    // vendor verification corpus use the tag at all, many with no
-    // message). Note this is the PHPDoc *tag* specifically, a purely
-    // documentation/static-analysis convention with zero PHP runtime
-    // effect of its own - distinct from PHP 8.4's native `#[\Deprecated]`
-    // *attribute* (which does emit a real runtime `E_DEPRECATED`
-    // warning on use, confirmed directly via `php`), not handled here.
-    // Consumed by `checker::deprecated_usage`, gated behind `Registry::
-    // check_deprecated_usage` (default off, mirroring `check_internal_
-    // usage`'s own identical "off by default, real value but real vendor
-    // noise" precedent - real PHPStan's own equivalent isn't even part
-    // of core `phpstan/phpstan` at all, but a separate, opt-in Composer
-    // package, `phpstan/phpstan-deprecation-rules`).
+    // `@deprecated` - `None` when absent; `Some(message)` (possibly
+    // empty) when present. This is the PHPDoc *tag*, distinct from PHP
+    // 8.4's native `#[\Deprecated]` *attribute* (which emits a real
+    // runtime warning), not handled here. Consumed by
+    // `checker::deprecated_usage`, gated behind
+    // `Registry::check_deprecated_usage` (default off).
     pub deprecated: Option<String>,
-    // `@throws Type[,
-    // description]` on a function/method - the checked-exception type a
-    // caller should be prepared for. A function can (and often does)
-    // document more than one, one per line, so every tag is kept (same
-    // "a class can declare many" reasoning `implements`/`properties`
-    // above already have) - order isn't meaningful, only "which types
-    // were named at all," consumed as a union. Only the raw type text is
-    // kept here, same as `return_type`/`var_type` above - resolved to a
-    // real `Type` (and validated as an actual `Throwable` subtype) at
-    // registry-build time, where name resolution/generics substitution
-    // is actually available.
+    // `@throws Type[, description]` - the checked-exception type(s) a
+    // caller should be prepared for; every tag is kept and consumed as a
+    // union. Resolved to a real `Type` (and validated as `Throwable`) at
+    // registry-build time.
     pub throws: Vec<String>,
     // `@phpstan-assert[-if-true/-if-false] [!]Type $target` - real
-    // PHPStan's custom-assertion-function convention (`assertNarrowedTo
-    // Type`-style helpers, real corpus shape: PHPUnit's own accessor
-    // pair `hasTestFilesFile(): bool` tagged `@phpstan-assert-if-true
-    // !null $this->testFilesFile`, then `testFilesFile(): string`'s own
-    // body guards on it). `assert` is unconditional (true regardless of
-    // this declaration's own return value - the common shape for a
-    // function that throws on failure, mirroring `assert($cond)`'s own
-    // existing "narrows for the rest of the scope, no branch needed"
-    // treatment); `assert_if_true`/`assert_if_false` only hold once this
-    // declaration's own return value is known. `target`/`ty` are kept as
-    // raw text here, same "parse now, resolve later" split every other
-    // type-bearing tag above already has - resolved into a real `Type`
-    // plus a classified `registry::AssertTarget` at registry-build time.
-    // A real, common target shape this doesn't attempt: `=Type`/`!=value`
-    // (PHPStan's own template-equality/value-equality assertion forms,
-    // a genuinely different check than "is this a subtype of Type" -
-    // `parse_assert_tag` below skips these entirely rather than
-    // misparsing them into a bogus type assertion).
+    // PHPStan's custom-assertion-function convention. `assert` narrows
+    // unconditionally; `assert_if_true`/`assert_if_false` only once this
+    // declaration's return value is known. `=Type`/`!=value` forms
+    // (template-/value-equality assertions) are skipped rather than
+    // misparsed.
     pub assert_if_true: Vec<AssertTag>,
     pub assert_if_false: Vec<AssertTag>,
     pub assert: Vec<AssertTag>,
-    // `@phpstan-type Name TypeExpr` - a local type alias, conventionally
-    // declared on a class's own docblock and referenced bare (by `Name`
-    // alone) from that same class's `@param`/`@return`/`@var` tags (real
-    // corpus shape: `justinrainbow/json-schema`'s own `ErrorBag`,
-    // `@phpstan-type Error array{...}` then `@phpstan-type ErrorList
-    // list<Error>`). Kept as raw text here, same "parse now, resolve
-    // later" split every other type-bearing tag has - resolved into a
-    // real `Type` (and substituted into every member that references it)
-    // at `ClassInfo::from_decl` time, where name resolution is actually
-    // available.
+    // `@phpstan-type Name TypeExpr` - a local type alias, referenced bare
+    // from that same class's `@param`/`@return`/`@var` tags. Resolved
+    // into a real `Type` at `ClassInfo::from_decl` time.
     pub type_aliases: HashMap<String, String>,
-    // `@phpstan-import-type Name from Class [as Alias]` - the cross-class
-    // sibling of `@phpstan-type` above, importing another class's own
-    // local alias by name instead of declaring a fresh one. Kept as raw
-    // text here too (`from`/`alias` are simple bare identifiers per real
-    // `phpstan/phpdoc-parser`'s own grammar, never subject to `use`-import
-    // rewriting the way a type expression's own class references are) -
-    // resolved once `Registry::resolve_deferred_type_imports` can see
-    // every class's own already-built `type_aliases` table, which a
-    // single class's own `from_decl` call can't (the source class may not
-    // be indexed yet at all).
+    // `@phpstan-import-type Name from Class [as Alias]` - imports another
+    // class's own local alias. Resolved once
+    // `Registry::resolve_deferred_type_imports` can see every class's
+    // already-built `type_aliases` table (the source class may not be
+    // indexed yet at `from_decl` time).
     pub type_imports: Vec<TypeImportTag>,
     // `@phpstan-require-extends Type` - declared on a trait/interface,
-    // requiring every class that ends up using/implementing it to also
-    // `extends` (or otherwise be a subtype of) `Type`. Kept as raw text,
-    // resolved into a real `Type` at `ClassInfo::from_decl` time (same
-    // "parse now, resolve later" split as every other type-bearing tag) -
-    // `checker::oop::check_require_tags` walks every real consumer.
+    // requiring every using/implementing class to be a subtype of
+    // `Type`. Checked by `checker::oop::check_require_tags`.
     pub require_extends: Vec<String>,
-    // `@phpstan-require-implements Type` - a trait's own sibling of
-    // `require_extends` above, requiring the using class to `implements`
-    // `Type` instead (real PHPStan doesn't recognize this on an interface
-    // at all - an interface can't `implements`, only `extends`).
+    // `@phpstan-require-implements Type` - a trait's sibling of
+    // `require_extends`, requiring `implements` instead (real PHPStan
+    // doesn't recognize this on an interface, which can't `implements`).
     pub require_implements: Vec<String>,
-    // `@phpstan-sealed Type` - declares the *complete* list of types
-    // allowed to directly `extends`/`implements` this one (a union of
-    // several is real, common syntax for "exactly these"). Unlike
-    // `require_extends`/`require_implements` above (a transitive "must be
-    // a subtype of," checked against every real consumer anywhere in the
-    // hierarchy), this is a one-level, exact-name allowlist checked
-    // against every *immediate* child only - `checker::oop::
-    // check_sealed_hierarchy`.
+    // `@phpstan-sealed Type` - the *complete* list of types allowed to
+    // directly `extends`/`implements` this one. Unlike
+    // `require_extends`/`require_implements` (transitive, checked
+    // against every consumer in the hierarchy), this is a one-level,
+    // exact-name allowlist checked against every *immediate* child only
+    // (`checker::oop::check_sealed_hierarchy`).
     pub sealed: Vec<String>,
-    // `@method [static] ReturnType methodName(Type $param = default, ...)` -
-    // a virtual method with no real declaration at all (conventionally
-    // backed by `__call`/`__callStatic`). A class can declare many, one
-    // tag per virtual method. Kept parsed (not raw text like most other
-    // tags here) since the grammar is genuinely more than one type
-    // expression - `parse_method_tag`'s own doc comment has the details.
+    // `@method [static] ReturnType methodName(Type $param = default, ...)`
+    // - a virtual method with no real declaration (conventionally backed
+    // by `__call`/`__callStatic`). Kept parsed, not raw text, since the
+    // grammar is more than one type expression - see `parse_method_tag`.
     pub method_tags: Vec<MethodTag>,
     // `@mixin Type` - every `Type`'s own *public* method/property becomes
-    // available on this class too, as if inherited (conventionally
-    // forwarded via `__call`/`__get`). Kept as raw text, resolved at
-    // `Registry::resolve_deferred_mixins` time (the mixin target may not
-    // be indexed yet at `ClassInfo::from_decl` time, the identical
-    // ordering problem `type_imports` already has).
+    // available on this class too (conventionally forwarded via
+    // `__call`/`__get`). Resolved at `Registry::resolve_deferred_mixins`
+    // time (the target may not be indexed yet at `from_decl` time).
     pub mixins: Vec<String>,
-    // `@param-immediately-invoked-callable \$name`/
-    // `@param-later-invoked-callable $name` (also the `@phpstan-`-prefixed
-    // spellings, for free via this module's own "second pass strips
-    // `phpstan-`" normalization) - merged into one map keyed by parameter
-    // name, `true` for the immediately-invoked spelling, `false` for the
-    // later-invoked one; a repeated/conflicting tag for the same
-    // parameter has the last one win, matching every other single-valued-
-    // per-key tag in this struct. Declaration-time validity is checked by
+    // `@param-immediately-invoked-callable $name`/
+    // `@param-later-invoked-callable $name` - merged into one map keyed
+    // by parameter name, `true` for immediately-invoked. Declaration-time
+    // validity is checked by
     // `checker::noop::check_declared_param_callable_tags`; the runtime
-    // scope-threading effect these two tags also drive in real PHPStan is
-    // a confirmed, disclosed architectural mismatch this project doesn't
-    // model (see that function's own doc comment).
+    // scope-threading effect these drive in real PHPStan isn't modeled.
     pub param_immediately_invoked_callable: HashMap<String, bool>,
-    // `@param-closure-this Type \$name` - the type `\$this`
-    // becomes inside a `Closure`-typed parameter's own literal argument,
-    // when one is passed. Declaration-time validity (does `$name` exist,
-    // is its native type actually `Closure`-compatible) and the runtime
-    // effect (seeding `$this` via
-    // `checker::calls::check_closure_literal_with_this_and_scope`, the
-    // same mechanism `Closure::bind`/`->bindTo()` already use) are both
-    // built - see `checker::noop::check_declared_param_callable_tags` and
+    // `@param-closure-this Type $name` - the type `$this` becomes inside
+    // a `Closure`-typed parameter's own literal argument. Seeds `$this`
+    // via `checker::calls::check_closure_literal_with_this_and_scope`,
+    // the same mechanism `Closure::bind`/`->bindTo()` use - see
     // `registry::function_sig::ParamSig::closure_this_type`.
     pub param_closure_this: HashMap<String, String>,
 }
@@ -616,10 +480,8 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     }
                 }
             }
-            // `@template-covariant`/`@template-contravariant` (Phase
-            // 10.5's variance half) - same shape as a plain `@template`,
-            // just also marking which direction the parameter is allowed
-            // to vary in.
+            // Same shape as a plain `@template`, plus which direction
+            // the parameter is allowed to vary in.
             "template-covariant" => {
                 if let Some((name, bound, default)) = parse_template_tag(rest) {
                     if !block.templates.contains(&name) {
@@ -671,10 +533,8 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             "import-type" => {
                 // `Alias from ClassName [as OtherAlias]` - a fixed
-                // keyword grammar (confirmed directly against real
-                // `phpstan/phpdoc-parser`'s own `parseTypeAliasImportTagValue`),
-                // not a type expression, so plain whitespace-splitting is
-                // enough - no `take_type_token` involved.
+                // keyword grammar, not a type expression, so plain
+                // whitespace-splitting is enough.
                 let mut parts = rest.split_whitespace();
                 let alias = parts.next().unwrap_or("");
                 let from = if parts.next() == Some("from") {
@@ -697,16 +557,13 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             // `@template-extends`/`@template-implements` are real
             // PHPStan-recognized synonyms for plain `@extends`/
-            // `@implements` (semantically identical - both name a
-            // generic parent/interface's own concrete type arguments),
-            // used throughout phpstorm-stubs itself (`Generator`'s own
-            // `@template-implements Iterator<TKey, TYield>`, confirmed
-            // directly in `vendor/phpstorm-stubs/standard/_types.php`) -
-            // a real, previously-missing gap: without this, `Generator`'s
-            // own `implements_args["Iterator"]` was silently empty, and
+            // `@implements`, used throughout phpstorm-stubs itself
+            // (`Generator`'s own `@template-implements
+            // Iterator<TKey, TYield>`) - without this,
+            // `implements_args["Iterator"]` would be silently empty, and
             // `Registry::class_template_bindings(_, _, "Iterator")` on
-            // any `Generator<...>`-typed value zipped its real type
-            // arguments against nothing, always coming back empty.
+            // any `Generator<...>`-typed value would zip its real type
+            // arguments against nothing.
             "extends" | "template-extends" => {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
@@ -721,12 +578,9 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             // Real PHPStan-recognized synonym for `@use`, mirroring
             // `@extends`/`@template-extends` and `@implements`/
-            // `@template-implements` just above (`PhpDocNodeResolver::
-            // resolveUsesTags`, confirmed directly, checks the identical
-            // `['@use', '@template-use', '@phpstan-use']` trio - the third,
-            // `@phpstan-use`, needs no separate arm here: `parse`'s own
-            // two-pass loop above already strips a leading `phpstan-` off
-            // every tag before this match ever sees it).
+            // `@template-implements` just above. `@phpstan-use` needs no
+            // separate arm: `parse`'s own two-pass loop already strips a
+            // leading `phpstan-` off every tag.
             "use" | "template-use" => {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
@@ -972,10 +826,10 @@ fn split_top_level_commas(s: &str) -> Vec<&str> {
 }
 
 /// `@method [static] ReturnType methodName(Type $param = default, ...)` -
-/// confirmed directly against real `phpstan/phpdoc-parser`'s own
-/// `parseMethodTagValue`/`parseMethodTagValueParameter`. The return-type-
-/// vs-method-name ambiguity (both are bare-identifier-shaped) resolves
-/// the same way real PHPStan's own parser does: try a type token first:
+/// mirrors real `phpstan/phpdoc-parser`'s own `parseMethodTagValue`/
+/// `parseMethodTagValueParameter`. The return-type-vs-method-name
+/// ambiguity (both are bare-identifier-shaped) resolves the same way:
+/// try a type token first:
 /// if it already contains its own `(...)` (no whitespace before the
 /// parameter list at all), it was actually the *method name*, and there
 /// is no return type; otherwise it's the return type, and the very next
@@ -1025,11 +879,11 @@ fn parse_method_tag(rest: &str) -> Option<MethodTag> {
     })
 }
 
-/// One `@method` parameter - see `parse_method_tag`'s own doc comment.
-/// The type-omitted case (`p` starting directly with `$`/`&`/`...`)
-/// mirrors real PHPStan's own lookahead exactly (`parseMethodTagValueParameter`,
-/// confirmed directly): a parameter type is only ever parsed when the
-/// current token *isn't* already variable/reference/variadic-shaped.
+/// One `@method` parameter - see `parse_method_tag`. The type-omitted
+/// case (`p` starting directly with `$`/`&`/`...`) mirrors real
+/// PHPStan's own lookahead (`parseMethodTagValueParameter`): a parameter
+/// type is only ever parsed when the current token isn't already
+/// variable/reference/variadic-shaped.
 fn parse_method_tag_param(p: &str) -> Option<MethodTagParam> {
     let p = p.trim();
     if p.is_empty() {
