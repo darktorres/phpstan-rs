@@ -16,9 +16,7 @@ impl Registry {
     /// general leniency elsewhere - rather than defaulting to `Invariant`
     /// and risking a false positive on a real but unregistered
     /// (uninstalled dependency, PHAR-bundled `phpstan/phpstan` itself, ...)
-    /// generic class. Phase 54: hoisted from `checker::generics` (pure
-    /// `self.classes` data, no checker-specific state) alongside
-    /// `class_template_bindings`/`is_assignable`, its two real consumers.
+    /// generic class.
     pub(crate) fn slot_variance(&self, class: &str, index: usize) -> Option<Variance> {
         let info = self.classes.get(class)?;
         let name = info.templates.get(index)?;
@@ -31,21 +29,18 @@ impl Registry {
         })
     }
 
-    /// Phase 54: the variance that actually governs one generic argument
-    /// slot - a call-site variance marker written directly on `arg`
+    /// The variance that actually governs one generic argument slot - a
+    /// call-site variance marker written directly on `arg`
     /// (`types::strip_call_site_variance`'s own sentinels,
     /// `"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`) always wins
     /// when present; otherwise falls back to `class`'s own declared
     /// variance for that slot (`slot_variance`, `Invariant` by default
     /// when the class declares no variance for it, `None`/"don't know"
-    /// when `class` or the slot itself isn't registered at all). Read
-    /// directly off real PHPStan's own `GenericObjectType::
-    /// isSuperTypeOf`/`getReferencedTemplateTypes`, both of which resolve
-    /// a slot's variance with this exact same two-step rule - confirmed
-    /// this is genuinely the same concept both assignability
-    /// (`is_assignable` below) and declaration-soundness composition
-    /// (`checker::generics::walk_variance`) need, not something specific
-    /// to one or the other. `None` here (as opposed to `Invariant`) means
+    /// when `class` or the slot itself isn't registered at all). Both
+    /// assignability (`is_assignable` below) and declaration-soundness
+    /// composition (`checker::generics::walk_variance`) resolve a slot's
+    /// variance with this same two-step rule. `None` here (as opposed to
+    /// `Invariant`) means
     /// "no real basis to say anything about this slot at all," the same
     /// "don't know, don't guess" case `slot_variance` itself already
     /// returns `None` for.
@@ -79,7 +74,7 @@ impl Registry {
     /// (`Collection<User>` -> `{"T": Object("User", [])}`) against
     /// `target`'s own declared `@template` parameter names, walking up
     /// `class`'s `extends`/`implements` chain to reach it if `target`
-    /// isn't `class` itself (Phase 10.5) - so a concrete subclass that
+    /// isn't `class` itself - so a concrete subclass that
     /// fixes its parent's template param (`class IntCollection extends
     /// Collection<int> {}`) resolves `Collection`'s own `T` to `int` even
     /// though `IntCollection` isn't generic itself, and a generic
@@ -89,10 +84,9 @@ impl Registry {
     ///
     /// `target` matters because template names are scoped to the class
     /// that declares them, not globally unique - two unrelated classes in
-    /// the same chain commonly both use `T` (confirmed the hard way on a
-    /// real corpus: `symfony/type-info`'s `NullableType<T of Type>
-    /// extends UnionType<T|BuiltinType<...>>`, where `UnionType` has its
-    /// *own*, unrelated `T`). Returning bindings scoped to exactly
+    /// the same chain commonly both use `T` (e.g. `NullableType<T of
+    /// Type> extends UnionType<T|BuiltinType<...>>`, where `UnionType`
+    /// has its own, unrelated `T`). Returning bindings scoped to exactly
     /// `target`'s own level - not a single flat map merged across the
     /// whole chain - is what keeps those two `T`s from colliding into
     /// whichever one happened to be computed last.
@@ -102,8 +96,7 @@ impl Registry {
     /// `@extends`/`@implements` tag along the way to `target` all just
     /// leave that level's names unbound - `substitute_template` already
     /// treats an unbound `TemplateParam` as `Mixed`, the right
-    /// conservative fallback for an "erased" generic. Phase 54: hoisted
-    /// from `checker::generics` alongside `slot_variance`/`is_assignable`.
+    /// conservative fallback for an "erased" generic.
     pub(crate) fn class_template_bindings(
         &self,
         class: &str,
@@ -200,14 +193,12 @@ impl Registry {
     /// backfill`'s own job): a signature is also read directly when
     /// *checking its own declaring class's own method body* (seeding
     /// `locals` for its own parameters), a path that has no "external call
-    /// site" to resolve anything through at all - real corpus false
-    /// positive caught verifying this: `Composer\Pcre\PHPStan\
-    /// InvalidRegexPatternRule::processNode(Node $node, ...)` (implementing
-    /// real PHPStan's own `Rule<TNodeType>`, `@param TNodeType $node` on
-    /// the interface) backfilling the raw, still-templated `TNodeType`
-    /// verbatim left `$node`'s own local type literally named `"TNodeType"`,
-    /// not a concrete class, not `Mixed`, the instant its own body called
-    /// `$this->extractPatterns($node, ...)`. Resolving eagerly here, using
+    /// site" to resolve anything through at all. Without resolving
+    /// eagerly, a method implementing a generic interface (`@param
+    /// TNodeType $node` on the interface) would leave `$node`'s own local
+    /// type literally named `"TNodeType"` - not a concrete class, not
+    /// `Mixed` - the instant its own body reads it. Resolving eagerly
+    /// here, using
     /// this exact class's own concrete `@implements Rule<StaticCall>`
     /// binding, makes the stored signature already-concrete before
     /// anything ever reads it, closing that gap regardless of which of
