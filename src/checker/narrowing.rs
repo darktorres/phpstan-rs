@@ -67,9 +67,8 @@ fn mirror_comparison(op: &BinOp) -> BinOp {
     }
 }
 
-/// ROADMAP "Known but not yet scheduled" follow-up - the narrow slice
-/// of real PHPStan's `ConditionalExpressionHolder` this project builds:
-/// whether `rhs` (an assignment's right-hand side) is a recognized
+/// The narrow slice of real PHPStan's `ConditionalExpressionHolder`
+/// this project builds: whether `rhs` (an assignment's right-hand side) is a recognized
 /// narrowable condition shape worth storing as a condition alias for
 /// `apply_narrowing` to replay later. Deliberately closed and small -
 /// the same four shapes `apply_narrowing` itself already dispatches on
@@ -124,11 +123,10 @@ impl<'a> Checker<'a> {
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
     pub(crate) fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
-        // Phase 12 Finding E: `preg_match(...)` (bare, or compared
-        // against a literal 0/1) doesn't otherwise match any existing
-        // narrowing shape below, so this doesn't shadow anything -
-        // verified directly, not assumed: the `Binary(op, l, r)` arm
-        // further down *does* also run afterward for a comparison form,
+        // `preg_match(...)` (bare, or compared against a literal 0/1)
+        // doesn't otherwise match any existing narrowing shape below,
+        // so this doesn't shadow anything: the `Binary(op, l, r)` arm
+        // further down does also run afterward for a comparison form,
         // dispatching to `apply_equality_narrowing`, but that function's
         // own `narrowing_key(l)`/`narrowing_key(r)` calls have no arm for
         // `ExprKind::Call` at all, so it's a genuine no-op for this
@@ -152,13 +150,11 @@ impl<'a> Checker<'a> {
             purge_stale_narrowing_for(locals, matches_name);
             locals.insert(matches_name.clone(), narrowed);
         }
-        // Phase 71 Item 4: `function_exists('foo')`'s own true branch
-        // proves `foo` is callable for the rest of that branch - a
-        // disclosed, project-specific adaptation (this project's own
-        // registry, unlike real PHPStan's live reflection, can genuinely
-        // lack a symbol that still exists at runtime) mirroring the
-        // already-shipped `InnerFunctionRule` declaration-side adaptation.
-        // Only the exact literal-string-argument shape is recognized - a
+        // `function_exists('foo')`'s own true branch proves `foo` is
+        // callable for the rest of that branch - a project-specific
+        // adaptation (this project's own registry, unlike real PHPStan's
+        // live reflection, can genuinely lack a symbol that still exists
+        // at runtime). Only the exact literal-string-argument shape is recognized - a
         // computed argument never populates the guard, matching this
         // project's usual "don't guess" leniency. The `&&` arm below
         // already recurses into this for free (`if (function_exists('foo')
@@ -178,8 +174,7 @@ impl<'a> Checker<'a> {
                 .guarded_functions
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
-        // ROADMAP "Known but not yet scheduled": real PHPStan's own
-        // `MethodExistsTypeSpecifyingExtension`/
+        // Real PHPStan's own `MethodExistsTypeSpecifyingExtension`/
         // `PropertyExistsTypeSpecifyingExtension` (`Accessory\
         // HasMethodType`/`HasPropertyType`) - a `method_exists($recv,
         // 'name')`/`property_exists($recv, 'name')` true branch proves
@@ -187,12 +182,7 @@ impl<'a> Checker<'a> {
         // branch, regardless of `$recv`'s own static type. Mirrors
         // `guarded_functions`'s own design exactly, one level down (a
         // per-receiver fact instead of a global one): only the exact
-        // (bare variable, literal string) shape is recognized, matching
-        // this project's usual "don't guess" leniency. Real corpus false
-        // positive this fixes: Piwigo's own `ImageBackend::destroy()`
-        // (`if (method_exists($image, 'destroy')) { $image->destroy();
-        // }`, `$image`'s declared `ImageInterface` type never declares
-        // `destroy()` at all - only some real implementations do).
+        // (bare variable, literal string) shape is recognized.
         if branch_true
             && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
             && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
@@ -227,8 +217,8 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(l, locals, false);
                 self.apply_narrowing(r, locals, false);
             }
-            // Phase 34 Finding B: "at least one is true, but not sure
-            // which" isn't representable *in general* - but when every
+            // "At least one is true, but not sure
+            // which" isn't representable in general - but when every
             // operand is a direct predicate-table check on the identical
             // expression, it narrows precisely to the union of what each
             // operand would give alone (`is_int($x) || is_string($x)`
@@ -242,32 +232,25 @@ impl<'a> Checker<'a> {
                     locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
                 }
             }
-            // A round of Piwigo-corpus bucketing found a real, common
-            // idiom this project's own "Known limitations" already
-            // named as needing "its own sizable narrowing-engine
-            // feature": `if ((! is_int($a) && ! is_string($a)) || (!
+            // `if ((! is_int($a) && ! is_string($a)) || (!
             // is_int($b) && ! is_string($b)) || ...) { continue; }`
-            // (real shape, `CommentRepository::findAllWithConditions`/
-            // `findList`, 7 sites) - narrowing several *different*
-            // variables at once through one combined condition. Turned
-            // out not to need that: the `Or ... if !branch_true` arm
-            // just above already decomposes an arbitrarily-long `||`
-            // chain into independent per-leaf `apply_narrowing` calls
-            // (De Morgan on the *outer* `||`) - each landing here, on
-            // exactly one `&&`-of-negated-predicates leaf, one variable
-            // at a time. The only missing piece was teaching `&&`'s own
-            // false branch to finish the same De Morgan step one level
-            // down: `!(!is_int($v) && !is_string($v))` is `is_int($v)
-            // || is_string($v)`, which `and_chain_narrowing_target`
-            // computes by reusing `or_chain_narrowing_target` on each
-            // un-negated leaf directly (double negation), then this
-            // arm narrows exactly the way the sibling `Or ... if
-            // branch_true` arm above already does for a literal `||`.
-            // Every leaf here is independent (a different key each),
-            // so no "different keys in one condition" support was
-            // needed at this level at all - each And-term simply lands
-            // on its own call to this same arm, mutating the one
-            // shared `locals` for its own key only.
+            // narrows several different variables at once through one
+            // combined condition. The `Or ... if !branch_true` arm just
+            // above already decomposes an arbitrarily-long `||` chain
+            // into independent per-leaf `apply_narrowing` calls (De
+            // Morgan on the outer `||`) - each landing here, on exactly
+            // one `&&`-of-negated-predicates leaf, one variable at a
+            // time. `&&`'s own false branch finishes the same De Morgan
+            // step one level down: `!(!is_int($v) && !is_string($v))`
+            // is `is_int($v) || is_string($v)`, which
+            // `and_chain_narrowing_target` computes by reusing
+            // `or_chain_narrowing_target` on each un-negated leaf
+            // directly (double negation), then this arm narrows exactly
+            // the way the sibling `Or ... if branch_true` arm above
+            // already does for a literal `||`. Every leaf here is
+            // independent (a different key each), so each And-term
+            // simply lands on its own call to this same arm, mutating
+            // the one shared `locals` for its own key only.
             ExprKind::Binary(BinOp::And, ..) if !branch_true => {
                 if let Some((key, target_ty, repr_expr)) = self.and_chain_narrowing_target(cond) {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
@@ -298,23 +281,22 @@ impl<'a> Checker<'a> {
                     && ((branch_true
                         && ((matches!(effective_op, BinOp::Gt) && *n == 0)
                             || (matches!(effective_op, BinOp::GtEq) && *n == 1)))
-                        // Real corpus find (Piwigo's own `ImageDerivativeController::
-                        // parseCustomParams`): `if (count($x) < 1) { $this
-                        // ->ierror(...); }` (a real, `never`-typed early-
-                        // exit idiom) proves the exact same "`$x` is non-
-                        // empty" fact on the surviving path, just phrased
-                        // as the *false* branch of the mirrored comparison
+                        // `if (count($x) < 1) { $this->ierror(...); }`
+                        // (a `never`-typed early-exit idiom) proves the
+                        // exact same "`$x` is non-empty" fact on the
+                        // surviving path, just phrased as the false
+                        // branch of the mirrored comparison
                         // (`count($x) < 1` false, or `count($x) <= 0`
                         // false, both mean `count($x) >= 1`) - the
-                        // reversed-operand form (`1 > count($x)`) is now
+                        // reversed-operand form (`1 > count($x)`) is
                         // handled too, via `count_call_operand`/
                         // `mirror_comparison` above.
                         || (!branch_true
                             && ((matches!(effective_op, BinOp::Lt) && *n == 1)
                                 || (matches!(effective_op, BinOp::LtEq) && *n == 0))))
                 {
-                    // Phase 14 (+ follow-up): `count($x) > 0`/`count($x) >=
-                    // 1` proves `$x` non-empty - now handles both operand
+                    // `count($x) > 0`/`count($x) >=
+                    // 1` proves `$x` non-empty - handles both operand
                     // orders (`count($x) > 0` and `0 < count($x)`), via
                     // `count_call_operand`'s own left/right detection and
                     // `mirror_comparison` canonicalizing the operator back
@@ -326,7 +308,7 @@ impl<'a> Checker<'a> {
                         int_comparison_operands(l, r)
                     && let Some(key) = narrowing_key(keyed_expr)
                 {
-                    // Phase 55 follow-up: `$x < N`/`$x >= N`/... (either
+                    // `$x < N`/`$x >= N`/... (either
                     // operand order) narrows `$x`'s own int range - scoped
                     // directly against real PHPStan's own `IntegerRangeType
                     // ::getSmallerType`/`getGreaterType` family
@@ -367,7 +349,7 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(inner, locals, !branch_true);
             }
             ExprKind::Grouping(inner) => self.apply_narrowing(inner, locals, branch_true),
-            // Phase 26: `(bool) $x`'s own truthiness is exactly `$x`'s -
+            // `(bool) $x`'s own truthiness is exactly `$x`'s -
             // PHP's cast doesn't change which values are truthy/falsy, it
             // just makes the check explicit (a common, idiomatic style:
             // `if (! (bool) $fp) { throw ...; }` after `fopen()`) - so
@@ -378,7 +360,7 @@ impl<'a> Checker<'a> {
                 self.apply_narrowing(inner, locals, branch_true);
             }
             ExprKind::Call(callee, args) => {
-                // Phase 22: `narrowing_key`, not a bare `ExprKind::
+                // `narrowing_key`, not a bare `ExprKind::
                 // Variable` match - without this, `is_string($arr['key'])`
                 // (or `empty($arr['key'])`) never narrowed `$arr['key']`
                 // at all, the array-index counterpart of the exact gap
@@ -387,18 +369,17 @@ impl<'a> Checker<'a> {
                 if let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice())
                     && let Some(key) = narrowing_key(&single_arg.value)
                 {
-                    // Phase 55: a fully-qualified call (`\is_array($x)`,
+                    // A fully-qualified call (`\is_array($x)`,
                     // `\count($x)`, ...) keeps its leading backslash in
                     // `ExprKind::Name` - unlike ordinary call resolution
                     // (`name_ctx::resolve_function_candidates`, used for
                     // every real argument/arity check), every name
-                    // comparison in this whole match arm was a bare
-                    // string equality with no normalization, so a real,
-                    // common defensive-global-namespace style (pervasive
-                    // in Rector-prefixed vendor code, real shape:
+                    // comparison in this whole match arm is a bare
+                    // string equality with no normalization, so a
+                    // common defensive-global-namespace style (e.g.
                     // `\is_array($value)` nested inside an
-                    // `is_iterable($value)` guard) silently skipped
-                    // narrowing entirely.
+                    // `is_iterable($value)` guard) needs stripping the
+                    // backslash first.
                     let name = name.trim_start_matches('\\');
                     if name == "empty" {
                         // `empty($x)` is PHP's own falsy check - only the
@@ -411,7 +392,7 @@ impl<'a> Checker<'a> {
                             locals.insert(key, narrow_type_excluding_falsy(&current));
                         }
                     } else if name == "isset" {
-                        // Phase 23: `isset($x)`'s truthy branch means
+                        // `isset($x)`'s truthy branch means
                         // specifically "not null" - it's true for `0`,
                         // `''`, `false`, an empty array, every falsy-but-
                         // non-null value - so this narrows only `Null`
@@ -425,7 +406,7 @@ impl<'a> Checker<'a> {
                             locals.insert(key, narrow_type_excluding(&current, &Type::Null));
                         }
                     } else if name == "count" && branch_true {
-                        // Phase 55: a bare `if (count($x))`/`while
+                        // A bare `if (count($x))`/`while
                         // (count($x))` truthiness check, not the `> 0`/
                         // `>= 1` comparison form the `Binary` arm above
                         // already handles - `count()` is never negative,
@@ -438,13 +419,11 @@ impl<'a> Checker<'a> {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         locals.insert(key, upgrade_array_to_non_empty(&current));
                     } else if name == "array_is_list" && branch_true {
-                        // Phase 55's own still-open list: a real, named
-                        // gap - webmozart/assert's own `Assert::isList()`
-                        // (a real, common assertion-library idiom) proves
-                        // list-ness via `is_array($x) && array_is_list
-                        // ($x)`, the same shape `count($x)`'s own
-                        // truthiness upgrade just above already covers
-                        // for non-emptiness. Only the true branch is
+                        // `is_array($x) && array_is_list($x)` (a common
+                        // assertion-library idiom) proves list-ness, the
+                        // same shape `count($x)`'s own truthiness
+                        // upgrade just above already covers for
+                        // non-emptiness. Only the true branch is
                         // narrowable - failing `array_is_list()` proves
                         // nothing more specific than "not proven a list",
                         // the same asymmetry `count`/`empty` already
@@ -452,7 +431,7 @@ impl<'a> Checker<'a> {
                         let current = self.current_narrowed_type(&single_arg.value, &key, locals);
                         locals.insert(key, upgrade_array_to_list(&current));
                     } else if name == "is_numeric" {
-                        // Phase 32 Finding G: deliberately its own arm,
+                        // Deliberately its own arm,
                         // not a `narrowing_type_for_predicate` table entry
                         // - that table's single target type feeds *both*
                         // directions through the same dispatch below,
@@ -472,11 +451,10 @@ impl<'a> Checker<'a> {
                             // is_numeric - unconditionally safe to drop.
                             // A kept String (bare, or inside the
                             // resulting Union) is upgraded to
-                            // numeric-string (Phase 14 - verified
-                            // against real PHPStan's own dumpType():
+                            // numeric-string, matching real PHPStan:
                             // `string $x` under is_numeric($x) narrows
                             // to plain numeric-string, `mixed $x`
-                            // narrows to int|float|numeric-string).
+                            // narrows to int|float|numeric-string.
                             let excluded = [Type::Bool, Type::True, Type::False, Type::Null]
                                 .into_iter()
                                 .fold(current, |acc, excluded| {
@@ -506,7 +484,7 @@ impl<'a> Checker<'a> {
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "in_array"
                     && let [needle, haystack, strict] = args.as_slice()
-                    // Phase 33 Finding 2: only the strict, literal-array
+                    // Only the strict, literal-array
                     // form real PHPStan's own `InArrayFunctionTypeSpecifyingExtension`
                     // narrows - a loose comparison's type-juggling would
                     // make the real safe target wider than the literal
@@ -533,17 +511,11 @@ impl<'a> Checker<'a> {
                     // isset($b) && ...` - *every* argument must be set) -
                     // the single-arg dispatch above's own `[single_arg]`
                     // slice pattern never matches here at all, silently
-                    // narrowing *none* of them, not just the ones past
+                    // narrowing none of them, not just the ones past
                     // the first. Only the true branch is narrowable, the
                     // same asymmetry the single-arg case above already
                     // has (a multi-arg `isset()` being false doesn't say
-                    // *which* argument was unset). Real corpus false
-                    // positive: Monolog's own `MongoDBHandler::write()`'s
-                    // `isset($this->manager, $this->namespace)` leaving
-                    // `$this->namespace` (a real `string|null` property)
-                    // un-narrowed inside the guard, wrongly flagging the
-                    // subsequent `$this->manager->executeBulkWrite(
-                    // $this->namespace, ...)` call.
+                    // which argument was unset).
                     for arg in args {
                         if let Some(key) = narrowing_key(&arg.value) {
                             let current = self.current_narrowed_type(&arg.value, &key, locals);
@@ -557,16 +529,14 @@ impl<'a> Checker<'a> {
                     // match) also accepts an int literal, stringifying it
                     // the same way an `ArrayShape`'s own field keys already
                     // are internally - without this, `array_key_exists(0,
-                    // $arr)` (an extremely common tuple/numeric-shape
-                    // check, as common as the string-key form) never
-                    // triggered this narrowing at all, silently keeping a
-                    // `Union` member that couldn't possibly have offset
-                    // `0` at all (a real corpus false negative:
-                    // `qexprDateData`'s own `array_key_exists(0, $data)`).
+                    // $arr)` (a common tuple/numeric-shape check, as
+                    // common as the string-key form) would never trigger
+                    // this narrowing, silently keeping a `Union` member
+                    // that couldn't possibly have offset `0` at all.
                     && let Some(lit_key) = literal_string_key(&key_arg.value)
                     && let Some(arr_key) = narrowing_key(&arr_arg.value)
                 {
-                    // Phase 33 Finding 4: the checked expression here is
+                    // The checked expression here is
                     // the array argument, not the key - proving/disproving
                     // whether a specific offset is present lets a `Union`
                     // member that could never make the call come out this
@@ -576,7 +546,7 @@ impl<'a> Checker<'a> {
                     let current = self.current_narrowed_type(&arr_arg.value, &arr_key, locals);
                     let narrowed =
                         narrow_array_shape_by_key_presence(&current, &lit_key, branch_true);
-                    // Phase 50/73-74: also narrow the specific element
+                    // Also narrow the specific element
                     // access itself (`$arr['key']`), not just `$arr`'s
                     // own overall type - see `array_value_type_for_key`'s
                     // own doc comment for why this project's own
@@ -604,7 +574,7 @@ impl<'a> Checker<'a> {
                     && let [haystack, needle] = args.as_slice()
                     && let Some(key) = narrowing_key(&haystack.value)
                 {
-                    // Phase 55's own still-open list: real PHPStan's own
+                    // Real PHPStan's own
                     // `StrContainingTypeSpecifyingExtension` - a haystack
                     // that provably contains/starts/ends with a non-empty
                     // literal needle can't itself be empty. Only fires for
@@ -659,25 +629,17 @@ impl<'a> Checker<'a> {
                 }
             }
             // `@phpstan-assert-if-true`/`-if-false` on a method's own
-            // docblock (real corpus shape: PHPUnit's own accessor pair
-            // `hasTestFilesFile(): bool` tagged `@phpstan-assert-if-true
-            // !null $this->testFilesFile`) - see `FunctionSig::
-            // assert_if_true`'s own doc comment for the full picture.
-            // `recv_class` picks a *representative* member out of a
-            // `Union`/`Intersection` receiver the exact same way
-            // `checker/expr.rs`'s own `MethodCall` arm already does for
-            // ordinary method-call checking - real corpus shape this
-            // fixes: Doctrine ORM's own `AssociationMapping::
-            // isToOneOwningSide(): bool` (`@phpstan-assert-if-true
-            // OneToOneOwningSideMapping|ManyToOneAssociationMapping
-            // $this`), called on a variable typed as the *union* of all
-            // six concrete mapping subclasses - every one of which
-            // inherits the identical method, so any single member
-            // resolves the same `AssertInfo` the others would. Once
-            // resolved, `apply_assert_infos`/`narrow_type_to` already
-            // narrow the receiver's own *full* current type generically,
-            // Union or not - only the lookup itself needed to stop
-            // requiring a bare `Type::Object`.
+            // docblock - see `FunctionSig::assert_if_true`'s own doc
+            // comment for the full picture. `recv_class` picks a
+            // representative member out of a `Union`/`Intersection`
+            // receiver the exact same way `checker/expr.rs`'s own
+            // `MethodCall` arm already does for ordinary method-call
+            // checking - a variable typed as the union of several
+            // concrete subclasses that all inherit the identical method
+            // resolves the same `AssertInfo` any single member would.
+            // Once resolved, `apply_assert_infos`/`narrow_type_to`
+            // already narrow the receiver's own full current type
+            // generically, Union or not.
             ExprKind::MethodCall(recv, method, args, _) => {
                 let recv_ty = self.infer_expr(recv, locals);
                 let class = match &recv_ty {
@@ -723,7 +685,7 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::Instanceof(inner, target) => {
-                // Phase 33 Finding 1: the false branch doesn't need a
+                // The false branch doesn't need a
                 // "not this class" type to be representable - it only
                 // needs to *drop* the one member just proven impossible
                 // from an already-enumerated `Union`, exactly what
@@ -762,29 +724,19 @@ impl<'a> Checker<'a> {
             // already computed while checking each operand for
             // diagnostics, so a later &&/|| operand referencing the
             // freshly-assigned variable needs the assignment replayed
-            // here too. Corpus-verified real shape (`Symfony\Component\
-            // DependencyInjection\Compiler\AbstractRecursivePass::
-            // getReflectionMethod()`): `$r->hasMethod('__call') && ($r =
-            // $r->getMethod('__call')) && $r->isPublic()` wrongly flagged
-            // `$r->isPublic()` as calling a nonexistent method on the
-            // *pre*-reassignment `ReflectionClass`, never seeing that
-            // `$r` had become a `ReflectionMethod` two conjuncts earlier
-            // in the very same condition - a real, previously-invisible
-            // gap unmasked only once `parse_not`'s own `!$var = expr`
-            // fix stopped leaving reflection variables like this one
-            // typed as `Mixed` (silencing every check through them)
-            // whenever they were first bound via that idiom.
+            // here too - e.g. `$r->hasMethod('__call') && ($r =
+            // $r->getMethod('__call')) && $r->isPublic()` must see that
+            // `$r` became a `ReflectionMethod` two conjuncts earlier in
+            // the very same condition, not the pre-reassignment type.
             //
             // The `branch_true` truthy case still needs its own extra
             // step on top of the plain bind: `if ($position = strpos($x,
-            // "#")) { substr($x, 0, $position); }` (amphp's own
-            // `Http2ConnectionProcessor`) relies on the *assignment's
-            // own result* being truthy to reach the `if` body at all -
-            // without also excluding falsy members from the
-            // freshly-bound type here, `$position` kept `strpos()`'s raw
-            // `int<0, max>|false` inside the truthy branch instead of a
-            // real non-zero `int`, a corpus-verified false positive this
-            // arm's own first version introduced (`substr()`'s 3rd
+            // "#")) { substr($x, 0, $position); }` relies on the
+            // assignment's own result being truthy to reach the `if`
+            // body at all - without also excluding falsy members from
+            // the freshly-bound type here, `$position` would keep
+            // `strpos()`'s raw `int<0, max>|false` inside the truthy
+            // branch instead of a real non-zero `int` (`substr()`'s 3rd
             // argument expects `int|null`, not `int<0, max>|false`).
             ExprKind::Assign(lhs, rhs) => {
                 let rhs_ty = self.infer_expr(rhs, locals);
@@ -796,9 +748,8 @@ impl<'a> Checker<'a> {
                     locals.insert(key, narrow_type_excluding_falsy(&current));
                 }
             }
-            // ROADMAP "Known but not yet scheduled" follow-up: the narrow
-            // slice of real PHPStan's `ConditionalExpressionHolder` this
-            // project builds - `$ok = $x instanceof Foo; if ($ok) {...}`
+            // The narrow slice of real PHPStan's `ConditionalExpressionHolder`
+            // this project builds - `$ok = $x instanceof Foo; if ($ok) {...}`
             // (or the plain-alias form `$y = $x; if ($y) {...}`) replays
             // the *stored* condition through this exact same recursive
             // dispatch, correlating a *second* variable's narrowing to
@@ -868,7 +819,7 @@ impl<'a> Checker<'a> {
         locals.set_condition_alias(name.clone(), target_key, std::rc::Rc::new(rhs.clone()));
     }
 
-    /// Phase 48.7/48.C: `AssertRuleHelper`'s equivalent - a `@phpstan-
+    /// `AssertRuleHelper`'s equivalent - a `@phpstan-
     /// assert`-family tag's own type is already resolved into a real
     /// `AssertInfo` (`FunctionSig::assert`/`assert_if_true`/
     /// `assert_if_false`) and consumed for narrowing (`apply_narrowing`'s
@@ -877,21 +828,17 @@ impl<'a> Checker<'a> {
     /// this file's sibling existence-checking helpers exactly the way
     /// `check_method_tag_types`/`check_mixin_types`/`check_type_alias_types`
     /// (`oop.rs`) already do; `parameter.notFound`/`assert.unknownExpr`
-    /// surface `AssertTarget::NotFound`/`Unknown` (Phase 48.C's own
-    /// registry-side change - see that enum's doc comment);
+    /// surface `AssertTarget::NotFound`/`Unknown`;
     /// `assert.impossibleType`/`.alreadyNarrowedType` are new (see
     /// `check_one_assert_tag`'s own doc comment for scope). Deliberately
     /// NOT built: `assert.unresolvableType` (real PHPStan's own pure-
     /// intersection-type unsatisfiability check - a genuinely separate,
-    /// larger gap spanning multiple unrelated rule families per ROADMAP's
-    /// own audit, not specific to asserts, and not attempted here) and
-    /// the `missingType.iterableValue`/`.generics` sub-checks on an
-    /// asserted type (real value, but needs its own message-template
-    /// plumbing change to `report_missing_typehint_findings` - left as a
-    /// disclosed, narrower cut for this pass rather than risking that
-    /// already-shipped, separately-tested check family). Called once per
-    /// declaration, alongside `check_declared_purity_tag`/`check_declared_
-    /// param_callable_tags` (`function_decl.rs`).
+    /// larger gap spanning multiple unrelated rule families, not specific
+    /// to asserts) and the `missingType.iterableValue`/`.generics`
+    /// sub-checks on an asserted type (needs its own message-template
+    /// plumbing change to `report_missing_typehint_findings`). Called
+    /// once per declaration, alongside `check_declared_purity_tag`/
+    /// `check_declared_param_callable_tags` (`function_decl.rs`).
     pub(crate) fn check_assert_tag_types(
         &mut self,
         sig: Option<&FunctionSig>,
@@ -1000,17 +947,15 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 48.C: `assert.impossibleType`'s own narrow, conservative type-
-/// disjointness primitive - deliberately NOT Phase 84's XL tri-state
-/// rewrite, despite surface similarity (confirmed against the design doc
-/// this phase's own plan drew that distinction from). Only ever declares
+/// `assert.impossibleType`'s own narrow, conservative type-
+/// disjointness primitive. Only ever declares
 /// two types disjoint when each resolves to one of a handful of coarse,
 /// mutually-exclusive "scalar families" (`scalar_family` below) and those
 /// families differ - e.g. `string` vs `int`, or `array` vs `object`.
 /// Recurses into `Union` on either side (every member of a union side
 /// must be disjoint from the other side for the whole comparison to
 /// count - the same "stay on the lenient side" direction this project's
-/// own union-legality check already established, see ROADMAP.md).
+/// own union-legality check already established).
 /// Returns `false` (not confidently disjoint - "don't guess") for
 /// anything not covered: `Mixed`/`Never`/`Void`, two same-family types
 /// (e.g. two unrelated object types - real PHPStan's own object-vs-object
