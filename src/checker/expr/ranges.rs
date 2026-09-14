@@ -4,7 +4,7 @@ use crate::checker::is_unsealed_shape;
 use crate::checker::type_union::union_types;
 use crate::types::{self, AccessoryKind, Type};
 
-/// Phase 15 continuation: `ty`'s own `(min, max)` bound pair when it's
+/// `ty`'s own `(min, max)` bound pair when it's
 /// range-representable at all - an `IntLiteral` is a degenerate range
 /// with `min == max`, matching `IntRange`'s own doc comment ("the same
 /// relationship `IntLiteral` has to `Int`"). `infer_binary`'s own
@@ -201,7 +201,7 @@ pub(crate) fn pow_int_range(
 /// PHPStan only ever reaches this formula for a *single constant* right
 /// operand (`getShiftLeftType`/`getShiftRightType` themselves bail to
 /// plain `int` the moment the right side isn't a `ConstantIntegerType` -
-/// no range-shifted-by-range case exists at all, confirmed directly), so
+/// no range-shifted-by-range case exists at all), so
 /// `infer_binary`'s own call site only invokes this once `int_range_bounds`
 /// on the right side has already collapsed to a single value. `amount`
 /// outside `0..64` (negative - PHP throws `ArithmeticError` at runtime,
@@ -245,7 +245,7 @@ pub(crate) fn shift_int_range(
 /// the actual runtime values" (including when either side is
 /// completely unbounded in the relevant direction). Mirrors real
 /// PHPStan's own `IntegerRangeType::isSmallerThan`/`isSmallerThanOrEqual`
-/// corner-comparison logic (confirmed directly, `vendor/phpstan-src`) -
+/// corner-comparison logic -
 /// deliberately simplified to the pure-numeric case only, matching this
 /// project's own established "no loose-comparison modeling" precedent
 /// (`checker/narrowing.rs`'s own `comparison_narrowed_bounds`, the
@@ -316,17 +316,16 @@ pub(crate) fn compare_range_outcome(
 }
 
 /// Whether `e` reads a property (instance or static) anywhere in its
-/// own expression tree - a real, disclosed guard for `check_constant_
+/// own expression tree - a guard for `check_constant_
 /// loose_comparison`/`check_constant_numeric_comparison`: this project
 /// doesn't invalidate a property's own narrowed type across an arbitrary
 /// intervening method call (real PHPStan's own `MutatingScope` does,
-/// generally assuming any call *might* mutate any property unless
-/// proven otherwise) - real corpus false positive this fixes
-/// (`Piwigo\Admin\Integrity\CheckIntegrity::check`): `$this->retrieve_list
+/// generally assuming any call might mutate any property unless
+/// proven otherwise), so e.g. `$this->retrieve_list
 /// = [];` followed by `$this->dispatchListCheckIntegrity();` (which, per
 /// its own name, populates it) then `if (count($this->retrieve_list) >
-/// 0)` - this project still believes `$this->retrieve_list` is the
-/// empty array literal it was *last assigned*, making `count(...)`'s own
+/// 0)` would otherwise still believe `$this->retrieve_list` is the
+/// empty array literal it was last assigned, making `count(...)`'s own
 /// exact-`IntLiteral(0)` special case (`array_shape`'s own zero-field
 /// count) look "always false" against the literal `0` it's compared to,
 /// even though the intervening call almost certainly changed it. Not
@@ -642,7 +641,7 @@ pub(crate) fn div_int_range(
         // The rounding step (`ceil`ing the min, `floor`ing the max
         // independently) can invert an otherwise-valid range into one
         // with no real int members at all - `normalize_int_range`'s own
-        // doc comment has the exact real corpus shape (`10 / 4`, always
+        // doc comment has an example (`10 / 4`, always
         // `2.5`, never any int). `union_types` has no general `Never`-
         // absorption rule of its own (nothing elsewhere in this project
         // ever produces a `Never` member to union away), so this handles
@@ -653,7 +652,7 @@ pub(crate) fn div_int_range(
     }
 }
 
-/// Phase 60: real PHPStan's own `isset()`/`empty()`/`??`/`??=` "does this
+/// Real PHPStan's own `isset()`/`empty()`/`??`/`??=` "does this
 /// null-probe make sense" verdict, condensed to the one shape this
 /// project scopes to (a bare, guaranteed-defined variable - see
 /// `Checker::check_pointless_null_probe`'s own doc comment for why a
@@ -672,15 +671,14 @@ pub(crate) fn null_probe_verdict(ty: &Type) -> Option<&'static str> {
     }
 }
 
-/// Phase 60 follow-up, `empty()`'s own falsiness-aware verdict - real
-/// PHPStan's `EmptyRule` (`vendor/phpstan-src`, read directly): unlike
+/// `empty()`'s own falsiness-aware verdict - real
+/// PHPStan's `EmptyRule`: unlike
 /// `null_probe_verdict` just above, `empty()` tests falsiness, not just
-/// null-ness, so both `isNull()` *and* `toBoolean()->isFalse()` have to
+/// null-ness, so both `isNull()` and `toBoolean()->isFalse()` have to
 /// be unambiguous before it says anything - by the time both are
 /// resolved, the message reduces to exactly one of these two outcomes
 /// (`isNull`-specific wording is provably unreachable once falsiness is
-/// already known, confirmed by tracing `EmptyRule::processNode`'s own
-/// branch order). `type_truthiness` already recurses through `Union`/
+/// already known). `type_truthiness` already recurses through `Union`/
 /// `Intersection`/`ArrayShape`/accessory kinds, so this is a thin
 /// wrapper, not a separate reimplementation.
 pub(crate) fn empty_probe_verdict(ty: &Type) -> Option<&'static str> {
