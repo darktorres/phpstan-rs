@@ -22,16 +22,13 @@ pub fn parse_type_string(raw: &str) -> Type {
     let amp_parts = split_top_level(s, '&');
     let ty = if pipe_parts.len() > 1 {
         let members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
-        // `Mixed` already includes every other
-        // possible value, so a union with `Mixed` sitting alongside
-        // anything else (`end()`'s real stub: `@return mixed|false`,
-        // never updated after `end(): mixed` dropped its own native
-        // `|false`) is simply `Mixed` - `union_types` (`checker/expr.rs`)
-        // already special-cases this at *construction* time everywhere
-        // it's used, but this is the lower-level parser building a
-        // `Type::Union` directly from doc text, with no such
-        // normalization. A stray non-`Mixed` member surviving otherwise
-        // fails an ordinary argument-compatibility check on its own,
+        // `Mixed` already includes every other possible value, so a
+        // union with `Mixed` alongside anything else (real shape:
+        // `end()`'s stub `@return mixed|false`) is simply `Mixed` -
+        // `union_types` special-cases this at construction time, but
+        // this lower-level parser builds a `Type::Union` directly from
+        // doc text with no such normalization; a stray non-`Mixed`
+        // member would otherwise fail an ordinary compatibility check
         // even though the whole union is vacuously satisfiable.
         if members.contains(&Type::Mixed) {
             return Type::Mixed;
@@ -50,20 +47,6 @@ pub fn parse_type_string(raw: &str) -> Type {
     }
 }
 
-/// Splits `s` on `sep`, but only where `sep` appears outside any
-/// `<>`/`{}`/`()`/`[]` nesting. Always returns at least one part, mirroring
-/// `str::split` - callers check `.len() > 1` to know whether a real
-/// top-level separator was found at all.
-///
-/// A `'...'`/`"..."` string-literal segment is tracked as one opaque run,
-/// the exact same fix `docblock.rs`'s own `take_type_token` needed for the
-/// identical reason - without it, a bracket-shaped character *inside* the
-/// quotes (a real corpus shape: PHPUnit's own literal-string union
-/// `'->'|'::' `, documenting a real property-access-vs-static-call
-/// operator) was read as a real closing bracket, permanently decrementing
-/// `depth` below zero and silently swallowing every top-level separator
-/// for the rest of the string - `'->'|'::' ` mangled into the single,
-/// nonsensical literal `Type::StringLiteral("->'|'::")`.
 /// The byte index of the `)` matching the FIRST `(` in `s`
 /// (`s` must start at or before that `(`), tracking bracket depth/quotes
 /// the same way `split_top_level` does - no existing helper answers "an
@@ -95,17 +78,15 @@ fn find_matching_paren(s: &str) -> Option<usize> {
     None
 }
 
-/// Real structural parsing of a `Closure(...)`/
-/// `callable(...)` PHPDoc shape - `stripped` is `s` with any leading `\`
-/// already removed (case preserved, unlike the `lower` prefix-matching
-/// gate at this function's own call site). `None` on anything not
-/// confidently understood (a missing/unbalanced `(`, or the mandatory
-/// trailing `: ReturnType` missing - real phpdoc-parser's own grammar,
-/// confirmed directly: `TypeParser::parseCallable` unconditionally
-/// consumes a `:` token) - the caller falls back to today's bare
-/// `Type::Callable(None)` marker in that case, exactly as before this
-/// sub-item existed, so a shape this doesn't recognize can only ever
-/// lose precision, never mis-parse.
+/// Real structural parsing of a `Closure(...)`/`callable(...)` PHPDoc
+/// shape - `stripped` is `s` with any leading `\` already removed (case
+/// preserved, unlike the `lower` prefix-matching gate at this function's
+/// call site). `None` on anything not confidently understood (a
+/// missing/unbalanced `(`, or the mandatory trailing `: ReturnType`
+/// missing - real phpdoc-parser's grammar unconditionally consumes a
+/// `:` token) - the caller falls back to the bare `Type::Callable(None)`
+/// marker, so a shape this doesn't recognize can only ever lose
+/// precision, never mis-parse.
 fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     let close = find_matching_paren(stripped)?;
     let open = stripped.find('(')?;
@@ -159,6 +140,17 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     }))))
 }
 
+/// Splits `s` on `sep`, but only where `sep` appears outside any
+/// `<>`/`{}`/`()`/`[]` nesting. Always returns at least one part, mirroring
+/// `str::split` - callers check `.len() > 1` to know whether a real
+/// top-level separator was found at all.
+///
+/// A `'...'`/`"..."` string-literal segment is tracked as one opaque
+/// run, since a bracket-shaped character *inside* the quotes (real
+/// shape: PHPUnit's own literal-string union `'->'|'::' `) would
+/// otherwise be read as a real closing bracket, permanently
+/// decrementing `depth` below zero and swallowing every top-level
+/// separator for the rest of the string.
 fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
