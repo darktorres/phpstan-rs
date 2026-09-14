@@ -501,34 +501,28 @@ impl Registry {
         None
     }
 
-    /// Whether `class` directly `use`s a trait that
-    /// declares a method named `method` *abstract* - used only by
-    /// `#[\Override]`-attribute checking, which needs to treat
-    /// implementing a *trait's own* abstract method as a real override
-    /// too: a class implementing a trait's own
-    /// `abstract protected function twist()` with `#[\Override]` is
-    /// real, legal PHP (real shape:
-    /// `Psl\RandomSequence\MersenneTwisterSequence::twist()`
-    /// overriding `Internal\MersenneTwisterTrait`'s own abstract
-    /// declaration this exact way). Deliberately checks the trait's own
-    /// `abstract_methods` set, not merely "does the trait have a method
-    /// of this name at all" - a trait supplying a *concrete* method the
-    /// using class never separately redeclares (own_sig IS the trait's
-    /// own contribution, unmodified) is a different case entirely, with
-    /// its own already-correct handling: `check_method_overrides`'s own
-    /// trait-derived-method sweep re-runs this same function keyed on the
-    /// using class, so a genuinely ancestor-less concrete trait method
-    /// still fatals there exactly as real PHP does (confirmed directly:
-    /// `trait T { #[\Override] function foo() {} } class Standalone {
-    /// use T; }` still fatals on `Standalone::foo()`) - this check must
-    /// not accidentally swallow that real case too. Deliberately narrower
-    /// than folding `uses` into `lookup_ancestor_method_with_owner`'s own
-    /// general walk (the "Still open: interface-first/trait-abstract-
-    /// method ancestor-lookup priority" item this project's own roadmap
-    /// already tracks separately) - that would also change every *other*
-    /// check in `check_one_method_override` (Liskov parameter/return-type
-    /// comparisons) in ways not verified here; this only answers the one
-    /// yes/no question the override-attribute check itself needs.
+    /// Whether `class` directly `use`s a trait that declares a method
+    /// named `method` *abstract* - used only by `#[\Override]`-attribute
+    /// checking, which needs to treat implementing a *trait's own*
+    /// abstract method as a real override too: a class implementing a
+    /// trait's `abstract protected function twist()` with `#[\Override]`
+    /// is real, legal PHP (real shape:
+    /// `Psl\RandomSequence\MersenneTwisterSequence::twist()` overriding
+    /// `Internal\MersenneTwisterTrait`'s own abstract declaration this
+    /// exact way). Deliberately checks the trait's `abstract_methods`
+    /// set, not merely "does the trait have a method of this name at
+    /// all" - a trait supplying a *concrete* method the using class
+    /// never separately redeclares is a different case, with its own
+    /// already-correct handling: `check_method_overrides`'s own
+    /// trait-derived-method sweep re-runs this same function keyed on
+    /// the using class, so a genuinely ancestor-less concrete trait
+    /// method still fatals there exactly as real PHP does. Deliberately
+    /// narrower than folding `uses` into
+    /// `lookup_ancestor_method_with_owner`'s general walk, which would
+    /// also change every *other* check in `check_one_method_override`
+    /// (Liskov parameter/return-type comparisons) in unverified ways;
+    /// this only answers the one yes/no question the override-attribute
+    /// check needs.
     pub fn trait_declares_abstract_method(&self, class: &str, method: &str) -> bool {
         let Some(info) = self.classes.get(class) else {
             return false;
@@ -540,25 +534,21 @@ impl Registry {
         })
     }
 
-    /// Whether `class`'s own `extends`/`implements`
-    /// ancestor chain includes a name this project's registry has no
-    /// declaration for at all, at any depth - used only by
-    /// `#[\Override]`-attribute checking, which must never confidently
-    /// claim "no matching parent method exists" when the real reason
-    /// nothing was found is a missing dependency rather than a genuine
-    /// absence (real shape: `CycloneDX\Composer\
-    /// Plugin implements ... Composer\Plugin\PluginInterface` and
-    /// `CycloneDX\Composer\_internal\MakeBom\Command extends Composer\
-    /// Command\BaseCommand` - neither vendored anywhere in this project's
-    /// own verification corpus at all, so this registry has no way to
-    /// know whether the real `activate()`/`configure()`/... methods being
-    /// overridden are declared there, the same "don't guess wrong" rule
-    /// this project applies elsewhere). Every other check in
-    /// `check_one_method_override` stays as lenient-by-omission as it
-    /// already was (an unresolved ancestor simply yields no comparison,
-    /// same as a genuinely absent one) - only this specific check's
-    /// polarity (firing exactly when *nothing* is found) makes an
-    /// unresolved-vs-absent distinction actually matter.
+    /// Whether `class`'s own `extends`/`implements` ancestor chain
+    /// includes a name this project's registry has no declaration for
+    /// at all, at any depth - used only by `#[\Override]`-attribute
+    /// checking, which must never confidently claim "no matching parent
+    /// method exists" when the real reason nothing was found is a
+    /// missing dependency rather than a genuine absence (real shape:
+    /// `CycloneDX\Composer\Plugin implements ...
+    /// Composer\Plugin\PluginInterface`, unvendored, so this registry
+    /// has no way to know whether the real `activate()` being overridden
+    /// is declared there). Every other check in
+    /// `check_one_method_override` stays lenient-by-omission (an
+    /// unresolved ancestor yields no comparison, same as a genuinely
+    /// absent one) - only this check's polarity (firing exactly when
+    /// *nothing* is found) makes the unresolved-vs-absent distinction
+    /// matter.
     pub fn has_unresolvable_ancestor(&self, class: &str) -> bool {
         let Some(info) = self.classes.get(class) else {
             return false;
@@ -588,12 +578,9 @@ impl Registry {
         false
     }
 
-    /// Same idea as
-    /// `lookup_ancestor_method_with_owner` just above, but walking only
-    /// `extends` - real PHP interfaces can't declare properties at all,
-    /// so there's no `implements` side to check (`precompute_member_
-    /// owners`'s own `ancestor_property_owner_by_class` build mirrors
-    /// this same `extends`-only restriction).
+    /// Same idea as `lookup_ancestor_method_with_owner`, but walking
+    /// only `extends` - real PHP interfaces can't declare properties, so
+    /// there's no `implements` side to check.
     pub fn lookup_ancestor_property_with_owner(
         &self,
         class: &str,
@@ -607,23 +594,19 @@ impl Registry {
         Some((owner.clone(), sig))
     }
 
-    /// Finding 46: real PHP forbids overriding a method declared `final`
-    /// anywhere in the ancestor chain, no matter how many intervening
-    /// subclasses sit between the `final` declaration and this one (a
-    /// method that's final stays final for every descendant, not just
-    /// its immediate subclass). Walks only `extends` - real PHP's own
-    /// `final` keyword applies to ordinary class inheritance; an
-    /// interface's own methods have no bodies to protect, and this
-    /// project doesn't yet propagate a trait's own `final_methods` the
-    /// way it does `abstract_methods` (Finding 46 as reported is scoped
-    /// to class inheritance, matching its own repro). Returns the name of
-    /// the ancestor that declared it final, plus whether that was via
-    /// `@final` (docblock, PHPStan-only convention, real PHP doesn't
-    /// enforce it) rather than the real keyword - checked together, one
-    /// ancestor at a time nearest-first, real keyword winning over
-    /// `@final` when a single ancestor somehow has both (mirrors real
-    /// PHPStan's own `OverridingMethodRule` if/elseif order exactly,
-    /// `method.parentMethodFinal` vs. `method.parentMethodFinalByPhpDoc`).
+    /// Real PHP forbids overriding a method declared `final` anywhere
+    /// in the ancestor chain, no matter how many intervening subclasses
+    /// sit between the `final` declaration and this one. Walks only
+    /// `extends` - an interface's methods have no bodies to protect, and
+    /// this project doesn't yet propagate a trait's `final_methods` the
+    /// way it does `abstract_methods`. Returns the name of the ancestor
+    /// that declared it final, plus whether that was via `@final`
+    /// (docblock, PHPStan-only convention, real PHP doesn't enforce it)
+    /// rather than the real keyword - checked together, nearest-ancestor
+    /// first, real keyword winning over `@final` when a single ancestor
+    /// has both (mirrors real PHPStan's own `OverridingMethodRule`
+    /// if/elseif order: `method.parentMethodFinal` vs.
+    /// `method.parentMethodFinalByPhpDoc`).
     pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<(String, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = HashSet::new();
