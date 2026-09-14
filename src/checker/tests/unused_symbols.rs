@@ -1,5 +1,5 @@
-//! Phase 59: unused constructor parameters, unused closure `use(...)`
-//! captures, and unused private consts/methods/properties.
+//! Unused constructor parameters, unused closure `use(...)` captures,
+//! and unused private consts/methods/properties.
 
 use super::helpers::*;
 

@@ -1,5 +1,5 @@
-//! Phase 11 Stage 6's baseline mechanism, a simplified version of real
-//! PHPStan's own `baseline.neon`: `--generate-baseline` records every
+//! A baseline mechanism, a simplified version of real PHPStan's own
+//! `baseline.neon`: `--generate-baseline` records every
 //! current diagnostic into a file; a later run passed `--baseline` filters
 //! out anything already recorded, so existing debt doesn't block CI while
 //! new issues are still caught.
@@ -31,15 +31,14 @@ struct Entry {
     message: String,
 }
 
-/// Finding 32: a baseline entry's own `file` key was built directly from
-/// whatever `PathBuf` the current run happened to produce - two
+/// A baseline entry's own `file` key must not depend on whatever
+/// `PathBuf` spelling the current run happened to produce - two
 /// invocations that check the exact same real file but spell its path
 /// differently (`check-project .` vs `check-project ./.`, or a config
 /// file's own `paths` entry vs an equivalent positional CLI argument)
-/// produced two different keys for the same diagnostic, silently making
-/// every previously-baselined finding reappear as "new". Lexically
-/// resolves `.`/`..` segments and redundant separators - deliberately
-/// not `fs::canonicalize`, which would fail outright for a path that no
+/// must still produce the same key. Lexically resolves `.`/`..`
+/// segments and redundant separators - deliberately not
+/// `fs::canonicalize`, which would fail outright for a path that no
 /// longer exists (checking a file, baselining it, then later reporting
 /// against a moved/renamed baseline) and could also resolve symlinks
 /// differently across machines/checkouts, neither of which this is

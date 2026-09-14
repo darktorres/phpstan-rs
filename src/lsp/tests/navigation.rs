@@ -1,4 +1,4 @@
-//! Phase 17 Stage A: hover and go-to-definition, driven through the real
+//! Hover and go-to-definition, driven through the real
 //! `initialize`/`textDocument/hover`/`textDocument/definition` wire
 //! protocol (not `navigation::resolve_at` called directly) - the same
 //! `run_loop`-over-an-in-memory-`Cursor` pattern
@@ -173,10 +173,9 @@ fn nothing_resolvable_returns_null_not_an_error() {
     let uri = path_to_uri(&path).to_string();
     // Land on the primitive type keyword `int` - filtered out of
     // `type_hint_identifiers` on purpose (it's never a real class), so
-    // still a real position with nothing resolvable. (The bare parameter
-    // `$x`, previously used for this test, now *does* resolve - to its
-    // own declaration - since local-variable-declaration navigation
-    // shipped; see the `variable_navigation` tests below.)
+    // still a real position with nothing resolvable. (A bare parameter
+    // like `$x` does resolve, to its own declaration - see the
+    // `variable_navigation` tests below.)
     let pos = lsp_pos(src, "int $x");
     let messages = run(
         &dir,
@@ -223,10 +222,10 @@ fn definition_repopulates_after_a_did_change_moves_the_declaration() {
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 
-// Phase 17 Stage B: an instance receiver's own type, resolved via a
-// one-off checker probe (Checker::probe_span/probe_hit) rather than a
-// name lookup - $x isn't $this, self, or any other syntactically-known
-// target, so Stage A alone can't resolve it.
+// An instance receiver's own type, resolved via a one-off checker probe
+// (Checker::probe_span/probe_hit) rather than a name lookup - $x isn't
+// $this, self, or any other syntactically-known target, so a plain
+// name lookup can't resolve it.
 
 #[test]
 fn hover_and_definition_on_an_instance_method_call_resolve_via_the_receivers_type() {
@@ -290,15 +289,13 @@ fn an_uninferrable_receiver_resolves_to_null_not_a_guess() {
     assert_eq!(response_result(&messages, 3), Value::Null);
 }
 
-// Phase 17 follow-up: closure/arrow-fn body probing. The original Stage B
-// disclosure claimed this needed a different `Checker` entry point - false
-// on inspection: `check_expr`'s own `Closure`/`ArrowFn` arms already
-// recurse into a closure's body as part of ordinarily checking whatever
-// *named* function contains the closure literal, and `lsp::navigation`'s
-// `current_function` was already left pointing at that enclosing named
-// function through a closure/arrow-fn (never reset) - so re-running
-// `check_function` on it already reaches a receiver nested inside one.
-// These are regression guards for that, not new capability being added.
+// Closure/arrow-fn body probing: `check_expr`'s own `Closure`/`ArrowFn`
+// arms already recurse into a closure's body as part of ordinarily
+// checking whatever *named* function contains the closure literal, and
+// `lsp::navigation`'s `current_function` is left pointing at that
+// enclosing named function through a closure/arrow-fn (never reset) -
+// so re-running `check_function` on it already reaches a receiver
+// nested inside one.
 
 #[test]
 fn hover_and_definition_resolve_an_instance_call_inside_a_closure_body() {
@@ -337,8 +334,8 @@ fn hover_resolves_an_instance_call_inside_an_arrow_fn_body() {
     );
 }
 
-// Phase 17 follow-up: a `Union`/`Intersection` receiver resolving to
-// *every* class that declares the member, not just the first.
+// A `Union`/`Intersection` receiver resolves to *every* class that
+// declares the member, not just the first.
 
 #[test]
 fn hover_and_definition_on_a_union_receiver_resolve_every_declaring_class() {

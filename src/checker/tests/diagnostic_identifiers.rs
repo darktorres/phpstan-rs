@@ -1,10 +1,9 @@
-//! Phase 47: `Diagnostic` grew an `identifier`/`tip`/`non_ignorable`/
-//! `metadata`/`fix` beyond its original 4 fields, and `DiagnosticBuilder`
-//! is the fluent way to assemble one. These tests exercise both halves:
-//! that real checker call sites actually populate `identifier` (and, for
-//! the couple of call sites that attach one, `tip`) correctly, and that
-//! `DiagnosticBuilder` itself behaves as a plain, independently-testable
-//! unit.
+//! `Diagnostic` carries `identifier`/`tip`/`non_ignorable`/`metadata`/
+//! `fix` fields, and `DiagnosticBuilder` is the fluent way to assemble
+//! one. These tests exercise both halves: that real checker call sites
+//! actually populate `identifier` (and, for the couple of call sites
+//! that attach one, `tip`) correctly, and that `DiagnosticBuilder`
+//! itself behaves as a plain, independently-testable unit.
 
 use super::helpers::*;
 use crate::checker::DiagnosticBuilder;
@@ -178,10 +177,8 @@ fn instantiating_an_abstract_class_carries_identifier_and_tip() {
 
 #[test]
 fn ordinary_diagnostics_default_to_non_ignorable_false() {
-    // Nothing in this project sets `non_ignorable` yet (Phase 44, which
-    // would consume it, doesn't exist) - every existing call site's
-    // diagnostics should still default to `false`, not silently become
-    // unignorable by accident of the Phase 47 struct change.
+    // Nothing in this project sets `non_ignorable` yet - every existing
+    // call site's diagnostics should still default to `false`.
     let d = diagnostics_for(
         r#"<?php
             function f() {
@@ -226,9 +223,8 @@ fn diagnostic_builder_assembles_every_field() {
     assert_eq!(fix.description, "swap it out");
 }
 
-// Phase 37: PHP 8.5's `#[\NoDiscard]` marker -
-// `Checker::check_no_discard_statement`, mirroring real PHPStan's own
-// `CallToFunctionStatementWithNoDiscardRule`/
+// PHP 8.5's `#[\NoDiscard]` marker - `Checker::check_no_discard_statement`,
+// mirroring real PHPStan's own `CallToFunctionStatementWithNoDiscardRule`/
 // `CallToMethodStatementWithNoDiscardRule`/
 // `CallToStaticMethodStatementWithNoDiscardRule`.
 
@@ -291,12 +287,9 @@ fn a_bare_call_to_a_no_discard_method_is_flagged() {
     assert_eq!(d[0].identifier, "method.resultDiscarded");
 }
 
-// Real bug found and fixed this session: `check_no_discard_statement`
-// required the receiver's own type to be literally `Type::Object`,
-// silently skipping the check for a `Union`/`Intersection` receiver - a
-// value narrowed via `instanceof` from an unrelated interface, then
-// called through, same as the other bugs this session found via the
-// exact same anti-pattern.
+// `check_no_discard_statement` must handle a `Union`/`Intersection`
+// receiver, not just a literal `Type::Object` - a value narrowed via
+// `instanceof` from an unrelated interface, then called through.
 #[test]
 fn a_bare_call_to_a_no_discard_method_through_an_intersection_receiver_is_flagged() {
     let d = diagnostics_for(

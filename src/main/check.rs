@@ -28,25 +28,15 @@ pub(crate) fn run_check(paths: &[PathBuf]) {
     let chunk_size = files.len().div_ceil(num_threads).max(1);
     // A bare `scope.spawn` uses Rust's default new-thread stack size
     // (~2MiB on Linux) - smaller than what the parser's own
-    // MAX_EXPR_DEPTH guard needs to safely trip before physically
-    // exhausting the stack (confirmed directly: a real, realistic
-    // ~200-300 levels of nested parentheses - not an extreme
-    // adversarial input - crashed with an uncatchable stack overflow
-    // here, well short of that guard's 1000-level limit). An 8MiB
-    // worker stack (this project's own former fix, matching a plain
-    // main thread's own OS-default budget) turned out to still be
-    // insufficient for a debug build specifically - `cargo test`'s own
-    // unoptimized build has much larger per-frame stack usage through
-    // the parser's ~20-function-deep precedence-climbing chain than an
-    // optimized release build does, so `tests/cli.rs`'s own 500-level
-    // regression test (`check_does_not_crash_on_realistically_deep_
-    // nested_expressions`) reliably crashed under `cargo test` even
-    // with this fix in place, regardless of `RUST_MIN_STACK` (which
-    // only affects a *default*, unsized `thread::spawn`/`Builder` -
-    // never a smaller floor on an explicit `.stack_size()` call like
-    // this one). 64MiB (this project's own working `RUST_MIN_STACK`
-    // value elsewhere, confirmed sufficient here directly) gives real
-    // headroom for both build profiles.
+    // MAX_EXPR_DEPTH guard (1000 levels) needs to safely trip before
+    // physically exhausting the stack, and a debug build's much larger
+    // per-frame stack usage through the parser's ~20-function-deep
+    // precedence-climbing chain needs considerably more still. 64MiB
+    // (this project's own `RUST_MIN_STACK` value elsewhere) gives real
+    // headroom for both build profiles; `RUST_MIN_STACK` itself only
+    // affects a *default*, unsized `thread::spawn`/`Builder`, never a
+    // smaller floor on an explicit `.stack_size()` call like this one,
+    // so it has to be set here too.
     const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
     let failures: Vec<(PathBuf, String)> = std::thread::scope(|scope| {
         let handles: Vec<_> = files

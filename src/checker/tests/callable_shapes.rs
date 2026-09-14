@@ -1,7 +1,6 @@
-//! Phase 53: structural `Closure(...)`-shaped PHPDoc callable types -
-//! parsing (Sub-item A), contextual closure-body checking against a
-//! shaped `Closure(...)`-typed parameter (Sub-item B), and invoking a
-//! callable-typed value directly (Sub-item C).
+//! Structural `Closure(...)`-shaped PHPDoc callable types - parsing,
+//! contextual closure-body checking against a shaped `Closure(...)`-
+//! typed parameter, and invoking a callable-typed value directly.
 
 use super::helpers::*;
 
@@ -41,20 +40,18 @@ fn a_bare_callable_type_and_a_shaped_closure_type_are_mutually_assignable() {
 
 #[test]
 fn a_template_param_inside_a_closure_shape_is_marked_not_left_as_a_bogus_class_reference() {
-    // Not full call-site template *substitution* (Sub-item B's own
-    // design - `check_expr`'s new arm reads the callee's own raw,
-    // unsubstituted `FunctionSig.params[i].ty` as the override list,
-    // with no per-call generic-argument inference of its own - a real,
-    // disclosed narrower scope than a name like "substituted at a call
-    // site" would suggest) - what this actually verifies is Phase 53's
-    // own `mark_template_params` fix: `T` inside `Closure(T): string`
-    // is a real `Type::TemplateParam`, not an unresolved `Object("T",
-    // [])` a real call could never satisfy. An already-hinted closure
-    // parameter (`int $x` here) keeps its own native hint regardless
-    // either way (`check_closure_literal_with_param_overrides`'s own
-    // "declared type always wins over an inferred override" rule), so
-    // this doesn't by itself prove template substitution happens for an
-    // *unhinted* one - not yet exercised by any test.
+    // Not full call-site template *substitution* - `check_expr`'s arm
+    // reads the callee's own raw, unsubstituted
+    // `FunctionSig.params[i].ty` as the override list, with no per-call
+    // generic-argument inference of its own. What this verifies is
+    // `mark_template_params`: `T` inside `Closure(T): string` is a real
+    // `Type::TemplateParam`, not an unresolved `Object("T", [])` a real
+    // call could never satisfy. An already-hinted closure parameter
+    // (`int $x` here) keeps its own native hint regardless either way
+    // (`check_closure_literal_with_param_overrides`'s own "declared
+    // type always wins over an inferred override" rule), so this
+    // doesn't by itself prove template substitution happens for an
+    // *unhinted* one.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -77,8 +74,8 @@ fn a_template_param_inside_a_closure_shape_is_marked_not_left_as_a_bogus_class_r
 
 #[test]
 fn a_closure_literal_argument_at_a_closure_shaped_parameter_gets_its_unhinted_params_typed() {
-    // Sub-item B: `$x` has no native/arrow-fn type hint of its own, so it
-    // should pick up `int` from the declared `Closure(int): string` shape -
+    // `$x` has no native/arrow-fn type hint of its own, so it should
+    // pick up `int` from the declared `Closure(int): string` shape -
     // calling an int-only method on it should be clean, and calling a
     // string-only method should be flagged.
     let d = diagnostics_for(
@@ -201,11 +198,10 @@ fn invoking_a_shaped_callable_value_with_a_mismatched_argument_type_is_flagged()
 
 #[test]
 fn invoking_a_shaped_callable_value_through_an_array_element_still_checks_its_callee() {
-    // Real, previously-free bug fixed alongside Sub-item C: the callee
-    // sub-expression of a dynamic call (here, an array-element access,
-    // not a plain variable) was never independently `check_expr`'d
-    // before - an undefined variable used as the array itself should
-    // still be flagged.
+    // The callee sub-expression of a dynamic call (here, an
+    // array-element access, not a plain variable) must be independently
+    // `check_expr`'d - an undefined variable used as the array itself
+    // should still be flagged.
     let d = diagnostics_for(
         r#"<?php
             function test(): void {
