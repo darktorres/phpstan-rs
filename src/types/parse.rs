@@ -22,7 +22,7 @@ pub fn parse_type_string(raw: &str) -> Type {
     let amp_parts = split_top_level(s, '&');
     let ty = if pipe_parts.len() > 1 {
         let members: Vec<Type> = pipe_parts.into_iter().map(parse_type_atom).collect();
-        // Phase 32 Finding H: `Mixed` already includes every other
+        // `Mixed` already includes every other
         // possible value, so a union with `Mixed` sitting alongside
         // anything else (`end()`'s real stub: `@return mixed|false`,
         // never updated after `end(): mixed` dropped its own native
@@ -64,7 +64,7 @@ pub fn parse_type_string(raw: &str) -> Type {
 /// `depth` below zero and silently swallowing every top-level separator
 /// for the rest of the string - `'->'|'::' ` mangled into the single,
 /// nonsensical literal `Type::StringLiteral("->'|'::")`.
-/// Phase 53: the byte index of the `)` matching the FIRST `(` in `s`
+/// The byte index of the `)` matching the FIRST `(` in `s`
 /// (`s` must start at or before that `(`), tracking bracket depth/quotes
 /// the same way `split_top_level` does - no existing helper answers "an
 /// opening bracket's own matching close" (`split_top_level` only ever
@@ -95,7 +95,7 @@ fn find_matching_paren(s: &str) -> Option<usize> {
     None
 }
 
-/// Phase 53 Sub-item A: real structural parsing of a `Closure(...)`/
+/// Real structural parsing of a `Closure(...)`/
 /// `callable(...)` PHPDoc shape - `stripped` is `s` with any leading `\`
 /// already removed (case preserved, unlike the `lower` prefix-matching
 /// gate at this function's own call site). `None` on anything not
@@ -304,7 +304,7 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
             fields.push(("...".to_string(), Type::Mixed, false));
             continue;
         }
-        // Phase 33 Finding 3: a *positional* (unkeyed) field
+        // A *positional* (unkeyed) field
         // (`array{int, string}`, real PHPStan/Psalm tuple syntax) has no
         // `key:` prefix at all - `split_once(':')` alone can't tell that
         // apart from a keyed field whose own type happens to contain a
@@ -450,7 +450,7 @@ fn strip_shape_key_quotes(key: &str) -> &str {
     key
 }
 
-/// Phase 80 follow-up, real PHPStan's own `OffsetAccessType::getResult()`:
+/// Real PHPStan's own `OffsetAccessType::getResult()`:
 /// extracts `key`'s own value type out of `base`. Only the shapes that
 /// come up in practice are resolved (`ArrayShape`/`ObjectShape`'s own
 /// per-field lookup, a plain `Array`'s uniform value type, `Union`
@@ -651,7 +651,7 @@ fn parse_type_atom(s: &str) -> Type {
     if let Ok(n) = s.parse::<i64>() {
         return Type::IntLiteral(n);
     }
-    // Phase 14: mirrors the int-literal case just above, for a real
+    // Mirrors the int-literal case just above, for a real
     // float literal (`1.5|2.5`) - checked after the int case so an
     // integer-looking string is still caught as `IntLiteral` first.
     if let Ok(f) = s.parse::<f64>() {
@@ -691,7 +691,7 @@ fn parse_type_atom(s: &str) -> Type {
         return ty;
     }
 
-    // Phase 80 follow-up: PHPDoc/PHPStan's own `OffsetAccessType` syntax -
+    // PHPDoc/PHPStan's own `OffsetAccessType` syntax -
     // `SomeShape['key']` (a bare/unquoted key works too, e.g. an int
     // key) extracts one key's own value type out of whatever `SomeShape`
     // resolves to. Checked *after* the `[]`-array-shorthand loop just
@@ -799,7 +799,7 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
 
 fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]) -> Type {
     match bare.to_ascii_lowercase().as_str() {
-        // Phase 14: `int<min, max>` and its named shorthands are real
+        // `int<min, max>` and its named shorthands are real
         // ranges now, not aliased to plain `Int` - `IntRange` fully
         // replaces `Int`'s own range, the same relationship `IntLiteral`
         // has to `Int`. `int`/`integer` additionally read `generic_args`
@@ -841,7 +841,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // discarded here, not left unconsumed.
         "int-mask" | "int-mask-of" => Type::Int,
         "float" | "double" => Type::Float,
-        // Phase 14: the accessory-refined string pseudo-types are real
+        // The accessory-refined string pseudo-types are real
         // `Intersection([String, Accessory(_)])` types, mirroring real
         // PHPStan's own `IntersectionType([StringType, AccessoryXType])`
         // representation. `callable-string`/`trait-string`/
@@ -852,13 +852,12 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // optional `<Foo>` generic argument is similarly just dropped
         // rather than tracked.
         //
-        // Phase 75: `lowercase-string`/`uppercase-string`/`non-empty-
-        // lowercase-string`/`non-empty-uppercase-string` used to join
-        // that same "can't verify content" group too, downgraded to
-        // plain `string` - but unlike `callable-string`/`trait-string`/
-        // etc., case-content genuinely *is* now something this project
-        // can prove: `types::subtype`'s own new `LowercaseString`/
-        // `UppercaseString` literal-fact arms, and the case-tracking
+        // `lowercase-string`/`uppercase-string`/`non-empty-
+        // lowercase-string`/`non-empty-uppercase-string` are unlike
+        // `callable-string`/`trait-string`/etc.: case-content genuinely
+        // *is* something this project can prove -
+        // `types::subtype`'s own `LowercaseString`/`UppercaseString`
+        // literal-fact arms, and the case-tracking
         // producers `strtolower`/`strtoupper`/etc. now wire (`checker/
         // expr/builtin_calls.rs`), give these two real, checkable
         // content. Routed through the identical `Intersection([String,
@@ -883,7 +882,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::Accessory(AccessoryKind::NonEmptyString),
             Type::Accessory(AccessoryKind::UppercaseString),
         ]),
-        // Phase 75: `decimal-int-string` mirrors real PHPStan's own
+        // `decimal-int-string` mirrors real PHPStan's own
         // `IntersectionType([StringType, AccessoryDecimalIntegerStringType])`
         // (`TypeNodeResolver.php`) - the `inverse` variant (`non-decimal-
         // int-string`) stays unaliased/undegraded-to-string here (falls
@@ -1002,7 +1001,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // namespace-qualification exemption below for the same reason:
         // "resource" isn't a real class reference to resolve per-file.
         "resource" => Type::Object("resource".to_string(), Vec::new()),
-        // Phase 80: `value-of<T>`/`key-of<T>` - real PHPStan's own
+        // `value-of<T>`/`key-of<T>` - real PHPStan's own
         // `ValueOfType`/`KeyOfType`, both `LateResolvableType`s evaluated
         // against `T`'s own resolved type only once actually needed. This
         // project has no general lazy/deferred type-resolution mechanism
@@ -1014,7 +1013,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `value-of<T>` does, confirmed directly against `KeyOfType::
         // getResult()`/`ValueOfType::getResult()`).
         //
-        // Phase 80 follow-up: `T` naming a bare class/enum reference (no
+        // `T` naming a bare class/enum reference (no
         // template args) is exactly real PHPStan's own `value-of<T>`-on-an-
         // enum special case (`key-of<T>` on a class/enum has no real
         // PHPStan special case at all - it just falls to `getIterableKeyType()`,
@@ -1081,7 +1080,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "void" => Type::Void,
         "mixed" => Type::Mixed,
         "never" | "noreturn" => Type::Never,
-        // Phase 50: `array<K, V>`'s key argument is now real
+        // `array<K, V>`'s key argument is real
         // (`Type::Array`'s own key slot), not discarded. `array<V>`
         // (1-arg) and bare `array` still mean "key unknown" -
         // `Type::unknown_array_key()`. `class-string-map<TKey, TValue>`
@@ -1103,7 +1102,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 )
             }
         },
-        // Phase 14: `list`/`non-empty-array`/`non-empty-list` are now
+        // `list`/`non-empty-array`/`non-empty-list` are
         // real `Intersection([Array(_), Accessory(_)])` types, mirroring
         // real PHPStan's own `IntersectionType([ArrayType,
         // AccessoryArrayListType/NonEmptyArrayType])` representation -
@@ -1115,17 +1114,16 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 1 => parse_type_string(generic_args[0]),
                 _ => parse_type_string(generic_args[1]),
             };
-            // Phase 50: `list`/`non-empty-list` genuinely can only ever
-            // have sequential int keys - a real precision win over the
+            // `list`/`non-empty-list` genuinely can only ever have
+            // sequential int keys - a real precision win over the
             // default `int|string`, not just arity-matching.
             //
-            // Phase 74 corpus find: `non-empty-array` makes no such
-            // *implicit* promise (non-emptiness alone says nothing about
-            // key type) - but an *explicit* 2-arg `non-empty-array<K, V>`
-            // still names a real `K`, exactly like plain `array<K, V>`
-            // does, and previously always got thrown away here in favor
-            // of the unknown default regardless of what was actually
-            // written - `key()`/`array_key_first()`/`array_key_last()`'s
+            // `non-empty-array` makes no such *implicit* promise
+            // (non-emptiness alone says nothing about key type) - but an
+            // *explicit* 2-arg `non-empty-array<K, V>` still names a real
+            // `K`, exactly like plain `array<K, V>` does, and must not be
+            // thrown away here in favor of the unknown default -
+            // `key()`/`array_key_first()`/`array_key_last()`'s
             // own new precision (this same phase) immediately surfaced
             // it by silently losing a docblock's own `non-empty-array<
             // string, int>` key type.
@@ -1211,7 +1209,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // A user-defined generic class (`Collection<User>`): each type
         // argument is itself a full type string (could be a union, a
         // nested generic, ...), so it's re-run through `parse_generic_arg`
-        // (Phase 54: call-site-variance-aware; falls straight through to
+        // (call-site-variance-aware; falls straight through to
         // `parse_type_string` - the same recursive-field pattern
         // `try_parse_array_shape` already uses - for an ordinary
         // argument). A bare (non-generic) reference just gets an empty
@@ -1225,7 +1223,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
     }
 }
 
-/// Phase 54: real PHPStan's own call-site variance annotation syntax on
+/// Real PHPStan's own call-site variance annotation syntax on
 /// one generic type argument - `Collection<covariant Foo>`,
 /// `Collection<contravariant Foo>`, or `Collection<*>` ("don't check
 /// this argument at all"). Confirmed directly against `phpdoc-parser`'s
@@ -1235,8 +1233,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
 /// generic type position (`@param`/`@return`/`@var`/`@extends`/
 /// `@implements` alike), not just a hypothetical. Encoded with the same
 /// "sentinel via an existing `Type::Object` variant, guarded by a name
-/// no real PHP identifier can ever collide with" idiom Phase 80 already
-/// established for `value-of<T>`'s own `"$$valueof"` -
+/// no real PHP identifier can ever collide with" idiom `value-of<T>`
+/// already uses for its own `"$$valueof"` -
 /// `"$$covariant"`/`"$$contravariant"` each wrap the real argument
 /// type; `"$$bivariant"` (`*`) has no real argument to wrap. Consulted
 /// by `Registry::effective_slot_variance` (`registry.rs`), which lets a
