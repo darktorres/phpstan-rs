@@ -10,7 +10,7 @@ use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// Walks `ty` for every `Object(class, args)` naming a class with its
-    /// own `@template T of Bound` (Phase 10.5's bound-enforcement half),
+    /// own `@template T of Bound` (the bound-enforcement half),
     /// flagging any argument that doesn't satisfy its bound - e.g.
     /// `Collection<Foo>` where `Collection`'s own `@template T of Shape`
     /// and `Foo` doesn't implement `Shape`. Recurses into every argument
@@ -44,8 +44,7 @@ impl<'a> Checker<'a> {
     /// variance match slot `i`'s declared one" as it is for a plain count
     /// comparison. Every other caller, including this function's own
     /// recursion into a generic reference's nested arguments just below,
-    /// always keeps both pervasive checks - the whole point of Phase 54's
-    /// own follow-up: real PHPStan's own `GenericObjectTypeCheck`
+    /// always keeps both pervasive checks, matching real PHPStan's own `GenericObjectTypeCheck`
     /// (confirmed via `IncompatiblePhpDocTypeCheck`, the shared engine
     /// behind param/property/return-type PHPDoc checking) runs both at
     /// *every* declared generic-type position, not just a class's own
@@ -69,7 +68,7 @@ impl<'a> Checker<'a> {
                     && let Some(info) = self.registry.classes.get(class)
                     && !info.template_bounds.is_empty()
                 {
-                    // Phase 54: bound-checking cares about the real
+                    // Bound-checking cares about the real
                     // referenced type, not a call-site variance marker
                     // wrapping it (`Collection<covariant Foo>` still
                     // needs `Foo` itself checked against the bound,
@@ -159,12 +158,12 @@ impl<'a> Checker<'a> {
     /// `false` if `ty` mentions any class this project has no real data
     /// for at all - an uninstalled dependency, or a PHAR-bundled one
     /// (real `phpstan/phpstan` ships as a compiled PHAR with no loose
-    /// source files, the same gap Phase 9's own undefined-symbol checks
+    /// source files, the same gap undefined-symbol checks
     /// already document). `check_generic_bounds` uses this to skip a
     /// bound it has no way to actually verify, rather than guess wrong.
     pub(crate) fn is_type_fully_known(&self, ty: &Type) -> bool {
         match ty {
-            // Phase 54: a call-site variance sentinel's own name is
+            // A call-site variance sentinel's own name is
             // never a real class to look up - defer to whatever it
             // wraps (`"$$bivariant"` wraps nothing at all, trivially
             // "known" the same way this function's own catch-all
@@ -213,7 +212,7 @@ impl<'a> Checker<'a> {
         for p in &c.properties {
             if let Some(prop_sig) = info.properties.get(&p.name) {
                 self.check_generic_bounds(&prop_sig.ty, fqn, p.span);
-                // Phase 48: `ExistingClassesInPropertiesRule`'s own check -
+                // `ExistingClassesInPropertiesRule`'s own check -
                 // reuses this exact loop (same resolved `PropertySig::ty`,
                 // same real per-property span) rather than a second walk
                 // over `c.properties` elsewhere.
@@ -223,7 +222,7 @@ impl<'a> Checker<'a> {
                     p.span,
                     fqn,
                 );
-                // Phase 48.A: `property.trait` - see `check_type_trait_refs`'s
+                // `property.trait` - see `check_type_trait_refs`'s
                 // own doc comment.
                 self.check_type_trait_refs(
                     &prop_sig.ty,
@@ -232,15 +231,14 @@ impl<'a> Checker<'a> {
                     fqn,
                     "property.trait",
                 );
-                // Phase 48 follow-up (item 7c): `class.nameCase` for this
-                // PHPDoc-typed property position.
+                // `class.nameCase` for this PHPDoc-typed property position.
                 self.check_type_class_name_case(&prop_sig.case_refs, fqn, p.span);
                 self.check_type_internal_usage(&prop_sig.case_refs, fqn, p.span);
             }
         }
         self.check_property_tag_types(fqn, c);
         self.check_ancestor_generic_bounds(fqn, c.span);
-        // Phase 54: `TemplateTypeCheck`'s own declaration-validity family,
+        // `TemplateTypeCheck`'s own declaration-validity family,
         // class-level (real PHPStan's own per-kind rule split -
         // `ClassTemplateTypeRule`/`InterfaceTemplateTypeRule`/
         // `TraitTemplateTypeRule` - all funnel into the identical shared
@@ -268,10 +266,10 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 36's own "bright spot": `@property`/`@property-read`/
+    /// `@property`/`@property-read`/
     /// `@property-write`'s *validation* half (real PHPStan's own
     /// `PropertyTagCheck`) - parsing and inference already shipped back
-    /// in Phase 13 Finding D (`ClassInfo::from_decl` already synthesizes
+    /// (`ClassInfo::from_decl` already synthesizes
     /// every tag into a real, resolved `PropertySig`, exactly the way a
     /// magic `__get`/`__set`-backed property needs); only the diagnostic
     /// layer checking the tag's own declared type was missing. Mirrors
@@ -320,14 +318,13 @@ impl<'a> Checker<'a> {
                 c.span,
                 fqn,
             );
-            // Phase 48 follow-up (item 7c): `class.nameCase` for this
-            // `@property`-tag target.
+            // `class.nameCase` for this `@property`-tag target.
             self.check_type_class_name_case(&prop_sig.case_refs, fqn, c.span);
             self.check_type_internal_usage(&prop_sig.case_refs, fqn, c.span);
         }
     }
 
-    /// Phase 66: the `extends`/`implements` half of
+    /// The `extends`/`implements` half of
     /// `check_class_generic_bounds`, split out so an enum declaration -
     /// which can `implements` a generic interface but has no properties
     /// and can't `extends` anything - can share it too. Previously this
@@ -335,15 +332,15 @@ impl<'a> Checker<'a> {
     /// generic-bound violations written on an enum's own `implements`
     /// clause.
     ///
-    /// Phase 54 follow-up: also covers `@use Trait<Arg, ...>` (a `use`
+    /// Also covers `@use Trait<Arg, ...>` (a `use`
     /// clause's own generic arguments) - real PHPStan's own
     /// `UsedTraitsRule` is a separate rule (triggered per `TraitUse`
     /// statement node, with its own trait-name-mismatch diagnostics this
     /// project doesn't replicate), but its actual bound/arity/call-site-
     /// variance checking is the identical `GenericObjectTypeCheck`/
     /// `GenericAncestorsCheck` machinery this function already runs for
-    /// `extends`/`implements` - folding it in here, the same way Phase 66
-    /// already unified `extends`+`implements` for enums, avoids a third
+    /// `extends`/`implements` - folding it in here, the same way this function
+    /// already unifies `extends`+`implements` for enums, avoids a third
     /// near-duplicate call site for what's ultimately the same check.
     pub(crate) fn check_ancestor_generic_bounds(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
@@ -393,7 +390,7 @@ impl<'a> Checker<'a> {
             let iface_ty = Type::Object(iface.clone(), info.implements_args[iface].clone());
             types_to_check.push((iface_ty, true));
         }
-        // `@use Trait<Arg, ...>` (Phase 54 follow-up) - a `HashMap` just
+        // `@use Trait<Arg, ...>` - a `HashMap` just
         // like `implements_args`, each trait keyed independently (no
         // `extends_args`-style conflation risk: a class can `use` more
         // than one generic trait, but PHP requires one `@use` tag per
@@ -408,12 +405,12 @@ impl<'a> Checker<'a> {
         for (ty, check_arity) in &types_to_check {
             self.check_generic_bounds_and_arity(ty, fqn, span, *check_arity);
         }
-        // Phase 54's last build item: `generics.interfaceConflict` - see
+        // `generics.interfaceConflict` - see
         // `checker::generics::interfaces`'s own module doc comment.
         self.check_cross_path_interface_conflicts(fqn, span);
     }
 
-    /// Phase 54 follow-up: `GenericObjectTypeCheck`'s own arity/well-
+    /// `GenericObjectTypeCheck`'s own arity/well-
     /// formedness half (`generics.lessTypes`/`.moreTypes`, confirmed
     /// directly against `vendor/phpstan-src`) - a genuinely different
     /// rule than `check_generic_bounds`'s own bound-checking, which
@@ -524,7 +521,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 54 follow-up: `GenericObjectTypeCheck`'s own call-site-
+    /// `GenericObjectTypeCheck`'s own call-site-
     /// variance half (`generics.callSiteVarianceConflict`/
     /// `.callSiteVarianceRedundant`, confirmed directly against
     /// `vendor/phpstan-src`) - a call-site variance marker
@@ -603,8 +600,8 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 54: `TemplateTypeCheck`'s own declaration-validity family
-    /// (confirmed by direct read, `vendor/phpstan-src`) - validates a
+    /// `TemplateTypeCheck`'s own declaration-validity family
+    /// (`vendor/phpstan-src`) - validates a
     /// `@template` tag's own declaration, not a usage site. Shared
     /// between a class/interface/trait's own templates (`templates`/
     /// `bounds`/`defaults` read straight off its `ClassInfo`) and a
@@ -721,9 +718,9 @@ impl<'a> Checker<'a> {
     }
 }
 
-/// Phase 54: mirrors real PHPStan's own `TemplateTypeCheck`-internal
-/// hardcoded whitelist of ~15 supported `@template ... of Bound` shapes
-/// (confirmed by direct read) - deliberately conservative, mapped onto
+/// Mirrors real PHPStan's own `TemplateTypeCheck`-internal hardcoded
+/// whitelist of ~15 supported `@template ... of Bound` shapes -
+/// deliberately conservative, mapped onto
 /// this project's own `Type` variants rather than PHPStan's type-class
 /// list: anything not explicitly recognized here is treated as
 /// unsupported, since a false "supported" would silently let a genuinely
