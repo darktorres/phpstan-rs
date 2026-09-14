@@ -34,7 +34,7 @@ pub(crate) fn is_magic_method_name(lower: &str) -> bool {
 }
 
 impl<'a> Checker<'a> {
-    /// Finding 59: every case of a backed enum must have a unique backing
+    /// Every case of a backed enum must have a unique backing
     /// value - a real, unconditional PHP fatal error at declaration time
     /// otherwise ("Duplicate value in enum ... for case ..."), not merely
     /// a design smell. Only compares cases whose value is a literal
@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Phase 66: `EnumTemplateTypeRule` - enums can't be generic in real
+    /// `EnumTemplateTypeRule` - enums can't be generic in real
     /// PHP (there's no `enum Foo<T>` syntax at all), so a stray
     /// `@template` tag on one's own doc comment is always a mistake,
     /// never a real declaration the way it would be on a class.
@@ -85,12 +85,12 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// Phase 66: the rest of real PHPStan's own `EnumSanityRule`
+    /// The rest of real PHPStan's own `EnumSanityRule`
     /// (`vendor/phpstan-src/src/Rules/Classes/EnumSanityRule.php`) -
     /// `check_enum_case_values` above already covers its hardest sub-
     /// check (duplicate backing values). Every one of these is a real,
-    /// unconditional PHP fatal error at declaration time (confirmed
-    /// directly via `php -l`): a magic method other than `__call`/
+    /// unconditional PHP fatal error at declaration time: a magic
+    /// method other than `__call`/
     /// `__callStatic`/`__invoke`, redeclaring the native `cases()`/
     /// `from()`/`tryFrom()`, a backing type that isn't literally `int`/
     /// `string`, a value on a non-backed enum's case, a missing value on

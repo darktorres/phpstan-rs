@@ -103,11 +103,10 @@ fn class_interface_and_trait_declarations_are_tagged_with_their_own_kind() {
 
 #[test]
 fn a_class_named_the_same_as_a_keyword_keeps_its_own_declared_case() {
-    // Phase 48 follow-up (item 6): real vendored `marc-mabe/php-enum`
-    // declares a class literally named `Enum` (case-sensitive match
-    // against the `enum` keyword's own canonical spelling) - this used
-    // to be silently corrupted to `enum` by `take_name_segment`'s own
-    // keyword-recovery path.
+    // Real vendored `marc-mabe/php-enum` declares a class literally
+    // named `Enum` (case-sensitive match against the `enum` keyword's
+    // own canonical spelling) - `take_name_segment`'s own
+    // keyword-recovery path must not corrupt it to `enum`.
     let program = parse("<?php class Enum { public static function foo(): void {} }");
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
@@ -266,10 +265,8 @@ fn an_insteadof_clause_records_its_method_as_a_resolved_conflict() {
 #[test]
 fn an_insteadof_clause_with_a_fully_qualified_trait_name_is_still_parsed() {
     // A trait name before `::` in a trait-adaptation clause can be
-    // fully qualified (`\Some\Trait::method insteadof ...`) - found
-    // via bulk-running this project's checker against the vendored
-    // phpstan-src corpus (nsrt/traits/traits.php uses exactly this
-    // shape and previously failed to parse at all).
+    // fully qualified (`\Some\Trait::method insteadof ...`) - real
+    // shape: vendored phpstan-src's own nsrt/traits/traits.php.
     let program = parse(
         r#"<?php
             class C {
@@ -329,11 +326,10 @@ fn anonymous_class_parses_with_interface_and_constructor_args() {
 
 #[test]
 fn anonymous_class_with_a_leading_attribute_group_parses() {
-    // Regression test: real PHP allows `#[Attr]` between `new` and `class`
-    // for an anonymous class (confirmed against the PHP manual's own
-    // `new #[ExampleAttribute] class () {}` example, and against a real
-    // corpus file - Piwigo's tests/Unit/Template/RendererTest.php - that
-    // uses exactly this shape and used to fail to parse entirely).
+    // Real PHP allows `#[Attr]` between `new` and `class` for an
+    // anonymous class (the PHP manual's own
+    // `new #[ExampleAttribute] class () {}` example; real shape:
+    // Piwigo's tests/Unit/Template/RendererTest.php).
     let program = parse(
         r#"<?php
             $x = new #[TemplateAttr('a.latte')] class implements Countable {
@@ -405,7 +401,7 @@ fn property_hooks_parse() {
     assert_eq!(param.as_ref().unwrap().name, "value");
     assert!(matches!(body, PropertyHookBody::Block(_)));
 
-    // Phase 64 Item 1: a bodyless hook (`get;`/`set;`) parses to
+    // A bodyless hook (`get;`/`set;`) parses to
     // `Some(PropertyHookBody::Abstract)`/`Some((None, PropertyHookBody::
     // Abstract))`, not `None` - distinguishing "an abstract hook was
     // declared with no body" from "no hook at all", which `None` alone
@@ -562,8 +558,7 @@ fn readonly_class_still_parses_as_a_class() {
     assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo"));
 }
 
-// Phase 37: `#[...]` was previously thrown away entirely by the lexer -
-// these exercise the real `Attribute { name, args }` node now parsed onto
+// These exercise the real `Attribute { name, args }` node parsed onto
 // every declaration site that can carry one.
 
 #[test]

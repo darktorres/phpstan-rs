@@ -202,11 +202,10 @@ impl Parser {
     /// as opposed to a real spread argument like `foo(...$rest)`, which is
     /// followed by an expression, not directly by `)`).
     /// Returns `(args, is_first_class_callable)`. Each `Arg` captures its
-    /// own `name:` label (a named argument, `name: expr`) and `...` spread
-    /// marker - previously both were parsed then immediately discarded,
-    /// silently making every named/reordered-named/spread call get
-    /// checked as if its arguments were positional in written order (see
-    /// Item 1's own design notes for the real bug this caused).
+    /// own `name:` label (a named argument, `name: expr`) and `...`
+    /// spread marker - needed so a named/reordered-named/spread call
+    /// isn't checked as if its arguments were positional in written
+    /// order.
     pub(crate) fn parse_args(&mut self) -> Result<(Vec<Arg>, bool), ParseError> {
         self.expect(&Token::LParen)?;
         if matches!(self.peek(), Token::Ellipsis) && matches!(self.peek_at(1), Token::RParen) {

@@ -79,7 +79,7 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
     let Some(b_notification) = b_notification else {
         panic!("expected a publishDiagnostics notification for b.php, got: {messages:?}");
     };
-    // Found by content, not indexed as `diagnostics[0]` - Phase 58's own
+    // Found by content, not indexed as `diagnostics[0]` -
     // `missingType.return` (`useGreeter` itself has no `: T` return
     // type) is a second, real diagnostic on this exact fixture, sorted
     // ahead of the undefined-method one below since it anchors to the
@@ -97,9 +97,8 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
             "expected a diagnostic mentioning the now-missing greet() method, got: {b_notification:?}"
         );
     };
-    // A real range, not the old hardcoded {0,0}-{0,1} placeholder -
-    // pointing at `$g->greet()` itself (0-indexed LSP columns for a
-    // 1-indexed byte range starting at real column 48).
+    // A real range pointing at `$g->greet()` itself (0-indexed LSP
+    // columns for a 1-indexed byte range starting at real column 48).
     assert_eq!(
         greet_diagnostic["range"],
         json!({"start": {"line": 0, "character": 47}, "end": {"line": 0, "character": 58}})
@@ -169,12 +168,11 @@ fn uri_to_path_and_path_to_uri_round_trip() {
     assert_eq!(uri_to_path(&not_a_uri), None);
 }
 
-// Finding 1 from the architecture audit - a malformed message body
-// (a real Content-Length header, correctly consumed, but invalid
-// JSON) used to terminate the whole session rather than just being
-// skipped; a per-file parser panic during didOpen/didChange/the
-// initial workspace scan used to crash the whole server process
-// rather than just failing to analyze that one file.
+// A malformed message body (a real Content-Length header, correctly
+// consumed, but invalid JSON) must be skipped, not terminate the whole
+// session; a per-file parser panic during didOpen/didChange/the
+// initial workspace scan must fail to analyze that one file, not crash
+// the whole server process.
 
 #[test]
 fn a_malformed_message_body_is_skipped_without_terminating_the_session() {

@@ -1,14 +1,11 @@
-//! Phase 18 Axis 2: a documented, public reflection-level extension
-//! surface - formalizing what this crate already exposes as an
-//! unofficial, if latent, extension point rather than leaving it an
-//! accidental side effect. `phpstan-rs` is already a library crate:
-//! `Project::registry()`/`check_file` are `pub`, `Registry::classes`/
-//! `.functions` are `pub` `FxHashMap`s of fully-`pub`-fielded
-//! `ClassInfo`/`FunctionSig`, `Diagnostic` is a `pub struct` with every
-//! field `pub`, and `ast::{Stmt, Expr, ...}` is fully public - an
-//! external crate could already write exactly this kind of check by hand
-//! against `project.registry().classes`, just without a named trait to
-//! implement or a single entry point to run a list of them through.
+//! A documented, public reflection-level extension surface.
+//! `phpstan-rs` is already a library crate: `Project::registry()`/
+//! `check_file` are `pub`, `Registry::classes`/`.functions` are `pub`
+//! `FxHashMap`s of fully-`pub`-fielded `ClassInfo`/`FunctionSig`,
+//! `Diagnostic` is a `pub struct` with every field `pub`, and
+//! `ast::{Stmt, Expr, ...}` is fully public - this trait gives an
+//! external crate a named entry point for exactly this kind of check,
+//! rather than writing it by hand against `project.registry().classes`.
 //!
 //! **What this tier can see**: whatever a fully-resolved `ClassInfo`/
 //! `FunctionSig` records - declared types (native and PHPDoc-merged),
@@ -21,9 +18,9 @@
 //! mid-analysis, with a live `Scope`) - it's the reflection-only half,
 //! matching real PHPStan's own `ClassReflectionExtension`/
 //! `ReflectionProvider`-consuming tooling more than an ordinary `Rule`.
-//! Axis 3 (staged separately, see `checker::internal_rules`'s own doc
-//! comment) is where flow-sensitive, mid-analysis extension points would
-//! eventually live, once a real `Scope` facade exists to expose safely.
+//! Flow-sensitive, mid-analysis extension points (see
+//! `checker::internal_rules`'s own doc comment) would need a real
+//! `Scope` facade to expose safely, which doesn't exist yet.
 
 use crate::checker::Diagnostic;
 use crate::registry::{ClassInfo, FunctionSig};
