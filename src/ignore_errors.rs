@@ -8,12 +8,11 @@
 //! manually re-typed into `Config::ignore_errors` instead, the same way
 //! `paths`/`scan_paths` already are.
 //!
-//! Real corpus shape this exists for: Piwigo's own `phpstan.neon` ignores
-//! `missingType.iterableValue`/`variable.undefined`/`nullCoalesce.*`/a
-//! handful of `internal(Class)` identifiers under `_analysis/phpstan-latte/*`
-//! (Latte's own *compiled template output*, not hand-written code) - real
-//! PHPStan reports 0 diagnostics there because of this config, not because
-//! nothing would otherwise be found.
+//! A common real shape this exists for: a project ignoring diagnostics
+//! like `missingType.iterableValue`/`variable.undefined`/`nullCoalesce.*`
+//! under a generated-code directory (compiled templates, not hand-written
+//! code) - real PHPStan reports nothing there because of this config,
+//! not because nothing would otherwise be found.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
