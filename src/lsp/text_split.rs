@@ -1,5 +1,5 @@
-//! Phase 17: recovers a real per-name `Span` from a larger span whose
-//! source text holds more than one name (`Foo::CONST`, `?Foo`,
+//! Recovers a real per-name `Span` from a larger span whose source text
+//! holds more than one name (`Foo::CONST`, `?Foo`,
 //! `Foo|Bar`, `extends A, B`) - none of which the AST tracks separately
 //! (see `ast.rs`'s own `Span`-carrying fields this module's callers
 //! read). Re-lexes *just that span's own text* (never the whole file)
@@ -236,13 +236,11 @@ mod tests {
 
     #[test]
     fn split_identifier_spans_does_not_filter_self_static_parent() {
-        // Phase 17 regression: is_primitive_type_name (deps.rs's own
-        // "not an independent dependency edge" list) also lists self/
-        // static/parent - filtering those out here broke the count check
-        // for every self::X/static::X/parent::X StaticAccess, since a
-        // caller there always expects both halves back. Confirmed via a
-        // real corpus-shaped case (self::LIMIT) during this phase's own
-        // navigation.rs tests.
+        // is_primitive_type_name (deps.rs's own "not an independent
+        // dependency edge" list) also lists self/static/parent -
+        // filtering those out here would break the count check for every
+        // self::X/static::X/parent::X StaticAccess, since a caller there
+        // always expects both halves back.
         let src = "<?php self::LIMIT;";
         let span = Span {
             start: Position { line: 1, col: 7 },

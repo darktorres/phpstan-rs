@@ -111,11 +111,11 @@ fn percent_encode_path(s: &str) -> String {
 /// text instead of dropped - `lsp_types::Diagnostic` has no field for
 /// it. `Span`'s 1-indexed line/col become LSP's 0-indexed line/character.
 ///
-/// Phase 47: `identifier` now has a real home - LSP's own `code` field,
-/// exactly what an editor's "quick fix"/problem-matcher tooling expects a
-/// stable per-diagnostic-kind string in. `tip`, when present, is appended
-/// to the message text the same way `location` already is - LSP has no
-/// separate field for a secondary hint either.
+/// `identifier` maps to LSP's own `code` field, exactly what an editor's
+/// "quick fix"/problem-matcher tooling expects a stable per-diagnostic-
+/// kind string in. `tip`, when present, is appended to the message text
+/// the same way `location` already is - LSP has no separate field for a
+/// secondary hint either.
 pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
     let message = match &d.tip {
         Some(tip) => format!("{}: {}\n💡 {tip}", d.location, d.message),
