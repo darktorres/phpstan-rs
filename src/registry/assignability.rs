@@ -11,14 +11,8 @@ impl Registry {
             // The native `object` type hint (`Type::Object("object", _)` -
             // `types::parse_type_string`'s own sentinel for it, since
             // `object` is a reserved word no real class can ever be named)
-            // is satisfied by *any* class instance - a real, pre-existing
-            // gap this had never hit before Phase 10.5's bound-checking
-            // started comparing against it for the first time (a real,
-            // extremely common pattern: Doctrine's `EntityRepository
-            // <T of object>`). Confirmed live: a plain native `function
-            // f(): object { return new Foo(); }` was already
-            // incorrectly flagged before this fix, unrelated to generics
-            // at all.
+            // is satisfied by *any* class instance - an extremely common
+            // pattern, e.g. Doctrine's `EntityRepository<T of object>`.
             (Type::Object(_, _), Type::Object(b, _)) if b == "object" => true,
             // Real PHP recognizes (at least) four distinct shapes as a
             // valid `callable`: an actual `Closure` (already handled by
@@ -38,36 +32,17 @@ impl Registry {
             }
             (Type::String | Type::StringLiteral(_), Type::Callable(_)) => true,
             (Type::Array(_, _) | Type::ArrayShape(_), Type::Callable(_)) => true,
-            // Phase 54: type arguments used to be ignored here entirely
-            // (`Collection<Cat>` and `Collection<Dog>` were mutually
-            // assignable, always) - this project now genuinely models
-            // variance (`Type::TemplateParam::variance`, `@template-
-            // covariant`/`-contravariant`, and Phase 54's own call-site
-            // `covariant`/`contravariant`/`*` annotations,
-            // `types::parse_generic_arg`), so this comparison now
-            // actually applies it instead of skipping it. If `sup`'s own
-            // class isn't registered at all (an uninstalled dependency,
-            // or a PHAR-bundled one like `phpstan/phpstan` itself with no
-            // loose source to parse - the same "can't verify, don't
-            // guess" case `check_generic_bounds`'s own doc comment
-            // names), fall back to the pre-Phase-54 name/hierarchy-only
-            // comparison unchanged - the one deliberate leniency left in
-            // this design.
-            // Phase 54: type arguments used to be ignored here entirely
-            // (`Collection<Cat>` and `Collection<Dog>` were mutually
-            // assignable, always) - this project now genuinely models
-            // variance (`Type::TemplateParam::variance`, `@template-
-            // covariant`/`-contravariant`, and Phase 54's own call-site
-            // `covariant`/`contravariant`/`*` annotations,
-            // `types::parse_generic_arg`), so this comparison now
-            // actually applies it instead of skipping it. If `sup`'s own
-            // class isn't registered at all (an uninstalled dependency,
-            // or a PHAR-bundled one like `phpstan/phpstan` itself with no
-            // loose source to parse - the same "can't verify, don't
-            // guess" case `check_generic_bounds`'s own doc comment
-            // names), fall back to the pre-Phase-54 name/hierarchy-only
-            // comparison unchanged - the one deliberate leniency left in
-            // this design.
+            // Type arguments are compared with real variance
+            // (`Type::TemplateParam::variance`, `@template-covariant`/
+            // `-contravariant`, and call-site `covariant`/`contravariant`/
+            // `*` annotations, `types::parse_generic_arg`), not just
+            // skipped (`Collection<Cat>` and `Collection<Dog>` are not
+            // mutually assignable). If `sup`'s own class isn't registered
+            // at all (an uninstalled dependency, or a PHAR-bundled one
+            // like `phpstan/phpstan` itself with no loose source to
+            // parse), falls back to a plain name/hierarchy-only
+            // comparison - the one deliberate leniency left in this
+            // design.
             (Type::Object(a, args_a), Type::Object(b, args_b)) => {
                 if a != b && !self.is_subclass_of(a, b) {
                     return false;
@@ -80,10 +55,7 @@ impl Registry {
                 // recursion, allocating a `HashSet`/`HashMap` per call) is
                 // guaranteed to produce nothing the loop below would ever
                 // read - `info_b.templates` being empty makes that loop a
-                // no-op regardless of `effective_args_a`'s value. Found and
-                // fixed via a perf-optimization investigation workflow;
-                // measured as the single largest real, cleanly-attributable
-                // cost in this function across two real corpora.
+                // no-op regardless of `effective_args_a`'s value.
                 if info_b.templates.is_empty() {
                     return true;
                 }
@@ -150,35 +122,24 @@ impl Registry {
                     // still-unbound `TemplateParam` (a method/function's
                     // own `@template`, e.g. `E` in `EntityRepository<E>
                     // $repository`) is included here too, not just
-                    // `Mixed` - a real, corpus-found false positive this
-                    // fixed: `checker::calls`'s own call-argument
+                    // `Mixed`: `checker::calls`'s own call-argument
                     // template binding only ever binds a template used
-                    // as a *bare* param type (`T $value`), never one
+                    // as a bare param type (`T $value`), never one
                     // nested inside another class's own generic argument
                     // list, so `E` reaches this comparison exactly as
                     // unbound as it was declared - comparing it
                     // structurally against the real, concrete argument
                     // is exactly as wrong as comparing `Mixed` would be.
-                    // Real corpus shape: Piwigo's own `TypedRepository::
-                    // narrow(EntityRepository<E> $repository)` with
-                    // `@template E of object` - before this skip existed,
-                    // the pre-existing `(TemplateParam(tp), _) =>
-                    // matches!(*tp.bound, Type::Mixed) || is_assignable(
-                    // &tp.bound, sup)` arm ran the `object`-bound `E`'s
-                    // own upper bound against the real argument's
-                    // concrete class, `is_assignable(object, Concrete
-                    // Entity)`, and correctly said `false` (an arbitrary
-                    // object is genuinely not guaranteed to be that one
-                    // specific class - not a bug in that arm; a weak
-                    // bound like `object` legitimately can't prove the
-                    // narrower assignment sound). Skipping this slot
-                    // entirely for an unbound template - rather than
-                    // trying to make that comparison artificially permit
-                    // it - is what's actually correct: the real answer
-                    // isn't "yes" here, it's "not yet known, ask again
-                    // once `E` is bound," which this project's own call-
-                    // argument binding is simply never invoked for at
-                    // this nested position.
+                    // Skipping this slot entirely for an unbound template
+                    // - rather than falling back to the bound - is what's
+                    // actually correct: an arbitrary object is not
+                    // guaranteed to be a specific concrete class, so
+                    // comparing against a weak bound like `object` would
+                    // wrongly reject a legitimately sound assignment; the
+                    // real answer is "not yet known, ask again once `E`
+                    // is bound," which this project's own call-argument
+                    // binding is simply never invoked for at this nested
+                    // position.
                     if a_i == Type::Mixed
                         || b_i == Type::Mixed
                         || matches!(a_i, Type::TemplateParam(_))
@@ -210,8 +171,8 @@ impl Registry {
                 }
                 true
             }
-            // Phase 79: hierarchy-aware version of `types::is_subtype`'s
-            // own bare `EnumCase -> Object` name-equality rule - a case
+            // Hierarchy-aware version of `types::is_subtype`'s own bare
+            // `EnumCase -> Object` name-equality rule - a case
             // is assignable not just to its own enum's bare type but to
             // `UnitEnum`/`BackedEnum` (both synthesized `implements`
             // entries every enum gets, see `ClassInfo::from_enum_decl`)
@@ -263,35 +224,31 @@ impl Registry {
             // arm (see its doc comment for the full reasoning and why
             // this needs to run *before* the `Union` arms just below),
             // but recurses through `self.is_assignable` rather than the
-            // plain, hierarchy-*unaware* `types::is_subtype` - a real bug
-            // in an earlier version of this exact fix: delegating
-            // straight to `types::is_subtype(sub, sup)` silently dropped
-            // the class-hierarchy-walking half of this whole method for
-            // any bound check involving a `TemplateParam`, wrongly
-            // flagging real corpus code where a template's own bound is a
-            // union of *concrete classes* needing a real ancestor walk to
-            // match a single-class target (`phpstan/phpstan-strict-rules`'s
-            // own `@phpstan-template TNodeType of PreInc|PreDec|PostInc|
-            // PostDec` satisfying `Rule<TNodeType>`'s own `TNodeType of
-            // Node` bound - each of those four classes extends `Node`
-            // only via `Expr`, a real, multi-level ancestor chain plain
-            // name-equality can't see).
+            // plain, hierarchy-*unaware* `types::is_subtype`: delegating
+            // straight to `types::is_subtype(sub, sup)` would silently
+            // drop the class-hierarchy-walking half of this whole method
+            // for any bound check involving a `TemplateParam`, wrongly
+            // flagging code where a template's own bound is a union of
+            // concrete classes needing a real ancestor walk to match a
+            // single-class target (e.g. `@phpstan-template TNodeType of
+            // PreInc|PreDec|PostInc|PostDec` satisfying `Rule<TNodeType>`'s
+            // own `TNodeType of Node` bound - each of those four classes
+            // extends `Node` only via `Expr`, a multi-level ancestor
+            // chain plain name-equality can't see).
             (Type::TemplateParam(tp), _) => {
                 matches!(*tp.bound, Type::Mixed) || self.is_assignable(&tp.bound, sup)
             }
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
-            // Phase 14: mirrors `types::is_subtype`'s own dedicated
+            // Mirrors `types::is_subtype`'s own dedicated
             // Intersection-vs-Intersection rule, and for the same reason
             // - without it, this function's own generic `(Intersection,
             // _) => any(...)` rule below intercepts a same-shaped pair
             // (e.g. `list<string>` checked against a `list<string>`-
             // typed parameter) first and gets it wrong, since it only
-            // asks whether one *bare* member of `sub` alone satisfies
-            // the whole `sup` intersection, never whether `sub`'s own
-            // combination does - a severe, real regression confirmed via
-            // a full corpus re-check (211 -> 1861 diagnostics) before
-            // this fix landed.
+            // asks whether one bare member of `sub` alone satisfies the
+            // whole `sup` intersection, never whether `sub`'s own
+            // combination does.
             (Type::Intersection(_), Type::Intersection(sup_members)) => {
                 sup_members.iter().all(|m| self.is_assignable(sub, m))
             }
@@ -304,9 +261,9 @@ impl Registry {
             // shows up as Array(Mixed) meaning "unknown", not "really can
             // hold anything" - without this, e.g. a PHPDoc `int[]` param
             // would false-positive against every `[1, 2, 3]` literal.
-            // `strict_mixed_arrays` (Phase 11 Stage 5) opts out of this
-            // leniency, matching real PHPStan's own level-9-style "be
-            // strict about values with mixed type" philosophy.
+            // `strict_mixed_arrays` opts out of this leniency, matching
+            // real PHPStan's own level-9-style "be strict about values
+            // with mixed type" philosophy.
             (Type::Array(_, a), Type::Array(_, b)) => {
                 (!self.strict_mixed_arrays && matches!(**a, Type::Mixed))
                     || self.is_assignable(a, b)
@@ -318,9 +275,9 @@ impl Registry {
             // false-positive just because literal keys/values aren't
             // inferred. A genuinely known, homogeneous Array(V) still
             // correctly fails to satisfy an arbitrary shape.
-            // Phase 50: the pre-existing `Array(Mixed)` leniency now also
-            // requires the array's own key type to actually accept the
-            // shape's real aggregate key type - without this, `array<
+            // The `Array(Mixed)` leniency also requires the array's own
+            // key type to actually accept the shape's real aggregate key
+            // type - without this, `array<
             // string, mixed>` leniently satisfied `array{0: X}` (an
             // int-keyed shape) purely because its *value* type was
             // Mixed, ignoring a genuine key-type mismatch the leniency
@@ -338,33 +295,24 @@ impl Registry {
                     && (**key == Type::unknown_array_key()
                         || self.is_assignable(key, &types::shape_key_type(fields)))
             }
-            // Finding 48's own completion: now that an array literal
-            // carries a real per-position/per-key shape instead of
-            // always reading as `Array(Mixed)`, it needs a real rule
-            // saying such a shape satisfies an ordinary `array`/
-            // `array<T>` hint - without this, `[1, 2, 3]` would stop
-            // being assignable to `int[]`/`array<int>` the moment its
-            // own type became precise, a real regression `types::
-            // is_subtype`'s own (deliberately conservative, pre-Finding-48)
-            // rule doesn't allow for.
-            // Phase 53: the same `Array(Mixed)` leniency two arms above -
-            // an individual shape field with no inferred type of its own
-            // (an unresolved global constant, most commonly - real shape:
-            // nikic/php-parser's own `$token->is([\T_COMMENT,
-            // \T_DOC_COMMENT])`, where neither constant is a name this
-            // project's registry models) reads as `Mixed`, not "really
-            // can hold anything", so confidently failing it against `b`
-            // (e.g. `array<int|string>`) is exactly the false positive
-            // this leniency already exists to prevent for a homogeneous
-            // `Array(Mixed)` - a shape literal deserves the identical
-            // treatment per field, not a stricter one just because its
-            // own type happens to be more structurally precise.
-            // Phase 50: also requires the shape's own real aggregate key
-            // type to be assignable to the array's own declared key type
-            // - without this, `array{name: string}` (an all-string-keyed
-            // shape) was silently accepted as satisfying `array<int,
-            // string>`, checking only whether every field's *value* type
-            // matched.
+            // Now that an array literal carries a real per-position/
+            // per-key shape instead of always reading as `Array(Mixed)`,
+            // it needs a real rule saying such a shape satisfies an
+            // ordinary `array`/`array<T>` hint - without this, `[1, 2,
+            // 3]` would stop being assignable to `int[]`/`array<int>`
+            // the moment its own type became precise. An individual
+            // shape field with no inferred type of its own (an
+            // unresolved global constant, most commonly) reads as
+            // `Mixed`, not "really can hold anything", so confidently
+            // failing it against `b` (e.g. `array<int|string>`) is
+            // exactly the false positive the `Array(Mixed)` leniency
+            // already exists to prevent - a shape literal deserves the
+            // identical treatment per field. Also requires the shape's
+            // own real aggregate key type to be assignable to the
+            // array's own declared key type - without this,
+            // `array{name: string}` (an all-string-keyed shape) would be
+            // silently accepted as satisfying `array<int, string>`,
+            // checking only whether every field's value type matched.
             (Type::ArrayShape(fields), Type::Array(key, b)) => {
                 self.is_assignable(&types::shape_key_type(fields), key)
                     && fields
@@ -401,8 +349,8 @@ impl Registry {
                     },
                 )
             }
-            // Phase 80: the `object{...}`-flavored sibling of the two
-            // `ArrayShape` rules just above - a real class instance
+            // The `object{...}`-flavored sibling of the two `ArrayShape`
+            // rules just above - a real class instance
             // satisfies a declared object shape when it has every
             // property the shape actually requires (an optional field
             // may be missing) with an assignable type, checked via
@@ -453,16 +401,15 @@ impl Registry {
             // own predicate type, among others - never a real, resolvable
             // class name this leniency's own "can't verify, don't guess
             // wrong" reasoning was written for). Without this exclusion,
-            // `is_assignable(Type::False, Object("resource"))` wrongly
-            // returned `true` (since `"resource"` is never a key in
-            // `self.classes` either), so `narrow_type_to`'s own `Union`
-            // arm kept a genuinely-impossible `False` member instead of
-            // stripping it - a real corpus false negative this fixes:
-            // `assertIsResource($proc)` (a real, common PHPUnit-assertion
-            // narrowing idiom, `apply_phpunit_assertion_narrowing`'s own
-            // dedicated arm) silently failed to narrow away `resource|
-            // false`'s own `false` member, unlike every sibling
-            // `assertIs*` narrowing target that isn't itself an `Object`.
+            // `is_assignable(Type::False, Object("resource"))` would
+            // wrongly return `true` (since `"resource"` is never a key
+            // in `self.classes` either), so `narrow_type_to`'s own
+            // `Union` arm would keep a genuinely-impossible `False`
+            // member instead of stripping it - e.g. `assertIsResource
+            // ($proc)` (a common PHPUnit-assertion narrowing idiom)
+            // silently failing to narrow away `resource|false`'s own
+            // `false` member, unlike every sibling `assertIs*` narrowing
+            // target that isn't itself an `Object`.
             (_, Type::Object(name, _))
                 if name != "object" && name != "resource" && !self.classes.contains_key(name) =>
             {
@@ -472,17 +419,16 @@ impl Registry {
         }
     }
 
-    /// Phase 84: the level-aware counterpart to `is_assignable` above -
-    /// real PHPStan's `RuleLevelHelper::accepts()` two genuinely level-
-    /// gated behaviors (`checkNullables`/`checkUnionTypes`,
-    /// `vendor/phpstan-src/src/Rules/RuleLevelHelper.php:152-164`)
-    /// applied to the identical argument/return/property-type check
-    /// `is_assignable` already performs, for the handful of real call
-    /// sites a `Rule` class actually consumes `RuleLevelHelper` through
-    /// (not every `is_assignable` call site project-wide - narrowing,
-    /// LSP-override compatibility, and generics bound-checking are real
-    /// PHPStan's own separate, never-level-gated `isSuperTypeOf()`
-    /// domain, and must keep calling `is_assignable` directly).
+    /// The level-aware counterpart to `is_assignable` above - real
+    /// PHPStan's `RuleLevelHelper::accepts()` two genuinely level-gated
+    /// behaviors (`checkNullables`/`checkUnionTypes`) applied to the
+    /// identical argument/return/property-type check `is_assignable`
+    /// already performs, for the handful of real call sites a `Rule`
+    /// class actually consumes `RuleLevelHelper` through (not every
+    /// `is_assignable` call site project-wide - narrowing, LSP-override
+    /// compatibility, and generics bound-checking are real PHPStan's own
+    /// separate, never-level-gated `isSuperTypeOf()` domain, and must
+    /// keep calling `is_assignable` directly).
     ///
     /// `self.configured_level` is the project's own `level` setting
     /// *before* `check-project`'s own `MAX_LEVEL`-driven `.unwrap_or(6)`
@@ -491,17 +437,17 @@ impl Registry {
     /// that never opts into this.
     ///
     /// Deliberately not a full tri-state (`Yes`/`No`/`Maybe`) rewrite of
-    /// `is_assignable`'s own boolean API (see this phase's own
-    /// re-scoping note) - real PHPStan's `checkUnionTypes` distinguishes
-    /// "definitely accepts" from "maybe accepts" via `TrinaryLogic`, a
-    /// distinction this project's plain boolean `.all()`/`.any()`
-    /// combinators (already used, unconditionally, by `is_assignable`
-    /// itself) have no way to represent without that larger rewrite -
-    /// `UNION_TYPES_CHECK_LEVEL` is still named and folded into the
-    /// fast-path guard below (both real gates must be at their strict
-    /// threshold before this collapses to `is_assignable` unchanged), but
-    /// doesn't get its own separate `.all()`-vs-`.any()` switch the way
-    /// `NULLABLES_CHECK_LEVEL` gets its own null-stripping switch.
+    /// `is_assignable`'s own boolean API: real PHPStan's `checkUnionTypes`
+    /// distinguishes "definitely accepts" from "maybe accepts" via
+    /// `TrinaryLogic`, a distinction this project's plain boolean
+    /// `.all()`/`.any()` combinators (already used, unconditionally, by
+    /// `is_assignable` itself) have no way to represent without that
+    /// larger rewrite - `UNION_TYPES_CHECK_LEVEL` is still named and
+    /// folded into the fast-path guard below (both real gates must be at
+    /// their strict threshold before this collapses to `is_assignable`
+    /// unchanged), but doesn't get its own separate `.all()`-vs-`.any()`
+    /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
+    /// switch.
     pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
         let Some(level) = self.configured_level else {
             return self.is_assignable(sub, sup);
