@@ -98,9 +98,9 @@ fn generator_with_a_bare_early_return_guard_is_not_a_null_mismatch() {
 
 #[test]
 fn a_non_generator_falling_off_the_end_is_still_a_real_null_mismatch() {
-    // Regression guard: Finding 3's fix must not blanket-suppress the
-    // real, pre-existing diagnostic for an ordinary (non-generator)
-    // function that falls off the end with no return.
+    // The generator exemption above must not blanket-suppress the
+    // diagnostic for an ordinary (non-generator) function that falls off
+    // the end with no return.
     let d = diagnostics_for(
         r#"<?php
             function notAGenerator(): int {
@@ -149,10 +149,10 @@ fn phpdoc_only_param_type_does_not_flag_correct_usage() {
 
 #[test]
 fn phpdoc_param_type_is_usable_inside_the_function_own_body() {
-    // Regression test for a real bug: check_function used to seed
-    // parameter locals from the raw AST's native hint only, so a
-    // PHPDoc-only type worked for callers but not for the function's
-    // own body analyzing its own parameter.
+    // `check_function` must seed parameter locals from the resolved
+    // (docblock-aware) type, not the raw AST's native hint only, or a
+    // PHPDoc-only type works for callers but not for the function's own
+    // body analyzing its own parameter.
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $x): int { return $x; }
@@ -168,15 +168,12 @@ fn phpdoc_param_type_is_usable_inside_the_function_own_body() {
 
 #[test]
 fn an_already_defined_variable_passed_by_ref_is_widened_not_left_stale() {
-    // Phase 22 Finding 3, real shape: Piwigo\Admin\Install\
-    // InstallService::installDbConnect(array &$infos, array &$errors,
-    // ...) called as installDbConnect($infos, $errors, ...) where
-    // $errors was already `$errors = [];` - the by-ref leniency above
-    // only ever applied to an *undefined* variable
-    // (`locals.contains_key(name)` skipped anything already tracked),
-    // so `$errors` kept its stale, narrow `array{}` shape through the
-    // call even though the callee is known to mutate it by reference,
-    // and `$errors[0]` afterward was flagged as "no such key".
+    // The by-ref leniency must also widen an already-defined variable,
+    // not just an undefined one (`locals.contains_key(name)` must not
+    // skip anything already tracked) - otherwise a variable with a
+    // stale, narrow `array{}` shape keeps it through a call known to
+    // mutate it by reference, and a later access is wrongly flagged as
+    // "no such key".
     let d = diagnostics_for(
         r#"<?php
             function fillErrors(array &$errors): void {}
@@ -192,11 +189,10 @@ fn an_already_defined_variable_passed_by_ref_is_widened_not_left_stale() {
 
 #[test]
 fn unknown_function_argument_is_leniently_defined_not_flagged() {
-    // Calling an undeclared function is itself now flagged (Phase 9),
-    // but the original point of this test still holds: $result isn't
-    // known to be by-ref (the callee's signature is itself unknown),
-    // so it's leniently treated as defined by the call rather than
-    // also producing a spurious "undefined variable" diagnostic.
+    // Calling an undeclared function is itself flagged separately, but
+    // $result isn't known to be by-ref (the callee's signature is itself
+    // unknown), so it's leniently treated as defined by the call rather
+    // than also producing a spurious "undefined variable" diagnostic.
     let d = diagnostics_for(
         r#"<?php
             function f() {
@@ -423,9 +419,8 @@ fn a_named_argument_call_in_declaration_order_is_not_flagged() {
 
 #[test]
 fn a_named_argument_call_in_a_different_order_than_declared_is_not_misflagged() {
-    // The real bug Item 1 fixes: naive positional reasoning would
-    // compare "x" against $a's own int type and "1" against $b's
-    // own string type, both wrongly.
+    // Naive positional reasoning would compare "x" against $a's own int
+    // type and "1" against $b's own string type, both wrongly.
     let d = diagnostics_for(
         r#"<?php
             function f1(int $a, string $b): void {}
@@ -626,9 +621,8 @@ fn a_promoted_constructor_property_defaulted_to_null_is_implicitly_nullable() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 14 from the architecture audit - a PHPDoc type completely
-// replaced the native hint, silently dropping nullability the native
-// signature already stated.
+// A PHPDoc type must not completely replace the native hint, silently
+// dropping nullability the native signature already stated.
 
 #[test]
 fn docblock_type_merges_the_native_hints_nullability_when_not_repeated() {
@@ -658,9 +652,9 @@ fn docblock_type_still_rejects_a_genuinely_wrong_type() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Finding 23 from the architecture audit - a variadic parameter was
-// bound inside its own function/closure/arrow-fn body as the element
-// type, not an array of it, in three independent binding sites.
+// A variadic parameter must be bound inside its own function/closure/
+// arrow-fn body as an array of the element type, not the element type
+// itself, at each of three independent binding sites.
 
 #[test]
 fn variadic_parameter_is_an_array_inside_a_top_level_function_body() {
@@ -696,9 +690,9 @@ fn variadic_parameter_is_an_array_inside_an_arrow_fn_body() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 49: named-argument legality (unknown/duplicate/positional-after-
-// named, and the unpack-ordering rules real PHP's own parser enforces at
-// compile time that this project's own parser doesn't).
+// Named-argument legality: unknown/duplicate/positional-after-named, and
+// the unpack-ordering rules PHP's own parser enforces at compile time
+// that this project's parser doesn't.
 
 #[test]
 fn an_unknown_named_argument_is_flagged() {
@@ -836,7 +830,7 @@ fn a_named_argument_written_after_a_spread_argument_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 49: by-reference argument legality - a nullsafe access chain
+// By-reference argument legality - a nullsafe access chain
 // (`NullsafeCheck::containsNullSafe`'s own equivalent walk) or any other
 // non-lvalue expression can never be a real storage location to write a
 // by-ref parameter's mutation back into.
@@ -896,15 +890,13 @@ fn passing_an_array_index_by_reference_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 89: phpstorm-stubs' own real declaration
-// (`&$array, &...$rest`) marks every one of `array_multisort`'s
-// variadic-tail arguments by-reference uniformly - but real PHP itself
-// lets a `SORT_*` constant (not a variable at all) sit in one of those
-// same positions, interleaved with the genuinely-by-ref additional
-// arrays being sorted. Real PHPStan's own bundled `functionMap.php`
-// resolves this by not treating any of this function's own parameters
-// as by-ref-checked at all - `php_stubs::patch_array_multisort_by_ref`
-// mirrors that exact choice as a narrow post-generation patch.
+// phpstorm-stubs' declaration (`&$array, &...$rest`) marks every one of
+// `array_multisort`'s variadic-tail arguments by-reference uniformly -
+// but PHP itself lets a `SORT_*` constant (not a variable at all) sit in
+// one of those same positions, interleaved with the genuinely-by-ref
+// additional arrays being sorted. `php_stubs::patch_array_multisort_by_ref`
+// resolves this by not treating any of this function's parameters as
+// by-ref-checked at all, mirroring PHPStan's bundled `functionMap.php`.
 #[test]
 fn array_multisort_sort_flag_constants_interleaved_with_arrays_are_not_flagged() {
     let d = diagnostics_for(
@@ -920,15 +912,12 @@ fn array_multisort_sort_flag_constants_interleaved_with_arrays_are_not_flagged()
     );
 }
 
-// A Piwigo/real-PHPStan corpus diff found `usleep()`'s own phpstorm-stubs
-// PHPDoc refines its native `int` parameter to `int<0,max>` - but real
-// PHPStan's own `functionMap.php` declares it as plain `int`, and
-// `NativeFunctionReflectionProvider` never consults phpstorm-stubs' own
-// PHPDoc for a function `functionMap.php` already covers (confirmed
-// directly via `dumpType()`/a real `vendor/bin/phpstan analyse` run:
-// neither an unconstrained `int` variable nor a literal `-5` is flagged).
-// `php_stubs::patch_usleep` corrects this the same narrow, one-function
-// way `patch_array_multisort_by_ref` above does.
+// `usleep()`'s phpstorm-stubs PHPDoc refines its native `int` parameter
+// to `int<0,max>` - but PHPStan's `functionMap.php` declares it as plain
+// `int`, and `NativeFunctionReflectionProvider` never consults
+// phpstorm-stubs' PHPDoc for a function `functionMap.php` already
+// covers. `php_stubs::patch_usleep` corrects this the same narrow,
+// one-function way `patch_array_multisort_by_ref` above does.
 #[test]
 fn usleep_accepts_an_unbounded_int_not_just_a_provably_non_negative_one() {
     let d = diagnostics_for(
@@ -945,18 +934,15 @@ fn usleep_accepts_an_unbounded_int_not_just_a_provably_non_negative_one() {
     );
 }
 
-// A Piwigo/real-PHPStan corpus diff found a much broader instance of the
-// same `functionMap.php`-supersedes-phpstorm-stubs pattern `usleep()`
-// above already fixed: phpstorm-stubs' own `#[ArrayShape(...)]` attribute
-// (a JetBrains/PhpStorm IDE-inspection convention, never read by real
-// PHPStan at all - confirmed by a direct grep of `vendor/phpstan-src/src/`,
-// zero occurrences anywhere) was being consumed as if it were something
-// real PHPStan derives a precise array shape from, for any function or
-// method carrying it. `gd_info()`'s own real `functionMap.php` entry is
-// bare `array` (no shape at all) - `php_stubs::patch_functionmap_array_
-// shapes` corrects this the same narrow, `functionMap.php`-verified way
-// `patch_usleep`/`patch_debug_backtrace` already do, for every function
-// this investigation actually checked.
+// The same `functionMap.php`-supersedes-phpstorm-stubs pattern
+// `usleep()` above already fixed applies more broadly: phpstorm-stubs'
+// `#[ArrayShape(...)]` attribute (a JetBrains/PhpStorm IDE-inspection
+// convention, never read by PHPStan) must not be consumed as a precise
+// array shape for any function or method carrying it. `gd_info()`'s
+// `functionMap.php` entry is bare `array` (no shape at all) -
+// `php_stubs::patch_functionmap_array_shapes` corrects this the same
+// narrow, `functionMap.php`-verified way `patch_usleep`/
+// `patch_debug_backtrace` do.
 #[test]
 fn gd_info_stays_a_bare_array_not_a_fixed_shape() {
     let d = diagnostics_for(
@@ -972,16 +958,14 @@ fn gd_info_stays_a_bare_array_not_a_fixed_shape() {
     );
 }
 
-// A Piwigo/real-PHPStan corpus diff found `proc_open()`'s own by-ref
-// `$pipes` out-parameter (3rd argument) left completely unspecialized,
-// falling to the generic `Mixed` leniency every unknown by-ref output
-// gets - real PHPStan types it via its own separate internal stub bundle
+// `proc_open()`'s by-ref `$pipes` out-parameter (3rd argument) must not
+// fall to the generic `Mixed` leniency every unknown by-ref output gets.
+// PHPStan types it via a separate internal stub bundle
 // (`vendor/phpstan-src/stubs/core.stub`, deliberately excluded from this
-// project's own stub pipeline) as `array<P, resource>`, `P` bound from
-// `$descriptor_spec`'s own key type. This fix doesn't chase that
-// template-binding precision (a plain `array<int, resource>`, matching
-// this exact corpus shape's own declared `@return array{0: resource, 1:
-// array<int, resource>}`), just the generic-`Mixed` false positive.
+// project's stub pipeline) as `array<P, resource>`, `P` bound from
+// `$descriptor_spec`'s key type; this project settles for the simpler
+// `array<int, resource>` rather than chasing that template-binding
+// precision.
 #[test]
 fn proc_open_populates_pipes_as_an_int_keyed_resource_array() {
     let d = diagnostics_for(
@@ -1019,10 +1003,10 @@ fn passing_a_deeply_nested_nullsafe_chain_by_reference_is_still_flagged() {
     );
 }
 
-// Phase 49: a constant-array spread argument (`f(...['a', 'b'])`) whose
-// own inferred type is a literal `Type::ArrayShape` has every eventual
-// argument slot known statically - int-keyed fields resolve positionally,
-// string-keyed fields resolve by parameter name.
+// A constant-array spread argument (`f(...['a', 'b'])`) whose inferred
+// type is a literal `Type::ArrayShape` has every eventual argument slot
+// known statically - int-keyed fields resolve positionally, string-keyed
+// fields resolve by parameter name.
 #[test]
 fn spread_of_a_literal_array_checks_each_positional_field_against_its_parameter() {
     let d = diagnostics_for(
