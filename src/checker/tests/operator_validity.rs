@@ -1,10 +1,10 @@
-//! Phase 52: `InvalidBinaryOperationRule` (`binaryOp.invalid`/
-//! `assignOp.invalid`), `InvalidComparisonOperationRule` (`*.invalid`),
+//! `InvalidBinaryOperationRule` (`binaryOp.invalid`/`assignOp.invalid`),
+//! `InvalidComparisonOperationRule` (`*.invalid`),
 //! `InvalidUnaryOperationRule` (`unaryOp.invalid`), and
 //! `InvalidIncDecOperationRule` (`*.expr`/`*.type`) - an operand-validity
-//! matrix, not a full port of real PHPStan's own operator type resolver.
-//! See `src/checker/operators.rs`'s own module doc for the scope
-//! decisions this deliberately makes.
+//! matrix, not a full port of PHPStan's own operator type resolver. See
+//! `src/checker/operators.rs`'s own module doc for the scope decisions
+//! this deliberately makes.
 
 use super::helpers::*;
 
@@ -173,12 +173,11 @@ fn bitwise_and_between_two_ints_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A real corpus check (`Composer\Pcre\Preg::match`, `Amp\Websocket\
-// Parser\Rfc6455Parser::parse`) found `mixed | <flags>` and `mixed &
-// '...'` wrongly flagged - `Mixed` on either side must skip the whole
-// check, not just each operand's own individual legality (a `Mixed`
-// might satisfy either of `&`/`|`/`^`'s two legal shapes at runtime,
-// but can't be proven to satisfy the *same* one as its other operand).
+// `mixed | <flags>` and `mixed & '...'` must not be flagged - `Mixed` on
+// either side must skip the whole check, not just each operand's own
+// individual legality (a `Mixed` might satisfy either of `&`/`|`/`^`'s
+// two legal shapes at runtime, but can't be proven to satisfy the same
+// one as its other operand).
 #[test]
 fn bitwise_or_with_a_mixed_operand_is_never_flagged_dont_guess() {
     let d = diagnostics_for(
@@ -193,11 +192,11 @@ fn bitwise_or_with_a_mixed_operand_is_never_flagged_dont_guess() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A real corpus check (`Composer\Pcre\Preg::match`'s own `@phpstan-type
-// int-mask<...>` PHPDoc type alias, which this project surfaces as a
-// `Type::Object` with no matching registry entry) found an unresolvable
-// class-shaped type wrongly treated as confidently non-numeric, the
-// same "don't guess" gap `type_to_string` already handles for casts.
+// An unresolvable class-shaped type (e.g. a `@phpstan-type int-mask<...>`
+// PHPDoc type alias, which this project surfaces as a `Type::Object`
+// with no matching registry entry) must not be treated as confidently
+// non-numeric, the same "don't guess" gap `type_to_string` already
+// handles for casts.
 #[test]
 fn bitwise_or_with_an_unresolvable_class_shaped_operand_is_never_flagged_dont_guess() {
     let d = diagnostics_for(
@@ -280,9 +279,8 @@ fn bitwise_not_of_a_string_int_or_float_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A real corpus check found `~$mixed` wrongly flagged - `is_bitwise_
-// not_operand`'s own catch-all defaulted to illegal instead of "don't
-// guess."
+// `~$mixed` must not be flagged - `is_bitwise_not_operand`'s catch-all
+// must default to "don't guess," not illegal.
 #[test]
 fn bitwise_not_of_mixed_is_never_flagged_dont_guess() {
     let d = diagnostics_for(
@@ -323,15 +321,14 @@ fn unary_minus_on_a_gmp_instance_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus find: unary `-` on an int literal used to leave the
-// literal's own *value* unnegated (only `+`'s numeric-string coercion was
-// actually implemented; `-` fell through to the same "return unchanged"
-// branch) - `-5` inferred as `IntLiteral(5)`, not `IntLiteral(-5)`. Only
-// a consumer that cares about the exact *value* (not just "is this an
-// int") can tell the difference - `checker::expr::loose_compare_
-// literals`'s own constant-folding does: with the bug, `-5 == 5` would
-// wrongly fold to `equal.alwaysTrue` (both sides silently the same
-// literal); correctly negated, it's `equal.alwaysFalse`.
+// Unary `-` on an int literal must negate the literal's own value, not
+// just leave it unchanged (`-5` must infer as `IntLiteral(-5)`, not
+// `IntLiteral(5)`). Only a consumer that cares about the exact value
+// (not just "is this an int") can tell the difference -
+// `checker::expr::loose_compare_literals`'s own constant-folding does:
+// without negation, `-5 == 5` would wrongly fold to `equal.alwaysTrue`
+// (both sides silently the same literal); correctly negated, it's
+// `equal.alwaysFalse`.
 #[test]
 fn unary_minus_negates_an_int_literal_s_own_value() {
     let d = diagnostics_for(
@@ -375,12 +372,12 @@ fn comparing_an_int_to_a_possibly_null_object_is_flagged() {
     assert_eq!(d[0].identifier, "greater.invalid");
 }
 
-// Real gap found and fixed this session: `is_array_or_null` matched
-// `Type::Array`/`Type::ArrayShape` directly with no `Type::Intersection`
-// case, so a `list<T>`/`non-empty-array<T>`-typed value (both represented
-// as `Intersection([Array(_), Accessory(_)])`, Phase 14) fell to the
-// permissive `_ => false` catch-all - meaning comparing a real `list<T>`
-// against a number was never flagged, unlike a plain `array`.
+// `is_array_or_null` must handle `Type::Intersection`, not just
+// `Type::Array`/`Type::ArrayShape` directly, or a `list<T>`/
+// `non-empty-array<T>`-typed value (both represented as
+// `Intersection([Array(_), Accessory(_)])`) falls to the permissive
+// `_ => false` catch-all - meaning comparing a `list<T>` against a
+// number is never flagged, unlike a plain `array`.
 #[test]
 fn comparing_an_int_to_a_possibly_null_list_is_flagged() {
     let d = diagnostics_for(
@@ -409,11 +406,10 @@ fn comparing_two_ints_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A real corpus check (`NumberComparator::assertEquals`) found a
-// `BcMath\Number` compared against a plain `int` wrongly flagged -
-// `is_strictly_number` now counts a number-castable object as a number
-// in its own right, matching real PHPStan's own `SimpleXMLElement`/
-// `GMP` exception for this same rule.
+// A `BcMath\Number` compared against a plain `int` must not be flagged -
+// `is_strictly_number` counts a number-castable object as a number in
+// its own right, matching PHPStan's own `SimpleXMLElement`/`GMP`
+// exception for this same rule.
 #[test]
 fn comparing_a_number_castable_object_to_an_int_is_never_flagged() {
     let d = diagnostics_for(
@@ -500,14 +496,14 @@ fn incrementing_an_int_a_float_or_a_string_variable_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus find: `++`/`--` on an `IntLiteral`-typed variable used to
-// leave the literal's own *value* completely unchanged (returning the
-// operand's own type as-is, the same "value never applied" bug class
-// unary `-`'s own fix (`negate_numeric_literal`) already found). Only a
-// consumer that cares about the exact value can tell the difference -
-// `checker::expr::loose_compare_literals`'s own constant-folding does:
-// with the bug, `0++ == 1` (well-formed as `$n = 0; $n++; $n == 1`)
-// would wrongly fold to `equal.alwaysFalse` (`$n` silently still `0`).
+// `++`/`--` on an `IntLiteral`-typed variable must advance the
+// literal's own value, not leave it unchanged (the same "value never
+// applied" bug class unary `-`'s own fix, `negate_numeric_literal`,
+// also guards against). Only a consumer that cares about the exact
+// value can tell the difference - `checker::expr::loose_compare_
+// literals`'s own constant-folding does: without advancing, `$n = 0;
+// $n++; $n == 1` would wrongly fold to `equal.alwaysFalse` (`$n`
+// silently still `0`).
 #[test]
 fn incrementing_an_int_literal_advances_its_own_value() {
     let d = diagnostics_for(
@@ -542,16 +538,14 @@ fn decrementing_an_int_literal_reduces_its_own_value() {
     );
 }
 
-// Real corpus find, one level deeper than the bare-variable case just
-// above: `++`/`--` on an `Index`/`PropertyAccess` target used to be a
-// silent no-op for the *container's own* tracked type - only a bare
-// `ExprKind::Variable` operand ever got rebound, so `++$arr['k']`/
-// `$this->prop++` never taught the array/property's own shape about the
-// value the increment just wrote (`CategoryService::saveCategoriesOrder`'s
-// own `++$currentRankForIdUppercat[$idUppercat]`, contributing to a real
-// `mixed`-leak false positive downstream). Same discriminating technique
-// as the bare-variable tests above: only a real, applied increment lets
-// the follow-up `== 1` constant-fold.
+// One level deeper than the bare-variable case just above: `++`/`--` on
+// an `Index`/`PropertyAccess` target must not be a silent no-op for the
+// container's own tracked type - a bare `ExprKind::Variable` operand
+// must not be the only one that gets rebound, or `++$arr['k']`/
+// `$this->prop++` never teaches the array/property's shape about the
+// value the increment just wrote. Same discriminating technique as the
+// bare-variable tests above: only a real, applied increment lets the
+// follow-up `== 1` constant-fold.
 #[test]
 fn incrementing_an_array_index_advances_its_own_tracked_value() {
     let d = diagnostics_for(
@@ -569,11 +563,10 @@ fn incrementing_an_array_index_advances_its_own_tracked_value() {
     );
 }
 
-// Real corpus find, traced while tracing a *different* fix
-// (`CategoryService::saveCategoriesOrder`): `++$arr[$dynamicKey]` inside
-// a loop, feeding a `$datas[] = ['rank' => $rank]` array literal, kept
-// `rank` at `mixed` even after the fix above - two further, more subtle
-// gaps in the exact same neighborhood, both needed together:
+// `++$arr[$dynamicKey]` inside a loop, feeding an array literal built
+// from the result, must not leave that field at `mixed` even with the
+// fix above - two further, more subtle gaps in the exact same
+// neighborhood, both needed together:
 //
 // 1. Reading a fresh dynamic key from a still-empty `ArrayShape` (the
 //    counter's very first touch) resolved to bare `Mixed`, not `Null` -
@@ -606,7 +599,7 @@ fn incrementing_a_dynamic_array_key_inside_a_loop_advances_precisely() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 52 follow-up: division/modulo by a literal zero.
+// Division/modulo by a literal zero.
 
 #[test]
 fn dividing_by_a_literal_zero_is_flagged() {
