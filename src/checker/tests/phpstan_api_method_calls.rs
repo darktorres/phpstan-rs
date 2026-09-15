@@ -10,13 +10,13 @@
 //! own two-source-string split) - the main checker's `diagnostics_for`
 //! only ever runs against one parsed/indexed program, which (unlike that
 //! other module's own standalone `Registry::build` call) also auto-embeds
-//! the real vendored `phpstorm-stubs`/`phpstan-src` corpus for stdlib-
-//! function test realism elsewhere. `PHPStan\FakeNs\Widget` (not a real
-//! PHPStan namespace/class) is used throughout instead of a real one like
-//! `PHPStan\Analyser\Scope` specifically to avoid colliding with that
-//! auto-embedded corpus's own real declaration of it - confirmed the hard
-//! way that a same-named fake redeclaration merges unpredictably with the
-//! real one and silently defeats what a test meant to check.
+//! the vendored `phpstorm-stubs`/`phpstan-src` corpus for stdlib-function
+//! test realism elsewhere. `PHPStan\FakeNs\Widget` (not a real PHPStan
+//! namespace/class) is used throughout instead of a real one like
+//! `PHPStan\Analyser\Scope`, to avoid colliding with that auto-embedded
+//! corpus's own real declaration of it - a same-named fake redeclaration
+//! merges unpredictably with the real one and silently defeats what a
+//! test meant to check.
 
 use super::helpers::*;
 use crate::Diagnostic;
