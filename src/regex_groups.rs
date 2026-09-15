@@ -401,15 +401,13 @@ struct Scanner {
     /// `true` once literal tracking is known to be unsafe for the rest
     /// of the pattern - initialized from the pattern's own top-level `i`
     /// modifier, and one-way (never cleared) if an inline `(?i...)`
-    /// modifier group is encountered anywhere. A real, deliberately
-    /// simple choice over precisely scoping an inline modifier group's
-    /// own effect to just its own body/branch remainder: real PCRE scopes
-    /// `(?i:...)` to its own body and bare `(?i)` to the rest of the
-    /// enclosing branch, but no corpus evidence anywhere in this
-    /// project's own history uses either form, so a coarser, always-safe
-    /// "suppress everything from here on" is preferred over the
-    /// complexity of exact scoping for a construct with zero evidenced
-    /// real usage.
+    /// modifier group is encountered anywhere. A deliberately simple
+    /// choice over precisely scoping an inline modifier group's effect
+    /// to just its own body/branch remainder: PCRE scopes `(?i:...)` to
+    /// its own body and bare `(?i)` to the rest of the enclosing branch,
+    /// but a coarser, always-safe "suppress everything from here on" is
+    /// preferred over the complexity of exact scoping for such a rarely
+    /// used construct.
     literal_globally_suppressed: bool,
     /// Incremented only in `finish_capturing_group`, around its own body
     /// scan - a group's own `top_level` is set from `self.capturing_depth
@@ -424,12 +422,11 @@ struct Scanner {
     /// unescaped whitespace and `#`-to-end-of-line comments outside a
     /// character class are skipped between tokens when this is set (see
     /// `skip_free_spacing`). Fixed for the whole scan, unlike
-    /// `literal_globally_suppressed`: no corpus evidence anywhere in
-    /// this project's own history uses an inline `(?x)`/`(?x:...)`
-    /// modifier group, so - consistent with this scanner's own existing,
-    /// documented choice for inline `i` - that inline form still bails
-    /// the whole parse (`scan_group_inner`'s own `"imsxuJU-"` branch)
-    /// rather than dynamically toggling this mid-scan.
+    /// `literal_globally_suppressed`: consistent with this scanner's
+    /// existing, documented choice for inline `i`, an inline
+    /// `(?x)`/`(?x:...)` modifier group still bails the whole parse
+    /// (`scan_group_inner`'s own `"imsxuJU-"` branch) rather than
+    /// dynamically toggling this mid-scan.
     free_spacing: bool,
 }
 
@@ -686,12 +683,11 @@ impl Scanner {
             }
             let contributed = match quantifier {
                 None => atom.literal_values,
-                // Real PCRE binds a quantifier following `\Q...\E` only
-                // to the block's own last character, never the whole
-                // block - this scanner treats the block as one
-                // indivisible atom, so cross-producting it as a whole
-                // would be wrong. No corpus pattern combines the two;
-                // bail rather than guess.
+                // PCRE binds a quantifier following `\Q...\E` only to
+                // the block's last character, never the whole block -
+                // this scanner treats the block as one indivisible atom,
+                // so cross-producting it as a whole would be wrong; bail
+                // rather than guess.
                 Some(_) if atom.is_quoted_block => None,
                 Some((_, None)) => None, // unbounded - min/max both required
                 Some((min, Some(max))) => atom
@@ -699,12 +695,11 @@ impl Scanner {
                     .and_then(|lits| repeat_literals(&lits, min, max)),
             };
             literal_values = concat_literals(literal_values, contributed);
-            // Same "binds to the quoted block's own last character only"
-            // fact as the literal-value cross-product just above applies
-            // here too - staying with the safe, fully-unknown default
+            // Same "binds to the quoted block's last character only" fact
+            // as the literal-value cross-product just above applies here
+            // too - staying with the safe, fully-unknown default
             // (`0`/`false`) for that one atom rather than guessing at
-            // the real, more intricate length this would actually
-            // produce (no corpus evidence combines the two).
+            // the more intricate length this would actually produce.
             let (contributed_min_len, contributed_digits_only) = match quantifier {
                 None => (atom.min_len, atom.digits_only),
                 Some(_) if atom.is_quoted_block => (0, false),
@@ -868,8 +863,8 @@ impl Scanner {
     /// checked first (so `[\]]`'s escaped `]` is never misread as the
     /// real closer), then a candidate POSIX class, then a leading-`]`
     /// literal, then an ordinary member. Character classes never contain
-    /// real groups, and are never literal-tracked (no corpus evidence
-    /// calls for enumerating even a trivial `[a]`). Returns whether the
+    /// real groups, and are never literal-tracked (not worth enumerating
+    /// even a trivial `[a]`). Returns whether the
     /// class is provably digit-only (`class_body_is_digits_only`,
     /// computed before consuming, since that check is a read-only
     /// lookahead over the same span this then consumes for real) -
@@ -1223,15 +1218,13 @@ impl Scanner {
                     // group count, not just an unsupported one.
                     return None;
                 }
-                // A real, if coarse, correctness fix: an inline `i`
-                // modifier (scoped `(?i:...)` or bare, "rest of branch"
-                // `(?i)`) makes literal tracking unsafe from here on -
-                // real PCRE scopes this precisely to the modifier's own
-                // body/branch remainder, but no corpus evidence anywhere
-                // uses either form, so this scanner suppresses literal
-                // tracking for the *rest of the whole pattern* instead
-                // of building exact scoping for a construct with zero
-                // evidenced real usage - coarser, but never wrong.
+                // An inline `i` modifier (scoped `(?i:...)` or bare,
+                // "rest of branch" `(?i)`) makes literal tracking unsafe
+                // from here on - PCRE scopes this precisely to the
+                // modifier's own body/branch remainder, but this scanner
+                // suppresses literal tracking for the rest of the whole
+                // pattern instead of building exact scoping for such a
+                // rarely used construct - coarser, but never wrong.
                 if mods.contains('i') {
                     self.literal_globally_suppressed = true;
                 }
