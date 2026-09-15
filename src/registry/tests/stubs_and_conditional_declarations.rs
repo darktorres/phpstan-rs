@@ -50,13 +50,11 @@ fn unconditional_class_wins_over_an_earlier_conditional_stub() {
     assert!(!r.classes["X"].methods.contains_key("stub"));
 }
 
-// Phase 25, real shape: Piwigo's own `phpstan-stubs/Imagick.stub.php`,
-// wired into `phpstan.neon` as a PHPStan `stubFiles` entry - a bare
-// `class Imagick { public function convolveImage(...) {} }` meant to
-// override *one* method of the real, already-known `Imagick` class
-// from `jetbrains/phpstorm-stubs`. Both declarations are unconditional
-// - the fix must merge them, not let the second one wholesale-replace
-// the first and silently drop every other real method/constant.
+// A stub file meant to override one method of an already-known class
+// (e.g. a `stubFiles`-provided bare `class Imagick { public function
+// convolveImage(...) {} }`) must merge with the real class, not let the
+// second unconditional declaration wholesale-replace the first and
+// silently drop every other method/constant.
 #[test]
 fn two_unconditional_class_declarations_merge_instead_of_replacing() {
     let r = build_registry(
@@ -115,13 +113,11 @@ fn a_merged_class_keeps_its_extends_when_the_second_declaration_has_none() {
 
 #[test]
 fn re_indexing_an_unconditional_class_after_removal_does_not_panic() {
-    // Found while implementing the merge fix above:
-    // `remove_declarations` (incremental re-checking's own removal
-    // step, `Project::update_file`) cleared `classes` but left a
-    // stale "already unconditionally declared" marker behind, so
-    // re-indexing the same file after a change hit the merge branch
-    // against an entry `remove_declarations` had already deleted -
-    // panicking instead of cleanly re-inserting.
+    // `remove_declarations` (incremental re-checking's removal step,
+    // `Project::update_file`) must clear the "already unconditionally
+    // declared" marker along with `classes`, or re-indexing the same
+    // file after a change hits the merge branch against an entry
+    // already deleted - panicking instead of cleanly re-inserting.
     let src = "<?php class X { public function original() {} }";
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
@@ -135,12 +131,11 @@ fn re_indexing_an_unconditional_class_after_removal_does_not_panic() {
     assert!(r.classes["X"].methods.contains_key("original"));
 }
 
-// Finding C (Phase 32): two unconditional declarations of the same
-// function name overwrite instead of merging - the function-side
-// sibling of Phase 25's class-merge fix. Real shape: `strtr`'s own
-// real stub declares a 3-string-argument overload and a 2-argument,
-// `array $replace_pairs` overload as two separate top-level
-// declarations sharing one name.
+// Two unconditional declarations of the same function name must merge,
+// not overwrite - the function-side sibling of the class-merge fix
+// above. (`strtr`'s stub declares a 3-string-argument overload and a
+// 2-argument, `array $replace_pairs` overload as two separate top-level
+// declarations sharing one name.)
 #[test]
 fn two_unconditional_function_declarations_with_different_arities_merge() {
     let r = build_registry(
@@ -250,16 +245,15 @@ fn merge_stubs_does_not_override_user_functions() {
     assert_eq!(r.functions["strlen"].return_type, Type::Int);
 }
 
-// Phase 60 corpus find: `Project::new` merges stubs *before* any real
-// project file is indexed (the same ordering the class-side test just
-// below documents), so a conditionally-declared polyfill of a built-in
-// name (the real, extremely common `if (!function_exists('str_contains'))
-// { function str_contains(?string $haystack, ?string $needle): bool
-// {...} }` shape, symfony/polyfill-php80's own real source) used to
-// always lose to the stub's own signature - `entry(...).or_insert_with
-// (...)` is a no-op once the stub already occupies the slot, silently
-// discarding the polyfill's own, more-precise (here, nullable) native
-// parameter types.
+// `Project::new` merges stubs before any project file is indexed (the
+// same ordering the class-side test just below documents), so a
+// conditionally-declared polyfill of a built-in name (`if
+// (!function_exists('str_contains')) { function str_contains(?string
+// $haystack, ?string $needle): bool {...} }`) must still be able to win
+// over the stub's own signature - `entry(...).or_insert_with(...)` is a
+// no-op once the stub already occupies the slot, which would silently
+// discard the polyfill's more-precise (here, nullable) native parameter
+// types.
 #[test]
 fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
     let stub_sig =
@@ -290,19 +284,16 @@ fn a_conditional_polyfill_declaration_wins_over_a_previously_merged_stub() {
     );
 }
 
-// Phase 60 corpus find, second half: real corpus shape (rector's own
-// vendored `scoper-autoload.php`, alongside symfony/polyfill-intl-
-// grapheme's own real declaration) has *two* unrelated conditional
-// declarations of the same built-in name - a bare `func_get_args()`-
-// forwarding shim with no declared params at all, and the real,
-// correctly-typed one - competing for the one stub-provided slot the
-// fix above lets a conditional declaration claim. Letting the
-// zero-param shim win first (whichever file happens to be indexed
-// first) left the *other* file's own body-check zipping its one real
+// Two unrelated conditional declarations of the same built-in name - a
+// bare `func_get_args()`-forwarding shim with no declared params at all,
+// and the real, correctly-typed one - compete for the one stub-provided
+// slot the fix above lets a conditional declaration claim. If the
+// zero-param shim won first (whichever file happens to be indexed
+// first), the other file's own body-check would zip its one real
 // parameter against the winning zero-param registry signature, quietly
 // losing the parameter and reading it as undefined inside its own body.
 // The arity gate keeps the door open for whichever declaration actually
-// matches the stub's own shape, regardless of which one is seen first.
+// matches the stub's shape, regardless of which one is seen first.
 #[test]
 fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     let stub_sig = build_registry("<?php function grapheme_strrev(string $string): string {}")
@@ -347,19 +338,16 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
     assert_eq!(r.functions["grapheme_strrev"].params[0].name, "string");
 }
 
-// A top-10-bucket workflow found the identical arity-mismatch shape one
-// level down from the two tests just above: neither of *these* two
-// conditional declarations ever occupies a *stub*-provided slot at all
-// (no `merge_stubs` call anywhere here) - real corpus shape: an
-// alphabetically-earlier `scoper-autoload.php`-style `func_get_args()`-
-// forwarding shim and the real, correctly-typed `symfony/deprecation-
-// contracts` declaration, both real, ordinary conditional declarations
-// of the same global function name, competing directly with each
-// other. Before this fix, `conditional_declaration_may_replace_stub`'s
-// own comparison only ever ran when the existing slot was still exactly
-// what `merge_stubs` had put there - a plain `or_insert_with` (first
-// one indexed wins, arity or not) applied here instead, so whichever
-// file happened to be indexed first won regardless of quality.
+// The identical arity-mismatch shape one level down from the two tests
+// just above: neither of these two conditional declarations ever
+// occupies a stub-provided slot at all (no `merge_stubs` call anywhere
+// here) - an alphabetically-earlier `func_get_args()`-forwarding shim
+// and the real, correctly-typed declaration, both ordinary conditional
+// declarations of the same global function name, compete directly with
+// each other. `conditional_declaration_may_replace_stub`'s comparison
+// must still apply here, not a plain `or_insert_with` (first one indexed
+// wins, arity or not), or whichever file happens to be indexed first
+// wins regardless of quality.
 #[test]
 fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     let mut r = Registry::default();
@@ -411,20 +399,16 @@ fn two_ordinary_conditional_declarations_are_tiebroken_by_arity_too() {
     );
 }
 
-// Phase 60 corpus find, fourth half: even at matching arity, a polyfill
-// package can bundle several PHP-version-gated variants of the same
-// function behind separate `function_exists()` guards - real shape:
-// symfony/polyfill-ctype's own `bootstrap.php` (`function ctype_punct
-// ($text) {...}`, no native types at all) alongside `bootstrap80.php`
-// (`function ctype_punct(mixed $text): bool {...}`, fully typed) for
-// the exact same name. Letting the untyped one win (whichever file the
-// corpus scan happens to reach first) silently discarded real type
-// information the stub itself already carried - and since every other
-// real file's own call sites (`jetbrains/phpstorm-stubs`'s own,
-// identically-typed declaration included) resolve through this one
-// shared registry entry, a *different* file's own body-check ended up
-// reporting the parameter/return type as missing, even though its own
-// source plainly declares both.
+// Even at matching arity, a polyfill package can bundle several
+// PHP-version-gated variants of the same function behind separate
+// `function_exists()` guards - an untyped variant (`function
+// ctype_punct($text) {...}`) alongside a fully-typed one (`function
+// ctype_punct(mixed $text): bool {...}`) for the exact same name. The
+// untyped one must not win (whichever file happens to be indexed
+// first), or it would silently discard type information the stub
+// itself already carried, and every other file's call sites resolving
+// through this one shared registry entry would then report the
+// parameter/return type as missing.
 #[test]
 fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration() {
     let stub_sig = build_registry("<?php function ctype_punct(mixed $text): bool {}")
@@ -467,19 +451,14 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::Mixed);
 }
 
-// Phase 60 corpus find, third half: real corpus shape - Piwigo itself
-// vendors `jetbrains/phpstorm-stubs` as a real dependency (presumably
-// for IDE/other tooling), so its own unconditional, bare (guard-free)
-// `function str_contains(string $haystack, string $needle): bool {}`
-// gets indexed as if it were ordinary project source, taking the
-// "second unconditional declaration merges onto the first" path against
-// the identical signature `merge_stubs` already put there. Clearing
-// `stub_provided_functions` there (as the very first version of this
-// fix did) told the *later*, better-typed conditional polyfill
-// declaration (symfony/polyfill-php80's own real `?string`-typed
-// `str_contains`) that the slot was no longer stub-equivalent and off
-// limits - silently discarding its nullable parameter types right back
-// to this phase's original bug, just via an extra hop.
+// A vendored, unconditional, bare (guard-free) duplicate of a stub
+// function gets indexed as if it were ordinary project source, taking
+// the "second unconditional declaration merges onto the first" path
+// against the identical signature `merge_stubs` already put there.
+// Clearing `stub_provided_functions` there would tell a later,
+// better-typed conditional polyfill declaration that the slot is no
+// longer stub-equivalent and off limits - silently discarding its
+// nullable parameter types via an extra hop.
 #[test]
 fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
     let stub_sig =
@@ -517,16 +496,15 @@ fn a_stub_slot_survives_an_unconditional_duplicate_of_the_stub_itself() {
     );
 }
 
-// Phase 25, real shape: `Project::new` calls `merge_stub_classes`
-// *before* any project file is indexed - a built-in class like
-// `Imagick` is already present by the time a project's own
-// `phpstan-stubs/Imagick.stub.php`-style override (a bare
-// `class Imagick { public function convolveImage(...) {} }` meaning
-// to patch one method) gets indexed later. Without also recording
-// the merged-in name in `unconditionally_declared_classes`,
-// `insert_built_decl`'s own merge fix would see "no unconditional
-// declaration recorded yet" and wholesale-replace the entire
-// built-in class with the override's bare one-method version.
+// `Project::new` calls `merge_stub_classes` before any project file is
+// indexed - a built-in class like `Imagick` is already present by the
+// time a project's own override (a bare `class Imagick { public
+// function convolveImage(...) {} }` meaning to patch one method) gets
+// indexed later. The merged-in name must also be recorded in
+// `unconditionally_declared_classes`, or `insert_built_decl`'s merge fix
+// would see "no unconditional declaration recorded yet" and
+// wholesale-replace the entire built-in class with the override's bare
+// one-method version.
 #[test]
 fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     // The built-in class's own `ClassInfo` is built the same way
@@ -564,18 +542,17 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     );
 }
 
-// Real corpus shape: `symfony/polyfill-php84`'s own `if (PHP_VERSION_ID
-// < 80400) { final class ReflectionConstant { private $value; ... } }`
-// collides with jetbrains/phpstorm-stubs' own native-class stub for the
-// real PHP 8.4+ `ReflectionConstant` (only `$name`, no `$value`) -
-// merged in via `merge_stub_classes` before this conditional
-// declaration is ever indexed. Unlike the `class_exists`-guarded
-// defensive-fallback shape above (`unconditional_class_wins_over_a_
-// later_conditional_stub`), the *built-in stub's* own members must gain
-// the conditional declaration's real properties/methods, not discard
-// them - the stub is itself only a type-checking fiction, and the
-// polyfill's own method bodies are checked against whatever wins this
-// name.
+// A polyfill's conditional declaration (`if (PHP_VERSION_ID < 80400) {
+// final class ReflectionConstant { private $value; ... } }`) can collide
+// with a native-class stub for a newer PHP version's built-in of the
+// same name (only `$name`, no `$value`) - merged in via
+// `merge_stub_classes` before this conditional declaration is ever
+// indexed. Unlike the `class_exists`-guarded defensive-fallback shape
+// above (`unconditional_class_wins_over_a_later_conditional_stub`), the
+// built-in stub's own members must gain the conditional declaration's
+// real properties/methods, not discard them - the stub is only a
+// type-checking fiction, and the polyfill's own method bodies are
+// checked against whatever wins this name.
 #[test]
 fn a_conditional_declaration_merges_onto_a_built_in_stub_class() {
     let built_in = build_registry("<?php class ReflectionConstant { public string $name; }")
@@ -637,16 +614,13 @@ fn a_conditional_declaration_does_not_merge_onto_a_real_non_stub_class() {
     assert!(!r.classes["X"].methods.contains_key("stub"));
 }
 
-// Real corpus regression, caught before shipping: `nikic/php-parser`'s
-// own conditional `class PhpToken extends Symfony\Polyfill\Php80\
-// PhpToken {}` (guarding PHP <8.0) collides with the built-in stub for
-// the real `\PhpToken` - merging that never-taken `extends` onto the
-// stub, a wholly unrelated third file's own `TokenPolyfill extends
-// \PhpToken {}` then inherited it transitively, wrongly flagging its
-// real `__construct()` as overriding a `final` method it has no actual
-// relation to. `extends`/`implements` must never be adopted from the
-// conditional declaration, even while its properties/methods do merge
-// in.
+// A conditional class declaration's `extends` (e.g. `class PhpToken
+// extends Symfony\Polyfill\Php80\PhpToken {}`, guarding PHP <8.0)
+// colliding with a built-in stub must never be adopted onto the stub,
+// even while its properties/methods do merge in - otherwise a wholly
+// unrelated third file inheriting from the built-in transitively picks
+// up the never-taken `extends`, wrongly flagging its real `__construct()`
+// as overriding a `final` method it has no actual relation to.
 #[test]
 fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
     let built_in = build_registry("<?php class PhpToken implements Stringable {}")
@@ -681,14 +655,12 @@ fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
     );
 }
 
-// phpstorm-stubs' interleaved-multiple-parameter-list shape one level
-// down from Phase 32 Finding C's own free-function fix: a class/enum
-// declaring the same method name twice in one body (its documented idiom
-// for a version-split or genuine overload, e.g. real `DatePeriod::
-// __construct`'s four declarations). `ClassInfo::from_decl`/
-// `from_enum_decl` used to build the method table with a bare
-// `.collect()`, silently keeping only the textually-last declaration and
-// dropping every earlier alternate parameter list with zero trace.
+// A class/enum declaring the same method name twice in one body (a
+// documented phpstorm-stubs idiom for a version-split or genuine
+// overload, e.g. `DatePeriod::__construct`'s four declarations) must
+// have its method table built by merging every declaration, not a bare
+// `.collect()` that silently keeps only the textually-last one and
+// drops every earlier alternate parameter list with zero trace.
 #[test]
 fn two_method_declarations_with_different_arities_in_one_class_body_merge() {
     // Mirrors real `DatePeriod`'s own three distinct constructor shapes
