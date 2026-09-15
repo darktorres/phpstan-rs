@@ -199,19 +199,17 @@ fn invalidation_is_transitive_across_an_inheritance_chain() {
 fn invalidation_still_works_for_namespaced_classes() {
     // Same shape as invalidation_is_transitive_across_an_inheritance_chain,
     // but every class lives in a namespace - real code, unlike almost
-    // every other test in this file. Phase 9.5 made declared_names
-    // return fully-qualified names (to match Registry::index's now
-    // namespace-aware keys, for correct incremental *removal*), but
-    // deps::referenced_names deliberately still collects bare names
+    // every other test in this file. `declared_names` returns
+    // fully-qualified names (to match Registry::index's namespace-aware
+    // keys, for correct incremental removal), but
+    // `deps::referenced_names` deliberately still collects bare names
     // (an intentional, documented approximation - see its own doc
-    // comment) - changed_symbols (fed from declared_names) and
-    // `dependents`'s keys (fed from referenced_names) must actually
-    // agree for transitive_affected_files' lookup to find anything at
-    // all, and after Phase 9.5 they silently didn't for any namespaced
-    // class: `dependents.get("App\\C")` found nothing under a
-    // "App\\C" key that was never inserted (only the bare "C" key
-    // was), so a.php was never re-checked even though it genuinely
-    // depends on the changed class.
+    // comment) - `changed_symbols` (fed from `declared_names`) and
+    // `dependents`'s keys (fed from `referenced_names`) must actually
+    // agree for `transitive_affected_files`' lookup to find anything at
+    // all: `dependents.get("App\\C")` must find something under an
+    // "App\\C" key, not only a bare "C" key, or a.php is never
+    // re-checked even though it genuinely depends on the changed class.
     let mut project = Project::new();
     project
         .load_file(
@@ -255,12 +253,11 @@ fn invalidation_still_works_for_namespaced_classes() {
 
 #[test]
 fn a_class_referenced_only_inside_a_property_hook_body_is_a_real_dependency() {
-    // Coverage measurement found deps.rs's collect_property_hooks/
-    // collect_hook_body had zero test executions - PHP 8.4 property
-    // hooks are real, newer syntax, and a class mentioned only inside
-    // a get/set hook body (not a plain method) is exactly the kind of
-    // reference the earlier Phase 7 regression already proved this
-    // codebase can silently miss.
+    // `deps.rs`'s `collect_property_hooks`/`collect_hook_body` must
+    // collect references inside a get/set hook body (not just a plain
+    // method) - PHP 8.4 property hooks are newer syntax, and a class
+    // mentioned only there is exactly the kind of reference this
+    // codebase can otherwise silently miss.
     let mut project = Project::new();
     project
         .load_file(
