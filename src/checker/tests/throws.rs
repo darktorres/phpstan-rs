@@ -1,6 +1,5 @@
-//! Phase 42's own self-contained first slice: `@throws` tag validity
-//! (`checker::throws`, `throws.notThrowable`) - a `@throws` naming
-//! something that isn't actually a `Throwable` subtype.
+//! `@throws` tag validity (`checker::throws`, `throws.notThrowable`) - a
+//! `@throws` naming something that isn't actually a `Throwable` subtype.
 
 use super::helpers::*;
 
@@ -38,12 +37,11 @@ fn throws_tag_naming_a_non_throwable_class_is_flagged() {
 
 #[test]
 fn throws_tag_naming_an_unresolvable_class_is_never_flagged() {
-    // Real corpus shape: a native-extension-only exception class (e.g.
-    // `SVMException` from the `svm` extension) that this project's own
-    // stub corpus never vendors - "don't know, don't guess" the same
-    // way `CaughtExceptionExistenceRule`'s own ordering already does for
-    // the analogous `catch` case, rather than misreporting an unknown
-    // class as "confirmed not Throwable".
+    // A native-extension-only exception class that this project's stub
+    // corpus never vendors must get "don't know, don't guess" the same
+    // way `CaughtExceptionExistenceRule`'s ordering already does for the
+    // analogous `catch` case, rather than misreporting an unknown class
+    // as "confirmed not Throwable".
     let d = diagnostics_for(
         r#"<?php
             /** @throws SomeExtensionOnlyException */
@@ -240,9 +238,9 @@ fn a_throw_inside_a_nested_if_still_contradicts_throws_void() {
     );
 }
 
-// Phase 42 Sub-items A/C: `TooWideFunctionThrowTypeRule`/
-// `TooWideMethodThrowTypeRule` - a declared `@throws` member never
-// actually produced anywhere in the body is flagged `throws.unusedType`.
+// `TooWideFunctionThrowTypeRule`/`TooWideMethodThrowTypeRule` - a
+// declared `@throws` member never actually produced anywhere in the
+// body is flagged `throws.unusedType`.
 
 #[test]
 fn a_declared_throws_type_actually_thrown_is_not_flagged_too_wide() {
@@ -260,19 +258,15 @@ fn a_declared_throws_type_actually_thrown_is_not_flagged_too_wide() {
     );
 }
 
-// Real, previously-live bug found while tracing a real Piwigo corpus
-// false positive (`ConfigLoader::validateRequired`, whose own
-// `new ReflectionClass(...)` call contributes ReflectionException - a
-// declared throw type on that stub's own constructor - alongside the
-// method's own genuine, matching `throw`): `check_too_wide_throw_type`
-// used to call `is_assignable(actual, &declared)` directly, treating the
-// *whole* union of everything this body could ever throw as the "sub"
-// side - is_assignable's own (otherwise entirely correct) rule for a
-// `Union` in that position requires *every* member to satisfy the
-// supertype, so one single unrelated throw point anywhere in the body
-// was enough to make an otherwise genuinely-thrown declared type look
-// unused. The real question is "was `declared` thrown *somewhere*," not
-// "is everything this body throws covered by `declared`."
+// `check_too_wide_throw_type` must not call `is_assignable(actual,
+// &declared)` directly, treating the whole union of everything this body
+// could ever throw as the "sub" side - `is_assignable`'s own (otherwise
+// entirely correct) rule for a `Union` in that position requires every
+// member to satisfy the supertype, so one single unrelated throw point
+// anywhere in the body would be enough to make an otherwise
+// genuinely-thrown declared type look unused. The real question is "was
+// `declared` thrown somewhere," not "is everything this body throws
+// covered by `declared`."
 #[test]
 fn a_declared_throws_type_actually_thrown_alongside_an_unrelated_one_is_not_flagged_too_wide() {
     let d = diagnostics_for(
@@ -460,7 +454,7 @@ fn a_throw_inside_a_nested_closure_does_not_satisfy_the_outer_functions_own_thro
     );
 }
 
-// Phase 42 Sub-item D: per-callee dynamic throw-type extensions.
+// Per-callee dynamic throw-type extensions.
 
 #[test]
 fn intdiv_by_a_literal_nonzero_divisor_satisfies_a_division_by_zero_error_throws_tag_check() {
@@ -494,11 +488,11 @@ fn intdiv_by_a_non_literal_divisor_satisfies_a_division_by_zero_error_throws_tag
     );
 }
 
-// Same bug, same fix as intdiv's own pair of tests just above: a *valid*
-// literal DateInterval spec used to fall back to the constructor's own
-// generic stub-level @throws tag instead of correctly contributing
-// nothing, so a declared @throws Exception looked "used" even though this
-// exact call could never throw it.
+// Same shape as intdiv's own pair of tests just above: a valid literal
+// DateInterval spec must not fall back to the constructor's generic
+// stub-level @throws tag - it should correctly contribute nothing, so a
+// declared @throws Exception is flagged unused when this exact call
+// could never throw it.
 #[test]
 fn dateinterval_with_a_valid_literal_spec_satisfies_an_exception_throws_tag_check() {
     let d = diagnostics_for(
@@ -659,8 +653,8 @@ fn constructing_simplexml_element_from_a_non_literal_argument_satisfies_an_excep
     );
 }
 
-// Phase 42 bonus item: opt-in "missing checked exception" family - off
-// by default, enabled per-test via `diagnostics_for_with`.
+// Opt-in "missing checked exception" family - off by default, enabled
+// per-test via `diagnostics_for_with`.
 
 #[test]
 fn the_missing_checked_exception_check_is_off_by_default() {
@@ -800,12 +794,12 @@ fn a_throw_inside_a_method_uses_method_wording_when_flagged() {
     );
 }
 
-// Phase 42 gating fix: `TooWideMethodThrowTypeRule`'s own visibility/
-// finality/first-declaration gate - an ordinary overridable method with an
-// unused `@throws` tag is a real, corpus-confirmed false-positive flood
-// (real PHPStan itself defaults `checkTooWideThrowTypesInProtectedAndPublicMethods`
-// to `false` for exactly this reason) and must stay silent unless the
-// method is private, final, or on a final class.
+// `TooWideMethodThrowTypeRule`'s visibility/finality/first-declaration
+// gate - an ordinary overridable method with an unused `@throws` tag is
+// a false-positive flood (PHPStan itself defaults
+// `checkTooWideThrowTypesInProtectedAndPublicMethods` to `false` for
+// exactly this reason) and must stay silent unless the method is
+// private, final, or on a final class.
 
 #[test]
 fn an_ordinary_overridable_public_method_with_an_unused_throws_tag_stays_silent() {
