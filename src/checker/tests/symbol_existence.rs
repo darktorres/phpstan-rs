@@ -1,20 +1,18 @@
-//! Phase 48: the "does this name actually resolve" existence-validation
-//! pipeline (`Checker::class_name_exists`/`collect_unknown_class_names`/
-//! `check_type_class_names_exist`, `checker/resolve.rs`), wired into every
-//! site that used to trust a class/interface/trait/enum/function name
-//! blindly - `use function`, `extends`/`implements`/trait-use targets,
-//! `instanceof`, `catch`, and parameter/return/property type hints
-//! (including on closures and arrow functions). Every positive case here
-//! is paired with at least one negative case exercising the same syntactic
-//! shape with a real, existing name, to guard against a false positive.
+//! The "does this name actually resolve" existence-validation pipeline
+//! (`Checker::class_name_exists`/`collect_unknown_class_names`/
+//! `check_type_class_names_exist`, `checker/resolve.rs`), covering every
+//! site that references a class/interface/trait/enum/function name -
+//! `use function`, `extends`/`implements`/trait-use targets, `instanceof`,
+//! `catch`, and parameter/return/property type hints (including on
+//! closures and arrow functions). Every positive case here is paired with
+//! at least one negative case exercising the same syntactic shape with a
+//! real, existing name, to guard against a false positive.
 
 use super::helpers::*;
 
 #[test]
 fn instantiating_a_typod_class_is_still_flagged_with_class_not_found() {
-    // Pre-existing behavior (`ExprKind::New`'s own check, predating this
-    // phase) - included here as the baseline every other site below is
-    // measured against.
+    // Baseline every other site below is measured against.
     let d = diagnostics_for("<?php function f() { return new TotallyMadeUp(); }");
     assert!(
         d.iter().any(|x| x.identifier == "class.notFound"),
@@ -227,10 +225,9 @@ fn catching_an_unknown_exception_class_is_flagged_with_class_not_found() {
                 && x.message.contains("TotallyMadeUpException")),
         "got: {d:?}"
     );
-    // Real bug fixed alongside the existence check: a typo'd/missing
-    // exception class must not ALSO get the misleading "does not
-    // implement Throwable" diagnostic - `class_name_exists` gates that
-    // check now (an `else if`, not a second independent `if`).
+    // A typo'd/missing exception class must not ALSO get the misleading
+    // "does not implement Throwable" diagnostic - `class_name_exists`
+    // gates that check (an `else if`, not a second independent `if`).
     assert!(
         !d.iter().any(|x| x.identifier == "catch.notThrowable"),
         "got: {d:?}"
@@ -493,11 +490,9 @@ fn a_real_use_function_import_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// ROADMAP "Known but not yet scheduled": `use function`'s own
-// `function.nameCase` check, opt-in (`Registry::check_function_name_case`,
-// default `false`) mirroring real PHPStan's own `checkFunctionNameCase`
-// parameter (also default `false`, not part of any standard level 0-10
-// rule set).
+// `use function`'s `function.nameCase` check is opt-in
+// (`Registry::check_function_name_case`, default `false`), mirroring
+// PHPStan's own `checkFunctionNameCase` parameter.
 #[test]
 fn use_function_name_case_is_not_flagged_by_default() {
     let d = diagnostics_for(
@@ -541,8 +536,6 @@ fn use_function_name_case_is_not_flagged_for_a_correctly_cased_import_even_when_
     );
 }
 
-// ROADMAP "Known but not yet scheduled": `use const`'s own existence
-// check - see `Checker::check_use_const_imports`'s own doc comment.
 #[test]
 fn a_typod_use_const_import_is_flagged_with_constant_not_found() {
     let d = diagnostics_for(
@@ -586,12 +579,9 @@ fn a_real_builtin_stub_const_use_import_is_not_flagged() {
     );
 }
 
-// Real corpus false positive caught during corpus verification:
-// `define_call_constant`'s own deliberate `PHP_INT_MIN` exclusion (its
-// raw literal overflows i64, mistyping as Float) used to mean this real,
-// always-defined constant was never registered at all - indistinguishable
-// from "doesn't exist" to this existence check. Now registered with
-// `Type::Int` directly instead of being skipped entirely.
+// `PHP_INT_MIN` is registered with `Type::Int` directly rather than
+// through `define_call_constant` (its raw literal overflows i64,
+// mistyping as Float), so it isn't treated as undefined.
 #[test]
 fn a_real_php_int_min_use_import_is_not_flagged() {
     let d = diagnostics_for(
@@ -622,11 +612,8 @@ fn a_grouped_use_const_import_typo_is_flagged() {
     );
 }
 
-// Disclosed, pinned boundary (not a fix target): a `define()` nested
-// inside a function body is invisible to `Registry::global_constants`
-// either way - documents that this stays a silent no-op rather than a
-// false positive, so a future change to `build_declarations_with_context`
-// doesn't silently start flagging real code.
+// `define()` nested inside a function body is invisible to
+// `Registry::global_constants`, so this stays flagged.
 #[test]
 fn a_define_nested_inside_a_function_body_is_not_flagged_either_way() {
     let d = diagnostics_for(
@@ -639,21 +626,13 @@ fn a_define_nested_inside_a_function_body_is_not_flagged_either_way() {
     );
     assert!(
         d.iter().any(|x| x.identifier == "constant.notFound"),
-        "got: {d:?} (nested define() is invisible to global_constants, so this stays flagged - not a regression, a pinned pre-existing boundary)"
+        "got: {d:?}"
     );
 }
 
-// Phase 71 corpus find: real PHP function calls are case-insensitive -
-// `Registry::lookup_function` used to be a plain exact-case `HashMap`
-// lookup, wrongly flagging any differently-cased call (a builtin or a
-// user-declared function alike) as undefined.
-
-// Phase 71 Item 4: `function_exists()`-guard suppression for the
-// undefined-function check - a disclosed, project-specific adaptation
-// (this project's own registry can legitimately lack a symbol real PHP
-// itself resolves fine at runtime, unlike real PHPStan's own live
-// reflection).
-
+// `function_exists()`-guard suppression for the undefined-function check:
+// this project's own registry can legitimately lack a symbol PHP itself
+// resolves fine at runtime, unlike PHPStan's live reflection.
 #[test]
 fn function_exists_guard_suppresses_undefined_function_call() {
     let d = diagnostics_for(
@@ -762,9 +741,8 @@ fn function_exists_guard_scoped_correctly_across_closures() {
     );
 }
 
-// Phase 48.1: real PHP resolves class/interface/trait/enum names case-
-// insensitively too, the same bug class already fixed for functions
-// (Phase 71).
+// Class/interface/trait/enum names resolve case-insensitively, like
+// function names.
 
 #[test]
 fn a_differently_cased_new_of_a_user_declared_class_is_never_flagged() {
@@ -836,9 +814,9 @@ fn a_genuinely_undefined_class_is_still_flagged_regardless_of_case() {
     );
 }
 
-// Phase 48.2: `class.nameCase`/`interface.nameCase`/`trait.nameCase`/
-// `enum.nameCase`, scoped to a class/enum declaration's own `extends`/
-// `implements`/trait-`use` references.
+// `class.nameCase`/`interface.nameCase`/`trait.nameCase`/`enum.nameCase`
+// are scoped to a class/enum declaration's own `extends`/`implements`/
+// trait-`use` references.
 
 #[test]
 fn a_differently_cased_extends_reference_to_a_user_class_is_flagged_name_case() {
@@ -882,11 +860,9 @@ fn a_differently_cased_trait_use_reference_is_flagged_name_case() {
     );
 }
 
-// Phase 48.H: `class.nameCase` widened to every native-syntax class-name
-// reference - `new`, `instanceof`, a static method/property/constant
-// access, and `catch` - none of which needed new parser/registry
-// plumbing (the raw, as-written text was already a bare AST string at
-// each of these positions).
+// `class.nameCase` applies to every native-syntax class-name reference -
+// `new`, `instanceof`, a static method/property/constant access, and
+// `catch`.
 
 #[test]
 fn a_differently_cased_new_reference_is_flagged_name_case() {
@@ -1078,9 +1054,8 @@ fn an_exact_case_reference_is_never_flagged_name_case() {
     );
 }
 
-// Phase 48 follow-up (item 7b): `class.nameCase` for a PHPDoc-typed
-// param/return position - `collect_class_name_case_refs`/
-// `check_type_class_name_case`.
+// `class.nameCase` for a PHPDoc-typed param/return position -
+// `collect_class_name_case_refs`/`check_type_class_name_case`.
 
 #[test]
 fn a_differently_cased_native_param_type_hint_is_flagged_name_case() {
@@ -1185,9 +1160,9 @@ fn a_template_name_sharing_a_lowercase_class_s_own_spelling_is_never_flagged_nam
     );
 }
 
-// Phase 48 follow-up (item 7c): `class.nameCase` for a property position -
-// a plain declared property's native type hint, a `@var`-tag property
-// type, and a `@property` tag target.
+// `class.nameCase` for a property position - a plain declared property's
+// native type hint, a `@var`-tag property type, and a `@property` tag
+// target.
 
 #[test]
 fn a_differently_cased_native_property_type_hint_is_flagged_name_case() {
@@ -1254,8 +1229,7 @@ fn a_correctly_cased_property_position_is_never_flagged_name_case() {
     );
 }
 
-// Phase 48 follow-up (item 7d): `class.nameCase` for `@method`/`@mixin`/
-// `@phpstan-type` tag targets.
+// `class.nameCase` for `@method`/`@mixin`/`@phpstan-type` tag targets.
 
 #[test]
 fn a_differently_cased_method_tag_return_type_is_flagged_name_case() {
@@ -1360,10 +1334,8 @@ fn a_correctly_cased_method_mixin_and_type_alias_are_never_flagged_name_case() {
 
 #[test]
 fn a_class_named_the_same_as_a_keyword_is_referenced_correctly_by_a_differently_cased_use() {
-    // Phase 48 item 6: `class Enum { ... }` used to have its own declared
-    // name silently corrupted to `enum` by `take_name_segment`'s keyword-
-    // recovery path - a real reference to it by its true case would have
-    // wrongly resolved to nothing (`class.notFound`) before this fix.
+    // Guards `take_name_segment`'s keyword-recovery path against
+    // corrupting a class named the same as a keyword (`class Enum {}`).
     let d = diagnostics_for(
         r#"<?php
             class Enum {}
@@ -1375,17 +1347,12 @@ fn a_class_named_the_same_as_a_keyword_is_referenced_correctly_by_a_differently_
 
 #[test]
 fn a_backfilled_return_type_inherited_from_an_ancestor_is_not_re_flagged_name_case() {
-    // Phase 48 item 7e (disclosed exclusion): `flatten_phpdoc_
-    // inheritance`'s own backfill pass copies `ty` from an ancestor but
-    // deliberately never re-collects `case_refs` from it - the raw text
-    // was written under that *ancestor's* file's own `use` imports, not
-    // this (identical, but still separate) file's `name_ctx`, so
-    // checking it here would be a real cross-file-context correctness
-    // hazard. `HasX::getX()`'s own genuinely mis-cased `@return foo` is
-    // correctly flagged once, on its own declaration - `Impl::getX()`,
-    // which declares no `@return` of its own and backfills `foo` from
-    // `HasX`, must not get a second, duplicate flag for the identical
-    // inherited text.
+    // `flatten_phpdoc_inheritance`'s backfill pass copies `ty` from an
+    // ancestor but deliberately never re-collects `case_refs` from it -
+    // the raw text was written under the ancestor's own `use` imports,
+    // not this file's `name_ctx`, so checking it here would be a
+    // cross-file-context hazard. The inherited text must not get a
+    // second, duplicate flag on the inheriting declaration.
     let d = diagnostics_for(
         r#"<?php
             class Foo {}
@@ -1453,16 +1420,11 @@ fn a_genuinely_undefined_function_is_still_flagged_regardless_of_case() {
     );
 }
 
-// `namespace\foo()` is a real, distinct PHP construct - "call `foo`
-// relative to the current namespace only, no use-import lookup, no
-// global-namespace fallback" - used as a deliberate house style by
-// `php-standard-library`/Psl (663 real call sites in the corpus) to
-// force resolution against a sibling function of the same short name
-// that also exists globally. Without recognizing the `namespace\`
-// prefix, `take_name_segment` accepting the keyword as an ordinary name
-// segment left the literal word "namespace" in the resolved string,
-// which then got re-qualified against the current namespace a *second*
-// time (`Psl\Str\namespace\chunk` instead of the real `Psl\Str\chunk`).
+// `namespace\foo()` calls `foo` relative to the current namespace only -
+// no use-import lookup, no global-namespace fallback. `take_name_segment`
+// must recognize the `namespace\` prefix rather than accepting "namespace"
+// as an ordinary name segment, or the resolved string gets re-qualified
+// against the current namespace a second time.
 #[test]
 fn a_namespace_relative_call_resolves_against_the_current_namespace() {
     let d = diagnostics_for(
@@ -1538,14 +1500,10 @@ fn a_group_use_function_import_is_checked_per_member() {
 
 #[test]
 fn a_plain_use_class_import_is_not_existence_checked() {
-    // Matches real PHPStan's own `ExistingNamesInUseRule`, confirmed
-    // directly against its source: a plain, class-shaped `use Foo;` is
-    // never existence-checked at the `use` statement itself (only
-    // case-sensitivity/forbidden-name checking runs there) - a class
-    // reference is only ever existence-checked where it's actually used.
-    // So a `use`-imported class that's never referenced again produces
-    // no diagnostic here, even though the name doesn't exist anywhere in
-    // this snippet.
+    // A plain, class-shaped `use Foo;` is never existence-checked at the
+    // `use` statement itself (only case-sensitivity/forbidden-name
+    // checking runs there) - a class reference is only ever
+    // existence-checked where it's actually used.
     let d = diagnostics_for(
         r#"<?php
             use Some\Totally\MadeUp\ClassName;
@@ -1556,14 +1514,10 @@ fn a_plain_use_class_import_is_not_existence_checked() {
 
 #[test]
 fn a_generic_type_argument_referencing_an_unregistered_class_is_not_flagged() {
-    // Deliberately mirrors `a_bound_argument_that_s_an_unregistered_class_
-    // is_never_flagged` (`generics_and_templates.rs`) - the same real
-    // corpus finding (a PHAR-bundled dependency with no loose source
-    // files this project's registry can index) applies equally to
-    // existence-checking, not just bound-checking: a class referenced
-    // only as a `@template` type ARGUMENT (not the bare typehint itself)
-    // is deliberately never existence-checked, since this project's own
-    // registry completeness can't be relied on for it.
+    // A class referenced only as a `@template` type ARGUMENT (not the
+    // bare typehint itself) is deliberately never existence-checked,
+    // since registry completeness can't be relied on for it (a
+    // PHAR-bundled dependency with no loose source files, for example).
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1579,11 +1533,9 @@ fn a_generic_type_argument_referencing_an_unregistered_class_is_not_flagged() {
 
 #[test]
 fn an_anonymous_class_self_and_static_typed_return_is_never_flagged() {
-    // Mirrors `anonymous_class_method_resolves_a_static_return_type`
-    // (`oop_overrides_and_inheritance.rs`): an anonymous class's own
-    // synthetic `"class@anonymous"` name is deliberately never indexed
-    // into the registry at all, so `self`/`static`-typed members inside
-    // its own body must never be misread as referencing a missing class.
+    // An anonymous class's synthetic `"class@anonymous"` name is never
+    // indexed into the registry, so `self`/`static`-typed members inside
+    // its body must never be misread as referencing a missing class.
     let d = diagnostics_for(
         r#"<?php
             function make() {
@@ -1598,13 +1550,12 @@ fn an_anonymous_class_self_and_static_typed_return_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus shape (jetbrains/phpstorm-stubs' own `relay/Cluster.php`):
-// a file can have more than one semicolon-style `namespace Foo;`
+// A file can have more than one semicolon-style `namespace Foo;`
 // statement, each switching the active namespace for everything that
-// follows - `Checker::name_ctx` used to be built once, whole-file (last
-// `namespace` seen wins), which wrongly resolved a self-referencing
-// return type declared under an *earlier* namespace as if it were under
-// the file's *last* one.
+// follows - `Checker::name_ctx` must track that per-statement rather
+// than being built once whole-file, or a self-referencing return type
+// declared under an earlier namespace resolves against the file's last
+// namespace instead.
 #[test]
 fn a_self_referencing_type_before_a_later_namespace_switch_in_the_same_file_is_never_flagged() {
     let d = diagnostics_for(
@@ -1618,10 +1569,6 @@ fn a_self_referencing_type_before_a_later_namespace_switch_in_the_same_file_is_n
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
-
-// Phase 48.3-48.6: existence-checking for @property/@method/@mixin/
-// @phpstan-type docblock tags - previously parsed/resolved and
-// semantically consumed, but never existence-checked.
 
 #[test]
 fn a_property_tag_referencing_an_unknown_class_is_flagged() {
@@ -1727,9 +1674,9 @@ fn a_phpstan_type_alias_referencing_an_unknown_class_is_flagged() {
 
 #[test]
 fn a_phpstan_import_type_from_an_unknown_class_is_not_flagged_by_default() {
-    // Deliberate leniency (Phase 48.6): the `from Class` target is very
-    // commonly only reachable via Composer autoloading this project's
-    // own registry may legitimately have no data for.
+    // Deliberate leniency: the `from Class` target is often only
+    // reachable via Composer autoloading the registry may have no data
+    // for.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1744,12 +1691,9 @@ fn a_phpstan_import_type_from_an_unknown_class_is_not_flagged_by_default() {
     );
 }
 
-// Phase 48.7: `StaticMethodCallCheck`/`AccessStaticPropertiesCheck`/
-// `ClassConstantRule`'s own "the class part itself doesn't exist" half -
-// a real, previously-silent gap (confirmed via direct code reading, not
-// just the design doc's own flagged-for-verification note): a `::`
-// reference through a genuinely undefined class produced zero
-// diagnostics before this.
+// `StaticMethodCallCheck`/`AccessStaticPropertiesCheck`/`ClassConstantRule`
+// each check "the class part itself doesn't exist" - a `::` reference
+// through a genuinely undefined class.
 
 #[test]
 fn calling_a_static_method_on_a_genuinely_undefined_class_is_flagged() {
@@ -1818,10 +1762,9 @@ fn a_static_method_call_on_a_known_class_is_still_only_flagged_as_a_missing_meth
     assert_eq!(d[0].identifier, "staticMethod.notFound");
 }
 
-// Phase 48.A: `parameter.trait`/`return.trait`/`property.trait` - a native
-// type-hint resolving to a real, indexed class that turns out to be a
-// `trait` rather than a class/interface/enum (real PHP itself rejects
-// this at the engine level).
+// `parameter.trait`/`return.trait`/`property.trait` flag a native
+// type-hint that resolves to a `trait` rather than a class/interface/enum
+// (PHP itself rejects this at the engine level).
 
 #[test]
 fn a_function_parameter_typed_as_a_trait_is_flagged() {
@@ -1959,10 +1902,9 @@ fn a_class_typed_parameter_is_never_flagged_as_a_trait() {
     );
 }
 
-// Phase 48.G: `class.prefixed` pipeline-wide expansion - a Rector/PHP-
-// Scoper/PHPUnit-PHAR/Box-mangled vendor class name leaking into a
-// reference is flagged wherever it's referenced, not just at a `use`
-// import site.
+// `class.prefixed` flags a Rector/PHP-Scoper/PHPUnit-PHAR/Box-mangled
+// vendor class name wherever it's referenced, not just at a `use` import
+// site.
 
 #[test]
 fn a_prefixed_class_used_as_a_parameter_type_is_flagged() {
