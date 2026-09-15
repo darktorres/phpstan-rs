@@ -33,9 +33,9 @@ fn generated_stub_classes_cover_real_built_in_classes() {
 
 #[test]
 fn generated_stub_classes_cover_real_phpstan_src_classes() {
-    // Finding 4: vendor/phpstan-src's own real classes, chained in
-    // after phpstorm-stubs - confirms PHPSTAN_SRC_SOURCES is actually
-    // wired in, not just declared.
+    // vendor/phpstan-src's classes, chained in after phpstorm-stubs -
+    // confirms PHPSTAN_SRC_SOURCES is actually wired in, not just
+    // declared.
     let classes = generated_stub_classes();
     let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_str()).collect();
     assert!(names.contains("PHPStan\\Type\\StringType"));
