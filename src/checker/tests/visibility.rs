@@ -1,15 +1,15 @@
-//! Phase 57: `public`/`private`/`protected` access-control enforcement
-//! for property reads/writes, method calls, and static method calls.
+//! `public`/`private`/`protected` access-control enforcement for
+//! property reads/writes, method calls, and static method calls.
 
 use super::super::Diagnostic;
 use super::helpers::*;
 
 /// These fixtures are deliberately minimal (a bare private property/
-/// method with no other legitimate use anywhere in the file) - real,
-/// unrelated Phase 59 unused-symbol diagnostics (`property.onlyWritten`,
-/// `method.unused`, ...) fire on them too, which isn't what these tests
-/// are about. Filters down to the visibility-family identifiers this
-/// file actually exercises.
+/// method with no other legitimate use anywhere in the file) - unrelated
+/// unused-symbol diagnostics (`property.onlyWritten`, `method.unused`,
+/// ...) fire on them too, which isn't what these tests are about.
+/// Filters down to the visibility-family identifiers this file actually
+/// exercises.
 fn visibility_diagnostics(src: &str) -> Vec<Diagnostic> {
     diagnostics_for(src)
         .into_iter()
@@ -261,15 +261,12 @@ fn calling_a_protected_static_method_from_a_subclass_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A real corpus check (amphp/http-server's own `Http1Driver`/
-// `Http2Driver`, siblings under a common `abstract class
-// AbstractHttpDriver { abstract protected function write(); }`) found
-// this shape wrongly flagged: `owner` (whichever class's own lookup
-// resolved the *concrete* override, `Http2Driver` here) isn't
-// necessarily where the member's own access-control contract actually
-// originates - `current_class`'s own hierarchy independently having a
-// same-named member (via the shared abstract ancestor) proves the
-// contract is shared too.
+// `owner` (whichever class's lookup resolved the concrete override)
+// isn't necessarily where the member's access-control contract actually
+// originates - `current_class`'s hierarchy independently having a
+// same-named member (via a shared abstract ancestor) proves the
+// contract is shared too, so a sibling class's call through it must not
+// be flagged.
 #[test]
 fn calling_a_protected_method_on_a_sibling_class_via_a_shared_abstract_ancestor_is_never_flagged() {
     let d = visibility_diagnostics(
@@ -293,12 +290,10 @@ fn calling_a_protected_method_on_a_sibling_class_via_a_shared_abstract_ancestor_
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Pest's own `$this`-binding (`uses(X::class)` + `it(...)`) grants the
-// same private/protected access real `Closure::bind`'s own third
-// argument does - a real corpus check (Piwigo's own PHPUnit/Pest test
-// suite calling an inherited protected `TestCase::expectErrorLog()`)
-// found this wrongly flagged before this call site started passing a
-// scope class through alongside `$this`'s own type.
+// Pest's `$this`-binding (`uses(X::class)` + `it(...)`) grants the same
+// private/protected access `Closure::bind`'s third argument does - this
+// call site must pass a scope class through alongside `$this`'s type,
+// or such access is wrongly flagged.
 #[test]
 fn calling_a_protected_method_from_inside_a_pest_bound_closure_is_never_flagged() {
     let d = diagnostics_for(
@@ -335,9 +330,8 @@ fn reading_a_promoted_private_constructor_property_from_outside_is_flagged() {
     assert_eq!(d[0].identifier, "property.private");
 }
 
-// Phase 57's own still-open item: a class constant's own `public`/
-// `private`/`protected` modifier (PHP 7.1+) gets the identical
-// enforcement a property/method already does.
+// A class constant's `public`/`private`/`protected` modifier (PHP 7.1+)
+// gets the identical enforcement a property/method already does.
 
 #[test]
 fn reading_a_private_constant_from_outside_its_class_is_flagged() {
@@ -453,11 +447,10 @@ fn an_enum_case_fetch_is_never_flagged_for_visibility() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 57 follow-up: `AccessPrivateConstantThroughStaticRule` -
-// `static::` performs late static binding, which can resolve to a
-// different class at runtime than the one lexically containing the
-// code, so a `private` constant reached this way is unsafe even from
-// inside its own declaring class - confirmed directly via `php -r`.
+// `AccessPrivateConstantThroughStaticRule` - `static::` performs late
+// static binding, which can resolve to a different class at runtime
+// than the one lexically containing the code, so a `private` constant
+// reached this way is unsafe even from inside its own declaring class.
 
 #[test]
 fn a_private_constant_accessed_through_static_is_flagged() {
@@ -558,11 +551,10 @@ fn a_private_constant_accessed_through_a_named_class_is_never_flagged_for_the_st
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 57 follow-up: ordinary static-property visibility enforcement
-// (previously entirely unenforced - confirmed directly via `php -r` as
-// a real "Cannot access private property" fatal error), plus the
-// identical `AccessPrivatePropertyThroughStaticRule` late-static-binding
-// unsafety the constant case above already gets.
+// Ordinary static-property visibility enforcement (a real "Cannot
+// access private property" fatal error), plus the identical
+// `AccessPrivatePropertyThroughStaticRule` late-static-binding unsafety
+// the constant case above already gets.
 
 #[test]
 fn reading_a_private_static_property_from_outside_its_class_is_flagged() {
@@ -682,9 +674,9 @@ fn a_public_static_property_accessed_through_static_is_never_flagged_for_the_sta
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 57 follow-up: `CallPrivateMethodThroughStaticRule` - the
-// identical late-static-binding unsafety, for a `static::method()` call
-// this time.
+// `CallPrivateMethodThroughStaticRule` - the identical
+// late-static-binding unsafety, for a `static::method()` call this
+// time.
 
 #[test]
 fn a_private_static_method_called_through_static_is_flagged() {
