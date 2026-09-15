@@ -2,12 +2,12 @@
 
 use super::helpers::*;
 
-// Phase 12: array_map/array_filter return-type precision. Each test
-// proves the inferred type is real, not just "still Mixed and
-// therefore compatible with everything" - is_assignable's own
-// Array(Mixed) leniency means an imprecise result would silently
-// satisfy *any* declared element type, so the discriminating check
-// here is a call the real, precise type must actually fail.
+// array_map/array_filter return-type precision. Each test proves the
+// inferred type is real, not just "still Mixed and therefore
+// compatible with everything" - is_assignable's own Array(Mixed)
+// leniency means an imprecise result would silently satisfy any
+// declared element type, so the discriminating check here is a call
+// the real, precise type must actually fail.
 
 #[test]
 fn array_map_infers_the_real_element_type_from_an_untyped_arrow_fn_param() {
@@ -67,12 +67,9 @@ fn array_map_trusts_an_explicit_closure_return_type_hint_over_the_array_element_
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found a first-class callable
-// (`intval(...)`, PHP 8.1) used as array_map's own callback was
-// completely unrecognized, discarding both the mapped element type
-// and any list-ness/non-emptiness the input already had - an
-// extremely common idiom in this corpus (76 first-party call sites
-// for `array_map(intval(...), ...)` alone).
+// A first-class callable (`intval(...)`, PHP 8.1) used as array_map's
+// own callback must be recognized, or it discards both the mapped
+// element type and any list-ness/non-emptiness the input already had.
 #[test]
 fn array_map_resolves_a_first_class_callable_to_a_native_function() {
     let d = diagnostics_for(
@@ -132,12 +129,11 @@ fn array_map_resolves_a_first_class_callables_own_self_return_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session: the `ExprKind::MethodCall` arm
-// resolving a first-class callable's own signature required the
-// receiver's own type to be literally `Type::Object`, silently skipping
-// it (and discarding the mapped element type entirely, the same
-// regression the tests above guard for a `Call`/`StaticCall` callable)
-// for a `Union`/`Intersection` receiver.
+// The `ExprKind::MethodCall` arm resolving a first-class callable's own
+// signature must not require the receiver's own type to be literally
+// `Type::Object`, or it silently skips (and discards the mapped element
+// type entirely, the same regression the tests above guard for a
+// `Call`/`StaticCall` callable) a `Union`/`Intersection` receiver.
 #[test]
 fn array_map_resolves_a_first_class_callable_to_an_instance_method_on_a_union_typed_receiver() {
     let d = diagnostics_for(
@@ -161,15 +157,15 @@ fn array_map_resolves_a_first_class_callable_to_an_instance_method_on_a_union_ty
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// PHP 8.4's `array_find`/`array_find_key`/`array_any`/`array_all` had no
-// handling anywhere in this project - the vendored stub declares
-// `array_find`/`array_find_key` `mixed`, matching real PHPStan's own
-// dedicated `ArrayFind{,Key}FunctionReturnTypeExtension` fallback absence.
-// A Piwigo corpus false positive: `HistoryService::logVisit`'s own
-// `array_find($cachedSections, fn ($knownSection) => ...)` cascaded into
-// a `?string` shape value losing its own precision down to `mixed`.
-// `array_any`/`array_all` already declare `bool` correctly in the stub -
-// their own gap was the callback's own parameter type, not the return.
+// PHP 8.4's `array_find`/`array_find_key`/`array_any`/`array_all` need
+// dedicated handling - the vendored stub declares `array_find`/
+// `array_find_key` `mixed`, matching real PHPStan's own dedicated
+// `ArrayFind{,Key}FunctionReturnTypeExtension` fallback absence, so
+// without it a call like `array_find($cachedSections, fn
+// ($knownSection) => ...)` loses its element type's own precision down
+// to `mixed`. `array_any`/`array_all` already declare `bool` correctly
+// in the stub - their own gap is the callback's own parameter type, not
+// the return.
 
 #[test]
 fn array_find_infers_the_element_type_or_null() {
@@ -313,13 +309,10 @@ fn array_combine_infers_the_values_array_s_own_element_type() {
     assert!(d[0].message.contains("needsStrings"), "got: {d:?}");
 }
 
-// Phase 31, real shape: `Piwigo\Admin\Install\InstallDataSeeder::seed`'s
-// own `$insert = ['id' => 1, 'galleries_url' => ...]; ...
-// massInsert('sites', array_keys($insert), [$insert]);` - the real
-// stub's own `@return int[]|string[]` (a whole-array either-or, not a
-// single homogeneous key type) always won when the argument's own
-// shape was knowable, printing as the confusing `array<int>|
-// array<string>` this cluster's diagnostics showed.
+// The native stub's own `@return int[]|string[]` (a whole-array
+// either-or, not a single homogeneous key type) must not always win
+// when the argument's own shape is knowable, or it prints as the
+// confusing `array<int>|array<string>`.
 #[test]
 fn array_keys_infers_string_keys_from_a_known_array_shape() {
     let d = diagnostics_for(
@@ -335,15 +328,11 @@ fn array_keys_infers_string_keys_from_a_known_array_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A Piwigo/real-PHPStan corpus diff found the 2-/3-arg `$search_value`/
-// `$strict` form fell through to the bare stub's own useless `int[]|
-// string[]` answer, since this arm used to gate on `args.len() == 1`
-// only - surfacing as a spurious `int|string` for every reader of the
-// result (`UserService::searchCaseUsername`'s own
-// `array_keys($byLower, $usernameLower, true)[0]` against a declared
-// `string` return type). `$search_value`/`$strict` only ever narrow
-// *which* keys survive, never the key type itself - confirmed via
-// `dumpType()` against real PHPStan, which returns the identical
+// The 2-/3-arg `$search_value`/`$strict` form must not fall through to
+// the bare stub's own useless `int[]|string[]` answer just because this
+// arm only gates on `args.len() == 1` - `$search_value`/`$strict` only
+// ever narrow which keys survive, never the key type itself, confirmed
+// via `dumpType()` against real PHPStan, which returns the identical
 // `list<string>` for the 3-arg form here that it does for the bare
 // 1-arg form.
 #[test]
@@ -391,33 +380,19 @@ fn array_keys_unions_int_and_string_for_a_genuinely_mixed_shape() {
     assert!(d[0].message.contains("needsInts"), "got: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found the native stub's own
-// literal `@return int[]|string[]` became a real regression once
-// `array_element_type` gained a `Union` arm (below): a plain,
-// non-literal array<string, V> argument (not a literal shape, so the
-// dedicated case above doesn't apply) fell through to that stub
-// verbatim, surfacing `int|string` for every reader of a key -
-// opcache-preload.php's own `foreach (array_keys($classMap) as
-// $symbol) { str_starts_with($symbol, ...); }` was real corpus code
-// this broke. Phase 50 follow-up: `array_key_type` now handles a
-// plain `Type::Array`'s own already-known key type directly (it
-// always could - `array_keys()` just never asked it to), so this
-// fixture's own `array<string, string>` now correctly infers a real
-// `string` key type instead of falling back to `Mixed` - either way
-// still assignable to `str_starts_with`'s own `string` parameter, so
-// this keeps passing while `array_keys_on_a_genuinely_untyped_array_
-// falls_back_to_mixed` below covers the actual remaining fallback
-// case (a bare, native-untyped `array` parameter).
+// A plain, non-literal `array<string, V>` argument (not a literal
+// shape, so the dedicated case above doesn't apply) must not fall
+// through to the native stub's own literal `@return int[]|string[]`
+// verbatim, or it surfaces `int|string` for every reader of a key.
 #[test]
 fn array_keys_on_a_plain_typed_array_falls_back_to_a_mixed_key_type_not_int_or_string() {
-    // Phase 50 follow-up, narrowed back after a real corpus false
-    // positive: `array_keys()`'s own key-type propagation only trusts a
-    // literal `Type::ArrayShape`'s key type, not a plain, non-shape
+    // `array_keys()`'s own key-type propagation only trusts a literal
+    // `Type::ArrayShape`'s key type, not a plain, non-shape
     // `Type::Array`'s - this project's dynamic-key-write widening
     // doesn't track a plain array's own key type precisely enough to
     // propagate safely (see `is_or_wraps_array_shape`'s own doc
-    // comment). A plain `array<string, string>`-typed argument therefore
-    // still degrades to `Mixed`-keyed here, same as before Phase 50.
+    // comment). A plain `array<string, string>`-typed argument
+    // therefore still degrades to `Mixed`-keyed here.
     let d = diagnostics_for(
         r#"<?php
             /** @param array<string, string> $classMap */
@@ -444,12 +419,9 @@ fn array_keys_on_a_genuinely_untyped_array_falls_back_to_mixed() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Round 13 of the Piwigo corpus cleanup: array_keys() always
-// returns a real list (sequentially re-keyed from zero, verified via
-// dumpType()) regardless of whether the input's own keys were
-// already sequential - real corpus shape:
-// `ShimClassGenerator::renderClass(array_keys($filters), ...)`
-// where `renderClass()`'s own parameter is `list<string>`-typed.
+// array_keys() always returns a real list (sequentially re-keyed from
+// zero, verified via dumpType()) regardless of whether the input's own
+// keys were already sequential.
 #[test]
 fn array_keys_result_is_a_real_list_not_just_a_plain_array() {
     let d = diagnostics_for(
@@ -483,14 +455,10 @@ fn array_fill_and_array_fill_keys_infer_the_fill_value_s_type() {
     assert!(d.iter().all(|x| x.message.contains("needsStrings")));
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`BatchManagerGlobalPageRenderer::render`): matches real
-// PHPStan's own `ArrayFillFunctionReturnTypeExtension` (confirmed
-// directly against `vendor/phpstan-src`) - `array_fill()`'s own result
-// is `list`-accessory whenever the start index is provably `0`, and
-// `non-empty`-accessory whenever the count is provably `>= 1`, neither
-// of which this project tracked before (a bare `array<0>`, satisfying
-// neither `list<int>` nor a merged-in `array{}`'s absorption).
+// Matches real PHPStan's own `ArrayFillFunctionReturnTypeExtension`:
+// `array_fill()`'s own result is `list`-accessory whenever the start
+// index is provably `0`, and `non-empty`-accessory whenever the count
+// is provably `>= 1`.
 #[test]
 fn array_fill_marks_list_and_non_empty_accessories_when_provable() {
     let d = diagnostics_for(
@@ -506,9 +474,9 @@ fn array_fill_marks_list_and_non_empty_accessories_when_provable() {
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Phase 73: array_fill_keys()'s own key-type precision - $keys' own
-// elements become the result's real keys, not the generic
-// unknown_array_key() default.
+// array_fill_keys()'s own key-type precision - $keys' own elements
+// become the result's real keys, not the generic unknown_array_key()
+// default.
 
 #[test]
 fn array_fill_keys_infers_the_key_type_from_the_keys_array() {
@@ -524,10 +492,10 @@ fn array_fill_keys_infers_the_key_type_from_the_keys_array() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 73: array_search()'s own key-type precision, one level less
-// precise than the pre-existing "definitely a list" case just above -
-// a haystack with a confidently-known key type (not just "definitely a
-// list") narrows the found-key half of the result the same way.
+// array_search()'s own key-type precision, one level less precise than
+// the pre-existing "definitely a list" case just above - a haystack
+// with a confidently-known key type (not just "definitely a list")
+// narrows the found-key half of the result the same way.
 
 #[test]
 fn array_search_narrows_to_the_haystack_s_own_known_key_type() {
@@ -556,9 +524,9 @@ fn array_search_stays_generic_for_an_unknown_key_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 73: array_intersect_key() - every surviving key/value pair's own
-// type comes straight from the first argument; only which keys survive
-// is narrowed by the rest. List-ness never survives (a gap can open up
+// array_intersect_key() - every surviving key/value pair's own type
+// comes straight from the first argument; only which keys survive is
+// narrowed by the rest. List-ness never survives (a gap can open up
 // anywhere).
 
 #[test]
@@ -578,9 +546,9 @@ fn array_intersect_key_preserves_the_first_array_s_own_key_and_value_types() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 74 follow-up: the identical `array_intersect_key` shape,
-// generalized to every other `array_diff*`/`array_udiff*`/
-// `array_intersect*`/`array_uintersect*` sibling.
+// The identical `array_intersect_key` shape, generalized to every
+// other `array_diff*`/`array_udiff*`/`array_intersect*`/
+// `array_uintersect*` sibling.
 
 #[test]
 fn array_diff_preserves_the_first_array_s_own_value_type_and_loses_list_ness() {
@@ -613,14 +581,12 @@ fn array_diff_key_preserves_the_first_array_s_own_key_and_value_types() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`SearchService::getRegularSearchResults`): a single spread
-// argument (`array_intersect(...$arrays)`) has exactly one AST-level
-// `Arg`, failing the plain `args.len() >= 2` gate outright and falling
-// all the way through to a bare `Mixed`/`array` fallback - unlike
-// `array_merge`'s own sibling arm, which already unwraps a spread
-// source one level to reach the arrays actually being merged/diffed/
-// intersected.
+// A single spread argument (`array_intersect(...$arrays)`) has exactly
+// one AST-level `Arg`, so a plain `args.len() >= 2` gate would fail
+// outright and fall all the way through to a bare `Mixed`/`array`
+// fallback - unlike `array_merge`'s own sibling arm, which already
+// unwraps a spread source one level to reach the arrays actually being
+// merged/diffed/intersected.
 #[test]
 fn array_intersect_and_array_diff_handle_a_single_spread_argument() {
     let d = diagnostics_for(
@@ -638,13 +604,12 @@ fn array_intersect_and_array_diff_handle_a_single_spread_argument() {
 
 #[test]
 fn array_udiff_preserves_the_first_array_s_own_value_type() {
-    // Only asserts the *return*-type shape this phase is about - a
-    // separate, pre-existing, zero-corpus-incidence stub imprecision
-    // (phpstorm-stubs' own real `array_udiff` declares its PHP 8.0+
-    // `...$rest` tail with a bare `@param array ...$rest` docblock, with
-    // no way to express "0+ arrays then one trailing callback"), found
-    // while writing this test, separately still flags the 3rd argument
-    // itself - unrelated to this check, not fixed here.
+    // Only asserts the return-type shape this test is about - a
+    // separate, pre-existing stub imprecision (phpstorm-stubs' own real
+    // `array_udiff` declares its PHP 8.0+ `...$rest` tail with a bare
+    // `@param array ...$rest` docblock, with no way to express "0+
+    // arrays then one trailing callback") separately still flags the
+    // 3rd argument itself - unrelated to this check, not fixed here.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -702,10 +667,9 @@ fn array_uintersect_assoc_preserves_the_first_array_s_own_key_and_value_types() 
     );
 }
 
-// Phase 73: array_flip() swaps keys and values - confirmed directly via
-// php that list-ness never survives (the new keys come from the old
-// values, essentially never already 0, 1, 2, ...) but non-emptiness
-// does.
+// array_flip() swaps keys and values - confirmed directly via php that
+// list-ness never survives (the new keys come from the old values,
+// essentially never already 0, 1, 2, ...) but non-emptiness does.
 
 #[test]
 fn array_flip_swaps_key_and_value_types() {
@@ -735,7 +699,7 @@ fn array_flip_preserves_non_emptiness_but_not_list_ness() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 74: the internal-array-pointer family - reset/current/end/key/
+// The internal-array-pointer family - reset/current/end/key/
 // array_key_first/array_key_last/next/prev - confirmed directly via php.
 
 // Each pointer function gets its own dedicated `$xs`/function - passing
@@ -892,12 +856,10 @@ fn array_key_first_and_last_report_the_key_type_when_provably_non_empty() {
 
 #[test]
 fn array_key_first_reports_a_real_key_type_for_a_literal_array_shape() {
-    // Phase 50 follow-up: `array_key_type` now handles `Type::ArrayShape`
-    // directly - a real union of each field's own key kind, not the
-    // generic `int|string` fallback this used to degrade to. Phase 50's
-    // own further refinement (`types::shape_key_type` now contributing
-    // each int-canonical key's real `IntLiteral`, not a widened `Type::
-    // Int`, per corpus false positive found verifying it) makes this
+    // `array_key_type` handles `Type::ArrayShape` directly - a real
+    // union of each field's own key kind, not a generic `int|string`
+    // fallback. `types::shape_key_type` contributes each int-canonical
+    // key's real `IntLiteral`, not a widened `Type::Int`, making this
     // even more precise: `0|1|2`, not just `int` - `array_key_first`
     // has no per-call "which key is really first" tracking of its own
     // (it reuses the same aggregate key union `key()`/`array_key_last`
@@ -994,8 +956,7 @@ fn array_column_falls_back_safely_without_a_known_shape_or_literal_key() {
 
 #[test]
 fn array_column_on_an_unshaped_row_array_still_produces_a_list() {
-    // Real corpus shape (ExtensionLifecycleTest::findMigrationVersions):
-    // a raw DB-fetch row type (`array<string, mixed>`, no shape at all)
+    // A raw DB-fetch row type (`array<string, mixed>`, no shape at all)
     // still has array_column()'s own real list-ness (a fresh, always-
     // sequential result array) even though there's no specific field
     // type to extract - the row's own uniform (here Mixed) element type
@@ -1034,8 +995,8 @@ fn array_column_with_an_index_key_does_not_gain_list_ness() {
 
 #[test]
 fn array_search_on_a_list_haystack_narrows_to_int_or_false() {
-    // Real corpus shape (pageAssetsTestIndexOf): a list's own keys are
-    // always sequential integers by definition, so searching one can
+    // A list's own keys are always sequential integers by definition,
+    // so searching one can
     // only ever find an `int` key (or `false`), never `string` - the
     // real stub's own unconditional `string|int|false` return type
     // doesn't know this.
@@ -1104,21 +1065,19 @@ fn array_map_array_filter_and_array_reduce_fall_back_safely_for_shapes_they_do_n
 
 #[test]
 fn array_filter_called_with_zero_arguments_does_not_panic() {
-    // Real, previously-unguarded panic (index out of bounds) found
-    // via --check-project against the *full* real corpus (including
-    // vendor/, not just first-party src/) - a syntactically valid
-    // but semantically invalid 0-arg array_filter() call parses fine
-    // and must not be blindly indexed into.
+    // A syntactically valid but semantically invalid 0-arg
+    // array_filter() call parses fine and must not be blindly indexed
+    // into (an out-of-bounds panic otherwise).
     let d = diagnostics_for(r#"<?php array_filter();"#);
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert!(d[0].message.contains("expects at least 1"), "got: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found the generic by-ref-widening
-// rule above discarded real precision for the sort() family - each
-// fell into the generic "trust the declared param type" widening,
-// which is only the plain `array &$array` stub for every one of
-// these. Verified against real PHPStan's own dumpType(): sort/rsort/
+// The generic by-ref-widening rule above must not discard real
+// precision for the sort() family by falling into the generic "trust
+// the declared param type" widening, which is only the plain
+// `array &$array` stub for every one of these. Verified against real
+// PHPStan's own dumpType(): sort/rsort/
 // usort/shuffle always reindex to a real list; asort/arsort/ksort/
 // krsort/uasort/uksort/natsort/natcasesort preserve the exact key
 // structure unchanged.
@@ -1226,17 +1185,11 @@ fn array_filter_array_combine_and_array_unique_no_longer_claim_the_result_is_sti
     assert_eq!(d.len(), 3, "got: {d:?}");
 }
 
-// Phase 68 corpus find: `strip_accessory_markers` only ever stripped a
-// *bare* `Intersection` - a `Union` branch (the real shape a loop-
-// conditionally-appended array literal gets, e.g. `non-empty-list<T>|
-// array{}`) fell straight through untouched, leaving `array_filter()`'s
-// own 2-argument, non-null/non-instanceof-callback case wrongly still
-// claiming list-ness. Real corpus repro: Piwigo's own
-// `CategoryCatsRenderer::render` building `$imageIds` via `$imageIds[] =
-// ...;` inside a conditional loop body, then
-// `array_values(array_filter($imageIds, is_string(...)))` - flagged as a
-// no-op `arrayValues.list` before this fix, since `array_filter`'s own
-// return type still carried the list marker through the `Union`.
+// `strip_accessory_markers` must strip through a `Union` branch too
+// (the real shape a loop-conditionally-appended array literal gets,
+// e.g. `non-empty-list<T>|array{}`), not just a bare `Intersection`, or
+// `array_filter()`'s own 2-argument, non-null/non-instanceof-callback
+// case wrongly still claims list-ness through the `Union`.
 #[test]
 fn array_filter_with_an_arbitrary_callback_strips_list_ness_through_a_union() {
     let d = diagnostics_for(
@@ -1259,12 +1212,10 @@ fn array_filter_with_an_arbitrary_callback_strips_list_ness_through_a_union() {
     );
 }
 
-// A round of Piwigo-corpus bucketing found real PHPStan's own
-// array_filter() extension recognizes an explicit null-check callback
-// (`fn ($v) => $v !== null`) and strips Null from the retained
-// element type, not just its usual accessory-marker stripping -
-// verified via dumpType(). Real Piwigo code (GalleryController)
-// builds `$page_items` exactly this way.
+// Real PHPStan's own array_filter() extension recognizes an explicit
+// null-check callback (`fn ($v) => $v !== null`) and strips Null from
+// the retained element type, not just its usual accessory-marker
+// stripping - verified via dumpType().
 #[test]
 fn array_filter_with_an_explicit_null_check_arrow_fn_strips_null_from_the_element_type() {
     let d = diagnostics_for(
@@ -1316,14 +1267,10 @@ fn array_filter_with_an_unrelated_callback_does_not_strip_null() {
     );
 }
 
-// A round of Piwigo-corpus bucketing found real PHPStan's own other
-// recognized array_filter() extension: an instanceof-shaped filter
-// callback (`fn ($v): bool => $v instanceof Target`) narrows the
-// retained element type to Target specifically, not just strips
-// Null - verified via dumpType(). Real Piwigo code
-// (BatchManagerGlobalPageRenderer::render) filters a
-// list<TagId|null> (from array_map(TagId::tryFrom(...), ...)) down
-// to a real list<TagId> this way.
+// Real PHPStan's own other recognized array_filter() extension: an
+// instanceof-shaped filter callback (`fn ($v): bool => $v instanceof
+// Target`) narrows the retained element type to Target specifically,
+// not just strips Null - verified via dumpType().
 #[test]
 fn array_filter_with_an_instanceof_callback_narrows_the_element_type() {
     let d = diagnostics_for(
@@ -1341,15 +1288,13 @@ fn array_filter_with_an_instanceof_callback_narrows_the_element_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A Piwigo/real-PHPStan corpus diff found `array_filter`'s own third
-// real recognized callback shape this project was missing: a native
+// `array_filter`'s third recognized callback shape: a native
 // `is_string`/`is_int`/`is_float`/`is_bool`/`is_null` type-check
-// predicate - `TagService::buildTagList`'s own `array_filter
-// ($altNamesEvent->value, is_string(...))` (the first-class-callable
-// form) lost its own precision down to `mixed`. Verified via
-// dumpType() that real PHPStan narrows the retained element type to
-// exactly that type, the same way an `instanceof`-shaped callback
-// already narrows to a class above.
+// predicate (including the first-class-callable form,
+// `array_filter($x, is_string(...))`). Verified via dumpType() that
+// real PHPStan narrows the retained element type to exactly that type,
+// the same way an `instanceof`-shaped callback already narrows to a
+// class above.
 #[test]
 fn array_filter_with_a_first_class_callable_is_string_predicate_narrows_the_element_type() {
     let d = diagnostics_for(
@@ -1400,16 +1345,13 @@ fn array_filter_with_an_is_bool_closure_predicate_narrows_the_element_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found real PHPStan's own
-// no-callback array_filter() default was left completely untouched
-// (only the accessory markers were stripped, element type unchanged)
-// - real PHP's own default drops every falsy element, exactly what
-// narrow_type_excluding_falsy (already shared with `!empty($x)`'s
-// own narrowing) already computes - verified via dumpType()
-// (list<TagId|null> -> list<TagId>; list<int|null> -> a real
-// non-zero-int, stripping both 0 and null, not just null). Real
-// Piwigo code (TusUploadCompletionService::completePhoto) relies on
-// exactly the object|null case.
+// Real PHP's no-callback array_filter() default drops every falsy
+// element, exactly what narrow_type_excluding_falsy (already shared
+// with `!empty($x)`'s own narrowing) already computes - not just
+// stripping accessory markers and leaving the element type unchanged.
+// Verified via dumpType() (list<TagId|null> -> list<TagId>;
+// list<int|null> -> a real non-zero-int, stripping both 0 and null,
+// not just null).
 #[test]
 fn array_filter_with_no_callback_drops_every_falsy_element() {
     let d = diagnostics_for(
@@ -1426,13 +1368,11 @@ fn array_filter_with_no_callback_drops_every_falsy_element() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive this fixes (Piwigo's own
-// tests/Integration/GroupServiceTest.php:363): `array_filter([$sourceId,
-// $copyId])` where `$copyId` is `?GroupId` used to keep field `1` typed
-// `GroupId|null` and unconditionally required, rejecting a
-// `list<GroupId>`-typed sink even though real PHP's no-callback
-// filtering really can (and does, when `$copyId` is null) drop that key
-// entirely.
+// `array_filter([$sourceId, $copyId])` where `$copyId` is `?GroupId`
+// must not keep field `1` typed `GroupId|null` and unconditionally
+// required, rejecting a `list<GroupId>`-typed sink - real PHP's
+// no-callback filtering really can (and does, when `$copyId` is null)
+// drop that key entirely.
 #[test]
 fn array_filter_with_no_callback_on_a_shape_drops_a_provably_null_field() {
     let d = diagnostics_for(
@@ -1498,9 +1438,7 @@ fn array_slice_and_array_reverse_preserve_list_ness_only_with_default_preserve_k
     assert!(d[0].location.contains("slicePreserveKeys"), "got: {d:?}");
 }
 
-// The same corpus recheck's largest remaining bucket: array_merge()
-// combining several list<T>-typed arrays, real Piwigo code
-// (`array_merge(['a', 'b'], someListReturningCall())`). Verified
+// array_merge() combining several list<T>-typed arguments. Verified
 // against real PHPStan's own dumpType(): merging only list-like
 // arguments stays a list; merging in even one plain array<T> degrades
 // list-ness for the whole result but keeps the element-type union.
@@ -1555,12 +1493,10 @@ fn array_merge_with_a_literal_array_argument_produces_a_non_empty_list() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Found by a later round of corpus bucketing: array_merge(...$x) - a
-// spread *argument*, not a spread array-literal item - was treated as
-// if the whole array-of-arrays were one merge argument, giving
-// list<list<int>> instead of list<int>. Real Piwigo code
-// (SearchService::searchAllwords) flattens a word=>list<int> map's
-// own values this way. Verified via dumpType().
+// `array_merge(...$x)` - a spread argument, not a spread array-literal
+// item - must not be treated as if the whole array-of-arrays were one
+// merge argument, which would give list<list<int>> instead of
+// list<int>. Verified via dumpType().
 #[test]
 fn array_merge_of_a_spread_argument_flattens_one_level() {
     let d = diagnostics_for(
@@ -1576,15 +1512,14 @@ fn array_merge_of_a_spread_argument_flattens_one_level() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Found by the corpus recheck after the fix above landed: real Piwigo
-// code (`Logger::__construct`) merges a property's own default
-// `array{...}` shape with a caller-supplied options shape via
-// array_merge(), then reassigns the property with the merged result -
+// Merging a property's own default `array{...}` shape with a
+// caller-supplied options shape via array_merge(), then reassigning
+// the property with the merged result -
 // `$this->options = array_merge($this->options, $options)`. Verified
-// against real PHPStan's own dumpType(): merging two known shapes
-// does the same key-renumbering/overwrite merge a spread array
-// literal does, producing a precise merged shape rather than
-// degrading to a generic array.
+// against real PHPStan's own dumpType(): merging two known shapes does
+// the same key-renumbering/overwrite merge a spread array literal
+// does, producing a precise merged shape rather than degrading to a
+// generic array.
 #[test]
 fn array_merge_of_two_known_shapes_produces_a_precise_merged_shape() {
     let d = diagnostics_for(
@@ -1603,9 +1538,9 @@ fn array_merge_of_two_known_shapes_produces_a_precise_merged_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 68 follow-up: merging a known shape with a plain, string-keyed
-// array (e.g. `array_merge($defaults, $options)`) now stays field-aware
-// instead of degrading straight to a generic array - every known field
+// Merging a known shape with a plain, string-keyed array (e.g.
+// `array_merge($defaults, $options)`) stays field-aware instead of
+// degrading straight to a generic array - every known field
 // name is kept, broadened by the plain array's own element type, and the
 // result is marked unsealed since the plain array may also contribute
 // unknown keys of its own.
@@ -1666,16 +1601,15 @@ fn array_merge_of_a_shape_and_a_plain_array_with_an_unknown_key_type_is_unaffect
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found `array_element_type`/
-// `is_array_like`/`is_list_like`/`is_known_non_empty_array` had no
-// `Type::Union` arm at all - the single most common way a real
-// variable's type actually arrives here: a control-flow merge
-// (`$x = []; if (...) { foreach (...) { $x[] = ...; } }` leaves `$x`
-// a Union of the "0 iterations" `array{}` branch and the "≥1" real
-// list branch). Every one of `sort()`, `array_merge()`, `foreach`,
-// etc. silently stopped recognizing such a value as an array at all,
-// the same class of regression Phase 14's own Task 7 audit exists to
-// prevent - just for `Union` instead of `Intersection`.
+// `array_element_type`/`is_array_like`/`is_list_like`/
+// `is_known_non_empty_array` need a `Type::Union` arm - the single most
+// common way a real variable's type actually arrives here: a
+// control-flow merge (`$x = []; if (...) { foreach (...) { $x[] = ...;
+// } }` leaves `$x` a Union of the "0 iterations" `array{}` branch and
+// the "≥1" real list branch). Without it, `sort()`, `array_merge()`,
+// `foreach`, etc. would silently stop recognizing such a value as an
+// array at all - the same class of regression already guarded for
+// `Intersection`.
 #[test]
 fn sort_still_reindexes_to_a_list_when_the_input_is_a_union_from_a_conditional_append() {
     let d = diagnostics_for(
@@ -1698,13 +1632,11 @@ fn sort_still_reindexes_to_a_list_when_the_input_is_a_union_from_a_conditional_a
 
 #[test]
 fn a_by_ref_parameter_declared_wider_than_array_falls_back_to_mixed_not_the_full_union() {
-    // Real corpus example that would otherwise regress:
-    // Piwigo\Core\ArrayHelper::prependAppendArrayItems passes its own
-    // already-array-typed `array $array` parameter into
-    // `array_walk($array, ...)`, whose real phpstorm-stubs signature
-    // is `array_walk(array|object &$array, ...)` - a union wider than
-    // what an already-array-typed argument could ever actually
-    // become (array_walk never turns an array into an object).
+    // An already-array-typed `array $array` parameter passed into
+    // `array_walk($array, ...)`, whose real phpstorm-stubs signature is
+    // `array_walk(array|object &$array, ...)` - a union wider than
+    // what an already-array-typed argument could ever actually become
+    // (array_walk never turns an array into an object).
     // Blindly widening to the *full* declared type here regresses
     // real precision (the return type below would start looking
     // possibly-object); only a plain `Type::Array`/`Type::ArrayShape`
@@ -1729,12 +1661,12 @@ fn a_by_ref_parameter_declared_wider_than_array_falls_back_to_mixed_not_the_full
 
 #[test]
 fn array_map_over_a_union_from_a_conditional_append_still_produces_a_list() {
-    // Same real corpus shape as sort()'s own identical test above,
-    // but through array_map's own list-preserving `rewrap_with_
-    // accessory_markers` - previously only recognized an `Intersection`-
-    // shaped input, silently dropping list-ness the moment the input
-    // came from a control-flow merge (`array{}|list<T>`) instead of a
-    // single literal/return.
+    // Same shape as sort()'s own identical test above, but through
+    // array_map's own list-preserving `rewrap_with_accessory_markers` -
+    // must recognize a `Union`-shaped input too, not just
+    // `Intersection`, or it silently drops list-ness the moment the
+    // input comes from a control-flow merge (`array{}|list<T>`) instead
+    // of a single literal/return.
     let d = diagnostics_for(
         r#"<?php
             /** @return list<int> */
@@ -1778,10 +1710,9 @@ fn range_with_single_char_string_bounds_is_a_non_empty_list_of_string() {
 
 #[test]
 fn preg_split_with_a_non_literal_pattern_is_a_list_of_string_or_false() {
-    // Real corpus shape (UploadDuplicatesController::split): a
-    // non-literal pattern/subject still splits into sequential integer
-    // keys - phpstorm-stubs' own bare `string[]|false` return type
-    // gives up that list-ness entirely.
+    // A non-literal pattern/subject still splits into sequential
+    // integer keys - phpstorm-stubs' own bare `string[]|false` return
+    // type gives up that list-ness entirely.
     let d = diagnostics_for(
         r#"<?php
             /** @return list<string> */
@@ -1869,13 +1800,12 @@ fn array_shift_on_a_list_preserves_list_ness_but_not_non_emptiness() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus find (Gettext's own `MoLoader::loadString`): `array_shift`/
-// `array_pop`'s own by-ref argument widening (just above) correctly
-// drops non-emptiness from the *array* afterward, but used to also
-// leak into this *expression's own returned value* - `array_shift`
+// `array_shift`/`array_pop`'s own by-ref argument widening (just above)
+// correctly drops non-emptiness from the array afterward, but must not
+// also leak into this expression's own returned value - `array_shift`
 // removing the one, definitely-present element of a provably non-empty
-// array (`explode()`'s own always-non-empty result) looked like it
-// could return `null`, even though the pre-call array's own known
+// array (`explode()`'s own always-non-empty result) must not look like
+// it could return `null`, since the pre-call array's own known
 // non-emptiness guarantees the removed/returned element is real.
 #[test]
 fn array_shift_on_a_provably_non_empty_array_never_returns_null() {
@@ -1895,8 +1825,8 @@ fn array_shift_on_a_provably_non_empty_array_never_returns_null() {
     );
 }
 
-// Phase 68: `ArrayFilterRule`/`ArrayValuesRule` - a no-op call, cheap to
-// detect once precise element/list-ness inference already exists.
+// `ArrayFilterRule`/`ArrayValuesRule` - a no-op call, cheap to detect
+// once precise element/list-ness inference already exists.
 
 #[test]
 fn array_filter_on_an_empty_array_literal_is_flagged() {
@@ -1929,11 +1859,8 @@ fn array_filter_on_an_ambiguous_element_type_is_never_flagged() {
     );
 }
 
-// Phase 68 / 68.4: `arrayFilter.same`/`arrayFilter.alwaysEmpty` -
-// unconditional, matching real PHPStan's own unconditional level-5
-// default (previously shipped opt-in via `check_array_filter_falsy_noop`
-// until a fresh corpus re-verify confirmed both root-caused false
-// positives stayed fixed).
+// `arrayFilter.same`/`arrayFilter.alwaysEmpty` - unconditional,
+// matching real PHPStan's own unconditional level-5 default.
 
 #[test]
 fn array_filter_on_a_list_of_objects_is_flagged() {
@@ -2074,9 +2001,6 @@ fn array_filter_on_a_positive_int_range_is_flagged() {
 
 #[test]
 fn array_filter_on_a_map_of_lists_is_never_flagged_a_list_can_be_empty() {
-    // Real corpus false positive found and fixed via this item's own
-    // corpus verification (Deptrac's own `EventHelper::
-    // unmatchedSkippedViolations`, `array<string, list<string>>`):
     // `list<T>` only promises sequential int keys, never non-emptiness -
     // `[]` is a perfectly real, empty (falsy) `list<T>`.
     let d = diagnostics_for(
@@ -2181,35 +2105,28 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
 // reasons (an unsound "provably non-empty" half, plus real corpus noise
 // even from the safe, always-nullable fallback alone).
 
-// Phase 68.3: `union_types` never merged two structurally different
-// `Array(key, val)` members into one - real corpus false negative found
-// via an isolated repro of `vendor/symfony/var-exporter/ProxyHelper.php`'s
-// own shape (a dynamic-key index-assignment inside a loop's `if`-branch,
-// then `continue`, plus its own fall-through path assigning a different
-// value type to the same array). Before that fix, this produced four
-// separate, redundant `array<...>` union members instead of one precise
-// `array<Foo|false>`.
+// `union_types` must merge two structurally different `Array(key, val)`
+// members into one - a dynamic-key index-assignment inside a loop's
+// `if`-branch, then `continue`, plus its own fall-through path
+// assigning a different value type to the same array, must produce one
+// precise `array<Foo|false>`, not four separate, redundant `array<...>`
+// union members.
 //
 // `$items` here is a plain `array` parameter with no non-emptiness
 // guarantee, so the loop may genuinely run zero times - `$result`'s own
-// merge does include `[]` (`array{}`) as a real alternative, real
-// PHPStan's own `ForeachHandler::processStmt` also merges it back in
-// whenever `isIterableAtLeastOnce()` isn't a definite "yes" (confirmed
-// directly against `vendor/phpstan-src`'s own `mergeWith($scope->
-// filterByTruthyValue(...))` call for exactly this "maybe" case) -
-// **but** that merged-in `array{}` never survives as its own visible
-// union member once a general `Array(key, val)` member (`array<false|
-// Foo>` here) is also present: it's a redundant subtype (an empty array
-// vacuously satisfies "every key/value is `key`/`val`-typed" for *any*
-// `key`/`val`), and `union_types` now drops it the same way real
-// PHPStan's own `TypeCombinator::union()` does - confirmed directly via
-// `\PHPStan\dumpType()` against the real `phpstan/phpstan` phar for
-// this identical shape (`$counter = []; foreach (...) { $counter[$k] =
-// ...; }`'s own post-loop type is the unqualified `array<...>`, no
-// `array{}` alternative visible at all). This was a real corpus false
-// positive (33 of 70 `argument.type`/`return.type` findings in one
-// scoped Piwigo run shared this exact signature - see `union_types`'s
-// own doc comment for the full mechanism), not a display-only quirk.
+// merge does include `[]` (`array{}`) as a real alternative, matching
+// real PHPStan's own `ForeachHandler::processStmt` merging it back in
+// whenever `isIterableAtLeastOnce()` isn't a definite "yes" - but that
+// merged-in `array{}` must not survive as its own visible union member
+// once a general `Array(key, val)` member (`array<false|Foo>` here) is
+// also present: it's a redundant subtype (an empty array vacuously
+// satisfies "every key/value is `key`/`val`-typed" for any `key`/
+// `val`), and `union_types` drops it the same way real PHPStan's own
+// `TypeCombinator::union()` does - confirmed via `\PHPStan\dumpType()`
+// against the real `phpstan/phpstan` phar for this identical shape
+// (`$counter = []; foreach (...) { $counter[$k] = ...; }`'s own
+// post-loop type is the unqualified `array<...>`, no `array{}`
+// alternative visible at all).
 #[test]
 fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_into_one_array_type() {
     let d = diagnostics_for(
@@ -2232,14 +2149,12 @@ fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_int
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Direct regression test for the real Piwigo corpus false positive
-// `union_types`'s own doc comment describes: a dynamic-key read against
-// an array built via dynamic-key writes inside a `foreach` (that might
-// run zero times) must not spuriously infer `|null`, since the merged
-// `array{}` alternative is a redundant subtype of the general
-// `Array(key, val)` the loop body actually produces - matches real
-// PHPStan's own `dumpType()` output for this identical shape, confirmed
-// directly against the real `phpstan/phpstan` phar.
+// A dynamic-key read against an array built via dynamic-key writes
+// inside a `foreach` (that might run zero times) must not spuriously
+// infer `|null`, since the merged `array{}` alternative is a redundant
+// subtype of the general `Array(key, val)` the loop body actually
+// produces - matches real PHPStan's own `dumpType()` output for this
+// identical shape.
 #[test]
 fn a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable() {
     let d = diagnostics_for(
