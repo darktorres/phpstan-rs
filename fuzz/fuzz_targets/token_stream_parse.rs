@@ -1,7 +1,7 @@
 #![no_main]
 
-//! Phase 19 Part A (secondary, lower priority than `lex_parse`) -
-//! bypasses the lexer entirely, feeding an `arbitrary`-derived token
+//! Secondary fuzz target, lower priority than `lex_parse` - bypasses the
+//! lexer entirely, feeding an `arbitrary`-derived token
 //! stream straight into `Parser::new`/`parse_program`. Gated behind the
 //! main crate's own opt-in `fuzzing` Cargo feature (`Token`/`Keyword`/
 //! `StringPart`/`Position` only gain a real `arbitrary::Arbitrary` derive

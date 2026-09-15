@@ -1,9 +1,9 @@
 //! Generates `PHPSTORM_STUBS_SOURCES` (every vendored
 //! `jetbrains/phpstorm-stubs` file's contents) and `PHPSTAN_SRC_SOURCES`
-//! (every vendored `phpstan/phpstan-src` runtime source file's contents,
-//! Finding 4 - real PHPStan classes like `PHPStan\Type\StringType`,
-//! referenced by any vendor package authoring a PHPStan rule/extension,
-//! that `phpstan/phpstan`'s own phar distribution can't provide since it
+//! (every vendored `phpstan/phpstan-src` runtime source file's contents -
+//! PHPStan classes like `PHPStan\Type\StringType`, referenced by any
+//! vendor package authoring a PHPStan rule/extension, that
+//! `phpstan/phpstan`'s own phar distribution can't provide since it
 //! ships no loose source at all), each a `&[&str]` so `php_stubs.rs`
 //! doesn't need hundreds of hand-written `include_str!` calls. Absolute
 //! paths are used in the generated `include_str!` invocations because the
