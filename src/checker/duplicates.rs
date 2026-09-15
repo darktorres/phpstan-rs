@@ -103,11 +103,10 @@ impl<'a> Checker<'a> {
             }
         }
         // A promoted constructor parameter is a property declaration in
-        // disguise - real PHPStan's own helper checks it against the
-        // same `$declaredProperties` set for exactly this reason. Only
-        // ever compared against another *promoted* collision (a plain
-        // property's own shape isn't directly comparable to a `Param`'s),
-        // which is the only real corpus shape found anyway.
+        // disguise - PHPStan's own helper checks it against the same
+        // `$declaredProperties` set for exactly this reason. Only ever
+        // compared against another promoted collision, since a plain
+        // property's shape isn't directly comparable to a `Param`'s.
         let mut seen_promoted: std::collections::HashMap<&str, &Param> =
             std::collections::HashMap::new();
         for m in methods {

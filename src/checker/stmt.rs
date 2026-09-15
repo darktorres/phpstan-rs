@@ -673,7 +673,7 @@ impl<'a> Checker<'a> {
 
     /// `StmtKind::If`'s own real body, extracted so a nested `elseif`
     /// (which the parser already desugars into a nested `If` inside
-    /// `else_branch` - confirmed directly in `parser/stmt.rs::parse_if`:
+    /// `else_branch`, in `parser/stmt.rs::parse_if`:
     /// `self.tokens[self.pos] = Token::Keyword(Keyword::If); Some(Box::new
     /// (self.parse_if()?))`) can recurse into `check_if` itself
     /// (`is_elseif: true`) instead of the generic `check_stmt` dispatch,
@@ -822,9 +822,7 @@ impl<'a> Checker<'a> {
         // apart from a genuine, unresolvable class reference - a
         // `@phpstan-type` alias declared on the current class needs the
         // same expansion here that `ClassInfo::from_decl` already gives
-        // every member's own `@param`/`@return`/`@var` (real corpus
-        // shape: `league/uri-interfaces`'s own `UriString::parse()`,
-        // `/** @var ComponentMap $components */`). Silently a no-op
+        // every member's own `@param`/`@return`/`@var`. Silently a no-op
         // outside any class, or one with no `@phpstan-type` tags at all.
         let ty = match &self.current_class {
             Some(class) => match self.registry.classes.get(class) {

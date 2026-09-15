@@ -18,9 +18,8 @@
 //!    the higher-level `pcre2` crate's safe `bytes::RegexBuilder`, which
 //!    has no way to set PHP's `J` modifier (`PCRE2_DUPNAMES`): a real,
 //!    legal PHP pattern like `/(?<a>x)|(?<a>y)/J` would otherwise always
-//!    be wrongly reported invalid - confirmed live (`/(?<a>x)|(?<a>y)/`
-//!    without `J` fails to compile with "two named subpatterns have the
-//!    same name (PCRE2_DUPNAMES not set)"; with `J` it compiles fine).
+//!    be wrongly reported invalid (without `J`, two named subpatterns
+//!    sharing a name fail to compile; with `J` it compiles fine).
 //!
 //! Feature-gated on `pcre-validate` (on by default, in `Cargo.toml`'s own
 //! `default` feature list) - the one place this project links a C

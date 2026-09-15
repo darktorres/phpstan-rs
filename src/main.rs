@@ -134,9 +134,8 @@ enum Command {
         /// `#[ValidatesStubFiles]` and never runs against ordinary
         /// scanned files at all, so this checker has no general way to
         /// rule out two same-named functions in separate files that are
-        /// never actually loaded together in the same PHP process (a
-        /// real corpus false positive this flag defaults off to avoid) -
-        /// see `registry::Registry::check_duplicate_function_
+        /// never actually loaded together in the same PHP process,
+        /// hence off by default - see `registry::Registry::check_duplicate_function_
         /// declarations`'s own doc comment.
         #[arg(long)]
         check_duplicate_function_declarations: bool,

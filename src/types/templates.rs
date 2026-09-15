@@ -84,8 +84,7 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
 /// PHPStan's own `ConstantStringType::isClassString()`/
 /// `getClassStringObjectType()` treats it: a literal naming a real,
 /// existing class binds a template exactly as well as an explicit
-/// `Foo::class` would (confirmed directly against `vendor/phpstan-src/src/
-/// Type/Constant/ConstantStringType.php:98-115`). Mirrors `bind_template_
+/// `Foo::class` would. Mirrors `bind_template_
 /// param`'s own structural recursion (`Array`/`ClassString`/`Union`) so a
 /// literal nested inside e.g. `class-string<T>[]` or `class-string<T>|null`
 /// is reached too. Kept as a separate preprocessing pass rather than

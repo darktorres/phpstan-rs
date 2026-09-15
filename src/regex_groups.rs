@@ -520,10 +520,9 @@ impl Scanner {
     /// each branch's own capturing groups restart numbering from the
     /// same point (the group number that would have come next just
     /// before this construct), so `(?|(a)|(b))` has exactly one
-    /// capturing group, number N, shared by both branches - never two
-    /// (confirmed live against a real PHP interpreter). Numbering
-    /// resumes, after the whole construct, from one past the *highest*
-    /// number reached in *any* one branch - also confirmed live:
+    /// capturing group, number N, shared by both branches - never two.
+    /// Numbering resumes, after the whole construct, from one past the
+    /// highest number reached in any one branch:
     /// `(?|(a)(b)|(c))(d)` numbers `(d)` as group 3, not 2, since branch
     /// 1 alone reached as high as 2. Otherwise behaves exactly like
     /// `scan_alternation` (multi-branch optionality, alternation-id

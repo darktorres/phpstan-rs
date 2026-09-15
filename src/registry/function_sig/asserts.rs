@@ -12,8 +12,8 @@ use super::generics::mark_template_params;
 /// `$target` text names - classified once here (registry-build time,
 /// when a declaration's own parameter list is available to match a bare
 /// name against) rather than carried as raw text into the checker.
-/// Deliberately narrow: a method-call target (`$this->parseError()`,
-/// a real corpus shape) or any array-index/nested-chain target isn't
+/// Deliberately narrow: a method-call target (e.g. `$this->parseError()`)
+/// or any array-index/nested-chain target isn't
 /// classified into any of these and the whole tag is dropped - this
 /// project's narrowing machinery has no way to key a call's own return
 /// value the way it keys a variable/property, and guessing wrong here
