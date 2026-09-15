@@ -139,15 +139,14 @@ impl<'a> Checker<'a> {
                     return Type::Mixed;
                 }
                 // `PHPStan\Testing\assertType('expected type string', $expr)`
-                // is real PHPStan's own testing-DSL function, used
-                // throughout its vendored fixture corpus to pin down an
-                // exact expected inferred type at a point of interest.
+                // is PHPStan's own testing-DSL function, used to pin down
+                // an exact expected inferred type at a point of interest.
                 // Recognizing it here - comparing `infer_expr`'s result
                 // (rendered via `Type`'s PHPStan-style `Display` impl)
-                // against the literal expected string - turns that whole
-                // corpus into directly-runnable ground truth, with no
-                // separate test harness needed. Real PHPStan treats this
-                // the same way (a no-op stub function its own internal
+                // against the literal expected string - lets fixture
+                // files serve as directly-runnable ground truth, with no
+                // separate test harness needed. PHPStan treats this the
+                // same way (a no-op stub function its own internal
                 // tooling specially recognizes), so it's additive, not a
                 // diagnostic anyone would trip on outside a fixture file.
                 if let ExprKind::Name(name) = &callee.kind
@@ -764,12 +763,12 @@ impl<'a> Checker<'a> {
                 // or_unknown_args`'s generic `Mixed` leniency, since its
                 // real stub (`@param-out array<P, resource> $pipes`,
                 // `@template P of int`) lives in a separate stub bundle
-                // this project doesn't ingest. Real PHPStan correlates
+                // this project doesn't ingest. PHPStan correlates
                 // `$descriptor_spec`'s literal keys into `P`; this project
                 // doesn't have a template-binding-through-`@param-out`
                 // mechanism to key off a different parameter's literal
                 // keys, but a plain `array<int, resource>` is still
-                // enough for the evidenced corpus case.
+                // enough to be useful.
                 if resolved_name.as_deref() == Some("proc_open")
                     && let Some(pipes_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(pipes_name) = &pipes_arg.kind
