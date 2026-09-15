@@ -41,14 +41,12 @@ fn closed_range_stub_attribute_on_a_param_with_a_real_default_keeps_it() {
 
 #[test]
 fn closed_range_stub_attribute_gating_a_whole_method_is_dropped_entirely() {
-    // Round 15 of the Piwigo corpus cleanup: a closed range (`to:`)
-    // gating a whole method - real shape:
-    // `DateTimeImmutable::__construct`'s `to: '8.2'`/`from: '8.3'`
-    // pair - is superseded on the PHP version this project models,
-    // same as a closed-range *parameter*, and must leave no trace at
-    // all rather than surviving as an ordinary, unconditional
-    // declaration (which the registry would then wrongly merge
-    // return types with the real, modern declaration).
+    // A closed range (`to:`) gating a whole method is superseded on the
+    // PHP version this project models, same as a closed-range parameter,
+    // and must leave no trace at all rather than surviving as an
+    // ordinary, unconditional declaration (which the registry would
+    // then wrongly merge return types with the real, modern
+    // declaration).
     let src = "<?php class C { #[PhpStormStubsElementAvailable(from: '5.5', to: '8.2')]\n\
                    public function __construct($datetime = \"now\") {} }";
     let with_attr = Lexer::new(src).tokenize();
@@ -96,8 +94,7 @@ fn closed_range_stub_attribute_gating_a_whole_free_function_is_dropped_entirely(
     assert_eq!(toks, expected);
 }
 
-// Phase 24: `#[LanguageLevelTypeAware]` - a real shape from
-// `substr()`'s own stub: no native return-type hint at all, an
+// `#[LanguageLevelTypeAware]` - no native return-type hint at all, an
 // existing but stale `@return` doc comment, and this attribute
 // immediately above `function`.
 
@@ -207,16 +204,11 @@ fn php_version_aware_on_a_return_type_appends_to_the_doc_comment_the_same_way() 
 
 #[test]
 fn language_level_type_aware_on_a_parameter_with_bracket_shorthand_is_left_alone() {
-    // Real shape (found via a crash while verifying this fix against
-    // this project's own bundled stub corpus): `strip_tags()`'s own
-    // `#[LanguageLevelTypeAware(["7.4" => "string[]|string|null"],
-    // default: "string|null")] $allowed_tags = null` - `TYPE[]` is
-    // PHPDoc-only shorthand, not valid native type-hint syntax at
-    // all, so injecting it as native tokens crashed the parser
-    // outright (`expected variable, found LBracket`) before this
-    // guard existed. Must fall back to leaving the parameter
-    // untouched (today's pre-existing, safe default) rather than
-    // injecting anything.
+    // `TYPE[]` is PHPDoc-only shorthand, not valid native type-hint
+    // syntax at all, so injecting it as native tokens would crash the
+    // parser outright (`expected variable, found LBracket`). Must fall
+    // back to leaving the parameter untouched (the safe default) rather
+    // than injecting anything.
     let src = "<?php\nfunction f(#[LanguageLevelTypeAware([\"7.4\" => \"string[]|string|null\"], default: \"string|null\")] $allowed_tags = null) {}";
     let with_attr = Lexer::new(src).tokenize();
     let without_attr = Lexer::new("<?php\nfunction f($allowed_tags = null) {}").tokenize();
@@ -234,17 +226,11 @@ fn language_level_type_aware_with_no_preceding_doc_comment_is_a_safe_no_op() {
     assert_eq!(with_attr, without_attr);
 }
 
-// Finding 6 from the architecture audit - the #[Attribute(...)] skip
-// logic wasn't string-aware, so an unbalanced `[`/`]` inside an
-// argument string (a completely ordinary regex character class)
-// ended the skip early and corrupted the rest of the parse.
-//
-// Phase 37: a general `#[Attribute(...)]` group is no longer skipped at
-// all - it's real tokens now, so a string literal's own content
-// (including an unbalanced `[`/`]` inside it) is naturally immune to this
-// problem, being just one ordinary `StringLit` token regardless of what
-// bytes it contains. This test now asserts the real tokens survive
-// intact instead of asserting the whole group vanishes.
+// A general `#[Attribute(...)]` group is real tokens, not skipped text,
+// so a string literal's content (including an unbalanced `[`/`]` inside
+// it, such as an ordinary regex character class) is naturally immune to
+// corrupting the rest of the parse - it's just one ordinary `StringLit`
+// token regardless of what bytes it contains.
 
 #[test]
 fn a_general_attribute_group_is_not_fooled_by_an_unbalanced_bracket_in_a_string_argument() {
