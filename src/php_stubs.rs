@@ -195,7 +195,7 @@ fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
 /// time, `functionMap.php`-verified discipline `patch_debug_backtrace`/
 /// `patch_usleep` already established. Every function `functionMap.php`
 /// itself leaves bare (`gd_info`, `pathinfo`, and the many others
-/// `#[ArrayShape]` used to over-refine) intentionally gets no patch at
+/// `#[ArrayShape]` would over-refine) intentionally gets no patch at
 /// all here - bare is the correct, real-PHPStan-matching answer for
 /// those, not an oversight. Not ported: `date_sun_info`
 /// (`functionMap.php`'s own type wraps its shape in a
@@ -333,10 +333,9 @@ fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
 /// for the same function in different files); taking the first is a
 /// simplification, not a precision-critical choice.
 pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
-    // Chaining PHPSTAN_SRC_SOURCES in took the combined
-    // corpus from 558 to 2351 files - re-parsing that from scratch on
-    // every call is fine for the real CLI binary, which calls this
-    // exactly once per process, but makes the test suite (hundreds of
+    // Re-parsing the combined 2351-file corpus from scratch on every
+    // call is fine for the CLI binary, which calls this exactly once per
+    // process, but makes the test suite (hundreds of
     // `diagnostics_for`/`Project::new` calls, each independently
     // re-parsing the whole corpus) measurably slower.
     // `LazyLock` computes the expensive part (parsing every file)
