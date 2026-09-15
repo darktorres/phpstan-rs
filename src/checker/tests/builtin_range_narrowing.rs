@@ -3,7 +3,7 @@
 
 use super::helpers::*;
 
-// Phase 51: IntegerRangeType completion - abs()/toAbsoluteNumber() and
+// IntegerRangeType completion - abs()/toAbsoluteNumber() and
 // `~`/toBitwiseNotType().
 
 #[test]
@@ -128,10 +128,9 @@ fn bitwise_not_of_a_plain_unbounded_int_or_string_is_unchanged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 51 follow-up: range-preserving shift arithmetic (`<<`/`>>`) -
-// real PHPStan's own `getShiftLeftType`/`getShiftRightType` only stay
-// range-preserving for a single constant right operand, confirmed
-// directly against `vendor/phpstan-src`.
+// Range-preserving shift arithmetic (`<<`/`>>`) - mirrors PHPStan's
+// `getShiftLeftType`/`getShiftRightType`, which only stay
+// range-preserving for a single constant right operand.
 
 #[test]
 fn left_shift_of_a_range_by_a_constant_shifts_both_bounds() {
@@ -178,9 +177,9 @@ fn right_shift_of_a_range_by_a_constant_shifts_both_bounds() {
 
 #[test]
 fn shift_by_a_non_constant_amount_falls_back_to_plain_int() {
-    // A non-literal shift amount degrades to bare `int` (real PHPStan's
-    // own restriction too, confirmed directly) - not narrow enough for
-    // a range-typed sink, unlike the constant-shift cases above.
+    // A non-literal shift amount degrades to bare `int` (PHPStan's own
+    // restriction too) - not narrow enough for a range-typed sink,
+    // unlike the constant-shift cases above.
     let d = diagnostics_for(
         r#"<?php
             /** @param int<1, 10> $x */
