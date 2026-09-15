@@ -16,8 +16,8 @@ use std::path::Path;
 
 use phpstan_rs::{project, types};
 
-// ROADMAP.md phase 19: `project::parse_file` must never crash the
-// process on adversarial input.
+// `project::parse_file` must never crash the process on adversarial
+// input.
 //
 // One known, *deliberate* panic exists below it and must not be
 // misreported as a crash, or a fuzz target would trivially and
