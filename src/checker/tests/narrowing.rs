@@ -1297,15 +1297,13 @@ fn instanceof_against_an_unrelated_interface_on_a_nullable_type_keeps_the_origin
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Regression test for a real bug caught while implementing the fix
-// above: when the pre-narrowing type is something that could never
-// actually be `instanceof` anything at all (`Null`, a scalar, ... -
-// itself a sign of a real, separate upstream inference gap, not
-// narrowed here), building a real Intersection out of it produces
-// nonsense like `null&ImageId` - worse than the old, simpler
-// behavior. Falls back to trusting the checked class alone whenever
-// the pre-narrowing type isn't a plain, single already-known class/
-// interface.
+// When the pre-narrowing type is something that could never actually be
+// `instanceof` anything at all (`Null`, a scalar, ... - itself a sign of
+// a separate upstream inference gap, not narrowed here), building a
+// real Intersection out of it produces nonsense like `null&ImageId` -
+// worse than simply trusting the checked class alone. Falls back to
+// that whenever the pre-narrowing type isn't a plain, single
+// already-known class/interface.
 #[test]
 fn instanceof_true_on_a_provably_non_object_type_does_not_build_a_nonsense_intersection() {
     let d = diagnostics_for(
@@ -3174,10 +3172,9 @@ fn switch_default_narrows_past_a_terminating_case() {
 
 #[test]
 fn switch_fallthrough_case_does_not_leak_its_own_narrowing_past_a_later_terminating_case() {
-    // Regression test for a real bug caught while implementing this
-    // fix: an empty `case null: case "": ...` fallthrough group's own
-    // optimistic narrowing (subject === null) must not leak past the
-    // *second* case (which itself terminates) into `default`.
+    // An empty `case null: case "": ...` fallthrough group's optimistic
+    // narrowing (subject === null) must not leak past the second case
+    // (which itself terminates) into `default`.
     let d = diagnostics_for(
         r#"<?php
             function f(?string $x): string {
