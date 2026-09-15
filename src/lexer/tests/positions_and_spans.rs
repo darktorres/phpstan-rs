@@ -2,7 +2,7 @@
 use super::super::*;
 use crate::token::StringPart;
 
-// `tokenize_with_spans` - Phase 11's source-position work.
+// `tokenize_with_spans` - source-position tracking.
 
 #[test]
 fn tokens_on_a_later_line_get_real_line_and_column_positions() {
@@ -102,17 +102,12 @@ fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
 
 #[test]
 fn many_tokens_on_one_extremely_long_line_does_not_blow_up_quadratically() {
-    // Real bug, not hypothetical: `line_col_at`'s first implementation
-    // recounted every character from the line's own start on *every*
-    // call, which is fine for ordinary code but a genuine O(line
-    // length x tokens on it) blowup on a real file in this project's
-    // own test corpus - `amphp/hpack`'s generated Huffman lookup
-    // table has a single line 1.25 million characters long, and hung
-    // for minutes (previously well under a second) before the
-    // incremental-cache fix. This is a smaller version of the same
-    // shape: one 200,000-character line with thousands of tokens on
-    // it - a quadratic implementation is easily slow enough here to
-    // fail this test's time budget; a linear one finishes instantly.
+    // `line_col_at` must not recount every character from the line's own
+    // start on every call - fine for ordinary code, but a genuine O(line
+    // length x tokens on it) blowup on a single very long line with many
+    // tokens. One 200,000-character line with thousands of tokens on it
+    // is enough to fail this test's time budget under a quadratic
+    // implementation; a linear one finishes instantly.
     let mut src = "<?php $a = [".to_string();
     for i in 0..40_000 {
         if i > 0 {
