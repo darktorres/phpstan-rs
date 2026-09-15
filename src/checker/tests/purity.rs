@@ -1,4 +1,4 @@
-//! Phase 41/82's transitive-purity payoff: `registry::purity::Registry::
+//! Transitive-purity payoff: `registry::purity::Registry::
 //! resolve_transitive_purity` proves a declaration effect-free, and
 //! `checker::noop::check_pure_call_without_effect` flags a bare,
 //! discarded statement-level call to one. Uses `all_diagnostics_for`
@@ -35,21 +35,14 @@ fn a_bare_call_to_a_final_method_with_a_trivial_body_is_flagged() {
     );
 }
 
-// Real PHPStan's own `hasSideEffects()` (`PhpMethodReflection`/
-// `PhpFunctionReflection`/`NativeFunctionReflection`, confirmed
-// byte-identical across all three in the real `phpstan/phpstan` 2.2.8
-// phar) unconditionally treats *any* non-constructor `void`-returning
-// declaration as having side effects, regardless of body - found by
-// diffing phpstan-rs's own scoped Piwigo corpus run against a real
-// `vendor/bin/phpstan analyse` run on the same corpus (real PHPStan:
-// zero relevant findings; phpstan-rs: 252 false-positive
-// `staticMethod.resultUnused`/`method.resultUnused` diagnostics, all on
-// `void`-returning empty/pure-bodied methods), then confirmed with a
-// minimal standalone repro against the real phar directly. A `void`
-// method/function/static method - even one with a byte-identical empty
-// body to a flagged non-`void` sibling - must never be flagged by this
-// whole diagnostic family; a `new.resultUnused` (constructor) case is
-// unaffected, since a constructor can't syntactically declare `void`.
+// PHPStan's own `hasSideEffects()` (`PhpMethodReflection`/
+// `PhpFunctionReflection`/`NativeFunctionReflection`) unconditionally
+// treats any non-constructor `void`-returning declaration as having
+// side effects, regardless of body. A `void` method/function/static
+// method - even one with a byte-identical empty body to a flagged
+// non-`void` sibling - must never be flagged by this whole diagnostic
+// family; a `new.resultUnused` (constructor) case is unaffected, since a
+// constructor can't syntactically declare `void`.
 #[test]
 fn a_bare_call_to_a_void_method_with_a_trivial_body_is_never_flagged() {
     let d = all_diagnostics_for(
