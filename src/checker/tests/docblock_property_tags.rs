@@ -3,13 +3,12 @@
 
 use super::helpers::*;
 
-// Phase 23 Finding 7, real shape: phpstorm-stubs'
-// `imagecreatefromstring` has a native return hint updated for PHP
-// 8's GD object migration (`: GdImage|false`) but a stale `@return
-// resource|GdImage|false` doc comment above it, never revised -
-// `resolve_type` used to always prefer the docblock, keeping the
-// stale `resource` member even though the native hint (present,
-// and not itself mentioning `resource`) is authoritative.
+// A stale `@return resource|GdImage|false` doc comment sitting above a
+// native return hint that's already been updated (`: GdImage|false`)
+// must not override the native hint - `resolve_type` must not always
+// prefer the docblock, keeping the stale `resource` member even though
+// the native hint (present, and not itself mentioning `resource`) is
+// authoritative.
 #[test]
 fn a_stale_resource_doc_comment_does_not_override_a_narrower_native_hint() {
     let d = diagnostics_for(
@@ -35,16 +34,11 @@ fn a_stale_resource_doc_comment_does_not_override_a_narrower_native_hint() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 23 Finding 7, real shape: Piwigo\Core\Logger::$fileHandle is
-// declared `private mixed $fileHandle = null;` deliberately - PHP has
-// no native `resource` type to declare, so the property leans on its
-// own `@var resource|null` docblock to carry the real type. An
-// earlier, unconditional version of Finding 7's fix incorrectly
-// treated `mixed` as an authoritative native hint that contradicts
-// the docblock's `resource` member, stripping it down to bare `null`
-// (a `!== null` guard, not the real code's `(bool)`-cast guard - a
-// cast-wrapped property-access truthy check is a separate, pre-
-// existing narrowing gap unrelated to this finding).
+// A property deliberately declared `private mixed $fileHandle = null;`
+// (PHP has no native `resource` type to declare) leans on its `@var
+// resource|null` docblock to carry the real type - `mixed` must not be
+// treated as an authoritative native hint that contradicts the
+// docblock's `resource` member, stripping it down to bare `null`.
 #[test]
 fn a_mixed_native_hint_does_not_override_a_docblocks_resource_member() {
     let d = diagnostics_for(
@@ -72,12 +66,12 @@ fn a_mixed_native_hint_does_not_override_a_docblocks_resource_member() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 24, real shape: `substr()`/`explode()`/`pg_connect()` have no
-// native return-type hint at all, so their only source of a return
-// type is a stale `@return` doc comment, gated by
-// `#[LanguageLevelTypeAware(['V.V' => 'MODERN'], default: 'LEGACY')]`
-// immediately above `function` - previously unparsed entirely, so
-// the checker read the pre-8.0 legacy type unconditionally.
+// `substr()`/`explode()`/`pg_connect()` have no native return-type hint
+// at all, so their only source of a return type is a stale `@return`
+// doc comment, gated by `#[LanguageLevelTypeAware(['V.V' => 'MODERN'],
+// default: 'LEGACY')]` immediately above `function` - this attribute
+// must be parsed, or the checker reads the pre-8.0 legacy type
+// unconditionally.
 #[test]
 fn language_level_type_aware_return_type_is_used_over_the_stale_docblock() {
     let d = diagnostics_for(
@@ -150,17 +144,12 @@ fn language_level_type_aware_on_a_parameter_is_used_over_the_stale_docblock() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found Doctrine's own
-// AbstractQuery::getResult() native stub declares a bare `mixed`
-// return with no docblock refinement at all - real PHPStan's own
-// phpstan-doctrine extension gives it a much richer, query-builder-
-// aware entity type this project can't replicate, but the narrower
-// fact that a non-indexBy()'d query's own result is always a real,
-// sequentially-keyed list is real and bounded (verified via
-// dumpType(); zero indexBy() call sites anywhere in this corpus).
-// Real Piwigo code (TagRepository::findAllTags and many others)
-// relies on exactly this via array_map(self::toProjection(...),
-// $entities).
+// Doctrine's `AbstractQuery::getResult()` native stub declares a bare
+// `mixed` return with no docblock refinement at all - PHPStan's
+// phpstan-doctrine extension gives it a much richer, query-builder-aware
+// entity type this project can't replicate, but the narrower fact that a
+// non-indexBy()'d query's result is always a sequentially-keyed list is
+// bounded enough to model directly.
 #[test]
 fn doctrine_query_get_result_is_a_real_list() {
     let d = diagnostics_for(
@@ -185,8 +174,8 @@ fn doctrine_query_get_result_is_a_real_list() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 36 from the architecture audit - PHP's implicit Stringable
-// conformance for any class declaring __toString() wasn't modeled.
+// PHP's implicit Stringable conformance for any class declaring
+// __toString() must be modeled.
 
 #[test]
 fn a_class_declaring_to_string_implicitly_implements_stringable() {
@@ -212,9 +201,8 @@ fn a_class_without_to_string_still_does_not_satisfy_stringable() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Phase 13 Finding D: real shape from `vendor/php-openapi/openapi`'s
-// own `OpenApi` class, which declares `@property Paths $paths` (a
-// magic property backed by `__get`/`__set`, no real declared field).
+// A class-level `@property Paths $paths` tag (a magic property backed
+// by `__get`/`__set`, no real declared field).
 #[test]
 fn a_class_level_property_tag_lets_the_magic_property_be_read() {
     let d = diagnostics_for(
@@ -273,10 +261,10 @@ fn a_property_read_tag_flags_an_attempted_write() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Phase 36's "bright spot": @property/@property-read/@property-write's
-// own *validation* half (real PHPStan's PropertyTagCheck) - the tag's
-// own declared type must reference a real, known class, the same
-// existence-checking every native property type hint already gets.
+// @property/@property-read/@property-write's validation half (mirrors
+// PHPStan's PropertyTagCheck) - the tag's declared type must reference a
+// real, known class, the same existence-checking every native property
+// type hint already gets.
 
 #[test]
 fn a_property_tag_referencing_an_unknown_class_is_flagged() {
@@ -366,8 +354,7 @@ fn an_unknown_class_referenced_only_by_a_property_tag_shadowed_by_a_real_propert
  {
     // Documented, deliberate leniency: a tag's name shadowed by a real,
     // physically-declared property of the same name checks the real
-    // property's own type, not the tag's - a redundant declaration style
-    // with no confirmed corpus incidence.
+    // property's own type, not the tag's.
     let d = diagnostics_for(
         r#"<?php
             /**
