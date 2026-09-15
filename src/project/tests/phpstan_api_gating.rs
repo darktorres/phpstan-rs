@@ -1,4 +1,4 @@
-//! Phase 40: `Project::set_phpstan_api_check_enabled` actually wires
+//! `Project::set_phpstan_api_check_enabled` actually wires
 //! `checker::phpstan_api::check_phpstan_api_usage` into `check_file`'s own
 //! diagnostics when (and only when) turned on - the checker module's own
 //! test suite (`checker::phpstan_api::tests`) covers the check's own
@@ -7,16 +7,15 @@
 //! Deliberately uses a `PHPStan\`-namespaced class name
 //! (`ZzzPhase40TestOnlyMarker`) that doesn't collide with any real class
 //! `php_stubs::generated_stub_classes()` already merges into every
-//! `Project::new()` unconditionally (Finding 4: the real `vendor/
-//! phpstan-src/src` tree, bundled specifically so this project can
-//! resolve `PHPStan\*` types even against a `phpstan/phpstan` install
-//! that shipped no loose source, e.g. its `.phar` distribution) - a real
-//! name like `PHPStan\Rules\Rule` would merge this test's own bare stand-
-//! in declaration onto the *real*, richly-shaped interface already
-//! loaded (`registry::ClassInfo::merge`'s own "stub source wins on
-//! conflict" rule), pulling in unrelated diagnostics (e.g. real `Rule`'s
-//! own abstract methods) that have nothing to do with what's under test
-//! here.
+//! `Project::new()` unconditionally (the vendored `vendor/phpstan-src/src`
+//! tree, bundled specifically so this project can resolve `PHPStan\*`
+//! types even against a `phpstan/phpstan` install that shipped no loose
+//! source, e.g. its `.phar` distribution) - a real name like
+//! `PHPStan\Rules\Rule` would merge this test's own bare stand-in
+//! declaration onto the real, richly-shaped interface already loaded
+//! (`registry::ClassInfo::merge`'s "stub source wins on conflict" rule),
+//! pulling in unrelated diagnostics (e.g. real `Rule`'s own abstract
+//! methods) that have nothing to do with what's under test here.
 use super::super::*;
 use super::helpers::without_missing_typehint_diagnostics;
 
@@ -67,10 +66,10 @@ fn enabling_the_gate_stays_quiet_once_the_base_class_is_tagged_api() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 40 follow-up: the vendor-directory half of `is_phpstan_code` -
-// only reachable through a real `Project`/`PathBuf` harness, since the
-// checker-level `Registry::build`-only test suite never has real paths
-// to populate `Registry::phpstan_class_files` from at all.
+// The vendor-directory half of `is_phpstan_code` - only reachable
+// through a real `Project`/`PathBuf` harness, since the checker-level
+// `Registry::build`-only test suite never has real paths to populate
+// `Registry::phpstan_class_files` from at all.
 
 #[test]
 fn a_phpstan_namespaced_caller_referencing_a_vendor_loaded_phpstan_class_is_flagged() {
@@ -153,8 +152,8 @@ fn a_phpstan_namespaced_caller_referencing_a_sibling_phpstan_namespaced_class_is
 
 #[test]
 fn a_static_call_to_an_inherited_phpstan_method_through_a_non_phpstan_subclass_is_flagged() {
-    // Phase 40 follow-up: real `ApiStaticCallRule` gates on the resolved
-    // method's *declaring* class, never the literally-written class
+    // Mirrors PHPStan's `ApiStaticCallRule`: it gates on the resolved
+    // method's declaring class, never the literally-written class
     // name's own namespace - `MyNonPhpStanSubclass::inheritedMethod()`
     // must still be flagged, even though the written class name
     // (`MyNonPhpStanSubclass`) is itself `App`-namespaced.
@@ -191,9 +190,8 @@ fn a_static_call_to_an_inherited_phpstan_method_through_a_non_phpstan_subclass_i
 
 #[test]
 fn a_bare_namespace_phpstan_declaration_with_no_trailing_backslash_is_recognized() {
-    // Phase 40 follow-up: `is_phpstan_namespace`'s own bare-`PHPStan`
-    // (no trailing backslash) case, confirmed against real
-    // `ApiRuleHelperTest.php`'s own row for it.
+    // `is_phpstan_namespace`'s bare-`PHPStan` (no trailing backslash)
+    // case.
     let mut project = Project::new();
     project.set_phpstan_api_check_enabled(true);
     project
@@ -215,13 +213,12 @@ fn a_bare_namespace_phpstan_declaration_with_no_trailing_backslash_is_recognized
 
 /// Not a normal regression test (nothing in this project's own behavior
 /// is asserted beyond "the class exists") - a documented, deliberate
-/// sanity check that real PHPStan's own `PHPStan\Rules\Rule` interface,
-/// as merged in unconditionally via `php_stubs::generated_stub_classes`,
-/// really does carry the real `@api` tag once parsed through this
-/// project's own docblock/registry pipeline - confirming Phase 40's own
-/// central premise: no extra vendor-loading work is needed for this
-/// checker to see accurate `@api` state for real PHPStan classes, since
-/// Finding 4's stub pipeline already threads every real class's own doc
+/// sanity check that PHPStan's `PHPStan\Rules\Rule` interface, as merged
+/// in unconditionally via `php_stubs::generated_stub_classes`, really
+/// does carry the `@api` tag once parsed through this project's own
+/// docblock/registry pipeline: no extra vendor-loading work is needed
+/// for this checker to see accurate `@api` state for PHPStan classes,
+/// since the stub pipeline already threads every real class's doc
 /// comment through `registry::ClassInfo::from_decl` exactly the same way
 /// an ordinary project file's declaration would be.
 #[test]
