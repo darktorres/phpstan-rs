@@ -4,10 +4,10 @@ use super::super::*;
 use super::helpers::*;
 use crate::types::AccessoryKind;
 
-// Phase 32 Finding L: exact type equality is the wrong tool for "is
-// this the kind of thing being narrowed" - both `narrow_type_to`/
-// `narrow_type_excluding` (member filtering) and `union_types`
-// (member dedup at construction time) used plain `==`/`!=`.
+// Exact type equality is the wrong tool for "is this the kind of thing
+// being narrowed" - both `narrow_type_to`/`narrow_type_excluding`
+// (member filtering) and `union_types` (member dedup at construction
+// time) must not use plain `==`/`!=`.
 
 #[test]
 fn union_types_collapses_a_string_literal_into_an_already_present_string() {
@@ -35,10 +35,10 @@ fn union_types_does_not_collapse_an_int_literal_into_an_unrelated_float() {
     );
 }
 
-// Phase 14: the same absorption idea, for an accessory-refined
-// string/array and an IntRange - an unknown branch genuinely might
-// be empty/out of range, so the refined member can't survive next
-// to its own separately-present, unrefined base.
+// The same absorption idea, for an accessory-refined string/array and an
+// IntRange - an unknown branch genuinely might be empty/out of range, so
+// the refined member can't survive next to its own separately-present,
+// unrefined base.
 #[test]
 fn union_types_collapses_a_non_empty_string_into_an_already_present_string() {
     let non_empty = Type::Intersection(vec![
@@ -81,11 +81,11 @@ fn union_types_collapses_a_float_literal_into_an_already_present_float() {
 
 #[test]
 fn union_types_does_not_collapse_a_real_class_intersection() {
-    // Guards Phase 14's own absorption fix: a genuine, unrelated
-    // multi-class intersection (no Accessory member at all) must
-    // never be treated as "more specific than its own base type" -
-    // Countable&Iterator sitting next to bare Countable in the same
-    // union are both real, independent possibilities.
+    // Guards the absorption fix above: a genuine, unrelated multi-class
+    // intersection (no Accessory member at all) must never be treated
+    // as "more specific than its own base type" - Countable&Iterator
+    // sitting next to bare Countable in the same union are both real,
+    // independent possibilities.
     let intersection = Type::Intersection(vec![
         Type::Object("Countable".to_string(), Vec::new()),
         Type::Object("Iterator".to_string(), Vec::new()),
@@ -102,19 +102,15 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
     );
 }
 
-// Phase 12 (unplanned follow-on): a real hang, found via `gdb` on a
-// hung `check-project` process, not guessed - `merge_scopes` (one
-// `union_types` call per `if`/`else`) and `write_index_into`'s own
-// `Union` arm both feed into `union_types`, which had no cap on how
-// many distinct members it would accumulate. A real corpus function
+// `merge_scopes` (one `union_types` call per `if`/`else`) and
+// `write_index_into`'s own `Union` arm both feed into `union_types`,
+// which must cap how many distinct members it accumulates - a function
 // with many sequential branches assigning genuinely distinct array
-// shapes to the same variable grew that variable's own union member
-// count combinatorially once `Type::Union` values stopped collapsing
-// to `Mixed` at the first read/write (Finding E's own `Union([matched,
-// empty])` unconditional `preg_match` shape). Simulates that same
-// shape directly: 20 pairwise-distinct one-field `ArrayShape`s folded
-// through `union_types` one at a time, exactly the access pattern
-// `merge_scopes` uses across many sequential branches.
+// shapes to the same variable can otherwise grow that variable's union
+// member count combinatorially. Simulates that shape directly: 20
+// pairwise-distinct one-field `ArrayShape`s folded through
+// `union_types` one at a time, exactly the access pattern `merge_scopes`
+// uses across many sequential branches.
 #[test]
 fn union_types_caps_runaway_member_growth_instead_of_hanging() {
     let result = (0..20)
@@ -253,12 +249,10 @@ fn writing_a_readonly_property_inside_its_own_constructor_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found real PHP 8.4 property hooks
-// (`CurrentConfig`'s own `apiKeyDuration`/`chmodValue`/etc.) whose
-// `set(Type $value)` hook deliberately accepts a wider type than the
-// property's own backing/read type, coercing internally before the
-// real assignment - a write must be checked against the hook's own
-// parameter type, not the property's declared type.
+// A PHP 8.4 property hook's `set(Type $value)` can deliberately accept a
+// wider type than the property's own backing/read type, coercing
+// internally before the real assignment - a write must be checked
+// against the hook's parameter type, not the property's declared type.
 #[test]
 fn a_property_hooks_wider_set_parameter_type_is_the_real_write_sink() {
     let d = diagnostics_for(
@@ -311,8 +305,8 @@ fn writing_an_ordinary_mutable_property_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 33 from the architecture audit - `iterable` was parsed as
-// plain `array`, silently dropping its `|Traversable` half.
+// `iterable` must not be parsed as plain `array`, silently dropping its
+// `|Traversable` half.
 
 #[test]
 fn iterable_accepts_a_real_traversable_not_just_an_array() {
@@ -343,12 +337,11 @@ fn iterable_still_rejects_a_genuinely_non_iterable_value() {
 
 #[test]
 fn iterable_traversable_half_is_not_namespace_mangled() {
-    // Regression test for a real bug caught while implementing this
-    // fix: the synthesized `Traversable` half of `iterable` is this
-    // project's own internal desugaring, not something the
-    // programmer wrote as a class reference - it must stay global
-    // regardless of the current namespace, the same way the native
-    // `object` hint already does.
+    // The synthesized `Traversable` half of `iterable` is this
+    // project's own internal desugaring, not something the programmer
+    // wrote as a class reference - it must stay global regardless of
+    // the current namespace, the same way the native `object` hint
+    // already does.
     let d = diagnostics_for(
         r#"<?php
             namespace App;
@@ -361,9 +354,8 @@ fn iterable_traversable_half_is_not_namespace_mangled() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 34 from the architecture audit - array-key/scalar/numeric/
-// resource pseudo-types weren't recognized, silently falling through
-// to a bogus literal class reference.
+// array-key/scalar/numeric/resource pseudo-types must be recognized, not
+// silently fall through to a bogus literal class reference.
 
 #[test]
 fn array_key_accepts_both_string_and_int() {
@@ -406,12 +398,10 @@ fn resource_pseudo_type_matches_across_namespaces() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 41 from the architecture audit (integer-literal half only -
-// the float-literal half needs a new Type::FloatLiteral variant,
-// deferred as lower priority per the plan) - PHPStan-style
-// literal-integer union types (`1|2|3`) rejected every value,
-// including genuinely valid ones, because a bare integer in a type
-// string fell through to a bogus literal-class-reference fallback.
+// PHPStan-style literal-integer union types (`1|2|3`) must not reject
+// every value, including genuinely valid ones - a bare integer in a
+// type string must not fall through to a bogus literal-class-reference
+// fallback.
 
 #[test]
 fn literal_integer_union_type_accepts_a_genuinely_valid_value() {
@@ -437,7 +427,7 @@ fn literal_integer_union_type_still_rejects_a_genuinely_invalid_value() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Phase 75: string accessory case-tracking, full concat algorithm.
+// String accessory case-tracking, full concat algorithm.
 
 #[test]
 fn strtolower_of_a_literal_constant_folds() {
@@ -489,10 +479,10 @@ fn two_literal_strings_concatenated_constant_fold() {
 
 #[test]
 fn a_literal_string_typed_parameter_still_accepts_a_concat_of_two_literals() {
-    // The real false-positive-fix regression: `LiteralString` used to
-    // have zero producers - `BinOp::Concat` collapsed to bare `string`
-    // even when both operands were literals, which a `literal-string`-
-    // typed callee correctly rejected.
+    // `LiteralString` must have a producer for `BinOp::Concat` - it must
+    // not collapse to bare `string` even when both operands are
+    // literals, which a `literal-string`-typed callee would then
+    // correctly reject.
     let d = diagnostics_for(
         r#"<?php
             /** @param literal-string $s */
@@ -505,9 +495,8 @@ fn a_literal_string_typed_parameter_still_accepts_a_concat_of_two_literals() {
 
 #[test]
 fn a_lowercase_string_phpdoc_parameter_rejects_a_plain_unproven_string() {
-    // The `parse.rs` reversal's own regression test: before Phase 75,
-    // `lowercase-string` degraded to plain `string`, so this call was
-    // wrongly accepted.
+    // `lowercase-string` must not degrade to plain `string`, or this
+    // call is wrongly accepted.
     let d = diagnostics_for(
         r#"<?php
             /** @param lowercase-string $s */
