@@ -111,10 +111,9 @@ fn a_param_referencing_a_local_alias_is_enforced() {
 
 #[test]
 fn an_inline_var_annotation_referencing_a_local_alias_is_expanded() {
-    // Real corpus shape: `league/uri-interfaces`'s own `UriString::
-    // parse()`, `/** @var ComponentMap $components */` on a local
-    // variable - a separate, check-time resolution path from the
-    // registry-build-time member handling the other tests here cover.
+    // `/** @var ComponentMap $components */` on a local variable is a
+    // separate, check-time resolution path from the registry-build-time
+    // member handling the other tests here cover.
     let d = diagnostics_for(
         r#"<?php
             /**

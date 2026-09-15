@@ -14,8 +14,8 @@ fn ctx_for(namespace: &str) -> NameContext {
 
 #[test]
 fn collects_a_representative_nested_type_s_own_class_name_refs() {
-    // A `Union`/`ClassString`/`ArrayShape` combination, real corpus
-    // shape: `class-string<Foo>|array{owner: Bar}`.
+    // A `Union`/`ClassString`/`ArrayShape` combination:
+    // `class-string<Foo>|array{owner: Bar}`.
     let ctx = ctx_for("App");
     let ty = types::parse_type_string("class-string<Foo>|array{owner: Bar}");
     let mut out = Vec::new();

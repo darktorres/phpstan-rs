@@ -471,9 +471,7 @@ fn private_property_reached_through_an_instanceof_self_narrowed_local_is_not_fla
     // not_flagged` test) - a same-class parameter type would already
     // establish the alias via `seed_self_typed_param_aliases` (rule 3),
     // which would defeat the point of this test: isolating the
-    // `instanceof self` narrowing rule (rule 2) on its own, the same
-    // shape as the real `ImageImagick::compose` corpus instance this
-    // mirrors (`$overlay_backend = $overlay->image;`, an unknown/
+    // `instanceof self` narrowing rule (rule 2) on its own (an unknown/
     // interface-typed value only narrowed by the `instanceof` check).
     let d = diagnostics_for(
         r#"<?php

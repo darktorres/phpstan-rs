@@ -1,5 +1,5 @@
-//! Phase 46: `regexp.pattern` - malformed PCRE pattern literals passed
-//! to the 8 real `preg_*` builtins that take one.
+//! `regexp.pattern` - malformed PCRE pattern literals passed to the 8
+//! `preg_*` builtins that take one.
 
 use super::helpers::*;
 

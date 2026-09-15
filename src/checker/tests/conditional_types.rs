@@ -1,5 +1,5 @@
 //! PHPDoc conditional return types (`@return ($param is X ? A : B)`) -
-//! `Type::Conditional`, `types::resolve_conditional` (Phase 80 follow-up).
+//! `Type::Conditional`, `types::resolve_conditional`.
 
 use super::helpers::*;
 

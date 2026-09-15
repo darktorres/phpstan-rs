@@ -1,10 +1,6 @@
-//! Phase 38: `Project::set_php_version` actually stores onto
+//! `Project::set_php_version` actually stores onto
 //! `registry::Registry::php_version` - mirrors the existing
 //! `set_strict_mixed_arrays`/`set_phpstan_api_check_enabled` precedent.
-//! The version-gated rules that will eventually *read* this field don't
-//! exist yet (this phase is purely the enabling plumbing), so there's
-//! nothing to assert about diagnostics - just that the setter's effect is
-//! visible on the registry it's meant to reach.
 use super::super::*;
 
 #[test]

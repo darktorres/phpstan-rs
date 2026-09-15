@@ -1,5 +1,5 @@
-//! Phase 39: `@deprecated` usage warnings (`checker::deprecated_usage`) -
-//! off by default (`Registry::check_deprecated_usage`), so every test here
+//! `@deprecated` usage warnings (`checker::deprecated_usage`) - off by
+//! default (`Registry::check_deprecated_usage`), so every test here
 //! needs it turned on to see anything.
 
 use super::helpers::*;

@@ -1,11 +1,10 @@
-//! Phase 62's premature-access half - `checker/uninitialized_dataflow.rs`'s
-//! own real, per-constructor "was this property definitely assigned *by
-//! this exact point*" dataflow. Purely additive to
-//! `checker/tests/uninitialized.rs`'s own existing "never initialized"
-//! suite (kept completely unmodified - see this file's own final test):
-//! every scenario here uses a property that genuinely does get assigned
-//! *somewhere*, so the only question is whether a read reaches it too
-//! early on some real path.
+//! The premature-access half - `checker/uninitialized_dataflow.rs`'s
+//! per-constructor "was this property definitely assigned by this exact
+//! point" dataflow. Purely additive to
+//! `checker/tests/uninitialized.rs`'s existing "never initialized"
+//! suite: every scenario here uses a property that genuinely does get
+//! assigned somewhere, so the only question is whether a read reaches
+//! it too early on some path.
 
 use super::helpers::*;
 

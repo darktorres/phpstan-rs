@@ -1225,11 +1225,10 @@ fn accessing_an_undeclared_key_of_an_unsealed_shape_is_never_flagged() {
 
 #[test]
 fn a_quoted_shape_key_with_a_hyphen_is_parsed_and_looked_up_correctly() {
-    // Real bug found while scoping this phase: a quoted key's own
-    // surrounding quote characters were never stripped, so the field
-    // was stored as the literal text `'content-type'` (quotes
-    // included) instead of the real string PHP itself uses as the
-    // array key - silently breaking every real lookup against it.
+    // A quoted key's surrounding quote characters must be stripped, or
+    // the field is stored as the literal text `'content-type'` (quotes
+    // included) instead of the string PHP itself uses as the array key -
+    // silently breaking every lookup against it.
     let d = diagnostics_for(
         r#"<?php
             /** @param array{'content-type': string} $x */
