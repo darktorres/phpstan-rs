@@ -1,6 +1,6 @@
-//! Phase 70.A: `yield`/`yield from` expression typing - resolving the
-//! enclosing declared `Generator<TKey, TValue, TSend, TReturn>`'s own
-//! TSend/TReturn template params, instead of always inferring `Mixed`.
+//! `yield`/`yield from` expression typing - resolving the enclosing
+//! declared `Generator<TKey, TValue, TSend, TReturn>`'s own TSend/TReturn
+//! template params, instead of always inferring `Mixed`.
 
 use super::helpers::*;
 
@@ -63,10 +63,9 @@ fn yield_from_expression_type_is_mixed_for_a_plain_array_argument() {
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Phase 70.A follow-up: a real, pre-existing bug found while testing the
-// above - `return $x;` inside a generator was checked against the whole
-// declared `Generator<...>` type (always a mismatch) instead of its own
-// TReturn.
+// `return $x;` inside a generator must be checked against TReturn, not
+// the whole declared `Generator<...>` type (which would always be a
+// mismatch).
 #[test]
 fn returning_a_value_inside_a_generator_checks_against_its_treturn_not_the_whole_generator_type() {
     let d = diagnostics_for(
@@ -101,9 +100,9 @@ fn returning_a_mismatched_value_inside_a_generator_is_still_flagged_against_its_
     );
 }
 
-// Phase 61.B: Generator `TReturn` completeness - falling off the end (or
-// an explicit bare `return;`) inside a generator with a real, non-Mixed/
-// Void declared TReturn is a real miss, checked against TReturn, not the
+// Generator `TReturn` completeness - falling off the end (or an
+// explicit bare `return;`) inside a generator with a non-Mixed/Void
+// declared TReturn is a real miss, checked against TReturn, not the
 // outer `Generator<...>` type.
 
 #[test]
@@ -196,7 +195,7 @@ fn generator_function_with_concrete_treturn_and_a_bare_return_gets_return_type_m
     );
 }
 
-// Phase 70.B: `yield from` compatibility checks.
+// `yield from` compatibility checks.
 
 #[test]
 fn yield_from_a_definitely_non_iterable_value_is_flagged() {
