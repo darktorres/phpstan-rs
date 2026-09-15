@@ -1,22 +1,20 @@
-//! Phase 80: `value-of<T>`/`key-of<T>` - real PHPStan's own `ValueOfType`/
+//! `value-of<T>`/`key-of<T>` - mirrors PHPStan's own `ValueOfType`/
 //! `KeyOfType`, both `LateResolvableType`s this project has no general
 //! lazy/deferred type-resolution mechanism to fully replicate. `T` itself
 //! already a real `array`/`array{...}` type needs no registry access at
 //! all and is resolved precisely at parse time.
 //!
-//! Phase 80 follow-up: `T` naming a real, registered enum is *also* now
-//! resolved precisely - `value-of<T>` (only `value-of`, matching real
-//! PHPStan's own `KeyOfType::getResult()`, which has no such special case
-//! at all) via a one-time `Registry::resolve_deferred_value_of` pass that
-//! runs once every class/enum is indexed (this project's own lower-risk
-//! substitute for real PHPStan's per-use laziness - see that function's
-//! own doc comment in `registry.rs`). Everything else genuinely
-//! unresolvable (`key-of<T>` naming a class/enum - confirmed real PHPStan
-//! has no special case there either; `value-of<T>`/`key-of<T>` naming an
-//! ordinary, non-enum class) still degrades to `Mixed` rather than the
-//! bogus, namespace-qualified "class name" it used to mangle into before
-//! this whole family existed (a real, active `class.notFound` false
-//! positive on every use of this syntax).
+//! `T` naming a real, registered enum is also resolved precisely -
+//! `value-of<T>` only (matching PHPStan's `KeyOfType::getResult()`,
+//! which has no such special case at all) via a one-time
+//! `Registry::resolve_deferred_value_of` pass that runs once every
+//! class/enum is indexed (this project's lower-risk substitute for
+//! PHPStan's per-use laziness - see that function's own doc comment in
+//! `registry.rs`). Everything else genuinely unresolvable (`key-of<T>`
+//! naming a class/enum - PHPStan has no special case there either;
+//! `value-of<T>`/`key-of<T>` naming an ordinary, non-enum class)
+//! degrades to `Mixed` rather than a bogus, namespace-qualified "class
+//! name".
 
 use super::helpers::*;
 
@@ -110,10 +108,10 @@ fn key_of_on_a_class_reference_no_longer_produces_a_bogus_class_not_found() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 80 follow-up: `value-of<T>` naming a real, registered enum -
-// resolved by `Registry::resolve_deferred_value_of` (`registry.rs`) once
-// every class/enum is indexed, reusing the enum's own already-built
-// `->value` property type rather than recomputing it.
+// `value-of<T>` naming a real, registered enum - resolved by
+// `Registry::resolve_deferred_value_of` (`registry.rs`) once every
+// class/enum is indexed, reusing the enum's already-built `->value`
+// property type rather than recomputing it.
 
 #[test]
 fn value_of_on_a_backed_enum_resolves_to_the_real_union_of_case_values() {
@@ -135,15 +133,14 @@ fn value_of_on_a_backed_enum_resolves_to_the_real_union_of_case_values() {
 
 #[test]
 fn value_of_on_a_backed_enum_resolves_correctly_inside_a_namespace() {
-    // Regression test for a real bug found while implementing this:
     // `NameContext::resolve_names_in_type`'s generic `Object` arm
-    // namespace-qualifies *every* `Object` name it doesn't special-case -
-    // a namespace-less fixture never actually exercises this at all
+    // namespace-qualifies every `Object` name it doesn't special-case - a
+    // namespace-less fixture never actually exercises this at all
     // (`ctx.resolve` on a bare name with an empty namespace is a no-op),
-    // so this needs a real `namespace` statement to catch it: without
-    // `resolve_names_in_type`'s own `"$$valueof"` guard, the sentinel
-    // itself got mangled into `App\$$valueof` before the resolution pass
-    // ever got a chance to recognize it, producing a bogus `class.notFound`
+    // so this needs a real `namespace` statement to catch it:
+    // `resolve_names_in_type`'s `"$$valueof"` guard must fire before the
+    // sentinel gets mangled into `App\$$valueof`, or resolution never
+    // gets a chance to recognize it, producing a bogus `class.notFound`
     // instead of the real resolved type.
     let d = diagnostics_for(
         r#"<?php
@@ -186,15 +183,12 @@ fn value_of_on_a_backed_enum_is_enforced_as_a_real_return_type() {
 
 #[test]
 fn value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type() {
-    // Regression test for a real bug found via this session's own corpus
-    // diff: `@return value-of<T>` where `T` is a `@template` placeholder
-    // (never resolvable to a concrete enum, so `Registry::
-    // resolve_deferred_value_of` degrades it to `Mixed`) used to silently
-    // discard a genuinely useful native return type in favor of a bare
-    // `Mixed` - `resolve_type`'s own `reconcile_with_native` had already
-    // (correctly) fallen back to the native type for this exact shape
-    // before `value-of<T>` support existed at all; real corpus shape:
-    // `php-standard-library`'s own `BackedEnumValueType::coerce(): string|int`.
+    // `@return value-of<T>` where `T` is a `@template` placeholder (never
+    // resolvable to a concrete enum, so `Registry::
+    // resolve_deferred_value_of` degrades it to `Mixed`) must not
+    // silently discard a genuinely useful native return type in favor of
+    // a bare `Mixed` - `resolve_type`'s `reconcile_with_native` must
+    // fall back to the native type for this exact shape.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
