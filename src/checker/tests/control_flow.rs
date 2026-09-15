@@ -1610,11 +1610,9 @@ fn a_switch_case_ending_in_an_if_whose_every_branch_continues_reaches_after_the_
 
 #[test]
 fn a_function_ending_in_a_try_catch_that_both_return_is_not_flagged() {
-    // Regression test for a real bug caught while implementing this
-    // fix: `always_terminates` had no case for `Try` at all, so a
-    // function ending in `try { return ...; } catch (...) { return
-    // ...; }` was incorrectly flagged as possibly falling off the
-    // end.
+    // `always_terminates` must have a case for `Try`, or a function
+    // ending in `try { return ...; } catch (...) { return ...; }` is
+    // incorrectly flagged as possibly falling off the end.
     let d = diagnostics_for(
         r#"<?php
             function f(bool $c): string {
@@ -2524,13 +2522,12 @@ fn dead_code_inside_a_nested_block_is_still_flagged() {
     );
 }
 
-// Regression guard for a real bug this reinstatement surfaced and fixed:
-// both `check_function`'s own falls-off-the-end check and
-// `always_terminates`'s own `Block` arm only ever looked at a block's
-// *last* statement to decide whether it always terminates - so a
-// function ending in dead code after a real, unconditional `return`
-// wrongly reported `return.missing` (the dead trailing statement, not
-// the `return`, was the last one `always_terminates` ever looked at).
+// Both `check_function`'s falls-off-the-end check and
+// `always_terminates`'s `Block` arm must not only look at a block's last
+// statement to decide whether it always terminates - a function ending
+// in dead code after an unconditional `return` would otherwise wrongly
+// report `return.missing` (the dead trailing statement, not the
+// `return`, being the last one `always_terminates` looks at).
 #[test]
 fn dead_code_after_a_return_does_not_also_trigger_a_spurious_return_missing() {
     let d = diagnostics_for(

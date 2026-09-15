@@ -192,8 +192,8 @@ fn an_untagged_hierarchy_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 48.7: `@phpstan-require-extends`/`@phpstan-require-implements`/
-// `@phpstan-sealed`'s own existence half - the RHS class name itself.
+// `@phpstan-require-extends`/`@phpstan-require-implements`/
+// `@phpstan-sealed`'s existence half - the RHS class name itself.
 
 #[test]
 fn a_require_extends_tag_naming_an_unknown_class_is_flagged() {
@@ -275,7 +275,7 @@ fn a_sealed_tag_naming_a_known_class_is_not_flagged() {
     );
 }
 
-// Phase 48.B: deeper `@phpstan-require-extends`/`-require-implements`/
+// Deeper `@phpstan-require-extends`/`-require-implements`/
 // `@phpstan-sealed` declaration-validity refinements.
 
 #[test]

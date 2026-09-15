@@ -1,7 +1,6 @@
-//! Phase 65: declaration-site modifier-consistency + constructor-shape
-//! checks - a batch of small, independent boolean-flag-combination
-//! checks real PHP enforces unconditionally at compile time, all
-//! confirmed directly against real `php -l`.
+//! Declaration-site modifier-consistency + constructor-shape checks - a
+//! batch of small, independent boolean-flag-combination checks PHP
+//! enforces unconditionally at compile time.
 
 use super::helpers::*;
 
@@ -315,8 +314,8 @@ fn static_of_an_ordinary_variable_is_never_flagged() {
     );
 }
 
-// Phase 48.F: `FunctionDefinitionCheck`'s PHP-version-gated native
-// declaration-syntax checks.
+// `FunctionDefinitionCheck`'s PHP-version-gated native declaration-syntax
+// checks.
 
 #[test]
 fn a_native_union_parameter_type_pre_8_0_is_flagged() {

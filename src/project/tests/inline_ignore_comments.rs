@@ -1,8 +1,7 @@
-//! Phase 44: `@phpstan-ignore-line`/`@phpstan-ignore-next-line` inline
-//! suppression, and (Phase 44 follow-up) the fuller bare `@phpstan-ignore
-//! <identifier list>` form - end-to-end through `Project::load_file`/
-//! `check_file`, on top of `ignore_comments`'s own already-tested pure
-//! text-scanning logic.
+//! `@phpstan-ignore-line`/`@phpstan-ignore-next-line` inline suppression,
+//! and the fuller bare `@phpstan-ignore <identifier list>` form -
+//! end-to-end through `Project::load_file`/`check_file`, on top of
+//! `ignore_comments`'s own already-tested pure text-scanning logic.
 
 use std::path::PathBuf;
 
