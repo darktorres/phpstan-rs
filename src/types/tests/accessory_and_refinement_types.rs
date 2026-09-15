@@ -3,13 +3,11 @@ use super::super::*;
 
 #[test]
 fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
-    // A real, widely-used PHPStan-ecosystem pseudo-type (nikic/php-parser's
-    // own `@return list<ClassMethod>` is exactly this shape) - without
-    // this, "list" fell through to the generic-user-class branch and
-    // got treated as a literal class named "list". Phase 14: now a
-    // real Intersection([Array(_), Accessory(ArrayList)]), not a
-    // plain Array alias.
-    // Phase 50: a list's key can only ever be a sequential int.
+    // Without this, "list" falls through to the generic-user-class
+    // branch and gets treated as a literal class named "list".
+    // `list<T>` is a real `Intersection([Array(_), Accessory(ArrayList)])`,
+    // not a plain Array alias - a list's key can only ever be a
+    // sequential int.
     assert_eq!(
         parse_type_string("list<int>"),
         Type::Intersection(vec![
@@ -83,21 +81,14 @@ fn interface_string_and_trait_string_are_class_strings_bound_to_an_internal_kind
     );
 }
 
-// A top-10-bucket corpus round found `lowercase-string`/`uppercase-
-// string`/`non-empty-lowercase-string`/`non-empty-uppercase-string`
-// missing from the list above entirely - real PHPStan/Psalm pseudo-
-// types (real corpus shape: `symfony/polyfill-php84`'s own `Php84.php`,
-// `amphp/hpack`'s own header-name typing) that fell through to the
-// generic-user-class branch and got namespace-qualified into a bogus
-// "class" (e.g. `Psl\HPACK\non-empty-lowercase-string`), which then
-// failed every ordinary `string`-typed assignability check. Originally
-// fixed by downgrading all four to plain `Type::String` (parity with
-// `class-string`'s own "nothing to verify" reasoning) - Phase 75
-// reverses that downgrade (this test's own name and body updated to
-// match): unlike `class-string`, case-content genuinely is now
-// something this project can prove and produce, so these route through
-// the same real `Intersection([String, Accessory(_)])` machinery as
-// `non-empty-string`/`numeric-string` instead.
+// `lowercase-string`/`uppercase-string`/`non-empty-lowercase-string`/
+// `non-empty-uppercase-string` must not fall through to the
+// generic-user-class branch and get namespace-qualified into a bogus
+// "class", which then fails every ordinary `string`-typed assignability
+// check. Unlike `class-string`, case-content genuinely is something
+// this project can prove and produce, so these route through the same
+// `Intersection([String, Accessory(_)])` machinery as
+// `non-empty-string`/`numeric-string`.
 #[test]
 fn case_refinement_string_pseudo_types_are_now_real_accessory_types() {
     assert_eq!(
@@ -143,14 +134,12 @@ fn decimal_int_string_is_a_real_accessory_type() {
     );
 }
 
-// Same corpus round: `int-mask<Flag::*>`/`int-mask-of<Flag::*>` -
-// real PHPStan expands these into every combinable bitmask value, which
-// this project can't enumerate without resolving the referenced class
-// constants. Falling through to the generic-class branch produced a
-// bogus `Composer\Pcre\int-mask<Composer\Pcre\PREG_UNMATCHED_AS_NULL>`-
-// style "class" that then failed ordinary `int` assignability checks -
-// a real corpus false positive. Degrading to the pseudo-type's own real
-// underlying kind, `Type::Int`, is a strict improvement.
+// `int-mask<Flag::*>`/`int-mask-of<Flag::*>` expand into every
+// combinable bitmask value in PHPStan, which this project can't
+// enumerate without resolving the referenced class constants. Falling
+// through to the generic-class branch would produce a bogus "class"
+// that then fails ordinary `int` assignability checks; degrading to the
+// pseudo-type's underlying kind, `Type::Int`, is a strict improvement.
 #[test]
 fn int_mask_pseudo_types_degrade_to_plain_int() {
     assert_eq!(parse_type_string("int-mask"), Type::Int);
@@ -163,11 +152,9 @@ fn int_mask_pseudo_types_degrade_to_plain_int() {
 
 #[test]
 fn string_refinement_pseudo_types_with_verifiable_content_are_real_accessory_types() {
-    // Phase 14: real, common PHPStan/Psalm-ecosystem refinement types
-    // (real volume seen in a live corpus: 3402 non-empty-string
-    // occurrences alone) - each is a literal-provable fact about a
-    // string's content, mirroring real PHPStan's own
-    // Intersection([StringType, AccessoryXType]) representation.
+    // Each is a literal-provable fact about a string's content,
+    // mirroring PHPStan's own Intersection([StringType, AccessoryXType])
+    // representation.
     assert_eq!(
         parse_type_string("non-empty-string"),
         Type::Intersection(vec![
@@ -212,12 +199,10 @@ fn class_string_with_a_generic_argument_is_tracked_precisely() {
     assert_eq!(parse_type_string("class-string<Foo, Bar>"), Type::String);
 }
 
-// Phase 75: `describe_accessory_intersection`'s generic ordered-parts
-// join, replacing the old fixed 4-tuple match - each existing singleton
-// case still renders exactly as before, and a combination none of those
-// 4 tuples covered (`date('Y')`'s own real `non-empty-numeric-string`,
-// silently mis-rendered via the raw `&`-joined fallback before this fix)
-// now composes correctly too.
+// `describe_accessory_intersection` uses a generic ordered-parts join
+// rather than a fixed tuple match, so any combination (e.g.
+// `non-empty-numeric-string`) composes correctly, not just a hardcoded
+// set of singleton cases.
 #[test]
 fn accessory_intersection_display_composes_every_combination() {
     assert_eq!(
@@ -256,9 +241,6 @@ fn accessory_intersection_display_composes_every_combination() {
         parse_type_string("non-empty-uppercase-string").to_string(),
         "non-empty-uppercase-string"
     );
-    // The `date('Y')`-shaped mis-render this generalization fixes as a
-    // confirmed side effect: `Intersection([String, NonEmptyString,
-    // NumericString])` didn't match any of the old 4 fixed tuples.
     let date_y_shaped = Type::Intersection(vec![
         Type::String,
         Type::Accessory(AccessoryKind::NonEmptyString),
@@ -269,8 +251,7 @@ fn accessory_intersection_display_composes_every_combination() {
 
 #[test]
 fn int_refinement_pseudo_types_are_real_int_ranges() {
-    // Phase 14: each is a real IntRange now, mirroring real
-    // PHPStan's own standalone IntegerRangeType.
+    // Mirrors PHPStan's own standalone IntegerRangeType.
     assert_eq!(
         parse_type_string("positive-int"),
         Type::IntRange(Some(1), None)
@@ -319,8 +300,8 @@ fn int_range_generic_syntax_parses() {
 
 #[test]
 fn array_refinement_pseudo_types_are_real_accessory_intersections() {
-    // Phase 14: real Intersection([Array(_), Accessory(_)]) types
-    // now, mirroring real PHPStan's own representation.
+    // Mirrors PHPStan's own Intersection([Array(_), Accessory(_)])
+    // representation.
     assert_eq!(
         parse_type_string("non-empty-array<int>"),
         Type::Intersection(vec![
@@ -329,9 +310,8 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
         ])
     );
     assert_eq!(
-        // Phase 50: a list's key can only ever be a sequential int - a
-        // real precision win, not just arity-matching the unknown
-        // int|string default plain non-empty-array keeps above.
+        // A list's key can only ever be a sequential int, unlike the
+        // unknown int|string default plain non-empty-array keeps above.
         parse_type_string("non-empty-list<string>"),
         Type::Intersection(vec![
             Type::Array(Box::new(Type::Int), Box::new(Type::String)),
@@ -339,9 +319,8 @@ fn array_refinement_pseudo_types_are_real_accessory_intersections() {
             Type::Accessory(AccessoryKind::NonEmptyArray),
         ])
     );
-    // Doctrine's own refinement of `array<class-string<TKey>, TValue>`
-    // - Phase 50: the key type is real now (wrapped in ClassString, per
-    // this pseudo-type's own documented meaning), not discarded.
+    // `class-string-map<K, V>` refines `array<class-string<K>, V>` - the
+    // key type is wrapped in ClassString, not discarded.
     assert_eq!(
         parse_type_string("class-string-map<Foo, int>"),
         Type::Array(
@@ -382,19 +361,15 @@ fn array_shape_field_can_itself_be_a_union() {
 #[test]
 fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     // `...<K, V>` (PHPStan/Psalm's "this shape may carry other,
-    // unlisted keys too" marker) has no `:` in it - found on real code
-    // that this used to make the field loop's `?` propagate a None out
-    // of the whole function, silently failing the ENTIRE shape parse
-    // (falling through to treating `array{...}` as a literal, then
-    // namespace-mangled, class name) over one unmodeled marker,
-    // discarding every real field alongside it.
-    //
-    // Phase 50 follow-up: the marker itself is now recorded as a real
-    // sentinel field (`("...".to_string(), Type::Mixed, false)`, see
-    // `types::is_unsealed_shape`'s own doc comment) instead of being
-    // silently discarded - consumed by `checker::narrowing`'s "never
-    // prove an unsealed shape's key is absent" gate and `checker::
-    // assignment`'s matching `isset()`/access-existence leniency.
+    // unlisted keys too" marker) has no `:` in it, so the field loop's
+    // `?` must not propagate a None out of the whole function and
+    // silently fail the ENTIRE shape parse over one unmodeled marker.
+    // The marker is recorded as a real sentinel field
+    // (`("...".to_string(), Type::Mixed, false)`, see `types::
+    // is_unsealed_shape`'s own doc comment), consumed by
+    // `checker::narrowing`'s "never prove an unsealed shape's key is
+    // absent" gate and `checker::assignment`'s matching
+    // `isset()`/access-existence leniency.
     let shape = parse_type_string("array{items: int, ...<string, mixed>}");
     assert_eq!(
         shape,
@@ -414,12 +389,11 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     );
 }
 
-// Phase 33 Finding 3: a positional (unkeyed) field - real, valid
-// PHPStan/Psalm tuple syntax - used to fail the *entire* shape's parse
-// (`split_once(':')?` had nothing to split), falling through to a
-// bogus, unparsed class-name `Object`. Numbered the same way
-// `infer_array_literal_type` numbers a real array literal's own
-// positional elements, so both end up structurally identical.
+// A positional (unkeyed) field must not fail the entire shape's parse
+// (`split_once(':')?` has nothing to split), falling through to a bogus,
+// unparsed class-name `Object`. Numbered the same way
+// `infer_array_literal_type` numbers an array literal's own positional
+// elements, so both end up structurally identical.
 #[test]
 fn array_shape_with_positional_fields_numbers_them_like_a_real_array_literal() {
     let shape = parse_type_string("array{int, string}");
@@ -432,11 +406,10 @@ fn array_shape_with_positional_fields_numbers_them_like_a_real_array_literal() {
     );
 }
 
-// The real `idcUploadSizedPhoto` shape this finding exists for.
 #[test]
 fn array_shape_with_positional_int_range_fields_parses() {
     let shape = parse_type_string("array{int<0, 255>, int<0, 255>, int<0, 255>}");
-    // Phase 14: each field is a real IntRange now, not plain Int.
+    // Each field is a real IntRange, not plain Int.
     assert_eq!(
         shape,
         Type::ArrayShape(vec![
@@ -459,13 +432,8 @@ fn array_shape_mixing_explicit_int_keys_and_named_keys_still_parses_correctly() 
     );
 }
 
-// Regression guard: Translator::toDictionaryEntry's real
-// @return array{domain: string, plural-forms: string, ...} - found by
-// the full corpus re-check after this fix first shipped, since a
-// hyphenated bare key was already accepted before any key-shape
-// validation existed at all, and `looks_like_shape_key`'s first
-// version wrongly rejected it, misclassifying the field as
-// positional.
+// A hyphenated bare key must not be rejected by `looks_like_shape_key`,
+// misclassifying the field as positional.
 #[test]
 fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
     let shape = parse_type_string("array{domain: string, plural-forms: string}");
