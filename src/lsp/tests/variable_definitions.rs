@@ -9,11 +9,11 @@ use super::helpers::run;
 use super::helpers::*;
 use serde_json::{Value, json};
 
-// Phase 17 follow-up: local-variable-declaration navigation - a read
-// resolves to its own nearest-preceding declaration in the same scope
-// (a parameter, an assignment, a `foreach` binding, or a `catch (...) $e`
-// binding), a plain textual-order heuristic, not full control-flow
-// analysis (see `Resolved::Variable`'s own doc comment).
+// Local-variable-declaration navigation - a read resolves to its
+// nearest-preceding declaration in the same scope (a parameter, an
+// assignment, a `foreach` binding, or a `catch (...) $e` binding), a
+// plain textual-order heuristic, not full control-flow analysis (see
+// `Resolved::Variable`'s own doc comment).
 
 #[test]
 fn definition_on_a_variable_read_resolves_to_its_own_parameter() {
@@ -106,10 +106,10 @@ fn a_variable_declared_in_one_function_does_not_leak_into_another() {
     assert_eq!(response_result(&messages, 2), Value::Null);
 }
 
-// Phase 17 follow-up: top-level script-scope navigation. `ProbeScope::
-// TopLevel` re-checks the whole file's own top-level statements via
-// `Checker::check_program` instead of `check_function` - real top-level
-// PHP code is exactly as checkable as a function body.
+// Top-level script-scope navigation. `ProbeScope::TopLevel` re-checks
+// the whole file's own top-level statements via `Checker::check_program`
+// instead of `check_function` - top-level PHP code is exactly as
+// checkable as a function body.
 
 #[test]
 fn definition_on_a_top_level_variable_read_resolves_via_check_program() {
@@ -149,9 +149,9 @@ fn hover_and_definition_on_a_top_level_instance_call_resolve_via_the_receivers_t
     assert_eq!(def["uri"], uri);
 }
 
-// Phase 17 follow-up: hover now shows an inferred type for a local
-// variable too, not just a class/function/member - both a read and the
-// variable's own declaration site, each via the real checker probe
+// Hover shows an inferred type for a local variable too, not just a
+// class/function/member - both a read and the variable's own
+// declaration site, each via the real checker probe
 // (`Checker::probe_hit_at`), not a hand-rolled approximation.
 
 #[test]
@@ -169,10 +169,10 @@ fn hover_on_a_variable_read_shows_its_inferred_type() {
 #[test]
 fn hover_on_a_closure_use_capture_shows_its_inferred_type() {
     // The capture token itself, inside `use (...)`, is a real reference
-    // to the outer scope's own `$x` - previously only wired for go-to-
-    // definition's own separate `probe_var_provenance` probe, never for
-    // `probe_hit`/hover (`ExprKind::Closure`'s own `uses` loop never
-    // called `probe_hit_at` at all).
+    // to the outer scope's own `$x`, so `probe_hit`/hover must resolve
+    // it too, not just go-to-definition's separate
+    // `probe_var_provenance` probe (`ExprKind::Closure`'s `uses` loop
+    // must call `probe_hit_at`).
     let dir = TempDir::new("hover_var_closure_use");
     let src = "<?php function g(int $x) { $f = function () use ($x) { return $x; }; }";
     let path = dir.write("a.php", src);
@@ -207,10 +207,10 @@ fn hover_on_a_foreach_bindings_own_declaration_shows_its_element_type() {
     assert_eq!(response_result(&messages, 2)["contents"], "mixed");
 }
 
-// Phase 17 follow-up: auto-vivification. A by-ref call argument, an
-// array index-write, or preg_match's own $matches out-parameter is a
-// variable's real first appearance when there's nothing declared for it
-// yet - `declare`d there, not left with no provenance at all.
+// Auto-vivification. A by-ref call argument, an array index-write, or
+// preg_match's own $matches out-parameter is a variable's real first
+// appearance when there's nothing declared for it yet - it must be
+// `declare`d there, not left with no provenance at all.
 
 #[test]
 fn definition_on_a_read_resolves_to_a_byref_call_argument_that_first_defined_it() {
@@ -242,10 +242,10 @@ fn definition_on_a_read_after_a_closure_resolves_to_its_own_use_by_ref_capture()
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 
-// Phase 17: the capture token itself, inside `use (...)`, is now a real,
-// navigable reference to the outer scope's own variable - previously
-// unreachable for both hover and go-to-definition (`Walker::expr`'s own
-// `ExprKind::Closure` arm never visited `uses` at all).
+// The capture token itself, inside `use (...)`, must be a real,
+// navigable reference to the outer scope's own variable, for both hover
+// and go-to-definition - `Walker::expr`'s `ExprKind::Closure` arm must
+// visit `uses`.
 
 #[test]
 fn definition_on_a_use_capture_by_value_resolves_to_its_outer_assignment() {
@@ -344,10 +344,10 @@ fn definition_on_a_read_after_an_existing_variable_is_widened_by_ref_keeps_its_r
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 
-// Phase 17 follow-up: branch-aware variable navigation. A read only
-// reachable through mutually exclusive arms that assign the name
-// differently offers every real candidate (an LSP `Array` of locations),
-// rather than silently picking the textually-last one.
+// Branch-aware variable navigation. A read only reachable through
+// mutually exclusive arms that assign the name differently offers every
+// real candidate (an LSP `Array` of locations), rather than silently
+// picking the textually-last one.
 
 #[test]
 fn definition_on_a_variable_read_after_if_else_offers_both_branches() {
@@ -443,16 +443,12 @@ fn definition_on_a_variable_read_after_a_while_loop_offers_the_pre_loop_value_to
 
 #[test]
 fn definition_on_a_variable_read_after_a_foreach_offers_the_pre_loop_value_too() {
-    // Real, previously-live bug found and fixed this session
-    // (`Checker::converge_loop_body`, `checker/control_flow.rs`): a
-    // `foreach`, like `while`/`for`, can genuinely run zero times (an
-    // empty `$items`) - `$x = 0` (before the loop) is a real alternative
-    // to the loop body's own `$x = $item`, the same "may run zero times"
-    // merge `While`'s own analogous test just above already exercises.
-    // A prior fix attempt wrongly special-cased `foreach` as never
-    // merging with the pre-loop state at all (mirroring real corpus false
-    // positive `UploadService::addUploadedFile`, see
-    // `null_probes.rs`'s own test for that exact shape).
+    // A `foreach`, like `while`/`for`, can genuinely run zero times (an
+    // empty `$items`), so `$x = 0` (before the loop) is a real
+    // alternative to the loop body's own `$x = $item`, the same "may run
+    // zero times" merge `While`'s own analogous test just above already
+    // exercises. `foreach` must not be special-cased as never merging
+    // with the pre-loop state at all.
     let dir = TempDir::new("var_foreach_merge");
     let src = "<?php function f(array $items) { $x = 0; foreach ($items as $item) { $x = $item; } return $x; }";
     let path = dir.write("a.php", src);
@@ -487,8 +483,7 @@ fn definition_on_a_variable_read_after_a_do_while_stays_a_scalar() {
     assert_eq!(result["range"]["start"]["character"], expected["character"]);
 }
 
-// Phase 17 follow-up: list-destructuring targets are now tracked as
-// declarations too.
+// List-destructuring targets are tracked as declarations too.
 
 #[test]
 fn definition_on_a_read_resolves_to_its_destructuring_assignment_target() {
@@ -533,7 +528,7 @@ fn definition_on_a_read_resolves_to_its_foreach_destructuring_target() {
     assert_eq!(result["uri"], uri);
 }
 
-// Phase 17 follow-up: `global $x;` links back to a top-level declaration.
+// `global $x;` links back to a top-level declaration.
 
 #[test]
 fn definition_on_a_global_variable_read_resolves_to_the_global_statement_itself() {
