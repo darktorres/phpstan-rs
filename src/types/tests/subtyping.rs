@@ -25,11 +25,11 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
     ));
 }
 
-// Phase 50: on top of the pre-existing "only when the array's own value
-// type is Mixed" rule (no per-field value comparison happens here at all -
-// that's `registry::is_assignable`'s own, separate job), a shape's own
-// real aggregate key type must also be a subtype of a precisely-keyed
-// `Type::Array`'s own declared key type.
+// On top of the "only when the array's own value type is Mixed" rule (no
+// per-field value comparison happens here at all - that's
+// `registry::is_assignable`'s own, separate job), a shape's aggregate key
+// type must also be a subtype of a precisely-keyed `Type::Array`'s
+// declared key type.
 
 #[test]
 fn a_string_keyed_shape_is_a_subtype_of_a_matching_string_keyed_mixed_valued_array() {
@@ -66,12 +66,11 @@ fn everything_is_subtype_of_mixed() {
 
 #[test]
 fn an_unbounded_template_param_is_still_unconditionally_compatible_either_way() {
-    // Phase 54: the extremely common bound-free `@template T` must keep
-    // `is_subtype`'s old blanket leniency exactly as before - an
-    // undeclared bound is `Mixed`, and `is_subtype(Mixed, sup)` is only
-    // ever true when `sup` is `Mixed` too, so without this the new
-    // bound-aware `sub` arm would turn every one of these into a brand
-    // new false positive.
+    // The extremely common bound-free `@template T` must keep
+    // `is_subtype`'s blanket leniency - an undeclared bound is `Mixed`,
+    // and `is_subtype(Mixed, sup)` is only ever true when `sup` is
+    // `Mixed` too, so without this the bound-aware `sub` arm would turn
+    // every one of these into a false positive.
     let t = Type::TemplateParam(TemplateParam::unbounded("T".to_string()));
     assert!(is_subtype(&t, &Type::String));
     assert!(is_subtype(&t, &Type::Object("Foo".to_string(), Vec::new())));
@@ -97,13 +96,12 @@ fn a_bounded_template_param_is_a_subtype_of_whatever_its_bound_satisfies() {
     assert!(!is_subtype(&t, &Type::String));
 }
 
-// Real corpus false positive: doctrine/collections' own `@template TKey
-// of array-key` (bound `int|string`, a Union) - `is_subtype`'s own
-// generic `(_, Union(members)) => any(is_subtype(sub, m))` arm used to
-// run *before* the dedicated `TemplateParam` arm below, splitting the
-// *target* union member-by-member (`is_subtype(TKey, Int)` and
+// A `@template TKey of array-key` (bound `int|string`, a Union) must be
+// compared via the dedicated `TemplateParam` arm, not the generic `(_,
+// Union(members)) => any(is_subtype(sub, m))` arm - the latter splits
+// the target union member-by-member (`is_subtype(TKey, Int)` and
 // `is_subtype(TKey, String)`, each correctly false on its own) instead
-// of comparing `TKey`'s own union bound against the target as a whole.
+// of comparing `TKey`'s union bound against the target as a whole.
 #[test]
 fn a_template_param_whose_own_bound_is_a_union_is_a_subtype_of_that_same_union() {
     let t = Type::TemplateParam(TemplateParam {
@@ -298,11 +296,11 @@ fn array_accessory_subtype_rules() {
 
 #[test]
 fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
-    // Phase 50: `array{0: int, 1?: string, 2: int}` is only `Maybe`-a-list
-    // in real PHPStan (if the optional field 1 is genuinely absent, keys
-    // {0, 2} aren't sequential) - `is_list_like`/`shape_fields_are_list_
-    // like` used to ignore each field's own `optional` flag entirely and
-    // answer `true` unconditionally here.
+    // `array{0: int, 1?: string, 2: int}` is only `Maybe`-a-list (if the
+    // optional field 1 is genuinely absent, keys {0, 2} aren't
+    // sequential) - `is_list_like`/`shape_fields_are_list_like` must not
+    // ignore each field's `optional` flag and answer `true`
+    // unconditionally here.
     let list_ty = Type::Intersection(vec![
         Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
         Type::Accessory(AccessoryKind::ArrayList),
@@ -341,9 +339,9 @@ fn array_subtyping_is_covariant_on_value_type() {
     assert!(!is_subtype(&mixed_arr, &ints));
 }
 
-// Phase 80 follow-up: an unresolved `Type::Conditional` falls back to
-// comparing against `Union([if_true, if_false])` on either side, mirroring
-// the existing `Union` arms exactly.
+// An unresolved `Type::Conditional` falls back to comparing against
+// `Union([if_true, if_false])` on either side, mirroring the existing
+// `Union` arms exactly.
 #[test]
 fn an_unresolved_conditional_as_sub_requires_both_branches_to_satisfy_sup() {
     let conditional = parse_type_string("($x is int ? int : string)");
@@ -359,7 +357,7 @@ fn an_unresolved_conditional_as_sup_is_satisfied_by_either_branch() {
     assert!(!is_subtype(&Type::Bool, &conditional));
 }
 
-// Phase 75: the 3 new literal-proving arms + 4 implication arms for
+// Literal-proving arms + implication arms for
 // `LowercaseString`/`UppercaseString`/`DecimalIntegerString`.
 
 fn lowercase_string() -> Type {
