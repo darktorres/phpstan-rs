@@ -2,18 +2,11 @@
 
 use super::helpers::*;
 
-// Real corpus false positive found while corpus-verifying the family
-// above: `strpos()`'s own `$offset` parameter (typed `int<0, max>`)
-// collapsed to bare `Int` the moment it was reassigned via `$offset =
-// $pos + 1;` inside a loop, surfacing only once the `While`-condition
-// convergence fix made `strpos()`'s own later, real re-check of
-// `$offset` visible at all (`Tools\p58\assign.php`). `infer_binary`'s
-// `Add`/`Sub` arms gained real, narrow `int<min,max>` arithmetic -
-// confirmed directly against `vendor/phpstan-src`'s own
-// `InitializerExprTypeResolver::integerRangeMath`. `Mul`/`Div`/`Mod`/
-// `Pow`'s own full range-arithmetic surface, and `Sub`'s own full
-// range-minus-range case, were extended to match later in the same
-// session (see the dedicated tests further below) - see each of
+// `strpos()`'s `$offset` parameter (typed `int<0, max>`) must not
+// collapse to bare `Int` the moment it's reassigned via `$offset = $pos
+// + 1;` inside a loop - `infer_binary`'s `Add`/`Sub` arms need real,
+// narrow `int<min,max>` arithmetic, mirroring `vendor/phpstan-src`'s own
+// `InitializerExprTypeResolver::integerRangeMath`. See each of
 // `mul_int_range`/`div_int_range`/`mod_int_range`/`pow_int_range`/
 // `sub_int_range_full`'s own doc comments (`checker/expr.rs`) for the
 // exact transcription each is based on.
@@ -90,13 +83,10 @@ fn adding_two_int_ranges_with_a_shared_unbounded_end_stays_unbounded() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Re-examining Phase 15's own disclosed simplification ("`Sub` only
-// preserves the range for a *constant* right operand... real PHPStan's
-// own `Minus` arm has extra branches specifically for when the
-// subtracted side is itself an unbounded range") per the user's own
-// explicit "do all those narrow [items], our corpus not having them is
-// not a reason not to do them" - `sub_int_range_full` now transcribes
-// real PHPStan's own full range-minus-range formula directly, so a
+// `Sub` must not only preserve the range for a constant right operand -
+// PHPStan's own `Minus` arm has extra branches specifically for when the
+// subtracted side is itself an unbounded range. `sub_int_range_full`
+// transcribes PHPStan's full range-minus-range formula directly, so a
 // genuinely ranged (not single-valued) right operand is handled too,
 // not just a constant one.
 #[test]
