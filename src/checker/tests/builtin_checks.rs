@@ -1,12 +1,12 @@
-//! Phase 71: a batch of small, independent builtin-specific checks with
-//! no shared architectural blocker.
+//! A batch of small, independent builtin-specific checks with no shared
+//! architectural blocker.
 
 use super::helpers::*;
 
 // `argument.unused` - `define()`'s own third `$case_insensitive`
 // argument stopped doing anything as of PHP 8.0. Gated on a configured
-// `php_version` (>= 8.0) - confirmed directly via `php` that this is a
-// real runtime `E_WARNING`, not just a PHPStan-only observation.
+// `php_version` (>= 8.0) - a real runtime `E_WARNING`, not just a
+// PHPStan-only observation.
 
 #[test]
 fn defines_third_argument_is_flagged_on_php_8_and_later() {
@@ -109,17 +109,15 @@ fn random_int_with_equal_min_and_max_is_never_flagged() {
     );
 }
 
-// `min`/`max` - a Piwigo corpus false positive found both functions had
-// zero return-type handling at all (the vendored stub declares `mixed`
-// params/return, matching real PHP's own native signature - real
-// PHPStan's own precision here comes entirely from a bundled
-// `MinMaxFunctionReturnTypeExtension` this project has no equivalent of).
-// Scoped to the fallback path that extension itself uses whenever it
-// can't constant-fold (this project has no constant-value tracking as
-// elaborate as real PHPStan's own): the union of every argument's own
-// type, only when none of them could be an array (a single array
-// argument is real PHP's *other*, differently-behaved `min`/`max`
-// overload, deliberately not modeled here).
+// `min`/`max` - the vendored stub declares `mixed` params/return,
+// matching PHP's own native signature; PHPStan's own precision here
+// comes entirely from a bundled `MinMaxFunctionReturnTypeExtension` this
+// project has no equivalent of. Scoped to the fallback path that
+// extension itself uses whenever it can't constant-fold (this project
+// has no constant-value tracking as elaborate as PHPStan's own): the
+// union of every argument's type, only when none of them could be an
+// array (a single array argument is PHP's other, differently-behaved
+// `min`/`max` overload, deliberately not modeled here).
 
 #[test]
 fn min_of_two_ints_infers_int() {
@@ -270,8 +268,7 @@ fn a_var_export_call_nested_inside_another_call_is_flagged() {
     );
 }
 
-// Phase 76: filter_var()'s own FILTER_VALIDATE_* return-type precision,
-// confirmed directly via php.
+// `filter_var()`'s FILTER_VALIDATE_* return-type precision.
 
 #[test]
 fn filter_var_validate_int_returns_int_or_false() {
@@ -333,10 +330,10 @@ fn filter_var_with_null_on_failure_returns_null_instead_of_false() {
 
 #[test]
 fn filter_var_recognizes_null_on_failure_inside_an_or_chain() {
-    // A real corpus idiom: ORing FILTER_NULL_ON_FAILURE together with an
-    // unrelated flag - contains_flag_name's own lenient bitwise-or-chain
-    // scan (already established for preg_split's flags argument) covers
-    // this the same way.
+    // ORing FILTER_NULL_ON_FAILURE together with an unrelated flag -
+    // `contains_flag_name`'s lenient bitwise-or-chain scan (already
+    // established for preg_split's flags argument) covers this the same
+    // way.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -355,8 +352,8 @@ fn filter_var_recognizes_null_on_failure_inside_an_or_chain() {
 fn filter_var_with_require_array_flag_falls_back_to_the_generic_stub() {
     // Genuinely more complex than this narrow slice attempts - don't
     // guess, just leave the generic stub type in place. (A non-provably-
-    // array input - see the Phase 76 sub-item A tests below for the
-    // provably-array case, which *is* now handled.)
+    // array input - see the tests below for the provably-array case,
+    // which is handled.)
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -368,8 +365,7 @@ fn filter_var_with_require_array_flag_falls_back_to_the_generic_stub() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 76 sub-item A: `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` per-
-// element return type.
+// `FILTER_REQUIRE_ARRAY`/`FILTER_FORCE_ARRAY` per-element return type.
 
 #[test]
 fn filter_var_with_require_array_flag_and_a_known_array_input_wraps_the_element_type() {
@@ -441,7 +437,7 @@ fn filter_var_min_range_option_survives_require_array_wrap() {
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Phase 76 sub-item B: PHP 8.5's `FILTER_THROW_ON_FAILURE`.
+// PHP 8.5's `FILTER_THROW_ON_FAILURE`.
 
 #[test]
 fn filter_var_with_throw_on_failure_removes_the_false_fallback() {
@@ -491,7 +487,7 @@ fn filter_var_with_throw_on_failure_and_a_literal_default_option_still_removes_t
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Phase 76 sub-item C: `filter_input()` itself.
+// `filter_input()` itself.
 
 #[test]
 fn filter_input_validate_int_returns_int_or_null_or_false() {
@@ -561,19 +557,16 @@ fn filter_input_with_require_array_flag_falls_back_to_the_generic_stub() {
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Phase 76 follow-up: an `['options' => [...]]` array's own `default`/
-// `min_range`/`max_range` sub-keys are now recognized (this phase's own
-// prior write-up called this "needs Phase 51's IntegerRangeType
-// completion" - re-checked rather than trusted, and turned out to be
-// unrelated: `normalize_int_range`/`int_range_bounds` already existed,
-// built this session for Phase 15's own range-arithmetic work).
+// An `['options' => [...]]` array's `default`/`min_range`/`max_range`
+// sub-keys are recognized, via the existing
+// `normalize_int_range`/`int_range_bounds` range-arithmetic machinery.
 
 #[test]
 fn filter_var_with_a_min_and_max_range_option_narrows_to_a_real_int_range() {
-    // Real corpus find: filter_var($v, FILTER_VALIDATE_INT, ['options'
-    // => ['min_range' => 1]]) narrows the successful result to a real
-    // range - guessing plain int|false here wrongly widened past a
-    // declared positive-int sink.
+    // `filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' =>
+    // 1]])` narrows the successful result to a real range - guessing
+    // plain int|false here would wrongly widen past a declared
+    // positive-int sink.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -712,7 +705,7 @@ fn random_int_with_a_non_literal_argument_is_never_flagged() {
     );
 }
 
-// Phase 71: `filter_var()`'s `FILTER_NULL_ON_FAILURE`/`FILTER_THROW_ON_FAILURE`
+// `filter_var()`'s `FILTER_NULL_ON_FAILURE`/`FILTER_THROW_ON_FAILURE`
 // flag conflict, PHP 8.5+.
 #[test]
 fn filter_var_null_and_throw_on_failure_bitwise_or_reports() {
