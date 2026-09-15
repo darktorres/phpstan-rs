@@ -274,13 +274,12 @@ pub fn parse(raw: &str) -> DocBlock {
         let line = raw_line.trim();
         let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
         // A wrapped array-shape/list field commonly carries its own
-        // trailing `// description` (real corpus shape, e.g. pestphp's
-        // `JavaScriptSerializer::parseValue`'s `@var array{v?: string, //
+        // trailing `// description` (e.g. `@var array{v?: string, //
         // null, undefined, ..., b?: bool, // boolean, ...}`). Without
         // stripping it, the comment text gets spliced straight into the
         // joined type string below and `take_type_token` happily parses
         // "// null" as a bare class-like name, corrupting the whole
-        // shape - `//` never appears in real type-expression syntax, so
+        // shape - `//` never appears in type-expression syntax, so
         // stripping from its first occurrence to end of line is safe.
         let line = line
             .split_once("//")
@@ -293,16 +292,13 @@ pub fn parse(raw: &str) -> DocBlock {
         }
     }
 
-    // Real PHPStan recognizes a `@phpstan-`-prefixed sibling of `@param`/
+    // PHPStan recognizes a `@phpstan-`-prefixed sibling of `@param`/
     // `@return`/`@var`/`@template*`/`@extends`/`@implements` as a more
-    // precise, PHPStan-only override of the same information - a common
-    // convention (582/437/186 occurrences of `@phpstan-param`/`-return`/
-    // `-var` alone across this project's own vendored corpus, mostly
-    // Doctrine's own stubs, e.g. `EntityRepository::findBy()`'s native
+    // precise, PHPStan-only override of the same information - meant to
+    // coexist with a plainer tag for non-PHPStan tooling (e.g. a native
     // `@return` staying the loose `array` an IDE/other tools understand
-    // while `@phpstan-return list<T>` carries the precise generic type)
-    // meant to coexist with a plainer tag for non-PHPStan tooling, not
-    // replace it outright. Two passes over the same tag list - plain tags
+    // while `@phpstan-return list<T>` carries the precise generic type),
+    // not replace it outright. Two passes over the same tag list - plain tags
     // first, then `@phpstan-*` ones with the prefix stripped, reusing the
     // exact same per-tag logic - gives the override its right-to-win
     // regardless of which one the docblock happens to write first.
@@ -338,16 +334,14 @@ pub fn parse(raw: &str) -> DocBlock {
 /// of `@param Type $name description`/`@var Type $name`/`@property Type
 /// $name`/... every tag handler below that needs one shares this same
 /// shape. Strips a leading `&` (by-ref, e.g. `@param string[] &$matches
-/// [optional]`, real common PHP-manual style) and `...` (variadic,
-/// `@param int ...$nums` - without this, `strip_prefix('$')` fails on the
-/// literal `.`), plus a trailing `:` real corpus PHPDoc sometimes runs the
-/// description straight into with no separating space (`@param Type
-/// $name: description`) - `split_whitespace` alone leaves that colon
-/// attached to the extracted name, silently storing/looking up the tag
-/// under a name (`"post:"`) the real parameter (`"post"`) never matches,
-/// discarding its own doc type entirely. Confirmed live: Piwigo's own
-/// `NotificationByMailSubController::doTimeoutTreatment` docblock uses
-/// exactly this style for two of its own three `@param` tags.
+/// [optional]`, common PHP-manual style) and `...` (variadic, `@param
+/// int ...$nums` - without this, `strip_prefix('$')` fails on the
+/// literal `.`), plus a trailing `:` some PHPDoc runs the description
+/// straight into with no separating space (`@param Type $name:
+/// description`) - `split_whitespace` alone leaves that colon attached
+/// to the extracted name, silently storing/looking up the tag under a
+/// name (`"post:"`) the real parameter (`"post"`) never matches,
+/// discarding its own doc type entirely.
 fn extract_doc_var_name(token: &str) -> Option<&str> {
     token
         .trim_start_matches('&')
@@ -514,14 +508,13 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let mut parts = rest.splitn(2, char::is_whitespace);
                 let name = parts.next().unwrap_or("");
                 let remainder = parts.next().unwrap_or("").trim_start();
-                // A real, common variant of this tag's own syntax writes
-                // an `=` between the alias name and its type expression
-                // (real corpus shape: `doctrine/orm`'s own `@phpstan-type
-                // ConcreteAssociationMapping = OneToOneOwningSideMapping|
-                // ...`) - without stripping it, `take_type_token` stopped
-                // at the first whitespace and took the bare `=` itself as
-                // the whole "type", later resolved into a bogus namespace-
-                // qualified class name ending in `\=`.
+                // A common variant of this tag's syntax writes an `=`
+                // between the alias name and its type expression
+                // (`@phpstan-type Alias = ConcreteType`) - without
+                // stripping it, `take_type_token` stops at the first
+                // whitespace and takes the bare `=` itself as the whole
+                // "type", later resolved into a bogus namespace-qualified
+                // class name ending in `\=`.
                 let remainder = remainder
                     .strip_prefix('=')
                     .unwrap_or(remainder)
@@ -721,12 +714,10 @@ fn parse_template_tag(rest: &str) -> Option<(String, Option<String>, Option<Stri
 /// whitespace that occurs outside any `<>`/`{}`/`()`/`[]` nesting - a plain
 /// `split_whitespace().next()` would wrongly cut an array shape or generic
 /// off at its first internal space (`array{count: int, ...}`). A `'...'`/
-/// `"..."` string-literal segment (a real, legal PHPStan literal-string-
-/// union member, e.g. `' '|'>'|'+'|'~'`) is tracked as one opaque run
-/// too - without this, a space *inside* the quotes (a real corpus shape:
-/// `sabberworm/php-css-parser`'s own `@phpstan-type ValidCombinatorValue
-/// ' '|'>'|'+'|'~'`) was wrongly treated as the token's own end, cutting
-/// the whole type down to a bare, dangling `'`.
+/// `"..."` string-literal segment (a legal PHPStan literal-string-union
+/// member, e.g. `' '|'>'|'+'|'~'`) is tracked as one opaque run too -
+/// without this, a space inside the quotes is wrongly treated as the
+/// token's end, cutting the whole type down to a bare, dangling `'`.
 fn take_type_token(s: &str) -> &str {
     let mut depth = 0i32;
     let mut quote: Option<char> = None;
@@ -735,10 +726,10 @@ fn take_type_token(s: &str) -> &str {
     // ReturnType`/`callable(...): ReturnType` shape's own trailing return
     // type sits outside the parens, separated from them by this `:`, and
     // the plain depth-0-whitespace-stops rule below would otherwise
-    // truncate right after the `:` (a real, confirmed bug: `@param
-    // Closure(int): string $fn` lost everything from " string" onward,
-    // silently degrading to the bare `Closure(int):` fragment). Decided
-    // once, right at the `)`, via a bounded lookahead - not a blanket
+    // truncate right after the `:` (`@param Closure(int): string $fn`
+    // would lose everything from " string" onward, silently degrading to
+    // the bare `Closure(int):` fragment). Decided once, right at the `)`,
+    // via a bounded lookahead - not a blanket
     // "tolerate whitespace after any `)`" rule, which would wrongly
     // swallow an *ordinary* parenthesized type's own real terminating
     // space too (`(A&B) $x` must still stop right after its own `)`,
@@ -790,9 +781,9 @@ fn take_type_token(s: &str) -> &str {
 }
 
 /// Splits `s` on `,`, but only where it appears outside any `<>`/`{}`/
-/// `()`/`[]` nesting - `@method`'s own parameter list needs this (a real
-/// corpus shape: `array<string, mixed> $options = []`, whose own internal
-/// comma must not split the parameter list itself). Mirrors `take_type_
+/// `()`/`[]` nesting - `@method`'s parameter list needs this (e.g.
+/// `array<string, mixed> $options = []`, whose internal comma must not
+/// split the parameter list itself). Mirrors `take_type_
 /// token`'s exact bracket-depth/quote-tracking shape one call up - a
 /// deliberate duplication, not shared with `types::split_top_level`
 /// (nearly identical logic, comma instead of whitespace as the
