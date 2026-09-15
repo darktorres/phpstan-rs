@@ -77,10 +77,10 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
     assert!(!r.is_assignable(&ints, &shape));
 }
 
-// Phase 50: an `ArrayShape`'s own aggregate key type (int-vs-string,
-// mirroring real PHPStan's own `ConstantArrayType::getIterableKeyType()`)
-// must actually agree with a `Type::Array`'s own declared key type, in
-// both directions - not just each field's/element's own *value* type.
+// An `ArrayShape`'s aggregate key type (int-vs-string, mirroring
+// PHPStan's `ConstantArrayType::getIterableKeyType()`) must actually
+// agree with a `Type::Array`'s declared key type, in both directions -
+// not just each field's/element's value type.
 
 #[test]
 fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
@@ -238,7 +238,7 @@ fn interface_string_and_trait_string_check_the_real_class_kind() {
     ));
 }
 
-// Phase 84: `accepts_at_configured_level`'s own level-aware leniency.
+// `accepts_at_configured_level`'s level-aware leniency.
 
 #[test]
 fn accepts_at_configured_level_matches_is_assignable_when_never_configured() {
@@ -260,12 +260,11 @@ fn accepts_at_configured_level_matches_is_assignable_at_the_strict_threshold() {
     assert!(!r.accepts_at_configured_level(&nullable_string, &Type::String));
 }
 
-// The load-bearing case (Phase 84's own found-and-fixed bug): a nullable-
-// typed actual value (`?string`, the single most common PHP nullability
-// idiom) accepted by a plain, non-nullable declared type below level 8 -
-// this must now succeed, where plain `is_assignable` (and a naive
-// "bail to is_assignable whenever `sup` is a Union too" fast path) both
-// reject it.
+// The load-bearing case: a nullable-typed actual value (`?string`, the
+// single most common PHP nullability idiom) must be accepted by a
+// plain, non-nullable declared type below level 8, where plain
+// `is_assignable` (and a naive "bail to is_assignable whenever `sup` is
+// a Union too" fast path) both reject it.
 #[test]
 fn a_nullable_actual_type_is_accepted_by_a_non_nullable_declared_type_below_level_eight() {
     let mut r = build_registry("<?php");
