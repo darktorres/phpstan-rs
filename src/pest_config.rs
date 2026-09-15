@@ -1,14 +1,14 @@
-//! Replicates the real `pestphp/pest-plugin-phpstan` extension's `$this`
+//! Replicates the `pestphp/pest-plugin-phpstan` extension's `$this`
 //! resolution inside Pest's `it`/`test`/`describe`/`beforeEach`/
-//! `afterEach`/`beforeAll`/`afterAll` closures. Real PHP has no static way
-//! to know `$this` is valid inside these top-level-file closures - Pest's
+//! `afterEach`/`beforeAll`/`afterAll` closures. PHP has no static way to
+//! know `$this` is valid inside these top-level-file closures - Pest's
 //! own runtime rebinds it via `Closure::bindTo()` before invoking them.
-//! Real PHPStan only accepts this because of Pest's own first-party
-//! PHPStan extension - this module's own resolution order is read
-//! directly from that extension's real source
-//! (`vendor/pestphp/pest-plugin-phpstan/src/Type/Pest/` in a real corpus,
-//! not guessed): `TestClosureThisTypeExtension.php`'s own constant lists
-//! are the authoritative function set (`is_this_binding_call` below);
+//! PHPStan only accepts this because of Pest's own first-party PHPStan
+//! extension - this module's resolution order is read directly from
+//! that extension's source
+//! (`vendor/pestphp/pest-plugin-phpstan/src/Type/Pest/`):
+//! `TestClosureThisTypeExtension.php`'s own constant lists are the
+//! authoritative function set (`is_this_binding_call` below);
 //! `PestTestCaseType.php`/`PestConfigReader.php` give the resolution
 //! order - a file-local `uses(...)` call (no `->in(...)`) written
 //! directly inside the file being checked, else a directory-scoped
@@ -16,12 +16,11 @@
 //! file whose target directory prefixes the file being checked, else
 //! default to `PHPUnit\Framework\TestCase`.
 //!
-//! Deliberately narrower than the real extension in two disclosed ways,
-//! neither with any real corpus evidence to justify building more:
-//! trait arguments in `uses(...)` aren't distinguished from classes (real
-//! Pest wraps them in its own `PestTestCaseWithTraitsType`); a `->in(...)`
-//! argument must be a bare string literal, no glob-wildcard targets (real
-//! Pest's own glob step is a no-op for a literal, already-existing
+//! Deliberately narrower than the real extension in two disclosed ways:
+//! trait arguments in `uses(...)` aren't distinguished from classes (Pest
+//! wraps them in its own `PestTestCaseWithTraitsType`); a `->in(...)`
+//! argument must be a bare string literal, no glob-wildcard targets
+//! (Pest's own glob step is a no-op for a literal, already-existing
 //! directory path anyway).
 //!
 //! The base scanner (`checker/expr.rs`) never spells out Pest's own
@@ -103,24 +102,20 @@ pub(crate) fn file_local_this_type(program: &[Stmt], ctx: &NameContext) -> Optio
     })
 }
 
-/// Real Pest's own dynamic-property idiom, replicated from
+/// Pest's own dynamic-property idiom, replicated from
 /// `pestphp/pest-plugin-phpstan`'s `TestCaseDynamicPropertyTypeExtension`
 /// and `PestHookPropertyReader`: every `beforeEach`/`test`/`afterEach`/
 /// `describe` closure in a file shares the same `$this` instance, so a
 /// property set in one `beforeEach(...)` closure is legitimately
 /// readable from another closure in the same file. Narrower than the
 /// real reader in the same two ways `file_local_this_type`'s own doc
-/// comment discloses for class resolution, and for the same reason (no
-/// real corpus evidence to justify building more):
+/// comment discloses for class resolution:
 ///
 /// - Only a **top-level, file-local** `beforeEach(...)` call is scanned
 ///   here (mirroring `file_local_this_type`'s own top-level-only shape) -
 ///   the real reader finds `beforeEach(...)` anywhere in the file via a
 ///   fully recursive AST search, which would also catch one nested
-///   inside a `describe(...)` closure. Checked directly whether that
-///   matters for this project's own real corpus: no `.php` test file
-///   combines `describe(` and `beforeEach(`, so a top-level-only scan is
-///   fully sufficient today.
+///   inside a `describe(...)` closure.
 /// - Only a **direct, top-level statement** inside the closure body is
 ///   recognized as a property assignment (mirroring the real reader's
 ///   own `foreach ($closure->stmts as $stmt)`, no recursion into a
@@ -159,8 +154,7 @@ pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> HashSet<String> {
 /// statements in a `beforeEach(...)` closure's own body, keying off the
 /// literal `$this` expression only (unlike the real reader, which
 /// resolves by the property base's *type* via PHPStan's own `Scope` -
-/// an aliased `$self = $this; $self->prop` isn't covered here, with no
-/// corpus evidence it's needed).
+/// an aliased `$self = $this; $self->prop` isn't covered here).
 fn collect_hook_closure_properties(expr: &Expr, props: &mut HashSet<String>) {
     let ExprKind::Closure { body, .. } = &expr.kind else {
         return;
