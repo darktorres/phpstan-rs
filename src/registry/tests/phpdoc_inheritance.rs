@@ -1,5 +1,5 @@
-//! Phase 87: `flatten_phpdoc_inheritance` - backfilling a missing `@param`/
-//! `@return` from an ancestor's own docblock, mirroring real PHPStan's
+//! `flatten_phpdoc_inheritance` - backfilling a missing `@param`/
+//! `@return` from an ancestor's own docblock, mirroring PHPStan's
 //! `ResolvedPhpDocBlock::mergeParamTags`/`mergeReturnTags`.
 
 use super::super::*;
@@ -7,8 +7,8 @@ use super::helpers::*;
 use crate::types::AccessoryKind;
 
 /// `list<T>` parses to `Type::Intersection([Array(int, T), Accessory
-/// (ArrayList)])` (Phase 14) - pulls `T` back out for a plain equality
-/// assertion against the expected element type.
+/// (ArrayList)])` - pulls `T` back out for a plain equality assertion
+/// against the expected element type.
 fn list_item_type(ty: &Type) -> &Type {
     let Type::Intersection(members) = ty else {
         panic!("expected Type::Intersection (a list<T>), got {ty:?}");
@@ -192,14 +192,12 @@ fn a_private_ancestor_method_is_never_inherited_from() {
     );
 }
 
-// Real PHP never enforces constructor-signature compatibility (arity,
-// order, and names can all differ freely between a class and its
-// parent) - real corpus false positive caught verifying this pass:
-// Doctrine Migrations' own `DoctrineCommand::__construct(?DependencyFactory
-// $dependencyFactory, ?string $name)` (no own doc) sits under Symfony's
-// `Command::__construct(?string $name)` (own `@param string|null $name`).
-// Positional matching would wrongly stamp `$dependencyFactory` (position
-// 0) with `$name`'s own type; name-based matching must leave it alone.
+// PHP never enforces constructor-signature compatibility (arity, order,
+// and names can all differ freely between a class and its parent), so
+// backfilling ancestor param docs onto a constructor must match by
+// name, not position - a positionally-matched ancestor's differently-
+// named parameter at the same index would wrongly get stamped with the
+// wrong type.
 #[test]
 fn a_constructor_matches_ancestor_params_by_name_not_position() {
     let r = build_registry(
@@ -231,12 +229,9 @@ fn a_constructor_matches_ancestor_params_by_name_not_position() {
     assert!(sig.params[1].has_own_doc);
 }
 
-// Real corpus false positive: Doctrine DBAL's own abstract `Type` class
-// declares `@return mixed` on `convertToPHPValue()` quite literally (its
-// value genuinely varies by column type at that level of abstraction) -
-// inheriting that onto a concrete override with a real, specific native
-// return type must never happen, since a `mixed` tag can only ever
-// destroy information, never add any.
+// An ancestor's literal `@return mixed` tag must never be inherited onto
+// a concrete override with a specific native return type, since a
+// `mixed` tag can only ever destroy information, never add any.
 #[test]
 fn an_ancestors_mixed_tag_is_never_inherited() {
     let r = build_registry(
@@ -263,13 +258,8 @@ fn an_ancestors_mixed_tag_is_never_inherited() {
 // `Type::Object`'s own doc comment) - a template-parameterized ancestor
 // type is only meaningful within the ancestor's own `@template` scope,
 // so backfilling it verbatim onto an unrelated descendant must never
-// happen. Real corpus false positive: Doctrine's own
-// `AbstractClassMetadataFactory` (`@template T of ClassMetadata`,
-// `@phpstan-return list<T>` on `getAllMetadata()`) backfilling onto
-// `Doctrine\ORM\Mapping\ClassMetadataFactory` (which binds `T` to the
-// concrete ORM `ClassMetadata` via its own `@extends
-// AbstractClassMetadataFactory<ClassMetadata>`, unmodeled here) silently
-// lost that binding, resolving to the far less specific interface type.
+// happen, or the binding is silently lost, resolving to the far less
+// specific interface type.
 #[test]
 fn an_ancestors_template_parameterized_type_is_never_inherited() {
     let r = build_registry(
@@ -293,23 +283,18 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
     );
 }
 
-// Corrected sibling of the erased case just above, found via a Piwigo/
-// real-PHPStan corpus diff (`MessengerFactory::transport`'s own call
-// through `DoctrineTransportFactory`): a class-scoped `@template` *is*
-// safe to backfill after all, provided the descendant actually supplies
-// a real, concrete binding for it via `@implements Ancestor<Concrete>` -
-// `Registry::template_param_scopes_all_safe_to_backfill`'s own doc
-// comment has the full reasoning for why this is safe now (a real,
+// Corrected sibling of the erased case just above: a class-scoped
+// `@template` is safe to backfill after all, provided the descendant
+// actually supplies a concrete binding for it via `@implements
+// Ancestor<Concrete>` - `Registry::template_param_scopes_all_safe_to_backfill`'s
+// own doc comment has the full reasoning for why this is safe (a
 // resolvable binding, not the still-unresolvable erased case above).
-// Resolved *immediately*, at backfill time, to the concrete bound type -
+// Resolved immediately, at backfill time, to the concrete bound type -
 // not left as a raw `TemplateParam` for some later call-time pass to
 // substitute (`Registry::substitute_class_scoped_ancestor_templates`'s
 // own doc comment explains why: this same signature is also read
-// directly when checking its own declaring class's own method body, a
-// path with no "external call site" to resolve anything through at all
-// - confirmed by a real corpus false positive this exact design caught,
-// `Composer\Pcre\PHPStan\InvalidRegexPatternRule::processNode`'s own
-// `$node` parameter staying literally typed `"TNodeType"` otherwise).
+// directly when checking its own declaring class's method body, a path
+// with no "external call site" to resolve anything through at all).
 #[test]
 fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding_exists() {
     let r = build_registry(
@@ -335,13 +320,8 @@ fn an_ancestors_template_parameterized_type_is_inherited_when_a_concrete_binding
     );
 }
 
-// ROADMAP "Known but not yet scheduled" follow-up: a `@template` declared
-// directly on the ancestor *method* itself is safe to backfill verbatim
-// regardless of any class-level binding - real corpus shape: `Doctrine\
-// ORM\EntityManagerInterface::getReference()` (`@template T of object`,
-// `@param class-string<T> $entityName`, `@return T|null`) backfilling
-// cleanly onto `EntityManager::getReference()`'s own wholly undocumented
-// native signature.
+// A `@template` declared directly on the ancestor method itself is safe
+// to backfill verbatim regardless of any class-level binding.
 #[test]
 fn a_method_scoped_template_parameterized_type_is_inherited() {
     let r = build_registry(
@@ -388,15 +368,13 @@ fn a_method_scoped_template_parameterized_type_is_inherited() {
     );
 }
 
-// Real corpus false positive: `Doctrine\ORM\EntityManagerInterface::
-// getMetadataFactory()` has no own doc, and its own native hint already
-// resolves (via that file's own `use` import) to the concrete ORM
-// `ClassMetadataFactory` - but a grandparent interface
-// (`Doctrine\Persistence\ObjectManager`) documents the *same method name*
-// against a same-named but genuinely different, more generic class (its
-// own `use` resolves the identifier differently). Neither the `Mixed`
-// guard nor the template-param guard catches this (both sides are real,
-// concrete, non-template types) - only a same-class-name check does.
+// An ancestor method's own native hint can already resolve (via that
+// file's own `use` import) to a concrete class - but a grandparent
+// interface documents the same method name against a same-named but
+// genuinely different, more generic class (its own `use` resolves the
+// identifier differently). Neither the `Mixed` guard nor the
+// template-param guard catches this (both sides are concrete,
+// non-template types) - only a same-class-name check does.
 #[test]
 fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_never_inherited() {
     let r = build_registry(
@@ -422,22 +400,18 @@ fn an_ancestors_object_type_naming_a_different_class_than_the_native_hint_is_nev
     );
 }
 
-// Real corpus false positive found reviewing fix 19's own full-corpus
-// diff (`PHPStan\Type\Constant\ConstantStringType::getValue()`, a
-// concrete `: string` override of `ConstantScalarType::getValue()`'s own
-// `@return int|float|string|bool|null` doc tag): neither `safe_to_
-// backfill_mixed` nor `safe_to_backfill_object_type` catches an
-// ancestor's *non*-`Mixed`, *non*-`Object` doc type that's simply
-// incompatible with the child's own concrete native return type - the
-// ancestor's broad `int|float|string|bool|null` was blindly cloned
-// wholesale onto the child, discarding its own, already-correct,
-// narrower native `string` for something far less precise. Fixed by
-// reconciling the inherited doc type against the child's own native type
-// via the exact same `reconcile_with_native` an own (non-inherited)
-// docblock already goes through (`FunctionSig::resolve_type`'s own doc
-// comment) - filtering the inherited union down to whichever member(s)
-// the native type can actually be, matching real PHPStan's own
-// `TypehintHelper::decideType` (`$type->isSuperTypeOf($phpDocType)`).
+// Neither `safe_to_backfill_mixed` nor `safe_to_backfill_object_type`
+// catches an ancestor's non-`Mixed`, non-`Object` doc type that's simply
+// incompatible with the child's own concrete native return type - a
+// broad ancestor union must not be blindly cloned wholesale onto the
+// child, discarding its own, already-correct, narrower native type for
+// something far less precise. The inherited doc type must be
+// reconciled against the child's native type via the same
+// `reconcile_with_native` an own (non-inherited) docblock already goes
+// through (`FunctionSig::resolve_type`'s own doc comment) - filtering
+// the inherited union down to whichever member(s) the native type can
+// actually be, mirroring PHPStan's `TypehintHelper::decideType`
+// (`$type->isSuperTypeOf($phpDocType)`).
 #[test]
 fn an_ancestors_doc_return_type_incompatible_with_the_native_return_type_is_reconciled_not_cloned_verbatim()
  {
