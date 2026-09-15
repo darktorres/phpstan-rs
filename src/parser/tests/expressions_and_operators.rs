@@ -178,8 +178,7 @@ fn a_bang_negated_assignment_nested_in_a_logical_or_still_assigns() {
 }
 
 // `.`/cast get the identical "assignment as a bare operand" treatment -
-// confirmed directly (`php -r '$v=0; $r="x".$v="y"; var_dump($r,$v);'`
-// prints `string(3) "xy"` and `$v` becomes `"y"`).
+// `$r = 'x' . $v = 'y';` prints `string(3) "xy"` and `$v` becomes `"y"`.
 #[test]
 fn an_assignment_nested_as_a_concat_rhs_parses_as_real_php_does() {
     let program = parse("<?php $r = 'x' . $v = 'y';");

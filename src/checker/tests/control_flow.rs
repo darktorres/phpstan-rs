@@ -1946,10 +1946,9 @@ fn phpstan_throw_expr_type_flags_throwing_a_non_throwable() {
     }));
 }
 
-// `generator.returnType` - confirmed directly via `php -l` as a real,
-// unconditional PHP fatal error at compile time: a function body
-// containing `yield` must declare a return type compatible with
-// Generator/Iterator/Traversable/iterable.
+// `generator.returnType` - an unconditional PHP fatal error at compile
+// time: a function body containing `yield` must declare a return type
+// compatible with Generator/Iterator/Traversable/iterable.
 
 #[test]
 fn a_generator_function_declared_to_return_int_is_flagged() {
@@ -2071,8 +2070,8 @@ fn a_generator_function_declared_to_return_iterable_is_never_flagged() {
 
 #[test]
 fn a_generator_function_declared_to_return_a_nullable_generator_is_never_flagged() {
-    // Confirmed directly via php -l: real PHP accepts this even though
-    // calling the function never actually produces null.
+    // PHP accepts this even though calling the function never actually
+    // produces null.
     let d = diagnostics_for(
         r#"<?php
             function f(): ?Generator {
@@ -2088,8 +2087,8 @@ fn a_generator_function_declared_to_return_a_nullable_generator_is_never_flagged
 
 #[test]
 fn a_generator_function_declared_to_return_an_unrelated_union_with_generator_is_never_flagged() {
-    // Confirmed directly via php -l: real PHP accepts `int|Generator`
-    // outright - only one union member needs to be Generator-compatible.
+    // PHP accepts `int|Generator` outright - only one union member needs
+    // to be Generator-compatible.
     let d = diagnostics_for(
         r#"<?php
             function f(): int|Generator {

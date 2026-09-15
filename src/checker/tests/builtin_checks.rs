@@ -414,11 +414,11 @@ fn filter_var_require_array_takes_priority_over_force_array_when_both_are_set() 
 #[test]
 fn filter_var_min_range_option_survives_require_array_wrap() {
     // The `|false` fallback is still unioned into the per-element type
-    // even with a `min_range` option present - confirmed directly
-    // against real PHPStan's own `getType()`: `$exactType === null` (a
-    // non-literal array element's own value is never "exact") triggers
-    // the fallback-union unconditionally, independent of whether a
-    // range option also narrowed the base type.
+    // even with a `min_range` option present - mirrors PHPStan's
+    // `getType()`: `$exactType === null` (a non-literal array element's
+    // value is never "exact") triggers the fallback-union
+    // unconditionally, independent of whether a range option also
+    // narrowed the base type.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -637,10 +637,9 @@ fn filter_var_with_a_non_int_default_option_widens_the_result_union() {
 #[test]
 fn filter_var_min_range_option_is_ignored_for_a_non_int_filter() {
     // `FILTER_VALIDATE_FLOAT`'s own `min_range`/`max_range` aren't
-    // modeled (real PHPStan itself doesn't support FloatRangeType
-    // either, confirmed directly against `FilterFunctionReturnTypeHelper
-    // ::getFilterTypeOptions()`'s own commented-out entry) - the base
-    // type is used unchanged rather than misapplying an int range to it.
+    // modeled (PHPStan itself doesn't support FloatRangeType either) -
+    // the base type is used unchanged rather than misapplying an int
+    // range to it.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;

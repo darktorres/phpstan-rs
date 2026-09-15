@@ -90,11 +90,11 @@ fn value_of_on_a_single_field_shape_is_the_bare_type_not_a_one_member_union() {
 
 #[test]
 fn key_of_on_a_class_reference_no_longer_produces_a_bogus_class_not_found() {
-    // Confirmed directly against real PHPStan's own `KeyOfType::getResult()`
-    // (`return $this->type->getIterableKeyType();`) - a bare class/enum
-    // reference has no special case there at all, so `Mixed` (an ordinary
-    // class isn't iterable) is the real, correct, final answer here, not
-    // a placeholder waiting on more work.
+    // Mirrors PHPStan's `KeyOfType::getResult()` (`return
+    // $this->type->getIterableKeyType();`) - a bare class/enum reference
+    // has no special case there at all, so `Mixed` (an ordinary class
+    // isn't iterable) is the correct, final answer here, not a
+    // placeholder waiting on more work.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;

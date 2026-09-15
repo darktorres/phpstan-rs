@@ -170,9 +170,9 @@ fn preg_match_array_key_exists_false_branch_does_not_narrow_an_optional_group() 
 #[test]
 fn preg_match_an_interior_optional_group_is_always_present_not_optional() {
     // Group 2 is optional (via `?`) but *interior* - group 3, after
-    // it, is required, so real PCRE can never omit $matches[2]
-    // entirely (confirmed live: `preg_match('/(a)(b)?(c)/', 'ac', $m)`
-    // gives `$m = [0=>'ac', 1=>'a', 2=>'', 3=>'c']`). Using the same
+    // it, is required, so PCRE can never omit $matches[2] entirely
+    // (`preg_match('/(a)(b)?(c)/', 'ac', $m)` gives `$m = [0=>'ac',
+    // 1=>'a', 2=>'', 3=>'c']`). Using the same
     // established technique as `preg_match_array_key_exists_false_
     // branch_narrows_a_required_group_to_never` above: if the false
     // branch of `array_key_exists('2', ...)` narrows `$matches` to
@@ -889,10 +889,9 @@ fn preg_match_still_skips_a_pattern_concatenated_with_a_real_variable() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// (a): the `x` (free-spacing) modifier no longer bails the whole parse -
+// The `x` (free-spacing) modifier no longer bails the whole parse -
 // unescaped whitespace and `#`-comments between tokens are skipped, the
-// same way real PCRE's own free-spacing mode does (confirmed live
-// against a real PHP interpreter).
+// same way PCRE's own free-spacing mode does.
 #[test]
 fn preg_match_understands_a_free_spacing_pattern_with_comments() {
     // The pattern has to appear directly as the call argument, not
@@ -976,12 +975,11 @@ fn preg_match_branch_reset_with_reused_numbers_safely_stays_untyped() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// (a): the narrower, safely-resolvable shape of branch-reset - only one
+// The narrower, safely-resolvable shape of branch-reset - only one
 // branch (of several) captures anything at all, so no number is ever
-// reused - types correctly, including a group declared *after* the
-// construct renumbering correctly (confirmed live against a real PHP
-// interpreter: `(d)` really is group 2 here, not 3, since no branch of
-// `(?|...)` reaches higher than group 1).
+// reused - types correctly, including a group declared after the
+// construct renumbering correctly (`(d)` really is group 2 here, not 3,
+// since no branch of `(?|...)` reaches higher than group 1).
 #[test]
 fn preg_match_branch_reset_with_only_one_capturing_branch_types_correctly() {
     let d = diagnostics_for(

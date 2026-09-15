@@ -1248,9 +1248,9 @@ fn an_ordinary_class_without_any_immutable_tag_is_unaffected_by_class_is_immutab
     );
 }
 
-// Narrowing a method's own visibility on override is a real,
-// unconditional PHP fatal error (confirmed directly against real `php`:
-// "Access level to Child::foo() must be public (as in class Base)").
+// Narrowing a method's own visibility on override is an unconditional
+// PHP fatal error ("Access level to Child::foo() must be public (as in
+// class Base)").
 #[test]
 fn narrowing_visibility_from_public_to_protected_is_flagged() {
     let d = diagnostics_for(
@@ -1474,10 +1474,9 @@ fn overriding_a_non_abstract_method_non_abstractly_is_never_flagged_as_abstract_
     );
 }
 
-// An override with fewer parameters than its ancestor is a
-// real, unconditional PHP fatal error (confirmed directly: "Declaration
-// of Child::foo(int $a): void must be compatible with Base::foo(int $a,
-// int $b): void").
+// An override with fewer parameters than its ancestor is an
+// unconditional PHP fatal error ("Declaration of Child::foo(int $a):
+// void must be compatible with Base::foo(int $a, int $b): void").
 #[test]
 fn an_override_missing_an_inherited_parameter_is_flagged() {
     let d = diagnostics_for(
@@ -1507,10 +1506,10 @@ fn an_override_missing_a_variadic_ancestor_tail_is_never_flagged() {
     );
 }
 
-// A parameter the ancestor made optional can never become
-// required on override - a real, unconditional PHP fatal error
-// (confirmed directly: "Declaration of Child::foo(int $a, int $b): void
-// must be compatible with Base::foo(int $a, int $b = 0): void").
+// A parameter the ancestor made optional can never become required on
+// override - an unconditional PHP fatal error ("Declaration of
+// Child::foo(int $a, int $b): void must be compatible with
+// Base::foo(int $a, int $b = 0): void").
 #[test]
 fn an_override_requiring_a_parameter_the_ancestor_made_optional_is_flagged() {
     let d = diagnostics_for(
@@ -1555,9 +1554,9 @@ fn an_override_adding_its_own_extra_optional_parameter_is_never_flagged() {
     );
 }
 
-// By-ref/variadic-contravariance mismatches - both confirmed directly
-// via `php -l` as real, unconditional fatal errors ("Declaration of
-// Child::foo(...) must be compatible with Base::foo(...)").
+// By-ref/variadic-contravariance mismatches - both unconditional fatal
+// errors ("Declaration of Child::foo(...) must be compatible with
+// Base::foo(...)").
 
 #[test]
 fn an_override_dropping_a_by_ref_parameter_is_flagged() {
@@ -1621,8 +1620,7 @@ fn an_override_dropping_variadic_on_the_ancestors_own_variadic_parameter_is_flag
 
 #[test]
 fn widening_a_fixed_ancestor_parameter_to_variadic_on_override_is_never_flagged() {
-    // Real, legal PHP - confirmed directly - the reverse direction from
-    // the check just above.
+    // Legal PHP - the reverse direction from the check just above.
     let d = diagnostics_for(
         r#"<?php
             class Base { public function foo($x): void {} }
@@ -1635,9 +1633,8 @@ fn widening_a_fixed_ancestor_parameter_to_variadic_on_override_is_never_flagged(
     );
 }
 
-// The property-override half - each shape confirmed directly via
-// `php -r` as a real, unconditional fatal error ("Cannot redeclare ...
-// as ...", "Access level to ... must be ...").
+// The property-override half - each shape an unconditional fatal error
+// ("Cannot redeclare ... as ...", "Access level to ... must be ...").
 
 #[test]
 fn overriding_a_static_property_as_non_static_is_flagged() {
@@ -2126,9 +2123,8 @@ fn overriding_a_private_ancestor_property_is_never_flagged_for_any_mismatch() {
 
 // A method a trait supplies but the class itself never textually
 // re-declares still needs override-compatibility checking against an
-// implemented interface/parent - confirmed directly via `php -r` as a
-// real, unconditional fatal error even though the class body never
-// mentions the method name at all.
+// implemented interface/parent - an unconditional fatal error even
+// though the class body never mentions the method name at all.
 
 #[test]
 fn a_trait_supplied_method_narrowing_an_interface_parameter_type_is_flagged() {
@@ -2453,12 +2449,12 @@ fn a_plain_method_with_no_override_attribute_is_never_flagged() {
 
 #[test]
 fn an_override_attribute_on_a_standalone_trait_method_is_never_flagged_by_itself() {
-    // A trait has no ancestor chain of its own at all - real PHP defers
-    // this whole check to whichever class eventually `use`s the trait
-    // (confirmed directly: the identical trait method is fine when the
-    // using class has a real ancestor, and only fatals - attributed to
-    // the using class's own method name - when it doesn't). Checking
-    // the trait's own declaration in isolation must never flag it.
+    // A trait has no ancestor chain of its own at all - PHP defers this
+    // whole check to whichever class eventually `use`s the trait (the
+    // identical trait method is fine when the using class has an
+    // ancestor, and only fatals - attributed to the using class's own
+    // method name - when it doesn't). Checking the trait's own
+    // declaration in isolation must never flag it.
     let d = diagnostics_for(
         r#"<?php
             trait T {
@@ -2519,8 +2515,8 @@ fn an_override_attribute_on_a_trait_method_used_by_a_class_with_no_ancestor_is_f
 #[test]
 fn an_override_attribute_implementing_a_trait_s_own_abstract_method_is_never_flagged() {
     // A class's own concrete method satisfying a trait's own abstract
-    // method declaration is a real override too, confirmed directly via
-    // `php -r` - `lookup_ancestor_method_with_owner` only ever walks
+    // method declaration is a real override too -
+    // `lookup_ancestor_method_with_owner` only ever walks
     // extends/implements, never `uses`, so this needs its own check.
     let d = diagnostics_for(
         r#"<?php
@@ -2931,13 +2927,13 @@ fn neither_side_having_a_native_type_is_never_flagged() {
 
 #[test]
 fn a_self_typed_property_override_resolves_against_its_own_declaring_class() {
-    // Guards against a real false-*negative* a bare, unresolved `self`
-    // comparison would produce: confirmed directly via `php -r` that
-    // this is a real, unconditional fatal error ("Type of Child::$next
-    // must be Base (as in class Base)") - each side's own `self` means
-    // "this exact declaring class," not "whatever `self` textually
-    // says," so `resolve_pseudo`'d Base-vs-Child is the *correct*
-    // mismatch to report, not a false positive to avoid.
+    // Guards against a real false-negative a bare, unresolved `self`
+    // comparison would produce: this is an unconditional fatal error
+    // ("Type of Child::$next must be Base (as in class Base)") - each
+    // side's own `self` means "this exact declaring class," not
+    // "whatever `self` textually says," so `resolve_pseudo`'d
+    // Base-vs-Child is the correct mismatch to report, not a false
+    // positive to avoid.
     let d = diagnostics_for(
         r#"<?php
             class Base {

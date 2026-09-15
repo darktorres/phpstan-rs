@@ -11,13 +11,11 @@ use super::helpers::*;
 
 #[test]
 fn a_bare_call_to_a_final_method_with_a_trivial_body_is_flagged() {
-    // Non-`void` return type deliberately - matches real PHPStan's own
-    // `hasSideEffects()`, which unconditionally treats *any* non-
-    // constructor `void`-returning declaration as having side effects
-    // regardless of body content (confirmed directly against the real
-    // `phpstan/phpstan` phar: an empty-bodied `void` method called bare
-    // produces zero diagnostics, level 10, bleeding-edge included) -
-    // this family only ever fires on a discarded non-`void` result.
+    // Non-`void` return type deliberately - matches PHPStan's
+    // `hasSideEffects()`, which unconditionally treats any
+    // non-constructor `void`-returning declaration as having side
+    // effects regardless of body content - this family only ever fires
+    // on a discarded non-`void` result.
     let d = all_diagnostics_for(
         r#"<?php
             final class Foo {

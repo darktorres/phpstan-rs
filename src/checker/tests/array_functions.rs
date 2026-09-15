@@ -666,9 +666,9 @@ fn array_uintersect_assoc_preserves_the_first_array_s_own_key_and_value_types() 
     );
 }
 
-// array_flip() swaps keys and values - confirmed directly via php that
-// list-ness never survives (the new keys come from the old values,
-// essentially never already 0, 1, 2, ...) but non-emptiness does.
+// array_flip() swaps keys and values - list-ness never survives (the new
+// keys come from the old values, essentially never already 0, 1, 2,
+// ...) but non-emptiness does.
 
 #[test]
 fn array_flip_swaps_key_and_value_types() {
@@ -699,7 +699,7 @@ fn array_flip_preserves_non_emptiness_but_not_list_ness() {
 }
 
 // The internal-array-pointer family - reset/current/end/key/
-// array_key_first/array_key_last/next/prev - confirmed directly via php.
+// array_key_first/array_key_last/next/prev.
 
 // Each pointer function gets its own dedicated `$xs`/function - passing
 // it to one of these by-ref functions widens this project's own tracked
@@ -2172,14 +2172,12 @@ fn a_dynamic_key_read_after_a_foreach_populated_array_is_not_spuriously_nullable
 }
 
 // Sibling case confirming the fix is genuinely scoped to a redundant
-// *empty-shape-vs-array* subtype relationship, not a blanket "loops
-// never keep their zero-iteration possibility" rule: a whole-variable
-// reassignment (not a dynamic-key write) must still keep its real
-// `|null` alternative, since `Null` is not a subtype of `String` -
-// matches real PHPStan's own `dumpType()` output for this identical
-// shape too (confirmed directly: `string|null`, not collapsed - this
-// project's own union member ordering displays it as `null|string`,
-// a cosmetic difference only).
+// empty-shape-vs-array subtype relationship, not a blanket "loops never
+// keep their zero-iteration possibility" rule: a whole-variable
+// reassignment (not a dynamic-key write) must still keep its `|null`
+// alternative, since `Null` is not a subtype of `String` (this
+// project's own union member ordering displays it as `null|string`, a
+// cosmetic difference only).
 #[test]
 fn a_whole_variable_reassigned_inside_a_foreach_still_keeps_its_null_alternative() {
     let d = diagnostics_for(

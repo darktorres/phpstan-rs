@@ -232,11 +232,9 @@ fn real_phpstan_rule_interface_is_recognized_as_api_via_the_generated_stub_pipel
         .expect("PHPStan\\Rules\\Rule should be present via the generated stub pipeline");
     assert!(rule.is_api, "expected PHPStan\\Rules\\Rule to be @api");
 
-    // `PHPStan\Analyser\Scope` carries both tags in real PHPStan's own
-    // source (confirmed directly against `vendor/phpstan-src/src/
-    // Analyser/Scope.php`) - proves the `@api-do-not-implement` half of
-    // the pipeline also survives all the way through, not just a bare
-    // `@api`.
+    // `PHPStan\Analyser\Scope` carries both tags in PHPStan's own source -
+    // proves the `@api-do-not-implement` half of the pipeline also
+    // survives all the way through, not just a bare `@api`.
     let scope = registry
         .classes
         .get("PHPStan\\Analyser\\Scope")
