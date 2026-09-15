@@ -2,9 +2,9 @@
 
 use super::helpers::*;
 
-// Phase 23 Finding 3: str_replace/preg_replace's real stub return
-// types are unconditionally unioned with `array`, even though the
-// function only returns an array when $subject itself is one.
+// `str_replace`/`preg_replace`'s native stub return types are
+// unconditionally unioned with `array`, even though the function only
+// returns an array when $subject itself is one.
 #[test]
 fn str_replace_narrows_to_string_when_the_subject_is_a_string() {
     let d = diagnostics_for(
@@ -17,11 +17,9 @@ fn str_replace_narrows_to_string_when_the_subject_is_a_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Round 12: verified via dumpType() - concatenating any string with a
-// real non-falsy string literal (on either side) always produces a
-// non-falsy-string, regardless of the other side's own type. Real
-// corpus shape: `sys_get_temp_dir() . '/'` fed straight into
-// PHPUnit's `assertStringStartsWith(non-empty-string $prefix, ...)`.
+// Concatenating any string with a non-falsy string literal (on either
+// side) always produces a non-falsy-string, regardless of the other
+// side's type.
 #[test]
 fn concatenating_a_non_falsy_string_literal_on_the_right_narrows_to_non_falsy_string() {
     let d = diagnostics_for(
@@ -254,9 +252,8 @@ fn var_export_with_a_non_literal_flag_stays_nullable() {
     );
 }
 
-// Phase 32 Finding E: same subject-dependent-return-type family as
-// `str_replace` above, missed by Phase 23/31 - `substr_replace`'s own
-// subject is argument index 0, not 2.
+// Same subject-dependent-return-type family as `str_replace` above -
+// `substr_replace`'s subject is argument index 0, not 2.
 #[test]
 fn substr_replace_narrows_to_string_when_the_subject_is_a_string() {
     let d = diagnostics_for(
@@ -315,15 +312,12 @@ fn mb_convert_encoding_narrows_to_string_or_false_when_the_subject_is_a_string()
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Found while triaging the wider Piwigo corpus test suite
-// (`HtmlServiceTest`'s own `str_repeat(' ', 300)` fed into `toEndWith()`'s
-// own `non-empty-string`-typed parameter): this project had no
-// `str_repeat()` handling at all before this fix (a bare `string`,
-// matching the native stub). Real PHPStan's own
-// `StrRepeatFunctionReturnTypeExtension` (confirmed directly against
-// `vendor/phpstan-src`) constant-folds a small literal-input/literal-
-// count call outright, and otherwise still marks the result
-// `non-falsy-string` when the input is itself non-falsy and the count
+// `str_repeat()` must not fall back to a bare `string` (matching the
+// native stub) with no special-case handling. Mirrors PHPStan's
+// `StrRepeatFunctionReturnTypeExtension`: constant-folds a small
+// literal-input/literal-count call outright, and otherwise still marks
+// the result `non-falsy-string` when the input is itself non-falsy and
+// the count
 // is provably `>= 1`.
 #[test]
 fn str_repeat_folds_small_literals_and_marks_non_falsy_when_provable() {
