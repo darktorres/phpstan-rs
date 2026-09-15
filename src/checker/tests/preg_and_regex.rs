@@ -17,13 +17,10 @@ fn preg_replace_narrows_to_string_or_null_when_the_subject_is_a_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Round 11 of the Piwigo corpus cleanup: `preg_replace`/`str_replace`'s
-// subject-dependent special case gated on a bare `== Type::String`,
-// which stopped matching the instant Phase 14 made a narrowed
-// "provably non-empty" string a real `Intersection([String,
-// Accessory(NonEmptyString)])` instead of plain `String` - the exact
-// shape `Lang::load()`'s own `if ($source_file === '') { return
-// false; }` guard produces for every use of `$source_file` afterward.
+// `preg_replace`/`str_replace`'s subject-dependent special case must not
+// be gated on a bare `== Type::String`, since a narrowed "provably
+// non-empty" string is a real `Intersection([String,
+// Accessory(NonEmptyString)])`, not plain `String`.
 #[test]
 fn preg_replace_narrows_to_string_when_the_subject_is_a_narrowed_non_empty_string() {
     let d = diagnostics_for(
@@ -43,9 +40,9 @@ fn preg_replace_narrows_to_string_when_the_subject_is_a_narrowed_non_empty_strin
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 12 Finding A: preg_match's by-ref $matches shape - a real
-// PCRE-structure parser (never a matching engine), scoped to the
-// common 3-argument, literal-pattern form.
+// `preg_match`'s by-ref $matches shape - a PCRE-structure parser (never
+// a matching engine), scoped to the common 3-argument, literal-pattern
+// form.
 #[test]
 fn preg_match_required_group_is_accepted_as_a_string_parameter() {
     let d = diagnostics_for(
@@ -83,10 +80,9 @@ fn preg_match_required_group_is_precisely_typed_once_the_match_is_confirmed() {
             }
         "#,
     );
-    // Phase 12 (literal enumeration): group 1's own content is the
-    // constant `a`, so it's now typed as the literal `'a'`, not
-    // generic `string` - even more precise than this test's own
-    // original intent (proving precise typing at all, not just
+    // Group 1's content is the constant `a`, so it's typed as the
+    // literal `'a'`, not generic `string` - even more precise than this
+    // test's original intent (proving precise typing at all, not just
     // Mixed-leniency), so the check just needs to name the sharper
     // type.
     assert!(
@@ -263,7 +259,7 @@ fn preg_match_named_group_is_precisely_typed_by_number_and_name_once_confirmed()
     );
 }
 
-// --- Phase 12: literal enumeration for constant-only groups ---
+// --- Literal enumeration for constant-only groups ---
 
 #[test]
 fn preg_match_a_constant_alternation_group_is_typed_as_a_literal_union() {
@@ -284,15 +280,14 @@ fn preg_match_a_constant_alternation_group_is_typed_as_a_literal_union() {
     );
 }
 
-// `preg_match` itself can't be used to test this composition:
-// reading through a flagged call's `$matches` always collapses to
-// `Mixed` (Finding E's own narrowing is scoped to no-flags callers
-// only, so a flagged call's `$matches` stays the unconditional
-// `Union` even inside a confirmed-matched `if` - see
-// `preg_match_offset_capture_types_each_entry_as_a_string_int_tuple`'s
-// own comment above). `preg_match_all` never has that Union at all
-// (Finding D), so it's the only way to observe the composed tuple
-// shape directly.
+// `preg_match` itself can't be used to test this composition: reading
+// through a flagged call's `$matches` always collapses to `Mixed` (the
+// no-match-narrowing is scoped to no-flags callers only, so a flagged
+// call's `$matches` stays the unconditional `Union` even inside a
+// confirmed-matched `if` - see `preg_match_offset_capture_types_each_
+// entry_as_a_string_int_tuple`'s own comment above). `preg_match_all`
+// never has that Union at all, so it's the only way to observe the
+// composed tuple shape directly.
 #[test]
 fn preg_match_all_a_constant_group_combined_with_offset_capture_only_narrows_the_text_slot() {
     let d = diagnostics_for(
@@ -316,11 +311,11 @@ fn preg_match_all_a_constant_group_combined_with_offset_capture_only_narrows_the
     );
 }
 
-// Phase 72: `\d+` is neither a literal sequence nor a top-level
-// alternation, but it *is* now provably a non-empty, digits-only group
-// (the `RegexGroupFallback::NumericString` tri-state fallback) - refined
-// to `numeric-string`, not a wrong or guessed literal, and strictly more
-// precise than the plain `string` this used to degrade to.
+// `\d+` is neither a literal sequence nor a top-level alternation, but
+// it is provably a non-empty, digits-only group (the
+// `RegexGroupFallback::NumericString` tri-state fallback) - refined to
+// `numeric-string`, not a wrong or guessed literal, and strictly more
+// precise than plain `string`.
 #[test]
 fn preg_match_a_digit_only_group_is_typed_as_numeric_string() {
     let d = diagnostics_for(
@@ -633,18 +628,15 @@ fn preg_match_with_an_unrecognized_flags_expression_stays_mixed() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 12 Finding B: PREG_OFFSET_CAPTURE - confirmed against a real
-// PHP interpreter that every present entry becomes a real [string,
-// int] tuple (the match text and its byte offset), not a bare
-// string. Passes leniently either way - Finding E's own
-// `preg_match_condition` narrowing is deliberately scoped to
-// no-`$flags` callers only, so a flagged call's `$matches` stays a
-// `Union` even inside a confirmed-matched `if`, and reading through
-// it collapses to `Mixed` (this project's usual "don't know, don't
-// flag" leniency) rather than the real tuple shape. The genuinely
-// discriminating check for a flagged call is field *presence*
-// through the `Union` (Part 1's own real value), covered by the
-// dedicated test just below.
+// PREG_OFFSET_CAPTURE - every present entry becomes a real [string,
+// int] tuple (the match text and its byte offset), not a bare string.
+// Passes leniently either way - `preg_match_condition` narrowing is
+// deliberately scoped to no-`$flags` callers only, so a flagged call's
+// `$matches` stays a `Union` even inside a confirmed-matched `if`, and
+// reading through it collapses to `Mixed` (this project's usual "don't
+// know, don't flag" leniency) rather than the real tuple shape. The
+// genuinely discriminating check for a flagged call is field presence
+// through the `Union`, covered by the dedicated test just below.
 #[test]
 fn preg_match_offset_capture_types_each_entry_as_a_string_int_tuple() {
     let d = diagnostics_for(
@@ -677,26 +669,24 @@ fn preg_match_offset_capture_still_flags_a_genuinely_absent_group_through_the_un
     );
 }
 
-// Phase 12 Finding C: PREG_UNMATCHED_AS_NULL - confirmed against a
-// real PHP interpreter that a non-participating optional group
-// becomes `null` in the array rather than an entirely absent key.
-// Both tests below now pass leniently either way, the same reason as
+// PREG_UNMATCHED_AS_NULL - a non-participating optional group becomes
+// `null` in the array rather than an entirely absent key. Both tests
+// below pass leniently either way, the same reason as
 // `preg_match_offset_capture_types_each_entry_as_a_string_int_tuple`
-// just above: Finding E's own narrowing is scoped to no-`$flags`
-// callers, so a `PREG_UNMATCHED_AS_NULL`-flagged call's `$matches`
-// stays a `Union` with no narrowed, precise-typed context to read it
-// from - reading through it collapses to `Mixed` regardless of the
-// real nullable-vs-plain distinction this shape-building logic
-// actually produces. **A real, disclosed test gap, not a false
-// claim of coverage elsewhere**: `preg_match_matches_shape` itself
-// (`checker/expr.rs`) has no dedicated unit test of its own - this
-// project's established convention for this family of per-function
-// shape helpers (see `curl_getinfo_component_type`'s identical lack
-// of one) is to verify them only through `diagnostics_for`-based
-// integration tests like these, which is exactly what Finding E's
-// own narrowing scope now prevents from discriminating this one
-// specific distinction. Left open rather than papered over with a
-// test that would pass without truly exercising anything.
+// just above: the narrowing is scoped to no-`$flags` callers, so a
+// `PREG_UNMATCHED_AS_NULL`-flagged call's `$matches` stays a `Union`
+// with no narrowed, precise-typed context to read it from - reading
+// through it collapses to `Mixed` regardless of the real
+// nullable-vs-plain distinction this shape-building logic actually
+// produces. `preg_match_matches_shape` (`checker/expr.rs`) has no
+// dedicated unit test of its own - this project's established
+// convention for this family of per-function shape helpers (see
+// `curl_getinfo_component_type`'s identical lack of one) is to verify
+// them only through `diagnostics_for`-based integration tests like
+// these, which is exactly what the narrowing scope above prevents from
+// discriminating this one specific distinction. Left open rather than
+// papered over with a test that would pass without truly exercising
+// anything.
 #[test]
 fn preg_match_unmatched_as_null_makes_an_optional_group_nullable_but_always_present() {
     let d = diagnostics_for(
@@ -728,9 +718,8 @@ fn preg_match_unmatched_as_null_does_not_widen_a_required_group() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 12 Finding D: preg_match_all - both PREG_PATTERN_ORDER (the
-// real default) and PREG_SET_ORDER, both confirmed against a real
-// PHP interpreter before implementing.
+// `preg_match_all` - both PREG_PATTERN_ORDER (the default) and
+// PREG_SET_ORDER.
 #[test]
 fn preg_match_all_pattern_order_types_each_group_as_an_array_of_strings() {
     let d = diagnostics_for(
@@ -742,11 +731,10 @@ fn preg_match_all_pattern_order_types_each_group_as_an_array_of_strings() {
             }
         "#,
     );
-    // Phase 12 (literal enumeration): group 1's own content is the
-    // constant `a`, so its per-match array element is now the
-    // literal `'a'`, not generic `string`. Corpus round: each group's
-    // own match array is itself always a real `list<T>` (verified via
-    // dumpType()), not merely `array<T>`.
+    // Group 1's content is the constant `a`, so its per-match array
+    // element is the literal `'a'`, not generic `string`. Each group's
+    // own match array is itself always a `list<T>`, not merely
+    // `array<T>`.
     assert!(
         d.iter()
             .any(|x| x.message.contains("needsInt") && x.message.contains("list<'a'>")),
@@ -862,9 +850,7 @@ fn known_by_ref_output_param_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// --- Phase 72 ---
-
-// (b): a statically-foldable `Concat` pattern argument is now resolved
+// A statically-foldable `Concat` pattern argument is resolved
 // by `literal_string_value` itself, so `preg_match`'s own `$matches`
 // shape inference (which already only ever looked at
 // `literal_string_value(pattern_arg)`) picks it up for free.
