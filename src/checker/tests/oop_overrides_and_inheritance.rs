@@ -6,7 +6,7 @@ use super::helpers::*;
 fn concrete_class_name_satisfies_self_return_type() {
     // Regression test: `new UserRepository()` and `new self()` are
     // equally valid ways to satisfy a `: self` return type declared on
-    // UserRepository itself - this used to be a false positive.
+    // UserRepository itself.
     let d = diagnostics_for(
         r#"<?php
             class UserRepository {
@@ -21,14 +21,11 @@ fn concrete_class_name_satisfies_self_return_type() {
 
 #[test]
 fn nullable_self_return_type_is_resolved_the_same_way_a_bare_self_is() {
-    // Real, previously-live bug found via real code in this
-    // project's own verification corpus: resolve_pseudo only ever
-    // handled a *bare* self/static/parent, never one wrapped in a
-    // Union - the extremely common `?self`/`self|null` factory-
-    // method return type (real example: a `tryFromArray`-style
-    // static constructor) stayed unresolved as a bare `SelfRef`,
-    // which is_assignable/is_subtype have no arm to accept a
-    // concrete class instance against.
+    // `resolve_pseudo` must handle self/static/parent wrapped in a
+    // Union, not just a bare one - the extremely common `?self`/
+    // `self|null` factory-method return type must not stay unresolved
+    // as a bare `SelfRef`, which is_assignable/is_subtype have no arm
+    // to accept a concrete class instance against.
     let d = diagnostics_for(
         r#"<?php
             class Widget {
@@ -130,10 +127,9 @@ fn dynamic_property_not_declared_on_class_is_not_flagged() {
 
 #[test]
 fn static_access_flags_undefined_constants_properties_and_methods() {
-    // Phase 9's last remaining rule: existence checks for
-    // StaticAccess (constants, static properties) and StaticCall
-    // (static methods) - the same shape of check as MethodCall's,
-    // just for `Foo::` instead of `$foo->`.
+    // Existence checks for StaticAccess (constants, static properties)
+    // and StaticCall (static methods) - the same shape of check as
+    // MethodCall's, just for `Foo::` instead of `$foo->`.
     let d = diagnostics_for(
         r#"<?php
             class Foo {
@@ -227,8 +223,8 @@ fn a_dynamic_static_target_is_never_checked() {
 
 #[test]
 fn reading_an_undefined_property_is_flagged_but_writing_one_is_not() {
-    // Phase 9's last remaining piece: undefined-property-on-*read*
-    // detection. Deliberately asymmetric with the write side just
+    // Undefined-property-on-read detection. Deliberately asymmetric
+    // with the write side just
     // above - a write can legitimately create a real (if deprecated)
     // dynamic property, but a read of one that was never declared
     // and never dynamically assigned just returns null with a
@@ -330,13 +326,10 @@ fn anonymous_class_with_correct_usage_is_not_flagged() {
 
 #[test]
 fn anonymous_class_method_resolves_a_use_imported_return_type() {
-    // Phase 22 Finding 5, real shape: a `use`-imported interface
-    // return type on an anonymous class method - confirmed directly
-    // from a real diagnostic's own wording before this fix: "expected
-    // ResponseInterface, got Nyholm\Psr7\Response" (the expected side
-    // printing bare/unqualified, proving it was never resolved
-    // against the file's own `use` imports the way a top-level
-    // class's method signature already is).
+    // A `use`-imported interface return type on an anonymous class
+    // method must resolve against the file's own `use` imports the
+    // same way a top-level class's method signature already does - not
+    // print bare/unqualified in a diagnostic.
     let d = diagnostics_for(
         r#"<?php
             namespace App\Other;
@@ -526,16 +519,15 @@ fn a_method_narrowing_an_inherited_parameter_type_is_flagged() {
     );
 }
 
-// A top-10-bucket workflow found this exact check compared the merged,
-// docblock-aware parameter type instead of the native-only one - real
-// PHP/PHPStan only enforce override-compatibility at the native level
-// by default (`checkPhpDocMethodSignatures` is off unless a project
-// opts in), the identical distinction this project's own return-type
-// check already makes via `return_type_native`. Real, extremely common
-// corpus shape (Rector's own `RectorInterface::refactor(Node $node)`,
-// narrowed per-rule only via `@param SpecificNode $node`, native type
-// left as the wide `Node` on every single implementation): real
-// PHPStan does not flag this by default.
+// This check must compare the native-only parameter type, not the
+// merged, docblock-aware one - real PHP/PHPStan only enforce override-
+// compatibility at the native level by default
+// (`checkPhpDocMethodSignatures` is off unless a project opts in), the
+// identical distinction this project's own return-type check already
+// makes via `return_type_native`. A common shape: an interface method
+// narrowed per-implementation only via `@param SpecificNode $node`,
+// with the native type left as the wide ancestor type on every
+// implementation - real PHPStan does not flag this by default.
 #[test]
 fn a_param_narrowed_only_via_docblock_with_an_unchanged_native_type_is_not_flagged() {
     let d = diagnostics_for(
@@ -580,17 +572,15 @@ fn a_param_narrowed_at_the_native_level_is_still_flagged_even_with_a_docblock_pr
     );
 }
 
-// Real corpus find (Doctrine\Common\Collections\ReadableCollection::
-// exists(Closure $p), overridden identically by AbstractLazyCollection):
-// an ancestor's own `@phpstan-param Closure(TKey, T):bool $p` (the
+// An ancestor's own `@phpstan-param Closure(TKey, T):bool $p` (the
 // callable-shape doc syntax this project degrades to plain
 // `Type::Callable`, having no per-parameter/return signature of its
-// own to track) used to make `reconcile_with_native` resolve the
-// *ancestor's* parameter type to that coarse `Callable` marker instead
-// of its own, exactly-known native `Closure` - even though the child's
-// identically-typed native `Closure $p` resolved correctly on its own,
-// comparing "child: Closure" against "ancestor: Callable" looked like a
-// real narrowing that was never actually there.
+// own to track) must not make `reconcile_with_native` resolve the
+// ancestor's parameter type to that coarse `Callable` marker instead of
+// its own, exactly-known native `Closure` - otherwise, even when the
+// child's identically-typed native `Closure $p` resolves correctly on
+// its own, comparing "child: Closure" against "ancestor: Callable"
+// looks like a narrowing that was never actually there.
 #[test]
 fn an_override_with_a_callable_shape_doc_on_the_ancestor_only_is_not_a_narrowing() {
     let d = diagnostics_for(
@@ -615,16 +605,14 @@ fn an_override_with_a_callable_shape_doc_on_the_ancestor_only_is_not_a_narrowing
 
 #[test]
 fn a_final_class_s_own_self_typed_override_is_not_a_narrowing() {
-    // Real Piwigo corpus bug (Admin\Image\ImageBackend implements
-    // ImageInterface, whose own compose() parameter is declared by the
-    // *concrete implementing class's own name*, not an abstraction -
-    // an unusual but valid interface shape): `self` inside the
-    // concrete class and that same concrete class name are provably
-    // identical types, but neither is_assignable/is_subtype has a rule
-    // for a concrete Object satisfying a still-bare SelfRef (only the
-    // reverse direction is handled) - both the override's own `self`
-    // and the ancestor's own declared type need resolving before
-    // comparison, not just one.
+    // An interface method parameter declared by the concrete
+    // implementing class's own name (not an abstraction - an unusual
+    // but valid interface shape): `self` inside the concrete class and
+    // that same concrete class name are provably identical types, but
+    // neither is_assignable/is_subtype has a rule for a concrete Object
+    // satisfying a still-bare SelfRef (only the reverse direction is
+    // handled) - both the override's own `self` and the ancestor's own
+    // declared type need resolving before comparison, not just one.
     let d = diagnostics_for(
         r#"<?php
             interface ImageInterface {
@@ -746,18 +734,13 @@ fn an_override_narrowing_an_inherited_static_return_type_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found this check compared the
-// *docblock-refined* return type on both sides, wrongly flagging an
-// override that faithfully keeps the ancestor's own native `array`
-// while the ancestor's docblock separately narrowed it further
-// (`list<...>`) - real PHP itself only enforces override-
-// compatibility on the native signature, and by default so does real
-// PHPStan (`checkPhpDocMethodSignatures` is off unless a project
-// opts in - confirmed directly against real PHPStan with this exact
-// shape). Real corpus shape: several `HtmlRenderingInterface` test
-// fakes each declaring `getCatBreadcrumb(): array`, exactly matching
-// the interface's own native signature, while the interface's
-// *docblock* separately says `@return list<array{...}>`.
+// This check must not compare the docblock-refined return type on both
+// sides, or it wrongly flags an override that faithfully keeps the
+// ancestor's own native `array` while the ancestor's docblock
+// separately narrows it further (`list<...>`) - real PHP itself only
+// enforces override-compatibility on the native signature, and by
+// default so does real PHPStan (`checkPhpDocMethodSignatures` is off
+// unless a project opts in).
 #[test]
 fn an_override_matching_only_the_ancestors_native_return_type_is_not_flagged() {
     let d = diagnostics_for(
@@ -792,15 +775,12 @@ fn an_override_genuinely_widening_the_native_return_type_is_still_flagged() {
     assert!(d[0].message.contains("is not compatible"), "got: {d:?}");
 }
 
-// Round 10 of the Piwigo corpus cleanup: 22 first-party value objects
-// (ImageId, TagId, UserId, ...) each implement a shared interface
-// declaring `tryFrom(mixed $value): ?static` and override it with
-// `?self` on their own `final` class - confirmed against real PHPStan
-// 2.2.8 to be a legitimate override (a `final` class's `self` and
+// A `final` class overriding `tryFrom(mixed $value): ?static` with
+// `?self` is a legitimate override (a `final` class's `self` and
 // `static` are always the same concrete type). `resolve_type` builds
 // `?static` as `Union([StaticRef, Null])`, not its own `StaticRef`
-// variant, so the pre-existing bare-`StaticRef` escape hatch above
-// missed this extremely common nullable shape entirely.
+// variant, so a bare-`StaticRef` escape hatch alone would miss this
+// extremely common nullable shape entirely.
 #[test]
 fn overriding_a_nullable_static_return_with_a_nullable_self_return_is_not_flagged() {
     let d = diagnostics_for(
@@ -922,10 +902,9 @@ fn new_self_and_static_are_never_flagged_as_undefined() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 25 from the architecture audit - a self/static/parent-typed
-// parameter was never resolved, silently disabling undefined-
-// property/method checking through it (unlike the identical access
-// through $this).
+// A self/static/parent-typed parameter must be resolved, or it
+// silently disables undefined-property/method checking through it
+// (unlike the identical access through $this).
 
 #[test]
 fn self_typed_parameter_gets_undefined_property_checking() {
@@ -1034,10 +1013,9 @@ fn phpstan_overriding_method_flags_a_final_method_override() {
 fn phpstan_parameter_contravariance_flags_a_narrowed_override() {
     // Derived from vendor/phpstan-src/tests/PHPStan/Rules/Methods/data/parameter-contravariance.php's
     // `Foo`/`Lorem` pair: upstream flags `Lorem::doFoo(InvalidArgumentException $e)`
-    // as "not contravariant with" `Foo::doFoo(Exception $e)` - the same
-    // narrowed-parameter shape Finding 50 covers, using real,
+    // as "not contravariant with" `Foo::doFoo(Exception $e)`, using real,
     // already-registered Exception-hierarchy classes from the vendored
-    // phpstorm-stubs corpus rather than made-up ones.
+    // phpstorm-stubs rather than made-up ones.
     let d = diagnostics_for(
         r#"<?php
             class Foo {
@@ -1080,10 +1058,9 @@ fn phpstan_readonly_property_assign_flags_writes_outside_the_constructor() {
     assert_eq!(readonly_hits, 2, "expected both writes flagged, got: {d:?}");
 }
 
-// Real corpus find (`cyclonedx/cyclonedx-library`'s own
-// `Component::__clone()`): PHP 8.3 added a real, deliberate exception for
-// reassigning a `readonly` property once from within the declaring
-// class's own `__clone()` - a "deep clone" idiom, not a bug.
+// PHP 8.3 added a deliberate exception for reassigning a `readonly`
+// property once from within the declaring class's own `__clone()` - a
+// "deep clone" idiom, not a bug.
 #[test]
 fn a_readonly_reassignment_inside_clone_is_allowed_on_php_8_3_plus() {
     let d = diagnostics_for_with(
@@ -1201,8 +1178,8 @@ fn a_property_with_no_readonly_tag_at_all_is_never_flagged_for_a_setter_write() 
     );
 }
 
-// Phase 41 follow-up: `@phpstan-immutable` on the *class*, not the
-// property - `Registry::class_is_immutable`.
+// `@phpstan-immutable` on the class, not the property -
+// `Registry::class_is_immutable`.
 
 #[test]
 fn a_property_of_a_phpstan_immutable_class_written_outside_the_constructor_is_flagged() {
@@ -1271,7 +1248,7 @@ fn an_ordinary_class_without_any_immutable_tag_is_unaffected_by_class_is_immutab
     );
 }
 
-// Phase 64: narrowing a method's own visibility on override is a real,
+// Narrowing a method's own visibility on override is a real,
 // unconditional PHP fatal error (confirmed directly against real `php`:
 // "Access level to Child::foo() must be public (as in class Base)").
 #[test]
@@ -1348,7 +1325,7 @@ fn overriding_a_private_ancestor_method_is_never_flagged_as_narrowing() {
     );
 }
 
-// Phase 64: `method.nonStatic`/`method.static` - real PHPStan's own
+// `method.nonStatic`/`method.static` - real PHPStan's own
 // `OverridingMethodRule` requires an override to match its ancestor's
 // own static-ness exactly, either direction.
 
@@ -1411,15 +1388,11 @@ fn implementing_a_static_interface_method_non_statically_is_flagged() {
     );
 }
 
-// Real bug found and fixed while building the check above: a static
-// method supplied only via a used trait (never redeclared by the using
-// class itself) wasn't recognized as static at all when checking whether
-// it correctly overrides a static ancestor method - `static_methods`
-// wasn't trait-flattening-aware the way `abstract_methods` already was.
-// Real corpus false positive this fixes: `Symfony\Component\Cache\
-// Adapter\RedisAdapter` (`use RedisTrait;`, whose own `createConnection()`
-// is `static`) was flagged as a non-static override of `AbstractAdapter::
-// createConnection()`.
+// A static method supplied only via a used trait (never redeclared by
+// the using class itself) must be recognized as static when checking
+// whether it correctly overrides a static ancestor method -
+// `static_methods` needs to be trait-flattening-aware the way
+// `abstract_methods` already is.
 #[test]
 fn a_static_method_supplied_only_via_a_used_trait_is_never_flagged_as_a_non_static_override() {
     let d = diagnostics_for(
@@ -1435,7 +1408,7 @@ fn a_static_method_supplied_only_via_a_used_trait_is_never_flagged_as_a_non_stat
     );
 }
 
-// Phase 64: the general (non-`__construct`) case of
+// The general (non-`__construct`) case of
 // `method.abstractOverridingNonAbstract` - making a non-abstract
 // ancestor method abstract in the override.
 
@@ -1501,7 +1474,7 @@ fn overriding_a_non_abstract_method_non_abstractly_is_never_flagged_as_abstract_
     );
 }
 
-// Phase 64: an override with fewer parameters than its ancestor is a
+// An override with fewer parameters than its ancestor is a
 // real, unconditional PHP fatal error (confirmed directly: "Declaration
 // of Child::foo(int $a): void must be compatible with Base::foo(int $a,
 // int $b): void").
@@ -1534,7 +1507,7 @@ fn an_override_missing_a_variadic_ancestor_tail_is_never_flagged() {
     );
 }
 
-// Phase 64: a parameter the ancestor made optional can never become
+// A parameter the ancestor made optional can never become
 // required on override - a real, unconditional PHP fatal error
 // (confirmed directly: "Declaration of Child::foo(int $a, int $b): void
 // must be compatible with Base::foo(int $a, int $b = 0): void").
@@ -1582,10 +1555,9 @@ fn an_override_adding_its_own_extra_optional_parameter_is_never_flagged() {
     );
 }
 
-// Phase 64's own still-open list: by-ref/variadic-contravariance
-// mismatches - both confirmed directly via `php -l` as real,
-// unconditional fatal errors ("Declaration of Child::foo(...) must be
-// compatible with Base::foo(...)").
+// By-ref/variadic-contravariance mismatches - both confirmed directly
+// via `php -l` as real, unconditional fatal errors ("Declaration of
+// Child::foo(...) must be compatible with Base::foo(...)").
 
 #[test]
 fn an_override_dropping_a_by_ref_parameter_is_flagged() {
@@ -1663,9 +1635,9 @@ fn widening_a_fixed_ancestor_parameter_to_variadic_on_override_is_never_flagged(
     );
 }
 
-// Phase 64's own still-open property-override half - each shape
-// confirmed directly via `php -r` as a real, unconditional fatal error
-// ("Cannot redeclare ... as ...", "Access level to ... must be ...").
+// The property-override half - each shape confirmed directly via
+// `php -r` as a real, unconditional fatal error ("Cannot redeclare ...
+// as ...", "Access level to ... must be ...").
 
 #[test]
 fn overriding_a_static_property_as_non_static_is_flagged() {
@@ -1710,7 +1682,7 @@ fn keeping_the_same_static_ness_on_override_is_never_flagged() {
     );
 }
 
-// Phase 64 Item 3: PHP 8.4 `final` property modifier.
+// PHP 8.4 `final` property modifier.
 
 #[test]
 fn overriding_a_final_property_is_flagged() {
@@ -1818,8 +1790,8 @@ fn a_final_private_promoted_property_does_not_restrict_a_subclass_redeclaring_th
     );
 }
 
-// Phase 64: `@final`'s own docblock-only sibling to the native-keyword
-// `final` checks above, for both methods and properties.
+// `@final`'s own docblock-only sibling to the native-keyword `final`
+// checks above, for both methods and properties.
 
 #[test]
 fn overriding_a_phpdoc_final_method_is_flagged_with_its_own_identifier_and_wording() {
@@ -1984,7 +1956,7 @@ fn overriding_a_phpdoc_final_promoted_constructor_property_is_flagged() {
     );
 }
 
-// Phase 64 Item 5: property `#[Override]` attribute.
+// Property `#[Override]` attribute.
 
 #[test]
 fn an_override_attribute_on_a_property_with_no_matching_ancestor_is_flagged() {
@@ -2152,11 +2124,11 @@ fn overriding_a_private_ancestor_property_is_never_flagged_for_any_mismatch() {
     );
 }
 
-// Phase 64 follow-up: a method a trait supplies but the class itself
-// never textually re-declares still needs override-compatibility
-// checking against an implemented interface/parent - confirmed
-// directly via `php -r` as a real, unconditional fatal error even
-// though the class body never mentions the method name at all.
+// A method a trait supplies but the class itself never textually
+// re-declares still needs override-compatibility checking against an
+// implemented interface/parent - confirmed directly via `php -r` as a
+// real, unconditional fatal error even though the class body never
+// mentions the method name at all.
 
 #[test]
 fn a_trait_supplied_method_narrowing_an_interface_parameter_type_is_flagged() {
@@ -2208,8 +2180,8 @@ fn a_trait_supplied_method_matching_an_interface_signature_is_never_flagged() {
     );
 }
 
-// Phase 64 Item 4: `check_one_method_override`'s own ancestor lookup
-// (`find_method_signature_prototype`) now prioritizes an immediately-
+// `check_one_method_override`'s own ancestor lookup
+// (`find_method_signature_prototype`) prioritizes an immediately-
 // implemented interface's own native declaration over an `extends`
 // parent's, and a used trait's own abstract declaration over the
 // `extends` parent when no immediate interface declares the method -
@@ -2360,10 +2332,9 @@ fn an_unimplemented_abstract_trait_method_is_not_flagged_by_the_trait_override_s
     );
 }
 
-// Phase 64 follow-up: PHP 8.3's `#[\Override]` attribute - the
-// unconditional-fatal-error direction only (a real override *missing*
-// the attribute is a real PHPStan opt-in rule, off by default and not
-// enabled in this project's own corpus config - not attempted).
+// PHP 8.3's `#[\Override]` attribute - the unconditional-fatal-error
+// direction only (a real override missing the attribute is a real
+// PHPStan opt-in rule, off by default - not attempted).
 
 #[test]
 fn an_override_attribute_with_no_matching_ancestor_method_is_flagged() {
@@ -2482,12 +2453,11 @@ fn a_plain_method_with_no_override_attribute_is_never_flagged() {
 
 #[test]
 fn an_override_attribute_on_a_standalone_trait_method_is_never_flagged_by_itself() {
-    // Real, previously-live bug found via this project's own corpus:
-    // a trait has no ancestor chain of its own at all - real PHP defers
+    // A trait has no ancestor chain of its own at all - real PHP defers
     // this whole check to whichever class eventually `use`s the trait
     // (confirmed directly: the identical trait method is fine when the
     // using class has a real ancestor, and only fatals - attributed to
-    // the *using class's* own method name - when it doesn't). Checking
+    // the using class's own method name - when it doesn't). Checking
     // the trait's own declaration in isolation must never flag it.
     let d = diagnostics_for(
         r#"<?php
@@ -2548,12 +2518,10 @@ fn an_override_attribute_on_a_trait_method_used_by_a_class_with_no_ancestor_is_f
 
 #[test]
 fn an_override_attribute_implementing_a_trait_s_own_abstract_method_is_never_flagged() {
-    // Real, previously-live bug found via this project's own corpus
-    // (`Psl\RandomSequence\MersenneTwisterSequence::twist()`): a class's
-    // own concrete method satisfying a *trait's own* abstract method
-    // declaration is a real override too, confirmed directly via
+    // A class's own concrete method satisfying a trait's own abstract
+    // method declaration is a real override too, confirmed directly via
     // `php -r` - `lookup_ancestor_method_with_owner` only ever walks
-    // extends/implements, never `uses`, so this needed its own check.
+    // extends/implements, never `uses`, so this needs its own check.
     let d = diagnostics_for(
         r#"<?php
             trait T {
@@ -2574,13 +2542,11 @@ fn an_override_attribute_implementing_a_trait_s_own_abstract_method_is_never_fla
 
 #[test]
 fn an_override_attribute_with_an_unresolved_interface_in_the_implements_chain_is_never_flagged() {
-    // Real, previously-live bug found via this project's own corpus
-    // (`CycloneDX\Composer\Plugin::activate()` implementing a real
-    // `Composer\Plugin\PluginInterface` this corpus doesn't vendor a
-    // copy of at all): "no matching parent method exists" can't be
-    // confidently claimed when part of the ancestor chain is a name this
-    // registry has no declaration for - "don't guess wrong", the same
-    // rule this project applies elsewhere.
+    // "no matching parent method exists" can't be confidently claimed
+    // when part of the ancestor chain is a name this registry has no
+    // declaration for (e.g. an interface this project doesn't vendor a
+    // copy of at all) - "don't guess wrong", the same rule this project
+    // applies elsewhere.
     let d = diagnostics_for(
         r#"<?php
             class Impl implements TotallyUnknownInterface {
@@ -2635,7 +2601,7 @@ fn an_override_attribute_with_a_real_but_still_wrong_ancestor_is_still_flagged()
     );
 }
 
-// Phase 42: `MethodThrowTypeCovarianceRule` - opt-in, off by default.
+// `MethodThrowTypeCovarianceRule` - opt-in, off by default.
 
 #[test]
 fn the_covariance_check_is_off_by_default() {
@@ -2872,7 +2838,7 @@ fn neither_side_having_a_throws_tag_at_all_is_never_flagged() {
     );
 }
 
-// Phase 64: `OverridingPropertyRule`'s native-type-variance half
+// `OverridingPropertyRule`'s native-type-variance half
 // (`property.nativeType`/`.missingNativeType`/`.extraNativeType`).
 
 #[test]
@@ -3029,7 +2995,7 @@ fn a_reordered_union_native_type_is_not_flagged_as_a_mismatch() {
     );
 }
 
-// Phase 48.E: `parameter.noParent`/`return.noParent` - a native `parent`
+// `parameter.noParent`/`return.noParent` - a native `parent`
 // type-hint on a class with no real `extends` ancestor at all.
 
 #[test]
