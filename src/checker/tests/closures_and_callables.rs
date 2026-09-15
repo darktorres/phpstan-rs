@@ -60,7 +60,7 @@ fn pest_file_local_uses_resolves_this_to_the_bound_class() {
 
 #[test]
 fn pest_file_local_uses_still_flags_a_real_undefined_method() {
-    // Regression guard: Finding 1's fix must not blanket-suppress
+    // The Pest `$this`-binding leniency above must not blanket-suppress
     // every diagnostic inside a Pest closure - only the "undefined
     // variable $this" one. A genuinely undefined method call on the
     // bound class should still be flagged.
@@ -196,11 +196,10 @@ fn this_is_available_inside_a_closure_literal_passed_to_closure_bind() {
 
 #[test]
 fn closure_bind_still_flags_a_real_bug_inside_the_bound_closure() {
-    // A plain empty class, not `stdClass` - Phase 34 Finding D
-    // exempts `stdClass` specifically from undefined-property
-    // checking (real PHP's own "arbitrary property bag" class), so
-    // this test needs an ordinary class to still prove `$this`-
-    // rebinding is actually checked.
+    // A plain empty class, not `stdClass` - `stdClass` is specifically
+    // exempted from undefined-property checking (PHP's own "arbitrary
+    // property bag" class), so this test needs an ordinary class to
+    // still prove `$this`-rebinding is actually checked.
     let d = diagnostics_for(
         r#"<?php
             class Empty4841 {}
@@ -491,10 +490,9 @@ fn first_class_callable_of_an_internal_function_is_flagged() {
 
 #[test]
 fn first_class_callable_does_not_flag_too_few_arguments() {
-    // A real, previously-plausible regression: naively dispatching
-    // the wrapped call through its own ordinary arm (which also runs
-    // check_args) would misread "no arguments were written" as
-    // "zero arguments were passed."
+    // Naively dispatching the wrapped call through its own ordinary arm
+    // (which also runs check_args) would misread "no arguments were
+    // written" as "zero arguments were passed."
     let d = diagnostics_for(
         r#"<?php
             function needsTwo(int $a, int $b): int { return $a + $b; }
@@ -506,9 +504,9 @@ fn first_class_callable_does_not_flag_too_few_arguments() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 35 from the architecture audit - none of PHP's real
-// "callable" shapes other than a literal Closure satisfied the
-// `callable` type hint.
+// PHP's other "callable" shapes (an invokable object, a string function
+// name, a two-element method array), not just a literal Closure, must
+// satisfy the `callable` type hint.
 
 #[test]
 fn callable_accepts_an_invokable_object() {
@@ -574,12 +572,11 @@ fn closure_type_hint_is_distinct_from_callable_and_still_rejects_a_string() {
 
 #[test]
 fn a_real_closure_arrow_fn_and_first_class_callable_all_satisfy_the_closure_type_hint() {
-    // Regression test for a real bug caught while implementing this
-    // fix: splitting `closure`/`callable` into distinct types left
-    // infer_expr still inferring a closure/arrow-fn literal (and
+    // Splitting `closure`/`callable` into distinct types must not leave
+    // `infer_expr` still inferring a closure/arrow-fn literal (and
     // first-class-callable syntax) as the old, undifferentiated
-    // Type::Callable, so a genuine closure literal stopped
-    // satisfying the now-stricter native `Closure` type hint.
+    // Type::Callable, or a genuine closure literal stops satisfying the
+    // stricter native `Closure` type hint.
     let d = diagnostics_for(
         r#"<?php
             function needsClosure(Closure $fn): void {}
@@ -593,10 +590,10 @@ fn a_real_closure_arrow_fn_and_first_class_callable_all_satisfy_the_closure_type
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 53: array_map's own contextual parameter-type injection - an
-// unhinted callback parameter is checked against the mapped array's
-// own real element type, not left as an always-lenient `Mixed`, so a
-// genuine bug inside the callback body itself is now caught.
+// array_map's contextual parameter-type injection - an unhinted callback
+// parameter is checked against the mapped array's real element type,
+// not left as an always-lenient `Mixed`, so a genuine bug inside the
+// callback body itself is caught.
 #[test]
 fn array_map_arrow_fn_callback_catches_an_undefined_method_on_the_injected_element_type() {
     let d = diagnostics_for(
