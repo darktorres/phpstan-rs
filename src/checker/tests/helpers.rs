@@ -3,33 +3,35 @@ use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::registry::Registry;
 
-/// Phase 58: `missingType.*` (this project's `MissingTypehintCheck`
-/// family - untyped params/properties/returns, bare `array`/`iterable`,
+/// `missingType.*` (this project's `MissingTypehintCheck` family -
+/// untyped params/properties/returns, bare `array`/`iterable`,
 /// non-generic use of a generic class) fires on almost any declaration
 /// that isn't fully, precisely typed - which describes the overwhelming
 /// majority of this whole suite's own minimal, deliberately-untyped
-/// fixtures, none of which were written with this family in mind. Real
-/// PHPStan's own test suite never hits this problem, since `RuleTestCase`
-/// instantiates exactly one rule at a time; this project's `Checker` runs
-/// every check unconditionally (see `checker::Diagnostic::level`'s own
-/// doc comment - level is metadata for the CLI's own post-hoc `--level`
-/// filtering, not something that gates whether a check runs at all), so
-/// `diagnostics_for`/`diagnostics_for_with` filtering this one family out
-/// by default is what keeps every pre-existing test's own "diagnostics_for
-/// returns exactly what this fixture is actually testing" assumption
-/// true, without touching any of those tests' own content. Real CLI usage
-/// is unaffected either way - `main.rs`'s own default (`unwrap_or(MAX_LEVEL)`)
-/// already surfaces every level-6 diagnostic, `missingType.*` included,
-/// with no equivalent test-only exclusion. A test that specifically wants
-/// to see this family (`checker/tests/missing_typehint.rs`) uses
-/// `all_diagnostics_for` instead.
+/// fixtures, none of which were written with this family in mind.
+/// PHPStan's own test suite never hits this problem, since
+/// `RuleTestCase` instantiates exactly one rule at a time; this
+/// project's `Checker` runs every check unconditionally (see
+/// `checker::Diagnostic::level`'s own doc comment - level is metadata
+/// for the CLI's own post-hoc `--level` filtering, not something that
+/// gates whether a check runs at all), so
+/// `diagnostics_for`/`diagnostics_for_with` filtering this one family
+/// out by default is what keeps every pre-existing test's own
+/// "diagnostics_for returns exactly what this fixture is actually
+/// testing" assumption true, without touching any of those tests' own
+/// content. CLI usage is unaffected either way - `main.rs`'s own
+/// default (`unwrap_or(MAX_LEVEL)`) already surfaces every level-6
+/// diagnostic, `missingType.*` included, with no equivalent test-only
+/// exclusion. A test that specifically wants to see this family
+/// (`checker/tests/missing_typehint.rs`) uses `all_diagnostics_for`
+/// instead.
 fn is_missing_typehint_diagnostic(d: &Diagnostic) -> bool {
     d.identifier.starts_with("missingType.")
 }
 
-/// Phase 41/82's transitive-purity payoff (`checker::noop::
+/// The transitive-purity payoff (`checker::noop::
 /// check_pure_call_without_effect`) fires on a bare, discarded call to
-/// *any* declaration this project's own registry can prove effect-free -
+/// any declaration this project's own registry can prove effect-free -
 /// which, unlike the family it sits alongside
 /// (`logicalXor.resultUnused`/`booleanAnd.resultUnused`/
 /// `booleanOr.resultUnused`/`ternary.resultUnused`, deliberately left
@@ -51,7 +53,7 @@ fn is_pure_call_result_unused_diagnostic(d: &Diagnostic) -> bool {
     )
 }
 
-/// Phase 45 (item 11, 45A): `TooWideFunctionReturnTypehintRule`'s own
+/// `TooWideFunctionReturnTypehintRule`'s own
 /// `return.unusedType` fires unconditionally for a plain function (no
 /// opt-in gate the way the method-side variant has) whenever a declared
 /// `Union` return-type member is never actually produced by the analyzed
