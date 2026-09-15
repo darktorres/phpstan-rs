@@ -1,8 +1,8 @@
-//! `@phpstan-assert`/`-if-true`/`-if-false` tags - real PHPStan's
-//! custom-assertion-function convention. Real corpus shape: phpunit's
-//! own accessor pair `hasTestFilesFile(): bool` (tagged `@phpstan-assert
-//! -if-true !null $this->testFilesFile`) then `testFilesFile(): string`'s
-//! own body guarding on it.
+//! `@phpstan-assert`/`-if-true`/`-if-false` tags - PHPStan's
+//! custom-assertion-function convention: an accessor pair like
+//! `hasTestFilesFile(): bool` (tagged `@phpstan-assert-if-true !null
+//! $this->testFilesFile`) then `testFilesFile(): string`'s own body
+//! guarding on it.
 
 use super::helpers::*;
 
@@ -125,11 +125,11 @@ fn an_unconditional_assert_tag_narrows_unconditionally_after_the_call() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session: the bare, unconditional
-// `@phpstan-assert` lookup for an instance `MethodCall` required the
-// receiver's own type to be literally `Type::Object`, silently skipping
-// the narrowing for a `Union`/`Intersection` receiver - a value narrowed
-// via `instanceof` from an unrelated interface, then called through.
+// The bare, unconditional `@phpstan-assert` lookup for an instance
+// `MethodCall` must not require the receiver's type to be literally
+// `Type::Object`, or it silently skips the narrowing for a
+// `Union`/`Intersection` receiver - a value narrowed via `instanceof`
+// from an unrelated interface, then called through.
 #[test]
 fn an_unconditional_assert_tag_narrows_through_an_intersection_receiver() {
     let d = diagnostics_for(
@@ -155,14 +155,14 @@ fn an_unconditional_assert_tag_narrows_through_an_intersection_receiver() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real bug found and fixed this session: `AssertTarget::ThisProp`'s own
-// "not already narrowed" fallback (`assert_target_key_and_current`,
-// `checker/narrowing.rs`) matched the receiver's own type against
-// `Type::Object` directly, silently falling to `Type::Mixed` (discarding
-// the property's real declared type entirely) for a `Union`/
-// `Intersection` receiver - reachable even through the *already*-correct
-// `ThisSelf`/branch-conditional call site above, since this fallback
-// re-infers the receiver's own type independently.
+// `AssertTarget::ThisProp`'s "not already narrowed" fallback
+// (`assert_target_key_and_current`, `checker/narrowing.rs`) must not
+// match the receiver's type against `Type::Object` directly, or it
+// silently falls to `Type::Mixed` (discarding the property's real
+// declared type entirely) for a `Union`/`Intersection` receiver -
+// reachable even through the already-correct `ThisSelf`/
+// branch-conditional call site above, since this fallback re-infers the
+// receiver's type independently.
 #[test]
 fn assert_if_true_narrows_a_this_property_through_a_union_typed_receiver() {
     // Asserts the narrowed *type* directly (`assertType`), not merely the
@@ -214,11 +214,9 @@ fn a_negated_assert_excludes_the_type_instead_of_narrowing_to_it() {
 
 #[test]
 fn assert_if_true_on_a_method_narrows_a_union_typed_receiver() {
-    // Real corpus shape: Doctrine ORM's own `AssociationMapping::
-    // isToOneOwningSide(): bool` (`@phpstan-assert-if-true
-    // OneToOneOwningSideMapping|ManyToOneAssociationMapping $this`),
-    // called on a variable typed as the union of every concrete mapping
-    // subclass - every one of which inherits the identical method.
+    // A method tagged `@phpstan-assert-if-true A|B $this`, called on a
+    // variable typed as the union of every concrete subclass - every one
+    // of which inherits the identical method.
     let d = diagnostics_for(
         r#"<?php
             class Base {
@@ -240,13 +238,11 @@ fn assert_if_true_on_a_method_narrows_a_union_typed_receiver() {
 
 #[test]
 fn narrowing_a_union_to_a_transitively_implemented_interface_keeps_every_matching_member() {
-    // Real corpus shape: Doctrine ORM's own `@phpstan-assert-if-true
-    // ToOneAssociationMapping $this` (an interface every concrete mapping
-    // class implements only *transitively*, through an intermediate
-    // abstract class, never directly) - narrowing a union against it
-    // must keep every member that's *assignable* to the interface, not
-    // just ones that equal it structurally, or every member's own
-    // additional properties/methods are lost outright.
+    // An interface a concrete class implements only transitively,
+    // through an intermediate abstract class, never directly - narrowing
+    // a union against it must keep every member that's assignable to
+    // the interface, not just ones that equal it structurally, or every
+    // member's additional properties/methods are lost outright.
     let d = diagnostics_for(
         r#"<?php
             interface Marker {}
@@ -290,8 +286,8 @@ fn without_narrowing_the_union_typed_receiver_is_still_flagged() {
     assert_eq!(d[0].identifier, "property.notFound");
 }
 
-// Phase 48.7: `AssertRuleHelper`'s existence half - the tag's own type
-// text, not just its target, is checked for unknown classes.
+// `AssertRuleHelper`'s existence half - the tag's type text, not just
+// its target, is checked for unknown classes.
 
 #[test]
 fn an_assert_tag_naming_an_unknown_class_is_flagged() {
@@ -338,7 +334,7 @@ fn an_assert_tag_naming_a_known_class_is_not_flagged_for_existence() {
     );
 }
 
-// Phase 48.C: `AssertRuleHelper`'s deeper declaration-validity checks.
+// `AssertRuleHelper`'s deeper declaration-validity checks.
 
 #[test]
 fn an_assert_target_naming_a_nonexistent_parameter_is_flagged() {
