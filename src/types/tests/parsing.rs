@@ -17,12 +17,10 @@ fn union_parses_flat() {
     );
 }
 
-// Phase 32 Finding H, real shape: `end()`'s real stub is `function
-// end(object|array &$array): mixed {}` with a never-updated
-// `@return mixed|false` doc comment - `Mixed` already includes every
-// other possible value, so a stray `False` (or `Null`) member sitting
-// alongside it fails an ordinary argument-compatibility check on its
-// own, even though the whole union is vacuously satisfiable.
+// `Mixed` already includes every other possible value, so a stray
+// `False` (or `Null`) member sitting alongside it fails an ordinary
+// argument-compatibility check on its own, even though the whole union
+// is vacuously satisfiable.
 #[test]
 fn a_union_containing_mixed_collapses_to_plain_mixed() {
     assert_eq!(parse_type_string("mixed|false"), Type::Mixed);
@@ -39,13 +37,10 @@ fn an_ordinary_union_with_no_mixed_member_is_unaffected() {
 
 #[test]
 fn quoted_literal_string_union_members_are_string_literals_not_class_names() {
-    // Real, previously-live bug found via real code in this
-    // project's own verification corpus (`@param 'ASC'|'DESC' $dir`,
-    // a real, documented PHPStan/Psalm literal-string-union
-    // convention): without recognizing the quotes, `'ASC'` fell
-    // through to the generic-class branch and became a literal
-    // class named `'ASC'` (quotes included), then got nonsensically
-    // namespace-qualified once that machinery ran (`Piwigo\Db\'ASC'`).
+    // Without recognizing the quotes, `'ASC'` falls through to the
+    // generic-class branch and becomes a literal class named `'ASC'`
+    // (quotes included), then gets nonsensically namespace-qualified
+    // once that machinery runs.
     assert_eq!(
         parse_type_string("'ASC'|'DESC'"),
         Type::Union(vec![
@@ -72,16 +67,13 @@ fn intersection_parses_flat() {
 
 #[test]
 fn a_leading_backslash_is_preserved_by_the_bare_parser() {
-    // parse_type_string alone has no namespace context - it's not
-    // this layer's job to decide what an absolute reference resolves
-    // to, only to preserve the fact that it *is* absolute for
+    // parse_type_string alone has no namespace context - it's not this
+    // layer's job to decide what an absolute reference resolves to,
+    // only to preserve the fact that it *is* absolute for
     // registry::resolve_names_in_type to act on later. Stripping the
-    // backslash here (the old, buggy behavior this test used to
-    // assert) permanently lost that distinction before namespace
-    // resolution ever ran, silently mis-qualifying every absolute
-    // reference as if it were relative - see
-    // registry.rs's own `a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced`
-    // for the real, end-to-end regression this caused.
+    // backslash here would silently mis-qualify every absolute
+    // reference as if it were relative - see registry.rs's
+    // `a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced`.
     assert_eq!(
         parse_type_string("\\App\\Foo"),
         Type::Object("\\App\\Foo".to_string(), Vec::new())
@@ -106,12 +98,10 @@ fn phpdoc_array_shorthand_parses() {
     );
 }
 
-// Phase 53: a real corpus check (guzzlehttp/psr7's own `@param
-// (string|int)[] $keys`) found this array-shorthand form - the element
-// type itself is a parenthesized union/intersection, not a single bare
-// name - fell through to the generic class-name branch and got
-// nonsensically namespace-qualified, the same bug class `$this`/
-// `self::RFC_*` above already had their own dedicated fixes for.
+// Array-shorthand form where the element type itself is a parenthesized
+// union/intersection, not a single bare name - must not fall through to
+// the generic class-name branch and get nonsensically
+// namespace-qualified.
 #[test]
 fn phpdoc_array_shorthand_with_a_parenthesized_union_element_type_parses() {
     assert_eq!(
@@ -137,14 +127,12 @@ fn phpdoc_array_shorthand_with_a_parenthesized_intersection_element_type_parses(
     );
 }
 
-// Real, serious corpus find (nikic/php-parser's own `@param array{int,
-// string, string}[] $patches`): `try_parse_array_shape`/`try_parse_
-// object_shape` were only ever tried once, against the *original*,
-// un-stripped string - a shape wrapped in this exact array-shorthand
-// suffix never ends with the shape's own closing `}` at that point (it
-// ends with `[]`), so it fell straight through to the generic class-name
-// branch and mangled the shape's own literal text into a bogus,
-// namespace-qualified "class name".
+// `try_parse_array_shape`/`try_parse_object_shape` must be tried against
+// more than just the original, un-stripped string - a shape wrapped in
+// an array-shorthand suffix never ends with the shape's own closing `}`
+// at that point (it ends with `[]`), so it would fall straight through
+// to the generic class-name branch and mangle the shape's literal text
+// into a bogus, namespace-qualified "class name".
 #[test]
 fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
     assert_eq!(
@@ -160,13 +148,12 @@ fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
     );
 }
 
-// Phase 50: `canonical_int_key` (real PHP's own array-key canonicalization
-// rule, confirmed against `ConstantStringType::toArrayKey()`) - a negative
-// key canonicalizes to a real int key, but a leading-zero string does not
-// (real PHP itself keeps `"01"` as a string key), unlike the bare
-// `str::parse::<i64>()` this project's own shape-key literal used to rely
-// on (`"01".parse::<i64>() == Ok(1)` - Rust's own parser is lenient about
-// leading zeros/`"-0"` in a way real PHP's own canonicalization isn't).
+// `canonical_int_key` implements PHP's array-key canonicalization rule -
+// a negative key canonicalizes to a real int key, but a leading-zero
+// string does not (PHP keeps `"01"` as a string key), unlike a bare
+// `str::parse::<i64>()` (`"01".parse::<i64>() == Ok(1)` - Rust's parser
+// is lenient about leading zeros/`"-0"` in a way PHP's canonicalization
+// isn't).
 
 #[test]
 fn canonical_int_key_accepts_zero_and_ordinary_positive_and_negative_integers() {
@@ -219,9 +206,9 @@ fn a_leading_zero_shape_key_stays_a_string_literal_not_an_int() {
 
 #[test]
 fn an_explicit_zero_key_collides_with_and_overwrites_an_earlier_positional_field() {
-    // Phase 50: `try_parse_array_shape` never used to merge two shape
-    // fields whose keys canonicalize to the same value - this would have
-    // silently produced two separate fields both keyed "0" before the fix.
+    // `try_parse_array_shape` must merge two shape fields whose keys
+    // canonicalize to the same value, not silently produce two separate
+    // fields both keyed "0".
     assert_eq!(
         parse_type_string("array{int, 0: string}"),
         Type::ArrayShape(vec![("0".to_string(), Type::String, false)])
@@ -258,8 +245,8 @@ fn an_object_shape_wrapped_in_array_shorthand_parses() {
     );
 }
 
-// Phase 80 follow-up: `OffsetAccessType` - `SomeShape['key']` extracts
-// one field's own value type.
+// `OffsetAccessType` - `SomeShape['key']` extracts one field's value
+// type.
 #[test]
 fn offset_access_type_on_an_array_shape_extracts_the_field_type() {
     assert_eq!(
@@ -351,8 +338,8 @@ fn generic_array_with_one_type_arg_parses_as_value_type() {
 
 #[test]
 fn generic_array_with_key_and_value_uses_both() {
-    // Phase 50: the key argument used to be silently discarded - now
-    // it's a real part of the resulting Type::Array.
+    // The key argument is a real part of the resulting Type::Array, not
+    // silently discarded.
     assert_eq!(
         parse_type_string("array<string, int>"),
         Type::Array(Box::new(Type::String), Box::new(Type::Int))
@@ -370,17 +357,14 @@ fn generic_user_class_keeps_base_name_and_type_args() {
     );
 }
 
-// Phase 54: real PHPStan's own call-site variance annotation syntax
-// (`covariant Foo`/`contravariant Foo`/`*`) inside a generic argument
-// list - confirmed real and current against `phpdoc-parser`'s own
-// `GenericTypeNode` in `vendor/phpstan-src`. Direct parser-level
-// assertions, independent of any downstream consumer, since the
+// PHPStan's call-site variance annotation syntax (`covariant Foo`/
+// `contravariant Foo`/`*`) inside a generic argument list. Direct
+// parser-level assertions, independent of any downstream consumer, since
 // checker-level tests exercising this (`checker::tests::
 // generics_and_templates`) can pass "by accident" if parsing regresses
-// to treating the whole annotated argument as one bogus, unrelated
-// class name - a real gap this test file's own revert-verification
-// found: `Collection<contravariant T>` degrading to a literal class
-// named `"contravariant T"` still produced zero diagnostics downstream,
+// to treating the whole annotated argument as one bogus, unrelated class
+// name: `Collection<contravariant T>` degrading to a literal class named
+// `"contravariant T"` would still produce zero diagnostics downstream,
 // for an entirely different (and wrong) reason.
 
 #[test]
@@ -474,16 +458,14 @@ fn dnf_type_group_resolves_to_a_real_intersection_inside_the_union() {
     assert_eq!(members[1], Type::Null);
 }
 
-// A round of Piwigo-corpus bucketing found real PHPStan's own
-// conditional return type syntax (`@return ($action is 'send' ?
-// list<string> : list<UserMailNotification>)`,
-// NotificationByMailSender's own real shape) fell into the DNF-group
-// unwrap right above and got mangled into a nonsense, namespace-
-// qualified "class name". Phase 80 follow-up: a bare `$param` subject
-// now parses into a real, lazily-resolved `Type::Conditional` instead of
-// eagerly unioning both branches at parse time - `resolve_conditional`
-// (wired into `Checker::infer_call_return_type`) picks the real branch
-// per call site once the bound argument type is known.
+// PHPStan's conditional return type syntax (`@return ($action is 'send'
+// ? list<string> : list<UserMailNotification>)`) must not fall into the
+// DNF-group unwrap above and get mangled into a nonsense,
+// namespace-qualified "class name". A bare `$param` subject parses into
+// a lazily-resolved `Type::Conditional` instead of eagerly unioning both
+// branches at parse time - `resolve_conditional` (wired into
+// `Checker::infer_call_return_type`) picks the real branch per call site
+// once the bound argument type is known.
 #[test]
 fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
     let ty = parse_type_string("($action is 'send' ? list<string> : list<int>)");
@@ -517,10 +499,10 @@ fn conditional_return_type_syntax_with_is_not_sets_negated() {
     assert!(negated);
 }
 
-// Real PHPStan also allows a non-parameter type-expression subject (e.g.
-// a template name) - not modeled here, so this project falls back to the
-// same eager "union both branches" leniency it always used, rather than
-// guessing at a shape it can't represent.
+// PHPStan also allows a non-parameter type-expression subject (e.g. a
+// template name) - not modeled here, so this falls back to the eager
+// "union both branches" leniency rather than guessing at a shape it
+// can't represent.
 #[test]
 fn conditional_return_type_syntax_with_a_non_parameter_subject_falls_back_to_a_union() {
     let ty = parse_type_string("(T is 'send' ? list<string> : list<int>)");
@@ -531,26 +513,20 @@ fn conditional_return_type_syntax_with_a_non_parameter_subject_falls_back_to_a_u
 }
 
 // A docblock-parsed `list<int>` builds its key as a literal `Type::Int`
-// (needed so a later marker-stripping op, e.g. `array_diff()`'s own
-// result, still shows a known `array<int, T>` rather than collapsing to
-// a keyless `array<T>` - verified via dumpType()), while every
-// runtime-inferred list this project builds (`array_values()`, `sort()`,
-// ...) uses the generic `unknown_array_key()` sentinel for that same
-// position instead (deliberately - a list's key is always int *by
-// definition*, so `upgrade_array_to_list`'s own doc comment treats
-// encoding it twice as redundant). Both printed identically as
-// `list<int>` (`describe_accessory_intersection` hides a list's key
-// unconditionally) but weren't structurally `==`-equal, and worse,
-// `is_subtype`'s own generic `Array` key check is directionally
-// asymmetric between the two representations
+// (needed so a later marker-stripping op, e.g. `array_diff()`'s result,
+// still shows a known `array<int, T>` rather than collapsing to a
+// keyless `array<T>`), while every runtime-inferred list this project
+// builds (`array_values()`, `sort()`, ...) uses the generic
+// `unknown_array_key()` sentinel for that same position instead
+// (deliberately - a list's key is always int by definition, so encoding
+// it twice would be redundant). Both print identically as `list<int>`
+// but aren't structurally `==`-equal, and `is_subtype`'s generic `Array`
+// key check is directionally asymmetric between the two representations
 // (`is_subtype(unknown_array_key(), Int)` is false, the reverse true),
-// so a genuine runtime `list<int>` failed to satisfy an otherwise-
-// identical docblock-declared `list<int>` parameter/return type.
-// Corpus-verified via `SearchService::getRegularSearchResults()`
-// printing a real return-type mismatch as `list<int>|list<int>|array|
-// array{}` - the two `list<int>` members were exactly this
-// docblock-vs-runtime pair, which `union_types`'s own dedup (via
-// `types_equal_for_union`) now also collapses into one.
+// so a genuine runtime `list<int>` would otherwise fail to satisfy an
+// identical docblock-declared `list<int>` parameter/return type -
+// `union_types`'s dedup (via `types_equal_for_union`) must collapse them
+// into one.
 #[test]
 fn a_docblock_parsed_list_is_a_mutual_subtype_of_the_runtime_inferred_shape() {
     let docblock_list = parse_type_string("list<int>");
@@ -594,18 +570,14 @@ fn a_plain_list_is_not_a_subtype_of_a_non_empty_list_of_the_same_element_type() 
     assert!(!is_subtype(&runtime_plain_list, &docblock_non_empty));
 }
 
-// Phase 30, real shape: Doctrine DBAL's own `@param Closure(self):T
-// $func` (`Connection::transactional()`) - the callable-shape syntax
-// wasn't recognized at all, so the whole literal string
-// `"Closure(self):T"` fell through to the generic class-name branch
-// and got mangled into a bogus, namespace-qualified "class name"
-// once resolved against the current file's own namespace.
-//
-// Phase 53 Sub-item A: this syntax is now parsed into a real, shaped
-// `Type::Callable(Some(sig))` instead of degrading to the bare marker -
-// `self`/`T` stay unresolved `Object` references here (only `parse_
-// type_string` itself runs in this test, not the later name-resolution/
-// template-marking passes), but the structural shape itself is real.
+// A `Closure(self):T`-shaped callable-shape doc member must not fall
+// through to the generic class-name branch and get mangled into a
+// bogus, namespace-qualified "class name" - it parses into a real,
+// shaped `Type::Callable(Some(sig))` instead of degrading to the bare
+// marker. `self`/`T` stay unresolved `Object` references here (only
+// `parse_type_string` itself runs in this test, not the later
+// name-resolution/template-marking passes), but the structural shape
+// itself is real.
 #[test]
 fn closure_shape_syntax_parses_into_a_real_shape() {
     assert_eq!(
@@ -644,18 +616,16 @@ fn a_class_name_merely_starting_with_closure_is_not_mistaken_for_the_callable_sh
     );
 }
 
-// Real corpus shape: amphp/amp's own `@param \Closure(CancelledException)
-// $callback` - fully qualified with a leading `\`, which used to defeat
-// the callable-shape check entirely (`"\closure(...".starts_with(
+// A fully-qualified `\Closure(CancelledException)` (leading `\`) must
+// not defeat the callable-shape check (`"\closure(...".starts_with(
 // "closure(")` is false), falling through to the generic-class branch
 // and mangling into a bogus `Type::Object("Closure(CancelledException)",
-// [])` "class" (reported as a false `class.notFound`).
+// [])` "class".
 //
 // `\Closure(CancelledException)` itself has no trailing `: ReturnType` -
-// the real phpdoc-parser grammar's own mandatory piece - so it still
-// degrades to the bare marker exactly as before; `\Closure(int, string):
-// bool` does have one, so (Phase 53 Sub-item A) it now parses into a
-// real shape instead.
+// a mandatory piece of the grammar - so it still degrades to the bare
+// marker; `\Closure(int, string): bool` does have one, so it parses into
+// a real shape instead.
 #[test]
 fn fully_qualified_closure_shape_syntax_with_no_return_type_degrades_to_plain_callable() {
     assert_eq!(
@@ -672,13 +642,11 @@ fn fully_qualified_closure_shape_syntax_with_a_return_type_parses_into_a_real_sh
     );
 }
 
-// Real corpus shape: PHPUnit's own literal-string union `'->'|'::' `
-// (documenting a real property-access-vs-static-call operator) - a
-// bracket-shaped character *inside* one quoted member (the `>` in
-// `'->'.`) used to be read as a real closing bracket by `split_top_level`,
-// permanently corrupting its own depth counter and swallowing the `|`
-// separator for the rest of the string entirely, mangling the whole
-// thing into the single, nonsensical `Type::StringLiteral("->'|'::")`.
+// A bracket-shaped character *inside* one quoted union member
+// (`'->'|'::'`, the `>` in `'->'`) must not be read as a real closing
+// bracket by `split_top_level`, or it corrupts the depth counter and
+// swallows the `|` separator for the rest of the string, mangling the
+// whole thing into a single nonsensical `Type::StringLiteral`.
 #[test]
 fn a_quoted_literal_containing_a_bracket_shaped_character_does_not_corrupt_the_union_split() {
     assert_eq!(
