@@ -1,22 +1,16 @@
-//! Phase 20 Finding D: an automated regression-guard benchmark - the gap
-//! `run_incremental_bench` (main.rs, the existing `incremental-bench` CLI
-//! command) doesn't fill on its own, since it's a manual, human-run tool,
-//! not something CI or a test suite runs automatically. Exactly the kind
-//! of tooling absence that let a real quadratic blowup (Phase 11) ship
-//! unnoticed until it happened to hang on a real file.
+//! An automated regression-guard benchmark - the gap `run_incremental_bench`
+//! (main.rs, the existing `incremental-bench` CLI command) doesn't fill
+//! on its own, since it's a manual, human-run tool, not something CI or
+//! a test suite runs automatically.
 //!
 //! Benchmarks the same "full load, then check everything" shape
 //! `run_incremental_bench`'s own "full load" half already exercises,
-//! against this project's own in-repo vendored corpus
+//! against this project's in-repo vendored corpus
 //! (`vendor/phpstorm-stubs` + `vendor/phpstan-src/src`, 2351 files
-//! combined) rather than the real Piwigo corpus this project's own
-//! false-positive-hunting sessions use - Piwigo lives outside this repo
-//! (`~/piwigo17-rewrite`, machine-specific), so it isn't available to CI
-//! or any other machine a benchmark might run on. The vendored corpus is
-//! real-world-shaped PHP (not synthetic), already embedded in the binary
-//! via `build.rs` for an unrelated reason (Finding 4's stub-class
-//! pipeline), and guaranteed to be present wherever this repo is checked
-//! out (module the submodule-init guard `build.rs` itself now enforces).
+//! combined) - real-world-shaped PHP (not synthetic), already embedded
+//! in the binary via `build.rs` for the stub-class pipeline, and
+//! guaranteed to be present wherever this repo is checked out (modulo
+//! the submodule-init guard `build.rs` itself enforces).
 //!
 //! Source files are read once, up front, outside the benchmarked
 //! closure - each `Criterion::bench_function` iteration re-runs only the
@@ -24,10 +18,10 @@
 //! which would otherwise dominate the measurement and mask the actual
 //! parse/index/check throughput this benchmark exists to track.
 //!
-//! Criterion's own headline feature - comparing a run against its last
+//! Criterion's headline feature - comparing a run against its last
 //! recorded baseline (stored under `target/criterion/`) and flagging a
-//! statistically meaningful regression - is the actual "caught by CI
-//! rather than by chance" mechanism this finding calls for.
+//! statistically meaningful regression - is the mechanism that catches
+//! a real slowdown via CI rather than by chance.
 
 use std::path::{Path, PathBuf};
 
