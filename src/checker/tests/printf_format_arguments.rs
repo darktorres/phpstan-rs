@@ -13,11 +13,11 @@ fn sprintf_flags_too_few_arguments_for_its_own_placeholders() {
     );
 }
 
-// Phase 72: `literal_string_value` now folds a statically-foldable
-// `Concat` chain (every operand a literal, or a parenthesized grouping
-// of one) into one owned string, so a format string built by
-// concatenating nothing but literals is understood exactly the same as
-// if it had been written as one literal to begin with.
+// `literal_string_value` folds a statically-foldable `Concat` chain
+// (every operand a literal, or a parenthesized grouping of one) into one
+// owned string, so a format string built by concatenating nothing but
+// literals is understood exactly the same as if it had been written as
+// one literal to begin with.
 #[test]
 fn sprintf_understands_a_statically_foldable_concatenated_format_string() {
     let d = diagnostics_for(r#"<?php sprintf('%s and ' . '%s', "only one");"#);
@@ -45,11 +45,11 @@ fn sprintf_still_skips_a_concatenation_with_a_real_variable_operand() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 69: real PHPStan's `PrintfParametersRule` flags `sprintf`/
-// `printf` unconditionally at level 0 for an exact placeholder/argument
-// count mismatch - "too many" is a real, reachable bug (e.g. a stray
-// extra argument left over from a refactor), not something real PHP's
-// runtime leniency should suppress in static analysis.
+// Mirrors PHPStan's `PrintfParametersRule`: `sprintf`/`printf` are
+// flagged unconditionally at level 0 for an exact placeholder/argument
+// count mismatch - "too many" is a reachable bug (e.g. a stray extra
+// argument left over from a refactor), not something PHP's runtime
+// leniency should suppress in static analysis.
 #[test]
 fn sprintf_flags_too_many_arguments_for_its_own_placeholders() {
     let d = diagnostics_for(r#"<?php sprintf("%s", "a", "b", "c");"#);
@@ -152,8 +152,8 @@ fn sprintf_skips_the_check_entirely_for_shapes_it_does_not_confidently_understan
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 69: positional specifiers (`%1$s`) - a real, common PHP idiom
-// for reordering arguments in localized message strings.
+// Positional specifiers (`%1$s`) - a common PHP idiom for reordering
+// arguments in localized message strings.
 
 #[test]
 fn a_purely_positional_format_string_missing_an_argument_is_flagged() {
@@ -220,8 +220,7 @@ fn a_position_referenced_by_two_different_specifiers_checks_both() {
     );
 }
 
-// Phase 69: wiring the existing sprintf/printf engine into
-// fprintf/vsprintf/vprintf.
+// The sprintf/printf engine is wired into fprintf/vsprintf/vprintf.
 
 #[test]
 fn fprintf_checks_its_format_string_as_the_second_argument() {
@@ -247,14 +246,13 @@ fn vsprintf_checks_a_literal_array_argument() {
     );
 }
 
-// Phase 50: a non-trailing optional field means the shape is only
-// `Maybe`-a-list (real PHPStan's own `ConstantArrayTypeBuilder`
-// semantics) - if the optional field is genuinely absent, the remaining
-// keys aren't sequential from zero at all. vsprintf/vprintf's own
-// arg-count check must stay silent here (favoring a false negative over
-// a false positive), not assume the shape is list-like the way it used
-// to (key-index matching alone, ignoring each field's own `optional`
-// flag).
+// A non-trailing optional field means the shape is only `Maybe`-a-list
+// (mirrors PHPStan's `ConstantArrayTypeBuilder` semantics) - if the
+// optional field is genuinely absent, the remaining keys aren't
+// sequential from zero at all. vsprintf/vprintf's arg-count check must
+// stay silent here (favoring a false negative over a false positive),
+// not assume the shape is list-like via key-index matching alone,
+// ignoring each field's `optional` flag.
 
 #[test]
 fn vsprintf_with_a_non_trailing_optional_shape_field_is_never_flagged() {
@@ -287,10 +285,10 @@ fn vprintf_checks_a_literal_array_argument_s_element_types() {
     );
 }
 
-// Phase 69: vsprintf/vprintf now require an exact count match too,
-// mirroring real PHPStan's own `PrintfArrayParametersRule` (which
-// compares the placeholder count against the literal array's own size
-// with `===`, not just a "too few" lower bound).
+// vsprintf/vprintf require an exact count match too, mirroring PHPStan's
+// `PrintfArrayParametersRule` (which compares the placeholder count
+// against the literal array's size with `===`, not just a "too few"
+// lower bound).
 #[test]
 fn vsprintf_flags_too_many_array_elements_for_its_own_placeholders() {
     let d = diagnostics_for(r#"<?php vsprintf('%s', ["a", "b"]);"#);
@@ -300,11 +298,11 @@ fn vsprintf_flags_too_many_array_elements_for_its_own_placeholders() {
     );
 }
 
-// Phase 69: `%h`/`%H` (locale-independent decimal-point float formatting)
-// are real PHP 8.0+ specifiers. With no target version configured, they're
-// accepted (this project's "no target configured, don't restrict"
-// convention) - and, like the other float-bucket specifiers, flagged
-// against an array/object argument.
+// `%h`/`%H` (locale-independent decimal-point float formatting) are PHP
+// 8.0+ specifiers. With no target version configured, they're accepted
+// (this project's "no target configured, don't restrict" convention) -
+// and, like the other float-bucket specifiers, flagged against an
+// array/object argument.
 #[test]
 fn sprintf_accepts_h_specifier_with_no_target_version_configured() {
     let d = diagnostics_for(r#"<?php sprintf("%h", 3.5);"#);
@@ -364,8 +362,8 @@ fn vsprintf_with_a_non_literal_array_argument_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 69: `*` width/precision sub-placeholders each consume their own
-// argument, in order, before the specifier's own value argument.
+// `*` width/precision sub-placeholders each consume their own argument,
+// in order, before the specifier's own value argument.
 #[test]
 fn sprintf_width_star_consumes_int_argument() {
     let d = diagnostics_for(r#"<?php sprintf("%*d", 5, 42);"#);
@@ -399,7 +397,7 @@ fn sprintf_positional_with_star_stays_unchecked() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 69: `sscanf`/`fscanf`'s 3+-arg by-ref-output-variable form.
+// `sscanf`/`fscanf`'s 3+-arg by-ref-output-variable form.
 #[test]
 fn sscanf_byref_count_matches_placeholders_no_report() {
     let d = diagnostics_for(
@@ -470,7 +468,7 @@ fn sscanf_spread_argument_stays_silent() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 69: opt-in strict printf placeholder-type matching
+// Opt-in strict printf placeholder-type matching
 // (`check_strict_printf_placeholder_types`) - off by default, so none of
 // these are flagged without the flag explicitly enabled.
 
