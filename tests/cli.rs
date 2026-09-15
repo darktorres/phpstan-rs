@@ -1,7 +1,6 @@
 //! End-to-end tests of the actual `phpstan-rs` binary's CLI surface
 //! (`check`, `check-project`, `incremental-bench`, and `demo`, the
-//! explicit subcommand for what used to be the silent default with no
-//! arguments at all - see Phase 11 Stage 6's clap migration).
+//! explicit subcommand for running with no arguments at all).
 //! main.rs's run_check/run_check_project/run_incremental_bench/run_demo
 //! all print straight to stdout instead of returning anything testable
 //! in-process - rather than refactor working CLI-glue code just to make
@@ -166,35 +165,34 @@ fn check_project_level_flag_filters_out_higher_level_diagnostics() {
 
 #[test]
 fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
-    // Finding 48 made a literal array's own element types real (a real
-    // ArrayShape, not always Array(Mixed)), so a genuinely wrong literal
-    // element is now caught by ordinary, non-strict checking - what
-    // --strict-mixed-arrays still adds is catching a genuinely *unknown*
-    // (Mixed-element) array, such as one read back out of an untyped
-    // parameter.
+    // A literal array's element types are real (an ArrayShape, not
+    // always Array(Mixed)), so a genuinely wrong literal element is
+    // caught by ordinary, non-strict checking - what --strict-mixed-arrays
+    // adds is catching a genuinely unknown (Mixed-element) array, such
+    // as one read back out of an untyped parameter.
     let dir = TempDir::new("check_project_strict");
     dir.write(
         "arr.php",
         r#"<?php
             /** @param int[] $xs */
-            // A non-empty, impure body (Phase 41/82's transitive-purity
-            // pass would otherwise prove an empty-bodied `needsInts`
-            // effect-free, making its own statement-level call below a
-            // second, unrelated `function.resultUnused` finding that has
-            // nothing to do with this test's actual point).
+            // A non-empty, impure body - the transitive-purity pass would
+            // otherwise prove an empty-bodied `needsInts` effect-free,
+            // making its statement-level call below a second, unrelated
+            // `function.resultUnused` finding that has nothing to do
+            // with this test's actual point.
             function needsInts(array $xs): void { echo count($xs); }
             function test(array $untyped): void { needsInts($untyped); }
         "#,
     );
 
     // `--level 5` here only keeps this assertion focused on
-    // `strict_mixed_arrays`'s own point (whether an *unknown*-element
+    // `strict_mixed_arrays`'s own point (whether an unknown-element
     // array is reported by default) - it doesn't change whether the
     // check itself runs (that's gated by `--strict-mixed-arrays` alone,
-    // not by level), just excludes Phase 58's unrelated level-6
-    // `missingType.iterableValue` finding on `$untyped`'s own
-    // deliberately-bare `array` parameter, which this test needs to stay
-    // bare to exercise "unknown element type" at all.
+    // not by level), just excludes the unrelated level-6
+    // `missingType.iterableValue` finding on `$untyped`'s deliberately-bare
+    // `array` parameter, which this test needs to stay bare to exercise
+    // "unknown element type" at all.
     let unfiltered = bin()
         .arg("check-project")
         .arg("--level")
@@ -229,7 +227,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
 
 #[test]
 fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check() {
-    // Phase 62: off by default (mirroring real PHPStan's own opt-in
+    // Off by default (mirroring PHPStan's own opt-in
     // `checkUninitializedProperties`, see `registry::Registry::
     // check_uninitialized_properties`'s own doc comment) - only
     // `--check-uninitialized-properties` turns it on.
@@ -265,7 +263,7 @@ fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check()
 
 #[test]
 fn check_project_check_internal_usage_flag_opts_into_the_extra_check() {
-    // Phase 67: off by default (mirroring real PHPStan's own opt-in
+    // Off by default (mirroring PHPStan's own opt-in
     // `featureToggles.internalTag`, see `registry::Registry::
     // check_internal_usage`'s own doc comment) - only
     // `--check-internal-usage` turns it on.
@@ -306,10 +304,8 @@ fn check_project_check_internal_usage_flag_opts_into_the_extra_check() {
 
 #[test]
 fn check_project_a_wrong_typed_array_literal_is_flagged_without_strict_mixed_arrays() {
-    // The real capability Finding 48 unlocks: strict_mixed_arrays was
-    // never actually necessary to catch this - it just happened to be
-    // the only way to observe *any* difference before array literals
-    // carried a real per-element type.
+    // `strict_mixed_arrays` isn't necessary to catch this, since array
+    // literals carry a real per-element type.
     let dir = TempDir::new("check_project_literal_shape");
     dir.write(
         "arr.php",
@@ -327,9 +323,8 @@ fn check_project_a_wrong_typed_array_literal_is_flagged_without_strict_mixed_arr
 
 #[test]
 fn check_project_php_version_flag_is_accepted_and_checking_proceeds_normally() {
-    // Phase 38: no rule reads `php_version` yet (it's purely the enabling
-    // config/CLI/Project plumbing) - this just confirms the flag parses
-    // and a normal run still completes and reports as usual.
+    // Confirms the flag parses and a normal run still completes and
+    // reports as usual.
     let dir = TempDir::new("check_project_php_version");
     dir.write("a.php", "<?php function f(): int { return 1; }");
 
@@ -461,10 +456,10 @@ fn check_project_config_file_supplies_paths_and_level() {
 
 #[test]
 fn check_project_config_relative_paths_resolve_against_the_config_file_not_the_cwd() {
-    // Finding 8: a config file's own relative `paths` must resolve
-    // against the config file's own directory, matching every
-    // comparable format (.gitignore, tsconfig.json, real PHPStan's own
-    // neon includes) - not whatever directory happens to invoke the CLI.
+    // A config file's relative `paths` must resolve against the config
+    // file's own directory, matching every comparable format
+    // (.gitignore, tsconfig.json, PHPStan's own neon includes) - not
+    // whatever directory happens to invoke the CLI.
     // Run with `current_dir` set somewhere else entirely (the system
     // temp root, guaranteed to hold no `src/` of its own) so a bug that
     // resolves "src" against the process's cwd instead would report "no
@@ -598,10 +593,10 @@ fn check_project_generate_baseline_then_baseline_suppresses_only_pre_existing_di
 
 #[test]
 fn check_project_baseline_still_matches_a_differently_spelled_but_identical_path() {
-    // Finding 32: generating with "." then checking with "./." (the same
-    // real directory, spelled differently) must not make the whole
-    // baseline reappear as new - a realistic mismatch (a one-off local
-    // command vs. a CI script, a Makefile target vs. a manual run).
+    // Generating with "." then checking with "./." (the same directory,
+    // spelled differently) must not make the whole baseline reappear as
+    // new - a realistic mismatch (a one-off local command vs. a CI
+    // script, a Makefile target vs. a manual run).
     let dir = TempDir::new("check_project_baseline_path_spelling");
     dir.write("bad.php", "<?php function f() { return $existingBug; }\n");
     let baseline_path = dir.path().join("baseline.json");
@@ -1168,18 +1163,17 @@ fn demo_with_a_file_argument_parses_and_checks_that_file() {
 
 #[test]
 fn check_does_not_crash_on_realistically_deep_nested_expressions() {
-    // Phase 20 Finding A: a real, reproducible bug this session found by
-    // direct testing, not assumption - run_check's worker threads used
-    // to spawn with Rust's default ~2MiB stack, well under what the
-    // parser's own MAX_EXPR_DEPTH=1000 guard needs to safely trip before
-    // physically exhausting the stack. ~500 levels of nested parentheses
-    // (a realistic depth for generated/minified code, not an extreme
-    // adversarial input) used to hard-crash the process with an
-    // uncatchable SIGABRT well short of that guard. Checking for the
-    // absence of a signal specifically (not just a non-zero exit code) -
-    // a graceful "expression nested too deeply" parse failure is still a
-    // real, intentional, non-zero-exit-free success from the process's
-    // own perspective; a SIGABRT is the actual regression this guards
+    // `run_check`'s worker threads must spawn with a stack large enough
+    // for the parser's own MAX_EXPR_DEPTH=1000 guard to safely trip
+    // before physically exhausting the stack (Rust's default ~2MiB is
+    // not enough). ~500 levels of nested parentheses (a realistic depth
+    // for generated/minified code, not an extreme adversarial input)
+    // would otherwise hard-crash the process with an uncatchable
+    // SIGABRT well short of that guard. Checking for the absence of a
+    // signal specifically (not just a non-zero exit code) - a graceful
+    // "expression nested too deeply" parse failure is still a real,
+    // intentional, non-zero-exit-free success from the process's own
+    // perspective; a SIGABRT is the actual regression this guards
     // against.
     use std::os::unix::process::ExitStatusExt;
 
@@ -1200,15 +1194,11 @@ fn check_does_not_crash_on_realistically_deep_nested_expressions() {
 
 #[test]
 fn check_scales_roughly_linearly_with_a_single_very_long_line() {
-    // Phase 20's own namesake incident: a genuine O(line length x tokens
-    // on it) blowup that hung for minutes on a real 1.25M-character
-    // line, caught only by chance. Confirmed this session (manually, at
-    // much larger sizes) that today's code scales roughly linearly, not
-    // quadratically - this codifies that as a permanent regression
-    // guard at CI-friendly sizes: quadratic scaling would need ~16x the
-    // time for 4x the size; a generous 8x ceiling comfortably clears
-    // linear-ish scaling (observed ~3-4x) while still catching a real
-    // quadratic regression.
+    // Guards against an O(line length x tokens on it) blowup: a single
+    // very long line must scale roughly linearly with size, not
+    // quadratically. Quadratic scaling would need ~16x the time for 4x
+    // the size; a generous 8x ceiling comfortably clears linear-ish
+    // scaling while still catching a real quadratic regression.
     fn single_long_line(statements: usize) -> String {
         let mut src = String::from("<?php ");
         for i in 0..statements {
