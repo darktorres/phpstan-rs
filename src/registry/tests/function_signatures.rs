@@ -27,17 +27,12 @@ fn the_object_type_hint_is_not_namespace_qualified() {
 
 #[test]
 fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
-    // Real, previously-live bug found via real code in this
-    // project's own verification corpus (a `Doctrine\ORM\QueryBuilder`
-    // union member written as `\Doctrine\ORM\QueryBuilder`, i.e.
-    // "absolute, from the global namespace" - real PHP syntax): the
-    // leading `\` used to be stripped before `resolve_names_in_type`
-    // ever saw it (inside `types::parse_type_atom`, purely as part of
-    // computing a bare name for keyword matching), losing the "already
-    // fully qualified, don't touch" signal - every absolute reference
-    // containing a `\` then got silently mis-qualified as if it were
-    // namespace-relative (`App\Doctrine\ORM\QueryBuilder` instead of
-    // the real `Doctrine\ORM\QueryBuilder`).
+    // A leading `\` (root-anchored, "absolute, from the global
+    // namespace") must survive into `resolve_names_in_type` as the
+    // "already fully qualified, don't touch" signal - `types::
+    // parse_type_atom` must not strip it while computing a bare name for
+    // keyword matching, or an absolute reference gets silently
+    // mis-qualified as namespace-relative.
     let r = build_registry(
         r#"<?php
             namespace App;
@@ -54,14 +49,10 @@ fn a_leading_backslash_in_a_native_type_hint_is_not_re_namespaced() {
 
 #[test]
 fn a_root_anchored_native_closure_type_hint_is_not_namespace_qualified() {
-    // Real corpus shape (amphp/amp): a native `\Closure $callback` type
-    // hint (root-anchored, unambiguous) in a namespaced file used to
-    // become a bogus `App\Closure` - `types::parse_type_keyword_or_class`'s
-    // own `"closure"` keyword arm used to hardcode the bare, unqualified
-    // name regardless of the original text, losing the leading `\` that
-    // `NameContext::resolve` needs to see to know not to re-qualify it
-    // (the same reason `a_leading_backslash_in_a_native_type_hint_is_
-    // not_re_namespaced` above exists for an ordinary class reference).
+    // A root-anchored `\Closure` must keep its leading `\` through
+    // `types::parse_type_keyword_or_class`'s `"closure"` keyword arm, not
+    // get hardcoded to the bare unqualified name - `NameContext::resolve`
+    // needs to see it to know not to re-qualify it.
     let r = build_registry(
         r#"<?php
             namespace App;
@@ -80,12 +71,10 @@ fn a_root_anchored_native_closure_type_hint_is_not_namespace_qualified() {
 fn a_bare_unqualified_closure_type_hint_defers_to_a_real_use_import() {
     // Deliberately NOT given the same treatment as the root-anchored
     // case above: a bare, unqualified `Closure` is genuinely ambiguous -
-    // real corpus shape, `rector/rector`'s own consumers of `nikic/
-    // php-parser` routinely `use PhpParser\Node\Expr\Closure;` (an
-    // entirely different real class) and then type-hint bare `Closure`
-    // meaning *that* one, not the native global class. Must resolve
-    // through the same `use`-import lookup any other class reference
-    // gets.
+    // a file may `use Some\Other\Namespace\Closure;` an entirely
+    // different class and type-hint bare `Closure` meaning that one, not
+    // the native global class. Must resolve through the same
+    // `use`-import lookup any other class reference gets.
     let r = build_registry(
         r#"<?php
             namespace App;
@@ -117,13 +106,11 @@ fn phpdoc_types_an_otherwise_untyped_function() {
     assert_eq!(sig.return_type, Type::Int);
 }
 
-// Finding A (Phase 32): phpstorm-stubs represents "this parameter
-// changed across PHP versions" as the same conceptual parameter
-// declared twice, each gated by its own `#[PhpStormStubsElementAvailable]`
-// attribute - real PHP can't have two same-named parameters in one
-// function, so a duplicate name reaching `FunctionSig::from_decl` is
-// unconditionally this versioning artifact. Real shape: `pg_query`'s
-// `$connection`.
+// phpstorm-stubs represents "this parameter changed across PHP versions"
+// as the same conceptual parameter declared twice, each gated by its own
+// `#[PhpStormStubsElementAvailable]` attribute - PHP can't have two
+// same-named parameters in one function, so a duplicate name reaching
+// `FunctionSig::from_decl` is unconditionally this versioning artifact.
 #[test]
 fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
     let r = build_registry(
@@ -207,13 +194,10 @@ fn a_function_with_no_duplicate_parameters_is_unaffected() {
     assert_eq!(sig.params[1].name, "b");
 }
 
-// Finding B (Phase 32): a `LanguageLevelTypeAware` parameter override
-// loses to a competing legacy `@param` docblock tag, since the
-// override was only ever injected as a native type hint - `resolve_type`
+// A `LanguageLevelTypeAware` parameter override must win over a
+// competing legacy `@param` docblock tag, even though the override is
+// only ever injected as a native type hint and `resolve_type` normally
 // treats a matching `@param` tag as authoritative over the native hint.
-// Real shape: `ini_set`'s `@param string $value` next to a native
-// `#[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'],
-// default: 'string')] $value`.
 #[test]
 fn a_language_level_type_aware_override_wins_over_a_matching_stale_param_tag() {
     let r = build_registry(
@@ -239,11 +223,9 @@ fn a_language_level_type_aware_override_wins_over_a_matching_stale_param_tag() {
     );
 }
 
-// Real shape: `finfo_file`'s doc type is `resource`; before Finding B,
-// this collapsed to `Type::Mixed` (a *worse* failure than `ini_set`'s,
-// since `resolve_type`'s own `resource`-stripping fires on the
-// never-overridden stale doc type) rather than resolving to the
-// override at all.
+// A stale doc type of `resource` must not defeat the override either -
+// `resolve_type`'s `resource`-stripping must not fire on a
+// never-overridden stale doc type in place of the real override.
 #[test]
 fn a_language_level_type_aware_override_wins_even_when_the_stale_doc_type_is_resource() {
     let r = build_registry(
@@ -288,14 +270,10 @@ fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock()
     );
 }
 
-// Finding I (Phase 32): `resolve_type`'s docblock-vs-native
-// reconciliation generalizes Phase 23's `resource`-specific staleness
-// check into one rule via `is_subtype` - a real, present, non-`object`
-// native hint is authoritative about what's possible; any docblock
-// member incompatible with it can never actually happen. Real shape:
-// `imagesx`'s native `int` vs. a stale `@return int|false` doc (the
-// GD-object migration dropped `false` from the native hint without
-// the doc ever being updated).
+// `resolve_type`'s docblock-vs-native reconciliation applies one general
+// rule via `is_subtype`: a present, non-`object` native hint is
+// authoritative about what's possible, so any docblock member
+// incompatible with it can never actually happen and is dropped.
 #[test]
 fn a_stale_false_member_is_dropped_when_the_native_hint_no_longer_allows_it() {
     let r = build_registry(
@@ -324,18 +302,10 @@ fn a_false_member_the_native_hint_still_allows_is_kept() {
     );
 }
 
-// Real corpus false positive found reviewing the phpdoc-inheritance
-// reconciliation fix above (`member_possible_given_native`'s general
-// `Object => true`/`Callable => true` leniency - deliberately permissive
-// since this function usually can't disprove a class-hierarchy claim -
-// wrongly extended to a native `void` return, which admits nothing at
-// all, not even a class or callable). Real shape: `PhpParser\
-// NodeVisitor::enterNode()`'s own `@return null|int|Node|Node[]` doc
-// backfilling straight through an unrelated concrete override's native
-// `void` two ancestors down - the `Node` member survived reconciliation
-// purely because it's a named class, wrongly demanding a real `Node`
-// return from a function whose own, authoritative native signature is
-// `void`.
+// `member_possible_given_native`'s `Object => true`/`Callable => true`
+// leniency (deliberately permissive since it usually can't disprove a
+// class-hierarchy claim) must not extend to a native `void` return,
+// which admits nothing at all, not even a class or callable.
 #[test]
 fn a_stale_object_member_is_dropped_when_the_native_hint_is_void() {
     let r = build_registry(
@@ -348,19 +318,14 @@ fn a_stale_object_member_is_dropped_when_the_native_hint_is_void() {
     assert_eq!(r.functions["make14"].return_type, Type::Void);
 }
 
-// Real corpus regression caught verifying the fix just above: `Type::
-// Never` must be exempted from the new native-`void` exclusion - an
-// explicit `@return never` genuinely means the function always diverges
-// (throws/exits/loops forever), honestly compatible with *any* native
-// return hint including `void` (real PHPStan's own `TypehintHelper::
-// decideType` special-cases exactly this, checked before its general
-// `isSuperTypeOf` rule). Real shape: `Nette\Utils\ObjectHelpers::
-// strictStaticCall(): void` (own `@return never`) - collapsing this to
-// plain `void` would lose the one piece of information this project's
-// control-flow-termination analysis needs to recognize the call as
-// always-diverging, wrongly flagging every `__callStatic` ending with
-// `ObjectHelpers::strictStaticCall(...);` and no further `return` as
-// "should never return, but a return statement was reached."
+// `Type::Never` must be exempted from the native-`void` exclusion above -
+// an explicit `@return never` means the function always diverges
+// (throws/exits/loops forever), compatible with any native return hint
+// including `void` (mirrors PHPStan's own `TypehintHelper::decideType`
+// special case, checked before its general `isSuperTypeOf` rule).
+// Collapsing this to plain `void` would lose the one piece of
+// information control-flow-termination analysis needs to recognize the
+// call as always-diverging.
 #[test]
 fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
     let r = build_registry(
@@ -374,29 +339,15 @@ fn an_explicit_never_doc_survives_reconciliation_against_a_native_void_hint() {
     assert_eq!(r.functions["alwaysThrows15"].return_type, Type::Never);
 }
 
-// Phase 60 corpus find: a PHPStan/Psalm callable-shape doc member
-// (`Closure(Tv): bool`) used to degrade to plain `Type::Callable` at
-// parse time (no per-parameter/return signature tracked) - `is_subtype
-// (Callable, Closure)` is correctly `false` in general (not every
-// `callable` is a `Closure` instance), but that used to make
-// `reconcile_with_native` wrongly discard the doc member even when the
-// native hint names `Closure` exactly, collapsing `null|Closure` down
-// to bare `null` (`Psl\Dict\filter()`'s real shape). Back then, the
-// now-kept `Callable` member was further refined back to the native
-// hint's own bare `Closure` object type, since the bare marker carried
-// no signature info of its own to lose.
-//
-// Phase 53 Sub-item A superseded that last step: `Closure(mixed): bool`
-// now parses into a real, shaped `Type::Callable(Some(sig))` instead of
-// the bare marker - `refine_callable_member`'s own guard (`registry/
-// function_sig/type_resolution.rs`) deliberately does NOT touch an
-// already-shaped member anymore, since it's already a genuine
-// refinement in its own right, strictly more precise than degrading it
-// to a signature-less `Closure` object type would be. The `is_subtype`/
-// override-narrowing false positives this test's own history describes
-// are still avoided - `is_subtype`'s own `(Callable(Some(_)), Callable
-// (None))` leniency (`types/subtype.rs`) is the mechanism now, not this
-// refinement step.
+// A PHPStan/Psalm callable-shape doc member (`Closure(Tv): bool`) parses
+// into a real, shaped `Type::Callable(Some(sig))`, not a bare
+// signature-less marker - `refine_callable_member`'s guard
+// (`registry/function_sig/type_resolution.rs`) must not touch an
+// already-shaped member, since it's already a genuine refinement in its
+// own right, strictly more precise than degrading it to a signature-less
+// `Closure` object type would be. `is_subtype`'s `(Callable(Some(_)),
+// Callable(None))` leniency (`types/subtype.rs`) keeps this compatible
+// with the native `Closure` hint.
 #[test]
 fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closure_native_hint() {
     let r = build_registry(
@@ -417,20 +368,16 @@ fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closur
     assert_eq!(members[1], Type::Null);
 }
 
-// Phase 74 corpus find: an `array<K, V>`-shaped doc member's own *key*
-// used to be checked against the native `array` hint via the same full
-// `is_subtype` as any other member - correct for a concrete key
-// (`array<string, int>`'s own `string` really is a subtype of
-// `int|string`), but wrong once the key is a `@template`-bound
-// placeholder (`array<TKey, TValue>`, `TKey` still a bare, unresolved
-// `Object("TKey", [])` at this point - `reconcile_with_native` runs
-// *before* `mark_template_params` ever gets a chance to substitute it):
-// `is_subtype(Object("TKey", []), int|string)` is correctly `false` for
-// an arbitrary class, so the *entire* array member (including `TValue`,
-// which would have resolved just fine) was discarded in favor of the
-// bare native `array`. A native `array` hint carries no key information
-// to contradict in the first place, so the key is now always trusted
-// as-is; only the value is still checked against native's own.
+// An `array<K, V>`-shaped doc member's *key* must not be checked against
+// the native `array` hint the way any other member is - a `@template`-
+// bound key placeholder (`array<TKey, TValue>`) is still a bare,
+// unresolved `Object("TKey", [])` when `reconcile_with_native` runs
+// (before `mark_template_params` substitutes it), so `is_subtype`
+// against it is correctly `false` for an arbitrary class and would
+// discard the entire array member, including a `TValue` that would have
+// resolved fine. A native `array` hint carries no key information to
+// contradict in the first place, so the key is always trusted as-is;
+// only the value is still checked against the native hint.
 #[test]
 fn an_array_doc_member_with_a_template_key_is_not_discarded() {
     let r = build_registry(
@@ -510,18 +457,13 @@ fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
     );
 }
 
-// Found via a full corpus re-check after first shipping Finding I as
-// a bare `is_subtype(member, native_ty)` filter: `is_subtype`'s own
-// `Object` handling is name-equality only (no class hierarchy), so a
-// doc type naming a real subclass of a more generic native return
-// hint - the actual real corpus shape, a Doctrine-repository-typed
-// service declaring a native `EntityRepository` return with a doc
-// type naming the real concrete repository subclass - was wrongly
-// treated as "incompatible" and discarded in favor of the generic
-// native type, a real regression across dozens of real call sites.
-// Scoped back to exactly the one class-name case this project can
-// prove reliably (a literal `resource` doc member) - any other class
-// name must always be kept.
+// `is_subtype`'s `Object` handling is name-equality only (no class
+// hierarchy), so a doc type naming a real subclass of a more generic
+// native return hint must not be treated as "incompatible" and
+// discarded in favor of the generic native type - any class name doc
+// member must always be kept (the reconciliation above only ever
+// discards the one class-name case it can prove reliably, a literal
+// `resource` doc member).
 #[test]
 fn a_doc_type_naming_a_real_subclass_of_the_native_hint_is_not_discarded() {
     let r = build_registry(
@@ -589,10 +531,9 @@ fn phpdoc_types_a_promoted_constructor_property_via_param_tag() {
     );
 }
 
-// Phase 93: a promoted property's own inline `/** @var T */` (real
-// idiom - it doubles as that property's own docblock) is a second, more
-// common real-corpus source than an `@param $name` tag on the enclosing
-// `__construct()`'s own docblock.
+// A promoted property's own inline `/** @var T */` doubles as that
+// property's own docblock, alongside an `@param $name` tag on the
+// enclosing `__construct()`'s own docblock.
 #[test]
 fn phpdoc_types_a_promoted_constructor_property_via_its_own_inline_var_tag() {
     let r = build_registry(
@@ -613,11 +554,10 @@ fn phpdoc_types_a_promoted_constructor_property_via_its_own_inline_var_tag() {
     );
 }
 
-// The same, with a real attribute sitting between the inline doc
-// comment and the parameter itself (the exact real corpus shape -
-// Doctrine's `#[ORM\Column(...)]`) - confirms the doc comment attaches
-// to the parameter, not silently discarded once an attribute comes
-// between the two.
+// The same, with an attribute sitting between the inline doc comment and
+// the parameter itself - confirms the doc comment attaches to the
+// parameter, not silently discarded once an attribute comes between the
+// two.
 #[test]
 fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
     let r = build_registry(
@@ -649,9 +589,8 @@ fn missing_doc_comment_falls_back_to_native_hint() {
     assert_eq!(r.functions["f"].return_type, Type::String);
 }
 
-// `@phpstan-assert`-family tags - real PHPStan's custom-assertion-
-// function convention (real corpus shape: phpunit's own accessor pair
-// `hasTestFilesFile(): bool` / `testFilesFile(): string`).
+// `@phpstan-assert`-family tags - PHPStan's custom-assertion-function
+// convention.
 
 #[test]
 fn an_assert_if_true_tag_naming_a_this_property_resolves() {
@@ -729,9 +668,8 @@ fn a_bare_this_target_resolves() {
 
 #[test]
 fn a_target_naming_a_nonexistent_parameter_classifies_as_not_found() {
-    // Phase 48.C: no longer silently dropped - `AssertTarget::NotFound`
-    // carries the offending name through so the checker can report
-    // `parameter.notFound`.
+    // `AssertTarget::NotFound` carries the offending name through so the
+    // checker can report `parameter.notFound`.
     let r = build_registry(
         r#"<?php
             class Foo {
@@ -750,9 +688,8 @@ fn a_target_naming_a_nonexistent_parameter_classifies_as_not_found() {
 
 #[test]
 fn a_method_call_target_classifies_as_unknown_not_misclassified() {
-    // Phase 48.C: no longer silently dropped - `AssertTarget::Unknown`
-    // carries the raw target text through so the checker can report
-    // `assert.unknownExpr`.
+    // `AssertTarget::Unknown` carries the raw target text through so the
+    // checker can report `assert.unknownExpr`.
     let r = build_registry(
         r#"<?php
             class Foo {
