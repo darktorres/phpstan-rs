@@ -1,21 +1,21 @@
-//! Tests for Phase 40's `PHPStan\*`-reference checker.
+//! Tests for the `PHPStan\*`-reference checker.
 //!
 //! Each test supplies two separate source snippets, parsed and indexed
 //! independently - `stub_src` (a small fake `PHPStan\...`-namespaced
-//! declaration, standing in for a real `vendor/phpstan/phpstan/src/...`
-//! file) and `consumer_src` (the code actually under test) - exactly
-//! mirroring how these always live in genuinely separate files in any
-//! real corpus (a project's own `src/MyRule.php` is never the same file
-//! as `vendor/phpstan/phpstan/src/Rules/Rule.php`). Both parse trees are
+//! declaration, standing in for a `vendor/phpstan/phpstan/src/...` file)
+//! and `consumer_src` (the code actually under test) - exactly mirroring
+//! how these always live in genuinely separate files in practice (a
+//! project's own `src/MyRule.php` is never the same file as
+//! `vendor/phpstan/phpstan/src/Rules/Rule.php`). Both parse trees are
 //! merged for `Registry::build` (so the consumer's references resolve
-//! against the stub's real declarations), but `check_phpstan_api_usage`
+//! against the stub's declarations), but `check_phpstan_api_usage`
 //! itself only ever walks `consumer_src`'s own parse tree - keeping each
 //! test to a single `namespace` declaration per source string sidesteps
-//! this module's own accepted "one global, last-namespace-wins
-//! `NameContext` per walk" simplification (see its own doc comment),
-//! which - like `Checker::check_program`'s identical simplification -
-//! would otherwise mislabel declarations from an earlier `namespace`
-//! block in a single multi-namespace test file.
+//! this module's accepted "one global, last-namespace-wins `NameContext`
+//! per walk" simplification (see its own doc comment), which - like
+//! `Checker::check_program`'s identical simplification - would otherwise
+//! mislabel declarations from an earlier `namespace` block in a single
+//! multi-namespace test file.
 
 use super::*;
 use crate::lexer::Lexer;
@@ -62,7 +62,7 @@ fn instantiating_a_non_api_phpstan_class_is_flagged() {
 
 #[test]
 fn instantiating_an_api_tagged_phpstan_class_is_still_flagged_by_default() {
-    // Phase 40.2: real `ApiInstantiationRule` flags instantiation
+    // Mirrors PHPStan's `ApiInstantiationRule`: flags instantiation
     // unconditionally by default - a class-level `@api` does NOT exempt
     // it (extensions should use dependency injection, not direct
     // instantiation) unless the class's own, non-inherited constructor
@@ -196,10 +196,9 @@ fn a_static_call_on_a_non_api_class_is_flagged() {
     );
 }
 
-// Phase 40.B: a static call's own real *declaring* class (which can
-// differ from the referenced class under inheritance), and the method's
-// own docblock `@api` exemption - both real gaps confirmed against real
-// `ApiStaticCallRule::isCovered()`.
+// A static call's real declaring class (which can differ from the
+// referenced class under inheritance), and the method's own docblock
+// `@api` exemption - mirrors PHPStan's `ApiStaticCallRule::isCovered()`.
 
 #[test]
 fn a_static_call_to_an_inherited_method_checks_the_declaring_classs_own_api_status() {
@@ -252,8 +251,8 @@ fn a_static_call_to_a_method_with_its_own_api_doc_is_never_flagged_even_on_a_non
 
 #[test]
 fn a_static_call_to_an_api_classs_own_constructor_is_still_flagged() {
-    // Real PHPStan's own explicit exemption: a class-level @api doesn't
-    // cover __construct - only the constructor's own @api would.
+    // PHPStan's explicit exemption: a class-level @api doesn't cover
+    // __construct - only the constructor's own @api would.
     let diags = diagnostics_for(
         r#"<?php
         namespace PHPStan\Rules;
@@ -277,20 +276,18 @@ fn a_static_call_to_an_api_classs_own_constructor_is_still_flagged() {
     );
 }
 
-// Phase 40.D: `self`/`static`/`parent` pseudo-class resolution -
-// `NameContext::resolve` has no special-casing for any of the three, and
-// this standalone `Walker` (unlike the main `Checker`) previously had no
-// "current class" state at all to resolve them against.
+// `self`/`static`/`parent` pseudo-class resolution - `NameContext::
+// resolve` has no special-casing for any of the three, so this
+// standalone `Walker` (unlike the main `Checker`) needs its own
+// "current class" state to resolve them against.
 
 #[test]
 fn a_static_call_to_parent_on_a_non_api_base_is_not_flagged_absent_vendor_evidence() {
-    // Phase 40 follow-up: the calling scope (`MyRule`) is itself
-    // `PHPStan\*`-namespaced, so real `ApiRuleHelper::isPhpStanCode`
-    // additionally requires vendor-directory evidence for the target -
-    // this string-only harness (`Registry::build`, no real file paths)
-    // never has any, matching real PHPStan's own no-`declaringFile`
-    // answer (`ApiRuleHelperTest.php`'s own `PHPStan\Foo`-calling-
-    // `PHPStan\Foo`-with-no-declaringFile row expects `false`).
+    // The calling scope (`MyRule`) is itself `PHPStan\*`-namespaced, so
+    // `ApiRuleHelper::isPhpStanCode` additionally requires
+    // vendor-directory evidence for the target - this string-only
+    // harness (`Registry::build`, no real file paths) never has any,
+    // matching PHPStan's own no-`declaringFile` answer.
     let diags = diagnostics_for(
         r#"<?php
         namespace PHPStan\Rules;
@@ -418,7 +415,7 @@ fn an_instanceof_check_against_a_non_api_class_is_flagged() {
 
 #[test]
 fn an_instanceof_check_against_an_api_class_is_still_flagged_as_an_assumption() {
-    // Phase 40.3: real `ApiInstanceofRule` still flags an `@api`-tagged
+    // Mirrors PHPStan's `ApiInstanceofRule`: still flags an `@api`-tagged
     // class's instanceof - just with a different identifier/message
     // warning the assumption itself might break in a minor version.
     let diags = diagnostics_for(
@@ -462,10 +459,10 @@ fn an_instanceof_check_against_an_api_interface_is_never_flagged() {
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
-// Phase 40.E: `ApiInstanceofTypeRule`, entirely independent of `@api`
-// status - a real, deprecated-since-forever idiom (`instanceof StringType`
-// instead of `Type::isString()`) real PHPStan flags unconditionally on its
-// own compiled `#[InstanceofDeprecated]` table.
+// `ApiInstanceofTypeRule`, entirely independent of `@api` status - a
+// deprecated-since-forever idiom (`instanceof StringType` instead of
+// `Type::isString()`) PHPStan flags unconditionally on its compiled
+// `#[InstanceofDeprecated]` table.
 
 #[test]
 fn an_instanceof_check_against_a_deprecated_type_class_is_flagged_with_its_replacement_hint() {
@@ -583,9 +580,10 @@ fn extending_a_plain_api_phpstan_class_is_not_flagged() {
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
-// Phase 40.A: an interface's own `extends` gets `phpstanApi.interface`
-// (real `ApiInterfaceExtendsRule`), not the class-side `phpstanApi.class`
-// a plain class's own `extends` reports (real `ApiClassExtendsRule`).
+// An interface's `extends` gets `phpstanApi.interface` (mirrors
+// PHPStan's `ApiInterfaceExtendsRule`), not the class-side
+// `phpstanApi.class` a plain class's `extends` reports (mirrors
+// `ApiClassExtendsRule`).
 
 #[test]
 fn an_interface_extending_a_non_api_phpstan_interface_is_flagged_as_phpstan_api_interface() {
@@ -621,7 +619,7 @@ fn a_class_extending_a_non_api_phpstan_class_still_uses_phpstan_api_class() {
 
 #[test]
 fn extending_phpstans_own_mutating_scope_is_never_flagged() {
-    // Phase 40.A: real `ApiClassExtendsRule`'s own narrow, explicit
+    // Mirrors PHPStan's `ApiClassExtendsRule`'s narrow, explicit
     // carve-out (`processNode`'s early return on `MutatingScope::class`).
     let diags = diagnostics_for(
         r#"<?php
@@ -710,8 +708,8 @@ fn using_a_non_api_phpstan_trait_is_flagged() {
 
 #[test]
 fn using_an_api_tagged_phpstan_trait_is_still_flagged_unconditionally() {
-    // Phase 40.4: real `ApiTraitUseRule` grants no `@api` escape hatch at
-    // all, unlike extends/implements.
+    // Mirrors PHPStan's `ApiTraitUseRule`: grants no `@api` escape hatch
+    // at all, unlike extends/implements.
     let diags = diagnostics_for(
         r#"<?php
         namespace PHPStan\Rules;
@@ -731,7 +729,7 @@ fn using_an_api_tagged_phpstan_trait_is_still_flagged_unconditionally() {
     );
 }
 
-// Phase 40.6: `RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`/
+// `RuntimeReflectionFunctionRule`/`RuntimeReflectionInstantiationRule`/
 // `OldPhpParser4ClassRule` - all three gate on `class_implements_phpstan_
 // interface`, so every positive test below declares its enclosing class
 // as `implements \PHPStan\Rules\Rule` (a bare, undeclared interface
@@ -922,8 +920,8 @@ fn referencing_a_still_current_php_parser_class_name_is_not_flagged() {
     assert!(diags.is_empty(), "unexpected diagnostics: {diags:?}");
 }
 
-// Phase 40.6: `PhpStanNamespaceIn3rdPartyPackageRule` - the one rule of
-// the three that needs a real file path on disk (`find_composer_package_
+// `PhpStanNamespaceIn3rdPartyPackageRule` - the one rule of the three
+// that needs a real file path on disk (`find_composer_package_
 // name`'s own upward walk), so these tests build their own tiny
 // temporary directory tree rather than using `diagnostics_for` (which
 // always passes `None`).
