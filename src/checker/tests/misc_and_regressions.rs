@@ -36,9 +36,8 @@ fn property_read_flows_into_argument_type_check() {
     assert!(d[0].message.contains("needsInt"));
 }
 
-// Phase 13 Finding C: verified against real PHPStan's own dumpType() -
-// `/` gives `int|float` unconditionally whenever it can't prove
-// `float` is involved, `float` whenever it can.
+// `/` gives `int|float` unconditionally whenever it can't prove `float`
+// is involved, `float` whenever it can.
 #[test]
 fn division_of_two_ints_infers_int_or_float() {
     let d = diagnostics_for(
@@ -81,13 +80,11 @@ fn division_of_two_mixed_values_infers_int_or_float_not_mixed() {
 
 #[test]
 fn static_call_arguments_are_still_checked_for_undefined_variables() {
-    // ExprKind::StaticCall had no arm in check_expr's match at all at the
-    // time this was written - it fell into the wildcard `_ => {}`,
-    // so its argument expressions were never visited by any
-    // diagnostic. StaticCall gained its own existence checking later
-    // (Phase 9); this test predates that and still just proves the
-    // narrower claim - its args are real code checked like any other
-    // call's - independent of whichever existence check runs later.
+    // `ExprKind::StaticCall`'s argument expressions must be visited by
+    // `check_expr`, not fall into a wildcard `_ => {}` that skips
+    // diagnostics - its args are real code checked like any other
+    // call's, independent of whichever existence check runs on the call
+    // itself.
     let d = diagnostics_for(
         r#"<?php
             class Foo {
@@ -104,13 +101,10 @@ fn static_call_arguments_are_still_checked_for_undefined_variables() {
     );
 }
 
-// Corpus-found idiom (plupload's own `upload.php`): `!$var = expr`
-// parses as `!($var = expr)` (see the parser-level fix and its own
-// `php -r` confirmation), so `$dir` genuinely is defined by the time
-// the `if` body's `die()` doesn't run - a real false positive here
-// before that parser fix, since `!$dir` alone isn't a valid assignment
-// target `apply_narrowing`'s variable-definition tracking could ever
-// recognize.
+// `!$var = expr` parses as `!($var = expr)`, so `$dir` genuinely is
+// defined by the time the `if` body's `die()` doesn't run - `!$dir`
+// alone isn't a valid assignment target `apply_narrowing`'s
+// variable-definition tracking could ever recognize.
 #[test]
 fn a_variable_assigned_inside_a_bang_negated_or_condition_is_defined_afterward() {
     let d = diagnostics_for(
@@ -205,10 +199,9 @@ fn a_keyed_array_write_onto_an_undefined_variable_auto_vivifies_it() {
 }
 
 // A superglobal write must NOT go through the same fresh-empty-shape
-// auto-vivification as an ordinary local - real corpus regression
-// caught before shipping: `$_SERVER['SCRIPT_FILENAME'] = ...;` then
-// separately reading the real, pre-existing `$_SERVER['PHP_SELF']` (a
-// key never locally written) was wrongly flagged as accessing a key a
+// auto-vivification as an ordinary local: `$_SERVER['SCRIPT_FILENAME'] =
+// ...;` then separately reading `$_SERVER['PHP_SELF']` (a key never
+// locally written) must not be flagged as accessing a key a
 // freshly-narrowed `ArrayShape` could never have.
 #[test]
 fn a_keyed_write_to_a_superglobal_does_not_narrow_it_to_a_shape() {
@@ -228,13 +221,12 @@ fn a_keyed_write_to_a_superglobal_does_not_narrow_it_to_a_shape() {
 
 #[test]
 fn check_expr_recurses_into_every_simple_wrapper_expression() {
-    // Coverage measurement found none of these check_expr arms had
-    // ever run in the test suite - Grouping, Clone, (expression-
-    // position) Throw, Yield, DynamicVariable, string interpolation,
-    // and Cast. Given that the exact same "the wildcard arm never
-    // recurses into this" failure mode was a real bug for StaticCall
-    // earlier in this audit, each is independently verified here
-    // rather than assumed correct from reading the source.
+    // Each of these check_expr arms - Grouping, Clone, (expression-
+    // position) Throw, Yield, DynamicVariable, string interpolation, and
+    // Cast - is independently verified here rather than assumed correct,
+    // since "the wildcard arm never recurses into this" is a failure
+    // mode that has occurred elsewhere (see
+    // `static_call_arguments_are_still_checked_for_undefined_variables`).
     let d = diagnostics_for(
         r#"<?php
             function f() {
@@ -430,13 +422,11 @@ fn instantiating_a_class_via_a_leading_backslash_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 23 Finding 6, real shape: Piwigo\Core\Logger declares eight
-// non-negative severity constants plus `OFF = -1` - the one negative
-// one. `const int OFF = -1;` parses as a literal `1` wrapped in a
-// unary negation, which `infer_const_type` used to fall back to
-// `Mixed` for, widening `['severity' => Logger::OFF]` to
-// `array{severity: mixed}` and failing the constructor's declared
-// `array{severity?: int|string, ...}` shape.
+// `const int OFF = -1;` parses as a literal `1` wrapped in a unary
+// negation - `infer_const_type` must not fall back to `Mixed` for this,
+// which would widen `['severity' => Logger::OFF]` to `array{severity:
+// mixed}` and fail the constructor's declared `array{severity?:
+// int|string, ...}` shape.
 #[test]
 fn a_negative_typed_class_constant_infers_its_real_int_type() {
     let d = diagnostics_for(
@@ -456,12 +446,11 @@ fn a_negative_typed_class_constant_infers_its_real_int_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real Piwigo corpus bug (Core\AppInfo::URL = 'https://' . self::DOMAIN):
-// a class const's own value referencing another const via a
-// concatenation fell to Mixed in infer_const_type - real PHP string
-// concatenation always produces a `string` regardless of either
-// operand's own type, information available without resolving what
-// self::DOMAIN's own value actually is.
+// A class const's value referencing another const via a concatenation
+// must not fall to Mixed in infer_const_type - string concatenation
+// always produces a `string` regardless of either operand's type,
+// information available without resolving what the other const's value
+// actually is.
 #[test]
 fn a_class_constant_whose_value_is_a_concatenation_infers_as_string() {
     let d = diagnostics_for(
@@ -483,11 +472,10 @@ fn a_class_constant_whose_value_is_a_concatenation_infers_as_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real Piwigo corpus bug (Bootstrap\RequestPipeline::DEFAULT_MIDDLEWARE):
-// ClassConst never carried its own doc comment at all, so a `@var
-// list<...>` directly above a `public const array X = [...]` was
-// silently dropped, falling back to whatever infer_const_type could
-// read off the literal alone (a plain, unshaped `array`).
+// `ClassConst` must carry its own doc comment, or a `@var list<...>`
+// directly above a `public const array X = [...]` is silently dropped,
+// falling back to whatever infer_const_type can read off the literal
+// alone (a plain, unshaped `array`).
 #[test]
 fn a_var_tag_on_a_class_const_pins_its_declared_type() {
     let d = diagnostics_for(
@@ -697,14 +685,13 @@ fn increment_on_a_bool_variable_leaves_it_a_bool() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 52: a plain, unconstrained `string` is genuinely not proven
-// numeric (real PHPStan's own `StringType::toNumber()` is
-// unconditionally `ErrorType` too - only a `numeric-string`/literal
-// numeric value is legal here), so `-$s` is now correctly flagged
-// (`unaryOp.invalid`) alongside still inferring as `int` for the
-// purposes of `negate`'s own declared return type -
-// `unary_minus_on_a_numeric_string_infers_as_int_and_is_never_flagged`
-// below is this same test's legal counterpart.
+// A plain, unconstrained `string` is genuinely not proven numeric
+// (mirroring PHPStan's own `StringType::toNumber()`, unconditionally
+// `ErrorType` too - only a `numeric-string`/literal numeric value is
+// legal here), so `-$s` is flagged (`unaryOp.invalid`) alongside still
+// inferring as `int` for the purposes of `negate`'s declared return
+// type - `unary_minus_on_a_numeric_string_infers_as_int_and_is_never_
+// flagged` below is this same test's legal counterpart.
 #[test]
 fn unary_minus_on_a_non_numeric_string_infers_as_int_but_is_flagged() {
     let d = diagnostics_for(
@@ -780,17 +767,14 @@ fn intersection_typed_receiver_still_rejects_a_method_missing_from_every_member(
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// Item 2: a small initial port of real, ground-truth-labeled fixtures
-// from `phpstan/phpstan-src` (MIT-licensed - see `vendor/phpstan-src/LICENSE`),
-// adapted from the specific `tests/PHPStan/Rules/**/data/*.php` scenarios
-// that motivated Group E's own findings above. Each fixture is trimmed to
-// just the class/enum shapes this project's own (simpler) checker models -
-// PHPStan-specific assertions this project doesn't attempt (class-case-
-// sensitivity, named-constructor-argument checks, generic/template
-// variance, ...) are deliberately left out rather than chased for
-// byte-for-byte parity. These replace this session's own hand-written
-// repros with real, independently-authored ground truth for the same
-// gaps, per the audit plan's own Item 2.
+// A small port of ground-truth-labeled fixtures from `phpstan/phpstan-src`
+// (MIT-licensed - see `vendor/phpstan-src/LICENSE`), adapted from
+// `tests/PHPStan/Rules/**/data/*.php` scenarios. Each fixture is trimmed
+// to just the class/enum shapes this project's own (simpler) checker
+// models - PHPStan-specific assertions this project doesn't attempt
+// (class-case-sensitivity, named-constructor-argument checks,
+// generic/template variance, ...) are deliberately left out rather than
+// chased for byte-for-byte parity.
 
 #[test]
 fn assert_type_is_silent_when_the_inferred_type_matches() {
@@ -830,18 +814,13 @@ fn assert_type_also_recognizes_the_fully_qualified_call_form() {
 }
 
 // The `assertType()` special case in `check_expr`'s `Call` handling
-// (see its own doc comment) turns any of phpstan-src's real
-// `tests/PHPStan/Analyser/nsrt/*.php` fixtures into a directly
-// runnable regression test: `diagnostics_for` returning empty means
-// this project's own `infer_expr` matches PHPStan's own labeled
-// ground truth exactly, at that exact call site. These two are
-// copied verbatim (not trimmed) from real, small fixtures whose
-// expected type happens to already line up with this project's own
-// (coarser) `Type` representation - most `assertType` calls in the
-// corpus assert a precision (integer ranges, literal array shapes,
-// ...) this project doesn't attempt, so exact matches are the
-// minority, not the norm; these were found by direct trial against
-// the vendored corpus, not assumed.
+// turns any of phpstan-src's `tests/PHPStan/Analyser/nsrt/*.php`
+// fixtures into a directly runnable regression test: `diagnostics_for`
+// returning empty means `infer_expr` matches PHPStan's labeled ground
+// truth exactly, at that exact call site. These two are copied verbatim
+// (not trimmed) from small fixtures whose expected type happens to
+// already line up with this project's own (coarser) `Type`
+// representation.
 #[test]
 fn phpstan_nsrt_bool_cast_matches_real_assert_type() {
     // Verbatim from vendor/phpstan-src/tests/PHPStan/Analyser/nsrt/bug-2997.php.
@@ -859,8 +838,8 @@ fn phpstan_nsrt_bool_cast_matches_real_assert_type() {
 #[test]
 fn phpstan_nsrt_float_increment_decrement_matches_real_assert_type() {
     // Derived from vendor/phpstan-src/tests/PHPStan/Analyser/nsrt/bug-10122.php's
-    // `float $f` block - real PHP's `++`/`--` on a float stays a
-    // float, unlike Finding 16's own `null`/string special cases.
+    // `float $f` block - PHP's `++`/`--` on a float stays a float,
+    // unlike the `null`/string special cases handled elsewhere.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -873,20 +852,12 @@ fn phpstan_nsrt_float_increment_decrement_matches_real_assert_type() {
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
-// Real, previously-live bug found while triaging the Piwigo corpus:
 // `isset(...)`/`empty(...)` are language constructs with no real
-// signature, so `call_fallback_return_type` (the only place their own
+// signature, so `call_fallback_return_type` (the only place their
 // call-expression type gets decided, `is_language_construct` routing
-// them away from ever resolving one) had no arm for either, silently
-// collapsing both to `Mixed` when read as a plain value rather than
-// narrowed as a condition - real PHP always evaluates both to a real
-// `bool`. Real corpus false positive this fixes:
-// `SiteUpdateSubController::handle`'s own `$sync_meta_value =
-// isset($post['sync_meta']);` (assigned bare, unlike its sibling
-// `$display_info_value = isset(...) && $post['display_info'] === '1';`,
-// whose own `&&` computed a correct `bool` independently of `isset`'s
-// own type and so never surfaced this) feeding into a docblock-typed
-// `array{..., sync_meta: bool, ...}` shape a few lines later.
+// them away from ever resolving one) must have an arm for both, not
+// silently collapse to `Mixed` when read as a plain value rather than
+// narrowed as a condition - PHP always evaluates both to a real `bool`.
 #[test]
 fn isset_and_empty_infer_as_bool_when_read_as_a_plain_value() {
     let d = diagnostics_for(
