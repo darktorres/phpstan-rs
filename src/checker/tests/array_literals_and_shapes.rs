@@ -5,12 +5,11 @@ use super::helpers::*;
 
 #[test]
 fn a_wrong_typed_array_literal_element_is_flagged_regardless_of_strict_mixed_arrays() {
-    // Finding 48: an array literal's own element types are now
-    // inferred precisely (a real ArrayShape, not Array(Mixed)), so
-    // real information flows through unconditionally - unlike before
-    // Finding 48, `strict_mixed_arrays` isn't what makes this catch a
-    // genuinely wrong literal element; ordinary, non-strict checking
-    // already does.
+    // An array literal's own element types are inferred precisely (a
+    // real ArrayShape, not Array(Mixed)), so real information flows
+    // through unconditionally - `strict_mixed_arrays` isn't what makes
+    // this catch a genuinely wrong literal element; ordinary,
+    // non-strict checking already does.
     let src = r#"<?php
             /** @param int[] $xs */
             function needsInts(array $xs): void {}
@@ -26,12 +25,11 @@ fn a_wrong_typed_array_literal_element_is_flagged_regardless_of_strict_mixed_arr
 
 #[test]
 fn a_correctly_typed_array_literal_is_not_flagged_with_or_without_strict_mixed_arrays() {
-    // The other half of the same fix: before Finding 48, a *correct*
-    // literal was indistinguishable from an incorrect one once
-    // strict_mixed_arrays removed the Array(Mixed) leniency, since
-    // neither carried any real element-type information. Now that a
-    // literal carries a real shape, the genuinely correct case must
-    // stay silent.
+    // The other half of the same coverage: without a real element-type
+    // shape, a correct literal would be indistinguishable from an
+    // incorrect one once strict_mixed_arrays removed the Array(Mixed)
+    // leniency. Since a literal carries a real shape, the genuinely
+    // correct case must stay silent.
     let src = r#"<?php
             /** @param int[] $xs */
             function needsInts(array $xs): void {}
@@ -44,10 +42,9 @@ fn a_correctly_typed_array_literal_is_not_flagged_with_or_without_strict_mixed_a
 #[test]
 fn strict_mixed_arrays_still_flags_a_genuinely_unknown_mixed_typed_array() {
     // strict_mixed_arrays' own remaining, real purpose: a value whose
-    // element type is genuinely Mixed for a reason other than being
-    // an array literal (here, read back out of an untyped array
-    // parameter) - not affected by Finding 48's own literal-specific
-    // fix at all.
+    // element type is genuinely Mixed for a reason other than being an
+    // array literal (here, read back out of an untyped array
+    // parameter).
     let src = r#"<?php
             /** @param int[] $xs */
             function needsInts(array $xs): void {}
@@ -59,13 +56,12 @@ fn strict_mixed_arrays_still_flags_a_genuinely_unknown_mixed_typed_array() {
     assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
 }
 
-// Phase 53: a real corpus check (nikic/php-parser's own `$token->is([
-// \T_COMMENT, \T_DOC_COMMENT])`, unresolved global constants) found an
-// array-literal shape whose *individual fields* are genuinely Mixed
-// (not the whole array) didn't get the identical `Array(Mixed)`
-// leniency above - each field was checked strictly instead, wrongly
-// flagging a shape literal built from unmodeled constants against an
-// ordinary `array<V>`-typed parameter.
+// An array-literal shape whose individual fields are genuinely Mixed
+// (e.g. from unresolved global constants, not the whole array) must
+// get the identical `Array(Mixed)` leniency above, or each field is
+// checked strictly instead, wrongly flagging a shape literal built
+// from unmodeled constants against an ordinary `array<V>`-typed
+// parameter.
 #[test]
 fn an_array_literal_with_a_mixed_typed_field_from_an_unknown_constant_is_not_flagged() {
     let src = r#"<?php
@@ -109,9 +105,8 @@ fn a_correctly_shaped_literal_is_not_flagged_against_a_docblock_shape() {
 
 #[test]
 fn destructuring_a_swap_from_an_inline_array_literal_gets_real_per_position_types() {
-    // Finding 48's shared root cause with Finding 42: before this
-    // fix, [$a, $b] = [$b, $a] silently retyped both sides to Mixed,
-    // since the literal's own element types were never inferred -
+    // `[$a, $b] = [$b, $a]` must not silently retype both sides to
+    // Mixed by failing to infer the literal's own element types -
     // masking a real type mismatch the swap introduces.
     let d = diagnostics_for(
         r#"<?php
@@ -134,10 +129,9 @@ fn destructuring_a_swap_from_an_inline_array_literal_gets_real_per_position_type
 
 #[test]
 fn building_an_array_progressively_via_index_assignment_is_not_flagged() {
-    // A real regression found while verifying Finding 48 against the
-    // full vendor/phpstorm-stubs corpus: $x = []; $x['a'] = ...; is
-    // one of the most common ways to build an array in real PHP -
-    // check_shape_key_access must not treat the literal's own
+    // `$x = []; $x['a'] = ...;` is one of the most common ways to
+    // build an array in real PHP - check_shape_key_access must not
+    // treat the literal's own
     // starting shape as a sealed contract the array can never grow
     // past, either at the write site itself or at a later read.
     let d = diagnostics_for(
@@ -153,13 +147,11 @@ fn building_an_array_progressively_via_index_assignment_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus find, traced while tracing a different bug
-// (`CategoryService::saveCategoriesOrder`'s own dynamically-keyed
-// counter): a genuinely empty shape has zero possible keys, so a
-// *dynamic*-key read is unconditionally real PHP's own "undefined array
-// key" warning, returning `null` - `index_result_type` used to answer
-// bare `Mixed` here regardless, discarding real, certain information.
-// Deliberately not extended to a *literal* key too (`preg_match`'s own
+// A genuinely empty shape has zero possible keys, so a dynamic-key
+// read is unconditionally real PHP's own "undefined array key"
+// warning, returning `null` - `index_result_type` must not answer bare
+// `Mixed` here regardless, discarding real, certain information.
+// Deliberately not extended to a literal key too (`preg_match`'s own
 // `$matches` shape relies on that case staying lenient - see
 // `index_result_type`'s own doc comment for why).
 #[test]
@@ -202,7 +194,6 @@ fn reading_a_key_never_assigned_after_building_an_array_progressively_is_still_f
 
 #[test]
 fn appending_to_an_array_in_a_loop_then_reading_a_literal_index_is_not_flagged() {
-    // Phase 22 Finding 2, real shape: RegenerateFixtureTest.php's own
     // `$tagIds = []; foreach ([...] as $name) { $tagIds[] = ...; }`
     // then `$tagIds[0]`/`[1]`/`[2]` read afterward.
     let d = diagnostics_for(
@@ -223,7 +214,6 @@ fn appending_to_an_array_in_a_loop_then_reading_a_literal_index_is_not_flagged()
 
 #[test]
 fn assigning_a_dynamic_key_in_a_loop_then_reading_a_literal_key_is_not_flagged() {
-    // Phase 22 Finding 2, real shape: SearchFilterRenderer.php's own
     // `$displayFilters[$filtName] = ...;` inside a `foreach`, then
     // `$displayFilters['words']` read elsewhere.
     let d = diagnostics_for(
@@ -242,8 +232,8 @@ fn assigning_a_dynamic_key_in_a_loop_then_reading_a_literal_key_is_not_flagged()
 
 #[test]
 fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {
-    // The real, deliberate cost of Finding 2's fix, pinned down as a
-    // test rather than left as prose: once `$x` is widened away from
+    // A real, deliberate cost of this design, pinned down as a test
+    // rather than left as prose: once `$x` is widened away from
     // `Type::ArrayShape` by an append/dynamic-key write anywhere in
     // its lifetime, `check_shape_key_access` (which only fires on
     // `Type::ArrayShape`) stops catching a genuine typo on *any* key
@@ -264,10 +254,10 @@ fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {
     );
 }
 
-// A round of Piwigo-corpus bucketing found the array-append-widening
-// path (Phase 22) built a plain `Array`, never a real `list<T>`, even
-// though real PHP's own append semantics always assign the next
-// sequential int key - verified via dumpType(): a single append onto
+// The array-append-widening path must build a real `list<T>`, not a
+// plain `Array`, since real PHP's own append semantics always assign
+// the next sequential int key - verified via dumpType(): a single
+// append onto
 // an already-list-like container (including a freshly-empty `[]`)
 // stays a real, now-provably-non-empty list.
 #[test]
@@ -324,16 +314,13 @@ fn a_dynamic_key_write_does_not_claim_the_result_is_still_a_list() {
 
 #[test]
 fn a_nested_write_through_a_dynamically_keyed_array_grows_its_element_shape() {
-    // Real shape: CalendarMonthly::buildMonthCalendar builds $items
-    // via a dynamic-key write ($items[(int) $row->period] = [...]),
-    // then adds more fields per-element via a *nested* write
-    // ($items[$day]['derivative'] = ...) - discovered as a genuine
-    // new false positive while verifying Finding 2's own fix:
-    // bind_assignment_target's Index arm required a bare Variable
-    // base, so the nested write (base is itself $items[$day], an
-    // Index, not a Variable) was silently ignored, leaving
-    // $items[$day]'s inferred shape frozen at its initial literal -
-    // missing 'derivative' entirely.
+    // A dynamic-key write ($items[$period] = [...]), followed by more
+    // fields added per-element via a nested write ($items[$day]
+    // ['derivative'] = ...): `bind_assignment_target`'s Index arm must
+    // not only accept a bare Variable base, since the nested write's
+    // base is itself $items[$day], an Index, not a Variable - otherwise
+    // it's silently ignored, leaving $items[$day]'s inferred shape
+    // frozen at its initial literal, missing 'derivative' entirely.
     let d = diagnostics_for(
         r#"<?php
             function test(int $period, string $file): void {
@@ -347,17 +334,17 @@ fn a_nested_write_through_a_dynamically_keyed_array_grows_its_element_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// The real shape just above, one level closer to the actual corpus site:
-// the nested write happens *inside* a `foreach` that iterates the very
-// same array it mutates - `check_foreach`'s own doc comment discloses
-// this exact trade-off (tried merging the loop's exit state with its own
-// pre-loop snapshot once, reverted, since every key really iterated over
-// gets the loop's own treatment, never the stale pre-loop one). Guards
-// `Checker::converge_loop_body`'s own "drop only names introduced inside
-// the loop, never re-widen one that already existed" fix (this session)
-// from the other direction: a name already tracked before the loop must
-// keep exactly its post-loop type, not get unioned back with what it was
-// before.
+// The same shape, one level closer to the actual site: the nested
+// write happens inside a `foreach` that iterates the very same array
+// it mutates - `check_foreach`'s own doc comment discloses this exact
+// trade-off (merging the loop's exit state with its own pre-loop
+// snapshot would be wrong, since every key really iterated over gets
+// the loop's own treatment, never the stale pre-loop one). Guards
+// `Checker::converge_loop_body`'s own "drop only names introduced
+// inside the loop, never re-widen one that already existed" rule from
+// the other direction: a name already tracked before the loop must
+// keep exactly its post-loop type, not get unioned back with what it
+// was before.
 #[test]
 fn a_foreach_mutating_its_own_subject_array_keeps_the_post_loop_shape_precisely() {
     let d = diagnostics_for(
@@ -375,23 +362,19 @@ fn a_foreach_mutating_its_own_subject_array_keeps_the_post_loop_shape_precisely(
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// The exact real corpus shape (`CalendarMonthly::buildMonthCalendar`):
-// `$items` starts as a literal `[]`, gets built up by a *first* foreach
-// (over a separate array, so it may run zero times), and only *then* is
-// mutated in place by a *second* foreach over itself. This session's
-// `LoopZeroIterations` fix correctly makes the first foreach's own exit
-// state a real `Union` including the empty-shape alternative (the loop
-// might never run) - which means the second foreach's own entry for
-// `$items` is that same `Union`, not a bare `ArrayShape`/`Array`
-// anymore. `write_index_into`'s `Type::Union` arm requires *every*
-// member to accept the write or the whole write is silently dropped -
-// and its own empty-shape member reads back as `Type::Null` at a
-// dynamic key (`index_result_type`'s own "empty shape, dynamic key
-// reads null" arm), which `write_index_into` had no arm for at all
-// before this session's fix, bailing the entire nested write and
-// freezing `$items`'s tracked shape at its pre-second-loop state - a
-// real regression this exact test caught via corpus diff before this
-// fix landed.
+// `$items` starts as a literal `[]`, gets built up by a first foreach
+// (over a separate array, so it may run zero times), and only then is
+// mutated in place by a second foreach over itself. `LoopZeroIterations`
+// correctly makes the first foreach's own exit state a real `Union`
+// including the empty-shape alternative (the loop might never run) -
+// which means the second foreach's own entry for `$items` is that same
+// `Union`, not a bare `ArrayShape`/`Array` anymore. `write_index_into`'s
+// `Type::Union` arm requires every member to accept the write or the
+// whole write is silently dropped - and its own empty-shape member
+// reads back as `Type::Null` at a dynamic key (`index_result_type`'s
+// own "empty shape, dynamic key reads null" arm), so `write_index_into`
+// needs its own arm for that case, or it bails the entire nested write
+// and freezes `$items`'s tracked shape at its pre-second-loop state.
 #[test]
 fn a_foreach_mutating_its_own_subject_array_that_a_prior_maybe_empty_loop_built_keeps_the_new_fields()
  {
@@ -418,17 +401,16 @@ fn a_foreach_mutating_its_own_subject_array_that_a_prior_maybe_empty_loop_built_
     );
 }
 
-// A real Piwigo corpus false positive, structurally distinct from the two
-// tests just above: those mutate the subject *directly* keyed by its own
-// loop key (`$items[$day][...] = ...`); this one mutates the subject only
-// *indirectly*, through a by-ref value variable that aliases into it
-// (`foreach ($infosOfImage as &$info) { $info['src_image'] = ...; }`,
-// `CategoryCatsRenderer::render`). `by_ref` used to be dropped entirely
-// by `check_foreach` (destructured in `stmt.rs` and never even passed
-// in) - a field the loop body writes into the by-ref alias never widened
-// `$infosOfImage`'s own tracked element type at all, so a later dynamic-
-// key read (`$infosOfImage[$id]['src_image']`) reported the key missing
-// even though every element unconditionally gets it.
+// Structurally distinct from the two tests just above: those mutate
+// the subject directly keyed by its own loop key
+// (`$items[$day][...] = ...`); this one mutates the subject only
+// indirectly, through a by-ref value variable that aliases into it
+// (`foreach ($infosOfImage as &$info) { $info['src_image'] = ...; }`).
+// `by_ref` must not be dropped entirely by `check_foreach`, or a field
+// the loop body writes into the by-ref alias never widens
+// `$infosOfImage`'s own tracked element type, so a later dynamic-key
+// read (`$infosOfImage[$id]['src_image']`) would report the key
+// missing even though every element unconditionally gets it.
 #[test]
 fn a_foreach_writing_into_a_by_ref_value_variable_widens_the_subjects_own_element_type() {
     let d = diagnostics_for(
@@ -480,14 +462,12 @@ fn a_foreach_writing_into_a_plain_by_value_variable_does_not_widen_the_subject()
     );
 }
 
-// Phase 12 Finding E: a real, pre-existing gap found by making
-// check_shape_key_access Union-aware and re-checking the real
-// corpus - PiwigoInfosSender::send's own $piwigoInfos becomes a real
-// Union of two differently-shaped ArrayShapes across an if/else (one
-// branch's own nested field differs from the other's), and a later
-// flat write into that Union silently updated no member at all,
-// leaving a key written one line earlier still reported missing by a
-// very next nested write's own "does this key exist" check.
+// A variable becoming a real Union of two differently-shaped
+// ArrayShapes across an if/else (one branch's own nested field differs
+// from the other's) must have a later flat write into that Union
+// update every member, or a key written one line earlier is still
+// reported missing by a very next nested write's own "does this key
+// exist" check.
 // Positive precision check (not just "no false positive"): `Mixed` is
 // never flagged against anything (this project's own "don't guess"
 // leniency), so a test only asserting an empty diagnostic list here
@@ -535,15 +515,12 @@ fn a_flat_write_into_a_union_of_array_shapes_updates_every_member() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 12 (unplanned follow-on): the real `PiwigoInfosSender::send`
-// shape - a `Union`-typed container (built across an `if`/`else`) whose
-// very first write to a brand-new key is itself a *nested* append
+// A `Union`-typed container (built across an `if`/`else`) whose very
+// first write to a brand-new key is itself a nested append
 // (`$info['updates'][] = ...`), never a flat `$info['updates'] = [];`
-// first. `check_assignment_target`'s `Index` arm used to route the
+// first. `check_assignment_target`'s `Index` arm must not route the
 // inner `$info['updates']` sub-expression through `check_expr`, which
-// wrongly checked it as a genuine read via `check_shape_key_access` -
-// masked before Finding E made that function actually inspect a
-// `Union` instead of bailing on it outright.
+// would wrongly check it as a genuine read via `check_shape_key_access`.
 #[test]
 fn a_nested_append_creating_a_brand_new_key_on_a_union_typed_container_is_not_flagged() {
     let d = diagnostics_for(
@@ -671,10 +648,8 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
     );
 }
 
-// Phase 14 Task 7: the array-destructuring regression risk gets its
-// own direct, dedicated coverage - the live repro this round's own
-// review found broken (foreach over a list<T>-typed variable
-// silently inferring Mixed) and its siblings.
+// Direct coverage for a foreach over a list<T>-typed variable, which
+// must not silently infer Mixed for its element type, and its siblings.
 #[test]
 fn foreach_over_a_list_typed_variable_still_infers_the_real_element_type() {
     let d = diagnostics_for(
@@ -707,14 +682,13 @@ fn adding_two_list_typed_arrays_still_uses_array_union_not_numeric_addition() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A Piwigo/real-PHPStan corpus diff found `+` on two arrays used to
-// collapse straight to `array<array-key, mixed>` unconditionally,
-// discarding both operands' own key type - `$filters + $functions` on
-// two real `array<string, callable>`-typed values (mirroring Latte's
-// own `Engine::getFilters()`/`getFunctions()`) made every `foreach
-// ($merged as $name => ...)`'s `$name` infer as `int|string`, cascading
-// into real false positives on `strtolower($name)`/`strtoupper($name)`/
-// any other string-only callee project-wide. Fixed to union both
+// `+` on two arrays must not collapse straight to `array<array-key,
+// mixed>` unconditionally, discarding both operands' own key type -
+// `$filters + $functions` on two `array<string, callable>`-typed
+// values would make every `foreach ($merged as $name => ...)`'s `$name`
+// infer as `int|string`, cascading into false positives on
+// `strtolower($name)`/`strtoupper($name)`/any other string-only callee
+// project-wide. Fixed to union both
 // operands' real key/value types (mirroring real PHPStan's own
 // `InitializerExprTypeResolver::getPlusType`'s general-array-case
 // formula), collapsing back to the shared key type when both operands
@@ -865,11 +839,11 @@ fn a_by_ref_call_with_a_list_typed_declared_parameter_still_widens_precisely() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A new round of Piwigo-corpus bucketing surfaced `infer_array_literal_type`
-// giving up entirely (falling to bare `Array(Mixed)`) on any array
-// literal containing a spread element - the real, common shape being
-// `[...findA(), ...findB()]`, combining several `list<T>`-returning
-// helpers into one. Verified against real PHPStan's own dumpType():
+// `infer_array_literal_type` must not give up entirely (falling to
+// bare `Array(Mixed)`) on any array literal containing a spread
+// element - a common shape is `[...findA(), ...findB()]`, combining
+// several `list<T>`-returning helpers into one. Verified against real
+// PHPStan's own dumpType():
 // spreading two `list<T>`s stays a `list<T>`; spreading a `list<T>`
 // alongside a plain `array<T>` degrades to plain `array<T>` (not a
 // list); a leading literal element makes the whole thing non-empty.
@@ -909,11 +883,10 @@ fn spreading_a_list_and_a_plain_array_degrades_to_a_plain_array_not_a_list() {
     );
 }
 
-// Found by the corpus recheck after the fix above landed: real Piwigo
-// code (`UserInfoWithThemeName::toArray()`) spreads another object's
-// own precisely-known `toArray()` shape and adds one more field -
-// `[...$this->userInfo->toArray(), 'theme_name' => $x]`. Verified
-// against real PHPStan's own dumpType(): spreading a shape with only
+// Spreading another object's own precisely-known shape and adding one
+// more field - `[...$this->userInfo->toArray(), 'theme_name' => $x]`.
+// Verified against real PHPStan's own dumpType(): spreading a shape
+// with only
 // non-canonical (string) keys merges those keys in verbatim, keeping
 // the whole literal a precise shape rather than degrading to a
 // generic array.
@@ -1139,9 +1112,8 @@ fn array_plus_array_infers_as_array_not_arithmetic() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 42 from the architecture audit - destructuring from an
-// array{...} shape didn't extract each position/key's own precise
-// type, falling back to Mixed.
+// Destructuring from an array{...} shape must extract each position/
+// key's own precise type, not fall back to Mixed.
 
 #[test]
 fn positional_destructuring_extracts_the_shapes_real_per_position_types() {
@@ -1196,9 +1168,8 @@ fn correctly_typed_shape_destructuring_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 50 follow-up: unsealed-shape tracking (`array{a: int, ...}`) and
-// a real, previously-undiscovered quoted-shape-key parsing bug found
-// while scoping it.
+// Unsealed-shape tracking (`array{a: int, ...}`) and quoted-shape-key
+// parsing.
 
 #[test]
 fn isset_on_an_undeclared_key_of_an_unsealed_shape_is_never_flagged_as_absent() {
@@ -1275,8 +1246,8 @@ fn a_quoted_shape_key_with_a_hyphen_is_parsed_and_looked_up_correctly() {
 #[test]
 fn a_shape_with_a_hyphenated_key_displays_it_bare() {
     // A hyphen is part of this project's own "bare shape key" grammar
-    // (`looks_like_shape_key`'s own doc comment - real corpus
-    // convention, gettext's `plural-forms` key) - round-trips unquoted.
+    // (`looks_like_shape_key`'s own doc comment - e.g. gettext's
+    // `plural-forms` key) - round-trips unquoted.
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $x): void {}
@@ -1313,13 +1284,12 @@ fn a_shape_with_a_key_needing_quotes_displays_it_quoted() {
     );
 }
 
-// A dynamic-key array write's own key type is now narrowed by a
+// A dynamic-key array write's own key type must be narrowed by a
 // preceding `is_int()`/`is_string()`-family guard on the key expression
 // itself, the same benefit an ordinary variable read already gets via
-// `infer_expr` - real corpus find (Piwigo's own
-// CategoryAvailableListController.php:283-284): `if (is_int($row['id']))
-// { $arr[$row['id']] = ...; }` used to infer `$arr`'s key type from
-// `$row['id']`'s *unnarrowed* type, not `int`.
+// `infer_expr`: `if (is_int($row['id'])) { $arr[$row['id']] = ...; }`
+// must infer `$arr`'s key type as narrowed `int`, not `$row['id']`'s
+// unnarrowed type.
 #[test]
 fn a_dynamic_key_write_narrowed_by_a_preceding_is_int_guard_infers_an_int_key() {
     let d = diagnostics_for(
@@ -1390,15 +1360,12 @@ fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
 //
 // Each `if` has no `else`, so the "neither write happened yet"
 // empty-shape branch is genuinely part of the merge - but `union_types`
-// now drops a redundant *empty* `ArrayShape` once a general `Array(key,
-// val)` member is also present in the same union (`array{}` is a
-// subtype of any `Array(key, val)` - vacuously, since an empty array
-// satisfies "every key/value is `key`/`val`-typed" for any `key`/`val`
-// at all), matching real PHPStan's own `dumpType()` output for the
-// identical shape (confirmed directly: no `array{}` alternative ever
-// survives once a general map is also possible) - real corpus false
-// positive this fixed, see `union_types`'s own doc comment for the full
-// story and corpus impact.
+// drops a redundant empty `ArrayShape` once a general `Array(key, val)`
+// member is also present in the same union (`array{}` is a subtype of
+// any `Array(key, val)` - vacuously, since an empty array satisfies
+// "every key/value is `key`/`val`-typed" for any `key`/`val` at all),
+// matching real PHPStan's own `dumpType()` output for the identical
+// shape - see `union_types`'s own doc comment for the full mechanism.
 #[test]
 fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
     let d = diagnostics_for(
