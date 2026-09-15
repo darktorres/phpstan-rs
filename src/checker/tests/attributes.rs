@@ -3,8 +3,8 @@
 
 use super::helpers::*;
 
-// Phase 37: `AttributesCheck`'s existence half - `Checker::check_attributes`,
-// wired at every declaration site an `Attribute` list can now appear on.
+// `Checker::check_attributes`'s existence half, wired at every
+// declaration site an `Attribute` list can appear on.
 
 #[test]
 fn an_attribute_naming_an_undefined_class_is_flagged() {
@@ -51,9 +51,8 @@ fn an_attribute_on_a_method_parameter_naming_an_undefined_class_is_flagged() {
 
 #[test]
 fn an_attribute_naming_a_real_builtin_attribute_class_is_not_flagged() {
-    // `Attribute` itself is a real PHP builtin (from the vendored
-    // phpstorm-stubs corpus, not user code) - a genuinely known class,
-    // not just a plausible-looking name.
+    // `Attribute` itself is a real PHP builtin, not user code - a
+    // genuinely known class, not just a plausible-looking name.
     let d = diagnostics_for(
         r#"<?php
             #[Attribute]
@@ -63,9 +62,9 @@ fn an_attribute_naming_a_real_builtin_attribute_class_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 37 follow-up (this session): constructor-argument validation -
-// `resolve_call_args`/`check_args` reused directly for an attribute's own
-// constructor call, the same machinery `ExprKind::New` already uses.
+// Constructor-argument validation reuses `resolve_call_args`/`check_args`
+// directly for an attribute's own constructor call, the same machinery
+// `ExprKind::New` uses.
 
 #[test]
 fn an_attribute_with_no_constructor_given_arguments_is_flagged() {
@@ -86,11 +85,9 @@ fn an_attribute_with_no_constructor_given_arguments_is_flagged() {
 
 #[test]
 fn an_attribute_class_inheriting_its_constructor_from_an_ancestor_is_not_flagged() {
-    // Regression test for a real corpus false positive (PHPBench's own
-    // `#[BeforeMethods]`, `class BeforeMethods extends
-    // AbstractMethodsAttribute {}`) - the constructor lookup must walk
-    // the ancestor chain (`Registry::lookup_method`), not just this
-    // class's own declared methods.
+    // The constructor lookup must walk the ancestor chain
+    // (`Registry::lookup_method`), not just this class's own declared
+    // methods.
     let d = diagnostics_for(
         r#"<?php
             #[Attribute]
@@ -250,12 +247,11 @@ fn an_attribute_class_with_a_non_public_constructor_is_flagged() {
 
 #[test]
 fn an_attribute_argument_referencing_an_undefined_class_constant_is_checked() {
-    // Confirms attribute argument expressions are now actually visited by
-    // `check_expr` (previously never checked at all - only the attribute
-    // name itself was) - a real class's own genuinely undefined constant
-    // (attribute arguments are constant expressions in real PHP, so a
-    // plain `SomeClass::CONST` is exactly the shape that appears there)
-    // should be caught the same way it would anywhere else.
+    // Attribute argument expressions must be visited by `check_expr`, not
+    // just the attribute name itself - a genuinely undefined constant
+    // (attribute arguments are constant expressions in PHP, so a plain
+    // `SomeClass::CONST` is exactly the shape that appears there) must be
+    // caught the same way it would anywhere else.
     let d = diagnostics_for(
         r#"<?php
             class Real {}
@@ -275,12 +271,10 @@ fn an_attribute_argument_referencing_an_undefined_class_constant_is_checked() {
     );
 }
 
-// Phase 37 follow-up: `attribute.notAttribute`/`attribute.target` - the
-// vendored real `#[\Override]` stub declaration (`Attribute::
-// TARGET_METHOD|TARGET_PROPERTY|TARGET_CLASS_CONSTANT`, confirmed
-// directly against `vendor/phpstorm-stubs/Core/Core_c.php`) is real,
-// already-registered data these tests exercise directly rather than
-// needing a synthetic attribute class.
+// `attribute.notAttribute`/`attribute.target` - the vendored `#[\Override]`
+// stub declaration (`Attribute::TARGET_METHOD|TARGET_PROPERTY|
+// TARGET_CLASS_CONSTANT`) is already-registered data these tests
+// exercise directly rather than needing a synthetic attribute class.
 
 #[test]
 fn using_override_on_a_plain_function_is_flagged_wrong_target() {
@@ -389,9 +383,9 @@ fn a_user_defined_attribute_class_targeting_only_properties_used_on_a_property_i
     );
 }
 
-// Phase 37 follow-up: target-validity for the remaining declaration
-// kinds - class, class constant, enum case, and closure/arrow-fn (a
-// property/method/function/param already had this).
+// Target-validity for the remaining declaration kinds - class, class
+// constant, enum case, and closure/arrow-fn (a property/method/
+// function/param already had this).
 
 #[test]
 fn a_method_only_attribute_used_on_a_class_is_flagged() {
@@ -854,8 +848,8 @@ fn a_nodiscard_attribute_on_an_ordinary_method_is_never_flagged_via_the_hook_spe
     );
 }
 
-// Phase 37, item 1: `attribute.nonRepeatable` - a non-repeatable
-// attribute class used more than once at the same declaration site.
+// `attribute.nonRepeatable` - a non-repeatable attribute class used more
+// than once at the same declaration site.
 
 #[test]
 fn a_non_repeatable_attribute_used_twice_is_flagged() {
@@ -907,9 +901,8 @@ fn a_non_repeatable_attribute_used_once_is_never_flagged() {
     );
 }
 
-// Phase 37, item 2: `attribute.deprecated` - the missing eighth usage-
-// shape of the already-shipped `@deprecated` family, gated on
-// `check_deprecated_usage` like every other one.
+// `attribute.deprecated` - one more usage-shape of the `@deprecated`
+// family, gated on `check_deprecated_usage` like every other one.
 
 #[test]
 fn a_deprecated_attribute_class_is_flagged_when_check_deprecated_usage_is_on() {
@@ -946,10 +939,9 @@ fn a_deprecated_attribute_class_is_never_flagged_by_default() {
     );
 }
 
-// Phase 37, item 3: `<kind>.deprecatedAttribute` - PHP's native
-// `#[\Deprecated]` misused on a class-like declaration itself (a real,
-// unconditional PHP fatal error for class/interface/enum, confirmed
-// directly against real `php`; PHP-8.5-gated for a trait).
+// `<kind>.deprecatedAttribute` - PHP's native `#[\Deprecated]` misused on
+// a class-like declaration itself (an unconditional PHP fatal error for
+// class/interface/enum; PHP-8.5-gated for a trait).
 
 #[test]
 fn native_deprecated_attribute_on_a_class_is_flagged() {
@@ -1042,10 +1034,9 @@ fn native_deprecated_attribute_on_a_trait_with_no_configured_version_is_never_fl
     );
 }
 
-// Phase 37, item 4: `<kind>.allowDynamicProperties`/
-// `.allowDynamicPropertiesReadonly` - PHP's native
-// `#[\AllowDynamicProperties]` on a readonly class, enum, interface, or
-// (unconditionally) trait.
+// `<kind>.allowDynamicProperties`/`.allowDynamicPropertiesReadonly` -
+// PHP's native `#[\AllowDynamicProperties]` on a readonly class, enum,
+// interface, or (unconditionally) trait.
 
 #[test]
 fn native_allow_dynamic_properties_on_a_readonly_class_is_flagged() {
@@ -1122,9 +1113,9 @@ fn native_allow_dynamic_properties_on_a_trait_is_flagged() {
     );
 }
 
-// Phase 37, item 5: `attribute.interface`/`.enum`/`.abstract`/
-// `.constructorNotPublic` - self-declaration-site parity, generalizing
-// what was originally just the trait-only `attribute.trait` check.
+// `attribute.interface`/`.enum`/`.abstract`/`.constructorNotPublic` -
+// self-declaration-site parity, generalizing the trait-only
+// `attribute.trait` check.
 
 #[test]
 fn an_interface_marked_as_an_attribute_class_itself_is_flagged() {
@@ -1209,8 +1200,8 @@ fn an_ordinary_concrete_attribute_class_with_a_public_constructor_is_never_flagg
     );
 }
 
-// Phase 37, item 6: `property.overrideAttribute` - `#[\Override]` on a
-// property is only real PHP syntax from 8.5 on.
+// `property.overrideAttribute` - `#[\Override]` on a property is only
+// real PHP syntax from 8.5 on.
 
 #[test]
 fn override_attribute_on_a_property_below_php_8_5_is_flagged() {
@@ -1268,7 +1259,7 @@ fn override_attribute_on_a_property_with_no_configured_version_is_never_flagged_
     );
 }
 
-// Phase 37, item 7: attribute-reference `<kind>.nameCase` parity.
+// Attribute-reference `<kind>.nameCase` parity.
 
 #[test]
 fn an_attribute_reference_with_wrong_case_is_flagged() {
@@ -1302,33 +1293,15 @@ fn an_attribute_reference_with_correct_case_is_never_flagged_for_case() {
     );
 }
 
-// phpstorm-stubs' own `#[ArrayShape(["key" => "type", ...])]` attribute -
-// a JetBrains/PhpStorm IDE-inspection convention, not something real
-// PHPStan ever reads: confirmed by a direct grep of the vendored
-// `vendor/phpstan-src/src/` tree, zero occurrences of "ArrayShape"
-// anywhere in it. A prior fix (justified as "real PHPStan reads this
-// attribute directly to recover a precise array shape") was never
-// actually verified against real PHPStan's own source and was wrong -
-// this project used to graft the attribute's own shape onto a bare
-// `array`/`array|X` return type unconditionally, for *any* function or
-// method carrying an attribute literally named `ArrayShape` (own project
-// code included, not just the vendored stub corpus), which is stricter
-// than real PHPStan is anywhere. Real corpus false positives this caused
-// once traced against real PHPStan's own bundled `resources/
-// functionMap.php` (the actual source real PHPStan uses for these
-// functions' native signatures - `NativeFunctionReflectionProvider`
-// returns a `functionMap.php`-based reflection before phpstorm-stubs'
-// own attributes are ever reachable): Piwigo's own `ImageBackend::
-// getGraphicsLibrary` (`gd_info()['GD Version'] ?? null` flagged
-// `nullCoalesce.offset` - `functionMap.php` gives `gd_info` a bare
-// `array`, no shape at all) and `ImageExtImagick::write` (`pathinfo($path)
-// ['dirname']` in an `isset()` flagged `isset.offset` - `functionMap.php`
-// gives `pathinfo` bare `array|string`, likewise no shape). See
-// `php_stubs.rs`'s own `patch_functionmap_array_shapes` for the narrow,
+// phpstorm-stubs' `#[ArrayShape(["key" => "type", ...])]` attribute is a
+// JetBrains/PhpStorm IDE-inspection convention, not something PHPStan
+// ever reads. It must not graft the attribute's shape onto a bare
+// `array`/`array|X` return type for any function or method carrying an
+// attribute literally named `ArrayShape` (own project code included).
+// See `php_stubs.rs`'s `patch_functionmap_array_shapes` for the narrow,
 // per-function replacement: a hand-verified allowlist of the stub
-// functions `functionMap.php` really does give a precise shape to,
-// keyed off that file's own type text rather than phpstorm-stubs' own
-// (never-consulted-by-real-PHPStan) attribute.
+// functions `functionMap.php` (the actual source PHPStan uses for these
+// functions' native signatures) really does give a precise shape to.
 #[test]
 fn an_arrayshape_named_attribute_on_an_ordinary_function_is_inert() {
     let d = diagnostics_for(
