@@ -1,5 +1,5 @@
-//! Phase 58: `MissingTypehintCheck`-equivalent completeness battery (real
-//! PHPStan's level-6 `missingType.*` rule family) - implicit-mixed
+//! `MissingTypehintCheck`-equivalent completeness battery (PHPStan's
+//! level-6 `missingType.*` rule family) - implicit-mixed
 //! parameters/properties/returns, a bare `array`/`iterable` with no value
 //! type, and a bare reference to a class with its own `@template`s given
 //! no type arguments. See `checker/missing_typehint.rs`'s own module doc
@@ -115,12 +115,10 @@ fn array_return_type_with_an_explicit_mixed_value_type_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 88: an inherited `array<string, mixed>` (no own docblock on the
+// An inherited `array<string, mixed>` (no own docblock on the
 // implementor at all, relying entirely on the interface's) must be
 // recognized as deliberately, explicitly `mixed` the same way an own
-// docblock already is - real corpus false positive: every
-// `UrlServiceInterface`/`ExposesPageData`/... implementor and test
-// double in Piwigo that correctly omits its own docblock.
+// docblock already is.
 #[test]
 fn an_inherited_explicit_mixed_array_value_type_is_not_flagged() {
     let d = all_diagnostics_for(
@@ -139,12 +137,12 @@ fn an_inherited_explicit_mixed_array_value_type_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 88: an ancestor's own genuinely, deliberately untyped `mixed`
-// parameter (no native hint at all - PSR-3's real `LoggerInterface::
-// log(mixed $level, ...)` shape) must still propagate its "explicit"
-// provenance onto an equally-untyped override - nothing about
-// backfilling a bare `Mixed` here can lose information, since the
-// child's own native resolution was already `Mixed` too.
+// An ancestor's genuinely, deliberately untyped `mixed` parameter (no
+// native hint at all - PSR-3's `LoggerInterface::log(mixed $level, ...)`
+// shape) must still propagate its "explicit" provenance onto an
+// equally-untyped override - nothing about backfilling a bare `Mixed`
+// here can lose information, since the child's own native resolution was
+// already `Mixed` too.
 #[test]
 fn an_inherited_explicit_mixed_untyped_parameter_is_not_flagged() {
     let d = all_diagnostics_for(
@@ -163,14 +161,12 @@ fn an_inherited_explicit_mixed_untyped_parameter_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 90: an anonymous class is never indexed into the registry
-// under any stable name, so `check_function`'s own `sig` lookup always
-// misses for one - without a direct ancestor lookup at the
-// `ExprKind::NewAnonymousClass` call site, a same-named method
-// implementing a real interface's own documented `array<string,
-// mixed>` parameter was never recognized as deliberately, explicitly
-// `mixed`. Real corpus shape: PHPUnit-style test doubles implementing
-// a real project interface inline.
+// An anonymous class is never indexed into the registry under any
+// stable name, so `check_function`'s own `sig` lookup always misses for
+// one - a direct ancestor lookup at the `ExprKind::NewAnonymousClass`
+// call site is needed so a same-named method implementing an
+// interface's documented `array<string, mixed>` parameter is still
+// recognized as deliberately, explicitly `mixed`.
 #[test]
 fn an_anonymous_class_inherits_explicit_mixed_from_an_implemented_interface() {
     let d = all_diagnostics_for(
@@ -194,13 +190,10 @@ fn an_anonymous_class_inherits_explicit_mixed_from_an_implemented_interface() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 92: an anonymous class relying entirely on an implemented
-// interface's own real, non-`mixed` documented type (not merely an
-// explicit-`mixed` one, Phase 90's own narrower fix) must inherit the
-// actual type, not just have the finding suppressed - real corpus
-// false positive: `MailRecipientRepositoryInterface::
-// findAdminsAndWebmasters(): list<MailRecipient>`, implemented inline
-// with no own doc.
+// An anonymous class relying entirely on an implemented interface's
+// non-`mixed` documented type (not merely an explicit-`mixed` one, the
+// narrower fix above) must inherit the actual type, not just have the
+// finding suppressed.
 #[test]
 fn an_anonymous_class_inherits_a_precise_ancestor_type_not_just_the_mixed_suppression() {
     let d = all_diagnostics_for(
@@ -223,8 +216,7 @@ fn an_anonymous_class_inherits_a_precise_ancestor_type_not_just_the_mixed_suppre
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Same as above, for the return position specifically - the exact real
-// corpus shape (`findAdminsAndWebmasters(): list<MailRecipient>`).
+// Same as above, for the return position specifically.
 #[test]
 fn an_anonymous_class_inherits_a_precise_ancestor_return_type() {
     let d = all_diagnostics_for(
@@ -248,8 +240,8 @@ fn an_anonymous_class_inherits_a_precise_ancestor_return_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// ROADMAP "Known but not yet scheduled" follow-up: the anonymous-class
-// mirror of `a_method_scoped_template_parameterized_type_is_inherited`
+// The anonymous-class mirror of
+// `a_method_scoped_template_parameterized_type_is_inherited`
 // (src/registry/tests/phpdoc_inheritance.rs) - this code path
 // (`Checker::check_function_decl`'s own inline backfill,
 // `function_decl.rs`) is a hand-maintained duplicate of the same three
@@ -305,14 +297,10 @@ fn an_anonymous_class_with_no_doc_anywhere_is_still_flagged() {
     );
 }
 
-// Phase 91: an anonymous class's own signature is never looked up from
-// the registry at all (always `sig: None` in `check_function`), so the
-// `None` branch used to build every parameter/return type purely from
-// the native hint, never once parsing `f.doc_comment` itself - real
-// corpus false positive: `new readonly class(...) implements
-// ConnectionRegistry { /** @return array<string, object> */ public
-// function getConnections(): array {...} }` was flagged even though
-// its own docblock fully specifies the value type.
+// An anonymous class's own signature is never looked up from the
+// registry at all (always `sig: None` in `check_function`), so the
+// `None` branch must still parse `f.doc_comment` itself, not build every
+// parameter/return type purely from the native hint.
 #[test]
 fn an_anonymous_class_methods_own_return_docblock_is_read() {
     let d = all_diagnostics_for(
@@ -578,13 +566,11 @@ fn constructor_with_no_return_type_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A Piwigo/real-PHPStan corpus diff found `__serialize()`'s own real
-// return type is unconditionally hardcoded by real PHPStan's reflection
-// layer to `array<mixed, mixed>` with *explicit* mixed key/value types,
-// even when the source itself writes an explicit `: array` hint with no
-// `@return` tag - confirmed directly: an ordinary, non-magic method with
-// the identical bare `: array` hint and body *is* flagged (see below),
-// `__serialize()` never is.
+// `__serialize()`'s return type is unconditionally hardcoded to
+// `array<mixed, mixed>` with explicit mixed key/value types, even when
+// the source itself writes a bare `: array` hint with no `@return` tag -
+// an ordinary, non-magic method with the identical bare `: array` hint
+// and body is flagged (see below), `__serialize()` never is.
 #[test]
 fn a_bare_array_hinted_serialize_method_is_never_flagged() {
     let d = all_diagnostics_for(
