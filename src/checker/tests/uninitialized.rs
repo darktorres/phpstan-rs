@@ -1,10 +1,9 @@
-//! Phase 62: `property.uninitialized` - a typed, no-default property
-//! that nothing anywhere in the class body ever assigns. Deliberately
-//! permissive (see `uninitialized.rs`'s own doc comment): "assigned
-//! *somewhere*, by *any* method, however conditionally" is enough to
-//! clear it - a real corpus false positive (amphp's own deferred-init
-//! `Http1Driver::$client`, assigned only in a later `handleClient()`
-//! call, not the constructor) is exactly why.
+//! `property.uninitialized` - a typed, no-default property that nothing
+//! anywhere in the class body ever assigns. Deliberately permissive (see
+//! `uninitialized.rs`'s own doc comment): "assigned somewhere, by any
+//! method, however conditionally" is enough to clear it - a
+//! deferred-init property assigned only in a later method call, not the
+//! constructor, is exactly why.
 
 use super::helpers::*;
 
@@ -133,13 +132,11 @@ fn a_property_assigned_only_inside_a_try_body_is_not_flagged() {
     );
 }
 
-// Real corpus find (amphp's own `Http1Driver::$client`): a property
-// meant to be set by a separate method called sometime *after*
-// construction, not the constructor itself - a real, common "deferred/
-// pooled-object initialization" idiom, confirmed genuinely *not*
-// flagged by real PHPStan itself (`vendor/bin/phpstan` directly on that
-// file). The whole reason this check settles for "assigned anywhere in
-// the class, by any method" instead of "guaranteed by the constructor."
+// A property meant to be set by a separate method called sometime after
+// construction, not the constructor itself - a common "deferred/
+// pooled-object initialization" idiom, not flagged by PHPStan either.
+// The whole reason this check settles for "assigned anywhere in the
+// class, by any method" instead of "guaranteed by the constructor."
 #[test]
 fn a_property_assigned_only_by_a_separate_non_constructor_method_is_not_flagged() {
     let d = diagnostics_for(
@@ -160,12 +157,10 @@ fn a_property_assigned_only_by_a_separate_non_constructor_method_is_not_flagged(
     );
 }
 
-// Real corpus find (Symfony's own `SymfonyStyle::$questionHelper`,
-// touched nowhere except this exact shape): `??=`'s own left-hand check
-// is `isset()`-based, not a raw read - and `isset()` is specially
-// exempted from the "must not be accessed before initialization" error
-// a raw read of an uninitialized typed property throws, unlike every
-// *other* compound operator (confirmed directly against real `php`).
+// `??=`'s left-hand check is `isset()`-based, not a raw read - and
+// `isset()` is specially exempted from the "must not be accessed before
+// initialization" error a raw read of an uninitialized typed property
+// throws, unlike every other compound operator.
 #[test]
 fn a_property_only_ever_touched_via_coalesce_assign_is_not_flagged() {
     let d = diagnostics_for(
@@ -206,9 +201,8 @@ fn a_property_only_ever_touched_via_a_non_coalesce_compound_assign_is_still_flag
     );
 }
 
-// Real corpus find (Latte's own `IncludeFileNode::create()`): a static
-// "named constructor" populates a fresh instance held in a *local*
-// variable, not `$this` - a real, common PHP OOP idiom.
+// A static "named constructor" populates a fresh instance held in a
+// local variable, not `$this` - a common PHP OOP idiom.
 #[test]
 fn a_property_assigned_through_a_local_var_holding_a_fresh_instance_is_not_flagged() {
     let d = diagnostics_for(
@@ -229,11 +223,10 @@ fn a_property_assigned_through_a_local_var_holding_a_fresh_instance_is_not_flagg
     );
 }
 
-// Real corpus find (Latte's own `IterateWhileNode::create()`): the
-// fresh instance is held via a *chained* assignment (`$node = $tag->node
-// = new static;`), not a bare `$node = new static;` - the right-hand
-// side of the outer assign is itself another `Assign`, not directly a
-// `New`.
+// The fresh instance is held via a chained assignment (`$node =
+// $tag->node = new static;`), not a bare `$node = new static;` - the
+// right-hand side of the outer assign is itself another `Assign`, not
+// directly a `New`.
 #[test]
 fn a_property_assigned_through_a_chained_assignment_to_a_fresh_instance_is_not_flagged() {
     let d = diagnostics_for(
