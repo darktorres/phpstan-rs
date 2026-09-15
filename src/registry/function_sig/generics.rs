@@ -16,11 +16,8 @@ use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
 /// itself, with `aliases` keyed by each alias's own *resolved* FQN (the
 /// same name a bare, unqualified reference to it would resolve to) -
 /// substituting first and re-resolving the (already-resolved) result
-/// afterward double-qualifies every name the alias's own value already
-/// carries (a real bug caught during this feature's own first attempt:
-/// `json-schema`'s own unparsed `int-mask-of<...>` pseudo-type tripled
-/// into `JsonSchema\Entity\JsonSchema\Entity\JsonSchema\Entity\int-mask-of`
-/// this way). `aliases` itself needs no equivalent care to avoid
+/// afterward double-qualifies every name the alias's value already
+/// carries. `aliases` itself needs no equivalent care to avoid
 /// re-resolving *its own* values further - each entry is inserted once,
 /// already fully resolved, and never touched by `resolve_names_in_type`
 /// again after that.

@@ -518,21 +518,20 @@ impl Registry {
         };
         let sub = stripped_sub.as_ref().unwrap_or(sub);
 
-        // Real bug this method exists to fix (found during this phase's
-        // own adversarial review): a naive version of this method bailed
-        // straight to plain `is_assignable` whenever `sup` was *also* a
-        // Union, on the theory that a nested Union-vs-Union pair is rare
-        // - but this project represents *every* nullable declared type
-        // (`?string`, `?int`, `?Foo`, the single most common PHP
-        // nullability idiom) as `Type::Union([X, Type::Null])`
-        // (`types/parse.rs`), so `sup` is a Union at every one of this
-        // method's own real call sites checking a nullable-declared
-        // parameter/property/return type - exactly the scenario
-        // `checkNullables` exists for. Recursing into `self.accepts_at_
-        // configured_level_rec` (not plain `is_assignable`) on both sides
-        // whenever either is a Union, symmetric to `is_assignable`'s own
-        // existing `282`/`283` arms, is what keeps that leniency reaching
-        // its single most common trigger.
+        // A naive version of this method would bail straight to plain
+        // `is_assignable` whenever `sup` was also a Union, on the theory
+        // that a nested Union-vs-Union pair is rare - but this project
+        // represents every nullable declared type (`?string`, `?int`,
+        // `?Foo`, the single most common PHP nullability idiom) as
+        // `Type::Union([X, Type::Null])` (`types/parse.rs`), so `sup` is
+        // a Union at every one of this method's real call sites checking
+        // a nullable-declared parameter/property/return type - exactly
+        // the scenario `checkNullables` exists for. Recursing into
+        // `self.accepts_at_configured_level_rec` (not plain
+        // `is_assignable`) on both sides whenever either is a Union,
+        // symmetric to `is_assignable`'s own existing `282`/`283` arms,
+        // is what keeps that leniency reaching its single most common
+        // trigger.
         match (sub, sup) {
             (Type::Union(members), _) => members
                 .iter()
