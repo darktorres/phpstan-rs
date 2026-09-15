@@ -3,8 +3,8 @@
 
 use super::helpers::*;
 
-// Phase 50: InvalidKeyInArrayItemRule - an array literal key must be a
-// type PHP itself accepts as an array key at runtime.
+// An array literal key must be a type PHP itself accepts as an array key
+// at runtime.
 
 #[test]
 fn an_array_literal_key_typed_as_an_object_is_flagged() {
@@ -52,12 +52,11 @@ fn ordinary_int_and_string_array_literal_keys_are_never_flagged() {
 
 #[test]
 fn bool_float_and_null_array_literal_keys_are_not_flagged_php_coerces_them() {
-    // PHP silently coerces these at runtime (matches real PHPStan's own
-    // default, non-strict AllowedArrayKeysTypes) - not a hard TypeError
-    // the way an array/object key is. No php_version configured here, so
-    // the float/null deprecation checks below (Phase 50) stay silent too,
-    // matching this project's own "unconfigured means don't check"
-    // convention for every other PhpFeature-gated rule.
+    // PHP silently coerces these at runtime - not a hard TypeError the
+    // way an array/object key is. No php_version configured here, so the
+    // float/null deprecation checks below stay silent too, matching the
+    // "unconfigured means don't check" convention for every other
+    // PhpFeature-gated rule.
     let d = diagnostics_for(
         r#"<?php
             function test(bool $b, float $f, ?string $n): array {
@@ -68,10 +67,8 @@ fn bool_float_and_null_array_literal_keys_are_not_flagged_php_coerces_them() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 50: with a real target php_version configured, real PHPStan
-// additionally excludes a float key on PHP >= 8.1 and a null key on
-// PHP >= 8.5 (confirmed against `PhpVersion::deprecatesImplicitlyFloat
-// ConversionToInt`/`deprecatesNullArrayOffset` directly).
+// With a target php_version configured, additionally exclude a float
+// key on PHP >= 8.1 and a null key on PHP >= 8.5.
 
 #[test]
 fn a_float_array_literal_key_is_flagged_on_php_8_1_or_later() {
@@ -181,15 +178,11 @@ fn a_refined_string_array_literal_key_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 50 (reattempt): `InvalidKeyInArrayDimFetchRule` -
-// `offsetAccess.invalidOffset`, the exact same legal-key-type check as
-// `InvalidKeyInArrayItemRule` above, applied to a dim-fetch's own
-// dimension expression (`$arr[$key]`) instead of a literal's own key. A
-// first attempt at this was built, corpus-verified, then reverted after
-// finding +31 false positives, all traced to a used generic template
-// parameter leaking through as a bogus namespace-qualified class
-// reference instead of staying `Type::TemplateParam` - see ROADMAP.md's
-// own **Reverted** section.
+// `offsetAccess.invalidOffset` applies the exact same legal-key-type
+// check as `array.invalidKey` above, to a dim-fetch's own dimension
+// expression (`$arr[$key]`) instead of a literal's key. A used generic
+// template parameter must stay `Type::TemplateParam` here, not leak
+// through as a bogus namespace-qualified class reference.
 
 #[test]
 fn a_dim_fetch_with_an_object_typed_key_is_flagged() {
@@ -278,15 +271,12 @@ fn a_dim_fetch_on_a_union_of_arrays_is_still_checked() {
 
 #[test]
 fn an_unbound_generic_template_parameter_used_as_a_dim_fetch_key_is_never_flagged() {
-    // Regression test for the exact real-corpus shape that caused the
-    // original revert: `amphp/sync`'s own `PriorityQueue<T of
-    // int|string>` - a still-generic `T` reaching this check (not yet
-    // substituted with a concrete type) must stay leniently unflagged,
-    // not misread as a bogus, namespace-qualified class reference.
+    // A still-generic `T` reaching this check (not yet substituted with
+    // a concrete type) must stay leniently unflagged, not misread as a
+    // bogus, namespace-qualified class reference.
     // `invalid_array_key_description` has no arm for `Type::
-    // TemplateParam` at all, so it already falls to the safe "don't
-    // know" catch-all - this pins that behavior down for this exact
-    // shape rather than trusting it implicitly.
+    // TemplateParam` at all, so it falls to the safe "don't know"
+    // catch-all.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -308,21 +298,14 @@ fn an_unbound_generic_template_parameter_used_as_a_dim_fetch_key_is_never_flagge
 
 #[test]
 fn an_unrecognized_phpstan_import_type_alias_used_as_a_dim_fetch_key_is_never_flagged() {
-    // Regression test for a real, corpus-found residual of a pre-
-    // existing, disclosed gap: `@phpstan-import-type Name from Class`
-    // (importing a `@phpstan-type` alias declared on a *different*
-    // class) is "a distinct, separate tag this project doesn't parse"
-    // (`DocBlock::type_aliases`'s own doc comment, `src/docblock.rs`) -
-    // the unresolved alias name falls through as a bogus, unregistered
-    // `Object`, which this check must treat as "don't know," not a
-    // confirmed-illegal key type. Real corpus shapes: `phpunit/php-code-
-    // coverage`'s own `TestIndexType`, `php-cs-fixer`'s own `_ImportType`.
-    //
-    // `TestIndexType` genuinely isn't a registered class here (this
-    // project doesn't parse `@phpstan-import-type` at all, so nothing
-    // ever defines it) - Phase 48's own, separate, correct
-    // `class.notFound` existence check is expected to fire on it
-    // independently; only `offsetAccess.invalidOffset` must not.
+    // `@phpstan-import-type Name from Class` (importing a `@phpstan-type`
+    // alias declared on a different class) is a distinct, separate tag
+    // this project doesn't parse (`DocBlock::type_aliases`'s own doc
+    // comment, `src/docblock.rs`) - the unresolved alias name falls
+    // through as a bogus, unregistered `Object`, which this check must
+    // treat as "don't know," not a confirmed-illegal key type. The
+    // separate `class.notFound` existence check is expected to fire on
+    // it independently; only `offsetAccess.invalidOffset` must not.
     let d = diagnostics_for(
         r#"<?php
             class Holder {
@@ -387,31 +370,23 @@ fn a_class_level_template_referenced_inside_an_inline_var_annotation_is_never_fl
 
 #[test]
 fn a_top_level_function_own_template_referenced_inside_an_inline_var_annotation_is_never_flagged() {
-    // Real corpus shape found while verifying the class-level fix just
-    // above against the full vendor corpus: `php-standard-library`'s own
-    // top-level `Psl\Dict\group_by()`, `@template Tk of array-key`,
-    // `/** @var Tk $key */` referencing it directly - no enclosing class
-    // at all, so the class-level fix alone doesn't cover it; needs
-    // `Checker::current_function_template_params` too. The `namespace`
-    // statement is deliberate, not incidental: a *global*-namespace
-    // function's own bare name already equals its FQN, so a fixture
-    // without one doesn't actually exercise `current_function_template_
-    // params`'s own real fix (`Registry::lookup_function` needs the
-    // real FQN, `self.name_ctx.declared_name(...)` - a plain bare-name
-    // lookup silently finds nothing for any namespaced function, which
-    // is the overwhelmingly common real shape) - confirmed the hard way,
-    // this exact test passed even before that fix when written without
-    // one.
+    // A top-level function's `@template Tk of array-key` referenced via
+    // `/** @var Tk $key */` - no enclosing class at all, so the
+    // class-level fix alone doesn't cover it; needs `Checker::
+    // current_function_template_params` too. The `namespace` statement
+    // is deliberate, not incidental: a global-namespace function's bare
+    // name already equals its FQN, so a fixture without one wouldn't
+    // actually exercise `current_function_template_params`'s fix
+    // (`Registry::lookup_function` needs the real FQN,
+    // `self.name_ctx.declared_name(...)` - a plain bare-name lookup
+    // silently finds nothing for any namespaced function).
     //
-    // Phase 48.D follow-up: `$keyFunc`'s own `(Closure(Tv): ?Tk)` type is
-    // copied verbatim from the real signature too (not simplified to a
-    // bare `\Closure` the way this fixture originally was) - `Tk` is only
-    // ever referenced there, nested inside the closure's own return-type
-    // slot, never as a parameter's own bare top-level type, and a real
-    // corpus false positive (`method.templateTypeNotInParameter` wrongly
-    // firing on `Tk`) confirmed this project's own template-in-parameter
-    // scan needs to recurse into `Type::Callable` too, not just an
-    // ordinary class's own generic argument list.
+    // `$keyFunc`'s own `(Closure(Tv): ?Tk)` type is copied verbatim from
+    // the real signature too (not simplified to a bare `\Closure`) - `Tk`
+    // is only ever referenced there, nested inside the closure's return-
+    // type slot, never as a parameter's bare top-level type, so the
+    // template-in-parameter scan must recurse into `Type::Callable` too,
+    // not just an ordinary class's generic argument list.
     let d = diagnostics_for(
         r#"<?php
             namespace Psl\Dict;
@@ -436,8 +411,8 @@ fn a_top_level_function_own_template_referenced_inside_an_inline_var_annotation_
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 68: `array.duplicateKey` - a later literal key silently
-// overwrites an earlier one at runtime, almost always a copy-paste bug.
+// `array.duplicateKey` - a later literal key silently overwrites an
+// earlier one at runtime, almost always a copy-paste bug.
 
 #[test]
 fn a_duplicate_string_key_in_an_array_literal_is_flagged() {
@@ -488,9 +463,8 @@ fn an_explicit_int_key_colliding_with_an_implicit_one_is_flagged() {
 
 #[test]
 fn a_duplicate_negative_int_key_in_an_array_literal_is_flagged() {
-    // Phase 50: is_canonical_int_key used to reject any leading `-`
-    // outright, so a negative key was never recognized as a real,
-    // duplicate-checkable int key at all.
+    // A negative key must be recognized as a real, duplicate-checkable
+    // int key, not rejected outright for its leading `-`.
     let d = diagnostics_for(
         r#"<?php
             function f(): array {
@@ -553,10 +527,9 @@ fn a_spread_array_literal_is_never_flagged_for_duplicate_keys() {
     );
 }
 
-// Phase 68.4: key resolution now goes through `infer_expr`, so it's not
-// limited to a bare AST literal anymore - a class constant, a `define()`d
-// global constant, or a literal bool/null key are all real, statically-
-// known-scalar keys real PHPStan itself resolves too.
+// Key resolution goes through `infer_expr`, so it's not limited to a
+// bare AST literal - a class constant, a `define()`d global constant, or
+// a literal bool/null key are all statically-known-scalar keys.
 
 #[test]
 fn a_duplicate_key_via_a_class_constant_is_flagged() {
