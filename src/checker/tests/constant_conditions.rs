@@ -2,13 +2,12 @@
 
 use super::helpers::*;
 
-// Phase 15 item (2): the constant-boolean-condition family, reinstated
-// deliberately narrower than the original (reverted) design -
-// `literal_truthiness` only ever trusts a *syntactic* literal, never the
-// condition's own inferred type, sidestepping the two real narrowing
-// gaps (loop staleness, `?? false` collapse) that got the type-
-// inference-trusting version reverted. See `checker::stmt`'s own `If`/
-// `While`/`DoWhile` arms for the real-PHPStan-grounded exclusions.
+// The constant-boolean-condition family, deliberately scoped narrower
+// than trusting the condition's own inferred type: `literal_truthiness`
+// only ever trusts a syntactic literal, sidestepping two real narrowing
+// gaps (loop staleness, `?? false` collapse) that a type-inference-
+// trusting version would hit. See `checker::stmt`'s own `If`/`While`/
+// `DoWhile` arms for the real-PHPStan-grounded exclusions.
 
 #[test]
 fn an_if_with_a_literal_true_condition_is_flagged() {
@@ -57,14 +56,11 @@ fn a_grouped_literal_still_resolves_as_if_condition() {
     );
 }
 
-// Phase 15 continuation: a bare function/method/static call condition -
-// real PHPStan's own `FunctionCallConstantConditionRule`/`*Helper`
-// (confirmed directly against `vendor/phpstan-src`, not assumed - see
-// `should_skip_constant_condition`'s own doc comment for the full
-// finding): it isn't a separate rule at all, just this exact same
-// if/while/elseif/ternary/&&/|| family deferring *their own* reporting
-// when their own condition happens to be a call - no Collector, no new
-// diagnostic identifier, only the pre-existing exclusion needed removing.
+// A bare function/method/static call condition - real PHPStan's own
+// `FunctionCallConstantConditionRule`/`*Helper` isn't a separate rule
+// at all, just this exact same if/while/elseif/ternary/&&/|| family
+// deferring their own reporting when their own condition happens to be
+// a call - no Collector, no new diagnostic identifier.
 #[test]
 fn an_if_with_a_bare_call_condition_whose_declared_return_type_is_a_literal_true_is_flagged() {
     let d = diagnostics_for(
@@ -125,11 +121,11 @@ fn a_while_with_a_literal_false_condition_is_flagged() {
     );
 }
 
-// Phase 15 follow-up: `NumberComparisonOperatorsConstantConditionRule` -
-// a `</>/<=/>=` comparison whose own outcome is provable from both
-// operands' known int ranges joins the same constant-condition family,
-// with zero new checker code (`infer_binary`'s own comparison arm now
-// returns a literal `Type::True`/`Type::False` when provable).
+// `NumberComparisonOperatorsConstantConditionRule` - a `</>/<=/>=`
+// comparison whose own outcome is provable from both operands' known
+// int ranges joins the same constant-condition family, with zero new
+// checker code (`infer_binary`'s own comparison arm returns a literal
+// `Type::True`/`Type::False` when provable).
 
 #[test]
 fn an_if_with_a_provably_always_false_less_than_comparison_is_flagged() {
@@ -174,14 +170,12 @@ fn an_if_with_an_ordinary_unbounded_int_comparison_is_never_flagged() {
     );
 }
 
-// Real corpus find (`Piwigo\Site\SiteRepository::findGalleriesUrlById`):
-// unary `-` on an int literal used to leave its own *value* unnegated
-// (`-32768` inferred as `IntLiteral(32768)`, dropping the sign entirely -
-// only `+`'s numeric-string coercion was actually applied, `-` fell
-// through to the identical "return unchanged" branch). Narrowing `$id`
-// by the *false* branch of `$id < -32768` then wrongly produced
-// `int<32768, max>` instead of `int<-32768, max>`, making the second half
-// of `$id < -32768 || $id > 32767` look "always true" against the real
+// Unary `-` on an int literal must actually negate its own value, not
+// leave it unchanged (`-32768` inferred as `IntLiteral(32768)`, dropping
+// the sign entirely) - otherwise narrowing `$id` by the false branch of
+// `$id < -32768` produces `int<32768, max>` instead of
+// `int<-32768, max>`, making the second half of
+// `$id < -32768 || $id > 32767` look "always true" against the real
 // upper bound.
 #[test]
 fn a_negative_int_literal_narrows_with_the_correct_sign() {
@@ -200,13 +194,11 @@ fn a_negative_int_literal_narrows_with_the_correct_sign() {
     );
 }
 
-// Real corpus find: `++$x`/`--$x` on an `IntLiteral`/`IntRange`-typed
-// operand used to return the operand's own type completely unchanged -
-// `$n = 0; foreach (...) { ...; $n++; } if ($n > 0)` (a real, extremely
-// common accumulator idiom) looked "always false" against a check that
-// only fires once anything actually consumes the literal's own exact
-// value, since `$n` never actually advanced past `IntLiteral(0)` no
-// matter how many times `$n++` ran.
+// `++$x`/`--$x` on an `IntLiteral`/`IntRange`-typed operand must not
+// return the operand's own type completely unchanged - otherwise `$n =
+// 0; foreach (...) { ...; $n++; } if ($n > 0)` (an extremely common
+// accumulator idiom) looks "always false", since `$n` never advances
+// past `IntLiteral(0)` no matter how many times `$n++` runs.
 #[test]
 fn a_counter_incremented_inside_a_loop_and_checked_after_is_never_flagged() {
     let d = diagnostics_for(
@@ -230,13 +222,13 @@ fn a_counter_incremented_inside_a_loop_and_checked_after_is_never_flagged() {
     );
 }
 
-// Real corpus find (Symfony's own `LoggerTest`): a do-while's own
-// trailing condition, checked once more right after the loop exits, is
-// *itself* still consulting a loop-carried variable's post-convergence
-// (bounded-pass-approximated) type - `do { ...; $attempts++; } while
-// ($attempts < 150);` looked "always true" because this project's own
-// 3-pass convergence never actually reaches anywhere near 150, even
-// though real semantics genuinely allow it. `loop_depth`'s own guard on
+// A do-while's own trailing condition, checked once more right after
+// the loop exits, is itself still consulting a loop-carried variable's
+// post-convergence (bounded-pass-approximated) type - `do { ...;
+// $attempts++; } while ($attempts < 150);` must not look "always true"
+// just because this project's own bounded-pass convergence never
+// actually reaches anywhere near 150, even though real semantics
+// genuinely allow it. `loop_depth`'s own guard on
 // `check_constant_numeric_comparison` needs to still see this one
 // trailing check as "inside the loop" for exactly this reason.
 #[test]
@@ -257,17 +249,17 @@ fn a_do_while_s_own_trailing_condition_against_a_loop_carried_counter_is_never_f
     );
 }
 
-// Real, serious corpus find: the vendored `phpstorm-stubs`' own
-// `define('PHP_VERSION_ID', 50306)` (a placeholder baked in from
-// whatever PHP version generated that stub snapshot) used to be trusted
-// as `PHP_VERSION_ID`'s own literal type everywhere - every real
-// `PHP_VERSION_ID >= 80300`-style portability check throughout the
-// entire vendor ecosystem looked unconditionally, wrongly *false*, the
-// moment anything consumed the literal value for a "provably constant"
-// purpose. `checker::expr::Checker::global_constant_type` now derives
-// this from the configured `php_version` instead (an `IntRange`
-// spanning every possible patch digit) - or a fully unbounded
-// `Type::Int` with none configured, never a specific literal.
+// The vendored `phpstorm-stubs`' own `define('PHP_VERSION_ID', 50306)`
+// (a placeholder baked in from whatever PHP version generated that
+// stub snapshot) must not be trusted as `PHP_VERSION_ID`'s own literal
+// type everywhere, or every real `PHP_VERSION_ID >= 80300`-style
+// portability check throughout the entire vendor ecosystem looks
+// unconditionally, wrongly false, the moment anything consumes the
+// literal value for a "provably constant" purpose.
+// `checker::expr::Checker::global_constant_type` derives this from the
+// configured `php_version` instead (an `IntRange` spanning every
+// possible patch digit) - or a fully unbounded `Type::Int` with none
+// configured, never a specific literal.
 #[test]
 fn php_version_id_reflects_the_configured_php_version_not_the_stub_s_own_placeholder() {
     let d = diagnostics_for_with(
@@ -357,16 +349,10 @@ fn a_while_true_in_a_never_returning_function_is_not_flagged() {
     );
 }
 
-// Re-examining Phase 15's own disclosed Pending entry ("breakless-
-// detection reuses stmt_contains_break's own 'any break anywhere'
-// conservatism... a narrow, disclosed simplification") against real
-// PHPStan's own actual source (`WhileLoopAlwaysTrueConditionRule`'s
-// `BreaklessWhileLoopNode::getExitPoints()`) found this understated the
-// real gap: a `continue` whose own level escapes past this loop also
-// disqualifies, not just a literal `break` - confirmed via a real, live
-// corpus false positive, `PhpBench\Path\Path::getLongestCommonBasePath()`'s
-// own `while (true) { ...; continue 2; }` (vendored identically four
-// times across the corpus).
+// A `continue` whose own level escapes past this loop also disqualifies
+// breakless-loop detection, not just a literal `break` - matching real
+// PHPStan's own `WhileLoopAlwaysTrueConditionRule`'s
+// `BreaklessWhileLoopNode::getExitPoints()`.
 #[test]
 fn a_while_true_with_an_escaping_continue_is_not_flagged() {
     let d = diagnostics_for(
@@ -411,11 +397,9 @@ fn a_while_true_with_a_same_level_continue_is_still_flagged() {
     );
 }
 
-// Same real gap, the other disqualifying shape real PHPStan's own
-// `getExitPoints()` also covers: any `return`/`throw` reachable inside
-// the loop body is a real exit point too, not just `break`/`continue`.
-// Real, live corpus false positive: `Amp\Http\Server\Driver\Http1Driver::
-// handleClient()`'s own `while (true) { ...; return; ... }`.
+// The other disqualifying shape real PHPStan's own `getExitPoints()`
+// also covers: any `return`/`throw` reachable inside the loop body is a
+// real exit point too, not just `break`/`continue`.
 #[test]
 fn a_while_true_with_a_return_inside_is_not_flagged() {
     let d = diagnostics_for(
@@ -454,18 +438,15 @@ fn a_do_while_true_with_a_return_inside_is_not_flagged() {
     );
 }
 
-// Phase 15 continuation: real bug found and fixed this session - a
-// `while` condition's own constant-condition check (and any standalone
-// check reached while checking it, like `BooleanNot`) used to run
-// exactly once against the pre-loop entry state, entirely bypassing
-// Phase 55's own fixed-point loop-body convergence. Real corpus false
-// positive this produced: `Piwigo\Admin\Extensions\CoreUpdateService::
-// upgradeTo`'s `$end = false; while (!$end) { ...; $end = true; ... }` -
-// `$end`'s pre-loop type is exactly `false`, so `!$end` looked
-// unconditionally `true` even though the body can reassign it. Moving
-// the condition check inside `converge_loop_body`'s own closure (so it
-// runs against each pass's own converging state, exactly matching real
-// PHPStan's own `WhileHandler::processStmt`) fixes this.
+// A `while` condition's own constant-condition check (and any
+// standalone check reached while checking it, like `BooleanNot`) must
+// not run exactly once against the pre-loop entry state, bypassing
+// fixed-point loop-body convergence, or `$end = false; while (!$end) {
+// ...; $end = true; ... }` looks unconditionally `true` (since `$end`'s
+// pre-loop type is exactly `false`) even though the body can reassign
+// it. The condition check runs inside `converge_loop_body`'s own
+// closure, against each pass's own converging state, matching real
+// PHPStan's own `WhileHandler::processStmt`.
 #[test]
 fn a_while_condition_reassigned_inside_the_body_is_not_a_false_constant() {
     let d = diagnostics_for(
@@ -489,10 +470,9 @@ fn a_while_condition_reassigned_inside_the_body_is_not_a_false_constant() {
     );
 }
 
-// Same real bug, same fix, `For`'s own last condition expression instead
-// of `While`'s bare condition - real corpus false positive:
-// `Piwigo\Search\QMultiToken::parseExpression`'s `for ($stop = false; !
-// $stop && ...; $qi++)`, where `$stop` is reassigned inside the body.
+// Same requirement, `For`'s own last condition expression instead of
+// `While`'s bare condition - a `$stop` reassigned inside the body must
+// not make `for ($stop = false; !$stop && ...; $qi++)` look constant.
 #[test]
 fn a_for_loop_condition_reassigned_inside_the_body_is_not_a_false_constant() {
     let d = diagnostics_for(
@@ -513,18 +493,13 @@ fn a_for_loop_condition_reassigned_inside_the_body_is_not_a_false_constant() {
     );
 }
 
-// Re-examining Phase 15's own disclosed simplification ("the non-last
-// [`for` condition] expressions genuinely are only ever side-effecting
-// scratch expressions in every real corpus use seen so far, so they
-// stay checked once up front... a narrow, disclosed simplification")
-// per the user's own explicit "do all those narrow [items], our corpus
-// not having them is not a reason not to do them": the *non-last*
-// condition slot needed the identical fixed-point-convergence fix the
-// test just above already has for the *last* slot - checking it once,
-// up front against the pre-loop entry, saw `$stop`'s own pre-loop
-// literal `false` and never the body's own later reassignment,
-// wrongly flagging the bare `!$stop` (itself its own standalone check,
-// fires anywhere, not just as a whole condition) as always `true`.
+// The non-last condition slot needs the identical fixed-point-
+// convergence handling the test just above has for the last slot -
+// checking it once, up front against the pre-loop entry, would see
+// `$stop`'s own pre-loop literal `false` and never the body's own
+// later reassignment, wrongly flagging the bare `!$stop` (itself its
+// own standalone check, fires anywhere, not just as a whole condition)
+// as always `true`.
 #[test]
 fn a_for_loop_non_last_condition_reassigned_inside_the_body_is_not_a_false_constant() {
     let d = diagnostics_for(
@@ -545,18 +520,13 @@ fn a_for_loop_non_last_condition_reassigned_inside_the_body_is_not_a_false_const
     );
 }
 
-// Real regression found and fixed this session, caused by the two fixes
-// directly above: moving the condition check into `converge_loop_body`'s
-// own closure means it only ever mutates per-pass *copies* of the entry,
-// never the real `locals` directly - so a variable *the condition
-// itself* assigns (`while (($x = f()) !== null) {...}`, a real, common
-// idiom) no longer survived the "loop may run zero times" merge
-// afterward (`merge_scopes` drops anything present on only one side, and
-// the real pre-loop `locals` never got the binding at all anymore).
-// Real corpus false positive: `Symfony\Component\DependencyInjection\
-// Compiler\AbstractRecursivePass::getConstructor`'s `while ((null ===
-// $class = $definition->getClass()) && $definition instanceof
-// ChildDefinition)`.
+// A caveat of moving the condition check into `converge_loop_body`'s
+// own closure: it only ever mutates per-pass copies of the entry, never
+// the real `locals` directly - so a variable the condition itself
+// assigns (`while (($x = f()) !== null) {...}`, a common idiom) must
+// still survive the "loop may run zero times" merge afterward
+// (`merge_scopes` drops anything present on only one side, so the real
+// pre-loop `locals` needs the binding too).
 #[test]
 fn a_variable_assigned_by_the_while_condition_itself_is_defined_after_the_loop() {
     let d = diagnostics_for(
@@ -627,12 +597,6 @@ fn a_do_while_true_with_a_break_is_not_flagged() {
         "got: {d:?}"
     );
 }
-
-// Phase 15 continuation: reinstating the *complete* real PHPStan
-// constant-boolean-condition family with real inferred-type trust
-// (`inferred_constant_condition`), not just bare syntactic literals -
-// `elseif`'s own identifier/exemption, `&&`/`||`/`xor`'s own left/right/
-// whole-result diagnostics, and the standalone `!$expr` rule.
 
 #[test]
 fn a_ternary_with_a_literal_true_condition_is_flagged() {
@@ -801,17 +765,10 @@ fn a_boolean_and_used_directly_as_an_if_condition_does_not_double_report_the_rig
     );
 }
 
-// Real bug found and fixed this session: `is_first_level` only ever
-// considered `in_condition_position` (an if/while/ternary's own direct
-// condition), missing real PHPStan's other real
-// `isInFirstLevelStatement()` case - a bare `||`/`&&` expression used
-// directly as its own statement (`ExpressionContext::createTopLevel()`,
-// confirmed against `ExpressionHandler::processStmt`). Without also
-// checking `in_bare_statement_position` here, the whole-result check ran
-// unconditionally on a bare `$a or sideEffect();` statement. Real corpus
-// false positive: `Piwigo\Url\UrlService::makeSectionInUrl`'s
-// `isset($x) or trigger_error(...);` (`trigger_error()`'s own stub
-// return type is exactly `true`).
+// `is_first_level` must also treat a bare `||`/`&&` used directly as its
+// own statement (`$a or sideEffect();`) as first-level, not only an
+// if/while/ternary's own direct condition - otherwise the whole-result
+// check fires unconditionally on such statements.
 #[test]
 fn a_boolean_or_used_as_its_own_bare_statement_does_not_report_the_whole_result() {
     let d = diagnostics_for(
@@ -848,15 +805,10 @@ fn a_real_variable_on_both_sides_of_boolean_and_is_not_flagged() {
     );
 }
 
-// Real bug found and fixed this session: `check_boolean_and_or`'s left-
-// side check used to run against the *already left-narrowed* scope (the
-// same one the right-side check correctly wants), so a bare-variable
-// left operand looked constantly true purely by circularity - it had
-// just been narrowed truthy on the assumption it held, then that exact
-// narrowed value was checked as if it were the operand's own real type.
-// Real corpus false positive: `Piwigo\Controller\Admin\
-// ConfigurationSubController::processSizes`'s `if ($same and ... )`
-// where `$same` is reassigned earlier in the same block.
+// The left-side check must run against the scope *before* left-side
+// narrowing, unlike the right-side check - otherwise a bare-variable left
+// operand looks constantly true purely by circularity, since it was just
+// narrowed truthy on the assumption it held.
 #[test]
 fn a_reassignable_variable_narrowed_by_its_own_use_as_the_left_operand_is_not_flagged() {
     let d = diagnostics_for(
