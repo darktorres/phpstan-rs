@@ -25,9 +25,9 @@ fn template_binds_from_argument_in_a_namespaced_file() {
     // The non-namespaced twin above already covers the substitution
     // logic itself - what's specifically under test here is that
     // resolving `identity` as a call target (through
-    // resolve_function_candidates, since Phase 9.5) doesn't disturb
-    // the separate template-binding step that runs afterward on
-    // whatever signature that resolution finds.
+    // `resolve_function_candidates`) doesn't disturb the separate
+    // template-binding step that runs afterward on whatever signature
+    // that resolution finds.
     let d = diagnostics_for(
         r#"<?php
             namespace App;
@@ -122,7 +122,6 @@ fn class_level_template_substitutes_a_method_return_type() {
 
 #[test]
 fn class_string_template_binds_the_concrete_subclass_from_a_static_factory_call() {
-    // Phase 35 Finding E: `TypedRepository::narrow`-shaped repro -
     // `class-string<R>` needs to survive from the argument
     // (`Derived::class`) all the way through `@template R of Base`
     // binding to the `@return R` result, not collapse to plain
@@ -155,15 +154,14 @@ fn class_string_template_binds_the_concrete_subclass_from_a_static_factory_call(
 
 #[test]
 fn class_string_template_binds_through_a_nullable_union_parameter() {
-    // Phase 77: `bind_template_param` used to silently no-op on a
-    // `Union` param type - `class-string<T>|null` (phpstorm-stubs'
-    // pervasive idiom, e.g. `ReflectionClass::getAttributes()`'s own
-    // `?string $name` overload once templated) never bound `T` at all,
-    // even when the real argument was a non-null `class-string<Derived>`.
-    // Otherwise identical to `class_string_template_binds_the_concrete_
-    // subclass_from_a_static_factory_call` above, just with the added
-    // `|null` on the parameter - confirmed this exact addition is what
-    // used to suppress the binding.
+    // `bind_template_param` must not silently no-op on a `Union` param
+    // type - `class-string<T>|null` (phpstorm-stubs' pervasive idiom,
+    // e.g. `ReflectionClass::getAttributes()`'s own `?string $name`
+    // overload once templated) must bind `T` even when the real
+    // argument is a non-null `class-string<Derived>`. Otherwise
+    // identical to `class_string_template_binds_the_concrete_subclass_
+    // from_a_static_factory_call` above, just with the added `|null` on
+    // the parameter.
     let d = diagnostics_for(
         r#"<?php
             class Base {}
@@ -192,8 +190,7 @@ fn class_string_template_binds_through_a_nullable_union_parameter() {
 
 #[test]
 fn a_class_literal_still_satisfies_an_ordinary_string_parameter() {
-    // Backward compatibility: `Foo::class` used to infer plain
-    // `String`; now it's `ClassString(Object("Foo"))`, which must stay
+    // `Foo::class` infers `ClassString(Object("Foo"))`, which must stay
     // freely assignable to an ordinary `string`-typed parameter - the
     // extremely common logging/error-message idiom.
     let d = diagnostics_for(
@@ -378,10 +375,10 @@ fn bare_reference_to_a_generic_class_treats_template_as_mixed() {
 #[test]
 fn extends_tag_fixes_a_non_generic_subclass_s_inherited_template_param() {
     // IntCollection isn't generic itself, but its own `@extends
-    // Collection<int>` permanently binds Collection's own T to int
-    // (Phase 10.5) - proven the same way the class-level tests above
-    // do, via a return-type mismatch that only fires if T really did
-    // resolve to int rather than staying unbound (Mixed).
+    // Collection<int>` permanently binds Collection's own T to int -
+    // proven the same way the class-level tests above do, via a
+    // return-type mismatch that only fires if T really did resolve to
+    // int rather than staying unbound (Mixed).
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -549,15 +546,12 @@ fn a_subclass_with_no_extends_tag_leaves_the_inherited_template_unbound() {
 
 #[test]
 fn a_subclass_s_own_template_name_is_not_shadowed_by_an_unrelated_ancestor_s_same_name() {
-    // Real bug this reproduces (found verifying Phase 10.5 against
-    // symfony/type-info's real NullableType<T of Type> extends
-    // UnionType<T|BuiltinType<...>>, where UnionType has its own,
-    // unrelated T): binding a whole flat map across the entire
-    // extends chain lets an ancestor's own template name silently
-    // overwrite an unrelated same-named one further down the chain,
-    // since `T` is by far the most common single-letter generic name
-    // in real PHPStan code and nothing stops two unrelated classes
-    // from both using it. Child's own `ownValue()` must resolve
+    // Binding a whole flat map across the entire extends chain must
+    // not let an ancestor's own template name silently overwrite an
+    // unrelated same-named one further down the chain, since `T` is by
+    // far the most common single-letter generic name in real PHPStan
+    // code and nothing stops two unrelated classes from both using it.
+    // Child's own `ownValue()` must resolve
     // Child's own `T` (bound to Money at the call site) - not
     // ParentGeneric's unrelated `T` (fixed to Whatever via Child's
     // own `@extends` tag).
@@ -638,11 +632,11 @@ fn a_bounded_template_argument_satisfying_the_bound_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 80 follow-up: a `@template T of value-of<Enum>` bound - exercises
+// A `@template T of value-of<Enum>` bound - exercises
 // `Registry::resolve_deferred_value_of` (`registry.rs`) resolving a
-// class-level `template_bounds` entry, the one walked location the rest
-// of this session's own `checker/tests/key_value_of.rs` tests don't cover
-// (those only exercise ordinary param/return/property positions).
+// class-level `template_bounds` entry, distinct from the ordinary
+// param/return/property positions `checker/tests/key_value_of.rs`
+// covers.
 
 #[test]
 fn a_template_bound_by_value_of_an_enum_flags_a_non_matching_literal() {
@@ -725,16 +719,16 @@ fn a_bound_violation_in_a_return_type_is_flagged() {
     );
 }
 
-// Real corpus false positive: doctrine/collections' own `Collection<TKey,
-// T>` self-reference inside its own `map()`/`filter()`/`partition()`
-// methods' `@phpstan-return` tags, where `TKey` (this same class's own
-// template, itself bound to `array-key`, i.e. `int|string`) is passed
-// right back as the argument satisfying that identical bound.
-// `is_subtype`'s/`Registry::is_assignable`'s own generic `(_, Union(
-// members)) => any(is_subtype(sub, m))` arm ran *before* the dedicated
-// `TemplateParam` arm, splitting the target union member-by-member
-// instead of comparing `TKey`'s own union bound against it as a whole -
-// each split member failed alone even though the whole bound matched.
+// `Collection<TKey, T>` self-reference inside its own `map()`/
+// `filter()`/`partition()`-style methods' `@phpstan-return` tags, where
+// `TKey` (this same class's own template, itself bound to `array-key`,
+// i.e. `int|string`) is passed right back as the argument satisfying
+// that identical bound. The dedicated `TemplateParam` arm must run
+// before `is_subtype`'s/`Registry::is_assignable`'s own generic
+// `(_, Union(members)) => any(is_subtype(sub, m))` arm, or it splits
+// the target union member-by-member instead of comparing `TKey`'s own
+// union bound against it as a whole - each split member fails alone
+// even though the whole bound matches.
 #[test]
 fn a_template_whose_own_bound_is_a_union_satisfies_that_same_union_bound_via_self_reference() {
     let d = diagnostics_for(
@@ -830,13 +824,10 @@ fn a_bound_referencing_the_same_class_s_own_earlier_template_resolves_positional
 
 #[test]
 fn a_bound_of_object_is_satisfied_by_any_class_the_common_doctrine_repository_shape() {
-    // Real bug found verifying bound-enforcement against the real
-    // Piwigo corpus: `is_assignable` had never treated the native
-    // `object` type hint as a universal supertype of any class
-    // instance before this (nothing had compared against it this way
-    // until bound-checking started) - `Doctrine\ORM\EntityRepository
-    // <T of object>` is an extremely common real-world shape every
-    // one of Piwigo's own repository classes uses.
+    // `is_assignable` must treat the native `object` type hint as a
+    // universal supertype of any class instance - `Doctrine\ORM\
+    // EntityRepository<T of object>` is an extremely common real-world
+    // shape.
     let d = diagnostics_for(
         r#"<?php
             class ActivityEntity {}
@@ -853,13 +844,12 @@ fn a_bound_of_object_is_satisfied_by_any_class_the_common_doctrine_repository_sh
 
 #[test]
 fn a_bound_argument_that_s_an_unregistered_class_is_never_flagged() {
-    // Real bug found on the real Piwigo corpus: real phpstan/phpstan
-    // ships as a compiled PHAR (no loose source files at all), so
-    // `PHPStan\Type\ArrayType` (a real class implementing the real
-    // `PHPStan\Type\Type` interface) is never actually registered -
-    // this project has no way to verify that relationship, so it
-    // shouldn't guess a violation. Uses `Bound` itself as the
-    // stand-in for a class this project simply never saw declared.
+    // A bound argument naming a class this project has never seen
+    // declared (e.g. a PHAR-bundled dependency with no loose source
+    // files, like `phpstan/phpstan` itself) can't be verified against
+    // its bound, so it must not guess a violation. Uses `Bound` itself
+    // as the stand-in for a class this project simply never saw
+    // declared.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -948,8 +938,8 @@ fn a_contravariant_template_used_in_return_position_is_flagged() {
 
 #[test]
 fn a_plain_invariant_template_is_unrestricted_in_either_position() {
-    // No `-covariant`/`-contravariant` at all - Phase 10's original,
-    // unrestricted behavior must still hold for a plain @template.
+    // No `-covariant`/`-contravariant` at all - the unrestricted
+    // behavior must still hold for a plain @template.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1053,13 +1043,11 @@ fn a_phpstan_prefixed_template_covariant_tag_still_flags_method_variance() {
 
 #[test]
 fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
-    // Real bug found on the real Piwigo corpus: every single one of
-    // 27 real-corpus diagnostics this check produced before this
-    // exemption was on a constructor - the extremely common readonly
-    // value-holder pattern real PHPStan's own variance rule
-    // explicitly exempts, since a constructor is only ever called to
-    // build one specific concrete instance, never invoked
-    // polymorphically through a supertype-typed variable.
+    // A covariant template in a constructor parameter must be exempt -
+    // the extremely common readonly value-holder pattern real PHPStan's
+    // own variance rule explicitly exempts, since a constructor is only
+    // ever called to build one specific concrete instance, never
+    // invoked polymorphically through a supertype-typed variable.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1080,12 +1068,12 @@ fn a_covariant_template_in_a_constructor_parameter_is_exempt() {
 
 #[test]
 fn an_erased_generic_with_a_declared_default_resolves_to_it_instead_of_mixed() {
-    // Phase 54: `@template T = Default` - a bare (type-argument-free)
-    // reference used to always leave T reading as Mixed (see
-    // `bare_reference_to_a_generic_class_treats_template_as_mixed` above);
-    // with a declared default it now resolves to that default instead,
-    // proven the same way every other template-substitution test here is:
-    // a return-type mismatch that only fires if T really did become int.
+    // `@template T = Default` - a bare (type-argument-free) reference
+    // to a class with a declared default resolves to that default
+    // instead of Mixed (see `bare_reference_to_a_generic_class_treats_
+    // template_as_mixed` above) - proven the same way every other
+    // template-substitution test here is: a return-type mismatch that
+    // only fires if T really did become int.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1131,11 +1119,10 @@ fn an_erased_generic_s_default_matching_the_declared_type_is_not_flagged() {
 #[test]
 fn a_covariant_template_nested_inside_another_covariant_class_s_argument_is_still_flagged_in_input_position()
  {
-    // Phase 54's own real algorithmic addition: the old flat check never
-    // recursed into another class's own generic argument at all (see this
-    // test file's own history), so `T` used as `Producer<T>`'s own
-    // argument in a parameter position was silently missed entirely, no
-    // matter how it composed. `Producer`'s own template is (implicitly)
+    // The variance check must recurse into another class's own generic
+    // argument, not just check flatly: `T` used as `Producer<T>`'s own
+    // argument in a parameter position must not be missed, no matter
+    // how it composes. `Producer`'s own template is (implicitly)
     // covariant-compatible with pass-through - composing a parameter
     // (input) position with a covariant slot leaves it an input position,
     // so `Bad`'s own covariant `T` is exactly as unsound to find there as
@@ -1251,15 +1238,13 @@ fn a_template_nested_inside_an_unregistered_class_s_argument_is_never_flagged() 
     // guess `Invariant` (or anything else) for its own template slot and
     // risk a false positive on real, unverifiable third-party generics.
     //
-    // Phase 48 (symbol-existence checking) landed after this test was
-    // first written and correctly flags `Unregistered` itself as a
-    // missing class - genuinely real, separate behavior, not a
-    // regression: an unresolvable class name in a typehint is always
-    // worth reporting on its own. What this test actually guards is
-    // narrower now that both checks coexist: `check_generic_bounds`
-    // must not ALSO pile a second, generics-specific diagnostic on top
-    // once Phase 48 has already reported the class as missing - exactly
-    // one diagnostic, and it's the class-existence one.
+    // Symbol-existence checking correctly flags `Unregistered` itself
+    // as a missing class - an unresolvable class name in a typehint is
+    // always worth reporting on its own. What this test guards: `check_
+    // generic_bounds` must not ALSO pile a second, generics-specific
+    // diagnostic on top once symbol-existence checking has already
+    // reported the class as missing - exactly one diagnostic, and it's
+    // the class-existence one.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1277,13 +1262,11 @@ fn a_template_nested_inside_an_unregistered_class_s_argument_is_never_flagged() 
 
 #[test]
 fn a_method_s_own_template_still_binds_on_a_non_generic_class() {
-    // Real Piwigo corpus bug (Piwigo\PluginConfig\EventDispatcher, a
-    // plain PSR-14-style class with zero class-level templates of its
-    // own): substitute_class_templates ran first and always defaulted
-    // an unbound TemplateParam to Mixed, wiping out the method's own
-    // separate @template before infer_call_return_type's later,
-    // correct per-call-argument pass ever got to bind it - regardless
-    // of whether the enclosing class was generic at all.
+    // On a plain, non-generic class (zero class-level templates),
+    // `substitute_class_templates` must not run first and default an
+    // unbound TemplateParam to Mixed, wiping out the method's own
+    // separate @template before `infer_call_return_type`'s later,
+    // correct per-call-argument pass ever gets to bind it.
     let d = diagnostics_for(
         r#"<?php
             class EventDispatcher {
@@ -1309,20 +1292,19 @@ fn a_method_s_own_template_still_binds_on_a_non_generic_class() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 54: `Registry::is_assignable` now actually applies variance to a
-// generic class's own type arguments, instead of ignoring them entirely
-// (`Collection<Cat>` and `Collection<Dog>` used to be mutually
-// assignable, always). These exercise it through ordinary argument-type
-// checking (`checker/calls.rs`), the same real call site every one of
-// these comparisons goes through in practice.
+// `Registry::is_assignable` applies real variance to a generic class's
+// own type arguments, instead of ignoring them entirely (`Collection<Cat>`
+// and `Collection<Dog>` are not mutually assignable). These exercise it
+// through ordinary argument-type checking (`checker/calls.rs`), the
+// same real call site every one of these comparisons goes through in
+// practice.
 
 #[test]
 fn an_invariant_generic_class_rejects_a_narrower_argument_by_default() {
     // No `@template-covariant`/`-contravariant` at all - the default,
     // by far the most common real shape - so `Collection<Cat>` and
-    // `Collection<Animal>` are genuinely different types now, even
-    // though `Cat extends Animal`. Previously silent (type arguments
-    // were ignored entirely).
+    // `Collection<Animal>` are genuinely different types, even though
+    // `Cat extends Animal`.
     let d = diagnostics_for(
         r#"<?php
             class Animal {}
@@ -1568,11 +1550,9 @@ fn a_non_generic_subclass_fixing_the_parent_s_argument_is_not_assignable_to_a_di
     );
 }
 
-// Phase 54: real PHPStan's own call-site variance annotation syntax
+// Real PHPStan's own call-site variance annotation syntax
 // (`Collection<covariant Foo>`/`Collection<contravariant Foo>`/
-// `Collection<*>`) - confirmed real and current against `phpdoc-parser`'s
-// own `GenericTypeNode`/`PhpDoc\TypeNodeResolver::resolveGenericTypeNode`
-// in `vendor/phpstan-src`. `types::parse_generic_arg` parses it into a
+// `Collection<*>`). `types::parse_generic_arg` parses it into a
 // sentinel `Registry::effective_slot_variance` reads directly.
 
 #[test]
@@ -1675,9 +1655,9 @@ fn a_call_site_variance_marker_prints_legibly_in_a_diagnostic_message() {
     );
 }
 
-// Phase 54 follow-up: `generics.callSiteVarianceConflict`/
-// `.callSiteVarianceRedundant` - `check_call_site_variance`'s own port of
-// `GenericObjectTypeCheck`'s call-site-variance half.
+// `generics.callSiteVarianceConflict`/`.callSiteVarianceRedundant` -
+// `check_call_site_variance`'s own port of `GenericObjectTypeCheck`'s
+// call-site-variance half.
 
 #[test]
 fn a_call_site_covariant_marker_matching_the_class_s_own_covariant_template_is_redundant() {
@@ -1856,20 +1836,14 @@ fn without_the_call_site_marker_the_same_nesting_is_flagged_as_unsound() {
 
 #[test]
 fn an_unbound_method_own_template_nested_inside_a_generic_argument_is_never_flagged() {
-    // Regression test for a real false-positive class found via this
-    // session's own corpus diff (596 new diagnostics on a single real
-    // shape): `checker::calls`'s own call-argument template binding
-    // only ever binds a template used as a *bare* param type (`T
-    // $value`), never one nested inside another class's own generic
-    // argument list - so `E` here reaches `is_assignable`'s new
-    // variance-aware comparison exactly as unbound as it was declared,
-    // not substituted with the real argument's own entity type the way
-    // real PHPStan's own inference would. Comparing it structurally
-    // against the real, concrete argument is exactly as wrong as
-    // comparing `Mixed` would be - real corpus shape verbatim: Piwigo's
-    // own `TypedRepository::narrow(EntityRepository<E> $repository)`
-    // with `@template E of object`, called with a real, concrete
-    // `EntityRepository<ConcreteEntity>` value.
+    // `checker::calls`'s own call-argument template binding only binds
+    // a template used as a bare param type (`T $value`), never one
+    // nested inside another class's own generic argument list - so `E`
+    // here reaches `is_assignable`'s variance-aware comparison exactly
+    // as unbound as it was declared, not substituted with the real
+    // argument's own entity type the way real PHPStan's own inference
+    // would. Comparing it structurally against the real, concrete
+    // argument is exactly as wrong as comparing `Mixed` would be.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1895,9 +1869,9 @@ fn an_unbound_method_own_template_nested_inside_a_generic_argument_is_never_flag
 #[test]
 fn an_unbound_method_own_template_nested_inside_a_generic_argument_with_a_concrete_receiver_is_never_flagged()
  {
-    // The exact real corpus shape: the argument itself is a concretely
-    // generic-typed value (`EntityRepository<ConcreteEntity>`), not
-    // another unbound template.
+    // Same shape, but the argument itself is a concretely generic-typed
+    // value (`EntityRepository<ConcreteEntity>`), not another unbound
+    // template.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1921,8 +1895,8 @@ fn an_unbound_method_own_template_nested_inside_a_generic_argument_with_a_concre
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 54 follow-up: generic-reference arity/well-formedness on an
-// @extends/@implements clause specifically.
+// Generic-reference arity/well-formedness on an @extends/@implements
+// clause specifically.
 
 #[test]
 fn extending_a_single_template_class_with_two_type_arguments_is_flagged() {
@@ -2004,9 +1978,8 @@ fn a_missing_argument_covered_by_a_template_default_is_never_flagged() {
     );
 }
 
-// Real corpus false positive (Piwigo's own custom `phpstan-stubs/
-// LatteCachingIterator.stub.php`): a class with *no* declared templates
-// at all being given type arguments in someone else's `@extends` tag is
+// A class with no declared templates at all being given type arguments
+// in someone else's `@extends` tag is
 // `generics.notGeneric` territory (a different, deliberately unbuilt
 // check - see `check_generic_reference_arity`'s own doc comment), not
 // `generics.moreTypes` - this project's own `@template`-tag parsing
@@ -2028,10 +2001,9 @@ fn extending_a_class_with_zero_declared_templates_and_real_type_args_is_never_fl
     );
 }
 
-// Real corpus false positive (Symfony's own `ServiceCollectionInterface`,
-// which `extends ServiceProviderInterface, \Countable, \IteratorAggregate`
-// with *two* of those three each carrying their own `@extends <Args>`
-// tag): `ClassInfo::extends_args` is a flat, un-keyed list - real PHP
+// An interface extending several parents, each carrying its own
+// `@extends <Args>` tag: `ClassInfo::extends_args` is a flat, un-keyed
+// list - real PHP
 // interfaces can `extends` more than one parent, each with an
 // independent argument list this field has no way to keep separate, so
 // two `@extends<...>` tags parse into one conflated list. Arity-checking
@@ -2061,8 +2033,8 @@ fn an_interface_extending_two_generic_parents_at_once_is_never_flagged_for_arity
     );
 }
 
-// Phase 54 follow-up: `check_generic_reference_arity` is now called
-// pervasively from `check_generic_bounds_and_arity` itself, not just
+// `check_generic_reference_arity` is called pervasively from
+// `check_generic_bounds_and_arity` itself, not just
 // `check_ancestor_generic_bounds`'s own dedicated `extends`/`implements`
 // call site - matching real PHPStan's own `GenericObjectTypeCheck`, run
 // from `IncompatiblePhpDocTypeCheck` at every declared generic-type
@@ -2125,8 +2097,8 @@ fn a_param_type_with_the_exact_declared_arity_is_never_flagged() {
     );
 }
 
-// Phase 48.D: `method.templateTypeNotInParameter` - a function/method's
-// own `@template` referenced only in its return type (or nowhere at all)
+// `method.templateTypeNotInParameter` - a function/method's own
+// `@template` referenced only in its return type (or nowhere at all)
 // can never be inferred at a call site, since inference only ever reads
 // argument types.
 
@@ -2194,8 +2166,8 @@ fn a_template_also_referenced_in_a_parameter_is_never_flagged() {
 
 #[test]
 fn a_template_referenced_only_nested_inside_a_parameters_own_generic_argument_is_never_flagged() {
-    // Real corpus shape: a template only ever appearing inside a
-    // parameter's own generic argument list (`array<int, T>`), not as
+    // A template only ever appearing inside a parameter's own generic
+    // argument list (`array<int, T>`), not as
     // the parameter's own bare top-level type - still a real, valid
     // inference source, and must not be flagged.
     let d = diagnostics_for(
@@ -2238,11 +2210,10 @@ fn a_class_level_template_is_never_flagged_by_the_method_level_check() {
     );
 }
 
-// Phase 54: `@use Trait<Arg, ...>` - real PHPStan resolves this tag from
-// the `use` *statement*'s own doc comment (confirmed directly,
-// `vendor/phpstan-src`'s own `TemplateObjectType`: `/** @use
-// TemplateTypeTrait<ObjectType> */` sits right above `use
-// TemplateTypeTrait;`, not the class's own separate top-level docblock) -
+// `@use Trait<Arg, ...>` - real PHPStan resolves this tag from the
+// `use` statement's own doc comment (`/** @use TemplateTypeTrait
+// <ObjectType> */` sits right above `use TemplateTypeTrait;`, not the
+// class's own separate top-level docblock) -
 // `ClassInfo::uses_args` mirrors `implements_args`, feeding the identical
 // `check_generic_bounds`/`check_generic_reference_arity` pervasive
 // machinery `check_ancestor_generic_bounds` already runs for `extends`/
@@ -2378,15 +2349,13 @@ fn two_separate_use_statements_each_keep_their_own_use_tag_s_arguments() {
     );
 }
 
-// Phase 54 follow-up regression: `Traversable`/`Iterator`/
-// `IteratorAggregate`/`Generator` are the one real, hardcoded exception to
-// pervasive arity checking - `PhpDoc\TypeNodeResolver::
-// resolveGenericTypeNode` (`vendor/phpstan-src`) pads a short-form
-// reference to these four names with `mixed` before any arity check ever
-// sees it. Verified directly against a real, installed `phpstan/phpstan`
-// (see this test module's own history) - `Generator<int, string>` (2 of
-// its real 4 templates) must never be flagged, but `Generator<int, string,
-// bool>` (3 of 4 - not one of the two real padded shapes) still is.
+// `Traversable`/`Iterator`/`IteratorAggregate`/`Generator` are the one
+// real, hardcoded exception to pervasive arity checking -
+// `PhpDoc\TypeNodeResolver::resolveGenericTypeNode` pads a short-form
+// reference to these four names with `mixed` before any arity check
+// ever sees it. `Generator<int, string>` (2 of its real 4 templates)
+// must never be flagged, but `Generator<int, string, bool>` (3 of 4 -
+// not one of the two real padded shapes) still is.
 
 #[test]
 fn a_single_argument_generator_reference_is_never_flagged_for_arity() {
@@ -2425,9 +2394,8 @@ fn a_two_argument_generator_reference_is_never_flagged_for_arity() {
 #[test]
 fn a_three_argument_generator_reference_is_still_flagged_for_arity() {
     // Not one of the two hardcoded padded shapes (1 or 2 given args) -
-    // falls through to ordinary arity checking against Generator's real 4
-    // templates, same as a real, installed `phpstan/phpstan` (confirmed
-    // directly).
+    // falls through to ordinary arity checking against Generator's real
+    // 4 templates.
     let d = diagnostics_for(
         r#"<?php
             /** @return \Generator<int, string, bool> */
@@ -2457,8 +2425,8 @@ fn a_single_argument_traversable_reference_is_never_flagged_for_arity() {
     );
 }
 
-// Phase 54's last build item: `generics.interfaceConflict` -
-// `check_cross_path_interface_conflicts`, ported from
+// `generics.interfaceConflict` - `check_cross_path_interface_conflicts`,
+// ported from
 // `Rules/Generics/CrossCheckInterfacesHelper.php`. A real "diamond
 // generic" shape: `Box<T>` reaches `BaseIface` via two different paths
 // (`AIface`/`BIface`), each pinning `BaseIface`'s own template to a
@@ -2627,9 +2595,9 @@ fn two_independent_root_templates_forwarded_to_the_same_ancestor_slot_are_flagge
     );
 }
 
-// Phase 54/77 follow-up: constructor-argument-driven class-level generic
-// inference - `new Box(5)` binds `Box`'s own `@template T` from the
-// constructor argument's inferred type, the way real PHPStan's own
+// Constructor-argument-driven class-level generic inference -
+// `new Box(5)` binds `Box`'s own `@template T` from the constructor
+// argument's inferred type, the way real PHPStan's own
 // NewHandler/ConstructorClassTemplateTraverser does.
 
 #[test]
@@ -2705,14 +2673,13 @@ fn reflection_class_binds_its_own_template_from_a_class_string_argument() {
 
 #[test]
 fn reflection_class_from_a_plain_string_variable_leaves_t_erased_not_bound_to_string() {
-    // Corpus regression this exact patch introduced and fixed in the same
-    // pass: `new ReflectionClass($className)`, a plain `string`-typed
-    // variable (not `Foo::class`), must not bind `T` to `string` itself -
+    // `new ReflectionClass($className)`, a plain `string`-typed variable
+    // (not `Foo::class`), must not bind `T` to `string` itself -
     // `bind_template_param`'s bare-`T` union arm would otherwise happily
     // do so once the stricter `ClassString` arm declined to match,
     // producing a bound-violating `ReflectionClass<string>` (`T of
-    // object`) that broke real downstream `ReflectionClass<object>` call
-    // sites (`tools/phpstan/Latte/*.php` in the real Piwigo corpus).
+    // object`) that breaks real downstream `ReflectionClass<object>`
+    // call sites.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -2726,10 +2693,9 @@ fn reflection_class_from_a_plain_string_variable_leaves_t_erased_not_bound_to_st
 
 #[test]
 fn reflection_class_binds_its_own_template_from_a_bare_string_literal_naming_a_real_class() {
-    // Phase 54 follow-up: real PHPStan's own `ConstantStringType::
-    // isClassString()` treats a literal naming a real, registered class
-    // exactly like an explicit `Foo::class` - this project was behind
-    // real PHPStan here, not stricter than it, before this fix.
+    // Real PHPStan's own `ConstantStringType::isClassString()` treats a
+    // literal naming a real, registered class exactly like an explicit
+    // `Foo::class`.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -2778,17 +2744,16 @@ fn a_class_string_template_parameter_binds_from_a_literal_naming_a_real_class_th
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`MailServiceTestTransportSwap::with`): unlike `newInstance()`/
-// `newInstanceWithoutConstructor()` (both already correctly `@return T`-
-// documented in phpstorm-stubs), `newInstanceArgs()` carries no such tag
-// there at all - only its bare native `?object` hint - so it fell
-// straight through to that nullable native type instead of resolving to
-// `T`. Real PHPStan gets its own more precise typing here from a
-// separate, PHPStan-bundled stub override this project doesn't
-// otherwise ingest; patched by hand in `php_stubs::patch_reflection_
-// class_constructor_template`, the same function that already patches
-// the constructor's own template-binding gap just above.
+// Unlike `newInstance()`/`newInstanceWithoutConstructor()` (both
+// already correctly `@return T`-documented in phpstorm-stubs),
+// `newInstanceArgs()` carries no such tag there - only its bare native
+// `?object` hint - so it must not fall straight through to that
+// nullable native type instead of resolving to `T`. Real PHPStan gets
+// its own more precise typing here from a separate, PHPStan-bundled
+// stub override this project doesn't otherwise ingest; patched by hand
+// in `php_stubs::patch_reflection_class_constructor_template`, the same
+// function that already patches the constructor's own template-binding
+// gap just above.
 #[test]
 fn reflection_class_new_instance_args_returns_its_own_template_not_a_nullable_object() {
     let d = diagnostics_for(
@@ -2804,9 +2769,9 @@ fn reflection_class_new_instance_args_returns_its_own_template_not_a_nullable_ob
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 77: `ReflectionMethod`/`ReflectionProperty` carry a synthesized
-// `TClass` template (not real in phpstorm-stubs) so the 4 receiver-
-// propagating `ReflectionClass<T>` methods below bind it to `T`, and
+// `ReflectionMethod`/`ReflectionProperty` carry a synthesized `TClass`
+// template (not real in phpstorm-stubs) so the 4 receiver-propagating
+// `ReflectionClass<T>` methods below bind it to `T`, and
 // `getDeclaringClass()` hands it straight back.
 #[test]
 fn reflection_class_get_method_binds_its_receiver_s_own_template() {
@@ -2929,12 +2894,11 @@ fn reflection_class_get_method_leaves_t_erased_when_the_receiver_s_own_t_is_eras
 
 #[test]
 fn a_bare_reflection_method_return_type_hint_produces_no_missing_generics_diagnostic() {
-    // Phase 77 step 5's own regression test: `ReflectionMethod`'s newly
-    // synthesized `TClass` template must be exempted from
-    // `missingType.generics` (level 6+) the same way the 4 built-in
-    // iterable interfaces already are - otherwise this invented template
-    // would start flagging every ordinary bare `ReflectionMethod`/
-    // `ReflectionProperty` type hint project-wide.
+    // `ReflectionMethod`'s synthesized `TClass` template must be
+    // exempted from `missingType.generics` (level 6+) the same way the
+    // 4 built-in iterable interfaces already are - otherwise this
+    // invented template would flag every ordinary bare
+    // `ReflectionMethod`/`ReflectionProperty` type hint project-wide.
     let d: Vec<_> = all_diagnostics_for(
         r#"<?php
             class C {
@@ -2991,8 +2955,7 @@ fn a_trait_string_parameter_accepts_a_real_trait_class_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// ROADMAP "Known but not yet scheduled" follow-up: the call-site payoff
-// of backfilling a method-scoped `@template` (see
+// The call-site payoff of backfilling a method-scoped `@template` (see
 // src/registry/tests/phpdoc_inheritance.rs's own registry-level test for
 // the signature-shape assertion) - once backfilled, an actual method
 // call through it must really bind `T`, not just carry a `TemplateParam`
@@ -3022,14 +2985,11 @@ fn a_call_through_a_method_scoped_backfilled_template_binds_t_from_the_real_argu
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A Piwigo/real-PHPStan corpus diff found a real, distinct gap from the
-// method-scoped case just above: `MessengerFactory::transport`'s own
-// `(new DoctrineTransportFactory($registry))->createTransport(...)` -
-// `DoctrineTransportFactory` re-declares (doesn't purely inherit)
-// `TransportFactoryInterface`'s own `createTransport()`, so `owner`
-// (whichever class `lookup_method_with_owner` reports) is
-// `DoctrineTransportFactory` itself, which declares no `@template` of
-// its own - its genericness comes entirely from its own `@implements
+// A distinct gap from the method-scoped case just above: a class that
+// re-declares (doesn't purely inherit) an interface method, so `owner`
+// (whichever class `lookup_method_with_owner` reports) is the concrete
+// class itself, which declares no `@template` of its own - its
+// genericness comes entirely from its own `@implements
 // FactoryInterface15<Concrete>` tag. Confirmed via `dumpType()` against
 // real PHPStan that this correctly narrows to the concrete class. Fixed
 // via `registry::resolve::template_param_scopes_all_safe_to_backfill`
@@ -3068,22 +3028,20 @@ fn a_call_through_a_class_scoped_template_binds_via_the_implementing_class_s_own
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A distinct regression the fix above's own first draft introduced,
-// caught via the same corpus diff before it ever shipped: resolving a
-// class-scoped ancestor template only at *external call-site*
-// resolution left it as a raw, still-templated `TemplateParam` in the
-// stored signature - fine for a call from elsewhere, but wrong when the
-// signature is read directly to check its *own declaring class's own
-// method body* (seeding `locals` for its own parameters), a path with
-// no "external call site" to resolve anything through at all. Real
-// corpus shape: `Composer\Pcre\PHPStan\InvalidRegexPatternRule`
-// implementing real PHPStan's own `Rule<TNodeType>` (`@param TNodeType
-// $node` on the interface's own `processNode()`) - `$node`'s own local
-// type stayed literally named `"TNodeType"` the instant its own body
-// called `$this->extractPatterns($node, ...)`. Fixed by resolving a
-// class-scoped ancestor template *eagerly*, at backfill time
+// A distinct case the fix above's own approach must also handle:
+// resolving a class-scoped ancestor template only at external
+// call-site resolution would leave it as a raw, still-templated
+// `TemplateParam` in the stored signature - fine for a call from
+// elsewhere, but wrong when the signature is read directly to check
+// its own declaring class's own method body (seeding `locals` for its
+// own parameters), a path with no "external call site" to resolve
+// anything through at all: implementing an interface with `@param
+// TNodeType $node` on a method, `$node`'s own local type must not stay
+// literally named `"TNodeType"` the instant its own body calls another
+// method taking the concrete type. Resolved by resolving a
+// class-scoped ancestor template eagerly, at backfill time
 // (`Registry::substitute_class_scoped_ancestor_templates`), not merely
-// checking a binding is *available* and deferring substitution.
+// checking a binding is available and deferring substitution.
 #[test]
 fn a_class_scoped_template_resolves_when_checking_its_own_declaring_class_s_own_body() {
     let d = diagnostics_for(
