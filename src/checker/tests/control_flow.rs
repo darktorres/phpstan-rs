@@ -256,15 +256,12 @@ fn do_while_switch_and_static_var_bodies_are_all_checked() {
     );
 }
 
-// Real corpus find, one level deeper than the general loop-exit fix
-// (`Checker::converge_loop_body`'s own "drop names only introduced inside
-// the body" adjustment): a `do`-`while`'s own body always runs at least
-// once by construction (the condition is only ever checked *after* the
-// first pass), so a variable introduced only inside it must NOT be
-// dropped the way an ordinary `while`/`for`/`foreach` (which really can
-// run zero times) needs. `PageAssets::promoteLoadModes`'s own real corpus
-// shape - `do { $changed = false; ...; } while ($changed);` - was wrongly
-// flagged `variable.undefined` before this exemption.
+// A `do`-`while`'s own body always runs at least once by construction
+// (the condition is only ever checked after the first pass), so a
+// variable introduced only inside it must NOT be dropped the way an
+// ordinary `while`/`for`/`foreach` (which really can run zero times)
+// needs - `Checker::converge_loop_body`'s "drop names only introduced
+// inside the body" adjustment must exempt this shape.
 #[test]
 fn a_variable_introduced_inside_a_do_while_body_stays_defined_afterward() {
     let d = diagnostics_for(
@@ -314,16 +311,13 @@ fn a_variable_introduced_inside_an_infinite_for_loop_stays_defined_after_a_break
     );
 }
 
-// Real corpus false positive found while triaging the wider Piwigo corpus
-// (`UserSortField::parseOrderClause`): a `foreach` subject that's
-// *provably* non-empty (`explode()`'s own always-non-empty-list return,
-// confirmed against `vendor/phpstan-src`'s own `ExplodeFunctionDynamic
-// ReturnTypeExtension`) mirrors real PHPStan's `isIterableAtLeastOnce()->
-// yes()` case - it never runs zero times, so `LoopZeroIterations::
-// Impossible` applies, the same as do-while/for(;;), not `Possible`'s
-// merge-with-entry (which would otherwise spuriously reintroduce the
-// pre-loop `[]` as a live alternative even though every real iteration
-// provably replaces it).
+// A `foreach` subject that's provably non-empty (`explode()`'s own
+// always-non-empty-list return) mirrors real PHPStan's
+// `isIterableAtLeastOnce()->yes()` case - it never runs zero times, so
+// `LoopZeroIterations::Impossible` applies, the same as do-while/
+// for(;;), not `Possible`'s merge-with-entry (which would otherwise
+// spuriously reintroduce the pre-loop `[]` as a live alternative even
+// though every real iteration provably replaces it).
 #[test]
 fn a_foreach_over_a_provably_non_empty_subject_never_merges_with_the_pre_loop_entry() {
     let d = diagnostics_for(
@@ -343,14 +337,13 @@ fn a_foreach_over_a_provably_non_empty_subject_never_merges_with_the_pre_loop_en
 
 #[test]
 fn an_inline_var_tag_on_a_static_declaration_overrides_its_default_expression() {
-    // Real corpus find (Piwigo's own `MessengerRoundTripTest::marker()`):
-    // `static $x = null;` used to type `$x` as exactly `Null`, silently
+    // `static $x = null;` must not type `$x` as exactly `Null`, silently
     // clobbering an already-applied `/** @var string|null */` tag right
     // above it - every other assignment shape already lets `@var`
     // override its own natural inference; a `static` declaration is no
-    // different. Asserts against Phase 60's own `nullCoalesce.variable`
-    // (which the pre-fix `Null` inference wrongly fired, "always null")
-    // as the most direct evidence the annotation is actually honored.
+    // different. Asserts against `nullCoalesce.variable` (which a
+    // `Null` inference would wrongly fire, "always null") as the most
+    // direct evidence the annotation is actually honored.
     let d = diagnostics_for(
         r#"<?php
             function marker(): string {
@@ -483,10 +476,10 @@ fn throwing_a_non_throwable_class_is_flagged() {
 #[test]
 fn throw_expression_of_a_non_throwable_class_is_flagged() {
     // Same check as `throwing_a_non_throwable_class_is_flagged` just
-    // above, but via a `throw` *expression* (PHP 8's `??`/arrow-fn/
-    // match-arm shape) rather than a bare `throw` statement - a
-    // previously-real gap (`ExprKind::Throw` never ran this check at
-    // all, only `StmtKind::Throw` did).
+    // above, but via a `throw` expression (PHP 8's `??`/arrow-fn/
+    // match-arm shape) rather than a bare `throw` statement -
+    // `ExprKind::Throw` must run this check too, not just
+    // `StmtKind::Throw`.
     let d = diagnostics_for(
         r#"<?php
             class NotAnException3 {}
@@ -503,13 +496,12 @@ fn throw_expression_of_a_non_throwable_class_is_flagged() {
     );
 }
 
-// Real bug found and fixed this session: both `StmtKind::Throw` and
-// `ExprKind::Throw` required the thrown value's own type to be literally
-// `Type::Object`, silently skipping the check for a `Union`/
-// `Intersection` - a value narrowed via `instanceof` from an unrelated
+// Both `StmtKind::Throw` and `ExprKind::Throw` need `Union`/
+// `Intersection` handling for the thrown value's own type, not just
+// `Type::Object` - a value narrowed via `instanceof` from an unrelated
 // interface, then thrown, is exactly as real a shape here as it was for
 // property access (see `checker::tests::narrowing`'s own tests for that
-// bug). Neither `View` nor `NotThrowable` implements `Throwable`, so
+// case). Neither `View` nor `NotThrowable` implements `Throwable`, so
 // every member of the resulting intersection fails.
 #[test]
 fn throwing_a_value_narrowed_to_an_intersection_of_two_non_throwables_is_flagged() {
@@ -552,17 +544,15 @@ fn throwing_a_value_narrowed_to_an_intersection_including_a_real_throwable_is_no
     );
 }
 
-// Real bug found and fixed this session, discovered via a real corpus
-// line the Union fix above newly made reachable: `is_subclass_of`
-// silently treats a name the registry has no entry for as "not a
-// subclass of Throwable," indistinguishable from a real, known,
-// non-Throwable class - `class_name_exists` must be checked first,
-// mirroring `StmtKind::Try`'s own multi-catch handling a few hundred
-// lines up (which already guards this exact case). Real corpus shape:
-// a multi-catch `catch (A|B $e) { throw $e; }` binds `$e` to a real
+// `is_subclass_of` silently treats a name the registry has no entry
+// for as "not a subclass of Throwable," indistinguishable from a real,
+// known, non-Throwable class - `class_name_exists` must be checked
+// first, mirroring `StmtKind::Try`'s own multi-catch handling a few
+// hundred lines up (which already guards this exact case). A
+// multi-catch `catch (A|B $e) { throw $e; }` binds `$e` to a real
 // union type - one of `A`/`B` living in an unresolvable/unscanned
-// vendored package wrongly reported "does not implement Throwable"
-// even though the real interface genuinely does.
+// vendored package must not be wrongly reported "does not implement
+// Throwable" when the real interface genuinely does.
 #[test]
 fn throwing_a_union_including_an_unresolvable_class_is_not_flagged() {
     let d = diagnostics_for(
@@ -641,7 +631,7 @@ fn catching_a_real_exception_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 42: CatchWithUnthrownExceptionRule's "already caught" half
+// CatchWithUnthrownExceptionRule's "already caught" half
 // (`catch.alreadyCaught`) - a later catch clause every one of whose
 // types is already a subtype of something an earlier clause caught can
 // never actually run, since PHP tries each clause in source order and
@@ -736,8 +726,8 @@ fn unrelated_catch_clauses_are_never_flagged() {
     );
 }
 
-// Phase 42(4), `OverwrittenExitPointByFinallyRule`: a real, well-known
-// PHP gotcha - a `finally` block's own `return`/`throw`/`break`/
+// `OverwrittenExitPointByFinallyRule`: a real, well-known PHP gotcha -
+// a `finally` block's own `return`/`throw`/`break`/
 // `continue` always wins, even over an in-flight exception or the try
 // body's own return, silently discarding it. Verified byte-for-byte
 // against real PHPStan (message text, line numbers, and identifier)
@@ -772,13 +762,10 @@ fn a_finally_block_unconditionally_returning_overwrites_the_try_bodys_return() {
     );
 }
 
-// Phase 68.2: `finally`'s own real entry scope isn't just the try body's
+// `finally`'s own real entry scope isn't just the try body's
 // full-completion state - real PHP can jump into `finally` the moment an
 // exception is thrown anywhere inside the try body, including before a
-// variable it conditionally reassigns ever runs. Real corpus false
-// positive this fixes: Piwigo's own `tests/Integration/
-// GroupServiceTest.php`, `$copyId = null;` reassigned only conditionally
-// inside `try`, `finally` wrongly seeing only the reassigned state.
+// variable it conditionally reassigns ever runs.
 
 #[test]
 fn finally_sees_the_pre_try_state_too_when_an_earlier_statement_could_throw() {
@@ -985,13 +972,10 @@ fn a_finally_blocks_break_overwrites_the_try_bodys_continue() {
     );
 }
 
-// Phase 23 Finding 5, real shape:
-// tests/Unit/Mail/MailServiceTestFakeSmtpServer.php's `$conn =
-// stream_socket_accept(...); if ($conn === false) { fwrite(STDERR,
-// ...); exit(1); } stream_set_timeout($conn, 5);` - `exit`/`die`
-// never inferred as `Type::Never`, so this guard clause wasn't
-// recognized as terminating and the then-branch's narrowing leaked
-// into the surrounding scope past the `if`.
+// `exit`/`die` must be inferred as `Type::Never`, so a guard clause
+// like `if ($conn === false) { fwrite(STDERR, ...); exit(1); }` is
+// recognized as terminating and the then-branch's narrowing doesn't
+// leak into the surrounding scope past the `if`.
 #[test]
 fn a_guard_clause_built_on_exit_terminates_like_return() {
     let d = diagnostics_for(
@@ -1044,16 +1028,12 @@ fn for_loop_that_can_run_zero_times_does_not_define_a_body_only_variable() {
     assert!(d[0].message.contains("undefined variable $x"), "got: {d:?}");
 }
 
-// Phase 29, real shape: Piwigo\Core\Lang::load's own `$source_file =
-// ''; foreach ($languages as $language) { $f = ...; if (found) {
-// $source_file = $f; break; } } if ($source_file === '') { return
-// false; } preg_replace(..., $source_file);` - a `break` reached
-// inside an `if` had its own state (a real string) silently
-// discarded from what flows past the loop, since `always_terminates`
-// correctly stops it from leaking into the *rest of the same block*
-// but nothing captured it for the *loop's own* exit state. Left
-// `$source_file` permanently typed as the literal `''` after the
-// loop, which then collapsed to `Type::Never` at the `=== ''` guard -
+// A `break` reached inside an `if` must not have its own state (a real
+// string) discarded from what flows past the loop - `always_terminates`
+// correctly stops it from leaking into the rest of the same block, but
+// something must still capture it for the loop's own exit state, or the
+// variable stays permanently typed as its pre-loop literal after the
+// loop, which then collapses to `Type::Never` at a later guard -
 // vacuously assignable to anything, masking every real check after it.
 #[test]
 fn a_break_reached_inside_an_if_is_seen_by_code_after_its_foreach_loop() {
@@ -1175,18 +1155,16 @@ fn a_bare_break_inside_a_switch_inside_a_loop_does_not_leak_to_the_loop() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 29, real shape: found and reverted mid-fix -
-// `Piwigo\Calendar\CalendarMonthly::buildMonthCalendar`'s own
-// `foreach ($items as $day => $data) { ...; $items[$day]['derivative']
-// = ...; $items[$day]['file'] = ...; }` mutates the very same array
-// it iterates, via a nested write keyed by the loop variable itself.
-// An earlier version of this fix also merged `Foreach` with its own
-// pre-loop state (matching `While`/`For`'s existing "may run zero
-// times" treatment, for consistency) - but every key iterated over
-// here really does get the loop's own treatment, so unioning in the
-// *stale pre-loop* shape as an "also possible" alternative produced a
-// false "array{...} has no key 'derivative'" the real code never
-// risks. `Foreach` deliberately keeps checking its body once directly
+// A `foreach ($items as $day => $data) { ...; $items[$day]['derivative']
+// = ...; $items[$day]['file'] = ...; }` mutates the very same array it
+// iterates, via a nested write keyed by the loop variable itself.
+// Merging `Foreach` with its own pre-loop state (matching `While`/
+// `For`'s "may run zero times" treatment, for consistency) would be
+// wrong here: every key iterated over really does get the loop's own
+// treatment, so unioning in the stale pre-loop shape as an "also
+// possible" alternative would produce a false "array{...} has no key
+// 'derivative'" the real code never risks. `Foreach` deliberately keeps
+// checking its body once directly
 // against the real `locals`, gaining only the `break`-state capture.
 #[test]
 fn foreach_mutating_its_own_subject_via_the_loop_key_does_not_regress() {
@@ -1211,14 +1189,14 @@ fn foreach_mutating_its_own_subject_via_the_loop_key_does_not_regress() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real Piwigo corpus bug: an unassigned superglobal defaulted to
-// Type::Mixed rather than Array(Mixed) - real phpstorm-stubs' own
-// bootstrap file declares $_SESSION with a literal `= []`, which real
-// PHPStan generalizes to a bare `array`. Because widen_coalesce_
-// result's "keep the left side's real array type" rule only fires for
-// an already-known Type::Array, a Mixed left side let `??=` collapse
-// to the literal empty shape, flagging the very next unset() as
-// targeting a key that provably doesn't exist.
+// An unassigned superglobal must default to Array(Mixed), not
+// Type::Mixed - real phpstorm-stubs' own bootstrap file declares
+// $_SESSION with a literal `= []`, which real PHPStan generalizes to a
+// bare `array`. Because `widen_coalesce_result`'s "keep the left side's
+// real array type" rule only fires for an already-known Type::Array, a
+// Mixed left side would let `??=` collapse to the literal empty shape,
+// flagging the very next unset() as targeting a key that provably
+// doesn't exist.
 #[test]
 fn a_superglobal_coalesce_assign_does_not_collapse_to_an_empty_shape() {
     let d = diagnostics_for(
@@ -1232,16 +1210,14 @@ fn a_superglobal_coalesce_assign_does_not_collapse_to_an_empty_shape() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus false positive found while triaging the wider Piwigo
-// corpus (`ImageStdParams::getWatermark`): `CompoundAssign`'s own
-// rebind-after-the-fact step only ever fired for a bare
-// `ExprKind::Variable` left side, silently skipping any other
-// assignment-target shape (a property, an array index) - `$this->prop
-// ??= $default;` never actually updated `$this->prop`'s own tracked
-// type at all, so a read right afterward still saw its stale,
-// pre-assignment (nullable) type. Generalized to route through
-// `bind_assignment_target`, the same machinery every other assignment
-// shape already uses.
+// `CompoundAssign`'s own rebind-after-the-fact step must not only fire
+// for a bare `ExprKind::Variable` left side - it needs to cover any
+// other assignment-target shape (a property, an array index) too, or
+// `$this->prop ??= $default;` never actually updates `$this->prop`'s
+// own tracked type, leaving a read right afterward seeing its stale,
+// pre-assignment (nullable) type. Routes through `bind_assignment_
+// target`, the same machinery every other assignment shape already
+// uses.
 #[test]
 fn a_coalesce_assign_on_a_property_target_rebinds_it() {
     let d = diagnostics_for(
@@ -1260,25 +1236,19 @@ fn a_coalesce_assign_on_a_property_target_rebinds_it() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real Piwigo corpus bug: isset()/empty()'s own direct argument went
-// through the ordinary check_expr, so isset($shaped['maybe_missing'])
-// hit the same check_shape_key_access a bare read would - even though
-// probing a possibly-absent key is exactly what isset()/empty() are
-// for, and real PHP/PHPStan never flag it *that way*.
+// isset()/empty()'s own direct argument must not go through the
+// ordinary check_expr, hitting the same check_shape_key_access a bare
+// read would - probing a possibly-absent key is exactly what
+// isset()/empty() are for, and real PHP/PHPStan never flag it that way.
 //
-// Phase 60 correction: real PHPStan's own `checkAdvancedIsset` (live at
-// level 4+, confirmed directly against `vendor/phpstan-src` - this
-// project doesn't model PHPStan's own level system as a separate opt-in
-// toggle any more than it does for any other level-gated check, matching
-// `Diagnostic::level`'s own "metadata for --level filtering, not a
-// runtime gate" precedent) genuinely *does* flag `isset($shaped['b'])`
-// here - `b` is provably absent from `array{a: string}`, a real,
-// distinct diagnostic (`isset.offset`, "does not exist") from the old
-// `check_shape_key_access` bug this test originally guarded against.
-// Phase 60 follow-up: `empty()` now gets the identical offset/property
-// treatment as `isset()` (both funnel through the same real PHPStan
-// `IssetCheck`) - `empty($x['c'])` is flagged too, `empty.offset`, since
-// `c` is just as provably absent as `b`.
+// Real PHPStan's own `checkAdvancedIsset` (live at level 4+) genuinely
+// does flag `isset($shaped['b'])` here - `b` is provably absent from
+// `array{a: string}`, a real, distinct diagnostic (`isset.offset`,
+// "does not exist") from the check_shape_key_access shape above.
+// `empty()` gets the identical offset/property treatment as `isset()`
+// (both funnel through the same real PHPStan `IssetCheck`) -
+// `empty($x['c'])` is flagged too, `empty.offset`, since `c` is just as
+// provably absent as `b`.
 #[test]
 fn isset_and_empty_on_a_shape_s_missing_key_never_hit_the_old_shape_key_bug() {
     let d = diagnostics_for(
@@ -1298,10 +1268,9 @@ fn isset_and_empty_on_a_shape_s_missing_key_never_hit_the_old_shape_key_bug() {
     assert!(d.iter().any(|x| x.identifier == "empty.offset"));
 }
 
-// Real Piwigo corpus bug (test-double-recording idiom): a closure's
-// own `use (&$x)` mutation never wrote back to the declaring scope,
-// so `$x`'s type at a later read site stayed frozen at whatever it
-// was *before* the closure literal.
+// A closure's own `use (&$x)` mutation must write back to the
+// declaring scope, or `$x`'s type at a later read site stays frozen at
+// whatever it was before the closure literal.
 #[test]
 fn a_closure_s_byref_use_mutation_is_visible_after_the_closure_literal() {
     let d = diagnostics_for(
@@ -1322,10 +1291,9 @@ fn a_closure_s_byref_use_mutation_is_visible_after_the_closure_literal() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 31 from the architecture audit - a bare `return;`, and
-// falling off the end of the function body with no `return` at all,
-// were never checked against a non-nullable, non-void declared
-// return type.
+// A bare `return;`, and falling off the end of the function body with
+// no `return` at all, must be checked against a non-nullable,
+// non-void declared return type.
 
 #[test]
 fn bare_return_is_flagged_against_a_non_nullable_return_type() {
@@ -1377,10 +1345,10 @@ fn falling_off_the_end_is_flagged_against_a_non_nullable_return_type() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    // Phase 61: distinct from `return.type` (`bare_return_is_flagged_
-    // against_a_non_nullable_return_type`'s own "returned literal null"
-    // case just above) - falling off the end never explicitly returns
-    // anything at all, real PHPStan's own dedicated `return.missing`.
+    // Distinct from `return.type` (`bare_return_is_flagged_against_a_
+    // non_nullable_return_type`'s own "returned literal null" case just
+    // above) - falling off the end never explicitly returns anything at
+    // all, real PHPStan's own dedicated `return.missing`.
     assert_eq!(d[0].identifier, "return.missing", "got: {d:?}");
     assert!(
         d[0].message.contains("return statement is missing"),
@@ -1452,12 +1420,9 @@ fn a_void_function_returning_a_value_gets_return_void() {
 
 // `return anotherVoidFn();` delegating to another void-returning call is
 // legal, common PHP - real PHPStan doesn't flag it either, since it's
-// not "returning a value" at all, just handing back void-ness itself.
-// Real corpus false positive this exact idiom used to hit ("expected
-// void, got void"): `RectorPrefix202608\trigger_deprecation`-style
-// `function shim() { return \Prefix\shim(...func_get_args()); }`
-// forwarding wrappers, once the delegate's own signature correctly
-// resolves to `void`.
+// not "returning a value" at all, just handing back void-ness itself
+// (e.g. a forwarding wrapper: `function shim() { return
+// realImpl(...func_get_args()); }`).
 #[test]
 fn a_void_function_delegating_to_another_void_function_is_not_flagged() {
     let d = diagnostics_for(
@@ -1533,10 +1498,9 @@ fn a_function_ending_in_a_switch_with_no_default_is_flagged() {
 
 #[test]
 fn switch_cases_ending_in_break_still_propagate_their_definitions_past_the_switch() {
-    // Regression test for a real bug caught while implementing this
-    // fix: the Finding 55 rewrite of Switch's own narrowing stopped
-    // tracking what a `break`-terminated case (the most common real
-    // switch style) leaves defined for the code after the switch.
+    // Switch's own narrowing must track what a `break`-terminated case
+    // (the most common real switch style) leaves defined for the code
+    // after the switch.
     let d = diagnostics_for(
         r#"<?php
             function f(int $x): int {
@@ -1555,26 +1519,22 @@ fn switch_cases_ending_in_break_still_propagate_their_definitions_past_the_switc
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Re-examining Phase 15's own disclosed "continue N's own level argument
-// is parsed but never consulted for narrowing purposes" per the user's
-// own explicit "do all those narrow [items], our corpus not having them
-// is not a reason not to do them": real PHP's own well-known
-// `continue`-inside-`switch` gotcha (a bare `continue;`/`continue 1;`
-// written directly in a case is exactly `break`-equivalent - it exits
-// the switch, not any enclosing loop) was not recognized anywhere. Two
-// distinct, real bugs shared this one root cause, both found and fixed
-// together: `always_terminates`'s own `Switch` arm treated *any*
-// `Continue` (regardless of level) the same as `Return`/`Throw`, so a
-// switch with every case ending in either `return` or a break-equivalent
-// `continue` was wrongly judged to always terminate the whole function,
-// flagging the code after it as unreachable dead code; separately,
-// `reaches_after_switch`'s own first, unconditional arm only special-
-// cased a literal `Break` this way, leaving a *non-last* case ending in
-// a break-equivalent `continue` gated behind `is_last` (which a non-last
-// case can never satisfy) even after `exits_function_or_loop` was
-// itself already fixed - `is_switch_break_equivalent` now covers both.
+// Real PHP's own well-known `continue`-inside-`switch` gotcha (a bare
+// `continue;`/`continue 1;` written directly in a case is exactly
+// `break`-equivalent - it exits the switch, not any enclosing loop)
+// must be recognized. Two distinct code paths share this one root
+// cause: `always_terminates`'s own `Switch` arm must not treat any
+// `Continue` (regardless of level) the same as `Return`/`Throw`, or a
+// switch with every case ending in either `return` or a break-
+// equivalent `continue` is wrongly judged to always terminate the
+// whole function, flagging the code after it as unreachable dead code;
+// separately, `reaches_after_switch`'s own first, unconditional arm
+// must not only special-case a literal `Break` this way, leaving a
+// non-last case ending in a break-equivalent `continue` gated behind
+// `is_last` (which a non-last case can never satisfy) -
+// `is_switch_break_equivalent` covers both.
 // `exits_function_or_loop`'s own half of the same fix, isolated: the
-// *last* case (here the only one) ending in a bare `continue` - routed
+// last case (here the only one) ending in a bare `continue` - routed
 // through `reaches_after_switch`'s second, `is_last`-gated arm, not the
 // first, unconditional one the test above exercises.
 #[test]
@@ -1672,13 +1632,11 @@ fn a_function_ending_in_a_try_catch_that_both_return_is_not_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus shapes (NotificationController::findAvailableFeedId,
-// AdvisorySessionLock::acquirePostgres, NotificationByMailService::
-// findAvailableCheckKey, all `while (true) { ...; if (...) { return
-// $x; } }` find-a-free-key/retry loops) - `always_terminates` had no
-// case for `While`/`For` at all, so a function ending in one of these
-// (with no `break` anywhere in the loop body) was incorrectly flagged
-// as possibly falling off the end.
+// A common `while (true) { ...; if (...) { return $x; } }`
+// find-a-free-key/retry loop shape - `always_terminates` needs a case
+// for `While`/`For`, or a function ending in one of these (with no
+// `break` anywhere in the loop body) is incorrectly flagged as
+// possibly falling off the end.
 #[test]
 fn a_while_true_loop_with_no_break_and_a_return_inside_is_not_flagged() {
     let d = diagnostics_for(
@@ -1693,11 +1651,11 @@ fn a_while_true_loop_with_no_break_and_a_return_inside_is_not_flagged() {
             }
         "#,
     );
-    // Phase 15 item (2): this breakless `while (true)` now legitimately
-    // gets its own `while.alwaysTrue` (a `return` inside doesn't
-    // disqualify it - matches real PHPStan's own rule, confirmed
-    // against `vendor/phpstan-src`) - this test's own actual purpose is
-    // narrower than "no diagnostics at all", see the doc comment above.
+    // This breakless `while (true)` legitimately gets its own
+    // `while.alwaysTrue` (a `return` inside doesn't disqualify it,
+    // matching real PHPStan's own rule) - this test's own actual
+    // purpose is narrower than "no diagnostics at all", see the doc
+    // comment above.
     assert!(
         !d.iter().any(|x| x.identifier == "return.missing"),
         "unexpected diagnostics: {d:?}"
@@ -1738,12 +1696,11 @@ fn a_while_true_loop_with_a_reachable_break_is_still_flagged() {
     assert_eq!(d[0].identifier, "return.missing", "got: {d:?}");
 }
 
-// A round of Piwigo-corpus bucketing found a catch clause's own
-// ending state was discarded entirely after the whole try/catch -
-// `locals` only ever kept the try body's own final state, matching
-// this project's own documented "no scope merge back after try/
-// catch" limitation. Real shape: `$body = null; try { ...; } catch
-// (...) { $body = "x"; }` then using `$body` afterward.
+// A catch clause's own ending state must not be discarded entirely
+// after the whole try/catch - `locals` must merge back the catch
+// clause's own final state too, not just the try body's: `$body =
+// 'default'; try { ...; } catch (...) { $body = "x"; }` then using
+// `$body` afterward.
 #[test]
 fn a_variable_assigned_only_inside_a_catch_clause_is_visible_after_the_try_catch() {
     let d = diagnostics_for(
@@ -1787,10 +1744,9 @@ fn a_catch_clause_that_always_returns_is_excluded_from_the_post_try_merge() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Finding 37 from the architecture audit - array destructuring bound
-// nothing in a `foreach` value position, and a nested destructuring
-// pattern bound nothing even in a plain assignment; checking the
-// left-hand side itself had the identical one-level-only gap.
+// Array destructuring must bind in a `foreach` value position, and a
+// nested destructuring pattern must bind even in a plain assignment;
+// checking the left-hand side itself must recurse past one level too.
 
 #[test]
 fn foreach_value_destructuring_binds_its_variables() {
@@ -1868,10 +1824,9 @@ fn swap_idiom_still_leaves_a_genuinely_undefined_variable_flagged() {
     assert!(d[0].message.contains("undefined variable $c"), "got: {d:?}");
 }
 
-// Finding 27 from the architecture audit - a multi-type catch clause
-// bound only its first listed type, and MethodCall/PropertyAccess
-// never matched a Union/Intersection receiver at all, silently
-// skipping undefined-method/property checking for either.
+// A multi-type catch clause must bind the union of every listed type,
+// and MethodCall/PropertyAccess must match a Union/Intersection
+// receiver, not skip undefined-method/property checking for either.
 
 #[test]
 fn multi_catch_binds_the_union_of_every_listed_type_regardless_of_order() {
@@ -1906,10 +1861,9 @@ fn multi_catch_binds_the_union_of_every_listed_type_regardless_of_order() {
     assert_eq!(second_order.len(), 1, "got: {second_order:?}");
 }
 
-// Finding 38 from the architecture audit - unset($x) was treated as
-// *defining* $x (a side effect of the same mechanism that makes
-// isset()/empty() safe on a maybe-undefined variable) rather than
-// removing it.
+// unset($x) must actually remove $x, not treat it as *defining* $x (a
+// side effect of the same mechanism that makes isset()/empty() safe on
+// a maybe-undefined variable).
 
 #[test]
 fn using_a_variable_after_unset_is_flagged_as_undefined() {
@@ -1994,9 +1948,9 @@ fn phpstan_throw_expr_type_flags_throwing_a_non_throwable() {
     }));
 }
 
-// Phase 70: `generator.returnType` - confirmed directly via `php -l` as
-// a real, unconditional PHP fatal error at compile time: a function
-// body containing `yield` must declare a return type compatible with
+// `generator.returnType` - confirmed directly via `php -l` as a real,
+// unconditional PHP fatal error at compile time: a function body
+// containing `yield` must declare a return type compatible with
 // Generator/Iterator/Traversable/iterable.
 
 #[test]
@@ -2061,13 +2015,12 @@ fn a_generator_function_declared_to_return_generator_is_never_flagged() {
 
 #[test]
 fn a_docblock_return_array_shape_on_a_native_iterable_generator_is_never_flagged() {
-    // Real corpus find (vendor/doctrine/inflector's own
-    // `Inflectible::getSingular()`): a `@return Transformation[]`
-    // docblock on a `: iterable`-typed generator describes what
-    // iterating it *produces*, not a redeclaration of the native type -
-    // real PHP's own "Generator return type must be a supertype of
-    // Generator" fatal error is checked against the *native* type alone,
-    // never the PHPDoc-refined one.
+    // A `@return Transformation[]` docblock on a `: iterable`-typed
+    // generator describes what iterating it produces, not a
+    // redeclaration of the native type - real PHP's own "Generator
+    // return type must be a supertype of Generator" fatal error is
+    // checked against the native type alone, never the PHPDoc-refined
+    // one.
     let d = diagnostics_for(
         r#"<?php
             class Transformation {}
@@ -2242,13 +2195,10 @@ fn a_generator_arrow_function_with_a_wrong_declared_return_type_is_flagged() {
     );
 }
 
-// Phase 55: fixed-point loop-body convergence (`Checker::
-// converge_loop_body`). Before this, a loop body was checked exactly
-// once against the pre-loop entry state, so a variable reassigned inside
-// the body on one iteration was invisible to a narrowing check reading
-// it on a later one - exactly the gap `check_block`'s own doc comment
-// (above `Phase 15 item (1)`) traces as the reverted
-// `UnreachableStatementRule`'s real root cause.
+// Fixed-point loop-body convergence (`Checker::converge_loop_body`) - a
+// loop body must not be checked only once against the pre-loop entry
+// state, or a variable reassigned inside the body on one iteration is
+// invisible to a narrowing check reading it on a later one.
 #[test]
 fn a_variable_reassigned_in_a_loop_body_is_visible_to_a_narrowing_check_on_a_later_iteration() {
     // Concrete shape of the bug: `$x` starts `null`; a guard reads it
@@ -2284,16 +2234,15 @@ fn a_variable_reassigned_in_a_loop_body_is_visible_to_a_narrowing_check_on_a_lat
     );
 }
 
-// Real corpus false positive (sebastian/diff's `Parser::parse`, found
-// while corpus-verifying Phase 15's reinstated `UnreachableStatementRule`):
-// a variable reassigned *only* on a path that ends in `continue` never
-// fed its new value into the next convergence pass at all, since the
-// pass-to-pass entry computation only looked at the body's own ordinary
-// fall-through exit - which this shape never reaches. Convergence wrongly
-// concluded "nothing changed" after a single pass and kept that pass's
-// own diagnostics, computed against the stale, guaranteed-null entry -
-// so `$diff !== null` narrowed to `Type::Never` on *every* pass, not just
-// the first, and a read inside that guard looked unreachable.
+// A variable reassigned only on a path that ends in `continue` must
+// feed its new value into the next convergence pass - the pass-to-pass
+// entry computation must not only look at the body's own ordinary
+// fall-through exit, which this shape never reaches, or convergence
+// wrongly concludes "nothing changed" after a single pass and keeps
+// that pass's own diagnostics, computed against the stale,
+// guaranteed-null entry - so `$diff !== null` would narrow to
+// `Type::Never` on every pass, not just the first, and a read inside
+// that guard would look unreachable.
 #[test]
 fn a_variable_reassigned_only_on_a_path_ending_in_continue_still_converges() {
     let d = diagnostics_for(
@@ -2323,17 +2272,12 @@ fn a_variable_reassigned_only_on_a_path_ending_in_continue_still_converges() {
     );
 }
 
-// Phase 15 continuation: a second, distinct bug in the same
-// `continue`-handling area as the test above, found via a real Piwigo
-// corpus false positive once `BooleanNotConstantConditionRule` started
-// exercising it (`Piwigo\Db\BatchWriter::updateRow`). The previous fix
-// (`a_variable_reassigned_only_on_a_path_ending_in_continue_still_
-// converges`) made `continue_states` feed the *next pass's own entry*
-// correctly - but `converge_loop_body`'s own *return value* (the state
-// the caller treats as "what's true after the loop") was still built
-// from the kept pass's bare fallthrough-only `body_locals`, silently
-// dropping that same pass's own continue-reached states. A variable
-// only ever assigned on the non-`continue` path therefore looked
+// A second, distinct requirement in the same `continue`-handling area
+// as the test above: `converge_loop_body`'s own return value (the
+// state the caller treats as "what's true after the loop") must also
+// fold in the kept pass's own continue-reached states, not just the
+// pass's bare fallthrough-only `body_locals` - otherwise a variable
+// only ever assigned on the non-`continue` path looks
 // unconditionally assigned after the loop, instead of "maybe assigned,
 // maybe not."
 #[test]
@@ -2444,10 +2388,8 @@ fn a_diagnostic_unrelated_to_convergence_is_reported_exactly_once_not_once_per_p
     );
 }
 
-// Phase 15 item (1), `UnreachableStatementRule` (`deadCode.unreachable`):
-// reinstated once Phase 55's fixed-point loop convergence removed the
-// false-positive class that got it reverted in the first place - see
-// `checker::check_block`'s own doc comment and ROADMAP.md.
+// `UnreachableStatementRule` (`deadCode.unreachable`) - see
+// `checker::check_block`'s own doc comment.
 #[test]
 fn a_statement_after_an_unconditional_return_is_flagged_as_unreachable() {
     let d = diagnostics_for(
@@ -2483,12 +2425,9 @@ fn only_the_first_statement_after_a_terminator_is_flagged_not_every_one_after() 
     assert_eq!(matches.len(), 1, "got: {d:?}");
 }
 
-// Real corpus false positive: `Amp\Http\Client\Connection\Internal\
-// Http1Parser::parse()`'s own `return $response; body_identity: { ... }`,
-// where `goto body_identity;` (elsewhere in the same function - a real,
-// hand-written HTTP/1.1 parsing state machine) makes the labeled block
-// a genuine jump target, not dead code, whatever the `return` right
-// before it does.
+// A labeled block reachable via a `goto` written elsewhere in the same
+// function (e.g. a hand-written state machine) is a genuine jump
+// target, not dead code, whatever the `return` right before it does.
 #[test]
 fn a_labeled_statement_reachable_via_an_earlier_goto_is_not_flagged() {
     let d = diagnostics_for(
@@ -2608,8 +2547,8 @@ fn dead_code_after_a_return_does_not_also_trigger_a_spurious_return_missing() {
     );
 }
 
-// Phase 61: reinstated empty-concrete-method-body completeness check,
-// opt-in via `Registry::check_empty_method_bodies`.
+// Empty-concrete-method-body completeness check, opt-in via
+// `Registry::check_empty_method_bodies`.
 #[test]
 fn check_empty_method_bodies_flag_off_by_default_does_not_flag_empty_body() {
     let d = diagnostics_for(
