@@ -102,12 +102,11 @@ fn array_map_resolves_a_first_class_callable_to_a_static_method() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Regression test for a real bug caught while implementing the fix
-// above: a static factory returning `self` (`TagId::tryFrom(...):
-// ?self`) resolved to the literal, un-substituted `self|null`
-// instead of the real concrete class - every other call site that
-// resolves a method's return type runs it through resolve_pseudo
-// afterward, and this new one needed the same treatment.
+// A static factory returning `self` (`TagId::tryFrom(...): ?self`) must
+// not resolve to the literal, un-substituted `self|null` instead of the
+// concrete class - every other call site that resolves a method's
+// return type runs it through resolve_pseudo afterward, and this one
+// needs the same treatment.
 #[test]
 fn array_map_resolves_a_first_class_callables_own_self_return_type() {
     let d = diagnostics_for(
@@ -1929,12 +1928,11 @@ fn array_filter_on_a_list_of_null_is_flagged_always_empty() {
 
 #[test]
 fn array_filter_on_a_bare_int_element_type_is_never_flagged() {
-    // Real bug found and fixed while building this: a bare `int` element
-    // type must stay ambiguous (a real `int` genuinely can be exactly
-    // `0`), not "provably never falsy" - the naive approach of comparing
-    // `narrow_type_excluding_falsy`'s own output against the original
-    // would have wrongly treated it as never-falsy, since that function
-    // (built for a different purpose, condition-narrowing) leaves a bare
+    // A bare `int` element type must stay ambiguous (an `int` genuinely
+    // can be exactly `0`), not "provably never falsy" - comparing
+    // `narrow_type_excluding_falsy`'s output against the original would
+    // wrongly treat it as never-falsy, since that function (built for a
+    // different purpose, condition-narrowing) leaves a bare
     // `Int`/`Float`/`Bool` unchanged rather than marking it ambiguous.
     let d = diagnostics_for(
         r#"<?php
@@ -2102,8 +2100,8 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
 // ArrayPopFunctionReturnTypeExtension/ArrayShiftFunctionReturnTypeExtension:
 // investigated and declined - see the long-form doc comment on the
 // (reverted) match arm in `builtin_calls.rs` for the two compounding
-// reasons (an unsound "provably non-empty" half, plus real corpus noise
-// even from the safe, always-nullable fallback alone).
+// reasons (an unsound "provably non-empty" half, plus noise even from
+// the safe, always-nullable fallback alone).
 
 // `union_types` must merge two structurally different `Array(key, val)`
 // members into one - a dynamic-key index-assignment inside a loop's
