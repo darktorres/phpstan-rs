@@ -1,13 +1,12 @@
-//! Phase 60: `isset()`/`??`/`??=`/`?->` firing on an expression whose
+//! `isset()`/`??`/`??=`/`?->` firing on an expression whose
 //! statically-known type already proves the null-probe is pointless -
-//! mirrors real PHPStan's `IssetRule`/`NullCoalesceRule`/
+//! mirrors PHPStan's `IssetRule`/`NullCoalesceRule`/
 //! `NullsafeMethodCallRule`/`NullsafePropertyFetchRule`. `empty()` is
 //! deliberately out of scope - see `is_isset_probe`'s own doc comment in
 //! `checker/expr.rs` for why. Covers both the bare-variable/nullsafe-
 //! receiver half (`Checker::check_pointless_null_probe`) and the
-//! offset/property-chain half added later
-//! (`Checker::resolve_always_exists`/
-//! `check_pointless_offset_or_property_probe` - real PHPStan's own
+//! offset/property-chain half (`Checker::resolve_always_exists`/
+//! `check_pointless_offset_or_property_probe` - mirrors PHPStan's
 //! `checkAdvancedIsset`-gated `IssetabilityDescriptor`/`IssetCheck`).
 
 use super::super::Diagnostic;
@@ -24,15 +23,14 @@ fn null_probe_diagnostics(src: &str) -> Vec<Diagnostic> {
         .collect()
 }
 
-// Real, previously-live bug found and fixed this session
-// (`Checker::converge_loop_body`, `checker/control_flow.rs`): a variable
-// assigned only *inside* a loop body (never before it) was treated as
-// unconditionally defined afterward - the loop's own "ran zero times"
-// case, which real PHP always allows, was silently dropped from the
-// returned exit state. `isset()` right after such a loop (checking
-// exactly this - "did the loop actually find/set anything") is a common,
-// legitimate real idiom (`UploadService::addUploadedFile`'s own
-// identical shape) that was wrongly flagged "always exists".
+// A variable assigned only inside a loop body (never before it) must
+// not be treated as unconditionally defined afterward -
+// `Checker::converge_loop_body` (`checker/control_flow.rs`) must not
+// silently drop the loop's "ran zero times" case, which PHP always
+// allows, from the returned exit state. `isset()` right after such a
+// loop (checking exactly this - "did the loop actually find/set
+// anything") is a common, legitimate idiom that must not be wrongly
+// flagged "always exists".
 #[test]
 fn isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_flagged() {
     let d = null_probe_diagnostics(
@@ -52,12 +50,11 @@ fn isset_after_a_foreach_only_ever_setting_the_variable_inside_the_body_is_not_f
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// The exact real corpus shape (`UploadService::addUploadedFile`): the
-// variable is pre-declared `null` *before* the conditional/loop, not
-// introduced fresh inside it - a narrower first fix attempt ("keep a
-// pre-existing name exactly as the loop left it, only drop brand-new
-// names") wrongly special-cased this as "already defined", silently
-// losing the real `null` possibility the pre-loop declaration carries.
+// When the variable is pre-declared `null` before the conditional/loop,
+// not introduced fresh inside it, the fix above must not special-case
+// this as "already defined" (keeping a pre-existing name exactly as the
+// loop left it, only dropping brand-new names) - that would silently
+// lose the real `null` possibility the pre-loop declaration carries.
 #[test]
 fn isset_after_a_pre_declared_null_reassigned_only_inside_a_conditional_foreach_is_not_flagged() {
     let d = null_probe_diagnostics(
@@ -198,12 +195,11 @@ fn compound_coalesce_assign_on_a_never_nullable_local_is_flagged() {
     assert!(d[0].message.contains("??="), "{}", d[0].message);
 }
 
-// Real corpus find (Symfony's own AbstractObjectNormalizer::
-// validateAndDenormalize): `$err`'s type is only ever widened by this
-// exact statement, run once (unmodeled) per loop iteration - a second
-// or later real iteration would see the widened type from the first,
-// but this project's own single-pass loop-body checking can't. Locking
-// this in against `Checker::loop_depth`'s own guard regressing.
+// A variable's type only ever widened by a statement run once
+// (unmodeled) per loop iteration - a second or later real iteration
+// would see the widened type from the first, but this project's
+// single-pass loop-body checking can't. Locking this in against
+// `Checker::loop_depth`'s guard regressing.
 #[test]
 fn a_self_referential_coalesce_assign_inside_a_loop_is_never_flagged() {
     let d = null_probe_diagnostics(
@@ -221,13 +217,11 @@ fn a_self_referential_coalesce_assign_inside_a_loop_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Real corpus find (Symfony's own HttpClient::create()): a `static`
-// local can carry a value left over from an earlier call - the same
-// "this single pass can't see a wider type a different execution would
-// produce" unsoundness the loop case above has, just across invocations
-// instead of iterations. Confirmed genuinely silent in real PHPStan too
-// (verified directly against `vendor/bin/phpstan` on this exact file).
-// Locking this in against `Checker::static_var_names`'s own guard
+// A `static` local can carry a value left over from an earlier call -
+// the same "this single pass can't see a wider type a different
+// execution would produce" unsoundness the loop case above has, just
+// across invocations instead of iterations. Genuinely silent in PHPStan
+// too. Locking this in against `Checker::static_var_names`'s guard
 // regressing.
 #[test]
 fn a_coalesce_assign_on_a_static_local_is_never_flagged() {
@@ -245,11 +239,11 @@ fn a_coalesce_assign_on_a_static_local_is_never_flagged() {
 
 #[test]
 fn isset_on_an_index_expression_is_never_flagged() {
-    // A *plain*, unshaped array specifically - stays silent for a real
+    // A plain, unshaped array specifically - stays silent for a real
     // reason (a general `array<K, V>` makes no claim about any specific
-    // key), not because offset existence goes unmodeled - see this same
-    // file's own Phase 60 tests further down for the `array{...}`-shaped
-    // cases this now does correctly flag/exempt.
+    // key), not because offset existence goes unmodeled - see the tests
+    // further down for the `array{...}`-shaped cases this correctly
+    // flags/exempts.
     let d = null_probe_diagnostics(
         r#"<?php
             function test(array $x): void {
@@ -310,10 +304,9 @@ fn nullsafe_property_access_on_a_nullable_receiver_is_never_flagged() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Phase 60: the offset/property-chain half of isset()/??/??=  reversal -
-// real PHPStan's own recursive `IssetabilityDescriptor`/`IssetCheck`
-// (`checkAdvancedIsset`, confirmed live for this corpus at level 4+),
-// adapted to this project's own type system in
+// The offset/property-chain half of isset()/??/??= - mirrors PHPStan's
+// recursive `IssetabilityDescriptor`/`IssetCheck` (`checkAdvancedIsset`),
+// adapted to this project's type system in
 // `Checker::resolve_always_exists`/`check_pointless_offset_or_property_probe`.
 
 #[test]
