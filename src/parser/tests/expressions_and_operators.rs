@@ -18,16 +18,12 @@ fn word_operators_bind_looser_than_assignment() {
     assert!(matches!(&lhs.kind, ExprKind::Assign(..)));
 }
 
-// Phase 85: an assignment nested (unparenthesized) as a comparison
-// operator's own RHS. Real PHP's own grammar lets `variable '=' expr`
-// appear at this operand position - a real, common guard-clause idiom
-// (`if (false === $x = fn()) {...}`), found via a real Piwigo-corpus
-// false positive (RedisTrait::createConnection): `$params` never got
-// bound to `parse_url()`'s own return type because `false === $params
-// = parse_url($params)` used to parse as `(false === $params) =
-// parse_url($params)` - a malformed assignment target this project's
-// parser silently tolerated - instead of real PHP's own `false ===
-// ($params = parse_url($params))`.
+// An assignment nested (unparenthesized) as a comparison operator's own
+// RHS. PHP's grammar lets `variable '=' expr` appear at this operand
+// position - a common guard-clause idiom (`if (false === $x = fn())
+// {...}`). `false === $params = parse_url($params)` must parse as
+// `false === ($params = parse_url($params))`, not `(false === $params)
+// = parse_url($params)` - a malformed assignment target.
 #[test]
 fn an_assignment_nested_as_an_identical_comparisons_rhs_parses_as_real_php_does() {
     let program = parse("<?php if (false === $params = parse_url($x)) { return; }");
@@ -87,18 +83,15 @@ fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
     assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "params"));
 }
 
-// Phase 85 follow-up: an assignment nested (unparenthesized) as `&&`'s/
-// `||`'s own RHS - the identical real idiom the comparison-operator
-// fixes above cover, just one operand position looser in the precedence
-// chain. Real PHP's own grammar allows this here too (confirmed directly:
-// `php -r '$e=true; if ($e && $x = "hi") { echo $x; }'` prints `hi`, and
-// `$x` stays genuinely unset when `$e` is falsy - real short-circuiting,
-// not eager evaluation), found via a real corpus false positive
-// (symfony/console's own `Application.php`: `$e instanceof
-// CommandNotFoundException && $namespace = $this->findNamespace($name)`
-// used to parse as `($e instanceof CommandNotFoundException &&
-// $namespace) = $this->findNamespace($name)`, leaving `$namespace`
-// looking undefined to every reference inside the `if` body).
+// An assignment nested (unparenthesized) as `&&`'s/`||`'s own RHS - the
+// identical idiom the comparison-operator cases above cover, just one
+// operand position looser in the precedence chain. PHP's grammar allows
+// this here too, with real short-circuiting, not eager evaluation
+// (`$e && $x = "hi"` leaves `$x` genuinely unset when `$e` is falsy).
+// `$e instanceof Foo && $namespace = find($name)` must parse as `$e
+// instanceof Foo && ($namespace = find($name))`, not `($e instanceof
+// Foo && $namespace) = find($name)`, which would leave `$namespace`
+// looking undefined to every reference inside the `if` body.
 #[test]
 fn an_assignment_nested_as_a_logical_and_rhs_parses_as_real_php_does() {
     let program = parse("<?php if ($e instanceof Foo && $x = find($e)) { return; }");
@@ -142,14 +135,11 @@ fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
 
 // `!$var = expr` parses as `!($var = expr)`, not `(!$var) = expr` -
 // confirmed via `php -r '$x=0; $r=!$x=5; var_dump($r,$x);'` printing
-// `bool(false) int(5)`. Corpus-found real idiom: plupload's own
-// `upload.php`, `if (!is_dir($targetDir) || !$dir = opendir($targetDir))
-// { die(...); }`, left `$dir` looking undefined at every later
-// `readdir($dir)` without this - `!`'s own fix has to run at the point
-// `!` actually binds (inside `parse_not`, tighter than `&&`/`||`), not
-// rely on the enclosing `||`'s own assignment-tail fix: by the time
-// that runs, `!` has already wrapped the bare variable, and misassigning
-// into `Unary(Not, $var)` as if it were an lvalue wouldn't help either.
+// `bool(false) int(5)`. This has to be handled at the point `!` actually
+// binds (inside `parse_not`, tighter than `&&`/`||`), not rely on the
+// enclosing `||`'s own assignment-tail fix: by that point `!` has
+// already wrapped the bare variable, and misassigning into `Unary(Not,
+// $var)` as if it were an lvalue wouldn't help either.
 #[test]
 fn a_bang_negated_assignment_parses_as_negating_the_assignment_result() {
     let program = parse("<?php if (!$dir = opendir($path)) { return; }");
@@ -269,11 +259,9 @@ fn an_assignment_nested_as_a_cast_operand_parses_as_real_php_does() {
 
 #[test]
 fn a_bare_anonymous_function_statement_parses_as_an_expression_not_a_declaration() {
-    // `function () { ... };` with no assignment at all - a real, if
-    // unusual in production code, idiom that's extremely common in
-    // real PHPStan's own test fixtures (an isolated global-scope body
-    // with no named function needed). Found via bulk-running this
-    // project's checker against the vendored phpstan-src corpus.
+    // `function () { ... };` with no assignment at all - unusual in
+    // production code, but common in PHPStan's own test fixtures (an
+    // isolated global-scope body with no named function needed).
     let program = parse("<?php function () { echo 1; };");
     assert_eq!(program.len(), 1);
     let StmtKind::Expression(e) = &program[0].kind else {
@@ -837,8 +825,8 @@ fn by_reference_arrow_function_still_parses_as_arrow_fn() {
     assert!(matches!(&rhs.kind, ExprKind::ArrowFn { .. }));
 }
 
-// Phase 37: `#[Attr] function () {}` / `#[Attr] static fn() => ...` - the
-// only expression-position shape real PHP allows an attribute group on.
+// `#[Attr] function () {}` / `#[Attr] static fn() => ...` - the only
+// expression-position shape PHP allows an attribute group on.
 
 #[test]
 fn an_attributed_closure_expression_carries_its_own_attrs() {
