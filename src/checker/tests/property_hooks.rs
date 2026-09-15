@@ -1,8 +1,8 @@
-//! Phase 43: PHP 8.4 property hooks - virtual-property detection,
+//! PHP 8.4 property hooks - virtual-property detection,
 //! `propertyGetHook.noRead`/`propertySetHook.noAssign`,
 //! `propertySetHook.nativeParameterType` contravariance,
 //! `class.notFound` existence-checking for a set hook's own parameter
-//! type, real function-like body checking (undefined variables,
+//! type, function-like body checking (undefined variables,
 //! `return.missing`, generator-return-type compatibility), and
 //! `PropertyVarianceRule` for a property's own single type.
 
@@ -29,9 +29,8 @@ fn a_get_hook_that_reads_its_own_backing_storage_is_not_flagged() {
 #[test]
 fn a_get_hook_that_never_reads_its_own_backing_storage_is_flagged() {
     // The set hook DOES reference `$this->y`, so the property is not
-    // virtual (see the module-level empirical note in ROADMAP.md's Phase
-    // 43 entry - either hook referencing it is enough) - real PHPStan's
-    // own `GetNonVirtualPropertyHookReadRule` fires here.
+    // virtual (either hook referencing it is enough) - mirrors PHPStan's
+    // `GetNonVirtualPropertyHookReadRule`.
     let d = diagnostics_for(
         r#"<?php
             class BadGet {
@@ -90,13 +89,12 @@ fn a_fully_virtual_property_gets_neither_no_read_nor_no_assign() {
 
 #[test]
 fn a_reference_inside_a_nested_closure_does_not_count_as_writing_backing_storage() {
-    // Empirically verified against real PHP 8.5's own
-    // `ReflectionProperty::isVirtual()` (see ROADMAP.md's Phase 43
-    // entry) - a nested closure/arrow-fn is its own function scope, not
-    // counted by real PHP's own virtual-property algorithm either. The
-    // `get` hook reads `$this->k` directly, so the property is genuinely
-    // non-virtual (this rule's gate) - isolating whether `set`'s own
-    // nested-closure reference is (wrongly) counted as a real assignment.
+    // A nested closure/arrow-fn is its own function scope, not counted
+    // by PHP's own virtual-property algorithm (`ReflectionProperty::
+    // isVirtual()`) either. The `get` hook reads `$this->k` directly, so
+    // the property is genuinely non-virtual (this rule's gate) -
+    // isolating whether `set`'s nested-closure reference is (wrongly)
+    // counted as a real assignment.
     let d = diagnostics_for(
         r#"<?php
             class NestedClosureWrite {
@@ -266,12 +264,11 @@ fn get_hook_returning_the_wrong_type_is_flagged() {
 
 #[test]
 fn set_hook_body_can_legally_access_a_private_sibling_property_on_the_same_class() {
-    // Regression test for a real bug found while implementing this
-    // phase: `check_get_hook`/`check_set_hook` initially never saved/set/
-    // restored `Checker::current_class`, so an entirely legal same-class
-    // private property access from inside a hook body was wrongly
-    // flagged `property.private` (visibility checks read `current_class`
-    // to allow it).
+    // `check_get_hook`/`check_set_hook` must save/set/restore
+    // `Checker::current_class`, or an entirely legal same-class private
+    // property access from inside a hook body is wrongly flagged
+    // `property.private` (visibility checks read `current_class` to
+    // allow it).
     let d = diagnostics_for(
         r#"<?php
             class SameClassPrivateAccess {
@@ -500,11 +497,10 @@ fn a_promoted_plain_readwrite_property_with_a_covariant_template_type_is_flagged
     assert!(d.iter().any(|x| x.identifier == "generics.variance"));
 }
 
-// Phase 64 Item 1: property hooks - `notReadable`/`notWritable`/
-// `abstractOverridingNonAbstractHook`. Confirmed live via `php -r`: the
-// engine itself raises no error for any of these - a write through a
-// `notWritable` override silently no-ops instead (real footgun this
-// check exists to catch statically).
+// Property hooks - `notReadable`/`notWritable`/
+// `abstractOverridingNonAbstractHook`. The engine itself raises no error
+// for any of these - a write through a `notWritable` override silently
+// no-ops instead (a real footgun this check exists to catch statically).
 
 #[test]
 fn overriding_a_readable_hooked_property_with_a_set_only_hook_is_flagged_not_readable() {
@@ -642,7 +638,7 @@ fn a_plain_non_hooked_property_override_is_never_checked_for_hook_readability() 
     );
 }
 
-// Phase 42 property-hook family: `InvalidThrowsPhpDocValueRule`/
+// `InvalidThrowsPhpDocValueRule`/
 // `ThrowsVoidPropertyHookWithExplicitThrowPointRule`/
 // `TooWidePropertyHookThrowTypeRule`/`MissingCheckedExceptionInPropertyHookThrowsRule`
 // ported onto `get`/`set` hooks.
