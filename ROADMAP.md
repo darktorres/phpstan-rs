@@ -941,6 +941,25 @@ diagnostics are discarded, not just its state). This is the foundation
 the unreachable-code/constant-condition family below depends on - see
 that entry and **Reverted** for the real soundness bug this fixed.
 
+Same-branch discriminant-variable correlation (Phase 169): a new
+`Locals::branch_implied_facts` side-table (`checker.rs`), mirroring
+`condition_aliases`'s own O(1)-clone `Rc`-wrapped-value design - when an
+`if`'s own `$subject === value`/`$subject == value` true branch causes
+some *other* variable to become provably non-null,
+`record_branch_implied_facts` (`checker/narrowing.rs`) stores that fact
+keyed by `(subject, value)`; `apply_equality_narrowing`'s own replay
+hook (`checker/narrowing/assertions.rs`) applies it the next time the
+identical discriminant is tested true anywhere else in the program,
+with no lexical relationship to the original `if` at all. Unlike
+`condition_aliases` (purged the moment its own target is rebound, and
+intersected on merge), a fact here is a durable structural fact about
+the code at one exact discriminant - `merge_scopes` unions both
+branches' entries instead. Scoped to a value comparably concrete enough
+to make "the identical comparison" reproducible (an enum case, an int/
+string literal); a bare boolean-truthiness discriminant (as opposed to
+an equality comparison) and surviving into a closure capture are both
+disclosed, not attempted - see PHASE_BACKLOG's Phase 175.
+
 ## Rule catalog (checker)
 
 Symbol existence (classes/functions/use-imports/typehints, catch
@@ -1479,9 +1498,14 @@ current_function_return_points`/`current_function_saw_explicit_return`
 choke points) feed `check_too_wide_return_type`
 (`TooWideFunctionReturnTypehintRule`/`...MethodReturnTypehintRule`,
 `return.unusedType`, level 4, opt-in for protected/public non-final
-methods) and its property-assignment sibling (`property.unusedType`,
-private-only, including a separate static-property message variant). A
-real, load-bearing correction found via the test suite before this even
+methods). Its property-assignment sibling
+(`checker/property_type_too_wide.rs`'s `check_too_wide_property_types`,
+`property.unusedType`/`staticProperty.unusedType`) was actually built
+in a later session (Phase 166/174 below) - this paragraph's own prior
+text claimed it was already done here, which a `property.unusedType`/
+`current_class_property_assign_types` grep turned up zero hits for
+anywhere in the codebase, including tests; corrected rather than left
+stale once found. A real, load-bearing correction found via the test suite before this even
 reached corpus verification: real PHPStan's own `TooWideTypeCheck::
 narrowType` only ever acts when the declared type is literally a
 multi-member `UnionType` - a single, non-Union declared type (a bare
@@ -1516,6 +1540,57 @@ property, ...) got every declared member flagged as "never returned,"
 a systemic false positive across the entire unscoped corpus fixed by
 treating an actual `Mixed` member as automatically satisfying every
 declared member, matching the real trinary "Maybe" answer.
+
+**45A's property-assignment sibling, and the two-pass checking
+architecture (Phases 166/174).** `check_too_wide_property_types`
+(`checker/property_type_too_wide.rs`) applies the identical trinary
+algorithm to `Checker::property_assign_facts` (`name -> Vec<Type>` for
+every private-property write's own assigned type, accumulated at
+`check_property_assignment`'s own choke point, scoped to
+`write_visibility == Private` - the only visibility this project can
+claim to have seen every real write for). A promoted constructor
+property is never assigned via a real `Assign` node, so it accumulates
+no facts and is silently skipped - a disclosed leniency, not a claimed
+catch. Called once per class, right after its own method loop (mirrors
+`check_unused_private_members`'s identical "needs every body scanned
+together" choke point), and once for a trait genuinely unused by any
+real host (its own only possible consumer).
+
+The real remaining problem - a trait's own property-donated write,
+re-checked once per host via `check_trait_methods` with `current_class`
+set to that host, accumulates correctly under the host's own fqn, but
+nothing consumed that accumulator for the host unless the host's own
+`ClassDecl` happened to be processed after the trait, in the identical
+file - needed a genuinely new two-pass (collect-then-consume) checking
+architecture, not a bigger version of anything single-file already
+had: `Project::collect_property_assign_facts` runs a first pass over
+every loaded file purely to gather each `Checker`'s own `property_
+assign_facts` (`take_property_assign_facts`), merging every file's
+per-fqn/per-property contribution into one whole-project map;
+`Project::check_file_with_property_assign_facts` is the real,
+diagnostic-producing second pass, consuming that merge via a new
+`Checker::set_cross_file_property_assign_facts` setter.
+`Registry`'s own transitive-purity fixed point (Phase 41) is this
+project's one working whole-program mechanism, but its own module doc
+comment discloses why it can't be reused directly here: it deliberately
+only resolves call targets knowable *without* a live `Checker`/`Scope`,
+precisely because purity is a declaration-level fact computable from
+raw signatures, while a property-assignment fact can only be
+discovered by fully flow-sensitively checking a function body -
+exactly the machinery `Checker::check_file` otherwise discards the
+moment one file's check finishes. `check_file` itself is unchanged
+(same-file-only fallback via `cross_file_property_assign_facts: None`),
+so incremental/LSP use pays no cost from this; only `Project::check_all`
+and `--check-project`'s own batch orchestration
+(`main/check_project.rs`) run the two-pass path, via a new collect
+pass ahead of the existing parallel per-file check loop.
+
+Resolves the identical trait-property blind spot `check_unused_private_
+members` still has today (that check only scans a `ClassDecl`'s own
+literally-declared members, never a trait-flattened one, at all - not
+yet wired through this architecture; see PHASE_BACKLOG's Phase 175 for
+the one remaining named instance still needing this architecture,
+blocked on a different discriminant-shape gap of its own).
 
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
@@ -1770,12 +1845,9 @@ its declared/`@param-out` type) and `TooWideFunctionParameterOutTypeRule`/
 `TooWideMethodParameterOutTypeRule` (45D - too-wide narrowing for by-ref
 parameters), plus destructuring-target (`[$a, $byRef] = foo()`) and
 `foreach ($x as &$byRef)`-rebind coverage for the by-ref check 45B
-already builds for a plain `$x = ...`/`$x += ...` assignment.
-Cross-file trait-supplied property-assignment tracking for the property
-variant (45A's own property half) is pinned with a regression test
-documenting the gap rather than silently missed - see PHASE_BACKLOG's
-Phase 166 (reevaluated: disclosed real structural fixes exist, this
-isn't an architectural impossibility).
+already builds for a plain `$x = ...`/`$x += ...` assignment. 45A's own
+property half (including cross-file trait-supplied property-assignment
+tracking) is now done too - see Done, Phases 166/174.
 
 **48 - Symbol-existence pipeline, remaining stretch goals (PARTIAL).**
 The existence-check MVP, typed-class-constant validation, multi-

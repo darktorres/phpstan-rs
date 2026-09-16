@@ -18,7 +18,13 @@ the source of truth for their own material:
   schedule and scope it; go back to BEYOND_PHPSTAN.md's own numbered
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
-**Status:** every phase below is **PLANNED** — none of this is built.
+**Status:** every phase below is **PLANNED** — none of this is built,
+with three exceptions: Phases 166, 169, and 174 (a same-session
+reevaluation-then-implementation batch, unblocking two live dependency
+edges in `PHASE_DEPENDENCIES.md`) are now **DONE** and have moved into
+ROADMAP.md's own Done section, per this project's standing "fold DONE
+phases into Done" convention - their entries are removed from this
+backlog file, not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -2172,42 +2178,6 @@ verifying no consumer assumes class names are only ever parsed from
 top-level/nested named declarations) rather than a contained function
 addition like the phases above.
 
-## Phase 166 — Cross-file trait-supplied property-assignment tracking
-
-Reevaluated out of ROADMAP.md's Phase 45 entry, which called this "a
-confirmed architectural wall rather than an effort call" - its own text
-then names two disclosed, real structural fixes, which makes it a large
-backlog item, not a wall: `Checker::check_file` builds one fresh,
-single-use `Checker` per file, and `check_trait_methods` walks a host
-class's own inherited trait methods from *the trait's declaring file's*
-`Checker` instance, never the host's - a write into the host-scoped
-`current_class_property_assign_types` accumulator made while checking
-the trait's file can never reach the host's own accumulator (the
-identical blind spot `check_unused_private_members`'s own trait
-handling already has, for the same reason - `flatten_traits` only ever
-clones method/property signatures into a host's `ClassInfo`, never
-trait body statements, so both features share one root cause and one
-fix).
-
-Two real paths: (a) re-check each trait's methods from *within* every
-host's own `Checker` instance (once per host that uses the trait,
-rather than once from the trait's own declaring file) - bounded,
-reuses today's per-file architecture, but means a trait's own methods
-get checked N times for N host classes, redoing existent-symbol/
-type-checking work that's already correct, purely to also feed the
-host's accumulator; or (b) PHASE_BACKLOG Phase 174's own two-pass
-(collect-then-consume) checking architecture - the more structurally
-correct fix, and now the *preferred* one, not just an equally-valid
-alternative: Phase 174 is independently motivated by the cross-
-function correlation work in ROADMAP.md's own boundaries list too, so
-building it here resolves two otherwise-separate gaps with one piece
-of work instead of one.
-
-**Effort: large** — real checking-architecture work; resolves the
-identical gap in `check_unused_private_members` for free once built.
-Depends on Phase 174 if path (b) is taken (recommended); independently
-buildable via path (a) if Phase 174 isn't built first.
-
 ## Phase 167 — `is_a()` narrowing
 
 Reevaluated: ROADMAP.md's own prior decline cited "near-zero corpus
@@ -2256,33 +2226,6 @@ but disclosed here as real, buildable work rather than left unfiled:
 **Effort: large** — a real fluent-DSL-aware inference pass, comparable
 in shape to Phase 120's own Composer-path-repository parsing work, not
 a contained function addition.
-
-## Phase 169 — Same-branch discriminant-variable correlation
-
-One instance individually assessed out of ROADMAP.md's cross-variable-
-correlation cluster: a discriminant variable's own concrete value
-implying a *different* variable was already set in the same branch
-(`AuthService::authKeyLogin`'s own `$valid_key === ConnectedWith::ApiKey`
-implying `$secret_key` is no longer `null`; `AlbumsPageRenderer::render`'s
-own `$order_by_date` implying `$ref_dates` was set in the same `if`).
-
-A bounded generalization of the already-built `Locals::condition_aliases`
-mechanism (`checker.rs:104-177`), which today only ever aliases *one*
-boolean flag variable to *one* narrowing target. This needs: when a
-branch assigns two or more variables together, record a joint
-"co-assigned under this branch's condition" fact (keyed by the
-branch's own condition expression, the same key shape `condition_aliases`
-already uses) for every pair, not just a single flag; when code later
-tests one of those variables against a concrete value matching that
-branch's own discriminant, replay the fact that the other variable was
-set. Scope carefully to the same branch (not "ever assigned anywhere")
-to stay sound - the existing `purge_condition_aliases_targeting` on
-rebind already establishes the right "invalidate on any subsequent
-write" discipline to extend.
-
-**Effort: medium** — new per-branch co-assignment bookkeeping, but
-built on `condition_aliases`'s existing merge/purge/replay shape, not a
-new mechanism from scratch.
 
 ## Phase 170 — Same-condition-expression-recurrence narrowing
 
@@ -2417,48 +2360,6 @@ larger than a single leaf-arm addition but bounded and self-contained,
 reusing `condition_aliases`'s own invalidation discipline rather than
 inventing a new one.
 
-## Phase 174 — Two-pass (collect-then-consume) whole-project checking architecture
-
-Extracted out of Phase 166's own inline option (b) into its own phase,
-since it turned out to be a shared prerequisite for a second,
-independent consumer discovered while reevaluating ROADMAP.md's cross-
-variable-correlation boundary: persisting *any* fact discovered while
-checking one function into a form a *different* function's later check
-can consult needs this exact architecture, not something specific to
-trait properties.
-
-`registry/purity.rs`'s own transitive-purity fixed point is this
-project's one working whole-program mechanism, but its own module doc
-comment discloses why it can't be reused directly here: it deliberately
-only resolves call targets knowable *without* a live `Checker`/`Scope`
-(`$this->method()`, `self::`/`parent::`, `new self()`, a plain function
-call by name), precisely because purity is a declaration-level fact
-computable from raw signatures, while a correlation/cross-file-
-property fact can only be discovered by fully flow-sensitively checking
-a function body - the exact machinery `Checker::check_file` currently
-discards the moment one file's check finishes.
-
-Design: a first pass runs every file's `Checker` once, same as today,
-but returns a new output channel alongside diagnostics - a per-symbol
-"facts learned" record (initially: which properties a trait's own
-methods assign, for Phase 166; extensible to other collect-then-
-consume consumers later) - accumulated into a project-level store. A
-second pass re-runs every file's `Checker`, this time with that store
-available to consult. Touches `check_project`'s own top-level
-orchestration (running the whole project's files twice, not once) -
-real, disclosed, large work, not a contained function addition.
-
-**Does not by itself solve general cross-function correlation** (see
-ROADMAP.md's own updated boundary entry) - it only solves *persisting*
-a fact across a function boundary. Whether a collected fact still holds
-by the time it's consumed, when arbitrary intervening code could have
-invalidated it, is a separate, harder, currently-unsolved problem this
-phase doesn't attempt.
-
-**Effort: large** — whole-project orchestration change; unblocks Phase
-166 (preferred path) and is necessary (not sufficient) for any future
-cross-function correlation work.
-
 ## Phase 175 — Closure capturing an outer branch's co-assignment fact
 
 `RateService::rate`'s own closure - `$userAnonymous && $anonymousId
@@ -2466,15 +2367,28 @@ cross-function correlation work.
 non-null value by the *outer* scope's own `if ($userAnonymous) {
 $savedAnonymousId = ... ?? ...; }` before the closure even runs.
 
-Not independently assessable yet - compounds Phase 169's own same-
-branch discriminant-variable correlation mechanism with closure-capture
-timing (the correlation must survive into a closure body reading the
+Phase 169's own mechanism (`Locals::branch_implied_facts`,
+`checker.rs`/`checker/narrowing.rs`) is now built and its exact shape
+settled, so this is independently assessable - and needs real, further
+work beyond what 169 shipped, not just closure-capture plumbing on top
+of it: `record_branch_implied_facts` only recognizes an equality
+discriminant (`$subject === value`/`$subject == value`), matching the
+`AuthService::authKeyLogin` shape 169 was built for. `RateService::
+rate`'s own discriminant is a bare boolean truthiness test
+(`if ($userAnonymous) { $savedAnonymousId = ...; }`), a different
+recognized-shape gap on top of the closure-capture question - the
+discriminant key would need to cover a bare `narrowing_key`-able
+truthiness condition too, not just an equality comparison, before the
+closure-capture half (surviving into a closure body reading the
 captured variable, seeded from the outer scope's own `Locals` at the
 closure literal's declaration point - see `checker/expr.rs`'s
-`closure_locals`/`arrow_locals` seeding). Blocked on Phase 169 existing
-first; revisit its feasibility once that mechanism's own shape (what
-exactly gets stored, and how replay works) is settled, rather than
-guessing at a compatible design for both at once.
+`closure_locals`/`arrow_locals` seeding) is even reachable.
 
-**Effort: unknown, blocked** — depends on Phase 169's own design
-landing before this can be scoped.
+**Effort: medium** — one more discriminant-shape arm in
+`record_branch_implied_facts`/its replay hook (bare truthiness, not
+just equality), plus verifying the closure-capture seeding path
+actually carries `branch_implied_facts` forward (`Locals::fresh_scope`
+currently resets it to empty for every closure literal, matching
+`condition_aliases`'s own precedent - may need to *not* reset it here
+specifically, unlike the boolean-flag-scoped `condition_aliases`,
+since a fact here is meant to survive scope boundaries).

@@ -28,9 +28,9 @@ graph LR
     P172["172: Nullsafe-chain-\nproven-non-null implies\nits receiver is non-null"]
     XFN["(unnumbered) general\ncross-function array\ncorrelation - invariant\nsoundness, no known\nbounded design"]
 
-    P174 -->|preferred path; unblocks| P166
+    P174 -->|done; unblocked| P166
     P174 -.->|necessary, not sufficient -\nsee XFN's own second layer| XFN
-    P169 -->|blocks| P175
+    P169 -->|done; unblocked| P175
 ```
 
 Solid arrows are hard blockers stated directly in ROADMAP.md/PHASE_BACKLOG.md.
@@ -55,12 +55,13 @@ a missing edge was an oversight.
 
 | From | To | Relationship | Status |
 |---|---|---|---|
-| **174** Two-pass checking architecture | **166** Cross-file trait-property tracking | preferred path (alternative: 166's own option (a), an N-times-per-host re-check, independently buildable without 174) | live - 174 not yet built; 166 has a non-blocked fallback path, so isn't hard-blocked, just better served by 174 landing first |
-| **174** Two-pass checking architecture | General cross-function array correlation (unnumbered - see ROADMAP.md's own boundary entry) | necessary, not sufficient | live - even once 174 is built, the invariant-soundness layer on top has no known design; this edge alone doesn't close the gap |
-| **169** Same-branch discriminant-variable correlation | **175** Closure capturing an outer branch's co-assignment fact | hard blocker | live - 175 explicitly not independently assessable until 169's own stored-fact shape and replay mechanism are settled |
+| **174** Two-pass checking architecture | **166** Cross-file trait-property tracking | preferred path (166's own option (a), an N-times-per-host re-check, was never needed) | **satisfied** - both built in the same session (`Project::collect_property_assign_facts`/`check_file_with_property_assign_facts`, `checker/property_type_too_wide.rs`), validated together (3285 tests passing) |
+| **174** Two-pass checking architecture | General cross-function array correlation (unnumbered - see ROADMAP.md's own boundary entry) | necessary, not sufficient | live - 174 is built, but the invariant-soundness layer on top still has no known design; this edge alone doesn't close the gap (not a phase-to-phase block, since the target has no phase number) |
+| **169** Same-branch discriminant-variable correlation | **175** Closure capturing an outer branch's co-assignment fact | hard blocker (Phase 175's own feasibility depended on 169's stored-fact shape being settled first) | **satisfied** - 169 is built (`Locals::branch_implied_facts`); Phase 175 is now independently assessable (its own PHASE_BACKLOG entry re-scoped accordingly) but still itself unimplemented - a separate, still-open backlog item, not a live dependency edge |
 
-Three live edges today, all from this session's reevaluation work. None
-are satisfied yet (unlike the prior version of this file, retired because
-every edge it tracked had become satisfied) - this version starts fresh
-and should be re-checked/updated whenever 166, 169, 174, or 175 change
-status, and retired again once none of the edges above are live.
+Every real phase-to-phase edge above is now satisfied. The one
+remaining live note (174 -> general cross-function correlation) isn't
+a block between two numbered backlog phases - it stays here as
+context for whoever eventually picks up that unnumbered, unsolved
+problem, rather than being deleted the way a fully-satisfied graph
+would otherwise warrant retiring this file for.
