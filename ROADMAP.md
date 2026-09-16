@@ -1765,23 +1765,12 @@ its declared/`@param-out` type) and `TooWideFunctionParameterOutTypeRule`/
 `TooWideMethodParameterOutTypeRule` (45D - too-wide narrowing for by-ref
 parameters), plus destructuring-target (`[$a, $byRef] = foo()`) and
 `foreach ($x as &$byRef)`-rebind coverage for the by-ref check 45B
-already builds for a plain `$x = ...`/`$x += ...` assignment. Also
-declined, a confirmed architectural wall rather than an effort call:
-cross-file trait-supplied property-assignment tracking for the property
-variant (45A's own property half) - `Checker::check_file` builds one
-fresh, single-use `Checker` per file, and `check_trait_methods` walks a
-host class's own inherited trait methods from *the trait's declaring
-file's* `Checker` instance, never the host's, so a write into the
-host-scoped `current_class_property_assign_types` accumulator made while
-checking the trait's file can never reach the host's own accumulator -
-the same blind spot `check_unused_private_members`'s own trait handling
-already has, for the identical reason (`flatten_traits` only ever clones
-method/property signatures into a host's `ClassInfo`, never trait body
-statements). A real structural fix needs either re-checking each trait's
-methods from within every host's own `Checker` instance, or a genuinely
-new two-pass (collect-then-consume) checking architecture - both out of
-this item's own scope, pinned with a regression test documenting the gap
-rather than silently missed.
+already builds for a plain `$x = ...`/`$x += ...` assignment.
+Cross-file trait-supplied property-assignment tracking for the property
+variant (45A's own property half) is pinned with a regression test
+documenting the gap rather than silently missed - see PHASE_BACKLOG's
+Phase 166 (reevaluated: disclosed real structural fixes exist, this
+isn't an architectural impossibility).
 
 **48 - Symbol-existence pipeline, remaining stretch goals (PARTIAL).**
 The existence-check MVP, typed-class-constant validation, multi-

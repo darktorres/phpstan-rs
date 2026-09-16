@@ -2171,3 +2171,37 @@ scheme, indexing pass over every anonymous-class declaration site,
 verifying no consumer assumes class names are only ever parsed from
 top-level/nested named declarations) rather than a contained function
 addition like the phases above.
+
+## Phase 166 — Cross-file trait-supplied property-assignment tracking
+
+Reevaluated out of ROADMAP.md's Phase 45 entry, which called this "a
+confirmed architectural wall rather than an effort call" - its own text
+then names two disclosed, real structural fixes, which makes it a large
+backlog item, not a wall: `Checker::check_file` builds one fresh,
+single-use `Checker` per file, and `check_trait_methods` walks a host
+class's own inherited trait methods from *the trait's declaring file's*
+`Checker` instance, never the host's - a write into the host-scoped
+`current_class_property_assign_types` accumulator made while checking
+the trait's file can never reach the host's own accumulator (the
+identical blind spot `check_unused_private_members`'s own trait
+handling already has, for the same reason - `flatten_traits` only ever
+clones method/property signatures into a host's `ClassInfo`, never
+trait body statements, so both features share one root cause and one
+fix).
+
+Two real paths, either sufficient: (a) re-check each trait's methods
+from *within* every host's own `Checker` instance (once per host that
+uses the trait, rather than once from the trait's own declaring file) -
+bounded, reuses today's per-file architecture, but means a trait's own
+methods get checked N times for N host classes, redoing existent-symbol/
+type-checking work that's already correct, purely to also feed the
+host's accumulator; or (b) a genuinely new two-pass (collect-then-
+consume) checking architecture - a first pass populates every class's
+(including trait-donated) property-assignment data project-wide before
+a second pass consults it, which is the more structurally correct fix
+but touches `check_project`'s own top-level orchestration, not just
+this one accumulator.
+
+**Effort: large** — real checking-architecture work; resolves the
+identical gap in `check_unused_private_members` for free once built,
+so implement once and re-verify both consumers.
