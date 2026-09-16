@@ -2254,3 +2254,61 @@ but disclosed here as real, buildable work rather than left unfiled:
 **Effort: large** — a real fluent-DSL-aware inference pass, comparable
 in shape to Phase 120's own Composer-path-repository parsing work, not
 a contained function addition.
+
+## Phase 169 — Same-branch discriminant-variable correlation
+
+One instance individually assessed out of ROADMAP.md's cross-variable-
+correlation cluster: a discriminant variable's own concrete value
+implying a *different* variable was already set in the same branch
+(`AuthService::authKeyLogin`'s own `$valid_key === ConnectedWith::ApiKey`
+implying `$secret_key` is no longer `null`; `AlbumsPageRenderer::render`'s
+own `$order_by_date` implying `$ref_dates` was set in the same `if`).
+
+A bounded generalization of the already-built `Locals::condition_aliases`
+mechanism (`checker.rs:104-177`), which today only ever aliases *one*
+boolean flag variable to *one* narrowing target. This needs: when a
+branch assigns two or more variables together, record a joint
+"co-assigned under this branch's condition" fact (keyed by the
+branch's own condition expression, the same key shape `condition_aliases`
+already uses) for every pair, not just a single flag; when code later
+tests one of those variables against a concrete value matching that
+branch's own discriminant, replay the fact that the other variable was
+set. Scope carefully to the same branch (not "ever assigned anywhere")
+to stay sound - the existing `purge_condition_aliases_targeting` on
+rebind already establishes the right "invalidate on any subsequent
+write" discipline to extend.
+
+**Effort: medium** — new per-branch co-assignment bookkeeping, but
+built on `condition_aliases`'s existing merge/purge/replay shape, not a
+new mechanism from scratch.
+
+## Phase 170 — Same-condition-expression-recurrence narrowing
+
+One instance individually assessed out of ROADMAP.md's cross-variable-
+correlation cluster: the *same condition expression*, evaluated twice,
+where the second evaluation's branch should inherit the first's
+already-known effect. Two corpus shapes, both the identical underlying
+gap: `NotificationByMailSender::sendMailNotifications`'s own
+`$nbmSendDetailedContent ? $news : null` reusing the *identical*
+condition `$news`'s own assignment was gated on one line further down
+(a ternary gets no "which if-branch got me here" definedness narrowing,
+only ordinary type narrowing), and `UploadService::addUploadedFile`'s
+own `isset($image_id)` re-checked a second time ~150 lines later as a
+fresh `if`/`else`, whose second `else` branch assumes the first
+`else` branch (the same, unchanged condition) already ran.
+
+Generalizes `condition_aliases`'s own keying: today it keys a stored
+narrowing fact by the *flag variable name* holding a condition's
+result (`$ok = $x instanceof Foo; if ($ok) {...}`). This needs a second
+lookup path keyed by a normalized condition-expression identity
+directly (structural AST equality, the same comparison `narrowing_key`
+already does elsewhere) - so re-encountering the textually/
+structurally identical condition later, with no intermediate flag
+variable at all, still finds and replays the first evaluation's known
+effect, scoped to code that provably ran after the first evaluation
+with no intervening rebind of anything the condition or its effect
+depends on.
+
+**Effort: medium** — a second, expression-keyed lookup path alongside
+the existing variable-keyed one; reuses the merge/purge/replay
+machinery `condition_aliases` already has.

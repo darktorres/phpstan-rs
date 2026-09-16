@@ -2556,80 +2556,73 @@ section used to carry:
   values.
 - No cross-variable/parallel-structure correlation: two (or more)
   separately-tracked values that a program's own real logic always
-  keeps in lockstep - most commonly two or more parallel dynamically-
-  keyed arrays populated together in one loop and read together in a
-  later one (`$counterByKey[$key]`/`$dateByKey[$key]`/... - confirmed
-  live at `ActivityRepository::findDailyActionCountsSince`,
-  `HistoryRepository::findGroupedCountsSince`,
-  `ImageRepository::findExtensionBreakdown`), or a discriminant
-  variable whose value implies another variable was already set in the
-  same branch (`AuthService::authKeyLogin`'s own `$valid_key ===
-  ConnectedWith::ApiKey` implying `$secret_key` is no longer `null`;
-  `AlbumsPageRenderer::render`'s own `$order_by_date` implying
-  `$ref_dates` was set in the same `if`; `NotificationByMailSender::
-  sendMailNotifications`'s own `$nbmSendDetailedContent ? $news : null`
-  reusing the *identical* condition `$news`'s own assignment was gated
-  on, one line further down, which is this same unmodeled-correlation
-  gap even though it's the same variable rather than a separate one -
-  a ternary's own branches get no "which if-branch got me here"
-  definedness narrowing, only ordinary type narrowing;
-  `UploadService::addUploadedFile`'s own `isset($image_id)` re-checked a
-  second time, ~150 lines later, as a fresh `if`/`else` - the second
-  `else` branch reads `$dbnow` assuming the first `else` branch (the
-  same, unchanged condition) already set it, past the merge point where
-  this checker only sees "maybe null" left over from the *first*
-  if/else's own `if`-branch; `RateService::rate`'s own closure -
-  `$userAnonymous && $anonymousId !== $savedAnonymousId` implies
-  `$savedAnonymousId` was set to a real, non-null value by the *outer*
-  scope's own `if ($userAnonymous) { $savedAnonymousId = ... ?? ...; }`
-  before the closure even runs. A related but distinct sub-case:
-  `condition_alias_shape` (`narrowing.rs`) deliberately scopes the
-  boolean-alias mechanism above to a *single* recognized condition shape
-  per assignment - a genuinely common idiom it doesn't cover is a
-  *compound* `&&`/`||` condition assigned to a flag variable, then
-  reused later (`$flag = $a === null || $a === 0; if (! $flag) { use
-  $a; }`) - confirmed at `CategoryService::createVirtualCategory`'s own
-  `$parentIdIsEmpty = $parentId === null || $parentId === 0;`,
-  `CategoryService::setCatStatusWithinTransaction`'s own
-  `$topCategoryHasParent = $topCategoryIdUppercat !== null &&
-  $topCategoryIdUppercat !== 0;` (two call sites, both reusing the
-  now-narrowed `$parentCatId`), `GalleryController::__invoke`'s own
-  `$slideshow_url_present = is_string($slideshow_url) && $slideshow_url
-  !== '' && $slideshow_url !== '0';`, and `PasswordController::
-  processVerificationCode`'s own `$skip_mail = ! $is_user_found ||
-  $email === null || $email === '';`. Another: a nullsafe call's own
-  result, once narrowed non-null, provably implies its *receiver* was
-  non-null too (`$x = $a?->b(); if ($x !== null) { /* $a is non-null
-  */ }`) - a sound, directly-derivable implication from `?->`'s own
-  short-circuit semantics rather than mere incidental program logic,
-  but still the same general "value assigned from an expression, later
-  condition on the assigned variable implies a fact about a different
-  expression" shape this project's own `ConditionalExpressionHolder`
-  slice doesn't reach - confirmed at `ActivityRepository::insertMany`'s
-  own `$column = $kind?->referenceColumn(); if ($column !== null &&
-  ...) { ...referentExists($kind, ...); }`) - aren't provably
-  correlated by this checker. The *general* mechanism (an arbitrary
-  boolean-formula memory over recorded facts, symbolic enough to prove
-  any of the shapes above) is declined as genuinely unbounded in
-  scope - there's no natural stopping point to "solve cross-variable
-  correlation," unlike a single named idiom. That's a scope argument,
-  not "real PHPStan doesn't do this either" (which was this entry's
-  prior, invalid framing - matching real PHPStan is never on its own a
-  reason to decline a check this project could otherwise justify. See
-  `feedback_stricter_than_phpstan_is_fine`). Each named instance above
-  is instead an individual candidate for its own narrow, bounded
-  special case, the same way `condition_alias_shape`'s single-condition
-  form and the disjunctive-syllogism case (PHASE_BACKLOG Phase 162)
-  were carved out of this identical cluster - not yet individually
-  assessed for the rest (parallel dynamically-keyed arrays, a
-  discriminant variable implying another was set, ternary-branch
-  definedness, the closure-captures-an-outer-if's-assignment shape),
-  each of which needs its own feasibility pass before being declined
-  or filed as a phase, rather than being grouped into this one
-  "genuinely hard" bucket by association. Each individual finding this
-  produces in the meantime is sound (a real, if practically-
-  unreachable, edge the checker can't rule out), not a false positive
-  to chase down case by case.
+  keeps in lockstep. The *general* mechanism (an arbitrary boolean-
+  formula memory over recorded facts, symbolic enough to prove any
+  correlated shape) is declined as genuinely unbounded in scope - no
+  natural stopping point to "solve cross-variable correlation," unlike
+  a single named idiom. That's a scope argument, not "real PHPStan
+  doesn't do this either" (matching real PHPStan is never on its own a
+  reason to decline a check this project could otherwise justify - see
+  `feedback_stricter_than_phpstan_is_fine`). Each named instance was
+  individually assessed on that basis, not grouped in by association:
+  - Two (or more) parallel dynamically-keyed arrays populated together
+    in one loop and read together in a later one
+    (`$counterByKey[$key]`/`$dateByKey[$key]`/... - confirmed live at
+    `ActivityRepository::findDailyActionCountsSince`,
+    `HistoryRepository::findGroupedCountsSince`,
+    `ImageRepository::findExtensionBreakdown`) stays declined for a
+    real, different reason: correlating two independently-named
+    variables needs a cross-call, producer-to-consumer propagation
+    (the producing loop and the consuming read site can be in
+    different functions entirely), not a bounded local AST pattern
+    like the idioms below.
+  - A discriminant variable whose value implies another variable was
+    already set in the same branch (`AuthService::authKeyLogin`'s own
+    `$valid_key === ConnectedWith::ApiKey` implying `$secret_key` is no
+    longer `null`; `AlbumsPageRenderer::render`'s own `$order_by_date`
+    implying `$ref_dates` was set in the same `if`) is a bounded
+    generalization of the already-built `condition_aliases` mechanism
+    (co-assignment-under-the-same-branch provenance for an arbitrary
+    value, not just one boolean flag) - filed as PHASE_BACKLOG Phase
+    169, real and buildable.
+  - The *same condition expression* evaluated twice, where the second
+    evaluation's branch should inherit the first's already-known effect
+    - `NotificationByMailSender::sendMailNotifications`'s own
+    `$nbmSendDetailedContent ? $news : null` reusing the identical
+    condition `$news`'s own assignment was gated on one line further
+    down (a ternary gets no "which if-branch got me here" definedness
+    narrowing, only ordinary type narrowing), and
+    `UploadService::addUploadedFile`'s own `isset($image_id)`
+    re-checked a second time ~150 lines later as a fresh `if`/`else` -
+    both are the identical "recognize a syntactically-identical
+    condition recurring" shape, generalizing `condition_aliases`'s
+    existing keying (currently by flag-variable name) to also key by a
+    normalized condition-expression identity - filed as PHASE_BACKLOG
+    Phase 170, real and buildable, reuses existing architecture.
+  - `RateService::rate`'s own closure - `$userAnonymous &&
+    $anonymousId !== $savedAnonymousId` implying `$savedAnonymousId`
+    was set to a real, non-null value by the *outer* scope's own
+    `if ($userAnonymous) { $savedAnonymousId = ... ?? ...; }` before the
+    closure even runs - compounds the discriminant-variable mechanism
+    above (Phase 169) with closure-capture timing (the correlation must
+    survive into a closure body reading the captured variable); not
+    independently assessable until Phase 169 exists, revisit after.
+  - A *compound* `&&`/`||` condition assigned to a flag variable, then
+    reused later (`condition_alias_shape`'s own single-condition-shape
+    scoping) - confirmed at `CategoryService::createVirtualCategory`'s
+    own `$parentIdIsEmpty = $parentId === null || $parentId === 0;` and
+    three more call sites - and a nullsafe call's own narrowed-non-null
+    result implying its *receiver* was non-null too (`$x = $a?->b(); if
+    ($x !== null) { /* $a is non-null */ }`, confirmed at
+    `ActivityRepository::insertMany`) both stay genuinely declined:
+    independently verified against `vendor/phpstan-src` for the
+    identical shape, real PHPStan doesn't solve either one either -
+    unlike the general-mechanism framing above, this is offered only as
+    corroborating evidence for an independently-real difficulty (no
+    known bounded mechanism either project has), not as the reason on
+    its own. Each individual finding this produces is sound (a real, if
+    practically-unreachable, edge the checker can't rule out), not a
+    false positive to chase down case by case.
 - Doctrine ORM `QueryBuilder`/`AbstractQuery::getResult()`'s own real
   result-row shape is never inferred - its native PHP signature is
   bare `mixed` (confirmed directly in `vendor/doctrine-orm`), and real
