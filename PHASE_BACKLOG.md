@@ -2024,31 +2024,88 @@ verifying no consumer assumes class names are only ever parsed from
 top-level/nested named declarations) rather than a contained function
 addition like the phases above.
 
-## Phase 168 — Doctrine ORM/DBAL untyped-result dynamic-return-type extension
+## Phase 168 — Doctrine ORM/DBAL result-type inference
 
-Filed from ROADMAP.md's own "Permanent design boundaries" entry at the
-user's request - kept declined as a *default-scope* project decision
-(genuinely Doctrine-specific, matching this project's established
-precedent of not building single-framework result-shape inference
-without independent second confirmation - see `TOP100_RESEARCH_NOTES.md`),
-but disclosed here as real, buildable work rather than left unfiled:
+Re-verified against the real corpus rather than the original one-example
+writeup that previously kept this declined: the terminal `AbstractQuery`
+methods are used 526 times project-wide across 9 real methods (not the
+handful a single `TagRepository::findCommonTags` example suggested), and
+only `getResult()` has any special-casing today, shape-only
+(`list<mixed>`, no DQL awareness). Piwigo's entities are 100% PHP-8-
+attribute-mapped with natively-typed properties, so this project's own
+already-indexed property types answer "what type is this entity field"
+for free - the genuinely new work is a small DQL SELECT/FROM/JOIN parser
+plus a shape-builder over metadata this project already has, not a
+from-scratch Doctrine mapping-metadata resolver.
 
-- `QueryBuilder::getQuery()->getResult()` (and `getOneOrNullResult()`/
-  `getSingleResult()`) - a DQL-aware dynamic-return-type extension keyed
-  off the query's own `select()`/`from()` calls, mirroring real
-  PHPStan's dedicated `doctrine/orm` extension package. Needs walking
-  the fluent `QueryBuilder` call chain backward from the `getResult()`
-  call site to reconstruct which entity/fields were selected - a real
-  parser for a fluent-builder DSL, not a stub-signature change.
-- `Connection::fetchAssociative()`/`fetchAllAssociative()` (DBAL, one
-  API layer down) - natively `array<string, mixed>|false` with no
-  per-column typing; PHPStan doesn't type-narrow this generically
-  either (it needs the actual SQL/column metadata), so this half stays
-  `mixed` even with the QueryBuilder half built.
-
-**Effort: large** — a real fluent-DSL-aware inference pass, comparable
-in shape to Phase 120's own Composer-path-repository parsing work, not
-a contained function addition.
+- **168a (medium, DONE).** Entity metadata resolution -
+  `ClassInfo::doctrine_entity` (`registry/class_info/doctrine_entity.rs`),
+  extracted from `#[ORM\Entity]`/`#[ORM\Id]`/`#[ORM\ManyToOne]`/
+  `OneToOne`/`OneToMany`/`ManyToMany` attributes, reusing each property's
+  already-resolved native type. Entity inheritance
+  (`#[ORM\InheritanceType]`/discriminator columns) is a disclosed gap,
+  confirmed absent from the corpus - see 168j.
+- **168b (medium).** Symbolic `QueryBuilder` fluent-chain resolution
+  (`checker/doctrine/query_builder.rs`) - walks a `->getQuery()` call's
+  receiver chain backward collecting `select`/`addSelect`/`from`/`join`/
+  `innerJoin`/`leftJoin`, purely symbolically (no live QueryBuilder
+  object). Must handle both `$em->createQueryBuilder()` and the
+  corpus-dominant `$this->createQueryBuilder($alias)` repository
+  shorthand (100+ real sites), which implicitly establishes `select`/
+  `from` per real `EntityRepository::createQueryBuilder()`'s own source.
+- **168c (medium).** A small DQL SELECT-clause parser
+  (`checker/doctrine/dql.rs`) - entity/scalar-field/`IDENTITY()`/
+  aggregate-function/`AS`-alias/`DISTINCT`/`CASE`/`NEW Dto(...)` select
+  items, `FROM`/`JOIN` clauses. No WHERE/HAVING/GROUP BY/ORDER BY
+  parsing (never affects row shape). Scalar subqueries nested inside a
+  select item are a disclosed follow-on - see 168k.
+- **168d (medium).** Result-shape builder (`checker/doctrine/
+  result_shape.rs`) - SELECT clause + FROM/JOIN alias map + 168a's
+  metadata → one row `Type`, mirroring real Doctrine `HYDRATE_OBJECT`
+  hydration rules exactly (entity-alone vs. entity-plus-scalars mixed
+  shape vs. scalar-only), plus real aggregate-function return types
+  (`COUNT` → `int<0, max>`; `AVG`/`SUM`/`MIN`/`MAX` → the operand
+  field's own type) verified directly against `phpstan-doctrine`'s own
+  `QueryResultTypeWalker`.
+- **168e (medium).** Wiring `getResult()`/`getOneOrNullResult()`/
+  `getSingleResult()`/`execute()`/`toIterable()` - the five methods real
+  `phpstan-doctrine` itself resolves precisely via its
+  `QueryResultDynamicReturnTypeExtension`, so checkable against a real
+  reference implementation's own `dumpType()` output.
+  `execute()`/`toIterable()` need a real hydration-mode-argument dispatch
+  (`Query::HYDRATE_*` constant → the matching transform), not a fixed
+  per-method table.
+- **168f (medium).** `getArrayResult()`/`getSingleColumnResult()`/
+  `getSingleScalarResult()`/`getScalarResult()` - **beyond real
+  PHPStan** (confirmed via `phpstan-doctrine`'s own stub: none of these
+  four get a dynamic-return-type extension there either), transcribed
+  directly from Doctrine ORM's own hydrator source instead. The first
+  three alone are 295 of the corpus's 526 real call sites - the largest
+  real payoff of this whole phase. `getSingleScalarResult()` (a single
+  scalar value, alias for `getSingleResult(HYDRATE_SINGLE_SCALAR)`) is
+  not the same method as `getScalarResult()` (a flat multi-column array,
+  zero corpus usage) - easy to conflate.
+- **168g (small).** Direct `EntityManager::createQuery($dql)->getResult()`
+  - the same DQL parser fed a literal string instead of a
+  QueryBuilder-reconstructed one.
+- **168h (small).** Custom DQL function return types
+  (`DATE_FORMAT_YEAR_MONTH`/`REGEXP`/etc., project-registered via
+  `Configuration::addCustomStringFunction()`) - real `phpstan-doctrine`
+  itself can't infer these either, requiring a manually-declared config
+  surface (`doctrine.neon`'s own `customStringFunctions` etc.) - mirror
+  with a small `phpstan-rs.toml` config surface, same shape as this
+  project's existing `ignore_errors`/`restricted_symbols`.
+- **168i (small, permanent boundary).** DBAL raw `fetchAssociative()`/
+  `fetchAllAssociative()`/etc. - per-column typing needs the actual live
+  SQL/schema; real PHPStan doesn't solve this generically either. Stays
+  `array<string, mixed>|false`.
+- **168j (medium).** Entity inheritance mapping (single-table/joined-
+  table) - extends `DoctrineEntity` with a discriminator concept; a
+  `FROM BaseEntity` with mapped subclasses should produce a union row
+  type across them. Zero corpus usage to verify against.
+- **168k (medium).** Scalar subqueries nested inside a SELECT item
+  (`SELECT (SELECT COUNT(...) FROM ...) AS cnt`) - needs 168b-168d
+  applied recursively to the inner query. Zero corpus usage.
 
 ## Phase 173 — Same-function parallel dynamically-keyed array correlation
 

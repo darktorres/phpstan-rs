@@ -1,0 +1,158 @@
+//! Doctrine ORM entity metadata extraction (PHASE_BACKLOG Phase 168 168a).
+
+use super::super::*;
+use super::helpers::*;
+
+#[test]
+fn an_ordinary_class_has_no_doctrine_entity() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {}
+            "#,
+    );
+    assert!(r.classes.get("Foo").unwrap().doctrine_entity.is_none());
+}
+
+#[test]
+fn an_entity_records_its_id_field_scalar_fields_and_repository_class() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            class TagRepository {}
+
+            #[ORM\Entity(repositoryClass: TagRepository::class)]
+            class TagEntity
+            {
+                #[ORM\Id]
+                #[ORM\Column]
+                public int $id;
+
+                public function __construct(
+                    #[ORM\Column]
+                    public string $name,
+                ) {}
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\TagEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert_eq!(entity.id_field.as_deref(), Some("id"));
+    assert_eq!(entity.fields.get("id"), Some(&Type::Int));
+    assert_eq!(entity.fields.get("name"), Some(&Type::String));
+    assert_eq!(
+        entity.repository_class.as_deref(),
+        Some("App\\TagRepository")
+    );
+}
+
+#[test]
+fn a_many_to_one_association_resolves_its_target_from_the_native_type() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            class CategoryEntity {}
+
+            #[ORM\Entity]
+            class ImageEntity
+            {
+                #[ORM\Id]
+                public int $id;
+
+                public function __construct(
+                    #[ORM\ManyToOne]
+                    public CategoryEntity $category,
+                ) {}
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\ImageEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    let assoc = entity.associations.get("category").unwrap();
+    assert_eq!(assoc.target, "App\\CategoryEntity");
+    assert!(!assoc.is_collection);
+}
+
+#[test]
+fn a_one_to_many_collection_association_resolves_its_target_from_target_entity_argument() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            class ImageCategoryEntity {}
+
+            #[ORM\Entity]
+            class CategoryEntity
+            {
+                #[ORM\Id]
+                public int $id;
+
+                #[ORM\OneToMany(mappedBy: 'category', targetEntity: ImageCategoryEntity::class)]
+                public array $imageCategories;
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\CategoryEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    let assoc = entity.associations.get("imageCategories").unwrap();
+    assert_eq!(assoc.target, "App\\ImageCategoryEntity");
+    assert!(assoc.is_collection);
+}
+
+#[test]
+fn a_composite_identifier_records_no_single_id_field() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            class ImageEntity {}
+            #[ORM\Entity]
+            class CategoryEntity {}
+
+            #[ORM\Entity]
+            class ImageCategoryEntity
+            {
+                public function __construct(
+                    #[ORM\Id]
+                    #[ORM\ManyToOne]
+                    public ImageEntity $image,
+                    #[ORM\Id]
+                    #[ORM\ManyToOne]
+                    public CategoryEntity $category,
+                ) {}
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\ImageCategoryEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert!(entity.id_field.is_none());
+    assert_eq!(entity.associations.len(), 2);
+}

@@ -1922,6 +1922,32 @@ variable first (`$e = new Exception(...); throw $e;`) is never touched
 a logger, say - is legitimate code this checker can't distinguish from
 the typo. Gated behind `Registry::check_new_exception_discarded`.
 
+**Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
+168a, the first landed sub-item of a larger in-progress phase - see
+PHASE_BACKLOG.md for 168b onward). `ClassInfo::doctrine_entity`
+(`registry/class_info/doctrine_entity.rs`), extracted from a class's own
+`#[ORM\Entity]`/`#[ORM\Id]`/`#[ORM\ManyToOne]`/`OneToOne`/`OneToMany`/
+`ManyToMany` attributes (resolved through each file's own `use`
+imports/aliases, e.g. `use Doctrine\ORM\Mapping as ORM;`, to their real
+fully-qualified `Doctrine\ORM\Mapping\*` names - not a bare short-name
+match, unlike this project's own native `#[\Deprecated]`/
+`#[\AllowDynamicProperties]` handling, which can safely use one since
+those are unambiguous global-namespace attributes). Reuses each mapped
+property's own already-resolved native type (`PropertySig::ty_native`)
+for both scalar field types and a to-one association's own target
+entity - real Piwigo entities are 100% PHP-8-attribute-mapped with
+natively-typed properties, so no from-scratch Doctrine mapping-metadata
+resolver is needed at all, unlike real PHPStan's own `phpstan-doctrine`,
+which actually instantiates a live `ClassMetadataFactory` at analysis
+time. A `OneToMany`/`ManyToMany` collection-typed property falls back to
+its attribute's own explicit `targetEntity: ...` argument, since a
+`Collection`/`array`-typed property carries no target class name of its
+own. A composite identifier (more than one `#[ORM\Id]` property, real
+and valid Doctrine) deliberately records no single `id_field` rather
+than picking one arbitrarily. Entity inheritance
+(`#[ORM\InheritanceType]`/discriminator columns) is a disclosed gap,
+confirmed absent from the real corpus - PHASE_BACKLOG's own 168j.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism
@@ -3120,23 +3146,16 @@ section used to carry:
     when a nullsafe chain is proven non-null. Once it exists as a
     direct-condition rule, `condition_aliases`' replay picks it up for
     free the same way. Filed as PHASE_BACKLOG Phase 172.
-- Doctrine ORM `QueryBuilder`/`AbstractQuery::getResult()`'s own real
-  result-row shape is never inferred - its native PHP signature is
-  bare `mixed` (confirmed directly in `vendor/doctrine-orm`), and real
-  PHPStan only recovers precision here via a separate, dedicated
-  `doctrine/orm` PHPStan extension (DQL-aware dynamic-return-type
-  inference keyed off the query's own `select()`/`from()` calls) this
-  project doesn't replicate - a materially bigger, Doctrine-specific
-  feature, not a general type-system gap. Confirmed corpus false
-  positive this causes: `TagRepository::findCommonTags`'s own
-  `$qb->getQuery()->getResult()` loop cascades `mixed` into every field
-  of the row shape it builds by hand from each result object. The
-  identical gap, one API layer down: DBAL's own `Connection::
-  fetchAssociative()` (raw, unmapped row fetch) is natively
-  `array<string, mixed>|false`, no per-column typing at all - confirmed
-  at `NotificationByMailSenderTest::setUp`'s own
+- DBAL's own `Connection::fetchAssociative()` (raw, unmapped row fetch)
+  is natively `array<string, mixed>|false`, no per-column typing at all -
+  confirmed at `NotificationByMailSenderTest::setUp`'s own
   `$this->conn->fetchAssociative(...)` result assigned into a precisely
-  `array{check_key: string, ...}`-shaped property.
+  `array{check_key: string, ...}`-shaped property. Per-column typing
+  needs the actual live SQL/schema; real PHPStan doesn't solve this
+  generically either (PHASE_BACKLOG Phase 168's own 168i) - a genuine,
+  permanent boundary, unlike its sibling `QueryBuilder`/
+  `AbstractQuery::getResult()` gap immediately below, which is being
+  actively built.
 - `token_get_all()` returns bare `array` - confirmed *not* a gap versus
   real PHPStan specifically (no dynamic-return-type extension for it
   exists in `vendor/phpstan-src` either, unlike the several functions

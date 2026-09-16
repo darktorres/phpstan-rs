@@ -13,10 +13,13 @@ use crate::registry::name_context::{
 use crate::types::{self, AccessoryKind, TemplateParam, Type};
 
 mod attributes;
+mod doctrine_entity;
 mod tag_synthesis;
 mod virtual_property;
 
 use attributes::compute_attribute_targets;
+pub(crate) use doctrine_entity::DoctrineEntity;
+use doctrine_entity::compute_doctrine_entity;
 use tag_synthesis::method_tag_sig;
 pub(crate) use tag_synthesis::object_class_names;
 pub(crate) use virtual_property::hook_body_references_property;
@@ -324,6 +327,10 @@ pub struct ClassInfo {
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
     pub method_tags: Vec<(String, FunctionSig)>,
+    // `#[ORM\Entity]` metadata (PHASE_BACKLOG Phase 168 168a) - `None`
+    // for the overwhelming majority of classes, which aren't Doctrine
+    // entities at all.
+    pub doctrine_entity: Option<DoctrineEntity>,
     // `@phpstan-require-extends`/`@phpstan-require-implements`/
     // `@phpstan-sealed` - resolved directly to fully-qualified class
     // names (a tag's value can legally be a union of several, already
@@ -980,6 +987,7 @@ impl ClassInfo {
             .unwrap_or_default();
         let deprecated = class_doc.as_ref().and_then(|d| d.deprecated.clone());
         let attribute_targets = compute_attribute_targets(&c.attrs);
+        let doctrine_entity = compute_doctrine_entity(c, ctx, &properties);
 
         ClassInfo {
             kind: c.kind,
@@ -1025,6 +1033,7 @@ impl ClassInfo {
             type_alias_case_refs,
             type_imports,
             method_tags,
+            doctrine_entity,
         }
     }
 
@@ -1481,6 +1490,7 @@ impl ClassInfo {
             // Same scope trim as `mixins` above - a real `@method` on an
             // enum's own docblock is a rare combination not modeled here.
             method_tags: Vec::new(),
+            doctrine_entity: None,
         }
     }
 
