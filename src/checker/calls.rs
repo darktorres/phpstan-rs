@@ -577,35 +577,13 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Validates a call's argument list for the naming/ordering legality
-    /// real PHP itself enforces, independent of which parameter each
-    /// argument actually resolves to (`resolve_call_args`'s job).
-    /// Mirrors real PHPStan's `FunctionCallParametersCheck::
-    /// processArguments` plus its raw-args ordering pre-pass, reusing
-    /// its identifiers verbatim (`argument.unknown`, `argument.duplicate`,
-    /// `argument.positionalAfterNamed`, `argument.unpackAfterNamed`,
-    /// `argument.nonUnpackAfterUnpacked`).
-    ///
-    /// The three ordering checks are deliberately `else if` against each
-    /// other (real PHPStan instead runs an ordering pre-pass over the raw
-    /// argument list and a separate, later pass over an *expanded*
-    /// argument list - one that turns a spread over a known constant
-    /// array into one synthetic argument per element - to get
-    /// `positionalAfterNamed` from a genuinely different pass than
-    /// `unpackAfterNamed`/`nonUnpackAfterUnpacked`; this project doesn't
-    /// attempt that constant-array expansion, so the three collapse onto
-    /// the same raw-args loop here) - a single malformed argument only
-    /// ever gets one ordering complaint, not a pile of overlapping ones
-    /// for what's really the same mistake.
-    /// "Boolean trap" detection (PHASE_BACKLOG Phase 96's D2, opt-in via
-    /// `Registry::check_boolean_trap`) - a bare `true`/`false` literal
-    /// passed *positionally* into a bare-`bool`-typed parameter is always
-    /// type-correct, so no type-checking rule can ever see it. Named-
-    /// argument and spread calls are exempt (the name/callee already
-    /// documents the value at the call site); mirrors `resolve_call_args`'s
-    /// own positional-index bookkeeping rather than reusing its resolved
-    /// output, since that loses exactly the named-vs-positional
-    /// distinction this check depends on.
+    /// A bare `true`/`false` literal passed *positionally* into a
+    /// bare-`bool`-typed parameter is always type-correct, so no
+    /// type-checking rule can ever see it. Named-argument and spread
+    /// calls are exempt (the name/callee already documents the value);
+    /// mirrors `resolve_call_args`'s own positional-index bookkeeping
+    /// rather than its resolved output, which loses the named-vs-
+    /// positional distinction this check depends on.
     fn check_boolean_trap_arguments(
         &mut self,
         callee_label: &str,
@@ -649,17 +627,14 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// PHASE_BACKLOG Phase 96's D6, opt-in: two adjacent, same-typed
-    /// positional parameters are structurally invisible to real
-    /// PHPStan's whole type-system-based architecture as "different
-    /// roles" (`resize(int $width, int $height)` type-checks a swapped
-    /// `resize($height, $width)` call just fine) - a real, disclosed
-    /// heuristic, not a soundness gap this project usually cares about
-    /// closing. Fires only on the exact "crossed names" shape: both
-    /// arguments are bare variables, and each one's name matches the
-    /// *other* position's declared parameter name (case-insensitively) -
-    /// never a fuzzy/partial match, to keep the false-positive rate low
-    /// enough to be worth shipping at all.
+    /// Two adjacent, same-typed positional parameters are structurally
+    /// invisible to a type-checker as "different roles" (`resize(int
+    /// $width, int $height)` type-checks a swapped `resize($height,
+    /// $width)` call just fine) - a disclosed heuristic. Fires only on
+    /// the exact "crossed names" shape: both arguments are bare
+    /// variables, and each one's name matches the *other* position's
+    /// declared parameter name case-insensitively - never a fuzzy/
+    /// partial match, to keep the false-positive rate low.
     fn check_swapped_argument_names(
         &mut self,
         callee_label: &str,
@@ -729,6 +704,26 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Validates a call's argument list for the naming/ordering legality
+    /// real PHP itself enforces, independent of which parameter each
+    /// argument actually resolves to (`resolve_call_args`'s job).
+    /// Mirrors real PHPStan's `FunctionCallParametersCheck::
+    /// processArguments` plus its raw-args ordering pre-pass, reusing
+    /// its identifiers verbatim (`argument.unknown`, `argument.duplicate`,
+    /// `argument.positionalAfterNamed`, `argument.unpackAfterNamed`,
+    /// `argument.nonUnpackAfterUnpacked`).
+    ///
+    /// The three ordering checks are deliberately `else if` against each
+    /// other (real PHPStan instead runs an ordering pre-pass over the raw
+    /// argument list and a separate, later pass over an *expanded*
+    /// argument list - one that turns a spread over a known constant
+    /// array into one synthetic argument per element - to get
+    /// `positionalAfterNamed` from a genuinely different pass than
+    /// `unpackAfterNamed`/`nonUnpackAfterUnpacked`; this project doesn't
+    /// attempt that constant-array expansion, so the three collapse onto
+    /// the same raw-args loop here) - a single malformed argument only
+    /// ever gets one ordering complaint, not a pile of overlapping ones
+    /// for what's really the same mistake.
     fn check_argument_legality(
         &mut self,
         callee_label: &str,

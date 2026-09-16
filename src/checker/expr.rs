@@ -219,14 +219,10 @@ impl<'a> Checker<'a> {
                 let sig = resolved_name
                     .as_deref()
                     .and_then(|name| self.registry.lookup_function(name));
-                // PHASE_BACKLOG Phase 102's W3, opt-in, extending the
-                // existing `class.nameCase` mechanism to a plain function
-                // call - `resolved_name` is already namespace-qualified
-                // exactly the way `check_class_name_case`'s own
-                // `resolved` variable is (the raw, as-written spelling,
-                // just namespace-prefixed), so the identical "does the
-                // canonical declared spelling differ" comparison applies
-                // unchanged.
+                // `resolved_name` is already namespace-qualified the
+                // same way `check_class_name_case`'s own `resolved`
+                // variable is, so the identical canonical-vs-written
+                // comparison applies unchanged.
                 if self.registry.check_function_name_case
                     && let Some(resolved) = &resolved_name
                     && let Some((canonical, _)) = self.registry.lookup_function_with_name(resolved)

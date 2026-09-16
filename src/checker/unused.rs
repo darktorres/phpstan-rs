@@ -226,8 +226,7 @@ impl<'a> Checker<'a> {
         // private case, so "never written from inside the declaring
         // class" is just as sound. Hooked properties are skipped: a
         // `set` hook's own body is a different write mechanism entirely,
-        // not covered by `usage.writes` here. See PHASE_BACKLOG Phase
-        // 98's AB2.
+        // not covered by `usage.writes` here.
         for p in properties {
             if p.write_visibility != Some(Visibility::Private)
                 || p.visibility == Visibility::Private

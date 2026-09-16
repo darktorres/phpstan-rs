@@ -254,19 +254,12 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// PHASE_BACKLOG Phase 101's E1, opt-in (mirrors real `phpstan-
-    /// strict-rules`' `BooleansInConditions` family, e.g.
-    /// `BooleanInIfConditionRule`) - genuinely different from this
-    /// project's own existing *constant*-condition checks
-    /// (`inferred_constant_condition`, which only ever flags an
-    /// always-true/false condition): this instead flags a condition
-    /// whose type isn't confidently `bool` *at all*, regardless of its
-    /// value. `Type::Mixed` is always exempted - this project has no
-    /// "explicit vs. implicit mixed" provenance tracking on an inferred
-    /// expression type the way real PHPStan's own `isExplicitMixed()`
-    /// distinction needs, so treating every `Mixed` as "don't know, may
-    /// be bool" matches this project's own "don't guess" precedent used
-    /// everywhere else rather than a real port of that distinction.
+    /// Flags a condition whose type isn't confidently `bool` at all,
+    /// regardless of its value - distinct from `inferred_constant_
+    /// condition`'s always-true/false check. `Type::Mixed` is always
+    /// exempted: this project has no explicit-vs-implicit-mixed
+    /// provenance on an inferred expression type, so it reads as "don't
+    /// know, may be bool" rather than a confirmed non-bool.
     pub(crate) fn check_non_boolean_condition(
         &mut self,
         e: &Expr,
@@ -319,14 +312,11 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// PHASE_BACKLOG Phase 96's D7: structurally-identical operands on
-    /// both sides of a comparison or `Sub` - `$x === $x`, `$a - $a`. Zero
-    /// PHPStan precedent (its whole `Rules/` catalog reasons purely from
-    /// inferred *type*, never operand-expression identity). Deliberately
-    /// silent on whether the result is always true/false/zero (a float
-    /// `NAN` makes `$x === $x` false, for one) - just that comparing/
-    /// subtracting an expression from itself is almost always a
-    /// copy-paste mistake regardless of what it evaluates to.
+    /// Flags structurally-identical operands on both sides of a
+    /// comparison or `Sub` (`$x === $x`, `$a - $a`). Deliberately silent
+    /// on whether the result is always true/false/zero (a float `NAN`
+    /// makes `$x === $x` false) - just that comparing/subtracting an
+    /// expression from itself is almost always a copy-paste mistake.
     pub(crate) fn check_duplicate_operands(&mut self, op: &BinOp, l: &Expr, r: &Expr, label: &str) {
         if !matches!(
             op,
@@ -355,11 +345,10 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// `$x = $x` - the self-assignment half of PHASE_BACKLOG Phase 96's
-    /// D7, same operand-identity helper as `check_duplicate_operands`.
-    /// A compound-assign self-target (`$x += $x`) is a real, meaningful
-    /// operation (doubling), not a no-op, so it's deliberately not
-    /// covered here.
+    /// `$x = $x` - reuses `check_duplicate_operands`'s own operand-
+    /// identity helper. A compound-assign self-target (`$x += $x`) is a
+    /// real, meaningful operation (doubling), not a no-op, so it's
+    /// deliberately not covered here.
     pub(crate) fn check_self_assignment(&mut self, lhs: &Expr, rhs: &Expr, label: &str) {
         if !is_duplicate_side_effect_free_operand(lhs, rhs) {
             return;

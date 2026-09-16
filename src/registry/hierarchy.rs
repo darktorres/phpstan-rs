@@ -372,9 +372,8 @@ impl Registry {
     }
 
     /// The real declared spelling `lookup_method`/`lookup_method_with_
-    /// owner` would resolve `method` to, for `checker::oop`'s opt-in
-    /// call-site `method.nameCase` check (PHASE_BACKLOG Phase 102's W3)
-    /// to compare against the as-written text.
+    /// owner` would resolve `method` to, for comparing against the
+    /// as-written call-site text.
     pub(crate) fn lookup_method_canonical_name(&self, class: &str, method: &str) -> Option<&str> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some((name, _)) = owners.get_key_value(method) {

@@ -563,15 +563,11 @@ impl<'a> Checker<'a> {
         self.check_doc_see_tag_targets(label, doc, span);
     }
 
-    /// Real PHPStan's own `phpstan/phpdoc-parser` has no
-    /// `SeeTagValueNode` at all - PHASE_BACKLOG Phase 96's D5 fills the
-    /// gap with a plain identifier-shape check: a `@see` value that
-    /// parses as a bare class name or a `Class::member()`/`Class::
-    /// $prop`/`Class::CONST` reference is checked against the registry;
-    /// anything else (a URL, free-text prose, a bare function name with
-    /// no owning class) is left alone rather than guessed at, since
-    /// there's no upstream grammar to lean on for telling those apart
-    /// from a real symbol reference with any confidence.
+    /// Checks a `@see` value shaped like a bare class name or a
+    /// `Class::member()`/`Class::$prop`/`Class::CONST` reference against
+    /// the registry. Anything else (a URL, free-text prose, a bare
+    /// function name) is left alone - no upstream grammar exists to tell
+    /// those apart from a real reference with any confidence.
     fn check_doc_see_tag_targets(&mut self, label: &str, doc: &str, span: Span) {
         for target in &docblock::parse(doc).see {
             let (class_part, member) = match target.split_once("::") {
@@ -1005,19 +1001,13 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// PHASE_BACKLOG Phase 97's AA3 - real PHPStan's promoted-property
-    /// machinery only ever *validates* an existing promotion, never
-    /// *proposes* one. Suggests constructor property promotion for a
-    /// trivially-forwarding constructor: every parameter, in order, has
-    /// exactly one matching `$this->name = $name;` statement and nothing
-    /// else in the body, none of the parameters are already promoted (a
-    /// partially-promoted constructor is left alone - this is about
-    /// converting the *whole* thing), and each target property is a
-    /// plain (non-static, non-hooked) declaration on this same class
-    /// with the identical native type. Gated on the configured PHP
-    /// version being >= 8.0 (`PhpFeature::PromotedProperties`) - without
-    /// one configured, this doesn't guess forward any more than any
-    /// other version-gated check here does.
+    /// Suggests constructor property promotion for a trivially-
+    /// forwarding constructor: every parameter, in order, has exactly
+    /// one matching `$this->name = $name;` statement and nothing else in
+    /// the body, none of the parameters are already promoted, and each
+    /// target property is a plain (non-static, non-hooked) declaration
+    /// on this same class with the identical native type. Requires a
+    /// configured PHP version >= 8.0.
     pub(crate) fn check_promoted_property_candidate(&mut self, fqn: &str, c: &ClassDecl) {
         if !self.registry.check_promoted_property_suggestions {
             return;

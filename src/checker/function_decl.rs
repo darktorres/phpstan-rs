@@ -973,21 +973,11 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        // PHASE_BACKLOG Phase 97's AA5, opt-in: real PHPStan already
-        // computes this exact fact (`NeverRuleHelper::shouldReturnNever`)
-        // but its consuming rules are registered only in phpstan.org's
-        // own private issue-bot config, never shipped to a real
-        // installable package/level/strict-rules extension - a product-
-        // distribution gap, not a technical one. `body_falls_off_end ==
-        // false` here means the whole body already provably always
-        // terminates (throw/exit/infinite loop, no fallthrough); paired
-        // with "never saw a real `return` statement anywhere" (`current_
-        // function_saw_explicit_return`, which a bare `return;` also
-        // sets), that's exactly "never returns normally". Scoped to an
-        // undeclared (reads as `Mixed` here) or `void`-declared return
-        // type only - a function already declaring something else that
-        // never returns is a separate, unbuilt dead-code question, not
-        // this suggestion.
+        // `body_falls_off_end == false` means the body already provably
+        // always terminates; paired with never seeing a real `return`
+        // (a bare `return;` counts too), that's "never returns
+        // normally". Scoped to an undeclared (reads as `Mixed`) or
+        // `void`-declared return type only.
         if self.registry.check_never_return_suggestions
             && !f.body.is_empty()
             && !self.current_function_is_generator

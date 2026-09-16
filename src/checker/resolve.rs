@@ -463,12 +463,11 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The method-call/static-call half of PHASE_BACKLOG Phase 102's
-    /// W3 (the plain-function-call half lives on `ExprKind::Call`
-    /// directly) - opt-in, same `Registry::check_function_name_case`
-    /// flag as `use function`'s own `function.nameCase` check.
+    /// Method-call/static-call sibling of `ExprKind::Call`'s own inline
+    /// `function.nameCase` check, gated on the same `Registry::
+    /// check_function_name_case` flag as `use function`'s own check.
     /// `Registry::lookup_method_canonical_name` mirrors `lookup_class`'s
-    /// own case-insensitive-fallback shape.
+    /// case-insensitive-fallback shape.
     pub(crate) fn check_call_site_method_name_case(
         &mut self,
         class: &str,

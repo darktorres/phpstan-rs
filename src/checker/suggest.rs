@@ -1,7 +1,7 @@
-//! "Did you mean?" name suggestions for undefined-symbol diagnostics -
-//! see `PHASE_BACKLOG.md` D8. Plain Levenshtein edit distance, capped by
-//! `MAX_DISTANCE` so an unrelated name never gets suggested just because
-//! it happens to be the least-bad option among equally-wrong candidates.
+//! "Did you mean?" name suggestions for undefined-symbol diagnostics.
+//! Plain Levenshtein edit distance, capped by `MAX_DISTANCE` so an
+//! unrelated name never gets suggested just because it happens to be
+//! the least-bad option among equally-wrong candidates.
 
 const MAX_DISTANCE: usize = 3;
 

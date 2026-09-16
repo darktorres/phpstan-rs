@@ -159,56 +159,36 @@ pub struct Registry {
     // for why this goes beyond real PHPStan, which has no whole-project
     // equivalent to mirror.
     pub check_duplicate_class_declarations: bool,
-    // "Boolean trap" detection (PHASE_BACKLOG Phase 96's D2) - a bare
-    // `true`/`false` literal passed *positionally* into a bare-`bool`-
-    // typed parameter is always type-correct, so no PHPStan rule can see
-    // it; opt-in since a well-named single-bool-parameter call (`$x->
-    // setEnabled(true)`) is unambiguous in practice and would otherwise
-    // be noise on every such call project-wide.
+    // A bare `true`/`false` literal passed positionally into a
+    // bare-`bool`-typed parameter is always type-correct, so no rule
+    // can see it; opt-in since an unambiguous single-bool-parameter call
+    // is common and would otherwise be noise project-wide.
     pub check_boolean_trap: bool,
-    // Array-key cast warnings (PHASE_BACKLOG Phase 103's Z1, mirroring
-    // real PHPStan's own `LiteralArrayKeyCastRule`/`ArrayDimCastRule`) -
-    // real PHPStan only ever registers these in its own private
-    // issue-bot config (`Rules/Playground/`), never in any installable
-    // package/level/strict-rules extension, so there's no real-world
-    // precedent for how noisy they are on an ordinary codebase; opt-in
-    // until that's known.
+    // Array-key cast warnings (a literal float/bool/null/canonical-
+    // integer-string array key silently cast at runtime) - opt-in since
+    // there's no real-world precedent for how noisy this is.
     pub check_array_key_cast: bool,
-    // `RequireParentConstructCallRule` (PHASE_BACKLOG Phase 101's E3) -
-    // real PHPStan ships this only via the separate, opt-in
-    // `phpstan/phpstan-strict-rules` package, never core `phpstan/
-    // phpstan`; a legitimate constructor genuinely choosing not to call
-    // an otherwise-real parent constructor (composition-over-
-    // inheritance patterns, a parent constructor that's a no-op by
-    // design) is real enough that this stays opt-in here too.
+    // Flags a constructor that never calls an existing parent
+    // constructor - opt-in since a legitimate constructor can genuinely
+    // choose not to (composition-over-inheritance, a no-op parent).
     pub check_parent_constructor_call: bool,
-    // Constructor-property-promotion suggestion (PHASE_BACKLOG Phase
-    // 97's AA3) - a purely stylistic suggestion, not a bug, so opt-in
-    // like every other novel rule category shipped here.
+    // Constructor-property-promotion suggestion - a purely stylistic
+    // suggestion, not a bug, so opt-in.
     pub check_promoted_property_suggestions: bool,
-    // Opt-in "only booleans in a condition" family (PHASE_BACKLOG Phase
-    // 101's E1, mirroring real `phpstan-strict-rules`'
-    // `BooleansInConditions` rule family). Real PHPStan ships this only
-    // via that separate, opt-in package.
+    // Flags a condition/`&&`/`||`/`!` operand whose type isn't
+    // confidently `bool` - opt-in.
     pub check_boolean_conditions: bool,
     // Strict `checkDynamicProperties` behavior inside `isset()`/
-    // `empty()`/`??`/`??=` (PHASE_BACKLOG Phase 102's W1) - real
-    // PHPStan's lenient default (this project's own unconditional
-    // behavior otherwise) silently allows probing a property that
-    // doesn't exist there; the stricter mode still flags it. Opt-in,
-    // mirroring real PHPStan's own opt-in `checkDynamicProperties`
-    // parameter.
+    // `empty()`/`??`/`??=` - the lenient default silently allows probing
+    // a property that doesn't exist there; the stricter mode still
+    // flags it. Opt-in.
     pub check_dynamic_properties: bool,
-    // Opt-in swapped-adjacent-argument-name detection (PHASE_BACKLOG
-    // Phase 96's D6) - a real, disclosed heuristic (two same-typed
-    // parameters are structurally invisible to any type-system-based
-    // check as "different roles"), not a soundness gap, so opt-in like
-    // every other novel heuristic rule shipped here.
+    // Swapped-adjacent-argument-name detection - a disclosed heuristic
+    // (two same-typed parameters are invisible to any type-based check
+    // as "different roles"), not a soundness gap, so opt-in.
     pub check_swapped_arguments: bool,
-    // Opt-in `never`-return-type suggestion (PHASE_BACKLOG Phase 97's
-    // AA5) - real PHPStan already computes this exact fact, but its own
-    // consuming rules are registered only in phpstan.org's private
-    // issue-bot config, never shipped to a real installable package.
+    // `never`-return-type suggestion for a body that provably never
+    // returns normally - opt-in, a stylistic suggestion.
     pub check_never_return_suggestions: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
