@@ -20,6 +20,7 @@ mod date_time_method_return_types;
 mod declaration_sanity;
 mod deprecated_usage;
 mod diagnostic_identifiers;
+mod did_you_mean;
 mod docblock_property_tags;
 mod doctrine_and_stdlib_specials;
 mod duplicates;

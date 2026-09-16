@@ -19,14 +19,15 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with nine exceptions, both from the same reevaluation-then-
-implementation effort: Phases 166, 169, and 174 (unblocking two live
-dependency edges in `PHASE_DEPENDENCIES.md`), and Phases 161, 162, 167,
+with ten exceptions: Phases 166, 169, and 174 (unblocking two live
+dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
-made it natural to pick up next). All nine are now **DONE** and have
-moved into ROADMAP.md's own Done section, per this project's standing
-"fold DONE phases into Done" convention - their entries are removed
-from this backlog file, not left in place with a status tag flipped.
+made it natural to pick up next), and Phase 96's D8 (a small,
+self-contained "did you mean?" tip picked up next as a standalone
+unit). All ten are now **DONE** and have moved into ROADMAP.md's own
+Done section, per this project's standing "fold DONE phases into Done"
+convention - their entries are removed from this backlog file, not
+left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -457,11 +458,6 @@ rule of these shapes at all, confirmed by grep.
   a comparison/subtraction/self-assignment (`$x === $x`, `$a - $a`) —
   PHPStan reasons purely from inferred *type*, never operand-expression
   identity. One level below D3 (single expression, not branch bodies).
-- **D8 (small).** Computed edit-distance "did you mean?" tip for
-  `method.notFound` — the one undefined-symbol family PHPStan attaches
-  no tip to at all (class/function/property each get at least a static
-  "learn more" URL). Uses the already-built but mostly-unused
-  `DiagnosticBuilder::tip()`.
 
 ## Phase 97 — Whole-program design-pattern suggestion rules (§AA)
 

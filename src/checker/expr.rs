@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
@@ -996,13 +997,20 @@ impl<'a> Checker<'a> {
                                 || self.registry.lookup_method(c, "__call").is_some()
                         })
                     {
-                        self.report(
+                        let mut builder = DiagnosticBuilder::new(
                             label.to_string(),
                             format!("call to undefined method {recv_ty}::{method}()"),
                             e.span,
                             0,
                             "method.notFound",
                         );
+                        if let Some(suggestion) = suggest::suggest_similar_name(
+                            method,
+                            self.registry.all_method_names(class),
+                        ) {
+                            builder = builder.tip(format!("Did you mean {suggestion}()?"));
+                        }
+                        self.report_builder(builder);
                     } else if let Some((class, _, owner, _)) = &receiver
                         && let Some(sig) = sig
                     {
@@ -2895,13 +2903,20 @@ impl<'a> Checker<'a> {
                                 self.registry.lookup_method(c, method).is_some()
                                     || self.registry.lookup_method(c, "__call").is_some()
                             }) {
-                                self.report(
+                                let mut builder = DiagnosticBuilder::new(
                                     label.to_string(),
                                     format!("call to undefined method {recv_ty}::{method}()"),
                                     e.span,
                                     0,
                                     "method.notFound",
                                 );
+                                if let Some(suggestion) = suggest::suggest_similar_name(
+                                    method,
+                                    self.registry.all_method_names(class),
+                                ) {
+                                    builder = builder.tip(format!("Did you mean {suggestion}()?"));
+                                }
+                                self.report_builder(builder);
                             } else if let Some((owner, sig)) =
                                 self.registry.lookup_method_with_owner(class, method)
                             {

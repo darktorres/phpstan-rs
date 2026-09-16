@@ -812,6 +812,7 @@ mod resolve;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
 mod stmt;
+pub(crate) mod suggest;
 mod throws;
 mod type_union;
 mod uninitialized;

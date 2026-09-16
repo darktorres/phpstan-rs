@@ -358,6 +358,17 @@ impl Registry {
         self.classes.get(owner)?.methods.get(method)
     }
 
+    /// Every method name callable on `class` (own + inherited), for
+    /// building a "did you mean?" suggestion at a `method.notFound` site -
+    /// just the already-precomputed `method_owner_by_class` key set, no
+    /// extra ancestor walk needed.
+    pub(crate) fn all_method_names(&self, class: &str) -> impl Iterator<Item = &str> {
+        self.method_owner_by_class
+            .get(class)
+            .into_iter()
+            .flat_map(|m| m.keys().map(String::as_str))
+    }
+
     /// Same as `lookup_method`, but also returns the declaring ancestor's
     /// name - needed wherever a caller goes on to do class-level generic
     /// substitution (`checker::class_template_bindings`),

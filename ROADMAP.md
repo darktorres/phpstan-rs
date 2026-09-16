@@ -1664,6 +1664,19 @@ yet wired through this architecture; see PHASE_BACKLOG's Phase 175 for
 the one remaining named instance still needing this architecture,
 blocked on a different discriminant-shape gap of its own).
 
+**`method.notFound` "did you mean?" tip** (PHASE_BACKLOG Phase 96's
+D8). `checker::suggest::suggest_similar_name` - plain case-insensitive
+Levenshtein distance, capped at 3, over `Registry::all_method_names`
+(the already-precomputed `method_owner_by_class` key set for a class,
+own + inherited, no new ancestor walk) - attaches a `DiagnosticBuilder::
+tip()` (`"Did you mean foo()?"`) at both `method.notFound` call sites
+(`checker/expr.rs`'s `MethodCall` handling and its statement-context
+duplicate) when a close-enough candidate exists; silently omitted
+otherwise rather than suggesting an unrelated name. `method.notFound`
+was the one undefined-symbol family with no tip at all before this -
+class/function/property already had at least a static "learn more"
+URL.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the
