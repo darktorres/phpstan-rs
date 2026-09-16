@@ -2638,6 +2638,7 @@ section used to carry:
   above that real PHPStan does special-case), so a per-token shape
   (`array{0: int, 1: string, 2: int}|string`) is correctly out of scope
   here too.
+
 ## Won't-port (real PHPStan features with no applicable Rust target)
 
 An exhaustive 855-file audit against `vendor/phpstan-src/src/Rules/` and
