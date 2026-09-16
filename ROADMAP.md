@@ -1762,6 +1762,25 @@ is left alone the same way. The `@covers`/`#[CoversClass]` sibling this
 phase originally bundled in is still open - see PHASE_BACKLOG's "D5
 remainder".
 
+**Duplicate-operand detection** (PHASE_BACKLOG Phase 96's D7,
+`expr.duplicateOperands`) - zero PHPStan precedent, since its whole
+`Rules/` catalog reasons purely from inferred *type*, never operand-
+expression identity. `Checker::check_duplicate_operands` (`checker/
+operators.rs`) flags a comparison (`===`/`!==`/`==`/`!=`/`<`/`>`/`<=`/
+`>=`/`<=>`) or `Sub` whose two operands are the exact same side-effect-
+free expression (`$x === $x`, `$a - $a`, `$obj->x <=> $obj->x`);
+`check_self_assignment` covers the `$x = $x` sibling separately (a
+compound self-assign like `$x += $x` is a real, meaningful doubling
+operation, deliberately not covered). `is_duplicate_side_effect_free_
+operand` is deliberately narrow - a bare variable, or a `PropertyAccess`/
+`Index` chain rooted in one, recursing structurally - never a call/
+`new`/etc. (could have side effects or return a fresh value each time)
+and never a literal (`1 === 1` isn't a copy-paste mistake the way
+`$x === $x` is). Silent on whether the result is always true/false/zero
+(a float `NAN` makes `$x === $x` false) - just that comparing/
+subtracting an expression from itself is almost always a mistake
+regardless of what it evaluates to.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the

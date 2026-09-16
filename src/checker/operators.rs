@@ -33,7 +33,7 @@
 //! not a good trade for a rule whose whole point is confidence.
 
 use crate::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
-use crate::checker::Checker;
+use crate::checker::{Checker, unwrap_grouping};
 use crate::token::Span;
 use crate::types::{AccessoryKind, Type, is_subtype};
 
@@ -251,6 +251,60 @@ impl<'a> Checker<'a> {
             span,
             2,
             identifier,
+        );
+    }
+
+    /// PHASE_BACKLOG Phase 96's D7: structurally-identical operands on
+    /// both sides of a comparison or `Sub` - `$x === $x`, `$a - $a`. Zero
+    /// PHPStan precedent (its whole `Rules/` catalog reasons purely from
+    /// inferred *type*, never operand-expression identity). Deliberately
+    /// silent on whether the result is always true/false/zero (a float
+    /// `NAN` makes `$x === $x` false, for one) - just that comparing/
+    /// subtracting an expression from itself is almost always a
+    /// copy-paste mistake regardless of what it evaluates to.
+    pub(crate) fn check_duplicate_operands(&mut self, op: &BinOp, l: &Expr, r: &Expr, label: &str) {
+        if !matches!(
+            op,
+            BinOp::Identical
+                | BinOp::NotIdentical
+                | BinOp::Eq
+                | BinOp::NotEq
+                | BinOp::Lt
+                | BinOp::Gt
+                | BinOp::LtEq
+                | BinOp::GtEq
+                | BinOp::Spaceship
+                | BinOp::Sub
+        ) {
+            return;
+        }
+        if !is_duplicate_side_effect_free_operand(l, r) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            "Both sides of this expression are the same.".to_string(),
+            l.span,
+            5,
+            "expr.duplicateOperands",
+        );
+    }
+
+    /// `$x = $x` - the self-assignment half of PHASE_BACKLOG Phase 96's
+    /// D7, same operand-identity helper as `check_duplicate_operands`.
+    /// A compound-assign self-target (`$x += $x`) is a real, meaningful
+    /// operation (doubling), not a no-op, so it's deliberately not
+    /// covered here.
+    pub(crate) fn check_self_assignment(&mut self, lhs: &Expr, rhs: &Expr, label: &str) {
+        if !is_duplicate_side_effect_free_operand(lhs, rhs) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            "This assignment has no effect, both sides are the same.".to_string(),
+            lhs.span,
+            5,
+            "expr.duplicateOperands",
         );
     }
 
@@ -638,5 +692,26 @@ fn binop_sigil(op: &BinOp) -> &'static str {
         BinOp::Shr => ">>",
         BinOp::Coalesce => "??",
         BinOp::Pipe => "|>",
+    }
+}
+
+/// Whether `l`/`r` are the exact same side-effect-free expression -
+/// deliberately narrow to a bare variable, or a `PropertyAccess`/
+/// `Index` chain rooted in one, recursing structurally. Never a call/
+/// method-call/`new`/etc: those could have side effects or return a
+/// fresh, non-identical value each time, so "looks the same" wouldn't
+/// mean "IS the same" there. Never a literal either - `1 === 1` isn't
+/// a copy-paste mistake the way `$x === $x` is.
+fn is_duplicate_side_effect_free_operand(l: &Expr, r: &Expr) -> bool {
+    match (&unwrap_grouping(l).kind, &unwrap_grouping(r).kind) {
+        (ExprKind::Variable(a), ExprKind::Variable(b)) => a == b,
+        (ExprKind::PropertyAccess(la, lp, ln), ExprKind::PropertyAccess(ra, rp, rn)) => {
+            ln == rn && lp == rp && is_duplicate_side_effect_free_operand(la, ra)
+        }
+        (ExprKind::Index(la, Some(li)), ExprKind::Index(ra, Some(ri))) => {
+            is_duplicate_side_effect_free_operand(la, ra)
+                && is_duplicate_side_effect_free_operand(li, ri)
+        }
+        _ => false,
     }
 }

@@ -19,22 +19,22 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with fifteen exceptions: Phases 166, 169, and 174 (unblocking two live
+with sixteen exceptions: Phases 166, 169, and 174 (unblocking two live
 dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
-made it natural to pick up next), and Phase 96's D8, D2, and D5, Phase
-98's AB2, Phase 101's E4 and E3, and Phase 103's Z1 (six small,
-self-contained items picked up next as standalone units - D2, Z1, and
-E3 all opt-in, per this project's "ship opt-in" convention: D2 for a
-real false-positive risk on unambiguous single-bool-parameter calls,
-Z1 because real PHPStan itself only ever ran it in a private issue-bot
-config leaving no real-world noise signal, E3 because real PHPStan
-ships it only via the separate `phpstan-strict-rules` package and a
-legitimate constructor can genuinely choose not to call an otherwise-
-real parent one). All fifteen are now **DONE** and have moved into
-ROADMAP.md's own Done section, per this project's standing "fold DONE
-phases into Done" convention - their entries are removed from this
-backlog file, not left in place with a status tag flipped.
+made it natural to pick up next), and Phase 96's D8, D2, D5, and D7,
+Phase 98's AB2, Phase 101's E4 and E3, and Phase 103's Z1 (seven
+small, self-contained items picked up next as standalone units - D2,
+Z1, and E3 all opt-in, per this project's "ship opt-in" convention:
+D2 for a real false-positive risk on unambiguous single-bool-parameter
+calls, Z1 because real PHPStan itself only ever ran it in a private
+issue-bot config leaving no real-world noise signal, E3 because real
+PHPStan ships it only via the separate `phpstan-strict-rules` package
+and a legitimate constructor can genuinely choose not to call an
+otherwise-real parent one). All sixteen are now **DONE** and have
+moved into ROADMAP.md's own Done section, per this project's standing
+"fold DONE phases into Done" convention - their entries are removed
+from this backlog file, not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -455,11 +455,6 @@ rule of these shapes at all, confirmed by grep.
   $width)`) — PHPStan's type system has no way to represent "these two
   same-typed params are different roles," so this is invisible to its
   whole architecture, not merely unimplemented.
-- **D7 (medium).** Flag structurally-identical operands on both sides of
-  a comparison/subtraction/self-assignment (`$x === $x`, `$a - $a`) —
-  PHPStan reasons purely from inferred *type*, never operand-expression
-  identity. One level below D3 (single expression, not branch bodies).
-
 ## Phase 97 — Whole-program design-pattern suggestion rules (§AA)
 
 Real PHPStan's machinery in this space only ever *validates* an

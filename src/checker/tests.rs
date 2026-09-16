@@ -24,6 +24,7 @@ mod diagnostic_identifiers;
 mod did_you_mean;
 mod docblock_property_tags;
 mod doctrine_and_stdlib_specials;
+mod duplicate_operands;
 mod duplicates;
 mod enums;
 mod foreach_iterables;

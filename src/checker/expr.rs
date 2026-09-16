@@ -1164,6 +1164,7 @@ impl<'a> Checker<'a> {
                 let r_ty = self.check_expr(r, locals, label);
                 self.check_binary_operand_validity(op, &l_ty, &r_ty, false, l.span, label);
                 self.check_comparison_validity(op, &l_ty, &r_ty, l.span, label);
+                self.check_duplicate_operands(op, l, r, label);
                 self.check_division_by_literal_zero(op, r, &r_ty, r.span, label);
                 self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
                 self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
@@ -1447,6 +1448,7 @@ impl<'a> Checker<'a> {
                 // still need their *base* checked (`$obj->prop = ...`
                 // reads $obj).
                 self.check_assignment_target(lhs, locals, label);
+                self.check_self_assignment(lhs, rhs, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
                 // A bare by-ref-parameter variable directly assigned a
                 // value its declared type can't hold.
