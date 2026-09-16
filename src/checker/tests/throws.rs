@@ -380,11 +380,10 @@ fn a_declared_throws_type_on_a_method_never_thrown_is_flagged_with_method_wordin
 
 #[test]
 fn a_call_to_a_function_with_no_throws_tag_at_all_is_not_treated_as_unannotated() {
-    // Sub-item A's own deliberate calibration: an ordinary, resolved
-    // function with simply no `@throws` tag (the overwhelmingly common
-    // case, e.g. real stdlib calls like `strlen()`) must NOT suppress
-    // this whole check - only a genuinely unresolvable/dynamic call
-    // should.
+    // An ordinary, resolved function with simply no `@throws` tag (the
+    // overwhelmingly common case, e.g. stdlib calls like `strlen()`)
+    // must NOT suppress this whole check - only a genuinely
+    // unresolvable/dynamic call should.
     let d = diagnostics_for(
         r#"<?php
             function noThrowsTagAtAll(): void {}
@@ -743,11 +742,11 @@ fn a_throw_type_not_covered_by_a_narrower_throws_tag_is_still_flagged() {
 
 #[test]
 fn a_throw_covered_by_a_called_functions_own_throws_tag_is_still_flagged() {
-    // Sub-item A's own deliberate calibration: a *called* function's own
-    // `@throws` tag counts for the caller's own `TooWideFunctionThrowTypeRule`
-    // comparison, but never for this check - what a callee documents is
-    // that callee's own author's responsibility, not proof this
-    // declaration's own explicit `throw` is covered.
+    // A called function's `@throws` tag counts for the caller's
+    // `TooWideFunctionThrowTypeRule` comparison, but never for this check
+    // - what a callee documents is that callee's own author's
+    // responsibility, not proof this declaration's explicit `throw` is
+    // covered.
     let d = diagnostics_for_with(
         r#"<?php
             /** @throws \RuntimeException */

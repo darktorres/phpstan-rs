@@ -491,10 +491,9 @@ fn a_variadic_call_with_more_positional_arguments_than_declared_params_resolves_
 
 #[test]
 fn a_by_ref_parameter_filled_via_a_reordered_named_argument_binds_the_right_variable() {
-    // The specific failure mode that originally motivated Item 1: a
-    // by-ref output parameter, called with reordered named arguments,
-    // must bind the *correct* variable - not whichever one lands at
-    // the naive positional index.
+    // A by-ref output parameter, called with reordered named arguments,
+    // must bind the correct variable - not whichever one lands at the
+    // naive positional index.
     let d = diagnostics_for(
         r#"<?php
             function f9(string $pattern, string $subject, &$matches): int { $matches = []; return 1; }
