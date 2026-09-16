@@ -322,3 +322,59 @@ fn a_union_vs_union_pair_recurses_correctly_below_the_strict_threshold() {
     // from the actual side.
     assert!(!r.accepts_at_configured_level(&nullable_string, &nullable_int));
 }
+
+#[test]
+fn variance_composes_through_a_nested_covariant_generic_argument() {
+    let r = build_registry(
+        r#"<?php
+            /** @template-covariant T */
+            class Producer {}
+            /** @template-covariant T */
+            class Container {}
+            class Animal {}
+            class Cat extends Animal {}
+        "#,
+    );
+    let producer_of = |name: &str| Type::Object("Producer".to_string(), vec![obj(name)]);
+    let container_of = |t: Type| Type::Object("Container".to_string(), vec![t]);
+    assert!(r.is_assignable(
+        &container_of(producer_of("Cat")),
+        &container_of(producer_of("Animal"))
+    ));
+    assert!(!r.is_assignable(
+        &container_of(producer_of("Animal")),
+        &container_of(producer_of("Cat"))
+    ));
+}
+
+#[test]
+fn variance_flips_through_a_nested_contravariant_generic_argument() {
+    let r = build_registry(
+        r#"<?php
+            /** @template-contravariant T */
+            class Consumer {}
+            /** @template-covariant T */
+            class Container {}
+            class Animal {}
+            class Cat extends Animal {}
+        "#,
+    );
+    let consumer_of = |name: &str| Type::Object("Consumer".to_string(), vec![obj(name)]);
+    let container_of = |t: Type| Type::Object("Container".to_string(), vec![t]);
+    // Consumer<Animal> <: Consumer<Cat> (contravariant), so
+    // Container<Consumer<Animal>> <: Container<Consumer<Cat>> too, once
+    // the inner slot's own contravariance is composed through the outer
+    // covariant one rather than inherited as covariant by default.
+    assert!(r.is_assignable(
+        &container_of(consumer_of("Animal")),
+        &container_of(consumer_of("Cat"))
+    ));
+    assert!(!r.is_assignable(
+        &container_of(consumer_of("Cat")),
+        &container_of(consumer_of("Animal"))
+    ));
+}
+
+fn obj(name: &str) -> Type {
+    Type::Object(name.to_string(), Vec::new())
+}

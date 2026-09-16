@@ -1952,3 +1952,37 @@ database with no pure-PHP trigger to justify vendoring it);
 mechanism at all); and `phpstan/phpstan-php-parser`'s self-analysis
 stub-precision package (not a rule/check package). Full per-package
 detail and citations: `TOP100_RESEARCH_NOTES.md`.
+
+## Phase 158 — Dynamic static-call target resolution (`$obj::method()`)
+
+Reevaluated out of "Permanent design boundaries" — that entry's own
+justification ("no static name exists to resolve, matching `new
+$dynamicClass()`'s identical precedent") doesn't hold up: unlike a
+class-string *value* (genuinely unknowable without running the
+program), a receiver expression's own inferred *type* is exactly the
+kind of fact this project already computes for every other member
+access. `postfix.rs`'s own `DoubleColon` arm already fully parses the
+receiver expression before discarding it into a `"?"` sentinel the
+moment it isn't a literal `ExprKind::Name` — `$obj` in `$obj::method()`
+sits fully parsed in `expr` right where the class name is built.
+
+Design (confirmed 25 match sites across 17 files, all traceable):
+`ExprKind::StaticCall`'s first field becomes a real `StaticTarget` enum
+(`Name(String)` for `self`/`parent`/`static`/a literal class name, kept
+byte-for-byte compatible with every existing consumer that only ever
+handled a literal name; `Expr(Box<Expr>)` for a genuine dynamic
+receiver) rather than a second sibling field defaulting the common case
+to a permanent sentinel string — this project's own standing
+"maximize properness, not churn-avoidance" rule rules out narrowing
+this to the smaller-diff shape purely to avoid updating the 25 sites.
+Every non-`Name` consumer (`checker/expr.rs`'s `check_static_call`,
+`checker/narrowing.rs`, `checker/unused/*.rs`, `lsp/navigation.rs`,
+`registry/purity.rs`, `deps.rs`, `ast_walk.rs`) needs a new `Expr` arm:
+resolve the receiver's inferred type first, and when it's a known
+`Type::Object(fqn)`, check the static call against `fqn` exactly like
+today's literal-class path already does; fall back to today's
+unchecked no-op only when the receiver's own type can't be resolved
+(mirroring `new $dynamicClass()`'s genuine "no data" case, not
+conflating the two). **Effort: medium** — one AST shape change with
+real fan-out, but every touch point is a mechanical match-arm addition,
+not new inference machinery.

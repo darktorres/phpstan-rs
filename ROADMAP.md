@@ -2555,17 +2555,9 @@ section used to carry:
 
 ## Permanent design boundaries (not planned, by choice)
 
-- Conditional PHPDoc return types needing real per-call-site type-
-  parameter binding (distinct from the already-parsed union-widening
-  approximation, see Done) - deliberately not attempted.
-- A dynamic class target (`$obj::method()`) is never checked - no
-  static name exists to resolve, matching `new $dynamicClass()`'s
-  identical precedent.
 - A generic bound checked against a class this project has no real data
   for (a PHAR-bundled dependency with no loose source vendored, or an
   unparsed local type alias) silently skips the check.
-- Variance checking doesn't flip variance through a nested generic
-  argument.
 - Integer overflow/precision, floating-point rounding, and other
   runtime-value-dependent behavior are out of scope by construction -
   this checker only ever reasons about static types, never concrete
