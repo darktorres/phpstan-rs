@@ -2079,3 +2079,95 @@ guess" convention for every other unresolvable case).
 
 **Effort: small** — one call-site plumbing change to `check_foreach`,
 one new `statement_defined_variable_names` match arm.
+
+## Phase 162 — Disjunctive-syllogism narrowing (`if ($a || $b) { if ($b) {} else { /* $a true */ } }`)
+
+Reevaluated out of "Permanent design boundaries" — that entry's own
+text says real PHPStan **does** handle this via its own scope-narrowing
+("a real, common idiom real PHPStan handles ... this project's
+narrower `apply_narrowing` recursion doesn't attempt"), which is a
+different, weaker claim than the neighboring "confirmed absent in real
+PHPStan too" items in the same boundary list - this one has a proven,
+existing precedent to port, not an open research problem.
+
+Needs `apply_narrowing` to recognize a `Binary(Or, l, r)` condition at
+an outer `if`, hold `(l, r)` as a live "outer disjunction" fact for the
+duration of that `if`'s own then-branch body (a new, small piece of
+state threaded alongside `locals` - not a new `Locals` field, since
+it's control-flow-position-scoped, not variable-scoped), and when a
+*nested* `if`'s own condition is recognized as one disjunct's negation,
+narrow using the other disjunct as if it were directly asserted true.
+Mirror image for `Binary(And, l, r)`: within the *false* branch, if a
+nested condition asserts one conjunct's negation, the other conjunct's
+truth is unconstrained (not narrowable) - only the `||`/true-branch
+direction is a sound implication.
+
+**Effort: medium** — new control-flow-scoped state, not just a new
+match arm, but bounded to `apply_narrowing`'s existing call sites.
+
+## Phase 163 — `array_splice()` by-reference first-argument mutation tracking
+
+Reevaluated out of "Permanent design boundaries." `calls.rs`'s own
+`predefine_byref_or_unknown_args` already special-cases the closely
+related `sort`/`rsort`/`usort`/`shuffle` family (reindexing a by-ref
+argument to a real `list`, preserving element type) and the
+`asort`/`arsort`/`ksort`/... family (preserving exact key structure) -
+`array_splice($arr, $offset, $length, $replacement)`'s own by-ref
+mutation of `$arr` is the same shape of problem, not a new mechanism:
+insert `$replacement`'s own element type into `$arr`'s existing element
+type (widen to their union), keep `$arr`'s own key-type/list-ness
+(splice preserves sequential integer keys - PHP renumbers after
+splicing, unlike `unset()`), same as the sort-family's own reindexing
+logic already models.
+
+**Effort: small** — one new `match fn_name` arm alongside the existing
+sort-family special cases in the same function.
+
+## Phase 164 — Bounded sequential dynamic-key writes preserve `list`/`non-empty` markers
+
+Reevaluated out of "Permanent design boundaries" - filed there as
+needing the same general loop-index/array-length correlation the
+broader "cross-variable/parallel-structure correlation" boundary
+declines to model. That's true for the *general* case, but the single
+named recurring shape (`CalendarRenderer::render`'s own `for ($i = 0;
+$i < count($arr); $i++) { $arr[$i] = ...; }`) is narrow and fully
+local, not a general correlation problem: a `for` loop whose own
+condition is exactly `$i < count($sameArrayBeingWritten)` and whose
+step is exactly `$i++`/`$i += 1`, writing `$arr[$i]` inside the body,
+never grows `$arr` past its own pre-loop length or skips an index -
+`write_index_into` can special-case this one recognizable `for`-loop
+shape (matching the project's existing precedent of special-casing a
+handful of named recognizable idioms, e.g. the sort-family above)
+rather than needing to solve arbitrary loop-index correlation.
+
+**Effort: small** — one new recognized `for`-loop shape in
+`write_index_into`'s own dynamic-key-write branch; does not touch the
+general correlation gap, which stays declined.
+
+## Phase 165 — Anonymous-class synthetic per-declaration-site identity
+
+Reevaluated out of "Permanent design boundaries" - that entry's own
+wording ("a materially bigger feature than a one-line type change, not
+attempted here") already describes disclosed, buildable engineering
+work, not an architectural impossibility, so it belongs in the backlog
+proper rather than the permanent-boundary list.
+
+`parser/classes.rs`'s `parse_anonymous_class_new` gives every anonymous
+class in a program the identical literal name `"class@anonymous"`,
+never indexed into the registry. A real fix needs each anonymous class
+declaration site to register as its own synthetic class (a
+deterministic name keyed by file+span, e.g.
+`"class@anonymous:<file>:<span>"`, registered into `Registry::classes`
+with its own real `extends`/`implements` edges exactly like a named
+class) instead of only being parsed inline. Every consumer that
+currently keys off a class's own literal name for identity/hierarchy
+lookups then works unchanged - the fix is entirely in registration,
+not in `is_assignable`/hierarchy-check logic, which already does the
+right thing once each anonymous class has a real, unique registry
+entry.
+
+**Effort: large** — real registry-architecture work (new identity
+scheme, indexing pass over every anonymous-class declaration site,
+verifying no consumer assumes class names are only ever parsed from
+top-level/nested named declarations) rather than a contained function
+addition like the phases above.
