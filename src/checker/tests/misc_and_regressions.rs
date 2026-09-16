@@ -123,10 +123,9 @@ fn a_variable_assigned_inside_a_bang_negated_or_condition_is_defined_afterward()
     );
 }
 
-// Same underlying idiom, `.`/cast operand positions instead of `!` - a
-// top-10-bucket `variable.undefined` scoping round found `parse_
-// additive`/the cast arm of `parse_unary_inner` missing the identical
-// `parse_assignment_tail` fix, confirmed via a real PHP interpreter.
+// Same underlying idiom, `.`/cast operand positions instead of `!` -
+// `parse_additive`/the cast arm of `parse_unary_inner` need the identical
+// `parse_assignment_tail` fix.
 #[test]
 fn a_variable_assigned_as_a_concat_operand_is_defined_afterward() {
     let d = diagnostics_for(
