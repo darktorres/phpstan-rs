@@ -2189,22 +2189,24 @@ clones method/property signatures into a host's `ClassInfo`, never
 trait body statements, so both features share one root cause and one
 fix).
 
-Two real paths, either sufficient: (a) re-check each trait's methods
-from *within* every host's own `Checker` instance (once per host that
-uses the trait, rather than once from the trait's own declaring file) -
-bounded, reuses today's per-file architecture, but means a trait's own
-methods get checked N times for N host classes, redoing existent-symbol/
+Two real paths: (a) re-check each trait's methods from *within* every
+host's own `Checker` instance (once per host that uses the trait,
+rather than once from the trait's own declaring file) - bounded,
+reuses today's per-file architecture, but means a trait's own methods
+get checked N times for N host classes, redoing existent-symbol/
 type-checking work that's already correct, purely to also feed the
-host's accumulator; or (b) a genuinely new two-pass (collect-then-
-consume) checking architecture - a first pass populates every class's
-(including trait-donated) property-assignment data project-wide before
-a second pass consults it, which is the more structurally correct fix
-but touches `check_project`'s own top-level orchestration, not just
-this one accumulator.
+host's accumulator; or (b) PHASE_BACKLOG Phase 174's own two-pass
+(collect-then-consume) checking architecture - the more structurally
+correct fix, and now the *preferred* one, not just an equally-valid
+alternative: Phase 174 is independently motivated by the cross-
+function correlation work in ROADMAP.md's own boundaries list too, so
+building it here resolves two otherwise-separate gaps with one piece
+of work instead of one.
 
 **Effort: large** — real checking-architecture work; resolves the
-identical gap in `check_unused_private_members` for free once built,
-so implement once and re-verify both consumers.
+identical gap in `check_unused_private_members` for free once built.
+Depends on Phase 174 if path (b) is taken (recommended); independently
+buildable via path (a) if Phase 174 isn't built first.
 
 ## Phase 167 — `is_a()` narrowing
 
@@ -2414,3 +2416,65 @@ populated and purged the same way `condition_aliases` already is:
 larger than a single leaf-arm addition but bounded and self-contained,
 reusing `condition_aliases`'s own invalidation discipline rather than
 inventing a new one.
+
+## Phase 174 — Two-pass (collect-then-consume) whole-project checking architecture
+
+Extracted out of Phase 166's own inline option (b) into its own phase,
+since it turned out to be a shared prerequisite for a second,
+independent consumer discovered while reevaluating ROADMAP.md's cross-
+variable-correlation boundary: persisting *any* fact discovered while
+checking one function into a form a *different* function's later check
+can consult needs this exact architecture, not something specific to
+trait properties.
+
+`registry/purity.rs`'s own transitive-purity fixed point is this
+project's one working whole-program mechanism, but its own module doc
+comment discloses why it can't be reused directly here: it deliberately
+only resolves call targets knowable *without* a live `Checker`/`Scope`
+(`$this->method()`, `self::`/`parent::`, `new self()`, a plain function
+call by name), precisely because purity is a declaration-level fact
+computable from raw signatures, while a correlation/cross-file-
+property fact can only be discovered by fully flow-sensitively checking
+a function body - the exact machinery `Checker::check_file` currently
+discards the moment one file's check finishes.
+
+Design: a first pass runs every file's `Checker` once, same as today,
+but returns a new output channel alongside diagnostics - a per-symbol
+"facts learned" record (initially: which properties a trait's own
+methods assign, for Phase 166; extensible to other collect-then-
+consume consumers later) - accumulated into a project-level store. A
+second pass re-runs every file's `Checker`, this time with that store
+available to consult. Touches `check_project`'s own top-level
+orchestration (running the whole project's files twice, not once) -
+real, disclosed, large work, not a contained function addition.
+
+**Does not by itself solve general cross-function correlation** (see
+ROADMAP.md's own updated boundary entry) - it only solves *persisting*
+a fact across a function boundary. Whether a collected fact still holds
+by the time it's consumed, when arbitrary intervening code could have
+invalidated it, is a separate, harder, currently-unsolved problem this
+phase doesn't attempt.
+
+**Effort: large** — whole-project orchestration change; unblocks Phase
+166 (preferred path) and is necessary (not sufficient) for any future
+cross-function correlation work.
+
+## Phase 175 — Closure capturing an outer branch's co-assignment fact
+
+`RateService::rate`'s own closure - `$userAnonymous && $anonymousId
+!== $savedAnonymousId` implying `$savedAnonymousId` was set to a real,
+non-null value by the *outer* scope's own `if ($userAnonymous) {
+$savedAnonymousId = ... ?? ...; }` before the closure even runs.
+
+Not independently assessable yet - compounds Phase 169's own same-
+branch discriminant-variable correlation mechanism with closure-capture
+timing (the correlation must survive into a closure body reading the
+captured variable, seeded from the outer scope's own `Locals` at the
+closure literal's declaration point - see `checker/expr.rs`'s
+`closure_locals`/`arrow_locals` seeding). Blocked on Phase 169 existing
+first; revisit its feasibility once that mechanism's own shape (what
+exactly gets stored, and how replay works) is settled, rather than
+guessing at a compatible design for both at once.
+
+**Effort: unknown, blocked** — depends on Phase 169's own design
+landing before this can be scoped.

@@ -1726,8 +1726,10 @@ known. Numbered by the original phase for cross-reference; the number
 is not a priority order. Cross-phase dependencies, when a phase's own
 entry has one, are named inline in that entry's own text - a separate
 dependency graph (`PHASE_DEPENDENCIES.md`) was maintained through most
-of this project's development but retired once every edge it tracked
-became satisfied (no live blockers left to graph).
+of this project's development, retired once every edge it tracked
+became satisfied, then reinstated after this session's reevaluation of
+the boundaries/won't-port lists produced new phases (158-175) with live
+dependency edges among them.
 
 **17 - LSP hover/go-to-definition (PARTIAL).** See Done for what
 shipped. What's left is narrow and deliberate: a closure's own
@@ -2579,10 +2581,11 @@ section used to carry:
     generalization (the producing loop and the consuming read site in
     genuinely different functions/methods) splits into two layers on a
     fourth reevaluation pass, only one of which is a real wall:
-    (1) persisting the fact across a function boundary at all needs the
-    same "genuinely new two-pass (collect-then-consume) checking
-    architecture" Phase 166 already discloses as its own real fix
-    (`registry/purity.rs`'s own transitive-purity fixed point can't be
+    (1) persisting the fact across a function boundary at all needs
+    PHASE_BACKLOG Phase 174's own two-pass (collect-then-consume)
+    checking architecture (extracted into its own phase precisely
+    because this is its second independent consumer, alongside Phase
+    166) (`registry/purity.rs`'s own transitive-purity fixed point can't be
     reused directly - its own doc comment discloses it deliberately
     only resolves call targets knowable *without* a live `Checker`/
     `Scope`, precisely because a correlation fact, unlike purity, can
@@ -2629,8 +2632,8 @@ section used to carry:
     `if ($userAnonymous) { $savedAnonymousId = ... ?? ...; }` before the
     closure even runs - compounds the discriminant-variable mechanism
     above (Phase 169) with closure-capture timing (the correlation must
-    survive into a closure body reading the captured variable); not
-    independently assessable until Phase 169 exists, revisit after.
+    survive into a closure body reading the captured variable); filed
+    as PHASE_BACKLOG Phase 175, blocked on Phase 169.
   - A *compound* `&&`/`||` condition assigned to a flag variable, then
     reused later (confirmed at `CategoryService::createVirtualCategory`'s
     own `$parentIdIsEmpty = $parentId === null || $parentId === 0;` and
