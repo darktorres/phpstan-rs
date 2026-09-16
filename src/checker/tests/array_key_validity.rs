@@ -329,16 +329,12 @@ fn an_unrecognized_phpstan_import_type_alias_used_as_a_dim_fetch_key_is_never_fl
 
 #[test]
 fn a_class_level_template_referenced_inside_an_inline_var_annotation_is_never_flagged() {
-    // Regression test for the *real*, precise root cause behind the
-    // original revert (see `Checker::resolve_type_hint`'s own doc
-    // comment): `php-standard-library`'s own `SetType`/`MapType`/
-    // `MutableSetType`, each with an inline `/** @var Type\Type<T>
-    // $type */` referencing the enclosing class's own `@template T` -
-    // parsed independently of the registry-build pipeline (where
-    // `mark_template_params` always runs *before* name resolution), so
-    // without this fix `T` was indistinguishable from a genuine,
-    // unqualified class reference and got resolved (then flagged) as
-    // one.
+    // A class-level `@template T` referenced inside an inline `/** @var
+    // Type<T> $type */` annotation is parsed independently of the
+    // registry-build pipeline (where `mark_template_params` always runs
+    // before name resolution), so `T` must still be recognized here, not
+    // treated as indistinguishable from a genuine, unqualified class
+    // reference and resolved (then flagged) as one.
     let d = diagnostics_for(
         r#"<?php
             /**

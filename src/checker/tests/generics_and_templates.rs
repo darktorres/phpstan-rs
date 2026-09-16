@@ -991,13 +991,12 @@ fn a_top_level_function_has_no_enclosing_class_variance_to_violate() {
 
 #[test]
 fn a_phpstan_prefixed_own_template_still_shadows_a_class_level_template() {
-    // Regression test for a perf-optimization fix: check_function_
-    // with_ancestor_hint's own-@template parse is now gated behind a
-    // cheap substring pre-filter (checking both `@template` and
-    // `@phpstan-template`) before the real docblock::parse - this locks
-    // in that the `@phpstan-template` alias spelling still gets the
-    // real parse and still registers as the method's own template, not
-    // silently skipped by an under-specified filter.
+    // `check_function_with_ancestor_hint`'s own-@template parse is gated
+    // behind a cheap substring pre-filter (checking both `@template` and
+    // `@phpstan-template`) before the real docblock::parse - the
+    // `@phpstan-template` alias spelling must still get the real parse
+    // and register as the method's own template, not be silently
+    // skipped by an under-specified filter.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -1020,12 +1019,11 @@ fn a_phpstan_prefixed_own_template_still_shadows_a_class_level_template() {
 
 #[test]
 fn a_phpstan_prefixed_template_covariant_tag_still_flags_method_variance() {
-    // Regression test for the sibling perf-optimization fix in
-    // check_own_template_variance_declaration - the pre-filter there
-    // must check all 4 spellings (`@template-covariant`/
-    // `-contravariant` and their `@phpstan-`-prefixed aliases), not
-    // just the bare two, or this diagnostic would be silently dropped
-    // for a docblock using the phpstan-prefixed spelling.
+    // The sibling pre-filter in `check_own_template_variance_declaration`
+    // must check all 4 spellings (`@template-covariant`/`-contravariant`
+    // and their `@phpstan-`-prefixed aliases), not just the bare two, or
+    // this diagnostic would be silently dropped for a docblock using the
+    // phpstan-prefixed spelling.
     let d = diagnostics_for(
         r#"<?php
             /**
@@ -2985,19 +2983,18 @@ fn a_call_through_a_method_scoped_backfilled_template_binds_t_from_the_real_argu
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A distinct gap from the method-scoped case just above: a class that
+// A distinct case from the method-scoped one just above: a class that
 // re-declares (doesn't purely inherit) an interface method, so `owner`
 // (whichever class `lookup_method_with_owner` reports) is the concrete
 // class itself, which declares no `@template` of its own - its
 // genericness comes entirely from its own `@implements
-// FactoryInterface15<Concrete>` tag. Confirmed via `dumpType()` against
-// real PHPStan that this correctly narrows to the concrete class. Fixed
+// FactoryInterface15<Concrete>` tag. Must narrow to the concrete class
 // via `registry::resolve::template_param_scopes_all_safe_to_backfill`
-// (a class-scoped ancestor template with a real concrete binding is now
+// (a class-scoped ancestor template with a concrete binding gets
 // backfilled, not refused) plus `checker::generics::substitution::
-// substitute_class_templates`'s own new ancestor-walk (resolves it at
-// call time using `owner`'s own concrete binding, not `owner`'s own -
-// empty - template list).
+// substitute_class_templates`'s ancestor-walk (resolves it at call time
+// using `owner`'s own concrete binding, not `owner`'s own - empty -
+// template list).
 #[test]
 fn a_call_through_a_class_scoped_template_binds_via_the_implementing_class_s_own_implements_tag() {
     let d = diagnostics_for(
