@@ -127,6 +127,7 @@ fn run_check_project(
     check_boolean_conditions: bool,
     check_dynamic_properties: bool,
     check_swapped_arguments: bool,
+    check_never_return_suggestions: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -180,6 +181,7 @@ fn run_check_project(
     project.set_check_boolean_conditions(check_boolean_conditions);
     project.set_check_dynamic_properties(check_dynamic_properties);
     project.set_check_swapped_arguments(check_swapped_arguments);
+    project.set_check_never_return_suggestions(check_never_return_suggestions);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_php_version(php_version);
@@ -473,6 +475,7 @@ pub(crate) fn run_check_project_command(
     check_boolean_conditions: bool,
     check_dynamic_properties: bool,
     check_swapped_arguments: bool,
+    check_never_return_suggestions: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -576,6 +579,8 @@ pub(crate) fn run_check_project_command(
         check_dynamic_properties || config.check_dynamic_properties.unwrap_or(false);
     let check_swapped_arguments =
         check_swapped_arguments || config.check_swapped_arguments.unwrap_or(false);
+    let check_never_return_suggestions =
+        check_never_return_suggestions || config.check_never_return_suggestions.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -663,6 +668,7 @@ pub(crate) fn run_check_project_command(
         check_boolean_conditions,
         check_dynamic_properties,
         check_swapped_arguments,
+        check_never_return_suggestions,
         configured_level,
         &stub_dirs,
         php_version,

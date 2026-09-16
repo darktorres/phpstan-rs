@@ -27,6 +27,7 @@
 //! check_boolean_conditions = false
 //! check_dynamic_properties = false
 //! check_swapped_arguments = false
+//! check_never_return_suggestions = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -149,6 +150,10 @@ pub struct Config {
     /// `registry::Registry::check_swapped_arguments`'s own doc comment
     /// for why.
     pub check_swapped_arguments: Option<bool>,
+    /// Opt-in `never`-return-type suggestion - see
+    /// `registry::Registry::check_never_return_suggestions`'s own doc
+    /// comment for why.
+    pub check_never_return_suggestions: Option<bool>,
 }
 
 impl Config {

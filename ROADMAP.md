@@ -1849,6 +1849,24 @@ typed (never `Mixed`) - never a fuzzy/partial match, to keep the
 false-positive rate low enough to be worth shipping. Gated behind
 `Registry::check_swapped_arguments`, off by default.
 
+**Opt-in `never`-return-type suggestion** (PHASE_BACKLOG Phase 97's
+AA5, `return.neverCandidate`) - real PHPStan already computes this
+exact fact (`NeverRuleHelper::shouldReturnNever`), but its own
+consuming rules are registered only in phpstan.org's private issue-bot
+config, never shipped to a real installable package - a product-
+distribution gap, not a technical one. `check_function`
+(`checker/function_decl.rs`) reuses the exact same `body_falls_off_end`/
+`current_function_saw_explicit_return` facts its own `return.missing`/
+`return.never` fall-through check already computes: when the body
+provably always terminates (no fallthrough) and never executed a real
+`return` statement anywhere (a bare `return;` counts too), and the
+declared return type is undeclared (reads as `Mixed`) or `void`, it
+suggests `never` instead. Scoped away from a function already declaring
+some other real return type that never returns - that's a separate,
+unbuilt dead-code question. Gated behind `Registry::
+check_never_return_suggestions`, off by default (a purely stylistic
+suggestion, not a bug).
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the

@@ -207,6 +207,14 @@ enum Command {
         /// check_swapped_arguments`'s own doc comment.
         #[arg(long)]
         check_swapped_arguments: bool,
+        /// Enables `never`-return-type suggestions for a function/method
+        /// that provably never returns normally but is declared `void`
+        /// (or left undeclared). Off by default - real PHPStan already
+        /// computes this exact fact, but never ships an installable
+        /// rule consuming it - see `registry::Registry::
+        /// check_never_return_suggestions`'s own doc comment.
+        #[arg(long)]
+        check_never_return_suggestions: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -294,6 +302,7 @@ fn main() {
             check_boolean_conditions,
             check_dynamic_properties,
             check_swapped_arguments,
+            check_never_return_suggestions,
             php_version,
             generate_baseline,
             baseline,
@@ -325,6 +334,7 @@ fn main() {
             check_boolean_conditions,
             check_dynamic_properties,
             check_swapped_arguments,
+            check_never_return_suggestions,
             php_version,
             generate_baseline,
             baseline,

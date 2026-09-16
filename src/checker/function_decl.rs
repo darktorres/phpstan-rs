@@ -973,6 +973,36 @@ impl<'a> Checker<'a> {
                 );
             }
         }
+        // PHASE_BACKLOG Phase 97's AA5, opt-in: real PHPStan already
+        // computes this exact fact (`NeverRuleHelper::shouldReturnNever`)
+        // but its consuming rules are registered only in phpstan.org's
+        // own private issue-bot config, never shipped to a real
+        // installable package/level/strict-rules extension - a product-
+        // distribution gap, not a technical one. `body_falls_off_end ==
+        // false` here means the whole body already provably always
+        // terminates (throw/exit/infinite loop, no fallthrough); paired
+        // with "never saw a real `return` statement anywhere" (`current_
+        // function_saw_explicit_return`, which a bare `return;` also
+        // sets), that's exactly "never returns normally". Scoped to an
+        // undeclared (reads as `Mixed` here) or `void`-declared return
+        // type only - a function already declaring something else that
+        // never returns is a separate, unbuilt dead-code question, not
+        // this suggestion.
+        if self.registry.check_never_return_suggestions
+            && !f.body.is_empty()
+            && !self.current_function_is_generator
+            && !body_falls_off_end
+            && !self.current_function_saw_explicit_return
+            && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed))
+        {
+            self.report(
+                label.clone(),
+                "could be declared to return never - it never returns normally".to_string(),
+                f.return_type_span.unwrap_or(f.span),
+                5,
+                "return.neverCandidate",
+            );
+        }
 
         // Needs the same body-level extract()/eval() guard as everything
         // else checked in this function - placed before the truncation

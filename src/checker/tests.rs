@@ -42,6 +42,7 @@ mod method_and_mixin;
 mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;
+mod never_return_suggestion;
 mod noop;
 mod null_probes;
 mod object_shapes;

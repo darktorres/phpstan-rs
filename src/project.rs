@@ -324,6 +324,14 @@ impl Project {
         self.registry.check_swapped_arguments = enabled;
     }
 
+    /// Opts the whole project's checking into `never`-return-type
+    /// suggestions - see `registry::Registry::
+    /// check_never_return_suggestions`'s own doc comment for why this
+    /// defaults to `false`.
+    pub fn set_check_never_return_suggestions(&mut self, enabled: bool) {
+        self.registry.check_never_return_suggestions = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

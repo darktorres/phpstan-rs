@@ -205,6 +205,11 @@ pub struct Registry {
     // check as "different roles"), not a soundness gap, so opt-in like
     // every other novel heuristic rule shipped here.
     pub check_swapped_arguments: bool,
+    // Opt-in `never`-return-type suggestion (PHASE_BACKLOG Phase 97's
+    // AA5) - real PHPStan already computes this exact fact, but its own
+    // consuming rules are registered only in phpstan.org's private
+    // issue-bot config, never shipped to a real installable package.
+    pub check_never_return_suggestions: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats
