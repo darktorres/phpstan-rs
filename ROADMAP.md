@@ -2562,12 +2562,6 @@ section used to carry:
   runtime-value-dependent behavior are out of scope by construction -
   this checker only ever reasons about static types, never concrete
   values.
-- `array_flip`/`compact`/`get_defined_vars` needing array-key-type
-  tracking or a whole-scope variable lookup are deliberately not
-  attempted, not a "not yet."
-- A `Closure(...)`/`callable(...)` PHPDoc shape's own per-parameter/
-  return signature degrades to plain `Type::Callable` rather than being
-  modeled precisely.
 - A `foreach` header's own inline `@var` annotation isn't supported
   (only a tag on a statement inside the body is) - a header tag would
   need to affect the loop body's own checking, and shipping that
