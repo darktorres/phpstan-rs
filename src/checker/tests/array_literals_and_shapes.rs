@@ -576,7 +576,7 @@ fn a_spread_element_inside_a_literal_defeats_precise_shape_inference() {
     );
 }
 
-// Task 2: array-shape generalization, tried before the hard
+// Array-shape generalization, tried before the hard
 // MAX_UNION_MEMBERS collapse - 13 shapes that all share the *same*
 // key set merge into one shape with unioned field types instead of
 // collapsing to `Mixed`. Tested directly against `generalize_by_key_

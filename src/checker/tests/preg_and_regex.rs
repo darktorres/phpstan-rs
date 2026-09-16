@@ -164,7 +164,7 @@ fn preg_match_array_key_exists_false_branch_does_not_narrow_an_optional_group() 
     );
 }
 
-// --- Task 1c: trailing-vs-interior optional field presence/value ---
+// --- Trailing-vs-interior optional field presence/value ---
 
 #[test]
 fn preg_match_an_interior_optional_group_is_always_present_not_optional() {
@@ -380,10 +380,10 @@ fn preg_match_a_possibly_empty_digit_group_stays_plain_string() {
     );
 }
 
-// A digit-only group already covered by *exact* literal enumeration
-// (Task 1a) must keep using that, never the coarser tri-state fallback -
-// false-positive guard against the fallback accidentally taking
-// priority over a strictly more precise, already-working mechanism.
+// A digit-only group already covered by exact literal enumeration must
+// keep using that, never the coarser tri-state fallback - false-positive
+// guard against the fallback accidentally taking priority over a
+// strictly more precise, already-working mechanism.
 #[test]
 fn preg_match_a_literal_digit_group_keeps_its_exact_literal_type() {
     let d = diagnostics_for(
@@ -403,7 +403,7 @@ fn preg_match_a_literal_digit_group_keeps_its_exact_literal_type() {
     );
 }
 
-// --- Task 1b: tagged unions ---
+// --- Tagged unions ---
 //
 // Reading `$matches[N]` directly from the tagged `Union` collapses to
 // `Mixed` (the "without" variant genuinely lacks key N, and a `Union`

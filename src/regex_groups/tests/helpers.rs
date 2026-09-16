@@ -11,10 +11,6 @@ pub(super) fn literals(groups: &[RegexCaptureGroup]) -> Vec<Option<Vec<String>>>
     groups.iter().map(|g| g.literal_values.clone()).collect()
 }
 
-// --- Task 1a: literal enumeration ---
-
-// --- Task 1b: tagged unions ---
-
 pub(super) fn top_levels(groups: &[RegexCaptureGroup]) -> Vec<bool> {
     groups.iter().map(|g| g.top_level).collect()
 }
