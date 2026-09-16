@@ -19,17 +19,18 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with eleven exceptions: Phases 166, 169, and 174 (unblocking two live
+with twelve exceptions: Phases 166, 169, and 174 (unblocking two live
 dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
-made it natural to pick up next), and Phase 96's D8 and D2 (two small,
-self-contained items picked up next as standalone units - D2 opt-in,
-per this project's "ship opt-in" convention for a novel rule category
-with a real false-positive risk on unambiguous single-bool-parameter
-calls). All eleven are now **DONE** and have moved into ROADMAP.md's
-own Done section, per this project's standing "fold DONE phases into
-Done" convention - their entries are removed from this backlog file,
-not left in place with a status tag flipped.
+made it natural to pick up next), and Phase 96's D8 and D2 and Phase
+98's AB2 (three small, self-contained items picked up next as
+standalone units - D2 opt-in, per this project's "ship opt-in"
+convention for a novel rule category with a real false-positive risk
+on unambiguous single-bool-parameter calls). All twelve are now
+**DONE** and have moved into ROADMAP.md's own Done section, per this
+project's standing "fold DONE phases into Done" convention - their
+entries are removed from this backlog file, not left in place with a
+status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -511,12 +512,6 @@ directional asymmetry every sub-item below exploits.
   phpstan-rs's existing `check_declared_purity_tag` into
   `check_get_hook`/`check_set_hook` (`checker/oop/property_hooks.rs`),
   currently wired only for ordinary function/method declarations.
-- **AB2 (small).** Dead-write detection for `public private(set)`
-  properties — both projects' `UnusedPrivate*Rule` gate on
-  `visibility == Private`, entirely missing `write_visibility` (a
-  separate field phpstan-rs already has and already uses elsewhere for
-  a PHP 8.4 asymmetric-visibility property whose write access is just as
-  restricted as a fully-private one's).
 
 ## Phase 99 — Assertion-less test method detection ("risky test") (§AE)
 

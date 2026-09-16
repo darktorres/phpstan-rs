@@ -218,6 +218,44 @@ impl<'a> Checker<'a> {
             );
         }
 
+        // PHP 8.4 asymmetric visibility (`public private(set)`): a
+        // property's own read side can be reached from anywhere, so
+        // "never read"/"unused" can never be safely concluded from a
+        // same-class-only scan the way the fully-private loop below can -
+        // but the write side is exactly as restricted as the fully-
+        // private case, so "never written from inside the declaring
+        // class" is just as sound. Hooked properties are skipped: a
+        // `set` hook's own body is a different write mechanism entirely,
+        // not covered by `usage.writes` here. See PHASE_BACKLOG Phase
+        // 98's AB2.
+        for p in properties {
+            if p.write_visibility != Some(Visibility::Private)
+                || p.visibility == Visibility::Private
+                || p.hooks.is_some()
+            {
+                continue;
+            }
+            let written = p.default.is_some() || usage.writes.contains(&p.name);
+            if written {
+                continue;
+            }
+            let kind_word = if p.is_static {
+                "static property"
+            } else {
+                "property"
+            };
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "{kind_word} {fqn}::${} has private(set) visibility but is never written from within the declaring class",
+                    p.name
+                ),
+                p.span,
+                4,
+                "property.neverWritten",
+            );
+        }
+
         for p in properties {
             if p.visibility != Visibility::Private {
                 continue;

@@ -802,6 +802,79 @@ fn writing_a_public_private_set_property_from_inside_its_own_class_is_never_flag
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Dead-write detection for asymmetric-visibility properties (PHASE_BACKLOG
+// Phase 98's AB2) - `UnusedPrivate*Rule`'s own gate is `visibility ==
+// Private`, missing `write_visibility` entirely; a `public private(set)`
+// property's write side is exactly as class-scoped as a fully-private
+// property's, so "never written from inside the declaring class" is just
+// as sound to conclude from a same-class-only scan, even though "never
+// read"/"unused" aren't (the read side is genuinely public).
+
+#[test]
+fn a_public_private_set_property_with_no_default_and_no_write_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public private(set) int $x;
+                public function __construct() {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "property.neverWritten"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_public_private_set_property_written_inside_its_own_class_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public private(set) int $x;
+                public function setX(int $x): void {
+                    $this->x = $x;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.neverWritten"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_public_private_set_property_with_a_default_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public private(set) int $x = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.neverWritten"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_symmetric_public_property_is_never_flagged_by_this_check() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public int $x;
+                public function __construct() {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "property.neverWritten"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn writing_a_public_protected_set_property_from_a_subclass_is_never_flagged() {
     let d = visibility_diagnostics(

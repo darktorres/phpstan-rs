@@ -1053,7 +1053,19 @@ matching real PHPStan's three `UnusedPrivate*Rule` classes end to end:
 unused private class constants (`classConstant.unused`), unused private
 methods (`method.unused`), and all five unused/never-read/never-written
 property shapes (`property.unused`/`.neverRead`/`.onlyWritten`/
-`.neverWritten`/`.onlyRead`).
+`.neverWritten`/`.onlyRead`), plus PHASE_BACKLOG Phase 98's AB2: a PHP
+8.4 asymmetric-visibility property (`public`/`protected private(set)`)
+gets its own, narrower dead-write check reusing the same `property.
+neverWritten` identifier - real PHPStan's own `UnusedPrivate*Rule`
+gates on `visibility == Private` and so structurally can't see
+`write_visibility` at all. Only the write side is checked (a
+same-class-only scan can soundly conclude "never written from inside
+the declaring class" the exact same way it does for a fully-private
+property), never "unused"/"never read" - the read side is genuinely
+reachable from outside the class, so those two would need a real
+whole-project scan this check doesn't attempt. Hooked properties are
+skipped (a `set` hook's own body is a different write mechanism, not
+covered by the same-class `usage.writes` tracking this reuses).
 Duplicate-declaration scans within a class/trait/enum body, a
 same-file case-insensitive class-vs-`use`-alias collision, and
 duplicate top-level *function* declarations (a real, whole-project,
