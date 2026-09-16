@@ -2205,3 +2205,26 @@ this one accumulator.
 **Effort: large** — real checking-architecture work; resolves the
 identical gap in `check_unused_private_members` for free once built,
 so implement once and re-verify both consumers.
+
+## Phase 167 — `is_a()` narrowing
+
+Reevaluated: ROADMAP.md's own prior decline cited "near-zero corpus
+incidence" as its reason - this project's own standing rule is that
+corpus incidence only affects sequencing/verification order, never
+whether to build a feature at all, so this decline needs a real
+technical reason to stand and doesn't have one.
+
+`is_a($x, SomeClass::class)` (and the string-literal-second-argument
+form, `is_a($x, 'SomeClass')`) is semantically an `instanceof` check
+with its target spelled as a runtime value instead of native syntax -
+`checker/narrowing.rs`'s own `apply_narrowing` already has every
+primitive this needs (`narrow_instanceof_true`/`narrow_type_excluding`,
+`narrowing_key`, and this file's own literal-string/`::class`-constant
+resolution helpers used elsewhere for other single-arg predicate
+calls). A new `ExprKind::Call` arm matching `is_a`/`\is_a` (2- or
+3-argument form; the optional 3rd `$allow_string` argument doesn't
+change narrowing at all, only whether a `class-string` first argument
+is also accepted) extracts `(inner, resolved_class_name)` and delegates
+to the identical two lines `Instanceof`'s own arm already runs.
+
+**Effort: small** — one new match arm, zero new primitives.

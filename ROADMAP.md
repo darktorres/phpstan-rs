@@ -877,10 +877,13 @@ including the mirrored/negated `count($x) < 1` shape. Comparison-outcome
 narrowing for `<`/`>`/`<=`/`>=` between known-numeric operands, and a
 loose (`==`/`!=`) truth table between differing scalar literal kinds,
 transcribed from real PHPStan's own `LooseComparisonHelper`.
-`is_a()`/`class_exists()`-family narrowing was evaluated and declined
-(near-zero corpus incidence, or - for `class_exists()` specifically -
-an unobservable no-op given how this project already represents a
-bare `class-string`). One narrow `isset`/`empty`/nullsafe residual,
+`class_exists()` narrowing was evaluated and declined - an
+unobservable no-op given how this project already represents a bare
+`class-string`. `is_a()` narrowing was reevaluated (its own prior
+decline cited near-zero corpus incidence, which isn't a valid decline
+reason on its own - see PHASE_BACKLOG Phase 167, filed as real,
+near-zero-effort work reusing `instanceof`'s own narrowing primitives).
+One narrow `isset`/`empty`/nullsafe residual,
 left disclosed rather than chased further: a function bundling both a
 legacy and modern native-typed variant behind a runtime
 `PHP_VERSION_ID` branch (not just `function_exists()`) can still share
