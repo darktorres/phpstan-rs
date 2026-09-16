@@ -200,6 +200,12 @@ pub struct Registry {
     // can legitimately hardcode its own message internally, making a
     // bare `new` call at the throw site correct rather than a mistake.
     pub check_throw_without_message: bool,
+    // `throw new Exception(...)`/`throw new Error(...)` - the bare base
+    // class instead of a specific subclass - opt-in, since deliberately
+    // throwing the generic base class (a project with no custom
+    // exception hierarchy at all) is a legitimate style choice, not
+    // necessarily an oversight.
+    pub check_throw_base_class: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

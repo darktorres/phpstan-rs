@@ -70,6 +70,7 @@ mod string_functions;
 mod swapped_arguments;
 mod switch_missing_default;
 mod symbol_existence;
+mod throw_base_class;
 mod throw_without_message;
 mod throws;
 mod trait_composition_and_conflicts;

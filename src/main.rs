@@ -226,6 +226,12 @@ enum Command {
         /// message`'s own doc comment.
         #[arg(long)]
         check_throw_without_message: bool,
+        /// Enables base-Exception/Error-class detection (`throw new
+        /// Exception(...)`/`throw new Error(...)` instead of a specific
+        /// subclass). Off by default - see `registry::Registry::
+        /// check_throw_base_class`'s own doc comment.
+        #[arg(long)]
+        check_throw_base_class: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -316,6 +322,7 @@ fn main() {
             check_never_return_suggestions,
             check_switch_missing_default,
             check_throw_without_message,
+            check_throw_base_class,
             php_version,
             generate_baseline,
             baseline,
@@ -350,6 +357,7 @@ fn main() {
             check_never_return_suggestions,
             check_switch_missing_default,
             check_throw_without_message,
+            check_throw_base_class,
             php_version,
             generate_baseline,
             baseline,

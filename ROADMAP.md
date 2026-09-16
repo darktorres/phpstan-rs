@@ -1895,6 +1895,19 @@ legitimately hardcode its own message internally, making a bare `new`
 call correct rather than a mistake. Gated behind `Registry::
 check_throw_without_message`.
 
+**Opt-in base-Exception/Error-class detection** (PHASE_BACKLOG Phase
+147's 147e, `throw.baseClass`). `check_throw`'s identical `New`-shaped
+check flags `throw new Exception(...)`/`throw new Error(...)` naming
+the bare base class rather than a specific subclass, using the exact
+type `check_expr` already inferred for the thrown value (`Type::
+Object`) rather than re-resolving the class name from the `new`
+expression itself. A rethrow of an already-caught variable (`throw
+$e;`) is never a `New` expression, so it's untouched regardless of what
+concrete class it resolves to. Opt-in, since deliberately throwing the
+generic base class is a legitimate style choice in a project with no
+custom exception hierarchy. Gated behind `Registry::
+check_throw_base_class`.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

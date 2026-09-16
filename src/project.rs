@@ -346,6 +346,13 @@ impl Project {
         self.registry.check_throw_without_message = enabled;
     }
 
+    /// Opts the whole project's checking into base-Exception/Error-class
+    /// detection - see `registry::Registry::check_throw_base_class`'s
+    /// own doc comment for why this defaults to `false`.
+    pub fn set_check_throw_base_class(&mut self, enabled: bool) {
+        self.registry.check_throw_base_class = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

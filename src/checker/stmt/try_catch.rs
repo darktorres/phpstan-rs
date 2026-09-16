@@ -292,6 +292,19 @@ impl<'a> Checker<'a> {
                 "throw.missingExceptionMessage",
             );
         }
+        if self.registry.check_throw_base_class
+            && let ExprKind::New(_, _) = &e.kind
+            && let Type::Object(class, _) = &thrown_ty
+            && (class.eq_ignore_ascii_case("Exception") || class.eq_ignore_ascii_case("Error"))
+        {
+            self.report(
+                label.to_string(),
+                format!("Throwing the base {class} class is not recommended, use a specific subclass instead."),
+                e.span,
+                5,
+                "throw.baseClass",
+            );
+        }
         if let Some(class) = self.thrown_value_not_throwable(&thrown_ty) {
             self.report(
                 label.to_string(),
