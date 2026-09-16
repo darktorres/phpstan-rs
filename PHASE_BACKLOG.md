@@ -2063,14 +2063,18 @@ from-scratch Doctrine mapping-metadata resolver.
   same select-item grammar). No WHERE/HAVING/GROUP BY/ORDER BY parsing
   (never affects row shape). Scalar subqueries nested inside a select
   item are a disclosed follow-on - see 168k.
-- **168d (medium).** Result-shape builder (`checker/doctrine/
+- **168d (medium, DONE).** Result-shape builder (`checker/doctrine/
   result_shape.rs`) - SELECT clause + FROM/JOIN alias map + 168a's
   metadata → one row `Type`, mirroring real Doctrine `HYDRATE_OBJECT`
   hydration rules exactly (entity-alone vs. entity-plus-scalars mixed
   shape vs. scalar-only), plus real aggregate-function return types
-  (`COUNT` → `int<0, max>`; `AVG`/`SUM`/`MIN`/`MAX` → the operand
-  field's own type) verified directly against `phpstan-doctrine`'s own
-  `QueryResultTypeWalker`.
+  (`COUNT` → `int<0, max>` unconditionally; `AVG`/`SUM`/`MIN`/`MAX` →
+  the operand field's own type) verified directly against
+  `phpstan-doctrine`'s own `QueryResultTypeWalker`. A metadata gap on
+  any one field (an unknown alias, an unresolvable association)
+  localizes to `Mixed` for that field alone rather than discarding the
+  whole row - matches the real walker's own behavior; only a genuine
+  DQL syntax problem (168b/168c) makes the whole query undecidable.
 - **168e (medium).** Wiring `getResult()`/`getOneOrNullResult()`/
   `getSingleResult()`/`execute()`/`toIterable()` - the five methods real
   `phpstan-doctrine` itself resolves precisely via its

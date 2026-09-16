@@ -1997,6 +1997,36 @@ subquery nested inside a select item, `SELECT (SELECT COUNT(...) FROM
 ...) AS cnt`, a disclosed follow-on (168k) - makes the whole query
 undecidable (`None`), never a parse error or a silent guess.
 
+**Result-shape builder** (PHASE_BACKLOG Phase 168's 168d).
+`checker::doctrine::result_shape::build_result_row_type` - given 168c's
+parsed select items plus 168b's `FROM`/`JOIN` alias map and 168a's
+entity metadata, computes one query row's own `Type`, mirroring real
+Doctrine's default `HYDRATE_OBJECT` hydration exactly: exactly one bare-
+entity select item with no scalar siblings and no `AS`-alias produces
+the entity object directly, unwrapped; every other shape produces an
+`ArrayShape` keyed by each item's own `AS`-alias when it has one,
+otherwise by its absolute position in the select list (matching real
+Doctrine's own positional/named mixing rule, not a separately-counted
+"unaliased items only" index). `IDENTITY(alias.assoc)` resolves through
+to the target entity's own `id_field` type. Aggregate-function return
+types are transcribed directly from `phpstan-doctrine`'s own
+`QueryResultTypeWalker::walkAggregateExpression`, not inferred: `COUNT`
+is always `int<0, max>` *regardless* of whether its own operand
+resolves (real Doctrine's `COUNT` never actually depends on the
+operand's type); `SUM`/`AVG`/`MIN`/`MAX` all four resolve to the
+operand's own type instead (the real walker calls the identical
+`walkSimpleArithmeticExpression` for all four - there's no dedicated
+`SUM`/`AVG` output type). A deliberate design split from 168b/168c's own
+"undecidable" contract: those two fail the *whole query* on a real DQL
+syntax problem (an unparseable select item, an unresolvable
+`QueryBuilder` chain), matching what a real DQL parser or a live
+`QueryBuilder` replay would do; this module runs only after both already
+succeeded, so anything it still can't resolve (an unknown alias, an
+association 168a's metadata doesn't know) is a metadata gap, not a
+malformed query, and localizes to `Mixed` for that one field instead -
+matching real `phpstan-doctrine`'s own walker, which does the identical
+thing rather than discarding an otherwise-precise row shape.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism
