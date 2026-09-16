@@ -569,9 +569,9 @@ fn a_native_object_return_type_accepts_any_class_instance() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Findings 21/22 from the architecture audit - a plain int wasn't
-// accepted wherever a float was declared, and a native type hint
-// defaulted to null wasn't treated as implicitly nullable.
+// A plain int must be accepted wherever a float is declared, and a
+// native type hint defaulted to null must be treated as implicitly
+// nullable.
 
 #[test]
 fn int_widens_to_float_in_arguments_returns_and_property_assignment() {

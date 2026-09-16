@@ -62,12 +62,11 @@ fn concatenating_two_unknown_strings_does_not_falsely_claim_non_falsy() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// A top-10-bucket workflow found the identical `non-falsy-string`
-// inference this file's own Concat tests above cover was missing for
-// interpolated strings specifically: `ExprKind::Interpolated` returned
-// bare `Type::String` unconditionally, even when one of its own parts
-// was a real, non-falsy literal segment - the exact same fact
-// `"prefix-" . $unknown` already proved via Concat.
+// The identical `non-falsy-string` inference this file's Concat tests
+// above cover must also apply to interpolated strings:
+// `ExprKind::Interpolated` must not return bare `Type::String`
+// unconditionally when one of its parts is a non-falsy literal segment -
+// the same fact `"prefix-" . $unknown` already proves via Concat.
 #[test]
 fn an_interpolated_string_with_a_non_falsy_literal_segment_narrows_to_non_falsy_string() {
     let d = diagnostics_for(
@@ -111,11 +110,9 @@ fn str_replace_falls_back_to_the_generic_path_for_a_non_string_subject() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// A top-10-bucket workflow found sprintf()/vsprintf() had zero dynamic-
-// return-type handling at all - real PHPStan narrows to
-// `non-falsy-string` whenever the format string's own literal (non-
-// specifier) text is itself provably non-falsy, the same reasoning
-// Concat/Interpolated already use.
+// sprintf()/vsprintf() must narrow to `non-falsy-string` whenever the
+// format string's literal (non-specifier) text is itself provably
+// non-falsy, the same reasoning Concat/Interpolated already use.
 #[test]
 fn sprintf_with_a_non_falsy_literal_segment_narrows_to_non_falsy_string() {
     let d = diagnostics_for(
@@ -190,11 +187,10 @@ fn sprintf_with_a_non_literal_format_is_unaffected() {
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 
-// A top-10-bucket workflow found var_export($x, true) typed too loosely
-// - the native/stub signature is unconditionally `?string`, but a
-// literal `true` second argument means it always returns the real
-// representation string instead of printing to stdout and returning
-// null.
+// `var_export($x, true)` must not stay typed as the native/stub
+// signature's unconditional `?string` - a literal `true` second argument
+// means it always returns the representation string instead of printing
+// to stdout and returning null.
 #[test]
 fn var_export_with_a_literal_true_flag_narrows_to_plain_string() {
     let d = diagnostics_for(

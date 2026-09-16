@@ -2905,9 +2905,8 @@ fn a_doc_comment_with_no_var_tag_is_a_no_op() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Findings 54/56 from the architecture audit - a bare truthiness
-// check (`if ($x)` / `if (!$x)`) and `empty($x)` both applied no
-// narrowing at all.
+// A bare truthiness check (`if ($x)` / `if (!$x)`) and `empty($x)` must
+// both apply narrowing.
 
 #[test]
 fn negated_truthy_guard_narrows_past_the_if() {
@@ -3414,10 +3413,10 @@ fn strict_equality_still_narrows() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Findings 52/53 from the architecture audit - a `while`/`do-while`
-// loop never applied its negated condition as narrowing after exit,
-// and a `for` loop's body was checked as if it always executes
-// exactly once, with no "may run zero times" merge at all.
+// A `while`/`do-while` loop must apply its negated condition as
+// narrowing after exit, and a `for` loop's body must not be checked as
+// if it always executes exactly once - it needs a "may run zero times"
+// merge too.
 
 #[test]
 fn while_loop_narrows_the_negated_condition_after_exit() {

@@ -600,11 +600,10 @@ fn conditionally_declared_function_is_visible_to_undefined_function_checks() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Findings 12/16/18/19 from the architecture audit - infer_binary
-// grouped several operators by superficial similarity rather than by
-// each one's real PHP return-type rule; the Unary handling never
-// rebound `++`/`--`'s own variable, and never modeled numeric-string
-// coercion for unary `-`/`+`.
+// `infer_binary` must group operators by each one's real PHP
+// return-type rule, not superficial similarity; the Unary handling must
+// rebind `++`/`--`'s variable, and must model numeric-string coercion
+// for unary `-`/`+`.
 
 #[test]
 fn spaceship_operator_infers_as_int_not_bool() {
