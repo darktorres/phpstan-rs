@@ -598,11 +598,6 @@ hardening, a separate concern from net-new capabilities like these.)
 
 ## Phase 107 — Whole-file/whole-project symbol lists (§AH)
 
-- **AH1 (small).** `textDocument/documentSymbol` — per-file hierarchical
-  outline, walking `Project::ast(path)`'s top-level declarations using
-  fields (`name_span`, whole-declaration `span`) every declaration
-  already carries. The same walk `DeclLocations::index` already does,
-  restructured per-file instead of flattened project-wide.
 - **AH2 (medium).** `workspace/symbol` — project-wide fuzzy search over
   `DeclLocations`' existing maps. Two genuinely new pieces: a
   substring/fuzzy-match query layer (doesn't exist anywhere today), and

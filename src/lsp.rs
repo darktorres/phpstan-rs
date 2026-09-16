@@ -25,10 +25,11 @@ use std::path::{Path, PathBuf};
 
 use lsp_server::{ErrorCode, Message, Notification as LspNotification, Request, Response};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, MarkedString, OneOf, Position as LspPosition,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
+    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
+    MarkedString, OneOf, Position as LspPosition, ServerCapabilities, ServerInfo,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
 use crate::ast::ClassKind;
@@ -38,6 +39,7 @@ use crate::registry::format_signature;
 use crate::token::Span;
 use crate::types::Type;
 
+mod document_symbol;
 mod navigation;
 mod protocol;
 mod text_split;
@@ -494,6 +496,14 @@ impl Server {
         }
     }
 
+    fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
+        let path = uri_to_path(uri)?;
+        let stmts = self.project.ast(&path)?;
+        Some(DocumentSymbolResponse::Nested(
+            document_symbol::document_symbols(stmts),
+        ))
+    }
+
     fn location(&self, target_path: &Path, span: Span) -> Location {
         let target_uri = self
             .open_uris
@@ -581,6 +591,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     )),
                     hover_provider: Some(HoverProviderCapability::Simple(true)),
                     definition_provider: Some(OneOf::Left(true)),
+                    document_symbol_provider: Some(OneOf::Left(true)),
                     ..Default::default()
                 },
                 server_info: Some(ServerInfo {
@@ -619,6 +630,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     )
                 })
                 .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+        }
+        "textDocument/documentSymbol" => {
+            let result = serde_json::from_value::<DocumentSymbolParams>(req.params)
+                .ok()
+                .and_then(|params| server.document_symbol(&params.text_document.uri))
+                .map(|symbols| serde_json::to_value(symbols).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
         }

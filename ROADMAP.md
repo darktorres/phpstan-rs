@@ -2073,6 +2073,15 @@ call's incidental effect on an already-declared variable's type
 never does, so a read afterward still resolves to the variable's real
 declaration.
 
+**LSP `textDocument/documentSymbol`** (Phase 107 AH1). A per-file
+hierarchical outline, built directly from `Project::ast`'s own
+top-level declarations (`src/lsp/document_symbol.rs`) rather than the
+project-wide, FQN-flattened `decl_locations` index above, which has no
+per-file nesting to offer an outline. Classes/interfaces/enums nest
+their own consts/properties/methods/cases as children; a declaration
+inside a top-level `if`/`Block` is still walked, mirroring
+`DeclLocations::index`'s own recursion.
+
 **Fuzz testing infrastructure** (Phase 19). `cargo-fuzz` for the lexer/
 parser: `lex_parse` (primary target, mirroring production's exact
 `String::from_utf8_lossy`+lex+parse pipeline, including its own 64MiB
