@@ -1545,6 +1545,25 @@ getIterableKeyType()`, each int-canonical key contributing its own real
 own - a real, previously-unsound gap this closes: `array{name: string}`
 (all-string-keyed) no longer silently satisfies `array<int, string>`.
 
+**Opt-in array-key cast warnings** (PHASE_BACKLOG Phase 103's Z1,
+`array.keyCast`/`offsetAccess.keyCast`, mirroring real PHPStan's
+`LiteralArrayKeyCastRule`/`ArrayDimCastRule`). `array_key_cast_
+description` (`checker/expr/array_ops.rs`) mirrors `ConstantScalarType::
+toArrayKey()`: a float truncates to int, `true`/`false` become `1`/`0`,
+`null` becomes `''`, and a canonical-integer string
+(`canonical_int_key`, already built for `is_canonical_int_key`) becomes
+that int - checked at both the same call sites `check_array_item_key_
+type`/`check_dim_fetch_key_type` (Phase 50) already instrument. Gated
+behind `Registry::check_array_key_cast`, off by default: real PHPStan
+itself only ever registers these two rules in its own private
+issue-bot config (`Rules/Playground/`), never an installable package/
+level/strict-rules extension, so there's no real-world signal on how
+noisy this is on an ordinary codebase. A bare float literal expression
+infers to `Type::Float` everywhere else in this checker (no
+`FloatLiteral` produced from parsing a literal directly), so the float
+case is checked directly off the AST rather than the inferred type,
+the one shape needing that.
+
 **Closure `use (...)` capture checks** (Phase 17). A by-value `use
 ($typo)` capture of a variable never assigned anywhere in the outer
 scope now runs through the same undefined-variable machinery a direct

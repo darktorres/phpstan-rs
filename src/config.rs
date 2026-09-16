@@ -21,6 +21,7 @@
 //! check_duplicate_function_declarations = false
 //! check_duplicate_class_declarations = false
 //! check_boolean_trap = false
+//! check_array_key_cast = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -119,6 +120,10 @@ pub struct Config {
     /// Opt-in "boolean trap" detection - see
     /// `registry::Registry::check_boolean_trap`'s own doc comment for why.
     pub check_boolean_trap: Option<bool>,
+    /// Opt-in array-key cast warnings - see
+    /// `registry::Registry::check_array_key_cast`'s own doc comment for
+    /// why.
+    pub check_array_key_cast: Option<bool>,
 }
 
 impl Config {

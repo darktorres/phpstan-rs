@@ -166,6 +166,14 @@ pub struct Registry {
     // setEnabled(true)`) is unambiguous in practice and would otherwise
     // be noise on every such call project-wide.
     pub check_boolean_trap: bool,
+    // Array-key cast warnings (PHASE_BACKLOG Phase 103's Z1, mirroring
+    // real PHPStan's own `LiteralArrayKeyCastRule`/`ArrayDimCastRule`) -
+    // real PHPStan only ever registers these in its own private
+    // issue-bot config (`Rules/Playground/`), never in any installable
+    // package/level/strict-rules extension, so there's no real-world
+    // precedent for how noisy they are on an ordinary codebase; opt-in
+    // until that's known.
+    pub check_array_key_cast: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

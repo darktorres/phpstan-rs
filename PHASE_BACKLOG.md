@@ -19,18 +19,20 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with thirteen exceptions: Phases 166, 169, and 174 (unblocking two live
+with fourteen exceptions: Phases 166, 169, and 174 (unblocking two live
 dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
 made it natural to pick up next), and Phase 96's D8 and D2, Phase 98's
-AB2, and Phase 101's E4 (four small, self-contained items picked up
-next as standalone units - D2 opt-in, per this project's "ship opt-in"
-convention for a novel rule category with a real false-positive risk
-on unambiguous single-bool-parameter calls). All thirteen are now
-**DONE** and have moved into ROADMAP.md's own Done section, per this
-project's standing "fold DONE phases into Done" convention - their
-entries are removed from this backlog file, not left in place with a
-status tag flipped.
+AB2, Phase 101's E4, and Phase 103's Z1 (five small, self-contained
+items picked up next as standalone units - D2 and Z1 both opt-in, per
+this project's "ship opt-in" convention: D2 for a real false-positive
+risk on unambiguous single-bool-parameter calls, Z1 because real
+PHPStan itself only ever ran it in a private issue-bot config, never
+an installable package, leaving no real-world signal on how noisy it
+is). All fourteen are now **DONE** and have moved into ROADMAP.md's
+own Done section, per this project's standing "fold DONE phases into
+Done" convention - their entries are removed from this backlog file,
+not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -583,19 +585,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
   Extends the existing `class.nameCase` mechanism
   (`checker/resolve.rs`) to function/method/static calls and `use
   function` imports.
-
-## Phase 103 — Won't-port-mis-bucketed rules (§Z)
-
-- **Z1 (small).** Standalone numeric-string/float/bool array-key cast
-  warnings (`LiteralArrayKeyCastRule`/`ArrayDimCastRule`) — fully
-  working, general-purpose real PHPStan rules that are registered
-  *only* in phpstan.org's own private issue-bot config
-  (`Rules/Playground/`), never in any installable package/level/
-  strict-rules extension. A pure product-distribution gap on PHPStan's
-  side, not a technical one — phpstan-rs already has the needed
-  primitive (`is_canonical_int_key`) and ships one config surface to
-  every user. (Same mis-bucketing as Phase 97's AA5, for a different
-  rule pair.)
 
 ---
 

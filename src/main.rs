@@ -158,6 +158,14 @@ enum Command {
         /// `registry::Registry::check_boolean_trap`'s own doc comment.
         #[arg(long)]
         check_boolean_trap: bool,
+        /// Enables array-key cast warnings (a literal float/bool/null/
+        /// numeric-string array key silently cast at runtime). Off by
+        /// default - real PHPStan itself only ever registers this in its
+        /// own private issue-bot config, never an installable package -
+        /// see `registry::Registry::check_array_key_cast`'s own doc
+        /// comment.
+        #[arg(long)]
+        check_array_key_cast: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -239,6 +247,7 @@ fn main() {
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
             check_boolean_trap,
+            check_array_key_cast,
             php_version,
             generate_baseline,
             baseline,
@@ -264,6 +273,7 @@ fn main() {
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
             check_boolean_trap,
+            check_array_key_cast,
             php_version,
             generate_baseline,
             baseline,

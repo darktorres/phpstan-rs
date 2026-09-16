@@ -3,7 +3,7 @@ use crate::checker::expr::{
     invalid_array_key_description, is_canonical_int_key, is_confidently_array,
 };
 use crate::checker::type_union::union_types;
-use crate::checker::{Checker, Locals, TemplateBindings};
+use crate::checker::{Checker, Locals, TemplateBindings, unwrap_grouping};
 use crate::registry::FunctionSig;
 use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
@@ -656,6 +656,17 @@ impl<'a> Checker<'a> {
                 "array.invalidKey",
             );
         }
+        if self.registry.check_array_key_cast
+            && let Some((from, to)) = array_key_cast_description(key_expr, &key_ty)
+        {
+            self.report(
+                label.to_string(),
+                format!("Key {from} will be cast to {to} in the array."),
+                key_expr.span,
+                4,
+                "array.keyCast",
+            );
+        }
     }
 
     /// Real PHPStan's `InvalidKeyInArrayDimFetchRule`,
@@ -725,6 +736,17 @@ impl<'a> Checker<'a> {
                 idx.span,
                 3,
                 "offsetAccess.invalidOffset",
+            );
+        }
+        if self.registry.check_array_key_cast
+            && let Some((from, to)) = array_key_cast_description(idx, &idx_ty)
+        {
+            self.report(
+                label.to_string(),
+                format!("Key {from} will be cast to {to} in the array access."),
+                idx.span,
+                4,
+                "offsetAccess.keyCast",
             );
         }
     }
@@ -814,6 +836,37 @@ impl<'a> Checker<'a> {
             || matches!(ty, Type::Intersection(members)
                 if members.iter().any(|m| matches!(m, Type::Array(_, _) | Type::ArrayShape(_))))
             || matches!(ty, Type::Union(members) if members.iter().all(Self::is_array_like))
+    }
+}
+
+/// Real PHP's own array-key cast (mirrors `ConstantScalarType::
+/// toArrayKey()`): a float truncates to int, `true`/`false` become
+/// `1`/`0`, `null` becomes `''`, and a canonical-integer string
+/// (`canonical_int_key`) becomes that int - every other constant scalar
+/// (a plain int, or a non-canonical string like `"08"`/`"+1"`) is
+/// already its own array key and stays unchanged. Returns `Some((from,
+/// to))` (both already `describe`-formatted) only when a cast actually
+/// happens; `None` for a non-constant-scalar type (`Mixed`, a bare
+/// `Int`/`String`, ...) too, matching `check_array_item_key_type`'s own
+/// "don't guess" leniency.
+///
+/// A bare float literal expression infers to `Type::Float`, not a
+/// `FloatLiteral`, everywhere else in this checker (nothing else needs
+/// the literal value kept around) - checked directly off the AST here
+/// instead, the one shape this function needs it for.
+fn array_key_cast_description(expr: &Expr, ty: &Type) -> Option<(String, String)> {
+    if let ExprKind::Literal(Literal::Float(f)) = &unwrap_grouping(expr).kind {
+        return Some((f.to_string(), (*f as i64).to_string()));
+    }
+    match ty {
+        Type::FloatLiteral(f) => Some((f.to_string(), (*f as i64).to_string())),
+        Type::True => Some(("true".to_string(), "1".to_string())),
+        Type::False => Some(("false".to_string(), "0".to_string())),
+        Type::Null => Some(("null".to_string(), "''".to_string())),
+        Type::StringLiteral(s) => {
+            types::canonical_int_key(s).map(|n| (format!("'{s}'"), n.to_string()))
+        }
+        _ => None,
     }
 }
 

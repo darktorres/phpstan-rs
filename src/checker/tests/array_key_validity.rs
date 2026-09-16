@@ -647,6 +647,136 @@ fn a_class_constant_key_that_does_not_infer_to_a_scalar_still_suppresses_checkin
     );
 }
 
+// Opt-in array-key cast warnings (PHASE_BACKLOG Phase 103's Z1,
+// `array.keyCast`/`offsetAccess.keyCast`) - off by default.
+
+#[test]
+fn array_key_cast_is_off_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): array {
+                return [true => 1, '1' => 2];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_bool_literal_array_key_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): array {
+                return [true => 1];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_null_literal_array_key_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): array {
+                return [null => 1];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_float_literal_array_key_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): array {
+                return [2.5 => 1];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_canonical_int_string_array_key_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): array {
+                return ['1' => 1];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_canonical_string_array_key_is_not_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): array {
+                return ['08' => 1, '+1' => 2, '1.2' => 3];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_plain_int_array_key_is_not_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(): array {
+                return [1 => 'a'];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "array.keyCast"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_dim_fetch_with_a_cast_key_is_flagged_when_enabled() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(array $a): mixed {
+                return $a[true];
+            }
+        "#,
+        |r| r.check_array_key_cast = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "offsetAccess.keyCast"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_computed_key_suppresses_further_duplicate_key_checking() {
     // Don't guess: once a key can't be statically resolved, nothing

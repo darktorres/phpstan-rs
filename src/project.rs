@@ -277,6 +277,13 @@ impl Project {
         self.registry.check_boolean_trap = enabled;
     }
 
+    /// Opts the whole project's checking into array-key cast warnings -
+    /// see `registry::Registry::check_array_key_cast`'s own doc comment
+    /// for why this defaults to `false`.
+    pub fn set_check_array_key_cast(&mut self, enabled: bool) {
+        self.registry.check_array_key_cast = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
