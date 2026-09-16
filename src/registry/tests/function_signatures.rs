@@ -157,9 +157,8 @@ fn two_separate_duplicated_parameter_pairs_both_collapse() {
     assert_eq!(sig.params[2].ty, Type::String);
 }
 
-// Real shape: `fsockopen`'s duplicated `$port` - the duplicate that
-// actually broke argument binding (Finding A's own motivating case),
-// since it isn't the last parameter.
+// `fsockopen`'s duplicated `$port` - the duplicate breaks argument
+// binding since it isn't the last parameter.
 #[test]
 fn a_duplicated_parameter_in_the_middle_of_the_list_doesn_t_shift_later_ones() {
     let r = build_registry(

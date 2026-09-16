@@ -162,9 +162,9 @@ pub(crate) fn preg_match_matches_shape(
 /// Dispatches `preg_match`'s own unconditional `$matches` shape to one of
 /// real PHPStan's two tagged-union special cases when a pattern
 /// qualifies, falling back to the ordinary flat `preg_match_matches_shape`
-/// otherwise. `preg_match_all` never calls this - Finding D already
-/// established it needs none of this (both its own modes already produce
-/// a single, unconditional, always-correct shape for every match count).
+/// otherwise. `preg_match_all` never calls this - it needs none of this,
+/// since both its own modes already produce a single, unconditional,
+/// always-correct shape for every match count.
 pub(crate) fn build_matched_shape(
     groups: &[regex_groups::RegexCaptureGroup],
     alternation_branch_counts: &[(u32, usize)],

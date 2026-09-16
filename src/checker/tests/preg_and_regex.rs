@@ -57,17 +57,16 @@ fn preg_match_required_group_is_accepted_as_a_string_parameter() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Since Finding E, `$matches`'s own *unconditional* type (right after
-// the call, with no narrowing) is a `Union` with the empty (no-match)
-// shape - reading `$matches[1]` there collapses to `Mixed` (traced
-// through in the plan itself: the empty-shape member's own missing-
-// key fallback is `Mixed`, and `union_types` unconditionally absorbs
-// into it), so the test above alone no longer discriminates "typed as
-// a real `string`" from "leniently accepted because it's `Mixed`."
-// This one narrows first (Finding E's own `preg_match_condition`
-// recognizer), proving `$matches[1]` really is a precise `string` in
-// the one context that matters in practice - passing something
-// genuinely incompatible (an array) would be flagged if it weren't.
+// `$matches`'s unconditional type (right after the call, with no
+// narrowing) is a `Union` with the empty (no-match) shape - reading
+// `$matches[1]` there collapses to `Mixed` (the empty-shape member's own
+// missing-key fallback is `Mixed`, and `union_types` unconditionally
+// absorbs into it), so the test above alone doesn't discriminate "typed
+// as a real `string`" from "leniently accepted because it's `Mixed`."
+// This one narrows first (the `preg_match_condition` recognizer),
+// proving `$matches[1]` really is a precise `string` in the one context
+// that matters in practice - passing something genuinely incompatible
+// (an array) would be flagged if it weren't.
 #[test]
 fn preg_match_required_group_is_precisely_typed_once_the_match_is_confirmed() {
     let d = diagnostics_for(
@@ -120,17 +119,17 @@ fn preg_match_reading_a_genuinely_absent_group_is_flagged() {
 // *isn't* over-optimistically narrowed).
 #[test]
 fn preg_match_array_key_exists_false_branch_narrows_a_required_group_to_never() {
-    // Nested inside a truthy `preg_match(...)` check (Finding E's own
-    // `preg_match_condition` narrowing) rather than tested in
-    // isolation: since Finding E, $matches's own *unconditional* type
-    // right after the call is a `Union` with the empty (no-match)
-    // shape, and array_key_exists's own false-branch narrowing
-    // correctly leaves that empty-shape Union member untouched (it's
-    // entirely consistent with key '1' being absent) - so, without
-    // first narrowing away the no-match possibility, the overall
-    // result is genuinely `array{}`, not `Never`. The precise,
-    // non-Union full shape (and therefore a real `Never` narrowing
-    // for a required key) only exists once the match is confirmed.
+    // Nested inside a truthy `preg_match(...)` check (the
+    // `preg_match_condition` narrowing) rather than tested in isolation:
+    // $matches's unconditional type right after the call is a `Union`
+    // with the empty (no-match) shape, and array_key_exists's
+    // false-branch narrowing correctly leaves that empty-shape Union
+    // member untouched (it's entirely consistent with key '1' being
+    // absent) - so, without first narrowing away the no-match
+    // possibility, the overall result is genuinely `array{}`, not
+    // `Never`. The precise, non-Union full shape (and therefore a real
+    // `Never` narrowing for a required key) only exists once the match
+    // is confirmed.
     let d = diagnostics_for(
         r#"<?php
             function needsInt(int $n): void {}
