@@ -114,9 +114,13 @@ pub(crate) fn sub_int_range_full(
     let (min, max) = if l_min == l_max && l_min.is_some() && (r_min.is_none() || r_max.is_none()) {
         (None, l_min)
     } else {
+        // `checked_sub` throughout, not plain `-`: see `infer_binary`'s
+        // own `Add` arm doc comment for why (real PHP silently promotes
+        // an overflowing subtraction to `float` instead of panicking/
+        // wrapping the way plain `i64::-` would on adversarial input).
         let mut min = match (l_min, r_min) {
             (_, None) => None,
-            (Some(lm), Some(_)) => Some(lm - r_max.or(r_min).unwrap()),
+            (Some(lm), Some(_)) => lm.checked_sub(r_max.or(r_min).unwrap()),
             (None, Some(_)) => None,
         };
         let max;
@@ -132,10 +136,10 @@ pub(crate) fn sub_int_range_full(
                 if let Some(lm) = l_min
                     && r_min.is_none()
                 {
-                    min = Some(lm - rmax);
+                    min = lm.checked_sub(rmax);
                     max = None;
                 } else if let Some(rmin) = r_min {
-                    max = Some(lmax - rmin);
+                    max = lmax.checked_sub(rmin);
                 } else {
                     max = None;
                 }

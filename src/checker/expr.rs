@@ -3801,8 +3801,17 @@ impl<'a> Checker<'a> {
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                 {
-                    let min = l_min.zip(r_min).map(|(a, b)| a + b);
-                    let max = l_max.zip(r_max).map(|(a, b)| a + b);
+                    // `checked_add`, not plain `+`: real PHP silently
+                    // promotes an overflowing int addition to `float`
+                    // (`InitializerExprTypeResolver::integerRangeMath`'s
+                    // own `int|float|null` result type), which this
+                    // project's sibling `pow_int_range`/`shift_int_range`
+                    // already model by collapsing an overflowing bound to
+                    // `None` (unbounded) - plain `i64::+` here would
+                    // instead panic/wrap on adversarial input like
+                    // `int<1, PHP_INT_MAX> + int<1, 10>`.
+                    let min = l_min.zip(r_min).and_then(|(a, b)| a.checked_add(b));
+                    let max = l_max.zip(r_max).and_then(|(a, b)| a.checked_add(b));
                     return normalize_int_range(min, max);
                 }
                 Type::Int
@@ -3826,8 +3835,10 @@ impl<'a> Checker<'a> {
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                     && c == rc
                 {
-                    let min = l_min.map(|m| m - c);
-                    let max = l_max.map(|m| m - c);
+                    // `checked_sub` - see the `Add` arm's own doc comment
+                    // just above for why plain `i64::-` isn't safe here.
+                    let min = l_min.and_then(|m| m.checked_sub(c));
+                    let max = l_max.and_then(|m| m.checked_sub(c));
                     return normalize_int_range(min, max);
                 }
                 // The full range-minus-range case (`$x - $y`, both sides

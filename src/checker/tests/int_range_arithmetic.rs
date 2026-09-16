@@ -66,6 +66,39 @@ fn subtracting_a_literal_from_an_upper_unbounded_int_range_keeps_it_unbounded() 
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `PHP_INT_MAX + 1` overflows in real PHP by silently promoting to
+// `float`, never crashing - `checked_add`/`checked_sub`'s own doc
+// comments (`checker/expr.rs`/`checker/expr/ranges.rs`) collapse such
+// a bound to unbounded (`None`) for the same reason `pow_int_range`
+// already does, rather than letting plain `i64::+`/`-` panic/wrap.
+#[test]
+fn adding_past_i64_max_falls_back_to_unbounded_instead_of_panicking() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<0, 9223372036854775807> $x */
+            function f(int $x): void {
+                assertType('int<1, max>', $x + 1);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn subtracting_past_i64_min_falls_back_to_unbounded_instead_of_panicking() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int<-9223372036854775808, 0> $x */
+            function f(int $x): void {
+                assertType('int<min, -1>', $x - 1);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn adding_two_int_ranges_with_a_shared_unbounded_end_stays_unbounded() {
     let d = diagnostics_for(
