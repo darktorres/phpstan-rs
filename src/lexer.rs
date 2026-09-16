@@ -630,10 +630,9 @@ impl<'a> Lexer<'a> {
         }
         // A `.` right after integer digits always starts a float, even
         // with no fractional digits following (`123.` is a valid float
-        // literal, equal to `123.0`) - verified against a real PHP 8.5
-        // build: `1.$b` is a real syntax error there too (the `.` is
-        // greedily consumed into the number, not treated as concat),
-        // confirming this isn't conditional on what follows the dot.
+        // literal, equal to `123.0`) - `1.$b` is a syntax error in PHP
+        // too (the `.` is greedily consumed into the number, not treated
+        // as concat), so this isn't conditional on what follows the dot.
         if self.peek() == b'.' {
             is_float = true;
             self.pos += 1;

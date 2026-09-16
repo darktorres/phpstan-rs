@@ -198,9 +198,9 @@ impl Parser {
                     return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
                 }
                 // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
-                // production (verified against a real PHP 8.5 build: it
-                // does NOT allow a postfix chain right after it, unlike
-                // the classic form) from plain `clone <expr>`, chosen
+                // production (it does NOT allow a postfix chain right
+                // after it, unlike the classic form) from plain `clone
+                // <expr>`, chosen
                 // whenever what's in the parens can't be a single bare
                 // expression (a comma, named argument, or spread appears).
                 // `clone($x)` alone is just the classic unary form spelled

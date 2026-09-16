@@ -258,9 +258,8 @@ impl PartialEq for Locals {
 /// profile that motivates `Locals`'s persistent-map backing.
 pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
 
-/// Loosely mirrors real PHPStan's own rule-gating levels (0 lowest/laxest,
-/// verified against a fresh `phpstan/phpstan-src` clone's `conf/config.
-/// levelN.neon` files rather than recalled from memory): 0 for the
+/// Loosely mirrors PHPStan's own rule-gating levels (0 lowest/laxest,
+/// per `conf/config.levelN.neon`): 0 for the
 /// "definitely broken" undefined-symbol/arity family (matches real
 /// PHPStan's own level-0 bucket - "unknown classes, unknown functions,
 /// unknown methods..., wrong number of arguments..., always undefined

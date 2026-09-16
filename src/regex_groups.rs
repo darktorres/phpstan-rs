@@ -47,9 +47,9 @@ pub(crate) struct RegexCaptureGroup {
     /// alternation-variant builder (never by this scanner) - `true`
     /// overrides this group's own value entirely to the empty string for
     /// one specific tagged-union variant, for a group known to sit
-    /// *before* the variant's own matched branch (verified against real
-    /// PHPStan: it's always present there, backfilled, never entirely
-    /// absent). Just a `bool`, not a richer "forced value" type: the one
+    /// before the variant's own matched branch - it's always present
+    /// there, backfilled, never entirely absent. Just a `bool`, not a
+    /// richer "forced value" type: the one
     /// dispatch that sets this (the "exactly one top-level alternation"
     /// case) is already scoped to `!unmatched_as_null` callers only, so
     /// the only forced value ever needed here is the empty string - a
