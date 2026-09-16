@@ -2570,12 +2570,23 @@ section used to carry:
     (`$counterByKey[$key]`/`$dateByKey[$key]`/... - confirmed live at
     `ActivityRepository::findDailyActionCountsSince`,
     `HistoryRepository::findGroupedCountsSince`,
-    `ImageRepository::findExtensionBreakdown`) stays declined for a
-    real, different reason: correlating two independently-named
-    variables needs a cross-call, producer-to-consumer propagation
-    (the producing loop and the consuming read site can be in
-    different functions entirely), not a bounded local AST pattern
-    like the idioms below.
+    `ImageRepository::findExtensionBreakdown`, all single-method-scoped
+    like every other named instance in this cluster) splits into two
+    genuinely different cases on a third reevaluation pass: the
+    *same-function* case (both the populating loop and the later read
+    are in one method, matching every corpus citation above) is
+    buildable - filed as PHASE_BACKLOG Phase 173. What stays a real
+    architectural wall is only the *cross-function* generalization
+    (the producing loop and the consuming read site in genuinely
+    different functions/methods): `Locals` (and anything built on it,
+    including Phase 173's own new side-table) is entirely discarded at
+    the end of each function's own check - `Checker::check_file` builds
+    one fresh, single-use `Checker` per file (the same fact behind
+    Phase 166's trait-tracking gap) - and there's no existing mechanism
+    to persist an arbitrary per-call-site, per-variable-pair fact
+    across a function boundary the way `Registry`'s own fixed-point
+    data (aggregate, declaration-level - purity, type signatures)
+    already does for symbol-level facts.
   - A discriminant variable whose value implies another variable was
     already set in the same branch (`AuthService::authKeyLogin`'s own
     `$valid_key === ConnectedWith::ApiKey` implying `$secret_key` is no

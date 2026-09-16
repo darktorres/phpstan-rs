@@ -2372,3 +2372,45 @@ itself - confirmed at `ActivityRepository::insertMany`.
 
 **Effort: small** — one new, self-contained `apply_narrowing` match
 arm; no new alias/replay infrastructure.
+
+## Phase 173 — Same-function parallel dynamically-keyed array correlation
+
+Reevaluated a third time (the cross-variable-correlation cluster's own
+"parallel dynamically-keyed arrays" item) after two prior over-
+pessimistic passes on neighboring items in the same cluster - the
+same-function case (both the populating loop and the later read in one
+method, matching every corpus citation: `ActivityRepository::
+findDailyActionCountsSince`, `HistoryRepository::findGroupedCountsSince`,
+`ImageRepository::findExtensionBreakdown`) is bounded and buildable,
+unlike the genuinely cross-function generalization (still declined -
+see ROADMAP.md's own updated entry for exactly why).
+
+Design mirrors `condition_aliases` (`checker.rs:104-177`), not
+`AccessoryKind`: a correlation between two *named* variables needs
+real invalidation-on-rebind, which a payload-carrying `AccessoryKind`
+variant baked into a `Type` value has no story for (every existing
+variant is a stateless unit variant, `types.rs:191-205`, precisely
+because presence/absence is all `ArrayList`/`NonEmptyArray` ever need -
+a named cross-reference is a different shape of fact entirely). Add a
+new `Locals` side-table, `co_indexed: HashMap<String, HashSet<String>>`,
+populated and purged the same way `condition_aliases` already is:
+
+- Producer side: recognize a loop body where two (or more) array
+  variables each receive an unconditional write
+  (`$arr[$k] = ...;`/`$arr[$k] += ...;`) at the syntactically-identical
+  key expression, at the same statement-list nesting depth with no
+  intervening conditional/early-exit between them, every iteration -
+  after the loop, record each pair's mutual correlation.
+- Consumer side: a `foreach ($counterByKey as $k => ...)` whose subject
+  carries a `co_indexed` entry - a later `$dateByKey[$k]` read inside
+  that loop body, where `$k` is provably the loop's own key variable,
+  skips the "possibly undefined index" diagnostic.
+- Purge exactly like `condition_aliases`: rebinding either correlated
+  variable (a fresh `declare`, not a same-shape `insert`) invalidates
+  the pair.
+
+**Effort: medium** — new side-table plus two new detection passes
+(producer loop-shape recognition, consumer key-provenance matching);
+larger than a single leaf-arm addition but bounded and self-contained,
+reusing `condition_aliases`'s own invalidation discipline rather than
+inventing a new one.
