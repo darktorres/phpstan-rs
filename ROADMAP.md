@@ -1835,6 +1835,20 @@ opt-in-only re-check, not a full duplicate of the real rule. Off by
 default, mirroring real PHPStan's own opt-in `checkDynamicProperties`
 parameter.
 
+**Opt-in swapped-adjacent-argument-name detection** (PHASE_BACKLOG
+Phase 96's D6, `arguments.possiblySwapped`) - a real, disclosed
+heuristic: two adjacent, same-typed parameters are structurally
+invisible to real PHPStan's whole type-system-based architecture as
+"different roles" (`resize(int $width, int $height)` type-checks a
+swapped `resize($height, $width)` call just fine). `Checker::
+check_swapped_argument_names` (`checker/calls.rs`) fires only on the
+exact "crossed names" shape - both arguments are bare variables, each
+one's name matches the *other* position's declared parameter name
+case-insensitively, the two parameters are adjacent and identically
+typed (never `Mixed`) - never a fuzzy/partial match, to keep the
+false-positive rate low enough to be worth shipping. Gated behind
+`Registry::check_swapped_arguments`, off by default.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the

@@ -316,6 +316,14 @@ impl Project {
         self.registry.check_dynamic_properties = enabled;
     }
 
+    /// Opts the whole project's checking into swapped-adjacent-
+    /// argument-name detection - see `registry::Registry::
+    /// check_swapped_arguments`'s own doc comment for why this defaults
+    /// to `false`.
+    pub fn set_check_swapped_arguments(&mut self, enabled: bool) {
+        self.registry.check_swapped_arguments = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

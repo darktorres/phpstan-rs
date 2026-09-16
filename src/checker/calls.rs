@@ -247,6 +247,9 @@ impl<'a> Checker<'a> {
         if self.registry.check_boolean_trap {
             self.check_boolean_trap_arguments(callee_label, sig, args, defining_class, label);
         }
+        if self.registry.check_swapped_arguments {
+            self.check_swapped_argument_names(callee_label, sig, args, defining_class, label);
+        }
 
         // A spread/unpack argument's own real contents can't be resolved
         // statically (see `resolve_call_args`'s own doc comment) - every
@@ -642,6 +645,86 @@ impl<'a> Checker<'a> {
                 arg.value.span,
                 0,
                 "argument.booleanTrap",
+            );
+        }
+    }
+
+    /// PHASE_BACKLOG Phase 96's D6, opt-in: two adjacent, same-typed
+    /// positional parameters are structurally invisible to real
+    /// PHPStan's whole type-system-based architecture as "different
+    /// roles" (`resize(int $width, int $height)` type-checks a swapped
+    /// `resize($height, $width)` call just fine) - a real, disclosed
+    /// heuristic, not a soundness gap this project usually cares about
+    /// closing. Fires only on the exact "crossed names" shape: both
+    /// arguments are bare variables, and each one's name matches the
+    /// *other* position's declared parameter name (case-insensitively) -
+    /// never a fuzzy/partial match, to keep the false-positive rate low
+    /// enough to be worth shipping at all.
+    fn check_swapped_argument_names(
+        &mut self,
+        callee_label: &str,
+        sig: &FunctionSig,
+        args: &[Arg],
+        defining_class: Option<&str>,
+        label: &str,
+    ) {
+        let mut positional: Vec<(usize, &Expr)> = Vec::new();
+        let mut positional_index = 0usize;
+        for arg in args {
+            if arg.spread || arg.name.is_some() {
+                continue;
+            }
+            let index = positional_index;
+            positional_index += 1;
+            if let ExprKind::Variable(_) = &unwrap_grouping(&arg.value).kind {
+                positional.push((index, &arg.value));
+            }
+        }
+        for window in positional.windows(2) {
+            let [(i, a), (j, b)] = window else { continue };
+            if *j != *i + 1 {
+                continue;
+            }
+            let ExprKind::Variable(a_name) = &unwrap_grouping(a).kind else {
+                continue;
+            };
+            let ExprKind::Variable(b_name) = &unwrap_grouping(b).kind else {
+                continue;
+            };
+            let (Some(param_a), Some(param_b)) = (sig.params.get(*i), sig.params.get(*j)) else {
+                continue;
+            };
+            if param_a.name.eq_ignore_ascii_case(&param_b.name) {
+                continue;
+            }
+            if !a_name.eq_ignore_ascii_case(&param_b.name)
+                || !b_name.eq_ignore_ascii_case(&param_a.name)
+            {
+                continue;
+            }
+            let ty_a = match defining_class {
+                Some(c) => self.resolve_pseudo(&param_a.ty, c),
+                None => param_a.ty.clone(),
+            };
+            let ty_b = match defining_class {
+                Some(c) => self.resolve_pseudo(&param_b.ty, c),
+                None => param_b.ty.clone(),
+            };
+            if ty_a == Type::Mixed || ty_a != ty_b {
+                continue;
+            }
+            self.report(
+                label.to_string(),
+                format!(
+                    "{callee_label}() arguments #{} (${a_name}) and #{} (${b_name}) may be swapped - their variable names match the reversed parameter order (${}, ${})",
+                    i + 1,
+                    j + 1,
+                    param_a.name,
+                    param_b.name
+                ),
+                a.span,
+                5,
+                "arguments.possiblySwapped",
             );
         }
     }

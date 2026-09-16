@@ -19,26 +19,29 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with nineteen exceptions: Phases 166, 169, and 174 (unblocking two
+with twenty exceptions: Phases 166, 169, and 174 (unblocking two
 live dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162,
 167, 170, 171, and 172 (the small narrowing-engine batch this
 unblocking made it natural to pick up next), and Phase 96's D8, D2,
-D5, and D7, Phase 97's AA3, Phase 98's AB2, Phase 101's E4, E3, and
-E1, Phase 102's W1, and Phase 103's Z1 (ten small, self-contained
-items picked up next as standalone units - D2, Z1, E3, AA3, E1, and
-W1 all opt-in, per this project's "ship opt-in" convention: D2 for a
-real false-positive risk on unambiguous single-bool-parameter calls,
-Z1 because real PHPStan itself only ever ran it in a private
-issue-bot config leaving no real-world noise signal, E3, E1, and W1
-because real PHPStan ships each only via a separate opt-in mechanism
-of its own (E3/E1 via `phpstan-strict-rules`, W1 via its own opt-in
-`checkDynamicProperties` parameter; E3's own legitimate-exception
-risk: a constructor genuinely choosing not to call an otherwise-real
-parent one), AA3 because it's a purely stylistic suggestion, not a
-bug). All nineteen are now **DONE** and have moved into ROADMAP.md's
-own Done section, per this project's standing "fold DONE phases into
-Done" convention - their entries are removed from this backlog file,
-not left in place with a status tag flipped.
+D5, D6, and D7, Phase 97's AA3, Phase 98's AB2, Phase 101's E4, E3,
+and E1, Phase 102's W1, and Phase 103's Z1 (eleven small,
+self-contained items picked up next as standalone units - D2, D6, Z1,
+E3, AA3, E1, and W1 all opt-in, per this project's "ship opt-in"
+convention: D2 for a real false-positive risk on unambiguous
+single-bool-parameter calls, D6 because it's a disclosed heuristic
+(two same-typed parameters are structurally invisible to any
+type-system-based check as "different roles"), Z1 because real
+PHPStan itself only ever ran it in a private issue-bot config leaving
+no real-world noise signal, E3, E1, and W1 because real PHPStan ships
+each only via a separate opt-in mechanism of its own (E3/E1 via
+`phpstan-strict-rules`, W1 via its own opt-in `checkDynamicProperties`
+parameter; E3's own legitimate-exception risk: a constructor
+genuinely choosing not to call an otherwise-real parent one), AA3
+because it's a purely stylistic suggestion, not a bug). All twenty
+are now **DONE** and have moved into ROADMAP.md's own Done section,
+per this project's standing "fold DONE phases into Done" convention -
+their entries are removed from this backlog file, not left in place
+with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -454,11 +457,7 @@ rule of these shapes at all, confirmed by grep.
   a PHPUnit `@covers`/`#[CoversClass]` tag's target class exists),
   originally scoped to fold into the same D5 item rather than a
   separate check.
-- **D6 (medium).** Flag adjacent same-typed positional arguments whose
-  variable names suggest a swapped call order (`resize($height,
-  $width)`) — PHPStan's type system has no way to represent "these two
-  same-typed params are different roles," so this is invisible to its
-  whole architecture, not merely unimplemented.
+
 ## Phase 97 — Whole-program design-pattern suggestion rules (§AA)
 
 Real PHPStan's machinery in this space only ever *validates* an

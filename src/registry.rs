@@ -199,6 +199,12 @@ pub struct Registry {
     // mirroring real PHPStan's own opt-in `checkDynamicProperties`
     // parameter.
     pub check_dynamic_properties: bool,
+    // Opt-in swapped-adjacent-argument-name detection (PHASE_BACKLOG
+    // Phase 96's D6) - a real, disclosed heuristic (two same-typed
+    // parameters are structurally invisible to any type-system-based
+    // check as "different roles"), not a soundness gap, so opt-in like
+    // every other novel heuristic rule shipped here.
+    pub check_swapped_arguments: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

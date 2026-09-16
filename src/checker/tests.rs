@@ -66,6 +66,7 @@ mod restricted_symbol_usage;
 mod return_type_too_wide;
 mod see_tag;
 mod string_functions;
+mod swapped_arguments;
 mod symbol_existence;
 mod throws;
 mod trait_composition_and_conflicts;

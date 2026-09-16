@@ -26,6 +26,7 @@
 //! check_promoted_property_suggestions = false
 //! check_boolean_conditions = false
 //! check_dynamic_properties = false
+//! check_swapped_arguments = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -144,6 +145,10 @@ pub struct Config {
     /// `isset()`/`empty()`/`??`/`??=` - see `registry::Registry::
     /// check_dynamic_properties`'s own doc comment for why.
     pub check_dynamic_properties: Option<bool>,
+    /// Opt-in swapped-adjacent-argument-name detection - see
+    /// `registry::Registry::check_swapped_arguments`'s own doc comment
+    /// for why.
+    pub check_swapped_arguments: Option<bool>,
 }
 
 impl Config {

@@ -198,6 +198,15 @@ enum Command {
         /// check_dynamic_properties`'s own doc comment.
         #[arg(long)]
         check_dynamic_properties: bool,
+        /// Enables swapped-adjacent-argument-name detection (`resize
+        /// ($height, $width)` where the declared params are `(int
+        /// $width, int $height)`). Off by default - a real, disclosed
+        /// heuristic (two same-typed parameters are structurally
+        /// invisible to any type-system-based check as "different
+        /// roles"), not a soundness gap - see `registry::Registry::
+        /// check_swapped_arguments`'s own doc comment.
+        #[arg(long)]
+        check_swapped_arguments: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -284,6 +293,7 @@ fn main() {
             check_promoted_property_suggestions,
             check_boolean_conditions,
             check_dynamic_properties,
+            check_swapped_arguments,
             php_version,
             generate_baseline,
             baseline,
@@ -314,6 +324,7 @@ fn main() {
             check_promoted_property_suggestions,
             check_boolean_conditions,
             check_dynamic_properties,
+            check_swapped_arguments,
             php_version,
             generate_baseline,
             baseline,
