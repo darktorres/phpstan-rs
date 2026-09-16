@@ -393,15 +393,6 @@ architecture.
   (`checker/type_union.rs`'s own doc comment records a real `gdb`-caught
   hang inside `Type::eq`/`union_types`/`merge_scopes`, worked around with
   an ad hoc `MAX_UNION_MEMBERS = 12` cap rather than the root fix).
-- **C2 (small).** Parallelize `check_project`'s per-file loop across
-  native threads sharing one `Registry` — real PHPStan needs separate OS
-  processes (no cross-core object-graph sharing in PHP) plus a whole
-  shared-memory arena subsystem (`ArenaCache`) to claw back the
-  duplication cost. `Project::check_file` only needs `&self`; Rust's
-  ownership model gets this for free via `std::thread::scope`. (Note:
-  since this finding, `check_project`'s loop has in fact been
-  rayon-parallelized elsewhere in this repo's own history — re-verify
-  current state before starting, this may already be subsumed.)
 - **C3 (medium).** Memoize class-hierarchy member lookups
   (`Registry::lookup_in_hierarchy_with_owner`, re-walks the full
   ancestor BFS from scratch on every call) — real PHPStan's own
@@ -409,14 +400,6 @@ architecture.
   target, unsolved even by its native extension. A plain per-(class,
   member) memo table is immediately buildable once the class graph
   freezes at `finish_loading()`.
-- **C4 (small).** Work-stealing thread pool for `check_project`'s
-  per-file loop instead of PHPStan's own static size-sorted partition
-  (a workaround for its process-based IPC cost that doesn't apply once
-  C2's shared-memory threading exists) — a `rayon`/`crossbeam-deque`
-  work-stealing queue balances real measured cost, not a size proxy, and
-  needs no PHPStan-style post-hoc file-order restoration since
-  phpstan-rs's per-file checks are already order-independent.
-
 ---
 
 # Part 3 (BEYOND_PHPSTAN): New rule categories and design-pattern suggestions

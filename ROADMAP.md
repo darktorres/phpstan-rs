@@ -2016,6 +2016,15 @@ regression-guard benchmark, and `hotpath`, an opt-in in-process
 instrumentation profiler that catches effects system-wide `perf`
 sampling is too coarse to see.
 
+`check-project`'s own parse and check phases both run on a shared
+rayon thread pool (`main/check_project.rs`) - `Project::check_file`
+only needs `&self`, so Rust's ownership model gets cross-core sharing
+of one live `Registry` for free, unlike real PHPStan's own separate-
+process model. Files are pre-sorted largest-first before the check
+phase's own `par_iter()` to shrink the straggler tail beyond what
+rayon's built-in work-stealing alone closes. Never previously recorded
+here despite being fully built - this note corrects that gap.
+
 **LSP hover/go-to-definition** (Phase 17). A real Content-Length-framed
 JSON-RPC server. Every name reference is resolvable without receiver-
 type inference, via a `decl_locations` index plus real per-name span
