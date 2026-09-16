@@ -1948,6 +1948,32 @@ than picking one arbitrarily. Entity inheritance
 (`#[ORM\InheritanceType]`/discriminator columns) is a disclosed gap,
 confirmed absent from the real corpus - PHASE_BACKLOG's own 168j.
 
+**Symbolic Doctrine `QueryBuilder` fluent-chain resolution**
+(PHASE_BACKLOG Phase 168's 168b). `Checker::resolve_query_builder_chain`
+(`checker/doctrine/query_builder.rs`), given the receiver expression of
+a `->getQuery()` call, walks the fluent `MethodCall` chain backward
+collecting every call that can affect the query's own result-row shape
+(`select`/`addSelect`/`from`/`join`/`innerJoin`/`leftJoin`) - purely
+syntactically, unlike real PHPStan's own extension, which actually
+replays the chain onto a live `QueryBuilder` from a real
+`EntityManager`. `where`/`andWhere`/`having`/`groupBy`/`orderBy`/
+`setParameter`/etc. are dropped unconditionally rather than merely
+tolerated when unresolvable, since none of them can ever add or remove
+a result column. Two real chain-root shapes are both handled, checked
+directly against `EntityRepository::createQueryBuilder()`'s own real
+source: a plain `$em->createQueryBuilder()` (no implicit select/from),
+and the corpus-dominant `$this->createQueryBuilder($alias)` repository
+shorthand (100+ real call sites across 18 repository files - likely
+more common than the explicit-`from()` form), which real Doctrine
+defines as pure sugar for `->select($alias)->from($entityName, $alias)`
+and is resolved here via `Registry::repository_entity`'s own reverse
+lookup against 168a's `repository_class` field. `select()` replaces the
+accumulated select list; `addSelect()` appends to it, matching their
+real, distinct Doctrine semantics. A `select`/`from`/`join` argument
+that isn't a literal or class-constant-fetch expression makes the whole
+chain undecidable (`None`), the identical fallback real PHPStan's own
+extension takes at the same point.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

@@ -2045,7 +2045,7 @@ from-scratch Doctrine mapping-metadata resolver.
   already-resolved native type. Entity inheritance
   (`#[ORM\InheritanceType]`/discriminator columns) is a disclosed gap,
   confirmed absent from the corpus - see 168j.
-- **168b (medium).** Symbolic `QueryBuilder` fluent-chain resolution
+- **168b (medium, DONE).** Symbolic `QueryBuilder` fluent-chain resolution
   (`checker/doctrine/query_builder.rs`) - walks a `->getQuery()` call's
   receiver chain backward collecting `select`/`addSelect`/`from`/`join`/
   `innerJoin`/`leftJoin`, purely symbolically (no live QueryBuilder

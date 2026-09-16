@@ -789,6 +789,7 @@ mod coercion;
 mod control_flow;
 mod date_interval;
 mod deprecated_usage;
+pub(crate) mod doctrine;
 pub(crate) mod duplicate_classes;
 pub(crate) mod duplicate_functions;
 mod duplicates;
