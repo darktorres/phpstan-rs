@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder, Locals, class_kind_identifier};
+use crate::ast_walk::any_stmt_child;
+use crate::checker::{Checker, DiagnosticBuilder, Locals, class_kind_identifier, unwrap_grouping};
 use crate::docblock;
 use crate::registry::{
     FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
@@ -954,6 +955,56 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Real `phpstan-strict-rules`' `RequireParentConstructCallRule`
+    /// (`constructor.missingParentCall`) - a concrete class's own
+    /// `__construct()` that never calls `parent::__construct()`
+    /// anywhere in its body, when the nearest ancestor to actually
+    /// declare its own constructor (not just inherit one further up)
+    /// has one that's real, callable, and non-private.
+    /// `lookup_ancestor_method_with_owner` already gets that "nearest
+    /// real declaration" semantics for free.
+    pub(crate) fn check_parent_constructor_call(&mut self, fqn: &str, c: &ClassDecl) {
+        if !self.registry.check_parent_constructor_call {
+            return;
+        }
+        if c.kind == ClassKind::Trait || c.kind == ClassKind::Interface {
+            return;
+        }
+        let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") else {
+            return;
+        };
+        if ctor.is_abstract {
+            return;
+        }
+        let Some((ancestor, ancestor_sig)) = self
+            .registry
+            .lookup_ancestor_method_with_owner(fqn, "__construct")
+        else {
+            return;
+        };
+        if ancestor_sig.visibility == Visibility::Private {
+            return;
+        }
+        if self
+            .registry
+            .classes
+            .get(&ancestor)
+            .is_some_and(|info| info.abstract_methods.contains("__construct"))
+        {
+            return;
+        }
+        if body_calls_parent_construct(&ctor.function.body) {
+            return;
+        }
+        self.report(
+            fqn.to_string(),
+            format!("{fqn}::__construct() does not call parent constructor from {ancestor}."),
+            ctor.function.span,
+            4,
+            "constructor.missingParentCall",
+        );
+    }
+
     /// `@phpstan-require-extends`/`@phpstan-require-implements`'s
     /// consumer half, mirroring real PHPStan's `RequireExtendsRule`/
     /// `RequireImplementsRule`. For every interface/trait `fqn`
@@ -1073,6 +1124,26 @@ impl<'a> Checker<'a> {
             );
         }
     }
+}
+
+/// Whether `stmts` contains a `parent::__construct(...)` call as a
+/// direct statement anywhere in the body, recursing into nested blocks
+/// (`if`/`else`/`try`/`switch`/loops) the same way `any_stmt_child`'s
+/// other consumers do - real PHP call resolution is case-insensitive,
+/// so the class/method names are compared that way too.
+fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(stmt_calls_parent_construct)
+}
+
+fn stmt_calls_parent_construct(stmt: &Stmt) -> bool {
+    if let StmtKind::Expression(e) = &stmt.kind
+        && let ExprKind::StaticCall(class, method, _) = &unwrap_grouping(e).kind
+        && class.eq_ignore_ascii_case("parent")
+        && method.eq_ignore_ascii_case("__construct")
+    {
+        return true;
+    }
+    any_stmt_child(stmt, &mut stmt_calls_parent_construct)
 }
 
 fn is_php_identifier(s: &str) -> bool {

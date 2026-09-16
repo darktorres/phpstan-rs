@@ -284,6 +284,14 @@ impl Project {
         self.registry.check_array_key_cast = enabled;
     }
 
+    /// Opts the whole project's checking into
+    /// `RequireParentConstructCallRule` - see `registry::Registry::
+    /// check_parent_constructor_call`'s own doc comment for why this
+    /// defaults to `false`.
+    pub fn set_check_parent_constructor_call(&mut self, enabled: bool) {
+        self.registry.check_parent_constructor_call = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

@@ -1203,6 +1203,7 @@ impl<'a> Checker<'a> {
                             &c.consts,
                         );
                         self.check_too_wide_property_types(&fqn, c);
+                        self.check_parent_constructor_call(&fqn, c);
                     }
                 }
                 StmtKind::EnumDecl(e) => {

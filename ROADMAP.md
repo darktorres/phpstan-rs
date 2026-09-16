@@ -1564,6 +1564,21 @@ infers to `Type::Float` everywhere else in this checker (no
 case is checked directly off the AST rather than the inferred type,
 the one shape needing that.
 
+**Opt-in `constructor.missingParentCall`** (PHASE_BACKLOG Phase 101's
+E3, mirroring real `phpstan-strict-rules`' `RequireParentConstructCall
+Rule`). `Checker::check_parent_constructor_call` (`checker/oop.rs`)
+flags a concrete class's own `__construct()` that never calls `parent::
+__construct()` anywhere in its body (recursing into nested `if`/`try`/
+`switch`/loop blocks the same way other whole-body scans here do), when
+`lookup_ancestor_method_with_owner` finds a real, non-abstract,
+non-private ancestor constructor to call. Gated behind `Registry::
+check_parent_constructor_call`, off by default: real PHPStan itself
+ships this only via the separate, opt-in `phpstan/phpstan-strict-rules`
+package, and a legitimate constructor genuinely choosing not to call an
+otherwise-real parent one (composition-over-inheritance, a parent
+constructor that's a no-op by design) is real enough to keep it opt-in
+here too. Feeds Phase 111's I4 codemod once built.
+
 **Closure `use (...)` capture checks** (Phase 17). A by-value `use
 ($typo)` capture of a variable never assigned anywhere in the outer
 scope now runs through the same undefined-variable machinery a direct

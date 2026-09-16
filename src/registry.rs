@@ -174,6 +174,14 @@ pub struct Registry {
     // precedent for how noisy they are on an ordinary codebase; opt-in
     // until that's known.
     pub check_array_key_cast: bool,
+    // `RequireParentConstructCallRule` (PHASE_BACKLOG Phase 101's E3) -
+    // real PHPStan ships this only via the separate, opt-in
+    // `phpstan/phpstan-strict-rules` package, never core `phpstan/
+    // phpstan`; a legitimate constructor genuinely choosing not to call
+    // an otherwise-real parent constructor (composition-over-
+    // inheritance patterns, a parent constructor that's a no-op by
+    // design) is real enough that this stays opt-in here too.
+    pub check_parent_constructor_call: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

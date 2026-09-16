@@ -22,6 +22,7 @@
 //! check_duplicate_class_declarations = false
 //! check_boolean_trap = false
 //! check_array_key_cast = false
+//! check_parent_constructor_call = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -124,6 +125,10 @@ pub struct Config {
     /// `registry::Registry::check_array_key_cast`'s own doc comment for
     /// why.
     pub check_array_key_cast: Option<bool>,
+    /// Opt-in `RequireParentConstructCallRule` - see
+    /// `registry::Registry::check_parent_constructor_call`'s own doc
+    /// comment for why.
+    pub check_parent_constructor_call: Option<bool>,
 }
 
 impl Config {

@@ -166,6 +166,15 @@ enum Command {
         /// comment.
         #[arg(long)]
         check_array_key_cast: bool,
+        /// Enables `RequireParentConstructCallRule` (a concrete class's
+        /// own `__construct()` never calling `parent::__construct()`
+        /// when a real, callable parent constructor exists). Off by
+        /// default - real PHPStan ships this only via the separate,
+        /// opt-in `phpstan/phpstan-strict-rules` package - see
+        /// `registry::Registry::check_parent_constructor_call`'s own
+        /// doc comment.
+        #[arg(long)]
+        check_parent_constructor_call: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -248,6 +257,7 @@ fn main() {
             check_duplicate_class_declarations,
             check_boolean_trap,
             check_array_key_cast,
+            check_parent_constructor_call,
             php_version,
             generate_baseline,
             baseline,
@@ -274,6 +284,7 @@ fn main() {
             check_duplicate_class_declarations,
             check_boolean_trap,
             check_array_key_cast,
+            check_parent_constructor_call,
             php_version,
             generate_baseline,
             baseline,

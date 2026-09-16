@@ -19,20 +19,22 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with fourteen exceptions: Phases 166, 169, and 174 (unblocking two live
+with fifteen exceptions: Phases 166, 169, and 174 (unblocking two live
 dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
-made it natural to pick up next), and Phase 96's D8 and D2, Phase 98's
-AB2, Phase 101's E4, and Phase 103's Z1 (five small, self-contained
-items picked up next as standalone units - D2 and Z1 both opt-in, per
-this project's "ship opt-in" convention: D2 for a real false-positive
-risk on unambiguous single-bool-parameter calls, Z1 because real
-PHPStan itself only ever ran it in a private issue-bot config, never
-an installable package, leaving no real-world signal on how noisy it
-is). All fourteen are now **DONE** and have moved into ROADMAP.md's
-own Done section, per this project's standing "fold DONE phases into
-Done" convention - their entries are removed from this backlog file,
-not left in place with a status tag flipped.
+made it natural to pick up next), and Phase 96's D8, D2, and D5, Phase
+98's AB2, Phase 101's E4 and E3, and Phase 103's Z1 (six small,
+self-contained items picked up next as standalone units - D2, Z1, and
+E3 all opt-in, per this project's "ship opt-in" convention: D2 for a
+real false-positive risk on unambiguous single-bool-parameter calls,
+Z1 because real PHPStan itself only ever ran it in a private issue-bot
+config leaving no real-world noise signal, E3 because real PHPStan
+ships it only via the separate `phpstan-strict-rules` package and a
+legitimate constructor can genuinely choose not to call an otherwise-
+real parent one). All fifteen are now **DONE** and have moved into
+ROADMAP.md's own Done section, per this project's standing "fold DONE
+phases into Done" convention - their entries are removed from this
+backlog file, not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -557,12 +559,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
   traced to this project's own flow-sensitive variable-type-tracking
   gaps, not the checks themselves; this one risks the identical
   truthy/falsy union-splitting judgment call.
-- **E3 (small).** A concrete constructor that never calls
-  `parent::__construct()` when a real callable parent constructor
-  exists — direct combination of the existing ancestor-chain walk
-  (`lookup_ancestor_method_with_owner`) and existing
-  `parent::__construct()` reasoning (`checker/uninitialized.rs`). Feeds
-  Phase 111's I4 codemod.
 
 ## Phase 102 — More `phpstan-strict-rules` "stricter defaults" config flags (§W)
 
@@ -742,7 +738,8 @@ surface is used by only 4 rule files project-wide.
   of unused-private-member diagnostics (`*.unused`, not the
   `neverRead`/`onlyWritten` siblings, which must NOT be auto-deleted).
   Must walk backward past any preceding doc-comment before deleting.
-- **I4 (small, once Phase 101's E3 ships).** Conditional single-line
+- **I4 (small).** `constructor.missingParentCall` (Phase 101's E3, now
+  built) is ready to consume. Conditional single-line
   `parent::__construct();` insertion — only when the resolved parent
   constructor has zero required params; decline rather than guess
   otherwise.
