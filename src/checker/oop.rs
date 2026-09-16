@@ -559,6 +559,78 @@ impl<'a> Checker<'a> {
                 "phpDoc.phpstanTag",
             );
         }
+        self.check_doc_see_tag_targets(label, doc, span);
+    }
+
+    /// Real PHPStan's own `phpstan/phpdoc-parser` has no
+    /// `SeeTagValueNode` at all - PHASE_BACKLOG Phase 96's D5 fills the
+    /// gap with a plain identifier-shape check: a `@see` value that
+    /// parses as a bare class name or a `Class::member()`/`Class::
+    /// $prop`/`Class::CONST` reference is checked against the registry;
+    /// anything else (a URL, free-text prose, a bare function name with
+    /// no owning class) is left alone rather than guessed at, since
+    /// there's no upstream grammar to lean on for telling those apart
+    /// from a real symbol reference with any confidence.
+    fn check_doc_see_tag_targets(&mut self, label: &str, doc: &str, span: Span) {
+        for target in &docblock::parse(doc).see {
+            let (class_part, member) = match target.split_once("::") {
+                Some((c, m)) => (c, Some(m)),
+                None => (target.as_str(), None),
+            };
+            // A bare (no `::`) target only counts as a class reference
+            // when it starts uppercase/backslash, PHP's own class-naming
+            // convention - a lowercase bare word is far more likely the
+            // first word of a free-text description (`@see the return
+            // value of parseFoo`), which real PHPStan's own missing
+            // `SeeTagValueNode` grammar can't tell apart from a real
+            // reference either - erring towards not guessing here.
+            if member.is_none()
+                && !class_part.starts_with(|c: char| c.is_ascii_uppercase() || c == '\\')
+            {
+                continue;
+            }
+            let class_part = class_part.trim_start_matches('\\');
+            if class_part.is_empty()
+                || !class_part
+                    .split('\\')
+                    .all(|seg| is_php_identifier(seg) && !seg.is_empty())
+            {
+                continue;
+            }
+            let resolved = self.name_ctx.resolve(class_part);
+            if self.registry.lookup_class(&resolved).is_none() {
+                self.report(
+                    label.to_string(),
+                    format!("PHPDoc tag @see contains unknown class {class_part}"),
+                    span,
+                    2,
+                    "phpDoc.seeTag",
+                );
+                continue;
+            }
+            let Some(member) = member else { continue };
+            let found = if let Some(method) = member.strip_suffix("()") {
+                self.registry.lookup_method(&resolved, method).is_some()
+            } else if let Some(prop) = member.strip_prefix('$') {
+                self.registry.lookup_property(&resolved, prop).is_some()
+            } else if is_php_identifier(member) {
+                self.registry.lookup_const(&resolved, member).is_some()
+            } else {
+                // An unrecognized member shape (stray punctuation, a
+                // description that happened to contain "::") - don't
+                // guess.
+                true
+            };
+            if !found {
+                self.report(
+                    label.to_string(),
+                    format!("PHPDoc tag @see contains unknown reference {class_part}::{member}"),
+                    span,
+                    2,
+                    "phpDoc.seeTag",
+                );
+            }
+        }
     }
 
     /// Mirrors real PHPStan's `ClassConstantRule` typed-constant half:
@@ -1001,6 +1073,12 @@ impl<'a> Checker<'a> {
             );
         }
     }
+}
+
+fn is_php_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
 pub(crate) fn visibility_word(v: &Visibility) -> &'static str {

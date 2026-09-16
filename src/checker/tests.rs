@@ -59,6 +59,7 @@ mod regexp_pattern_validity;
 mod require_and_sealed;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
+mod see_tag;
 mod string_functions;
 mod symbol_existence;
 mod throws;

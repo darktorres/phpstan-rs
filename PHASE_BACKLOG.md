@@ -442,14 +442,12 @@ rule of these shapes at all, confirmed by grep.
   `include` within one function body only, no interprocedural tracking.
   PHPStan has zero taint infrastructure. Ship with an explicit
   false-positive-risk caveat; stay single-function-scoped.
-- **D5 (small).** Validate `@see` PHPDoc references resolve to a real
-  symbol — PHPStan's own `phpstan/phpdoc-parser` has no `SeeTagValueNode`
-  at all, not an architectural choice, the capability doesn't exist
-  upstream. Same territory as `brainbits/phpstan-rules`'
-  `CoversClassExistsRule` (validates a PHPUnit `@covers`/`#[CoversClass]`
-  tag's target class exists) from the top-100 survey — fold in as one
-  more PHPDoc-tag-target-existence position alongside `@see` when D5 is
-  built, not a separate check.
+- **D5 remainder (small).** `@see`'s own validation is now built (see
+  ROADMAP's Done section) — the one piece still open is
+  `brainbits/phpstan-rules`' `CoversClassExistsRule` sibling (validates
+  a PHPUnit `@covers`/`#[CoversClass]` tag's target class exists),
+  originally scoped to fold into the same D5 item rather than a
+  separate check.
 - **D6 (medium).** Flag adjacent same-typed positional arguments whose
   variable names suggest a swapped call order (`resize($height,
   $width)`) — PHPStan's type system has no way to represent "these two

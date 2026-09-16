@@ -105,6 +105,12 @@ pub struct DocBlock {
     // union. Resolved to a real `Type` (and validated as `Throwable`) at
     // registry-build time.
     pub throws: Vec<String>,
+    // `@see Target[ description]` - kept exactly as written (a plain
+    // symbol reference, a URL, or free text; distinguishing those is
+    // `checker::check_doc_see_tag_targets`'s job, not parsing's - real
+    // PHPStan's own `phpstan/phpdoc-parser` has no `SeeTagValueNode` at
+    // all, so there's no upstream shape to defer to here either).
+    pub see: Vec<String>,
     // `@phpstan-assert[-if-true/-if-false] [!]Type $target` - real
     // PHPStan's custom-assertion-function convention. `assert` narrows
     // unconditionally; `assert_if_true`/`assert_if_false` only once this
@@ -654,6 +660,12 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 let ty = take_type_token(rest);
                 if !ty.is_empty() {
                     block.throws.push(ty.to_string());
+                }
+            }
+            "see" => {
+                let target = take_type_token(rest);
+                if !target.is_empty() {
+                    block.see.push(target.to_string());
                 }
             }
             "assert-if-true" => {

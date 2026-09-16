@@ -1730,6 +1730,23 @@ named argument (`setVisible(visible: true)`) or a variable/expression
 argument is never flagged - only the bare literal shape is structurally
 invisible to ordinary type checking.
 
+**`@see` PHPDoc tag target validation** (PHASE_BACKLOG Phase 96's D5,
+`phpDoc.seeTag`). Real PHPStan's own `phpstan/phpdoc-parser` has no
+`SeeTagValueNode` at all - not an architectural choice, the capability
+doesn't exist upstream. `checker::oop::check_doc_see_tag_targets`
+(wired into the existing `check_unknown_phpstan_tags_on` call sites, so
+it runs on every class/method/property/const/function doc comment
+already) resolves a `@see` value shaped like a bare class name or a
+`Class::member()`/`Class::$prop`/`Class::CONST` reference against the
+registry. A bare (no `::`) target only counts as a class reference when
+it starts uppercase/backslash - PHP's own class-naming convention -
+since a lowercase bare word is far more likely the first word of free-
+text prose, which the same missing upstream grammar can't tell apart
+from a real reference either; a URL or anything not identifier-shaped
+is left alone the same way. The `@covers`/`#[CoversClass]` sibling this
+phase originally bundled in is still open - see PHASE_BACKLOG's "D5
+remainder".
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the
