@@ -12,6 +12,7 @@ use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
+use crate::types::Type;
 
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
@@ -639,15 +640,46 @@ impl Project {
     }
 
     /// Type-checks one already-loaded file against the project's current
-    /// registry, returning its diagnostics.
+    /// registry, returning its diagnostics. Same-file property-too-wide-
+    /// type facts only (see `Checker::cross_file_property_assign_facts`'s
+    /// own doc comment) - correct for incremental/LSP use (a single-file
+    /// re-check has no cheap way to also re-derive every other file's own
+    /// contribution), and for every caller that doesn't need the full
+    /// two-pass project-wide merge. `check_file_with_property_assign_facts`
+    /// is the batch counterpart that does.
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
+        self.check_file_impl(path, None)
+    }
+
+    /// The two-pass counterpart of `check_file` - `facts` is the whole-
+    /// project merge `collect_property_assign_facts` computed from a
+    /// prior pass over every loaded file, letting a trait-donated
+    /// property write discovered while checking a *different* file
+    /// reach this file's own `check_too_wide_property_types` call.
+    #[hotpath::measure]
+    pub fn check_file_with_property_assign_facts(
+        &self,
+        path: &Path,
+        facts: &HashMap<String, HashMap<String, Vec<Type>>>,
+    ) -> Vec<Diagnostic> {
+        self.check_file_impl(path, Some(facts))
+    }
+
+    fn check_file_impl(
+        &self,
+        path: &Path,
+        cross_file_property_assign_facts: Option<&HashMap<String, HashMap<String, Vec<Type>>>>,
+    ) -> Vec<Diagnostic> {
         let Some(file) = self.files.get(path) else {
             return Vec::new();
         };
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
+        if let Some(facts) = cross_file_property_assign_facts {
+            checker.set_cross_file_property_assign_facts(facts.clone());
+        }
         checker.check_program(&file.ast);
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
@@ -738,6 +770,35 @@ impl Project {
         out
     }
 
+    /// The collect half of the two-pass (collect-then-consume) checking
+    /// architecture: runs the checker once over every currently-loaded
+    /// file purely to gather `Checker::property_assign_facts` (this
+    /// pass's own diagnostics are discarded - `check_file`/`check_file_
+    /// with_property_assign_facts` are the real, diagnostic-producing
+    /// pass), then merges every file's own per-fqn/per-property
+    /// contribution into one whole-project map. A trait re-checked once
+    /// per host (`check_trait_methods`) already attributes its own
+    /// contribution to each host's real fqn (see `property_assign_facts`'s
+    /// own doc comment), so merging here needs no extra trait-awareness
+    /// of its own - just concatenating every file's own per-key `Vec`.
+    pub fn collect_property_assign_facts(&self) -> HashMap<String, HashMap<String, Vec<Type>>> {
+        let mut merged: HashMap<String, HashMap<String, Vec<Type>>> = HashMap::new();
+        for path in self.files.keys() {
+            let Some(file) = self.files.get(path) else {
+                continue;
+            };
+            let mut checker = Checker::new(&self.registry);
+            checker.check_program(&file.ast);
+            for (fqn, props) in checker.take_property_assign_facts() {
+                let entry = merged.entry(fqn).or_default();
+                for (prop, mut types) in props {
+                    entry.entry(prop).or_default().append(&mut types);
+                }
+            }
+        }
+        merged
+    }
+
     /// Runs the checker over every currently-loaded file, not just one -
     /// the whole-project counterpart to `check_file`. `--check-project`
     /// no longer uses this directly (it needs to check only the files it
@@ -746,11 +807,20 @@ impl Project {
     /// tests/tooling that need to see every diagnostic across a real
     /// corpus at once, rather than one file (and its
     /// transitively-affected dependents) at a time the way `update_file`
-    /// does.
+    /// does. Two-pass: `collect_property_assign_facts` runs first so a
+    /// trait-donated property write discovered in one file reaches
+    /// `check_too_wide_property_types` in whichever file declares the
+    /// host using it.
     pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        let facts = self.collect_property_assign_facts();
         self.files
             .keys()
-            .map(|path| (path.clone(), self.check_file(path)))
+            .map(|path| {
+                (
+                    path.clone(),
+                    self.check_file_with_property_assign_facts(path, &facts),
+                )
+            })
             .collect()
     }
 

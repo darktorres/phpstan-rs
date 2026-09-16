@@ -746,6 +746,7 @@ impl<'a> Checker<'a> {
         let mut then_locals = locals.clone();
         self.apply_narrowing(cond, &mut then_locals, true);
         self.check_stmt(then_branch, &mut then_locals, declared_return, label);
+        self.record_branch_implied_facts(cond, locals, &mut then_locals);
 
         let mut else_locals = locals.clone();
         self.apply_narrowing(cond, &mut else_locals, false);

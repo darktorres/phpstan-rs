@@ -78,6 +78,27 @@ type ConditionAliasMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// `discriminant_canonical_key(subject_key, value) -> [(implied_var, implied_type), ...]`
+// - a same-branch discriminant-variable correlation: whenever an
+// `if`'s own condition matches the *same* subject/value pair a prior
+// branch already recorded a fact under, every `(var, type)` pair here
+// replays into `locals` alongside that condition's own ordinary
+// narrowing (see `checker/narrowing.rs`'s `record_branch_implied_facts`/
+// `apply_equality_narrowing`'s own replay hook). `Rc`-wrapped `Vec`,
+// mirroring `ConditionAliasMap`'s own `Rc<Expr>` value, so cloning
+// `Locals` (extremely frequent - one clone per branch fork) stays O(1)
+// even though a fact list itself isn't `Copy`. Unlike `condition_
+// aliases` (purged the moment its own target is rebound), a recorded
+// fact here is a durable structural fact about the code at this exact
+// discriminant, not per-branch state - `merge_scopes` unions both
+// sides' entries rather than intersecting.
+type BranchImpliedFactsMap = imbl::GenericHashMap<
+    String,
+    std::rc::Rc<Vec<(String, Type)>>,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 /// A checked scope's variable-name-to-inferred-type bindings, plus an
 /// opt-in, parallel declaration-span side-channel the LSP's local-variable-
 /// navigation feature reads through `Checker::probe_span`/
@@ -108,6 +129,7 @@ pub(crate) struct Locals {
     pub(crate) guarded_methods: GuardedMemberSet,
     pub(crate) guarded_properties: GuardedMemberSet,
     pub(crate) condition_aliases: ConditionAliasMap,
+    pub(crate) branch_implied_facts: BranchImpliedFactsMap,
     // Whether `declare`/`insert_with_provenance` do anything - `false` by
     // default for every ordinary check-project run, `true` only for the
     // LSP's own per-request variable-navigation probe. Carried on `Locals`
@@ -223,6 +245,7 @@ impl Locals {
             guarded_methods: GuardedMemberSet::default(),
             guarded_properties: GuardedMemberSet::default(),
             condition_aliases: ConditionAliasMap::default(),
+            branch_implied_facts: BranchImpliedFactsMap::default(),
             track: self.track,
         }
     }
@@ -609,6 +632,30 @@ pub struct Checker<'a> {
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
     pub(crate) pest_hook_properties: HashSet<String>,
+    // Every private property write's own assigned type, discovered
+    // anywhere in this file's own `check_program` run - keyed by
+    // (declaring class fqn, property name), never reset per-class:
+    // `check_trait_methods` re-checks a trait's own methods once per
+    // host with `current_class` set to that host, so a trait-donated
+    // property write's own contribution must accumulate under the
+    // host's fqn regardless of which `ClassDecl` node `check_program`
+    // happens to be visiting when it runs - a per-class reset would
+    // wipe out an earlier host's own entries the moment a *different*
+    // class starts being checked. Consumed by
+    // `check_too_wide_property_types`, this project's own
+    // `TooWideFunctionReturnTypehintRule`-equivalent for properties.
+    pub(crate) property_assign_facts: HashMap<String, HashMap<String, Vec<Type>>>,
+    // The project-wide merge of every file's own `property_assign_facts`
+    // - set via `set_cross_file_property_assign_facts` (by `Project::
+    // check_file`, from a first, fact-collecting pass over every loaded
+    // file) before `check_program` runs. `None` for a standalone
+    // `Checker` never wired through that two-pass orchestration (most
+    // unit tests): `check_too_wide_property_types` then falls back to
+    // this run's own same-file `property_assign_facts`, correct for the
+    // common case where a trait and the host using it are declared (and
+    // visited, in that order) in the one file being checked.
+    pub(crate) cross_file_property_assign_facts:
+        Option<HashMap<String, HashMap<String, Vec<Type>>>>,
     // One frame per currently-open loop or switch, collecting
     // the `locals` snapshot at every `break` reached inside it - a stack,
     // since loops/switches nest. `StmtKind::Foreach`/`While`/`For`/
@@ -746,6 +793,7 @@ mod operators;
 pub(crate) mod phpstan_api;
 mod preg_pattern_validity;
 mod property_assignment;
+mod property_type_too_wide;
 mod resolve;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
@@ -820,6 +868,8 @@ impl<'a> Checker<'a> {
             in_exempt_last_condition: false,
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
+            property_assign_facts: HashMap::new(),
+            cross_file_property_assign_facts: None,
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
             loop_depth: 0,
@@ -867,6 +917,26 @@ impl<'a> Checker<'a> {
     /// finds itself, rather than one overriding the other.
     pub fn set_pest_hook_properties(&mut self, props: HashSet<String>) {
         self.pest_hook_properties = props;
+    }
+
+    /// Seeds the whole-project merge of every file's own `property_
+    /// assign_facts`, computed by `Project`'s own collect pass before the
+    /// real, diagnostic-producing pass runs - see `cross_file_property_
+    /// assign_facts`'s own doc comment.
+    pub fn set_cross_file_property_assign_facts(
+        &mut self,
+        facts: HashMap<String, HashMap<String, Vec<Type>>>,
+    ) {
+        self.cross_file_property_assign_facts = Some(facts);
+    }
+
+    /// This run's own `property_assign_facts` - the collect half of the
+    /// two-pass architecture reads this back out of a finished `Checker`
+    /// (one per file) to build the project-wide merge every other file's
+    /// own real pass then consumes via `set_cross_file_property_assign_
+    /// facts`.
+    pub fn take_property_assign_facts(&mut self) -> HashMap<String, HashMap<String, Vec<Type>>> {
+        std::mem::take(&mut self.property_assign_facts)
     }
 
     /// The declaration-site counterpart of the read-site probe hook inline
@@ -1116,6 +1186,7 @@ impl<'a> Checker<'a> {
                             &c.properties,
                             &c.consts,
                         );
+                        self.check_too_wide_property_types(&fqn, c);
                     }
                 }
                 StmtKind::EnumDecl(e) => {

@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checker::expr::type_definitely_excludes_null;
 use crate::checker::{
     Checker, Locals, build_matched_shape, int_range_bounds, literal_string_key,
     literal_string_value, normalize_int_range, unwrap_grouping,
@@ -98,6 +99,83 @@ fn condition_alias_shape(rhs: &Expr) -> bool {
 /// gets stored as an alias, matching this project's "don't guess, don't
 /// false-positive" precedent throughout `narrowing.rs`, not a false
 /// conclusion.
+/// The canonical key `record_branch_implied_facts`/`apply_equality_
+/// narrowing`'s own replay hook both key `Locals::branch_implied_facts`
+/// by - a discriminant subject (already reduced to its own
+/// `narrowing_key` string) paired with the literal/enum-case-like value
+/// it's compared against. `Type`'s own `Debug` output is used rather
+/// than a hand-rolled canonicalization: every value shape this applies
+/// to (an enum case, a literal) already has a stable, span-free `Debug`
+/// representation, and two independently-parsed occurrences of the
+/// identical comparison always resolve to `Type`-equal values here.
+pub(super) fn discriminant_canonical_key(subject_key: &str, value: &Type) -> String {
+    format!("{subject_key}=={value:?}")
+}
+
+impl<'a> Checker<'a> {
+    /// Records a same-branch discriminant-variable correlation: when
+    /// `cond` is a recognized `$subject === value` (or `==`) shape and
+    /// checking the *true* branch caused some *other* variable to become
+    /// provably non-null (from nullable/absent/`Mixed` before), stores
+    /// that as a durable fact under `discriminant_canonical_key` -
+    /// replayed by `apply_equality_narrowing` the next time the
+    /// identical discriminant is tested true anywhere else in the
+    /// program, even with no lexical relationship to this `if` at all.
+    /// Scoped to a value comparably concrete enough to make "the
+    /// identical comparison" a meaningful, reproducible fact (an enum
+    /// case, a literal) - not attempted for a comparison against a
+    /// merely-typed value with no fixed identity across occurrences.
+    pub(crate) fn record_branch_implied_facts(
+        &self,
+        cond: &Expr,
+        before: &Locals,
+        after: &mut Locals,
+    ) {
+        let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind else {
+            return;
+        };
+        let Some((subject_key, value_expr)) = (match (narrowing_key(l), narrowing_key(r)) {
+            (Some(key), _) => Some((key, r)),
+            (None, Some(key)) => Some((key, l)),
+            (None, None) => None,
+        }) else {
+            return;
+        };
+        let value_ty = self.infer_expr(value_expr, before);
+        if !matches!(
+            value_ty,
+            Type::EnumCase(..) | Type::IntLiteral(_) | Type::StringLiteral(_)
+        ) {
+            return;
+        }
+        let mut implied: Vec<(String, Type)> = Vec::new();
+        for (name, after_ty) in after.iter() {
+            if *name == subject_key {
+                continue;
+            }
+            if type_definitely_excludes_null(after_ty)
+                && *after_ty != Type::Mixed
+                && !before.get(name).is_some_and(type_definitely_excludes_null)
+            {
+                implied.push((name.clone(), after_ty.clone()));
+            }
+        }
+        if implied.is_empty() {
+            return;
+        }
+        let key = discriminant_canonical_key(&subject_key, &value_ty);
+        let mut combined = after
+            .branch_implied_facts
+            .get(&key)
+            .map(|existing| (**existing).clone())
+            .unwrap_or_default();
+        combined.extend(implied);
+        after
+            .branch_implied_facts
+            .insert(key, std::rc::Rc::new(combined));
+    }
+}
+
 fn condition_alias_target(rhs: &Expr) -> Option<String> {
     match &rhs.kind {
         ExprKind::Instanceof(inner, _) => narrowing_key(inner),

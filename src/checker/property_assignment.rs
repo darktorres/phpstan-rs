@@ -96,6 +96,21 @@ impl<'a> Checker<'a> {
         let expected = types::substitute_template(write_ty, &bindings);
         let expected = self.resolve_pseudo(&expected, &class);
         let actual = self.infer_expr(rhs, locals);
+        // `check_too_wide_property_types`'s own accumulation half - scoped
+        // to `write_visibility == Private` since that's the only
+        // visibility for which every real write is guaranteed to reach
+        // this exact choke point (a protected/public property could be
+        // written from a subclass this project never sees, so "every
+        // write we've seen" would be an unsound undercount for anything
+        // wider than private).
+        if prop_sig.write_visibility == Visibility::Private {
+            self.property_assign_facts
+                .entry(owner.clone())
+                .or_default()
+                .entry(prop.clone())
+                .or_default()
+                .push(actual.clone());
+        }
         if actual == Type::Mixed
             || self
                 .registry

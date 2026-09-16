@@ -27,10 +27,11 @@ impl<'a> Checker<'a> {
     /// user anywhere in the project still gets checked standalone.
     pub(crate) fn check_trait_methods(&mut self, fqn: &str, c: &ClassDecl) {
         let hosts = self.registry.classes_using_trait(fqn);
-        let contexts: Vec<String> = if hosts.is_empty() {
-            vec![fqn.to_string()]
-        } else {
+        let has_hosts = !hosts.is_empty();
+        let contexts: Vec<String> = if has_hosts {
             hosts
+        } else {
+            vec![fqn.to_string()]
         };
         let previous_trait = self.current_trait.take();
         self.current_trait = Some(fqn.to_string());
@@ -60,6 +61,20 @@ impl<'a> Checker<'a> {
             }
         }
         self.current_trait = previous_trait;
+        // A trait genuinely unused by any real host is its own only
+        // possible consumer of its own property-too-wide-type facts -
+        // safe to consume right here, in this same self-contained pass,
+        // unlike the real-host case (left to whichever host's own
+        // top-level `ClassDecl` processing calls `check_too_wide_
+        // property_types` for its own fqn, since a real host's own
+        // property-assignment facts can also come from its own directly-
+        // declared methods, checked at an unpredictable point relative
+        // to this trait - only the two-pass `cross_file_property_assign_
+        // facts` merge, not this single-pass call, can see both sides
+        // reliably).
+        if !has_hosts {
+            self.check_too_wide_property_types(fqn, c);
+        }
         // A trait used by 2+ classes gets checked 2+ times - a
         // genuinely host-independent bug in the trait's body (no
         // `$this->...` involved) would otherwise be reported once per

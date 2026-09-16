@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checker::narrowing::discriminant_canonical_key;
 use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_key};
 use crate::checker::narrowing::type_ops::{
     is_known_single_value, narrow_type_excluding, narrow_type_to,
@@ -125,6 +126,22 @@ impl<'a> Checker<'a> {
         } else {
             current
         };
+        // A same-branch discriminant-variable correlation
+        // (`record_branch_implied_facts`'s own doc comment): this exact
+        // discriminant, proven true here, was already seen once to also
+        // imply some *other* variable's own non-null type elsewhere in
+        // the program - replay those facts too, not just `key`'s own
+        // ordinary narrowing above.
+        if matches_when_true
+            && let Some(implied) = locals
+                .branch_implied_facts
+                .get(&discriminant_canonical_key(&key, &target_ty))
+                .cloned()
+        {
+            for (implied_key, implied_ty) in implied.iter() {
+                locals.insert(implied_key.clone(), implied_ty.clone());
+            }
+        }
         locals.insert(key, narrowed);
     }
 

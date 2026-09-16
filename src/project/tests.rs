@@ -8,4 +8,5 @@ mod inline_ignore_comments;
 mod pest_directory_scoping;
 mod php_version_setter;
 mod phpstan_api_gating;
+mod property_assign_facts;
 mod reflection_rule;

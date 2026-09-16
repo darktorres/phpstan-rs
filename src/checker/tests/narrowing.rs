@@ -3984,3 +3984,59 @@ fn condition_alias_self_reference_guard() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// `record_branch_implied_facts`/`apply_equality_narrowing`'s own replay
+// hook: a discriminant tested a second time, with no lexical
+// relationship to the branch that first proved the correlation, still
+// recalls that the other variable was set.
+#[test]
+fn a_discriminant_retested_later_implies_a_previously_set_variable_is_non_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum ConnectedWith {
+                case ApiKey;
+                case Password;
+            }
+            function f(ConnectedWith $valid_key): void {
+                $secret_key = null;
+                if ($valid_key === ConnectedWith::ApiKey) {
+                    $secret_key = "abc";
+                }
+                echo "unrelated code in between";
+                if ($valid_key === ConnectedWith::ApiKey) {
+                    assertType("'abc'", $secret_key);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_different_discriminant_value_does_not_imply_the_correlated_variable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum ConnectedWith {
+                case ApiKey;
+                case Password;
+            }
+            function f(ConnectedWith $valid_key): void {
+                $secret_key = null;
+                if ($valid_key === ConnectedWith::ApiKey) {
+                    $secret_key = "abc";
+                }
+                if ($valid_key === ConnectedWith::Password) {
+                    // Nothing narrows $secret_key here - the recorded
+                    // fact is keyed to the ApiKey discriminant
+                    // specifically, not a general "valid_key was
+                    // compared" signal - so it stays whatever the first
+                    // if's own ordinary merge already produced.
+                    assertType("'abc'|null", $secret_key);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

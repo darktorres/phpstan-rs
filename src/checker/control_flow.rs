@@ -460,6 +460,34 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // Unlike `condition_aliases` above, a `branch_implied_facts` entry is
+    // a durable structural fact about the code at one exact discriminant
+    // (see that field's own doc comment) - true whenever that
+    // discriminant holds again, regardless of which branch of *this*
+    // merge point actually ran, so a merge unions both sides rather than
+    // intersecting. `Rc::ptr_eq`-deduped when both sides inherited the
+    // identical entry unchanged (the common case - the fact was recorded
+    // before this split), otherwise both sides' own fact lists are kept
+    // (a genuinely new fact recorded independently on each side, from
+    // two different `if`s sharing one discriminant).
+    merged.branch_implied_facts = then_locals.branch_implied_facts.clone();
+    for (key, else_facts) in else_locals.branch_implied_facts.iter() {
+        match merged.branch_implied_facts.get(key) {
+            Some(then_facts) if std::rc::Rc::ptr_eq(then_facts, else_facts) => {}
+            Some(then_facts) => {
+                let mut combined = (**then_facts).clone();
+                combined.extend((**else_facts).clone());
+                merged
+                    .branch_implied_facts
+                    .insert(key.clone(), std::rc::Rc::new(combined));
+            }
+            None => {
+                merged
+                    .branch_implied_facts
+                    .insert(key.clone(), else_facts.clone());
+            }
+        }
+    }
     for (name, then_ty) in then_locals.iter() {
         if let Some(else_ty) = else_locals.get(name) {
             let mut provenance = then_locals

@@ -307,12 +307,24 @@ fn run_check_project(
     // needed - a panic mid-check can't have left it half-mutated.
     let default_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(|_| {}));
+    // The collect half of the two-pass (collect-then-consume) checking
+    // architecture - a trait-donated property write discovered while
+    // checking *any* loaded file must reach `check_too_wide_property_
+    // types` in whichever file declares the host using it, which a
+    // single per-file pass can't guarantee (see `Project::
+    // collect_property_assign_facts`'s own doc comment). Run before the
+    // real, diagnostic-producing pass below, which consumes the merge via
+    // `check_file_with_property_assign_facts` instead of `check_file`.
+    let property_assign_facts =
+        std::panic::catch_unwind(|| project.collect_property_assign_facts()).unwrap_or_default();
     let checked_results: Vec<(PathBuf, Result<Vec<checker::Diagnostic>, String>)> =
         pool.install(|| {
             analyze_files_by_size
                 .par_iter()
                 .map(|path| {
-                    let outcome = std::panic::catch_unwind(|| project.check_file(path));
+                    let outcome = std::panic::catch_unwind(|| {
+                        project.check_file_with_property_assign_facts(path, &property_assign_facts)
+                    });
                     let outcome = outcome.map_err(|payload| {
                         payload
                             .downcast_ref::<String>()

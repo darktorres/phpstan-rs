@@ -70,6 +70,10 @@ fn is_too_wide_return_type_diagnostic(d: &Diagnostic) -> bool {
     d.identifier == "return.unusedType"
 }
 
+fn is_too_wide_property_type_diagnostic(d: &Diagnostic) -> bool {
+    d.identifier == "property.unusedType" || d.identifier == "staticProperty.unusedType"
+}
+
 pub(super) fn diagnostics_for(src: &str) -> Vec<Diagnostic> {
     diagnostics_for_with(src, |_| {})
 }
@@ -83,6 +87,7 @@ pub(super) fn diagnostics_for_with(
         !is_missing_typehint_diagnostic(d)
             && !is_pure_call_result_unused_diagnostic(d)
             && !is_too_wide_return_type_diagnostic(d)
+            && !is_too_wide_property_type_diagnostic(d)
     });
     diagnostics
 }
