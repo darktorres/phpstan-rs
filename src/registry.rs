@@ -195,6 +195,11 @@ pub struct Registry {
     // string enumeration) can be a deliberate, correct choice this
     // checker has no way to confirm is truly exhaustive.
     pub check_switch_missing_default: bool,
+    // `throw new Exception()` (or any other class) with zero
+    // constructor arguments - opt-in, since a custom exception subclass
+    // can legitimately hardcode its own message internally, making a
+    // bare `new` call at the throw site correct rather than a mistake.
+    pub check_throw_without_message: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

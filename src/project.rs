@@ -339,6 +339,13 @@ impl Project {
         self.registry.check_switch_missing_default = enabled;
     }
 
+    /// Opts the whole project's checking into missing-exception-message
+    /// detection - see `registry::Registry::check_throw_without_message`'s
+    /// own doc comment for why this defaults to `false`.
+    pub fn set_check_throw_without_message(&mut self, enabled: bool) {
+        self.registry.check_throw_without_message = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

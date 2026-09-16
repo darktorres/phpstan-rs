@@ -1884,6 +1884,17 @@ this checker has no way to confirm is truly exhaustive, unlike a real
 PHP `enum`'s own `match`-exhaustiveness the checker already reasons
 about elsewhere. Gated behind `Registry::check_switch_missing_default`.
 
+**Opt-in missing-exception-message detection** (PHASE_BACKLOG Phase
+147's 147d, `throw.missingExceptionMessage`). `check_throw` (`checker/
+stmt/try_catch.rs`) flags a `throw new SomeClass();` with zero
+constructor arguments - a real, common "forgot the message" bug.
+Deliberately narrow: only a bare `new` expression at the throw site
+qualifies, so re-throwing a caught exception variable (`throw $e;`) is
+never touched. Opt-in, since a custom exception subclass can
+legitimately hardcode its own message internally, making a bare `new`
+call correct rather than a mistake. Gated behind `Registry::
+check_throw_without_message`.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

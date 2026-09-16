@@ -280,6 +280,18 @@ impl<'a> Checker<'a> {
         // judge (Mixed, a dynamic expression), including a
         // `Union`/`Intersection`-typed value.
         let thrown_ty = self.check_expr(e, locals, label);
+        if self.registry.check_throw_without_message
+            && let ExprKind::New(_, args) = &e.kind
+            && args.is_empty()
+        {
+            self.report(
+                label.to_string(),
+                "Exception thrown with no message argument.".to_string(),
+                e.span,
+                5,
+                "throw.missingExceptionMessage",
+            );
+        }
         if let Some(class) = self.thrown_value_not_throwable(&thrown_ty) {
             self.report(
                 label.to_string(),

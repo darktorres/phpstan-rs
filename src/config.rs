@@ -29,6 +29,7 @@
 //! check_swapped_arguments = false
 //! check_never_return_suggestions = false
 //! check_switch_missing_default = false
+//! check_throw_without_message = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -159,6 +160,10 @@ pub struct Config {
     /// `registry::Registry::check_switch_missing_default`'s own doc
     /// comment for why.
     pub check_switch_missing_default: Option<bool>,
+    /// Opt-in missing-exception-message detection - see
+    /// `registry::Registry::check_throw_without_message`'s own doc
+    /// comment for why.
+    pub check_throw_without_message: Option<bool>,
 }
 
 impl Config {

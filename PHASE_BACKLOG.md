@@ -1599,7 +1599,6 @@ real, widely-valued, and cheap:
   thrown anywhere — a real, common "forgot the throw keyword" typo bug;
   flag a `new`-exception expression used only as a bare statement/
   discarded value.
-- **147d (small).** `throw new Exception()` with no message argument.
 - **147e (small).** Throwing the bare `\Exception`/`\Error` base class
   instead of a specific subclass.
 ## Phase 148 — "No mixed member access" + null-coercion-safety + enum-exhaustiveness-enforcement families
