@@ -707,9 +707,8 @@ fn clone_with_overrides_and_classic_forms_both_parse() {
     };
     assert!(matches!(&rhs.kind, ExprKind::Clone(_, Some(_))));
 
-    // `clone $a->b` clones the *result* of `$a->b`, not `$a` itself -
-    // postfix binds inside clone's operand (verified against a real
-    // PHP 8.5 build).
+    // `clone $a->b` clones the result of `$a->b`, not `$a` itself -
+    // postfix binds inside clone's operand.
     let StmtKind::Expression(Expr {
         kind: ExprKind::Assign(_, rhs),
         ..

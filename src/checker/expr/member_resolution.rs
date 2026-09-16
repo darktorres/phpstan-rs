@@ -422,14 +422,13 @@ impl<'a> Checker<'a> {
                     Type::ObjectShape(vec![("days".to_string(), Type::Int, false)]),
                 ])
             }
-            // `SimpleXMLElement::asXML()`'s real 0-arg/1-arg
-            // overload split (verified against real PHPStan's own
-            // `SimpleXMLElementAsXMLMethodReturnTypeExtension`, whose
-            // arity check is the *opposite* direction the design doc's
-            // own paraphrase had it: exactly one argument - a filename to
-            // write to - returns `bool` (write success/failure); zero
-            // arguments (or any other count) returns the XML itself,
-            // `string|false`). Deliberately doesn't extend to the
+            // `SimpleXMLElement::asXML()`'s 0-arg/1-arg overload split
+            // (mirrors PHPStan's own
+            // `SimpleXMLElementAsXMLMethodReturnTypeExtension`): exactly
+            // one argument - a filename to write to - returns `bool`
+            // (write success/failure); zero arguments (or any other
+            // count) returns the XML itself, `string|false`.
+            // Deliberately doesn't extend to the
             // separate `saveXML()` alias method, matching real PHPStan's
             // own narrower scope.
             Type::Object(class, _)

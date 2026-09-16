@@ -478,12 +478,11 @@ fn a_class_partially_implementing_an_interface_is_flagged() {
 #[test]
 fn a_concrete_implementation_two_hops_up_an_extends_chain_satisfies_a_directly_implemented_interface()
  {
-    // Regression for a real BFS-distance bug found while implementing
-    // this: a class can `implements Throwable` directly while its
-    // real concrete `getCode()` only lives two `extends` hops further
-    // up (e.g. `BaseException -> Exception`) - the *closest* ancestor
-    // mentioning the name at all must not win over a real, if
-    // farther, concrete implementation.
+    // A class can `implements Throwable` directly while its concrete
+    // `getCode()` only lives two `extends` hops further up (e.g.
+    // `BaseException -> Exception`) - the closest ancestor mentioning
+    // the name at all must not win over a farther, concrete
+    // implementation.
     let d = diagnostics_for(
         r#"<?php
             interface Throwable2 {

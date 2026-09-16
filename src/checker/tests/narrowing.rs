@@ -432,8 +432,7 @@ fn not_equal_empty_string_narrows_to_non_empty_string() {
 // `$x !== []` (the array equivalent of the string idiom just above)
 // needs `is_known_single_value` to recognize an empty array literal
 // as exhaustively single-valued, the same way it already does a
-// literal string/int - verified against real PHPStan's own
-// dumpType() for both a plain array and an already-list-typed value.
+// literal string/int.
 #[test]
 fn not_equal_empty_array_narrows_to_non_empty_array() {
     let d = diagnostics_for(
@@ -2137,9 +2136,7 @@ fn narrowing_a_generated_stub_union_return_type_is_not_flagged() {
 
 #[test]
 fn short_circuit_and_narrows_its_right_operand_and_the_enclosing_if_body() {
-    // A real, common AST-visitor idiom (found via a false positive on
-    // this project's own tools/ directory once undefined-property
-    // detection actually exercised it): narrow a property chain via
+    // A common AST-visitor idiom: narrow a property chain via
     // `instanceof`, then read a property only the narrowed-to
     // subtype has - both within the same `&&` (needs check_expr's
     // short-circuit-aware traversal) and in the enclosing `if`'s body
@@ -2308,8 +2305,7 @@ fn is_string_narrows_a_literal_array_index_expression() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Found while implementing/testing Finding F above: `check_expr`'s own
-// `Index` arm never consulted the narrowed `locals` state at all -
+// `check_expr`'s `Index` arm must consult the narrowed `locals` state,
 // unlike `infer_expr`'s `Index` arm, and unlike `check_expr`'s own
 // `PropertyAccess` arm just above it in the same match. A narrowed
 // array-index expression passed as a *function argument* (checked via

@@ -1792,11 +1792,10 @@ fn nested_destructuring_assignment_binds_every_level() {
 
 #[test]
 fn nested_destructuring_does_not_check_its_own_targets_as_reads() {
-    // Regression test for a second, related bug found while fixing
-    // this one: checking the assignment's own left-hand side (not
-    // just binding it) only recursed one level into a destructuring
-    // pattern, so `$a`/`$b` were flagged as undefined on the
-    // destructuring statement itself, before binding ever ran.
+    // Checking the assignment's left-hand side (not just binding it)
+    // must recurse through every level of a destructuring pattern, or
+    // `$a`/`$b` are flagged as undefined on the destructuring statement
+    // itself, before binding ever runs.
     let d = diagnostics_for(
         r#"<?php
             function f(): void {

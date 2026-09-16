@@ -842,11 +842,10 @@ fn a_by_ref_call_with_a_list_typed_declared_parameter_still_widens_precisely() {
 // `infer_array_literal_type` must not give up entirely (falling to
 // bare `Array(Mixed)`) on any array literal containing a spread
 // element - a common shape is `[...findA(), ...findB()]`, combining
-// several `list<T>`-returning helpers into one. Verified against real
-// PHPStan's own dumpType():
-// spreading two `list<T>`s stays a `list<T>`; spreading a `list<T>`
-// alongside a plain `array<T>` degrades to plain `array<T>` (not a
-// list); a leading literal element makes the whole thing non-empty.
+// several `list<T>`-returning helpers into one: spreading two
+// `list<T>`s stays a `list<T>`; spreading a `list<T>` alongside a
+// plain `array<T>` degrades to plain `array<T>` (not a list); a
+// leading literal element makes the whole thing non-empty.
 #[test]
 fn spreading_two_lists_into_an_array_literal_still_produces_a_list() {
     let d = diagnostics_for(
@@ -885,11 +884,9 @@ fn spreading_a_list_and_a_plain_array_degrades_to_a_plain_array_not_a_list() {
 
 // Spreading another object's own precisely-known shape and adding one
 // more field - `[...$this->userInfo->toArray(), 'theme_name' => $x]`.
-// Verified against real PHPStan's own dumpType(): spreading a shape
-// with only
-// non-canonical (string) keys merges those keys in verbatim, keeping
-// the whole literal a precise shape rather than degrading to a
-// generic array.
+// Spreading a shape with only non-canonical (string) keys merges those
+// keys in verbatim, keeping the whole literal a precise shape rather
+// than degrading to a generic array.
 #[test]
 fn spreading_a_known_shape_and_adding_a_field_still_produces_a_precise_shape() {
     let d = diagnostics_for(

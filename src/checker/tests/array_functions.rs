@@ -1075,8 +1075,7 @@ fn array_filter_called_with_zero_arguments_does_not_panic() {
 // The generic by-ref-widening rule above must not discard real
 // precision for the sort() family by falling into the generic "trust
 // the declared param type" widening, which is only the plain
-// `array &$array` stub for every one of these. Verified against real
-// PHPStan's own dumpType(): sort/rsort/
+// `array &$array` stub for every one of these: sort/rsort/
 // usort/shuffle always reindex to a real list; asort/arsort/ksort/
 // krsort/uasort/uksort/natsort/natcasesort preserve the exact key
 // structure unchanged.
