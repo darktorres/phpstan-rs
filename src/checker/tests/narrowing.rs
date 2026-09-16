@@ -4040,3 +4040,212 @@ fn a_different_discriminant_value_does_not_imply_the_correlated_variable() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// `is_a()` narrowing - the runtime-value-spelled twin of `instanceof`,
+// reusing its identical narrowing primitives.
+#[test]
+fn is_a_with_a_class_const_target_narrows_like_instanceof() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Cat { public function meow(): string { return "meow"; } }
+            function useCat(Cat $c): string { return $c->meow(); }
+            function handle($animal) {
+                if (is_a($animal, Cat::class)) {
+                    return useCat($animal);
+                }
+                return "";
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn is_a_with_a_string_literal_target_narrows_like_instanceof() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Cat { public function meow(): string { return "meow"; } }
+            function useCat(Cat $c): string { return $c->meow(); }
+            function handle($animal) {
+                if (is_a($animal, 'Cat')) {
+                    return useCat($animal);
+                }
+                return "";
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A compound `||` condition assigned to a flag variable, then reused
+// later - `condition_alias_shape` now accepts a `Binary(And|Or, ...)`
+// RHS when both sides share the same narrowing target, and the replay
+// needs no new narrowing logic at all: `apply_narrowing`'s own
+// existing `Or ... if !branch_true` arm already recurses into each
+// disjunct independently.
+#[test]
+fn a_flag_holding_a_compound_or_equality_condition_narrows_on_replay() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(?int $parentId): void {
+                $parentIdIsEmpty = $parentId === null || $parentId === 0;
+                if (! $parentIdIsEmpty) {
+                    assertType('int', $parentId);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_flag_holding_a_compound_and_inequality_condition_narrows_on_replay() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(?int $x): void {
+                $flag = $x !== null && $x !== 0;
+                if ($flag) {
+                    assertType('int', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The direct-condition form (no intermediate flag variable) of the
+// same shape, via `or_chain_narrowing_target`'s own new equality leaf.
+#[test]
+fn an_or_chain_of_equality_comparisons_narrows_directly_to_the_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(int|string|bool $x): void {
+                if ($x === 1 || $x === "a") {
+                    assertType("1|'a'", $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A nullsafe chain proven non-null implies its receiver is non-null too.
+#[test]
+fn a_directly_tested_nullsafe_method_call_implies_the_receiver_is_non_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class A { public function b(): string { return "x"; } }
+            function f(?A $a): void {
+                if ($a?->b() !== null) {
+                    assertType('A', $a);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_assigned_then_tested_nullsafe_property_access_implies_the_receiver_is_non_null() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class A { public ?string $b = null; }
+            function f(?A $a): void {
+                $x = $a?->b;
+                if ($x !== null) {
+                    assertType('A', $a);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Same-condition-expression recurrence (Phase 170) - a ternary reusing
+// the identical bare-variable condition its own subject's assignment
+// was gated on, one line further down.
+#[test]
+fn a_ternary_reusing_an_earlier_if_s_identical_condition_inherits_its_effect() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(bool $sendDetail): void {
+                $news = null;
+                if ($sendDetail) {
+                    $news = "abc";
+                }
+                $result = $sendDetail ? $news : null;
+                assertType("'abc'|null", $result);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `isset($image_id)` re-checked a second time, as a fresh `if`/`else` -
+// the second `else` branch inherits the first `else` branch's own
+// effect.
+#[test]
+fn isset_re_checked_a_second_time_inherits_the_first_else_branch_s_effect() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $dbnow = null;
+                if (isset($image_id)) {
+                } else {
+                    $dbnow = "now";
+                }
+                echo "unrelated code in between";
+                if (isset($image_id)) {
+                } else {
+                    assertType("'now'", $dbnow);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Disjunctive syllogism (Phase 162): `if ($a || $b) { if ($b) {} else {
+// /* $a must be true */ } }`.
+#[test]
+fn disjunctive_syllogism_narrows_the_other_disjunct_true() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(?string $exif, ?string $exif2): void {
+                if ((bool) $exif || (bool) $exif2) {
+                    if ((bool) $exif2) {
+                    } else {
+                        assertType('non-falsy-string', $exif);
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn disjunctive_syllogism_does_not_fire_outside_a_pending_or_disjunction() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(?string $exif, ?string $exif2): void {
+                if ((bool) $exif2) {
+                } else {
+                    // No enclosing `||` pushed anything - $exif stays
+                    // whatever it already was, not narrowed to non-null.
+                    assertType('string|null', $exif);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

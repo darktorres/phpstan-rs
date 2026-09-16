@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
-    purge_stale_narrowing_for,
+    purge_stale_narrowing_for, unwrap_grouping,
 };
 use crate::docblock;
 use crate::types::Type;
@@ -360,6 +360,7 @@ impl<'a> Checker<'a> {
                 locals,
                 declared_return,
                 label,
+                inline_var.as_ref(),
             ),
             StmtKind::Switch { subject, cases } => {
                 self.check_switch(subject, cases, locals, declared_return, label)
@@ -743,13 +744,32 @@ impl<'a> Checker<'a> {
             }
         }
 
+        // Disjunctive-syllogism narrowing (`Checker::pending_or_
+        // disjunctions`'s own doc comment): a `Binary(Or, l, r))`
+        // condition's own true branch pushes `(l, r)` for the duration
+        // of `then_branch`'s own check, so any nested `if` inside it
+        // proving one disjunct false can assert the other true - popped
+        // unconditionally afterward, matching an ordinary stack
+        // discipline regardless of how `then_branch`'s own check
+        // returns.
+        let or_disjuncts = match &unwrap_grouping(cond).kind {
+            ExprKind::Binary(BinOp::Or, l, r) => Some(((**l).clone(), (**r).clone())),
+            _ => None,
+        };
+        if let Some(pair) = or_disjuncts.clone() {
+            self.pending_or_disjunctions.push(pair);
+        }
         let mut then_locals = locals.clone();
         self.apply_narrowing(cond, &mut then_locals, true);
         self.check_stmt(then_branch, &mut then_locals, declared_return, label);
-        self.record_branch_implied_facts(cond, locals, &mut then_locals);
+        if or_disjuncts.is_some() {
+            self.pending_or_disjunctions.pop();
+        }
+        self.record_branch_implied_facts(cond, locals, &mut then_locals, true);
 
         let mut else_locals = locals.clone();
         self.apply_narrowing(cond, &mut else_locals, false);
+        self.apply_disjunctive_syllogism(cond, &mut else_locals);
         if let Some(e) = else_branch {
             if let StmtKind::If {
                 cond: nested_cond,
@@ -770,6 +790,7 @@ impl<'a> Checker<'a> {
                 self.check_stmt(e, &mut else_locals, declared_return, label);
             }
         }
+        self.record_branch_implied_facts(cond, locals, &mut else_locals, false);
 
         // The classic guard clause - `if ($x === null) { return; }` -
         // depends on this: a branch that unconditionally
@@ -970,6 +991,19 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
         // and the post-dispatch reapplication) pick a `static`
         // declaration up for free.
         StmtKind::StaticVar(vars) => vars.iter().map(|(name, _)| name.clone()).collect(),
+        // A bare `@var Type` header on a `foreach` targets the loop's
+        // own value variable, mirroring every other statement kind
+        // here - only when it's a plain `$value` (not a destructuring
+        // target) *and* there's no separate key variable too (a
+        // `foreach ($x as $k => $v)` binds two names, the same
+        // ambiguity the `[single]` guard at every call site already
+        // declines to guess between) - the same "don't guess" scope
+        // every other unlisted shape already gets by falling through to
+        // the empty-`Vec` arm.
+        StmtKind::Foreach { key, value, .. } if key.is_none() => match &value.kind {
+            ExprKind::Variable(name) => vec![name.clone()],
+            _ => Vec::new(),
+        },
         _ => Vec::new(),
     }
 }

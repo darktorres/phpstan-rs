@@ -766,6 +766,20 @@ pub struct Checker<'a> {
     // graph. Scoped to one `Checker` (one file), so it never leaks across
     // files.
     call_candidate_cache: RefCell<HashMap<Span, (String, Option<String>)>>,
+    // Disjunctive-syllogism narrowing: a stack, not a `Locals` field,
+    // since it's scoped to the *traversal position* (currently inside
+    // an outer `if ($a || $b)`'s own true branch, at any nesting depth)
+    // rather than to any variable's tracked value. `check_if` pushes
+    // `(l, r)` before checking a `Binary(Or, l, r)` condition's own
+    // then-branch and pops it after, regardless of how deep a nested
+    // `if` inside that branch sits; `check_if`'s own false-branch
+    // handling consults the top of this stack (`apply_narrowing`'s
+    // reach here would need span-based identity anyway, so a small
+    // owned clone of each disjunct, not a borrow, keeps this simple) -
+    // see `checker/narrowing.rs`'s `disjunctive_syllogism_atom_key` for
+    // exactly which "is this the same atom" comparison is sound enough
+    // to act on.
+    pub(crate) pending_or_disjunctions: Vec<(Expr, Expr)>,
 }
 
 mod assignment;
@@ -880,6 +894,7 @@ impl<'a> Checker<'a> {
             probe_hit: RefCell::new(None),
             probe_var_provenance: RefCell::new(None),
             call_candidate_cache: RefCell::new(HashMap::new()),
+            pending_or_disjunctions: Vec::new(),
         }
     }
 

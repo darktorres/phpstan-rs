@@ -354,14 +354,15 @@ impl<'a> Checker<'a> {
     pub(crate) fn or_chain_narrowing_target<'e>(
         &self,
         cond: &'e Expr,
+        locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
         match &cond.kind {
             ExprKind::Binary(BinOp::Or, l, r) => {
-                let (lk, lt, le) = self.or_chain_narrowing_target(l)?;
-                let (rk, rt, _) = self.or_chain_narrowing_target(r)?;
+                let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
+                let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, union_types(lt, rt), le))
             }
-            ExprKind::Grouping(inner) => self.or_chain_narrowing_target(inner),
+            ExprKind::Grouping(inner) => self.or_chain_narrowing_target(inner, locals),
             ExprKind::Call(callee, args) => {
                 let (ExprKind::Name(name), [single_arg]) = (&callee.kind, args.as_slice()) else {
                     return None;
@@ -382,6 +383,25 @@ impl<'a> Checker<'a> {
                 let target_ty = self.resolve_name_expr(class_name);
                 Some((key, target_ty, inner))
             }
+            // `$parentId === null || $parentId === 0` - an equality-
+            // comparison leaf, the same shape `apply_equality_narrowing`
+            // already recognizes for a single condition, now composable
+            // into an arbitrary-depth `||` chain the identical way
+            // `is_*()`/`instanceof` leaves already are. `Mixed` is
+            // excluded the same way `apply_equality_narrowing` excludes
+            // it - an unresolvable value proves nothing about which
+            // member the union should include.
+            ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) => {
+                let (key, narrowed_expr, target_ty) = match (narrowing_key(l), narrowing_key(r)) {
+                    (Some(key), _) => (key, l, self.infer_expr(r, locals)),
+                    (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
+                    (None, None) => return None,
+                };
+                if target_ty == Type::Mixed {
+                    return None;
+                }
+                Some((key, target_ty, narrowed_expr))
+            }
             _ => None,
         }
     }
@@ -399,15 +419,16 @@ impl<'a> Checker<'a> {
     pub(crate) fn and_chain_narrowing_target<'e>(
         &self,
         cond: &'e Expr,
+        locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
         match &cond.kind {
             ExprKind::Binary(BinOp::And, l, r) => {
-                let (lk, lt, le) = self.and_chain_narrowing_target(l)?;
-                let (rk, rt, _) = self.and_chain_narrowing_target(r)?;
+                let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
+                let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, union_types(lt, rt), le))
             }
-            ExprKind::Grouping(inner) => self.and_chain_narrowing_target(inner),
-            ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner),
+            ExprKind::Grouping(inner) => self.and_chain_narrowing_target(inner, locals),
+            ExprKind::Unary(UnaryOp::Not, inner) => self.or_chain_narrowing_target(inner, locals),
             _ => None,
         }
     }

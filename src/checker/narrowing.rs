@@ -67,6 +67,25 @@ fn mirror_comparison(op: &BinOp) -> BinOp {
     }
 }
 
+/// The receiver of a nullsafe `?->` property/method chain - `$a` for
+/// `$a?->b`/`$a?->b()`. Shared by `condition_alias_shape`/`target`
+/// (aliasing a variable assigned from such a chain to its receiver, not
+/// the chain's own key) and `apply_equality_narrowing`'s own direct-
+/// testing hook (`if ($a?->b() !== null)` with no intermediate
+/// variable at all) - a nullsafe chain proven non-null soundly implies
+/// its receiver was non-null too, by `?->`'s own short-circuit
+/// semantics. A *non*-nullsafe chain returns `None`: `$a->b()` proven
+/// non-null says nothing new about `$a` (it was already known non-null,
+/// or this expression could never have been reached at all).
+pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
+    match &e.kind {
+        ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base, _, _, true) => {
+            Some(base)
+        }
+        _ => None,
+    }
+}
+
 /// The narrow slice of real PHPStan's `ConditionalExpressionHolder`
 /// this project builds: whether `rhs` (an assignment's right-hand side) is a recognized
 /// narrowable condition shape worth storing as a condition alias for
@@ -78,27 +97,37 @@ fn mirror_comparison(op: &BinOp) -> BinOp {
 /// correlation, `match`-arm correlation (the genuinely large part of
 /// real PHPStan's own mechanism this project declines to build).
 fn condition_alias_shape(rhs: &Expr) -> bool {
-    matches!(
-        &rhs.kind,
+    match &rhs.kind {
         ExprKind::Instanceof(..)
-            | ExprKind::Binary(
-                BinOp::Identical | BinOp::NotIdentical | BinOp::Eq | BinOp::NotEq,
-                ..
-            )
-            | ExprKind::Call(..)
-            | ExprKind::Variable(_)
-    )
+        | ExprKind::Binary(BinOp::Identical | BinOp::NotIdentical | BinOp::Eq | BinOp::NotEq, ..)
+        | ExprKind::Call(..)
+        | ExprKind::Variable(_) => true,
+        // A compound `&&`/`||` condition assigned to a flag variable,
+        // then reused later (`$flag = $a === null || $a === 0; if (!
+        // $flag) { use $a; }`) - storing the whole compound expression
+        // needs no new replay logic at all: `apply_narrowing`'s own
+        // existing `BinOp::And if branch_true`/`BinOp::Or if
+        // !branch_true` arms already recurse into each side
+        // independently (the case with a simple sequential-apply
+        // equivalent - "every conjunct/negated-disjunct must hold"),
+        // which is exactly the branch direction a stored flag's replay
+        // needs. Scoped to both sides sharing the *same* narrowing
+        // target (`condition_alias_target`'s own check below) - a
+        // compound condition spanning two different variables has no
+        // single alias target to invalidate on rebind.
+        ExprKind::Binary(BinOp::And | BinOp::Or, l, r) => {
+            condition_alias_shape(l) && condition_alias_shape(r)
+        }
+        // `$x = $a?->b();` - proving `$x` non-null later should also
+        // narrow `$a` (`nullsafe_receiver`'s own doc comment); storing
+        // the whole chain as `$x`'s alias, targeted at `$a`'s own key
+        // rather than `$x->b`'s, is what `condition_alias_target` below
+        // does.
+        _ if nullsafe_receiver(rhs).is_some() => true,
+        _ => false,
+    }
 }
 
-/// The one thing a condition-alias-eligible `rhs` actually narrows -
-/// reuses `narrowing_key` exactly the way `apply_equality_narrowing`
-/// already does for the identical operand-order-agnostic lookup. `None`
-/// for a shape `condition_alias_shape` accepted but whose own "narrowed
-/// thing" isn't `narrowing_key`-representable (most `Call`/`MethodCall`
-/// targets) - a real, disclosed leniency: such a condition simply never
-/// gets stored as an alias, matching this project's "don't guess, don't
-/// false-positive" precedent throughout `narrowing.rs`, not a false
-/// conclusion.
 /// The canonical key `record_branch_implied_facts`/`apply_equality_
 /// narrowing`'s own replay hook both key `Locals::branch_implied_facts`
 /// by - a discriminant subject (already reduced to its own
@@ -112,42 +141,152 @@ pub(super) fn discriminant_canonical_key(subject_key: &str, value: &Type) -> Str
     format!("{subject_key}=={value:?}")
 }
 
+/// The "is this the same propositional atom" identity disjunctive-
+/// syllogism narrowing needs (`Checker::pending_or_disjunctions`) -
+/// deliberately restricted to a bare truthiness atom (a variable, or
+/// `(bool) $variable`, the corpus-confirmed shape), never an equality
+/// comparison: two equality comparisons against *different* literals
+/// (`$a === 1`/`$a === 2`) would otherwise wrongly collapse to "the
+/// same atom" under a naive `narrowing_key`-only comparison, since
+/// `narrowing_key` only ever identifies the *subject*, not the value
+/// compared against.
+fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
+    let inner = match &e.kind {
+        ExprKind::Cast(kind, inner) if kind == "bool" => inner,
+        ExprKind::Grouping(inner) => inner,
+        _ => e,
+    };
+    match &inner.kind {
+        ExprKind::Variable(_) => narrowing_key(inner),
+        _ => None,
+    }
+}
+
+/// A condition recognized well enough to canonicalize as a bare-
+/// truthiness discriminant, for `record_branch_implied_facts`'s own
+/// same-condition-recurrence case (Phase 170) - a bare variable (the
+/// ternary/flag-reuse shape, `$nbmSendDetailedContent ? $news : null`
+/// reusing the identical `$nbmSendDetailedContent`'s own earlier `if`)
+/// or a single-argument `isset(...)` call (`UploadService::
+/// addUploadedFile`'s own `isset($image_id)` re-checked a second time).
+/// Deliberately narrow - not every truthiness-testable shape, just the
+/// two corpus-confirmed ones - matching this project's "don't guess"
+/// precedent throughout `narrowing.rs` rather than a general condition
+/// canonicalizer.
+fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
+    match &cond.kind {
+        ExprKind::Variable(_) => narrowing_key(cond),
+        ExprKind::Call(callee, args) => {
+            let ExprKind::Name(name) = &callee.kind else {
+                return None;
+            };
+            let [single_arg] = args.as_slice() else {
+                return None;
+            };
+            let key = narrowing_key(&single_arg.value)?;
+            (name.trim_start_matches('\\') == "isset").then(|| format!("isset({key})"))
+        }
+        _ => None,
+    }
+}
+
 impl<'a> Checker<'a> {
-    /// Records a same-branch discriminant-variable correlation: when
-    /// `cond` is a recognized `$subject === value` (or `==`) shape and
-    /// checking the *true* branch caused some *other* variable to become
-    /// provably non-null (from nullable/absent/`Mixed` before), stores
-    /// that as a durable fact under `discriminant_canonical_key` -
-    /// replayed by `apply_equality_narrowing` the next time the
-    /// identical discriminant is tested true anywhere else in the
-    /// program, even with no lexical relationship to this `if` at all.
-    /// Scoped to a value comparably concrete enough to make "the
-    /// identical comparison" a meaningful, reproducible fact (an enum
-    /// case, a literal) - not attempted for a comparison against a
-    /// merely-typed value with no fixed identity across occurrences.
+    /// Disjunctive syllogism: `if ($a || $b) { if ($b) {} else { /*
+    /// here, $a must be true */ } }` - called wherever a nested `if`'s
+    /// own condition is proven *false*, checks whether that condition
+    /// matches one atom of any currently-pending outer `||` (`Checker::
+    /// pending_or_disjunctions`, pushed by `check_if` for the duration
+    /// of an outer `Binary(Or, ..)` condition's own true branch); if so,
+    /// the *other* disjunct is asserted true via the identical
+    /// `apply_narrowing` recursion any other proven-true condition
+    /// already uses - a real, sound inference, not a new narrowing rule
+    /// of its own.
+    pub(crate) fn apply_disjunctive_syllogism(&self, cond: &Expr, locals: &mut Locals) {
+        let Some(cond_key) = disjunctive_syllogism_atom_key(cond) else {
+            return;
+        };
+        for (l, r) in self.pending_or_disjunctions.iter().rev() {
+            if disjunctive_syllogism_atom_key(l).as_deref() == Some(cond_key.as_str()) {
+                self.apply_narrowing(r, locals, true);
+            } else if disjunctive_syllogism_atom_key(r).as_deref() == Some(cond_key.as_str()) {
+                self.apply_narrowing(l, locals, true);
+            }
+        }
+    }
+
+    /// The replay half of `record_branch_implied_facts`'s bare-
+    /// truthiness discriminant shape - `subject` is the same canonical
+    /// string `truthiness_discriminant_subject` would have produced for
+    /// the condition currently being narrowed (a bare variable's own
+    /// name, or `"isset(key)"`). Looked up under whichever of `Type::
+    /// True`/`Type::False` matches `branch_true`, mirroring how the
+    /// equality discriminant's own replay (`apply_equality_narrowing`)
+    /// looks itself up by `(subject, value)`.
+    pub(crate) fn replay_truthiness_discriminant_facts(
+        &self,
+        subject: &str,
+        locals: &mut Locals,
+        branch_true: bool,
+    ) {
+        let marker = if branch_true { Type::True } else { Type::False };
+        if let Some(implied) = locals
+            .branch_implied_facts
+            .get(&discriminant_canonical_key(subject, &marker))
+            .cloned()
+        {
+            for (implied_key, implied_ty) in implied.iter() {
+                locals.insert(implied_key.clone(), implied_ty.clone());
+            }
+        }
+    }
+
+    /// Records a same-branch discriminant-variable correlation for one
+    /// branch (`branch_true` - which one `after` is the checked result
+    /// of): when checking that branch caused some *other* variable to
+    /// become provably non-null (from nullable/absent/`Mixed` before),
+    /// stores that as a durable fact under a discriminant key - replayed
+    /// the next time the identical discriminant is tested with the same
+    /// polarity anywhere else in the program, even with no lexical
+    /// relationship to this `if` at all. Two recognized discriminant
+    /// shapes, each with its own scoping: `$subject === value` (or
+    /// `==`), scoped to the *true* branch only (an equality's false
+    /// branch says nothing reusable - "not equal to X" isn't one fixed
+    /// identity to key facts under) and a value comparably concrete
+    /// enough to make "the identical comparison" reproducible (an enum
+    /// case, a literal); and a bare truthiness discriminant
+    /// (`truthiness_discriminant_subject`), keyed by `Type::True`/
+    /// `Type::False` as `discriminant_canonical_key`'s own "value" half.
+    /// The truthiness shape is safe for either branch, unlike the
+    /// equality shape, since truthy/falsy are the whole space of a
+    /// boolean condition's own outcomes, not one value out of many.
     pub(crate) fn record_branch_implied_facts(
         &self,
         cond: &Expr,
         before: &Locals,
         after: &mut Locals,
+        branch_true: bool,
     ) {
-        let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind else {
+        let subject = if branch_true
+            && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind
+        {
+            match (narrowing_key(l), narrowing_key(r)) {
+                (Some(key), _) => Some((key, self.infer_expr(r, before))),
+                (None, Some(key)) => Some((key, self.infer_expr(l, before))),
+                (None, None) => None,
+            }
+            .filter(|(_, ty)| {
+                matches!(
+                    ty,
+                    Type::EnumCase(..) | Type::IntLiteral(_) | Type::StringLiteral(_)
+                )
+            })
+        } else {
+            truthiness_discriminant_subject(cond)
+                .map(|key| (key, if branch_true { Type::True } else { Type::False }))
+        };
+        let Some((subject_key, value_ty)) = subject else {
             return;
         };
-        let Some((subject_key, value_expr)) = (match (narrowing_key(l), narrowing_key(r)) {
-            (Some(key), _) => Some((key, r)),
-            (None, Some(key)) => Some((key, l)),
-            (None, None) => None,
-        }) else {
-            return;
-        };
-        let value_ty = self.infer_expr(value_expr, before);
-        if !matches!(
-            value_ty,
-            Type::EnumCase(..) | Type::IntLiteral(_) | Type::StringLiteral(_)
-        ) {
-            return;
-        }
         let mut implied: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
             if *name == subject_key {
@@ -176,6 +315,15 @@ impl<'a> Checker<'a> {
     }
 }
 
+/// The one thing a condition-alias-eligible `rhs` actually narrows -
+/// reuses `narrowing_key` exactly the way `apply_equality_narrowing`
+/// already does for the identical operand-order-agnostic lookup. `None`
+/// for a shape `condition_alias_shape` accepted but whose own "narrowed
+/// thing" isn't `narrowing_key`-representable (most `Call`/`MethodCall`
+/// targets) - a real, disclosed leniency: such a condition simply never
+/// gets stored as an alias, matching this project's "don't guess, don't
+/// false-positive" precedent throughout `narrowing.rs`, not a false
+/// conclusion.
 fn condition_alias_target(rhs: &Expr) -> Option<String> {
     match &rhs.kind {
         ExprKind::Instanceof(inner, _) => narrowing_key(inner),
@@ -189,6 +337,16 @@ fn condition_alias_target(rhs: &Expr) -> Option<String> {
             _ => None,
         },
         ExprKind::Variable(name) => Some(name.clone()),
+        ExprKind::Binary(BinOp::And | BinOp::Or, l, r) => {
+            let lk = condition_alias_target(l)?;
+            let rk = condition_alias_target(r)?;
+            (lk == rk).then_some(lk)
+        }
+        // Targets the *receiver*'s own key, not the chain's - see
+        // `nullsafe_receiver`'s own doc comment for why.
+        ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base, _, _, true) => {
+            narrowing_key(base)
+        }
         _ => None,
     }
 }
@@ -304,7 +462,9 @@ impl<'a> Checker<'a> {
             // actual restriction-checking; this arm only acts when it
             // succeeds.
             ExprKind::Binary(BinOp::Or, ..) if branch_true => {
-                if let Some((key, target_ty, repr_expr)) = self.or_chain_narrowing_target(cond) {
+                if let Some((key, target_ty, repr_expr)) =
+                    self.or_chain_narrowing_target(cond, locals)
+                {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
                     locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
                 }
@@ -329,7 +489,9 @@ impl<'a> Checker<'a> {
             // simply lands on its own call to this same arm, mutating
             // the one shared `locals` for its own key only.
             ExprKind::Binary(BinOp::And, ..) if !branch_true => {
-                if let Some((key, target_ty, repr_expr)) = self.and_chain_narrowing_target(cond) {
+                if let Some((key, target_ty, repr_expr)) =
+                    self.and_chain_narrowing_target(cond, locals)
+                {
                     let current = self.current_narrowed_type(repr_expr, &key, locals);
                     locals.insert(key, narrow_type_to(self.registry, &current, &target_ty));
                 }
@@ -477,6 +639,20 @@ impl<'a> Checker<'a> {
                         // above. The false branch isn't safely narrowable
                         // to anything more specific, the same asymmetry
                         // `empty`/the truthy fallback below already accept.
+                        //
+                        // Same-condition-recurrence replay
+                        // (`truthiness_discriminant_subject`'s own doc
+                        // comment): the identical `isset($x)` re-checked
+                        // later, even in a fresh, lexically-unrelated
+                        // `if`/`else`, replays whatever the first
+                        // occurrence's own matching branch already
+                        // learned - both branches, unlike the narrowing
+                        // just below, which is truthy-only.
+                        self.replay_truthiness_discriminant_facts(
+                            &format!("isset({key})"),
+                            locals,
+                            branch_true,
+                        );
                         if branch_true {
                             let current =
                                 self.current_narrowed_type(&single_arg.value, &key, locals);
@@ -681,6 +857,45 @@ impl<'a> Checker<'a> {
                         let current = self.current_narrowed_type(&haystack.value, &key, locals);
                         locals.insert(key, upgrade_string_with_accessory(&current, kind));
                     }
+                } else if let ExprKind::Name(name) = &callee.kind
+                    && matches!(name.trim_start_matches('\\'), "is_a")
+                    && let [obj_arg, class_arg, ..] = args.as_slice()
+                    && let Some(key) = narrowing_key(&obj_arg.value)
+                {
+                    // `is_a($x, SomeClass::class)`/`is_a($x, 'SomeClass')`
+                    // is semantically `$x instanceof SomeClass` with its
+                    // target spelled as a runtime value instead of native
+                    // syntax - reuses the identical `Instanceof` arm's own
+                    // narrowing primitives below rather than a new
+                    // mechanism. The optional 3rd `$allow_string` argument
+                    // doesn't change narrowing at all (only whether a
+                    // `class-string` first argument is also accepted), so
+                    // it's matched away by the `..` above without being
+                    // inspected. A dynamic class-name argument (not a
+                    // literal string or `::class` constant) resolves via
+                    // `literal_string_value`'s own "give up, don't guess"
+                    // `None` the same way a dynamic `instanceof` target
+                    // does. `Foo::class` resolves via the identical
+                    // `StaticAccess(class_name, "class")` shape
+                    // `phpstan_api.rs`/`visibility.rs` already extract a
+                    // raw class name from elsewhere, not `literal_string_
+                    // value` (which only ever handles a real string
+                    // literal/concatenation).
+                    let class_name = match &class_arg.value.kind {
+                        ExprKind::StaticAccess(name, member) if member == "class" => {
+                            Some(name.clone())
+                        }
+                        _ => literal_string_value(&class_arg.value).map(|s| s.into_owned()),
+                    };
+                    if let Some(class_name) = class_name {
+                        let resolved = self.resolve_name_expr(&class_name);
+                        let current = self.current_narrowed_type(&obj_arg.value, &key, locals);
+                        if branch_true {
+                            locals.insert(key, narrow_instanceof_true(&current, &resolved));
+                        } else {
+                            locals.insert(key, narrow_type_excluding(&current, &resolved));
+                        }
+                    }
                 } else if let ExprKind::Name(name) = &callee.kind {
                     // A plain function call tagged `@phpstan-assert-if-true`/
                     // `-if-false` on its own docblock - see `FunctionSig::
@@ -844,6 +1059,7 @@ impl<'a> Checker<'a> {
                 if let Some((_, alias)) = locals.condition_aliases.get(name).cloned() {
                     self.apply_narrowing(&alias, locals, branch_true);
                 }
+                self.replay_truthiness_discriminant_facts(name, locals, branch_true);
                 if branch_true {
                     let current = self.current_narrowed_type(cond, name, locals);
                     locals.insert(name.clone(), narrow_type_excluding_falsy(&current));

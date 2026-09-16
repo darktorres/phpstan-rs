@@ -95,6 +95,25 @@ impl<'a> Checker<'a> {
             (None, Some(key)) => Some((key, r, self.infer_expr(l, locals))),
             (None, None) => None,
         };
+        // A nullsafe *method call* (`$a?->b()`) has no `narrowing_key`
+        // of its own at all (unlike a nullsafe property access, which
+        // does) - `pair` above is `None` for it, so the nullsafe-
+        // receiver implication below needs its own direct check against
+        // `l`/`r`, independent of whether `pair` succeeded, rather than
+        // being reached only through `narrowed_expr`.
+        if !matches_when_true {
+            let nullsafe_side = match (super::nullsafe_receiver(l), super::nullsafe_receiver(r)) {
+                (Some(receiver), _) if self.infer_expr(r, locals) == Type::Null => Some(receiver),
+                (_, Some(receiver)) if self.infer_expr(l, locals) == Type::Null => Some(receiver),
+                _ => None,
+            };
+            if let Some(receiver) = nullsafe_side
+                && let Some(receiver_key) = narrowing_key(receiver)
+            {
+                let current = self.current_narrowed_type(receiver, &receiver_key, locals);
+                locals.insert(receiver_key, narrow_type_excluding(&current, &Type::Null));
+            }
+        }
         let Some((key, narrowed_expr, target_ty)) = pair else {
             return;
         };
@@ -141,6 +160,23 @@ impl<'a> Checker<'a> {
             for (implied_key, implied_ty) in implied.iter() {
                 locals.insert(implied_key.clone(), implied_ty.clone());
             }
+        }
+        // A nullsafe chain assigned to a variable, then tested later
+        // (`$x = $a?->b(); if ($x !== null)`) - the direct-testing form
+        // (`if ($a?->b() !== null)`, with no intermediate variable) is
+        // already handled above, before `pair`'s own early return, since
+        // a nullsafe *method* call has no `narrowing_key` of its own to
+        // reach `narrowed_expr` through. This replays through `key`'s
+        // own `condition_aliases` entry, whose target was stored as the
+        // *receiver*'s key already (`condition_alias_target`'s own
+        // nullsafe arm), not the chain's.
+        if !matches_when_true
+            && target_ty == Type::Null
+            && let Some((alias_target, alias_expr)) = locals.condition_aliases.get(&key).cloned()
+            && let Some(receiver) = super::nullsafe_receiver(&alias_expr)
+        {
+            let current = self.current_narrowed_type(receiver, &alias_target, locals);
+            locals.insert(alias_target, narrow_type_excluding(&current, &Type::Null));
         }
         locals.insert(key, narrowed);
     }

@@ -96,6 +96,43 @@ fn a_var_tag_refining_a_wider_native_return_type_is_never_flagged() {
     );
 }
 
+// A `foreach` header's own inline `@var` annotation (Phase 161) - the
+// named form overrides the loop variable's own ordinarily-inferred
+// element type for the whole body, not just validated-and-discarded
+// the way `check_inline_var_annotation_type`'s own assign-only scope
+// leaves it for this statement kind.
+#[test]
+fn a_named_var_tag_on_a_foreach_header_overrides_the_loop_variable_s_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(array $items): void {
+                /** @var string $x */
+                foreach ($items as $x) {
+                    assertType('string', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_bare_var_tag_on_a_foreach_header_resolves_to_the_loop_variable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(array $items): void {
+                /** @var string */
+                foreach ($items as $x) {
+                    assertType('string', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_var_tag_on_a_non_assignment_statement_is_never_checked_for_type_mismatch() {
     // Scoped deliberately to the assign shape only - a `@var` on some

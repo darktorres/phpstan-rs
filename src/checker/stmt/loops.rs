@@ -499,6 +499,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
+        inline_var: Option<&(String, Type)>,
     ) {
         // A bare `$variable` subject that the body mutates in place via
         // a nested write keyed by its own loop variable (`foreach
@@ -549,6 +550,21 @@ impl<'a> Checker<'a> {
             None => self
                 .iterable_element_type(&subject_ty)
                 .unwrap_or((Type::Mixed, Type::Mixed)),
+        };
+        // A header-level inline `/** @var Type $value */` (or bare
+        // `@var Type`, resolved to this exact loop's own value variable
+        // by `statement_defined_variable_names`'s own `Foreach` arm)
+        // overrides the ordinarily-inferred element type - the same
+        // "trust the annotation over the inferred type" precedent every
+        // other annotated statement kind already gets, applied here so
+        // every convergence pass below binds the loop variable to it,
+        // not just whatever `check_stmt`'s own generic preamble happened
+        // to insert before this function's own rebinding overwrote it.
+        let element_ty = match (&value.kind, inline_var) {
+            (ExprKind::Variable(name), Some((annotated_name, ty))) if name == annotated_name => {
+                ty.clone()
+            }
+            _ => element_ty,
         };
         // See `converge_loop_body`'s own doc comment: `Foreach` gets
         // the same "may run zero times" merge with the pre-loop state
