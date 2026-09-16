@@ -2312,3 +2312,63 @@ depends on.
 **Effort: medium** — a second, expression-keyed lookup path alongside
 the existing variable-keyed one; reuses the merge/purge/replay
 machinery `condition_aliases` already has.
+
+## Phase 171 — Equality-comparison leaves in the OR/AND-chain narrowing mechanism
+
+Reevaluated a second time after an initial too-shallow pass accepted
+"confirmed hard against vendor/phpstan-src" without checking what
+mechanism already exists here. `apply_narrowing` already has a direct,
+generalized OR/AND-chain narrowing mechanism for a compound `&&`/`||`
+condition (`or_chain_narrowing_target`/`and_chain_narrowing_target`,
+`narrowing/predicates.rs:354-414`, wired in at `narrowing.rs:228`/
+`narrowing.rs:253`): it walks an arbitrary-depth chain, checks every
+leaf narrows the identical key, and unions the per-leaf target types -
+already handles `is_int($x) || is_string($x)` and
+`$x instanceof A || $x instanceof B` today. It just doesn't recognize
+an equality-comparison leaf (`$parentId === null || $parentId === 0`,
+confirmed at `CategoryService::createVirtualCategory` and three more
+call sites) - only a single-arg `is_*()` predicate call or `instanceof`
+are accepted leaf shapes right now.
+
+Add two leaf arms: `or_chain_narrowing_target` gets a
+`Binary(Identical | Eq, l, r)` arm (matching `condition_alias_shape`'s
+own already-recognized single-condition equality shapes - reuse
+`narrowing_key`/the literal-side detection it already does there);
+`and_chain_narrowing_target` gets the mirror `Binary(NotIdentical |
+NotEq, l, r)` arm directly (it can't get this for free via its own
+existing `Unary(Not, ...)` un-negation path, since `!==`/`!=` parse as
+their own `BinOp` variants, not a `Not`-wrapped `===`/`==`). Once the
+direct-condition case works, `$flag = $parentId === null || $parentId
+=== 0; if (! $flag) { use $parentId; }` narrows for free -
+`condition_aliases`' own replay (`narrowing.rs:767`) just calls
+`apply_narrowing` on the stored expression, so the flag-variable-reuse
+form needs no changes of its own.
+
+**Effort: small** — two new leaf-match arms in already-generalized,
+already-working chain-narrowing functions.
+
+## Phase 172 — Nullsafe-chain-proven-non-null implies its receiver is non-null
+
+Reevaluated a second time alongside Phase 171, for the same reason.
+Structurally different from every fix above: every existing
+`apply_narrowing` arm narrows the *tested expression's own*
+`narrowing_key` (an alias's replay, and now the OR/AND-chain leaves
+above, all still narrow the expression being tested, or one it's a
+transparent stand-in for). This fact is about a genuinely *different*
+key - `$x = $a?->b(); if ($x !== null) { ... }` should narrow `$a`
+(the receiver), not `$a->b()`/`$x` - so it needs one real new
+`apply_narrowing` match arm, not just a new accepted leaf shape:
+`ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base,
+_, _, true)`, when the whole chain is proven non-null (`branch_true`
+after the same equality/truthiness recognition every other arm already
+does), narrows `narrowing_key(base)` by excluding `Null` from its
+current type - parallel in shape to the existing `Instanceof` arm,
+which also narrows a key computed from a sub-expression of the tested
+condition, not the condition's own top-level key. Once this exists as
+a direct-condition rule, `condition_aliases`' own replay mechanism
+picks it up for an assigned flag variable (`$x = $a?->b(); ... if ($x
+!== null)`) automatically, with no changes to the alias machinery
+itself - confirmed at `ActivityRepository::insertMany`.
+
+**Effort: small** — one new, self-contained `apply_narrowing` match
+arm; no new alias/replay infrastructure.

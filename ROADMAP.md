@@ -2608,21 +2608,34 @@ section used to carry:
     survive into a closure body reading the captured variable); not
     independently assessable until Phase 169 exists, revisit after.
   - A *compound* `&&`/`||` condition assigned to a flag variable, then
-    reused later (`condition_alias_shape`'s own single-condition-shape
-    scoping) - confirmed at `CategoryService::createVirtualCategory`'s
+    reused later (confirmed at `CategoryService::createVirtualCategory`'s
     own `$parentIdIsEmpty = $parentId === null || $parentId === 0;` and
-    three more call sites - and a nullsafe call's own narrowed-non-null
-    result implying its *receiver* was non-null too (`$x = $a?->b(); if
-    ($x !== null) { /* $a is non-null */ }`, confirmed at
-    `ActivityRepository::insertMany`) both stay genuinely declined:
-    independently verified against `vendor/phpstan-src` for the
-    identical shape, real PHPStan doesn't solve either one either -
-    unlike the general-mechanism framing above, this is offered only as
-    corroborating evidence for an independently-real difficulty (no
-    known bounded mechanism either project has), not as the reason on
-    its own. Each individual finding this produces is sound (a real, if
-    practically-unreachable, edge the checker can't rule out), not a
-    false positive to chase down case by case.
+    three more call sites) is buildable, reevaluated a second time after
+    an initially too-shallow "confirmed hard against vendor/phpstan-src"
+    pass: `apply_narrowing` already has a *direct*, generalized OR/AND-
+    chain mechanism for exactly this shape (`or_chain_narrowing_target`/
+    `and_chain_narrowing_target`, `narrowing/predicates.rs:354-414`,
+    wired in at `narrowing.rs:228`/`253`) - it already walks an
+    arbitrary-depth `||`/`&&` chain checking every leaf narrows the same
+    key. It just doesn't recognize an equality-comparison leaf yet (only
+    a single-arg `is_*()` predicate call or `instanceof`) - the real gap
+    is two missing leaf arms, not missing machinery. `condition_aliases`'
+    own replay (`narrowing.rs:767`) just calls `apply_narrowing` on the
+    stored expression, so the flag-variable-reuse form is fixed for free
+    the moment the direct-condition form works - filed as PHASE_BACKLOG
+    Phase 171.
+  - A nullsafe call's own narrowed-non-null result implying its
+    *receiver* was non-null too (`$x = $a?->b(); if ($x !== null) { /*
+    $a is non-null */ }`, confirmed at `ActivityRepository::insertMany`)
+    is also buildable, but needs one genuinely new narrowing rule, not
+    just a new leaf shape: unlike every existing `apply_narrowing` arm
+    (which narrows the *tested expression's own* key), this fact is
+    about a *different* key (the receiver, not the whole nullsafe
+    chain) - a single new match arm (parallel in shape to the existing
+    `Instanceof` arm) that narrows `narrowing_key(receiver)` specifically
+    when a nullsafe chain is proven non-null. Once it exists as a
+    direct-condition rule, `condition_aliases`' replay picks it up for
+    free the same way. Filed as PHASE_BACKLOG Phase 172.
 - Doctrine ORM `QueryBuilder`/`AbstractQuery::getResult()`'s own real
   result-row shape is never inferred - its native PHP signature is
   bare `mixed` (confirmed directly in `vendor/doctrine-orm`), and real
