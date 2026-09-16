@@ -8,6 +8,7 @@ use crate::docblock;
 use crate::types::Type;
 
 mod loops;
+mod new_exception_discarded;
 mod switch;
 mod try_catch;
 
@@ -77,6 +78,7 @@ impl<'a> Checker<'a> {
                 self.in_bare_statement_position = true;
                 self.check_expr(e, locals, label);
                 self.check_no_discard_statement(e, locals, label);
+                self.check_new_exception_discarded(e, locals, label);
                 // NoopRule's own supported slice - see `checker::noop`'s
                 // module doc comment.
                 self.check_noop_statement(e, label);

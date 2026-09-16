@@ -1595,10 +1595,6 @@ real, widely-valued, and cheap:
   unconditional sibling of Phase 88 U2's Nette-rethrow consumer (which
   only fires when a *more specific* exception was thrown and
   swallowed).
-- **147c (small).** `new Exception(...)` constructed but never actually
-  thrown anywhere — a real, common "forgot the throw keyword" typo bug;
-  flag a `new`-exception expression used only as a bare statement/
-  discarded value.
 ## Phase 148 — "No mixed member access" + null-coercion-safety + enum-exhaustiveness-enforcement families
 
 Confirmed independently by `rector/type-perfect` and `shipmonk/

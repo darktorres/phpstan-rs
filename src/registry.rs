@@ -206,6 +206,14 @@ pub struct Registry {
     // exception hierarchy at all) is a legitimate style choice, not
     // necessarily an oversight.
     pub check_throw_base_class: bool,
+    // `new SomeException(...)` constructed but discarded as a bare
+    // statement, never thrown - opt-in, since a plain `new Foo();`
+    // statement for a class with a genuine constructor side effect is
+    // ordinary, legal code; only a `Throwable` subtype is even
+    // considered, but this project can't rule out every legitimate
+    // reason to build one without throwing it (e.g. handing it to a
+    // logger).
+    pub check_new_exception_discarded: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

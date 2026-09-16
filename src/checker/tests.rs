@@ -43,6 +43,7 @@ mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;
 mod never_return_suggestion;
+mod new_exception_discarded;
 mod noop;
 mod null_probes;
 mod object_shapes;

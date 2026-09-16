@@ -31,6 +31,7 @@
 //! check_switch_missing_default = false
 //! check_throw_without_message = false
 //! check_throw_base_class = false
+//! check_new_exception_discarded = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -169,6 +170,10 @@ pub struct Config {
     /// `registry::Registry::check_throw_base_class`'s own doc comment
     /// for why.
     pub check_throw_base_class: Option<bool>,
+    /// Opt-in discarded-`new`-exception detection - see
+    /// `registry::Registry::check_new_exception_discarded`'s own doc
+    /// comment for why.
+    pub check_new_exception_discarded: Option<bool>,
 }
 
 impl Config {

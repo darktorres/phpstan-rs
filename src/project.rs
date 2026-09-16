@@ -353,6 +353,13 @@ impl Project {
         self.registry.check_throw_base_class = enabled;
     }
 
+    /// Opts the whole project's checking into discarded-`new`-exception
+    /// detection - see `registry::Registry::check_new_exception_
+    /// discarded`'s own doc comment for why this defaults to `false`.
+    pub fn set_check_new_exception_discarded(&mut self, enabled: bool) {
+        self.registry.check_new_exception_discarded = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

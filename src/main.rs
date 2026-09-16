@@ -232,6 +232,12 @@ enum Command {
         /// check_throw_base_class`'s own doc comment.
         #[arg(long)]
         check_throw_base_class: bool,
+        /// Enables discarded-`new`-exception detection (`new
+        /// SomeException(...);` sitting on its own line, never thrown).
+        /// Off by default - see `registry::Registry::check_new_exception_
+        /// discarded`'s own doc comment.
+        #[arg(long)]
+        check_new_exception_discarded: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -323,6 +329,7 @@ fn main() {
             check_switch_missing_default,
             check_throw_without_message,
             check_throw_base_class,
+            check_new_exception_discarded,
             php_version,
             generate_baseline,
             baseline,
@@ -358,6 +365,7 @@ fn main() {
             check_switch_missing_default,
             check_throw_without_message,
             check_throw_base_class,
+            check_new_exception_discarded,
             php_version,
             generate_baseline,
             baseline,

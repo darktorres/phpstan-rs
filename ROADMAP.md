@@ -1908,6 +1908,20 @@ generic base class is a legitimate style choice in a project with no
 custom exception hierarchy. Gated behind `Registry::
 check_throw_base_class`.
 
+**Opt-in discarded-`new`-exception detection** (PHASE_BACKLOG Phase
+147's 147c, `new.exceptionNotThrown`). A real, common "forgot the
+`throw` keyword" typo: `new SomeException(...);` sitting on its own
+line as a whole statement, discarded rather than thrown -
+`check_new_exception_discarded` (`checker/stmt/
+new_exception_discarded.rs`) fires only when the constructed type is a
+confirmed `Throwable` subtype, using `check_no_discard_statement`'s own
+call site in `check_stmt`'s `Expression` arm. Assigning the value to a
+variable first (`$e = new Exception(...); throw $e;`) is never touched
+- only the exact bare-statement shape qualifies. Opt-in, since building
+(without throwing) a `Throwable` for some other purpose - handing it to
+a logger, say - is legitimate code this checker can't distinguish from
+the typo. Gated behind `Registry::check_new_exception_discarded`.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism
