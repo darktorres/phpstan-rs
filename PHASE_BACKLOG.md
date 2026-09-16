@@ -19,12 +19,14 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with three exceptions: Phases 166, 169, and 174 (a same-session
-reevaluation-then-implementation batch, unblocking two live dependency
-edges in `PHASE_DEPENDENCIES.md`) are now **DONE** and have moved into
-ROADMAP.md's own Done section, per this project's standing "fold DONE
-phases into Done" convention - their entries are removed from this
-backlog file, not left in place with a status tag flipped.
+with nine exceptions, both from the same reevaluation-then-
+implementation effort: Phases 166, 169, and 174 (unblocking two live
+dependency edges in `PHASE_DEPENDENCIES.md`), and Phases 161, 162, 167,
+170, 171, and 172 (the small narrowing-engine batch this unblocking
+made it natural to pick up next). All nine are now **DONE** and have
+moved into ROADMAP.md's own Done section, per this project's standing
+"fold DONE phases into Done" convention - their entries are removed
+from this backlog file, not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -2059,58 +2061,6 @@ not for the common, fully-resolvable case both shapes already parsed.
 project's own existing variance-composition pattern; no new `Type`
 variant.
 
-## Phase 161 — `foreach` header inline `@var` annotation
-
-Reevaluated out of "Permanent design boundaries" — that entry's stated
-blocker ("a header tag would need to affect the loop body's own
-checking, and shipping that half-working was judged worse than not
-supporting it") describes exactly what `check_foreach` already does
-for its ordinarily-inferred element type: bind the loop variable in
-`locals` before recursing into `body`. Overriding that bound type with
-an explicit tag is a strict superset of existing capability, not a new
-checking pathway. `Checker::inline_var_annotation(stmt)`
-(`checker/stmt.rs:798`) already takes a generic `&Stmt` and already
-resolves a *named* `@var Type $value` tag regardless of which
-`StmtKind` it sits on - a foreach header's own doc comment reaches it
-for free the moment `check_foreach` is handed the enclosing `Stmt` (or
-just this resolved override) and applies it in place of `element_ty`
-before the loop-var `declare` calls. Only the *bare* `@var Type` form
-(no explicit name) needs one new line:
-`statement_defined_variable_names` (`checker/stmt.rs:954`) has no
-`StmtKind::Foreach` arm yet, so a nameless tag can't infer "the loop's
-own value variable" the way it infers an assignment's LHS - add that
-one arm (foreach's own bound `value`, when it's a plain
-`ExprKind::Variable`, else empty per this function's existing "don't
-guess" convention for every other unresolvable case).
-
-**Effort: small** — one call-site plumbing change to `check_foreach`,
-one new `statement_defined_variable_names` match arm.
-
-## Phase 162 — Disjunctive-syllogism narrowing (`if ($a || $b) { if ($b) {} else { /* $a true */ } }`)
-
-Reevaluated out of "Permanent design boundaries" — that entry's own
-text says real PHPStan **does** handle this via its own scope-narrowing
-("a real, common idiom real PHPStan handles ... this project's
-narrower `apply_narrowing` recursion doesn't attempt"), which is a
-different, weaker claim than the neighboring "confirmed absent in real
-PHPStan too" items in the same boundary list - this one has a proven,
-existing precedent to port, not an open research problem.
-
-Needs `apply_narrowing` to recognize a `Binary(Or, l, r)` condition at
-an outer `if`, hold `(l, r)` as a live "outer disjunction" fact for the
-duration of that `if`'s own then-branch body (a new, small piece of
-state threaded alongside `locals` - not a new `Locals` field, since
-it's control-flow-position-scoped, not variable-scoped), and when a
-*nested* `if`'s own condition is recognized as one disjunct's negation,
-narrow using the other disjunct as if it were directly asserted true.
-Mirror image for `Binary(And, l, r)`: within the *false* branch, if a
-nested condition asserts one conjunct's negation, the other conjunct's
-truth is unconstrained (not narrowable) - only the `||`/true-branch
-direction is a sound implication.
-
-**Effort: medium** — new control-flow-scoped state, not just a new
-match arm, but bounded to `apply_narrowing`'s existing call sites.
-
 ## Phase 163 — `array_splice()` by-reference first-argument mutation tracking
 
 Reevaluated out of "Permanent design boundaries." `calls.rs`'s own
@@ -2178,29 +2128,6 @@ verifying no consumer assumes class names are only ever parsed from
 top-level/nested named declarations) rather than a contained function
 addition like the phases above.
 
-## Phase 167 — `is_a()` narrowing
-
-Reevaluated: ROADMAP.md's own prior decline cited "near-zero corpus
-incidence" as its reason - this project's own standing rule is that
-corpus incidence only affects sequencing/verification order, never
-whether to build a feature at all, so this decline needs a real
-technical reason to stand and doesn't have one.
-
-`is_a($x, SomeClass::class)` (and the string-literal-second-argument
-form, `is_a($x, 'SomeClass')`) is semantically an `instanceof` check
-with its target spelled as a runtime value instead of native syntax -
-`checker/narrowing.rs`'s own `apply_narrowing` already has every
-primitive this needs (`narrow_instanceof_true`/`narrow_type_excluding`,
-`narrowing_key`, and this file's own literal-string/`::class`-constant
-resolution helpers used elsewhere for other single-arg predicate
-calls). A new `ExprKind::Call` arm matching `is_a`/`\is_a` (2- or
-3-argument form; the optional 3rd `$allow_string` argument doesn't
-change narrowing at all, only whether a `class-string` first argument
-is also accepted) extracts `(inner, resolved_class_name)` and delegates
-to the identical two lines `Instanceof`'s own arm already runs.
-
-**Effort: small** — one new match arm, zero new primitives.
-
 ## Phase 168 — Doctrine ORM/DBAL untyped-result dynamic-return-type extension
 
 Filed from ROADMAP.md's own "Permanent design boundaries" entry at the
@@ -2226,97 +2153,6 @@ but disclosed here as real, buildable work rather than left unfiled:
 **Effort: large** — a real fluent-DSL-aware inference pass, comparable
 in shape to Phase 120's own Composer-path-repository parsing work, not
 a contained function addition.
-
-## Phase 170 — Same-condition-expression-recurrence narrowing
-
-One instance individually assessed out of ROADMAP.md's cross-variable-
-correlation cluster: the *same condition expression*, evaluated twice,
-where the second evaluation's branch should inherit the first's
-already-known effect. Two corpus shapes, both the identical underlying
-gap: `NotificationByMailSender::sendMailNotifications`'s own
-`$nbmSendDetailedContent ? $news : null` reusing the *identical*
-condition `$news`'s own assignment was gated on one line further down
-(a ternary gets no "which if-branch got me here" definedness narrowing,
-only ordinary type narrowing), and `UploadService::addUploadedFile`'s
-own `isset($image_id)` re-checked a second time ~150 lines later as a
-fresh `if`/`else`, whose second `else` branch assumes the first
-`else` branch (the same, unchanged condition) already ran.
-
-Generalizes `condition_aliases`'s own keying: today it keys a stored
-narrowing fact by the *flag variable name* holding a condition's
-result (`$ok = $x instanceof Foo; if ($ok) {...}`). This needs a second
-lookup path keyed by a normalized condition-expression identity
-directly (structural AST equality, the same comparison `narrowing_key`
-already does elsewhere) - so re-encountering the textually/
-structurally identical condition later, with no intermediate flag
-variable at all, still finds and replays the first evaluation's known
-effect, scoped to code that provably ran after the first evaluation
-with no intervening rebind of anything the condition or its effect
-depends on.
-
-**Effort: medium** — a second, expression-keyed lookup path alongside
-the existing variable-keyed one; reuses the merge/purge/replay
-machinery `condition_aliases` already has.
-
-## Phase 171 — Equality-comparison leaves in the OR/AND-chain narrowing mechanism
-
-Reevaluated a second time after an initial too-shallow pass accepted
-"confirmed hard against vendor/phpstan-src" without checking what
-mechanism already exists here. `apply_narrowing` already has a direct,
-generalized OR/AND-chain narrowing mechanism for a compound `&&`/`||`
-condition (`or_chain_narrowing_target`/`and_chain_narrowing_target`,
-`narrowing/predicates.rs:354-414`, wired in at `narrowing.rs:228`/
-`narrowing.rs:253`): it walks an arbitrary-depth chain, checks every
-leaf narrows the identical key, and unions the per-leaf target types -
-already handles `is_int($x) || is_string($x)` and
-`$x instanceof A || $x instanceof B` today. It just doesn't recognize
-an equality-comparison leaf (`$parentId === null || $parentId === 0`,
-confirmed at `CategoryService::createVirtualCategory` and three more
-call sites) - only a single-arg `is_*()` predicate call or `instanceof`
-are accepted leaf shapes right now.
-
-Add two leaf arms: `or_chain_narrowing_target` gets a
-`Binary(Identical | Eq, l, r)` arm (matching `condition_alias_shape`'s
-own already-recognized single-condition equality shapes - reuse
-`narrowing_key`/the literal-side detection it already does there);
-`and_chain_narrowing_target` gets the mirror `Binary(NotIdentical |
-NotEq, l, r)` arm directly (it can't get this for free via its own
-existing `Unary(Not, ...)` un-negation path, since `!==`/`!=` parse as
-their own `BinOp` variants, not a `Not`-wrapped `===`/`==`). Once the
-direct-condition case works, `$flag = $parentId === null || $parentId
-=== 0; if (! $flag) { use $parentId; }` narrows for free -
-`condition_aliases`' own replay (`narrowing.rs:767`) just calls
-`apply_narrowing` on the stored expression, so the flag-variable-reuse
-form needs no changes of its own.
-
-**Effort: small** — two new leaf-match arms in already-generalized,
-already-working chain-narrowing functions.
-
-## Phase 172 — Nullsafe-chain-proven-non-null implies its receiver is non-null
-
-Reevaluated a second time alongside Phase 171, for the same reason.
-Structurally different from every fix above: every existing
-`apply_narrowing` arm narrows the *tested expression's own*
-`narrowing_key` (an alias's replay, and now the OR/AND-chain leaves
-above, all still narrow the expression being tested, or one it's a
-transparent stand-in for). This fact is about a genuinely *different*
-key - `$x = $a?->b(); if ($x !== null) { ... }` should narrow `$a`
-(the receiver), not `$a->b()`/`$x` - so it needs one real new
-`apply_narrowing` match arm, not just a new accepted leaf shape:
-`ExprKind::PropertyAccess(base, _, true) | ExprKind::MethodCall(base,
-_, _, true)`, when the whole chain is proven non-null (`branch_true`
-after the same equality/truthiness recognition every other arm already
-does), narrows `narrowing_key(base)` by excluding `Null` from its
-current type - parallel in shape to the existing `Instanceof` arm,
-which also narrows a key computed from a sub-expression of the tested
-condition, not the condition's own top-level key. Once this exists as
-a direct-condition rule, `condition_aliases`' own replay mechanism
-picks it up for an assigned flag variable (`$x = $a?->b(); ... if ($x
-!== null)`) automatically, with no changes to the alias machinery
-itself - confirmed at `ActivityRepository::insertMany`.
-
-**Effort: small** — one new, self-contained `apply_narrowing` match
-arm; no new alias/replay infrastructure.
 
 ## Phase 173 — Same-function parallel dynamically-keyed array correlation
 

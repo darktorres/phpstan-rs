@@ -956,9 +956,81 @@ intersected on merge), a fact here is a durable structural fact about
 the code at one exact discriminant - `merge_scopes` unions both
 branches' entries instead. Scoped to a value comparably concrete enough
 to make "the identical comparison" reproducible (an enum case, an int/
-string literal); a bare boolean-truthiness discriminant (as opposed to
-an equality comparison) and surviving into a closure capture are both
-disclosed, not attempted - see PHASE_BACKLOG's Phase 175.
+string literal), for the equality shape specifically; surviving into a
+closure capture is disclosed, not attempted - see PHASE_BACKLOG's
+Phase 175.
+
+Same-condition-expression-recurrence narrowing (Phase 170): generalizes
+the mechanism above to a second discriminant shape,
+`truthiness_discriminant_subject` - a bare variable (the ternary/flag-
+reuse idiom, `$flag ? $news : null` reusing the identical `$flag`'s own
+earlier `if`) or a single-argument `isset(...)` call, keyed by `Type::
+True`/`Type::False` as `discriminant_canonical_key`'s own "value" half
+instead of a compared literal. Unlike the equality shape (true-branch
+only - "not equal to X" isn't one fixed identity to key facts under),
+this one records for *both* branches, since truthy/falsy exhaust a
+boolean condition's own outcome space; `replay_truthiness_discriminant_
+facts` is the shared replay half, called from the bare-`Variable` arm
+and the `isset(...)` arm alike.
+
+Disjunctive-syllogism narrowing (Phase 162): `if ($a || $b) { if ($b)
+{} else { /* $a must be true */ } }` - a new `Checker::pending_or_
+disjunctions` stack (control-flow-position-scoped, not a `Locals`
+field, since it tracks *where* checking currently is, not any
+variable's value), pushed with `(l, r)` by `check_if` for the duration
+of an outer `Binary(Or, l, r))`'s own true-branch check and popped
+after, regardless of nesting depth. Any nested `if` proving one
+disjunct false (`Checker::apply_disjunctive_syllogism`, matched via
+`disjunctive_syllogism_atom_key` - deliberately restricted to a bare
+variable or `(bool) $variable`, never an equality comparison, to avoid
+two different-literal comparisons wrongly collapsing to "the same
+atom") asserts the other disjunct true through the identical
+`apply_narrowing` recursion any other proven-true condition already
+uses. The mirror `Binary(And, ..)`-false-branch case stays unattempted
+- unlike the `||`/true direction, it isn't a sound implication.
+
+`is_a()` narrowing (Phase 167): `is_a($x, SomeClass::class)`/
+`is_a($x, 'SomeClass')` reuses `instanceof`'s own
+`narrow_instanceof_true`/`narrow_type_excluding` primitives directly,
+resolving the class-name argument via either a string literal or a
+`Foo::class` constant (`ExprKind::StaticAccess(name, "class")`,
+`checker/narrowing.rs`).
+
+Equality-comparison leaves in the OR/AND-chain narrowing mechanism
+(Phase 171) and nullsafe-chain-proven-non-null implies its receiver is
+non-null (Phase 172): `or_chain_narrowing_target` gained a
+`Binary(Identical | Eq, ..)` leaf (`$parentId === null || $parentId ===
+0` now narrows directly to the union, the same way an arbitrary-depth
+chain of `is_*()`/`instanceof` leaves already did); the flag-variable-
+reuse form of the identical shape (`$flag = $parentId === null ||
+$parentId === 0; if (! $flag) { use $parentId; }`) needed a different,
+more load-bearing fix - `condition_alias_shape`/`condition_alias_
+target` now accept a compound `Binary(And | Or, l, r)` RHS at all, when
+both sides share one narrowing target, since `apply_narrowing`'s own
+existing sequential-recursion arms (`And` true-branch, `Or`
+false-branch) already replay it correctly once the alias can be
+stored - no new narrowing logic needed for that half. Phase 172's own
+nullsafe-chain implication (`$a?->b() !== null` implies `$a` is
+non-null) needed one real new `apply_equality_narrowing` check (since a
+nullsafe *method* call has no `narrowing_key` of its own to reach
+through the ordinary path) for the direct-testing form, plus a new
+`condition_alias_target` arm (targeting the *receiver*'s key, not the
+chain's) for the assigned-then-tested form
+(`$x = $a?->b(); if ($x !== null) { ... }`).
+
+`foreach` header inline `@var` annotation (Phase 161):
+`Checker::inline_var_annotation` already ran generically for every
+statement kind, `Foreach` included, via `check_stmt`'s own preamble -
+the real gap was `check_foreach` itself unconditionally rebinding the
+loop variable to the ordinarily-inferred element type on every
+convergence pass, overwriting whatever the preamble had set. Threaded
+the resolved annotation through as an override instead. The bare
+(nameless) `@var Type` form needed one more piece:
+`statement_defined_variable_names` gained a `StmtKind::Foreach` arm
+resolving to the loop's own value variable, but only when there's no
+separate key variable too (`foreach ($x as $k => $v)` binds two names,
+the same ambiguity every other unresolvable shape already declines to
+guess between).
 
 ## Rule catalog (checker)
 
