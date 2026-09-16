@@ -953,14 +953,13 @@ fn preg_match_free_spacing_mode_still_treats_class_whitespace_as_literal() {
     );
 }
 
-// (a): `(?|...)` branch-reset - the classic idiom (each branch captures
+// `(?|...)` branch-reset - the classic idiom (each branch captures
 // something, reusing the same public group number) still can't be
 // shape-typed (see `parse_capture_groups`'s own doc comment on why),
-// but no longer bails the *whole* parse the way it did before this
-// phase - `$matches` just stays the generic widened fallback, same as
-// any other call this project doesn't confidently understand, rather
-// than every other `preg_match` in the same function file getting no
-// benefit from this scanner at all.
+// but must not bail the whole parse - `$matches` just stays the generic
+// widened fallback, same as any other call this project doesn't
+// confidently understand, rather than every other `preg_match` in the
+// same function file getting no benefit from this scanner at all.
 #[test]
 fn preg_match_branch_reset_with_reused_numbers_safely_stays_untyped() {
     let d = diagnostics_for(
