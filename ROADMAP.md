@@ -2575,18 +2575,31 @@ section used to carry:
     genuinely different cases on a third reevaluation pass: the
     *same-function* case (both the populating loop and the later read
     are in one method, matching every corpus citation above) is
-    buildable - filed as PHASE_BACKLOG Phase 173. What stays a real
-    architectural wall is only the *cross-function* generalization
-    (the producing loop and the consuming read site in genuinely
-    different functions/methods): `Locals` (and anything built on it,
-    including Phase 173's own new side-table) is entirely discarded at
-    the end of each function's own check - `Checker::check_file` builds
-    one fresh, single-use `Checker` per file (the same fact behind
-    Phase 166's trait-tracking gap) - and there's no existing mechanism
-    to persist an arbitrary per-call-site, per-variable-pair fact
-    across a function boundary the way `Registry`'s own fixed-point
-    data (aggregate, declaration-level - purity, type signatures)
-    already does for symbol-level facts.
+    buildable - filed as PHASE_BACKLOG Phase 173. The *cross-function*
+    generalization (the producing loop and the consuming read site in
+    genuinely different functions/methods) splits into two layers on a
+    fourth reevaluation pass, only one of which is a real wall:
+    (1) persisting the fact across a function boundary at all needs the
+    same "genuinely new two-pass (collect-then-consume) checking
+    architecture" Phase 166 already discloses as its own real fix
+    (`registry/purity.rs`'s own transitive-purity fixed point can't be
+    reused directly - its own doc comment discloses it deliberately
+    only resolves call targets knowable *without* a live `Checker`/
+    `Scope`, precisely because a correlation fact, unlike purity, can
+    only be discovered by fully flow-sensitively checking a function
+    body in the first place) - real, disclosed, large work, not
+    impossible, and building it once unlocks both gaps. (2) is the
+    actual wall: a fact collected once has to still hold by the time a
+    later, different function's check consumes it, and in the general
+    case arbitrary intervening code (another method on the same object,
+    a subclass override, an alias) could invalidate one side without
+    the other - soundly answering "does this correlation still hold
+    here" is an invariant-maintenance proof across arbitrary call
+    sequences to shared state, not a bigger data-flow analysis - a
+    fundamentally different, harder class of problem (the same
+    territory as separation logic/ownership analysis) with no known
+    bounded design in this codebase to extend, unlike every other item
+    in this cluster.
   - A discriminant variable whose value implies another variable was
     already set in the same branch (`AuthService::authKeyLogin`'s own
     `$valid_key === ConnectedWith::ApiKey` implying `$secret_key` is no
