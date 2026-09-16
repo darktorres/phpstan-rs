@@ -1601,6 +1601,7 @@ real, widely-valued, and cheap:
   discarded value.
 - **147e (small).** Throwing the bare `\Exception`/`\Error` base class
   instead of a specific subclass.
+
 ## Phase 148 — "No mixed member access" + null-coercion-safety + enum-exhaustiveness-enforcement families
 
 Confirmed independently by `rector/type-perfect` and `shipmonk/
