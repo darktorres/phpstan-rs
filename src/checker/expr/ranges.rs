@@ -41,6 +41,27 @@ pub(crate) fn normalize_int_range(min: Option<i64>, max: Option<i64>) -> Type {
     }
 }
 
+/// Applies `op` to two bounds, distinguishing a genuine `i64` overflow
+/// (both operands were real values, but the exact result doesn't fit)
+/// from a merely-unbounded operand (`None` propagating as `None` is
+/// correct there, not an overflow) - `bool` is `true` only for the
+/// former, the signal `Add`/`Sub`/`Mul` need to union `Type::Float`
+/// into their result the same way real PHP silently promotes an
+/// overflowing int operation to float at runtime.
+pub(crate) fn checked_bound_op(
+    a: Option<i64>,
+    b: Option<i64>,
+    op: impl Fn(i64, i64) -> Option<i64>,
+) -> (Option<i64>, bool) {
+    match (a, b) {
+        (Some(x), Some(y)) => match op(x, y) {
+            Some(v) => (Some(v), false),
+            None => (None, true),
+        },
+        _ => (None, false),
+    }
+}
+
 /// An unbounded end, mapped to signed infinity - `mul_int_range`'s own
 /// corner-product formula needs this so a single formula covers every
 /// combination of bounded/unbounded ends uniformly, matching real
@@ -93,7 +114,18 @@ pub(crate) fn mul_int_range(
     let max2 = corner(l_max, r_max, f64::INFINITY, f64::INFINITY);
     let min = min1.min(min2).min(max1).min(max2);
     let max = min1.max(min2).max(max1).max(max2);
-    normalize_int_range(finite_bound(min), finite_bound(max))
+    let (min_bound, max_bound) = (finite_bound(min), finite_bound(max));
+    let result = normalize_int_range(min_bound, max_bound);
+    // With every input bound present (no `?? -INF`/`?? INF` substitution
+    // ever used above), a non-finite corner can only be a genuine `i64`
+    // overflow, not a propagated unbounded operand - the same real-PHP
+    // int-to-float promotion `checked_bound_op` signals for `Add`/`Sub`.
+    let all_bounded = l_min.is_some() && l_max.is_some() && r_min.is_some() && r_max.is_some();
+    if all_bounded && (min_bound.is_none() || max_bound.is_none()) {
+        union_types(result, Type::Float)
+    } else {
+        result
+    }
 }
 
 /// Real PHPStan's own `integerRangeMath`'s `Minus` arm's own range-minus-

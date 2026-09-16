@@ -21,8 +21,8 @@ mod probe_checks;
 mod ranges;
 
 use crate::checker::expr::ranges::{
-    compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range, mul_int_range,
-    numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
+    checked_bound_op, compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range,
+    mul_int_range, numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
 };
 use crate::checker::type_union::union_types;
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
@@ -3891,18 +3891,19 @@ impl<'a> Checker<'a> {
                 if let (Some((l_min, l_max)), Some((r_min, r_max))) =
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                 {
-                    // `checked_add`, not plain `+`: real PHP silently
-                    // promotes an overflowing int addition to `float`
-                    // (`InitializerExprTypeResolver::integerRangeMath`'s
-                    // own `int|float|null` result type), which this
-                    // project's sibling `pow_int_range`/`shift_int_range`
-                    // already model by collapsing an overflowing bound to
-                    // `None` (unbounded) - plain `i64::+` here would
+                    // `checked_add` via `checked_bound_op`, not plain `+`:
+                    // real PHP silently promotes an overflowing int
+                    // addition to `float` - plain `i64::+` here would
                     // instead panic/wrap on adversarial input like
                     // `int<1, PHP_INT_MAX> + int<1, 10>`.
-                    let min = l_min.zip(r_min).and_then(|(a, b)| a.checked_add(b));
-                    let max = l_max.zip(r_max).and_then(|(a, b)| a.checked_add(b));
-                    return normalize_int_range(min, max);
+                    let (min, min_overflow) = checked_bound_op(l_min, r_min, i64::checked_add);
+                    let (max, max_overflow) = checked_bound_op(l_max, r_max, i64::checked_add);
+                    let result = normalize_int_range(min, max);
+                    return if min_overflow || max_overflow {
+                        union_types(result, Type::Float)
+                    } else {
+                        result
+                    };
                 }
                 Type::Int
             }
@@ -3925,11 +3926,16 @@ impl<'a> Checker<'a> {
                     (int_range_bounds(&lt), int_range_bounds(&rt))
                     && c == rc
                 {
-                    // `checked_sub` - see the `Add` arm's own doc comment
-                    // just above for why plain `i64::-` isn't safe here.
-                    let min = l_min.and_then(|m| m.checked_sub(c));
-                    let max = l_max.and_then(|m| m.checked_sub(c));
-                    return normalize_int_range(min, max);
+                    // `checked_sub` via `checked_bound_op` - see the `Add`
+                    // arm's own doc comment just above.
+                    let (min, min_overflow) = checked_bound_op(l_min, Some(c), i64::checked_sub);
+                    let (max, max_overflow) = checked_bound_op(l_max, Some(c), i64::checked_sub);
+                    let result = normalize_int_range(min, max);
+                    return if min_overflow || max_overflow {
+                        union_types(result, Type::Float)
+                    } else {
+                        result
+                    };
                 }
                 // The full range-minus-range case (`$x - $y`, both sides
                 // genuinely range-representable, right side not a single

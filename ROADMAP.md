@@ -259,6 +259,14 @@ PHPStan's own `InitializerExprTypeResolver`) and a real cast/coercion
 method surface (`toInteger`/`toFloat`/`toString` legality, including
 through `Intersection`). `print`/`InvalidPartOfEncapsedStringRule` and
 the stdlib `IntegerRangeType`-consumer extensions are wired up too.
+`+`/`-`'s constant-shift fast path/`*` now union `Float` into their
+result when a bound genuinely overflows `i64` (`checked_bound_op`,
+`checker/expr/ranges.rs`), matching real PHP's own silent int-to-float
+promotion on overflow - distinguished from an operand that was already
+unbounded (which correctly stays plain unbounded, no `Float` needed).
+`sub_int_range_full`'s own general range-minus-range case still doesn't
+- left as a faithful, untouched transcription of real PHPStan's own
+logic there.
 `Type::Array` carries a real key type, not
 just a value type. `object{...}` shapes (including a genuinely
 unsealed one, `array{..., ...}`), `value-of<T>`/`key-of<T>` (a

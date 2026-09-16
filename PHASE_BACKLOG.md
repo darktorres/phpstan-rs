@@ -124,13 +124,13 @@ reasons; phpstan-rs doesn't share the reason.
   in the analyzed set" sound. Needs a new reverse (parent-to-children)
   index on top of `hierarchy.rs`'s forward-only `all_ancestor_names`
   (reused directly by Phases 88/94/93 below).
-- **A6 (small).** Uniform int-to-float overflow promotion in range
-  arithmetic (`int_range_bounds`, `BinOp::Add`/`Sub`/`Mul`,
-  `checker/expr.rs`) — real PHPStan's own `integerRangeMath` only got
-  this right for `Div`; `Plus`/`Minus`/`Mul` silently discard a float
-  bound as unbounded int. A single cheap `PHP_INT_MAX` boundary check
-  per bound, applied uniformly, closes a gap real PHPStan has never
-  closed for its own three most-used arithmetic operators.
+- **A6 remainder (small).** `Add`, `Sub`'s constant-shift fast path, and
+  `Mul` now union `Float` in on genuine `i64` overflow (see ROADMAP's
+  Done section) - `sub_int_range_full`'s own general range-minus-range
+  case (right side not a single constant) is a faithful transcription
+  of real PHPStan's own multi-branch logic and was left untouched to
+  avoid risking a real bug in already-correct, carefully-verified code;
+  still silently discards a would-be float bound as unbounded there.
 
 ## Phase 86 — Whole-program analysis PHPStan's architecture can't cheaply do (§B)
 
