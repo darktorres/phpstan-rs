@@ -2562,10 +2562,6 @@ section used to carry:
   runtime-value-dependent behavior are out of scope by construction -
   this checker only ever reasons about static types, never concrete
   values.
-- A `foreach` header's own inline `@var` annotation isn't supported
-  (only a tag on a statement inside the body is) - a header tag would
-  need to affect the loop body's own checking, and shipping that
-  half-working was judged worse than not supporting it.
 - No cross-variable/parallel-structure correlation: two (or more)
   separately-tracked values that a program's own real logic always
   keeps in lockstep - most commonly two or more parallel dynamically-

@@ -2052,3 +2052,30 @@ not for the common, fully-resolvable case both shapes already parsed.
 **Effort: small** — one `subtype.rs` match arm rewritten using the
 project's own existing variance-composition pattern; no new `Type`
 variant.
+
+## Phase 161 — `foreach` header inline `@var` annotation
+
+Reevaluated out of "Permanent design boundaries" — that entry's stated
+blocker ("a header tag would need to affect the loop body's own
+checking, and shipping that half-working was judged worse than not
+supporting it") describes exactly what `check_foreach` already does
+for its ordinarily-inferred element type: bind the loop variable in
+`locals` before recursing into `body`. Overriding that bound type with
+an explicit tag is a strict superset of existing capability, not a new
+checking pathway. `Checker::inline_var_annotation(stmt)`
+(`checker/stmt.rs:798`) already takes a generic `&Stmt` and already
+resolves a *named* `@var Type $value` tag regardless of which
+`StmtKind` it sits on - a foreach header's own doc comment reaches it
+for free the moment `check_foreach` is handed the enclosing `Stmt` (or
+just this resolved override) and applies it in place of `element_ty`
+before the loop-var `declare` calls. Only the *bare* `@var Type` form
+(no explicit name) needs one new line:
+`statement_defined_variable_names` (`checker/stmt.rs:954`) has no
+`StmtKind::Foreach` arm yet, so a nameless tag can't infer "the loop's
+own value variable" the way it infers an assignment's LHS - add that
+one arm (foreach's own bound `value`, when it's a plain
+`ExprKind::Variable`, else empty per this function's existing "don't
+guess" convention for every other unresolvable case).
+
+**Effort: small** — one call-site plumbing change to `check_foreach`,
+one new `statement_defined_variable_names` match arm.
