@@ -19,15 +19,15 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with twenty-one exceptions: Phases 166, 169, and 174 (unblocking two
+with twenty-two exceptions: Phases 166, 169, and 174 (unblocking two
 live dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162,
 167, 170, 171, and 172 (the small narrowing-engine batch this
 unblocking made it natural to pick up next), and Phase 96's D8, D2,
 D5, D6, and D7, Phase 97's AA3 and AA5, Phase 98's AB2, Phase 101's
-E4, E3, and E1, Phase 102's W1, and Phase 103's Z1 (twelve small,
-self-contained items picked up next as standalone units - D2, D6, Z1,
-E3, AA3, AA5, E1, and W1 all opt-in, per this project's "ship opt-in"
-convention: D2 for a real false-positive risk on unambiguous
+E4, E3, and E1, Phase 102's W1 and W3, and Phase 103's Z1 (thirteen
+small, self-contained items picked up next as standalone units - D2,
+D6, Z1, E3, AA3, AA5, E1, and W1 all opt-in, per this project's "ship
+opt-in" convention: D2 for a real false-positive risk on unambiguous
 single-bool-parameter calls, D6 because it's a disclosed heuristic
 (two same-typed parameters are structurally invisible to any
 type-system-based check as "different roles"), Z1 because real
@@ -37,11 +37,14 @@ each only via a separate opt-in mechanism of its own (E3/E1 via
 `phpstan-strict-rules`, W1 via its own opt-in `checkDynamicProperties`
 parameter; E3's own legitimate-exception risk: a constructor
 genuinely choosing not to call an otherwise-real parent one), AA3 and
-AA5 because both are purely stylistic suggestions, not bugs). All
-twenty-one are now **DONE** and have moved into ROADMAP.md's own Done
-section, per this project's standing "fold DONE phases into Done"
-convention - their entries are removed from this backlog file, not
-left in place with a status tag flipped.
+AA5 because both are purely stylistic suggestions, not bugs. W3's own
+method-call/static-call half additionally required and got a real
+correctness fix to `Registry::lookup_method`/`lookup_method_with_
+owner` along the way - see ROADMAP's Done section). All twenty-two
+are now **DONE** and have moved into ROADMAP.md's own Done section,
+per this project's standing "fold DONE phases into Done" convention -
+their entries are removed from this backlog file, not left in place
+with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -548,18 +551,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
   non-strict default); the *strict* alternative
   (`checkStrictPrintfPlaceholderTypes`, on in strict-rules) has no
   phpstan-rs equivalent at all.
-- **W3 remainder (medium).** The plain-function-call half is now built
-  (see ROADMAP's Done section, reusing `Registry::check_function_name_
-  case`) - the method-call/static-call half is still open, and needs
-  more than reusing the existing mechanism: `Registry::lookup_method`/
-  `lookup_method_with_owner` are exact-spelling-only (no case-
-  insensitive fallback the way `lookup_class`/`lookup_function` have),
-  so a case-mismatched method call today doesn't even resolve to the
-  real method at all - it would need its own case-insensitive lookup
-  (the same shape `find_case_mismatched_ancestor_method`, Phase 101's
-  E4, already builds for the declaration-vs-ancestor direction) without
-  disturbing the existing exact-match method-call-resolution semantics
-  everything else here depends on.
 
 ---
 

@@ -1867,21 +1867,39 @@ unbuilt dead-code question. Gated behind `Registry::
 check_never_return_suggestions`, off by default (a purely stylistic
 suggestion, not a bug).
 
-**Opt-in call-site function-name-case checking** (PHASE_BACKLOG Phase
-102's W3, function-call half only). Extends the existing `function.
-nameCase` mechanism (`Registry::check_function_name_case`, previously
-only checking a `use function` import's own casing) to a plain
-function call: `resolved_name` in `ExprKind::Call`'s handling
-(`checker/expr.rs`) is already namespace-qualified the exact same way
-`check_class_name_case`'s own `resolved` variable is (the raw,
-as-written spelling, just namespace-prefixed), so the identical "does
-the canonical declared spelling differ" comparison via `lookup_
-function_with_name` applies unchanged. The method-call/static-call
-half stays open - see PHASE_BACKLOG's "W3 remainder": `lookup_method`/
-`lookup_method_with_owner` are exact-spelling-only, unlike `lookup_
-class`/`lookup_function`, so a case-mismatched method call doesn't
-even resolve to the real method today, needing its own case-
-insensitive lookup first.
+**Opt-in call-site function/method-name-case checking, plus a real
+case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
+now fully built). Extends the existing `function.nameCase` mechanism
+(`Registry::check_function_name_case`, previously only checking a `use
+function` import's own casing) two ways: a plain function call's
+`resolved_name` in `ExprKind::Call`'s handling (`checker/expr.rs`) is
+already namespace-qualified the exact same way `check_class_name_
+case`'s own `resolved` variable is (the raw, as-written spelling, just
+namespace-prefixed), so the identical "does the canonical declared
+spelling differ" comparison via `lookup_function_with_name` applies
+unchanged; `Checker::check_call_site_method_name_case`
+(`checker/resolve.rs`) covers a method/static-method call the same way,
+via a new `Registry::lookup_method_canonical_name` (mirrors `lookup_
+class`'s own case-insensitive-fallback shape), wired into both
+`MethodCall` arms and both `StaticCall` arms.
+
+Building the method-call half surfaced a real, pre-existing false-
+positive bug along the way, fixed as part of the same change:
+`Registry::lookup_method`/`lookup_method_with_owner` were exact-
+spelling-only, unlike `lookup_class`/`lookup_function` (which have
+always had a case-insensitive fallback) - so `$obj->DoStuff()` calling
+a real, declared `doStuff()` was wrongly reported as `method.notFound`,
+even though real PHP resolves method calls case-insensitively just
+like class/function names. Both now fall back to a case-insensitive
+scan of the already-precomputed `method_owner_by_class` map, fixing
+every consumer transitively (undefined-method detection, visibility
+checks, first-class-callable resolution, static calls) in one place.
+Deliberately scoped to `lookup_method`/`lookup_method_with_owner`
+only, not `lookup_ancestor_method_with_owner`/`find_method_signature_
+prototype` (used for override-compatibility checking) - those must stay
+exact-match, or Phase 101's E4 (`method.nameCase` for an override whose
+own casing differs from its ancestor's) would lose the exact signal it
+depends on to fire at all.
 
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-

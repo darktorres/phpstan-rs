@@ -616,6 +616,148 @@ fn a_typod_call_is_never_flagged_for_name_case() {
     );
 }
 
+// A case-mismatched method/static-method call resolves to the real
+// method at all now (a real false-positive `method.notFound` bug fixed
+// alongside W3 - real PHP method calls are case-insensitive, matching
+// the existing `lookup_class`/`lookup_function` precedent), and the
+// method-call/static-call half of `function.nameCase` (Phase 102's W3).
+
+#[test]
+fn a_case_mismatched_method_call_is_not_flagged_as_undefined() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function doStuff(): void {}
+            }
+            function f(Foo $x): void {
+                $x->DoStuff();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_case_mismatched_static_call_is_not_flagged_as_undefined() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public static function doStuff(): void {}
+            }
+            function f(): void {
+                Foo::DoStuff();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "staticMethod.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn method_name_case_is_not_flagged_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function doStuff(): void {}
+            }
+            function f(Foo $x): void {
+                $x->DoStuff();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_case_mismatched_method_call_is_flagged_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public function doStuff(): void {}
+            }
+            function f(Foo $x): void {
+                $x->DoStuff();
+            }
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.nameCase"
+            && x.message.contains("doStuff")
+            && x.message.contains("DoStuff")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_case_mismatched_static_call_is_flagged_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public static function doStuff(): void {}
+            }
+            function f(): void {
+                Foo::DoStuff();
+            }
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_correctly_cased_method_call_is_never_flagged_even_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public function doStuff(): void {}
+            }
+            function f(Foo $x): void {
+                $x->doStuff();
+            }
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_genuinely_undefined_method_is_still_flagged_when_case_checking_is_on() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public function doStuff(): void {}
+            }
+            function f(Foo $x): void {
+                $x->totallyUnrelated();
+            }
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.notFound"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_typod_use_const_import_is_flagged_with_constant_not_found() {
     let d = diagnostics_for(

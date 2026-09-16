@@ -463,6 +463,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// The method-call/static-call half of PHASE_BACKLOG Phase 102's
+    /// W3 (the plain-function-call half lives on `ExprKind::Call`
+    /// directly) - opt-in, same `Registry::check_function_name_case`
+    /// flag as `use function`'s own `function.nameCase` check.
+    /// `Registry::lookup_method_canonical_name` mirrors `lookup_class`'s
+    /// own case-insensitive-fallback shape.
+    pub(crate) fn check_call_site_method_name_case(
+        &mut self,
+        class: &str,
+        method: &str,
+        span: Span,
+        label: &str,
+    ) {
+        if !self.registry.check_function_name_case {
+            return;
+        }
+        let Some(canonical) = self.registry.lookup_method_canonical_name(class, method) else {
+            return;
+        };
+        if canonical != method {
+            self.report(
+                label.to_string(),
+                format!("Call to method {class}::{canonical}() with incorrect case: {method}."),
+                span,
+                0,
+                "method.nameCase",
+            );
+        }
+    }
+
     /// Walks an already name-resolved `Type` (every `Object` inside it
     /// already a fully-qualified name, the same shape `check_generic_
     /// bounds`/`is_type_fully_known` already expect), collecting every

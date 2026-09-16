@@ -354,8 +354,36 @@ impl Registry {
     /// class` (see `precompute_member_owners`'s own doc comment for what
     /// this replaced and why).
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionSig> {
-        let owner = self.method_owner_by_class.get(class)?.get(method)?;
-        self.classes.get(owner)?.methods.get(method)
+        let owners = self.method_owner_by_class.get(class)?;
+        if let Some(owner) = owners.get(method) {
+            return self.classes.get(owner)?.methods.get(method);
+        }
+        // Real PHP resolves method calls case-insensitively, the same
+        // as class/function names - `method_owner_by_class` is keyed by
+        // exact declared spelling (see `find_case_mismatched_ancestor_
+        // method`'s own doc comment), so a mismatched-case call needs
+        // this same fallback `lookup_class`/`lookup_function` already
+        // have, or `$obj->DoStuff()` calling a real `doStuff()` would
+        // wrongly read as undefined.
+        let (name, owner) = owners
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(method))?;
+        self.classes.get(owner)?.methods.get(name.as_str())
+    }
+
+    /// The real declared spelling `lookup_method`/`lookup_method_with_
+    /// owner` would resolve `method` to, for `checker::oop`'s opt-in
+    /// call-site `method.nameCase` check (PHASE_BACKLOG Phase 102's W3)
+    /// to compare against the as-written text.
+    pub(crate) fn lookup_method_canonical_name(&self, class: &str, method: &str) -> Option<&str> {
+        let owners = self.method_owner_by_class.get(class)?;
+        if let Some((name, _)) = owners.get_key_value(method) {
+            return Some(name.as_str());
+        }
+        owners
+            .keys()
+            .find(|name| name.eq_ignore_ascii_case(method))
+            .map(String::as_str)
     }
 
     /// Every method name callable on `class` (own + inherited), for
@@ -397,8 +425,17 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Option<(String, &FunctionSig)> {
-        let owner = self.method_owner_by_class.get(class)?.get(method)?;
-        let sig = self.classes.get(owner)?.methods.get(method)?;
+        let owners = self.method_owner_by_class.get(class)?;
+        if let Some(owner) = owners.get(method) {
+            let sig = self.classes.get(owner)?.methods.get(method)?;
+            return Some((owner.clone(), sig));
+        }
+        // See `lookup_method`'s own identical case-insensitive fallback
+        // doc comment.
+        let (name, owner) = owners
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(method))?;
+        let sig = self.classes.get(owner)?.methods.get(name.as_str())?;
         Some((owner.clone(), sig))
     }
 

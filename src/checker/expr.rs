@@ -1051,6 +1051,7 @@ impl<'a> Checker<'a> {
                         self.check_internal_method_call(owner, method, sig, false, e.span, label);
                         self.check_restricted_method_call(owner, method, false, e.span, label);
                         self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
+                        self.check_call_site_method_name_case(class, method, e.span, label);
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
                         // deprecated checks above.
@@ -2016,6 +2017,7 @@ impl<'a> Checker<'a> {
                                 );
                             }
                         }
+                        self.check_call_site_method_name_case(class, method, e.span, label);
                         // See the identical comment on the plain-
                         // function Call arm above - `check_args` is
                         // spread-aware, so it's always worth calling.
@@ -3013,6 +3015,7 @@ impl<'a> Checker<'a> {
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, false, e.span, label,
                                 );
+                                self.check_call_site_method_name_case(class, method, e.span, label);
                             }
                         }
                     }
@@ -3020,6 +3023,7 @@ impl<'a> Checker<'a> {
                         if let Some(class) = self.resolve_static_class_name(class_name)
                             && self.registry.classes.contains_key(&class)
                         {
+                            self.check_call_site_method_name_case(&class, method, e.span, label);
                             if self.registry.lookup_method(&class, method).is_none()
                                 && self
                                     .registry
