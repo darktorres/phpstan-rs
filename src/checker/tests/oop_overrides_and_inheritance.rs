@@ -3062,3 +3062,75 @@ fn a_parameter_typed_as_parent_with_a_real_ancestor_is_not_flagged() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn overriding_a_parent_method_with_different_casing_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function doStuff(): void {}
+            }
+            class Child extends Base {
+                public function DoStuff(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn overriding_a_parent_method_with_identical_casing_is_not_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function doStuff(): void {}
+            }
+            class Child extends Base {
+                public function doStuff(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn implementing_an_interface_method_with_different_casing_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {
+                public function doStuff(): void;
+            }
+            class C implements Iface {
+                public function DoStuff(): void {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unrelated_method_with_no_ancestor_at_all_is_not_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {
+                public function doStuff(): void {}
+            }
+            class Child extends Base {
+                public function totallyUnrelated(): void {}
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "method.nameCase"),
+        "got: {d:?}"
+    );
+}

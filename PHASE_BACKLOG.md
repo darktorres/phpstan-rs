@@ -19,14 +19,14 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with twelve exceptions: Phases 166, 169, and 174 (unblocking two live
+with thirteen exceptions: Phases 166, 169, and 174 (unblocking two live
 dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
-made it natural to pick up next), and Phase 96's D8 and D2 and Phase
-98's AB2 (three small, self-contained items picked up next as
-standalone units - D2 opt-in, per this project's "ship opt-in"
+made it natural to pick up next), and Phase 96's D8 and D2, Phase 98's
+AB2, and Phase 101's E4 (four small, self-contained items picked up
+next as standalone units - D2 opt-in, per this project's "ship opt-in"
 convention for a novel rule category with a real false-positive risk
-on unambiguous single-bool-parameter calls). All twelve are now
+on unambiguous single-bool-parameter calls). All thirteen are now
 **DONE** and have moved into ROADMAP.md's own Done section, per this
 project's standing "fold DONE phases into Done" convention - their
 entries are removed from this backlog file, not left in place with a
@@ -563,11 +563,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
   (`lookup_ancestor_method_with_owner`) and existing
   `parent::__construct()` reasoning (`checker/uninitialized.rs`). Feeds
   Phase 111's I4 codemod.
-- **E4 (small).** An overriding method whose declared name-casing
-  mismatches its parent/interface (PHP itself is case-insensitive for
-  calls — readability-only). Additive to the existing
-  `check_method_overrides`/`lookup_ancestor_method_with_owner` pass.
-  Feeds Phase 111's I1 codemod.
 
 ## Phase 102 — More `phpstan-strict-rules` "stricter defaults" config flags (§W)
 

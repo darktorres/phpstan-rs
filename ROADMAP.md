@@ -1079,7 +1079,13 @@ one), including the interface-vs-trait-vs-extends ancestor-lookup
 priority fix (matching real PHPStan's `MethodPrototypeFinder` exactly,
 including its own visibility-check-skip and self-type-resolution
 nuances for a trait-sourced prototype) and property `#[Override]`
-attribute checking. Property hooks are covered too:
+attribute checking. PHASE_BACKLOG Phase 101's E4: an overriding method
+whose own declared casing mismatches its parent/interface's
+(`method.nameCase`) - `Registry::find_case_mismatched_ancestor_method`
+reads the same-name-different-casing signal straight back out of
+`method_owner_by_class`'s existing exact-spelling keys (two case-
+insensitively-equal names both survive there as separate entries),
+with no separate ancestor walk needed. Property hooks are covered too:
 `PropertyHookBody::Abstract` (an AST variant distinguishing "no hook"
 from "an abstract hook with no body") plus `property.notReadable`/
 `.notWritable`/`.abstractOverridingNonAbstractHook`. PHP 8.4 `final`/

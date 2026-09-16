@@ -369,6 +369,22 @@ impl Registry {
             .flat_map(|m| m.keys().map(String::as_str))
     }
 
+    /// `method_owner_by_class[class]` is keyed by exact declared
+    /// spelling, so two case-insensitively-equal but distinctly-spelled
+    /// names both survive as separate keys - reading that back out here
+    /// finds a same-name-different-casing override with no extra walk.
+    pub(crate) fn find_case_mismatched_ancestor_method(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(String, String)> {
+        let owners = self.method_owner_by_class.get(class)?;
+        owners.iter().find_map(|(name, owner)| {
+            (name.eq_ignore_ascii_case(method) && name != method)
+                .then(|| (owner.clone(), name.clone()))
+        })
+    }
+
     /// Same as `lookup_method`, but also returns the declaring ancestor's
     /// name - needed wherever a caller goes on to do class-level generic
     /// substitution (`checker::class_template_bindings`),

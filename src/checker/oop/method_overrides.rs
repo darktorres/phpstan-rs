@@ -211,6 +211,20 @@ impl<'a> Checker<'a> {
         let Some(own_sig) = info.methods.get(method_name) else {
             return;
         };
+        if let Some((ancestor_owner, ancestor_name)) = self
+            .registry
+            .find_case_mismatched_ancestor_method(fqn, method_name)
+        {
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "Method {fqn}::{method_name}() overrides {ancestor_owner}::{ancestor_name}() with different letter casing"
+                ),
+                span,
+                4,
+                "method.nameCase",
+            );
+        }
         // Mirrors real PHPStan's `MethodPrototypeFinder` priority order
         // (immediately-implemented interface, then a used trait's own
         // abstract declaration, then the plain `extends` chain) - not
