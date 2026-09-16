@@ -543,15 +543,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
   gaps, not the checks themselves; this one risks the identical
   truthy/falsy union-splitting judgment call.
 
-## Phase 102 — More `phpstan-strict-rules` "stricter defaults" config flags (§W)
-
-- **W2 (medium).** Opt-in strict printf/sprintf placeholder-type
-  checking — phpstan-rs's `format_specifier_accepts` is explicitly
-  documented "deliberately lenient" (matches core PHPStan's own
-  non-strict default); the *strict* alternative
-  (`checkStrictPrintfPlaceholderTypes`, on in strict-rules) has no
-  phpstan-rs equivalent at all.
-
 ---
 
 # Part 5 (BEYOND_PHPSTAN): LSP / editor-native capabilities
