@@ -2608,13 +2608,28 @@ section used to carry:
   slice doesn't reach - confirmed at `ActivityRepository::insertMany`'s
   own `$column = $kind?->referenceColumn(); if ($column !== null &&
   ...) { ...referentExists($kind, ...); }`) - aren't provably
-  correlated by this checker (or, so far as confirmed
-  by reading `vendor/phpstan-src` for the identical shape, by real
-  PHPStan either - this is a genuinely hard, generally-unsolved static-
-  analysis problem, not a phpstan-rs-specific gap). Each individual
-  finding this produces is sound (a real, if practically-unreachable,
-  edge the checker can't rule out), not a false positive to chase down
-  case by case.
+  correlated by this checker. The *general* mechanism (an arbitrary
+  boolean-formula memory over recorded facts, symbolic enough to prove
+  any of the shapes above) is declined as genuinely unbounded in
+  scope - there's no natural stopping point to "solve cross-variable
+  correlation," unlike a single named idiom. That's a scope argument,
+  not "real PHPStan doesn't do this either" (which was this entry's
+  prior, invalid framing - matching real PHPStan is never on its own a
+  reason to decline a check this project could otherwise justify. See
+  `feedback_stricter_than_phpstan_is_fine`). Each named instance above
+  is instead an individual candidate for its own narrow, bounded
+  special case, the same way `condition_alias_shape`'s single-condition
+  form and the disjunctive-syllogism case (PHASE_BACKLOG Phase 162)
+  were carved out of this identical cluster - not yet individually
+  assessed for the rest (parallel dynamically-keyed arrays, a
+  discriminant variable implying another was set, ternary-branch
+  definedness, the closure-captures-an-outer-if's-assignment shape),
+  each of which needs its own feasibility pass before being declined
+  or filed as a phase, rather than being grouped into this one
+  "genuinely hard" bucket by association. Each individual finding this
+  produces in the meantime is sound (a real, if practically-
+  unreachable, edge the checker can't rule out), not a false positive
+  to chase down case by case.
 - Doctrine ORM `QueryBuilder`/`AbstractQuery::getResult()`'s own real
   result-row shape is never inferred - its native PHP signature is
   bare `mixed` (confirmed directly in `vendor/doctrine-orm`), and real

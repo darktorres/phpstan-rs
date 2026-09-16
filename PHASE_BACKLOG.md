@@ -2228,3 +2228,29 @@ is also accepted) extracts `(inner, resolved_class_name)` and delegates
 to the identical two lines `Instanceof`'s own arm already runs.
 
 **Effort: small** — one new match arm, zero new primitives.
+
+## Phase 168 — Doctrine ORM/DBAL untyped-result dynamic-return-type extension
+
+Filed from ROADMAP.md's own "Permanent design boundaries" entry at the
+user's request - kept declined as a *default-scope* project decision
+(genuinely Doctrine-specific, matching this project's established
+precedent of not building single-framework result-shape inference
+without independent second confirmation - see `TOP100_RESEARCH_NOTES.md`),
+but disclosed here as real, buildable work rather than left unfiled:
+
+- `QueryBuilder::getQuery()->getResult()` (and `getOneOrNullResult()`/
+  `getSingleResult()`) - a DQL-aware dynamic-return-type extension keyed
+  off the query's own `select()`/`from()` calls, mirroring real
+  PHPStan's dedicated `doctrine/orm` extension package. Needs walking
+  the fluent `QueryBuilder` call chain backward from the `getResult()`
+  call site to reconstruct which entity/fields were selected - a real
+  parser for a fluent-builder DSL, not a stub-signature change.
+- `Connection::fetchAssociative()`/`fetchAllAssociative()` (DBAL, one
+  API layer down) - natively `array<string, mixed>|false` with no
+  per-column typing; PHPStan doesn't type-narrow this generically
+  either (it needs the actual SQL/column metadata), so this half stays
+  `mixed` even with the QueryBuilder half built.
+
+**Effort: large** — a real fluent-DSL-aware inference pass, comparable
+in shape to Phase 120's own Composer-path-repository parsing work, not
+a contained function addition.
