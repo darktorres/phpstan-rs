@@ -315,7 +315,9 @@ impl<'a> Checker<'a> {
         zero_iterations: LoopZeroIterations<'_>,
         mut run_pass: impl FnMut(&mut Self, &mut Locals, Option<&Type>, &str, usize),
     ) -> (Locals, Vec<Locals>) {
-        const MAX_PASSES: usize = 3;
+        // No early widening happens per pass here, unlike PHPStan's own
+        // Scope, so a higher cap costs more compute but never precision.
+        const MAX_PASSES: usize = 6;
         let mut pass_entry = entry.clone();
         for pass in 0..MAX_PASSES {
             let is_last_allowed_pass = pass == MAX_PASSES - 1;
