@@ -24,6 +24,7 @@
 //! check_array_key_cast = false
 //! check_parent_constructor_call = false
 //! check_promoted_property_suggestions = false
+//! check_boolean_conditions = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -134,6 +135,10 @@ pub struct Config {
     /// `registry::Registry::check_promoted_property_suggestions`'s own
     /// doc comment for why.
     pub check_promoted_property_suggestions: Option<bool>,
+    /// Opt-in "only booleans in a condition" family - see
+    /// `registry::Registry::check_boolean_conditions`'s own doc comment
+    /// for why.
+    pub check_boolean_conditions: Option<bool>,
 }
 
 impl Config {

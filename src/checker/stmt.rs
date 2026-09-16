@@ -707,7 +707,22 @@ impl<'a> Checker<'a> {
         let is_last_without_else = else_branch.is_none();
         self.in_condition_position = true;
         self.in_exempt_last_condition = is_elseif && is_last_without_else;
-        self.check_expr(cond, locals, label);
+        let cond_ty = self.check_expr(cond, locals, label);
+        self.check_non_boolean_condition(
+            cond,
+            &cond_ty,
+            if is_elseif {
+                "an elseif condition"
+            } else {
+                "an if condition"
+            },
+            if is_elseif {
+                "elseif.condNotBoolean"
+            } else {
+                "if.condNotBoolean"
+            },
+            label,
+        );
         if let Some(value) = self.inferred_constant_condition(cond, locals) {
             if is_elseif {
                 if !(value && is_last_without_else) {

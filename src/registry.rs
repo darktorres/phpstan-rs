@@ -186,6 +186,11 @@ pub struct Registry {
     // 97's AA3) - a purely stylistic suggestion, not a bug, so opt-in
     // like every other novel rule category shipped here.
     pub check_promoted_property_suggestions: bool,
+    // Opt-in "only booleans in a condition" family (PHASE_BACKLOG Phase
+    // 101's E1, mirroring real `phpstan-strict-rules`'
+    // `BooleansInConditions` rule family). Real PHPStan ships this only
+    // via that separate, opt-in package.
+    pub check_boolean_conditions: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

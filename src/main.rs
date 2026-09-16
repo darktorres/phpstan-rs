@@ -181,6 +181,14 @@ enum Command {
         /// check_promoted_property_suggestions`'s own doc comment.
         #[arg(long)]
         check_promoted_property_suggestions: bool,
+        /// Enables the "only booleans are allowed in a condition" family
+        /// (`if`/`elseif`/`while`/`do-while`/ternary conditions, `&&`/
+        /// `||` operands, negated booleans). Off by default - real
+        /// PHPStan ships this only via the separate, opt-in
+        /// `phpstan/phpstan-strict-rules` package - see `registry::
+        /// Registry::check_boolean_conditions`'s own doc comment.
+        #[arg(long)]
+        check_boolean_conditions: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -265,6 +273,7 @@ fn main() {
             check_array_key_cast,
             check_parent_constructor_call,
             check_promoted_property_suggestions,
+            check_boolean_conditions,
             php_version,
             generate_baseline,
             baseline,
@@ -293,6 +302,7 @@ fn main() {
             check_array_key_cast,
             check_parent_constructor_call,
             check_promoted_property_suggestions,
+            check_boolean_conditions,
             php_version,
             generate_baseline,
             baseline,

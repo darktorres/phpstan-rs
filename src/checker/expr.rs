@@ -1080,10 +1080,26 @@ impl<'a> Checker<'a> {
             // real false positives once undefined-property detection
             // started exercising exactly this idiom on real code.
             ExprKind::Binary(BinOp::And, l, r) => {
-                self.check_expr(l, locals, label);
+                let l_ty = self.check_expr(l, locals, label);
+                self.check_non_boolean_and_or_operand(
+                    l,
+                    &l_ty,
+                    "&&",
+                    "left",
+                    "booleanAnd.leftNotBoolean",
+                    label,
+                );
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, true);
-                self.check_expr(r, &mut narrowed, label);
+                let r_ty = self.check_expr(r, &mut narrowed, label);
+                self.check_non_boolean_and_or_operand(
+                    r,
+                    &r_ty,
+                    "&&",
+                    "right",
+                    "booleanAnd.rightNotBoolean",
+                    label,
+                );
                 // Mirrors real PHPStan's `BooleanAndConstantConditionRule` -
                 // see `check_boolean_and_or`'s doc comment. Passes the
                 // original, pre-narrowing `locals`, not `narrowed`:
@@ -1107,10 +1123,26 @@ impl<'a> Checker<'a> {
                 self.infer_binary(&BinOp::And, l, r, locals)
             }
             ExprKind::Binary(BinOp::Or, l, r) => {
-                self.check_expr(l, locals, label);
+                let l_ty = self.check_expr(l, locals, label);
+                self.check_non_boolean_and_or_operand(
+                    l,
+                    &l_ty,
+                    "||",
+                    "left",
+                    "booleanOr.leftNotBoolean",
+                    label,
+                );
                 let mut narrowed = locals.clone();
                 self.apply_narrowing(l, &mut narrowed, false);
-                self.check_expr(r, &mut narrowed, label);
+                let r_ty = self.check_expr(r, &mut narrowed, label);
+                self.check_non_boolean_and_or_operand(
+                    r,
+                    &r_ty,
+                    "||",
+                    "right",
+                    "booleanOr.rightNotBoolean",
+                    label,
+                );
                 // Mirrors real PHPStan's `BooleanOrConstantConditionRule` -
                 // same reasoning as `&&` above.
                 self.check_boolean_and_or(
@@ -1238,7 +1270,14 @@ impl<'a> Checker<'a> {
                 self.infer_expr(inner, locals)
             }
             ExprKind::Unary(UnaryOp::Not, inner) => {
-                self.check_expr(inner, locals, label);
+                let inner_ty = self.check_expr(inner, locals, label);
+                self.check_non_boolean_condition(
+                    inner,
+                    &inner_ty,
+                    "a negated boolean",
+                    "booleanNot.exprNotBoolean",
+                    label,
+                );
                 // Mirrors real PHPStan's `BooleanNotConstantConditionRule` -
                 // fires anywhere `!expr` appears, not just as a condition
                 // (`should_skip_constant_condition` excludes `!` from
@@ -1503,7 +1542,20 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 self.in_condition_position = true;
-                self.check_expr(cond, locals, label);
+                let cond_ty = self.check_expr(cond, locals, label);
+                // The short/"elvis" `$cond ?: $else` form is exempted,
+                // matching real `BooleanInTernaryOperatorRule` exactly -
+                // it's a coalescing idiom (`$x ?: 'default'`), not a
+                // real boolean condition.
+                if then_.is_some() {
+                    self.check_non_boolean_condition(
+                        cond,
+                        &cond_ty,
+                        "a ternary operator condition",
+                        "ternary.condNotBoolean",
+                        label,
+                    );
+                }
                 // Mirrors real PHPStan's `TernaryOperatorConstantConditionRule`,
                 // same design as `If`/`While`/`DoWhile` (`check_if`) - no
                 // exclusions beyond `inferred_constant_condition`'s shared

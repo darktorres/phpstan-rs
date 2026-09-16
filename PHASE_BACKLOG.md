@@ -19,24 +19,25 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with seventeen exceptions: Phases 166, 169, and 174 (unblocking two
+with eighteen exceptions: Phases 166, 169, and 174 (unblocking two
 live dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162,
 167, 170, 171, and 172 (the small narrowing-engine batch this
 unblocking made it natural to pick up next), and Phase 96's D8, D2,
-D5, and D7, Phase 97's AA3, Phase 98's AB2, Phase 101's E4 and E3, and
-Phase 103's Z1 (eight small, self-contained items picked up next as
-standalone units - D2, Z1, E3, and AA3 all opt-in, per this project's
-"ship opt-in" convention: D2 for a real false-positive risk on
-unambiguous single-bool-parameter calls, Z1 because real PHPStan
-itself only ever ran it in a private issue-bot config leaving no
-real-world noise signal, E3 because real PHPStan ships it only via the
-separate `phpstan-strict-rules` package and a legitimate constructor
-can genuinely choose not to call an otherwise-real parent one, AA3
-because it's a purely stylistic suggestion, not a bug). All seventeen
-are now **DONE** and have moved into ROADMAP.md's own Done section,
-per this project's standing "fold DONE phases into Done" convention -
-their entries are removed from this backlog file, not left in place
-with a status tag flipped.
+D5, and D7, Phase 97's AA3, Phase 98's AB2, Phase 101's E4, E3, and
+E1, and Phase 103's Z1 (nine small, self-contained items picked up
+next as standalone units - D2, Z1, E3, AA3, and E1 all opt-in, per
+this project's "ship opt-in" convention: D2 for a real false-positive
+risk on unambiguous single-bool-parameter calls, Z1 because real
+PHPStan itself only ever ran it in a private issue-bot config leaving
+no real-world noise signal, E3 and E1 because real PHPStan ships both
+only via the separate `phpstan-strict-rules` package (E3's own
+legitimate-exception risk: a constructor genuinely choosing not to
+call an otherwise-real parent one), AA3 because it's a purely
+stylistic suggestion, not a bug). All eighteen are now **DONE** and
+have moved into ROADMAP.md's own Done section, per this project's
+standing "fold DONE phases into Done" convention - their entries are
+removed from this backlog file, not left in place with a status tag
+flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -539,12 +540,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
 
 ## Phase 101 — Ecosystem checks ported from `phpstan-strict-rules` (§E)
 
-- **E1 (small).** Non-boolean value used directly as a condition
-  (`if`/`while`/ternary/`&&`/`||`/`!` on a non-`bool`-typed expression) —
-  genuinely different from phpstan-rs's existing *constant*-condition
-  check (`boolean_conditions.rs` only flags always-true/false, never
-  "not bool-typed at all"). A type-kind check at the same call sites
-  already instrumented.
 - **E2 (medium, gate on revisiting two prior false positives first).**
   `array_filter()` without an explicit callback for an ambiguous
   element type — phpstan-rs already declined two siblings

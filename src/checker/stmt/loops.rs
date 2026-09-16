@@ -68,7 +68,14 @@ impl<'a> Checker<'a> {
             },
             |this, pass_locals, declared_return, label, _pass| {
                 this.in_condition_position = true;
-                this.check_expr(cond, pass_locals, label);
+                let cond_ty = this.check_expr(cond, pass_locals, label);
+                this.check_non_boolean_condition(
+                    cond,
+                    &cond_ty,
+                    "a while condition",
+                    "while.condNotBoolean",
+                    label,
+                );
                 // `WhileLoopAlwaysFalseConditionRule`/
                 // `WhileLoopAlwaysTrueConditionRule`: real
                 // inferred-type trust (`inferred_constant_condition`),
@@ -226,7 +233,14 @@ impl<'a> Checker<'a> {
         // convergence-bounded range, nowhere near the real 150, would
         // make `$attempts < 150` look unconditionally, wrongly
         // provable.
-        self.check_expr(cond, locals, label);
+        let cond_ty = self.check_expr(cond, locals, label);
+        self.check_non_boolean_condition(
+            cond,
+            &cond_ty,
+            "a do-while condition",
+            "doWhile.condNotBoolean",
+            label,
+        );
         self.loop_depth -= 1;
         // `DoWhileLoopConstantConditionRule`: real inferred-type
         // trust, same as `If`/`While` above. Both directions are gated

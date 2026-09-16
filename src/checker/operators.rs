@@ -254,6 +254,71 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// PHASE_BACKLOG Phase 101's E1, opt-in (mirrors real `phpstan-
+    /// strict-rules`' `BooleansInConditions` family, e.g.
+    /// `BooleanInIfConditionRule`) - genuinely different from this
+    /// project's own existing *constant*-condition checks
+    /// (`inferred_constant_condition`, which only ever flags an
+    /// always-true/false condition): this instead flags a condition
+    /// whose type isn't confidently `bool` *at all*, regardless of its
+    /// value. `Type::Mixed` is always exempted - this project has no
+    /// "explicit vs. implicit mixed" provenance tracking on an inferred
+    /// expression type the way real PHPStan's own `isExplicitMixed()`
+    /// distinction needs, so treating every `Mixed` as "don't know, may
+    /// be bool" matches this project's own "don't guess" precedent used
+    /// everywhere else rather than a real port of that distinction.
+    pub(crate) fn check_non_boolean_condition(
+        &mut self,
+        e: &Expr,
+        ty: &Type,
+        context: &str,
+        identifier: &'static str,
+        label: &str,
+    ) {
+        if !self.registry.check_boolean_conditions {
+            return;
+        }
+        if matches!(ty, Type::Mixed) || is_definitely_bool(ty) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("Only booleans are allowed in {context}, {ty} given."),
+            e.span,
+            5,
+            identifier,
+        );
+    }
+
+    /// The `&&`/`||` operand-shaped sibling of `check_non_boolean_
+    /// condition` above - real `BooleanInBooleanAndRule`/
+    /// `BooleanInBooleanOrRule`'s own message shape names which side
+    /// failed instead of describing the whole expression as "a
+    /// condition".
+    pub(crate) fn check_non_boolean_and_or_operand(
+        &mut self,
+        e: &Expr,
+        ty: &Type,
+        sigil: &str,
+        side: &str,
+        identifier: &'static str,
+        label: &str,
+    ) {
+        if !self.registry.check_boolean_conditions {
+            return;
+        }
+        if matches!(ty, Type::Mixed) || is_definitely_bool(ty) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("Only booleans are allowed in {sigil}, {ty} given on the {side} side."),
+            e.span,
+            5,
+            identifier,
+        );
+    }
+
     /// PHASE_BACKLOG Phase 96's D7: structurally-identical operands on
     /// both sides of a comparison or `Sub` - `$x === $x`, `$a - $a`. Zero
     /// PHPStan precedent (its whole `Rules/` catalog reasons purely from
@@ -692,6 +757,15 @@ fn binop_sigil(op: &BinOp) -> &'static str {
         BinOp::Shr => ">>",
         BinOp::Coalesce => "??",
         BinOp::Pipe => "|>",
+    }
+}
+
+fn is_definitely_bool(ty: &Type) -> bool {
+    match ty {
+        Type::Bool | Type::True | Type::False => true,
+        Type::Union(members) => members.iter().all(is_definitely_bool),
+        Type::Intersection(members) => members.iter().any(is_definitely_bool),
+        _ => false,
     }
 }
 

@@ -300,6 +300,14 @@ impl Project {
         self.registry.check_promoted_property_suggestions = enabled;
     }
 
+    /// Opts the whole project's checking into the "only booleans in a
+    /// condition" family - see `registry::Registry::
+    /// check_boolean_conditions`'s own doc comment for why this
+    /// defaults to `false`.
+    pub fn set_check_boolean_conditions(&mut self, enabled: bool) {
+        self.registry.check_boolean_conditions = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

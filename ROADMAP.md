@@ -1798,6 +1798,27 @@ suggestion, not a bug) and the configured PHP version being >= 8.0
 doesn't guess forward any more than any other version-gated check here
 does.
 
+**Opt-in "only booleans in a condition" family** (PHASE_BACKLOG Phase
+101's E1, mirroring real `phpstan-strict-rules`' `BooleansInConditions`
+rule family). `Checker::check_non_boolean_condition`/`check_non_
+boolean_and_or_operand` (`checker/operators.rs`) flag an `if`/`elseif`/
+`while`/`do-while`/full-ternary condition, a `&&`/`||` operand, or a
+negated (`!`) expression whose inferred type isn't confidently `bool`
+(`Bool`/`True`/`False`, or a `Union`/`Intersection` reducing to one) -
+genuinely different from this project's existing *constant*-condition
+checks (`inferred_constant_condition`, which only ever flags an
+always-true/false value, never "not bool-typed at all"). The short/
+"elvis" ternary (`$cond ?: $else`) is exempted, matching real
+`BooleanInTernaryOperatorRule` exactly - it's a coalescing idiom, not a
+real boolean condition. `Type::Mixed` is always exempted too: this
+project has no "explicit vs. implicit mixed" provenance tracking on an
+inferred expression type the way real PHPStan's own `isExplicitMixed()`
+distinction needs, so every `Mixed` reads as "don't know, may be bool,"
+matching this project's "don't guess" precedent rather than a literal
+port of that distinction. Gated behind `Registry::check_boolean_
+conditions`, off by default - real PHPStan ships this only via the
+separate, opt-in `phpstan/phpstan-strict-rules` package.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the
