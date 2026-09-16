@@ -1867,6 +1867,22 @@ unbuilt dead-code question. Gated behind `Registry::
 check_never_return_suggestions`, off by default (a purely stylistic
 suggestion, not a bug).
 
+**Opt-in call-site function-name-case checking** (PHASE_BACKLOG Phase
+102's W3, function-call half only). Extends the existing `function.
+nameCase` mechanism (`Registry::check_function_name_case`, previously
+only checking a `use function` import's own casing) to a plain
+function call: `resolved_name` in `ExprKind::Call`'s handling
+(`checker/expr.rs`) is already namespace-qualified the exact same way
+`check_class_name_case`'s own `resolved` variable is (the raw,
+as-written spelling, just namespace-prefixed), so the identical "does
+the canonical declared spelling differ" comparison via `lookup_
+function_with_name` applies unchanged. The method-call/static-call
+half stays open - see PHASE_BACKLOG's "W3 remainder": `lookup_method`/
+`lookup_method_with_owner` are exact-spelling-only, unlike `lookup_
+class`/`lookup_function`, so a case-mismatched method call doesn't
+even resolve to the real method today, needing its own case-
+insensitive lookup first.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the

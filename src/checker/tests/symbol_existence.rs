@@ -536,6 +536,86 @@ fn use_function_name_case_is_not_flagged_for_a_correctly_cased_import_even_when_
     );
 }
 
+// `function.nameCase` also covers a plain call site's own written
+// casing vs. the resolved declaration (PHASE_BACKLOG Phase 102's W3) -
+// the same opt-in flag, extended past just `use function` imports.
+
+#[test]
+fn a_miscased_user_function_call_is_not_flagged_by_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            function doStuff(): void {}
+            DOSTUFF();
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_miscased_user_function_call_is_flagged_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function doStuff(): void {}
+            DOSTUFF();
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.nameCase"
+            && x.message.contains("doStuff")
+            && x.message.contains("DOSTUFF")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_correctly_cased_function_call_is_never_flagged_even_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function doStuff(): void {}
+            doStuff();
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_miscased_builtin_call_is_flagged_when_opted_in() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function f(string $s): int {
+                return STRLEN($s);
+            }
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.nameCase"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_typod_call_is_never_flagged_for_name_case() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            totallyMadeUpFunction();
+        "#,
+        |r| r.check_function_name_case = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.nameCase"),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_typod_use_const_import_is_flagged_with_constant_not_found() {
     let d = diagnostics_for(

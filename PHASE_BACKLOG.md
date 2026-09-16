@@ -548,12 +548,18 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
   non-strict default); the *strict* alternative
   (`checkStrictPrintfPlaceholderTypes`, on in strict-rules) has no
   phpstan-rs equivalent at all.
-- **W3 (medium).** Opt-in call-site function/method name-case checking —
-  distinct from E4 (a *declaration's* casing vs. its ancestor); this
-  flags a *call's* written casing vs. the resolved declaration.
-  Extends the existing `class.nameCase` mechanism
-  (`checker/resolve.rs`) to function/method/static calls and `use
-  function` imports.
+- **W3 remainder (medium).** The plain-function-call half is now built
+  (see ROADMAP's Done section, reusing `Registry::check_function_name_
+  case`) - the method-call/static-call half is still open, and needs
+  more than reusing the existing mechanism: `Registry::lookup_method`/
+  `lookup_method_with_owner` are exact-spelling-only (no case-
+  insensitive fallback the way `lookup_class`/`lookup_function` have),
+  so a case-mismatched method call today doesn't even resolve to the
+  real method at all - it would need its own case-insensitive lookup
+  (the same shape `find_case_mismatched_ancestor_method`, Phase 101's
+  E4, already builds for the declaration-vs-ancestor direction) without
+  disturbing the existing exact-match method-call-resolution semantics
+  everything else here depends on.
 
 ---
 
