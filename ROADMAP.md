@@ -1974,6 +1974,29 @@ that isn't a literal or class-constant-fetch expression makes the whole
 chain undecidable (`None`), the identical fallback real PHPStan's own
 extension takes at the same point.
 
+**A small DQL select-item parser** (PHASE_BACKLOG Phase 168's 168c).
+`checker::doctrine::dql::parse_select_items` (`checker/doctrine/dql.rs`)
+- a hand-rolled tokenizer/parser (not a reuse of this project's own PHP
+`Lexer` - DQL is Doctrine's own, unrelated grammar) over 168b's already-
+split `select()`/`addSelect()` argument strings, each further split on
+its own top-level commas (a single comma-joined argument, e.g.
+`select('t, COUNT(x) AS c')`, is equally legal DQL). Recognizes a bare
+alias, a dotted scalar field, `IDENTITY(alias.assoc)`, the five
+aggregate functions (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`, `DISTINCT`
+consumed but not tracked - it changes cardinality, never an aggregate's
+own result type), `CASE WHEN ... THEN <arm> ... ELSE <arm> END` (only a
+bare field-ref arm modeled; a `WHEN` condition's own text is tokenized
+generically as opaque, never-interpreted tokens purely so it doesn't
+break tokenization, matching 168b's own WHERE-clause exclusion), `NEW
+Some\Dto(...)` construction (its own constructor arguments are skipped,
+not parsed - the result is always exactly `Object(Dto, [])` regardless),
+and a function-call-shaped item whose name isn't one of the five
+built-ins as a custom, project-registered function (PHASE_BACKLOG Phase
+168 168h). An unrecognized construct anywhere - including a scalar
+subquery nested inside a select item, `SELECT (SELECT COUNT(...) FROM
+...) AS cnt`, a disclosed follow-on (168k) - makes the whole query
+undecidable (`None`), never a parse error or a silent guess.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

@@ -2053,12 +2053,16 @@ from-scratch Doctrine mapping-metadata resolver.
   corpus-dominant `$this->createQueryBuilder($alias)` repository
   shorthand (100+ real sites), which implicitly establishes `select`/
   `from` per real `EntityRepository::createQueryBuilder()`'s own source.
-- **168c (medium).** A small DQL SELECT-clause parser
+- **168c (medium, DONE).** A small DQL select-item parser
   (`checker/doctrine/dql.rs`) - entity/scalar-field/`IDENTITY()`/
   aggregate-function/`AS`-alias/`DISTINCT`/`CASE`/`NEW Dto(...)` select
-  items, `FROM`/`JOIN` clauses. No WHERE/HAVING/GROUP BY/ORDER BY
-  parsing (never affects row shape). Scalar subqueries nested inside a
-  select item are a disclosed follow-on - see 168k.
+  items, fed by 168b's own already-split `select()`/`addSelect()`
+  arguments (`FROM`/`JOIN` are 168b's own structured output, not
+  re-parsed as text here - a full raw-DQL-string parser, needed once
+  168g's literal `createQuery($dql)` entry point is built, reuses this
+  same select-item grammar). No WHERE/HAVING/GROUP BY/ORDER BY parsing
+  (never affects row shape). Scalar subqueries nested inside a select
+  item are a disclosed follow-on - see 168k.
 - **168d (medium).** Result-shape builder (`checker/doctrine/
   result_shape.rs`) - SELECT clause + FROM/JOIN alias map + 168a's
   metadata → one row `Type`, mirroring real Doctrine `HYDRATE_OBJECT`

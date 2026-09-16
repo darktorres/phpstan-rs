@@ -1,0 +1,432 @@
+//! A small DQL SELECT-item parser (PHASE_BACKLOG Phase 168 168c) -
+//! scoped to exactly what a query's own result-row *shape* depends on:
+//! `alias`/`alias.field`/`IDENTITY(alias.assoc)`, an aggregate function
+//! call, `CASE ... END`, `NEW Some\Dto(...)`, each optionally `AS`-
+//! aliased, and a bare `DISTINCT` modifier (shape-irrelevant - it
+//! changes cardinality, never which columns exist). No WHERE/HAVING/
+//! GROUP BY/ORDER BY grammar at all - 168b's own chain-walker never
+//! collects those clauses' arguments in the first place, since none of
+//! them can ever add or remove a result column.
+//!
+//! This is a hand-rolled tokenizer/parser over a single select-item
+//! fragment's own text, not a reuse of this project's PHP `Lexer` - DQL
+//! is Doctrine's own, unrelated grammar.
+//!
+//! A scalar subquery nested inside a select item (`SELECT (SELECT
+//! COUNT(...) FROM ...) AS cnt`) is a disclosed follow-on (PHASE_BACKLOG
+//! Phase 168 168k) - this grammar has no select-item production starting
+//! with `(`, so a leading parenthesis (a subquery's only possible shape
+//! here) always falls through to `parse_field_ref`'s own "expected an
+//! identifier" failure and reports the whole item undecidable, never a
+//! silent misparse into some other construct.
+
+/// One select item's own operand - a bare alias (the whole entity), a
+/// dotted scalar field, or an `IDENTITY(...)` association reference.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FieldRef {
+    Alias(String),
+    Field(String, String),
+    Identity(String, String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AggregateFn {
+    Count,
+    Sum,
+    Avg,
+    Min,
+    Max,
+}
+
+impl AggregateFn {
+    fn from_name(name: &str) -> Option<AggregateFn> {
+        match name.to_ascii_uppercase().as_str() {
+            "COUNT" => Some(AggregateFn::Count),
+            "SUM" => Some(AggregateFn::Sum),
+            "AVG" => Some(AggregateFn::Avg),
+            "MIN" => Some(AggregateFn::Min),
+            "MAX" => Some(AggregateFn::Max),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SelectItemKind {
+    Field(FieldRef),
+    Aggregate {
+        func: AggregateFn,
+        /// `None` for a shape-irrelevant argument this project doesn't
+        /// otherwise resolve (`COUNT(*)`, a literal) - 168d falls back to
+        /// this function's own default type for the aggregate rather
+        /// than failing the whole item.
+        operand: Option<FieldRef>,
+    },
+    /// `CASE WHEN ... THEN <arm> ... ELSE <arm> END` - only a bare
+    /// `FieldRef` arm is modeled (every real corpus shape this project
+    /// has seen); a `WHEN` condition's own text is never inspected here
+    /// at all, matching 168b's WHERE-clause exclusion (a condition can
+    /// never affect row shape).
+    Case {
+        then_arms: Vec<FieldRef>,
+        else_arm: Option<FieldRef>,
+    },
+    New(String),
+    /// A function-call-shaped item whose name isn't one of the five
+    /// built-in aggregates - a custom, project-registered DQL function
+    /// (PHASE_BACKLOG Phase 168 168h).
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SelectItem {
+    pub(crate) kind: SelectItemKind,
+    pub(crate) alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Token {
+    Ident(String),
+    /// A backslash-qualified name (`App\Dto`) - kept distinct from a
+    /// plain `Ident` since only `NEW`'s own class-name position accepts
+    /// one.
+    QualifiedName(String),
+    Dot,
+    Comma,
+    LParen,
+    RParen,
+    Star,
+    /// Anything outside this grammar's own vocabulary (an operator, a
+    /// string/numeric literal) - never valid in a select-item position
+    /// (`parse_field_ref`/`parse_select_item_kind` reject it there,
+    /// reporting the item undecidable), but must still tokenize
+    /// successfully so a `WHEN`/`THEN` condition's own text - never
+    /// interpreted, just skipped over - doesn't fail the whole select
+    /// item's tokenization before parsing even begins.
+    Other,
+}
+
+fn tokenize(s: &str) -> Option<Vec<Token>> {
+    let mut tokens = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i] as char;
+        if c.is_whitespace() {
+            i += 1;
+            continue;
+        }
+        match c {
+            '.' => {
+                tokens.push(Token::Dot);
+                i += 1;
+            }
+            ',' => {
+                tokens.push(Token::Comma);
+                i += 1;
+            }
+            '(' => {
+                tokens.push(Token::LParen);
+                i += 1;
+            }
+            ')' => {
+                tokens.push(Token::RParen);
+                i += 1;
+            }
+            '*' => {
+                tokens.push(Token::Star);
+                i += 1;
+            }
+            _ if c.is_ascii_alphabetic() || c == '_' || c == '\\' => {
+                let start = i;
+                let mut saw_backslash = c == '\\';
+                i += 1;
+                while i < bytes.len() {
+                    let c2 = bytes[i] as char;
+                    if c2.is_ascii_alphanumeric() || c2 == '_' {
+                        i += 1;
+                    } else if c2 == '\\' {
+                        saw_backslash = true;
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let text = &s[start..i];
+                tokens.push(if saw_backslash {
+                    Token::QualifiedName(text.trim_start_matches('\\').to_string())
+                } else {
+                    Token::Ident(text.to_string())
+                });
+            }
+            // A quoted string literal (real corpus shape: a `WHEN
+            // t.status = 'active'`-style condition, never interpreted -
+            // just consumed as one opaque token so it doesn't break
+            // tokenization of the rest of the item).
+            '\'' | '"' => {
+                let quote = c;
+                i += 1;
+                while i < bytes.len() && bytes[i] as char != quote {
+                    i += 1;
+                }
+                i += 1; // the closing quote, if present - EOF otherwise
+                tokens.push(Token::Other);
+            }
+            // A numeric literal or any other operator character
+            // (`=`/`<`/`>`/`+`/`-`/etc.) - never valid in a select-item
+            // position itself, but real, ordinary text inside a `WHEN`
+            // condition, which this grammar skips over without
+            // interpreting.
+            _ => {
+                i += 1;
+                tokens.push(Token::Other);
+            }
+        }
+    }
+    Some(tokens)
+}
+
+/// Splits `s` on every top-level comma (never one nested inside
+/// parentheses) - `select('t', 'COUNT(x) AS c')`'s own two arguments are
+/// already split by 168b, but a real `select('t, COUNT(x) AS c')` single
+/// comma-joined argument is equally legal DQL and must split here.
+fn split_top_level_commas(s: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            ',' if depth == 0 => {
+                parts.push(&s[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&s[start..]);
+    parts
+}
+
+struct Parser {
+    tokens: Vec<Token>,
+    pos: usize,
+}
+
+impl Parser {
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.pos)
+    }
+
+    fn next(&mut self) -> Option<Token> {
+        let t = self.tokens.get(self.pos).cloned();
+        self.pos += 1;
+        t
+    }
+
+    fn eat_ident_ci(&mut self, word: &str) -> bool {
+        match self.peek() {
+            Some(Token::Ident(s)) if s.eq_ignore_ascii_case(word) => {
+                self.pos += 1;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// `alias`, `alias.field`, or `IDENTITY(alias.assoc)`.
+    fn parse_field_ref(&mut self) -> Option<FieldRef> {
+        if self.eat_ident_ci("IDENTITY") {
+            if self.next() != Some(Token::LParen) {
+                return None;
+            }
+            let (alias, field) = self.parse_dotted_path()?;
+            if self.next() != Some(Token::RParen) {
+                return None;
+            }
+            return Some(FieldRef::Identity(alias, field));
+        }
+        match self.next()? {
+            Token::Ident(alias) => {
+                if matches!(self.peek(), Some(Token::Dot)) {
+                    self.pos += 1;
+                    match self.next()? {
+                        Token::Ident(field) => Some(FieldRef::Field(alias, field)),
+                        _ => None,
+                    }
+                } else {
+                    Some(FieldRef::Alias(alias))
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_dotted_path(&mut self) -> Option<(String, String)> {
+        let Token::Ident(alias) = self.next()? else {
+            return None;
+        };
+        if self.next() != Some(Token::Dot) {
+            return None;
+        }
+        let Token::Ident(field) = self.next()? else {
+            return None;
+        };
+        Some((alias, field))
+    }
+
+    fn parse_select_item(&mut self) -> Option<SelectItem> {
+        let kind = self.parse_select_item_kind()?;
+        let alias = if self.eat_ident_ci("AS") {
+            match self.next()? {
+                Token::Ident(a) => Some(a),
+                _ => return None,
+            }
+        } else {
+            None
+        };
+        if self.pos != self.tokens.len() {
+            // Trailing, unrecognized tokens - undecidable rather than
+            // silently ignored.
+            return None;
+        }
+        Some(SelectItem { kind, alias })
+    }
+
+    fn parse_select_item_kind(&mut self) -> Option<SelectItemKind> {
+        if self.eat_ident_ci("DISTINCT") {
+            // Shape-irrelevant, but must still be consumed - the real
+            // operand follows it.
+            return self.parse_select_item_kind();
+        }
+        if self.eat_ident_ci("NEW") {
+            return match self.next()? {
+                Token::QualifiedName(name) | Token::Ident(name) => {
+                    if self.next() != Some(Token::LParen) {
+                        return None;
+                    }
+                    // The constructor's own arguments don't affect the
+                    // row shape (it's always exactly `Object(Dto, [])`),
+                    // so they're skipped, not parsed - just balance
+                    // parens to find where they end.
+                    self.skip_balanced_parens()?;
+                    Some(SelectItemKind::New(name))
+                }
+                _ => None,
+            };
+        }
+        if self.eat_ident_ci("CASE") {
+            return self.parse_case();
+        }
+        // `IDENTITY(...)` is field-ref-shaped (resolves to the target
+        // association's own id type), not a function call - checked
+        // before the generic function-call dispatch below, which would
+        // otherwise treat it as an unrecognized custom function.
+        if matches!(self.peek(), Some(Token::Ident(s)) if s.eq_ignore_ascii_case("IDENTITY")) {
+            return self.parse_field_ref().map(SelectItemKind::Field);
+        }
+        // A function-call shape: `Ident(...)` - an aggregate if `Ident`
+        // is one of the five built-ins, otherwise a custom function
+        // (168h).
+        if let Some(Token::Ident(name)) = self.peek().cloned()
+            && self.tokens.get(self.pos + 1) == Some(&Token::LParen)
+        {
+            self.pos += 2;
+            if let Some(func) = AggregateFn::from_name(&name) {
+                // `DISTINCT` inside an aggregate call (`COUNT(DISTINCT
+                // x)`) only changes cardinality, never `COUNT`'s own
+                // result type - consumed, not tracked.
+                self.eat_ident_ci("DISTINCT");
+                let operand = if matches!(self.peek(), Some(Token::Star)) {
+                    self.pos += 1;
+                    None
+                } else {
+                    self.parse_field_ref()
+                };
+                if self.next() != Some(Token::RParen) {
+                    return None;
+                }
+                return Some(SelectItemKind::Aggregate { func, operand });
+            }
+            self.skip_balanced_parens()?;
+            return Some(SelectItemKind::Custom(name));
+        }
+        self.parse_field_ref().map(SelectItemKind::Field)
+    }
+
+    /// Consumes tokens up to and including the matching `)` for a
+    /// `(` already consumed by the caller - used where this project
+    /// doesn't need an argument list's own contents (a `NEW`
+    /// constructor's args; a custom function's own args, resolved via
+    /// 168h's config surface instead of parsed here).
+    fn skip_balanced_parens(&mut self) -> Option<()> {
+        let mut depth = 1i32;
+        loop {
+            match self.next()? {
+                Token::LParen => depth += 1,
+                Token::RParen => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return Some(());
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn parse_case(&mut self) -> Option<SelectItemKind> {
+        let mut then_arms = Vec::new();
+        let mut else_arm = None;
+        loop {
+            if self.eat_ident_ci("WHEN") {
+                // The condition itself never affects row shape - skip to
+                // the matching `THEN` by balancing any parens it
+                // contains, then require `THEN` immediately.
+                while !self.eat_ident_ci("THEN") {
+                    self.next()?;
+                }
+                then_arms.push(self.parse_field_ref()?);
+            } else if self.eat_ident_ci("ELSE") {
+                else_arm = Some(self.parse_field_ref()?);
+            } else if self.eat_ident_ci("END") {
+                break;
+            } else {
+                return None;
+            }
+        }
+        Some(SelectItemKind::Case {
+            then_arms,
+            else_arm,
+        })
+    }
+}
+
+fn parse_one_select_item(fragment: &str) -> Option<SelectItem> {
+    let tokens = tokenize(fragment.trim())?;
+    let mut parser = Parser { tokens, pos: 0 };
+    parser.parse_select_item()
+}
+
+/// Parses every `select()`/`addSelect()` argument (168b's own
+/// `select_args`) into its real select items, splitting each argument on
+/// its own top-level commas first (a single comma-joined argument is
+/// equally legal DQL). `None` the moment any one item can't be parsed -
+/// an unrecognized construct anywhere makes the whole query undecidable,
+/// not just that one item.
+pub(crate) fn parse_select_items(select_args: &[String]) -> Option<Vec<SelectItem>> {
+    let mut items = Vec::new();
+    for arg in select_args {
+        for fragment in split_top_level_commas(arg) {
+            if fragment.trim().is_empty() {
+                continue;
+            }
+            items.push(parse_one_select_item(fragment)?);
+        }
+    }
+    Some(items)
+}
+
+#[cfg(test)]
+mod tests;
