@@ -128,6 +128,45 @@ fn a_differently_spelled_but_identical_path_is_still_matched() {
 }
 
 #[test]
+fn filter_reports_a_baseline_entry_no_current_diagnostic_matches() {
+    let mut baselined = HashMap::new();
+    baselined.insert(
+        PathBuf::from("a.php"),
+        vec![diag("Foo::bar", "undefined variable $x")],
+    );
+    let path = temp_path("stale_entry");
+    generate(&path, &baselined).unwrap();
+    let baseline = Baseline::load(&path).unwrap();
+
+    let mut results = HashMap::new();
+    results.insert(PathBuf::from("a.php"), vec![]);
+    let stale = filter(&mut results, &baseline);
+    assert_eq!(stale.len(), 1);
+    assert!(stale[0].contains("a.php"));
+    assert!(stale[0].contains("undefined variable $x"));
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn filter_reports_nothing_stale_when_every_entry_still_matches() {
+    let mut baselined = HashMap::new();
+    baselined.insert(
+        PathBuf::from("a.php"),
+        vec![diag("Foo::bar", "undefined variable $x")],
+    );
+    let path = temp_path("no_stale_entries");
+    generate(&path, &baselined).unwrap();
+    let baseline = Baseline::load(&path).unwrap();
+
+    let mut results = baselined;
+    let stale = filter(&mut results, &baseline);
+    assert!(stale.is_empty());
+
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
 fn normalize_path_resolves_dot_and_dotdot_segments() {
     assert_eq!(normalize_path(Path::new("./t.php")), PathBuf::from("t.php"));
     assert_eq!(

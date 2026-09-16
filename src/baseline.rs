@@ -103,8 +103,8 @@ impl Baseline {
         Ok(Baseline(entries.into_iter().collect()))
     }
 
-    fn contains(&self, file: &Path, d: &Diagnostic) -> bool {
-        self.0.contains(&Entry {
+    fn get<'a>(&'a self, file: &Path, d: &Diagnostic) -> Option<&'a Entry> {
+        self.0.get(&Entry {
             file: normalize_path(file).display().to_string(),
             location: d.location.clone(),
             message: d.message.clone(),
@@ -116,10 +116,29 @@ impl Baseline {
 /// in place - new diagnostics (not in the baseline) are kept, and files
 /// whose diagnostics are now empty stay in the map (a file with zero
 /// diagnostics is still real information: "this file was checked").
-pub fn filter(results: &mut HashMap<PathBuf, Vec<Diagnostic>>, baseline: &Baseline) {
+///
+/// Returns every baseline entry this run never matched against any
+/// current diagnostic, formatted `file:location: message` - mirrors
+/// real PHPStan's own on-by-default `reportUnmatchedIgnoredErrors`, so
+/// a baseline entry left behind by since-fixed/deleted code is
+/// surfaced instead of silently masking nothing forever.
+pub fn filter(results: &mut HashMap<PathBuf, Vec<Diagnostic>>, baseline: &Baseline) -> Vec<String> {
+    let mut matched: HashSet<&Entry> = HashSet::new();
     for (file, diagnostics) in results.iter_mut() {
-        diagnostics.retain(|d| !baseline.contains(file, d));
+        diagnostics.retain(|d| match baseline.get(file, d) {
+            Some(entry) => {
+                matched.insert(entry);
+                false
+            }
+            None => true,
+        });
     }
+    baseline
+        .0
+        .iter()
+        .filter(|e| !matched.contains(e))
+        .map(|e| format!("{}:{}: {}", e.file, e.location, e.message))
+        .collect()
 }
 
 #[cfg(test)]

@@ -2007,7 +2007,10 @@ live against PHP 8.5 - there's no dedicated SimpleXML exception class).
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
-(`--generate-baseline`/`--baseline`) and inline `@phpstan-ignore-line`/
+(`--generate-baseline`/`--baseline`), on by default reporting any
+baseline entry a run no longer matches against a current diagnostic
+(mirrors real PHPStan's own `reportUnmatchedIgnoredErrors`), and inline
+`@phpstan-ignore-line`/
 `-next-line`/`<identifier list>` suppression, matching real PHPStan's
 own trailing-vs-standalone placement rule exactly. `ignoreErrors:`
 config support. `--level`/`--php-version`-gated portability checks -

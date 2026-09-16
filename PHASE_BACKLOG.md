@@ -878,10 +878,6 @@ existing data flow.
   surviving cosmetic message-text changes — `Diagnostic.identifier` is
   already stable-by-design; `baseline.rs`'s `Entry` just doesn't
   consult it yet as an alternate match key.
-- **N3 (small).** Detect and report stale (unmatched) baseline entries,
-  mirroring PHPStan's own on-by-default `reportUnmatchedIgnoredErrors` —
-  track which entries `filter()`'s existing pass actually consumed and
-  expose the complement.
 - **N4 (small, new from top-100 Packagist survey).** Per-identifier
   baseline file splitting — `shipmonk/phpstan-baseline-per-identifier`
   splits one monolithic baseline into separate files per diagnostic

@@ -385,7 +385,11 @@ fn run_check_project(
 
     if let Some(baseline_path) = baseline_path {
         match baseline::Baseline::load(baseline_path) {
-            Ok(baseline) => baseline::filter(&mut results, &baseline),
+            Ok(baseline) => {
+                for stale in baseline::filter(&mut results, &baseline) {
+                    eprintln!("baseline entry no longer matches any diagnostic: {stale}");
+                }
+            }
             Err(e) => eprintln!("failed to load baseline {}: {e}", baseline_path.display()),
         }
     }
