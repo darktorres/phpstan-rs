@@ -4,6 +4,7 @@ mod array_functions;
 mod array_key_validity;
 mod array_literals_and_shapes;
 mod attributes;
+mod boolean_trap;
 mod builtin_checks;
 mod builtin_range_narrowing;
 mod call_user_func;

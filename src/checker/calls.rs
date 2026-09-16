@@ -244,6 +244,10 @@ impl<'a> Checker<'a> {
         // every count/type check below.
         self.check_argument_legality(callee_label, sig, args, label);
 
+        if self.registry.check_boolean_trap {
+            self.check_boolean_trap_arguments(callee_label, sig, args, defining_class, label);
+        }
+
         // A spread/unpack argument's own real contents can't be resolved
         // statically (see `resolve_call_args`'s own doc comment) - every
         // declared parameter at or past the positional index the spread
@@ -590,6 +594,58 @@ impl<'a> Checker<'a> {
     /// the same raw-args loop here) - a single malformed argument only
     /// ever gets one ordering complaint, not a pile of overlapping ones
     /// for what's really the same mistake.
+    /// "Boolean trap" detection (PHASE_BACKLOG Phase 96's D2, opt-in via
+    /// `Registry::check_boolean_trap`) - a bare `true`/`false` literal
+    /// passed *positionally* into a bare-`bool`-typed parameter is always
+    /// type-correct, so no type-checking rule can ever see it. Named-
+    /// argument and spread calls are exempt (the name/callee already
+    /// documents the value at the call site); mirrors `resolve_call_args`'s
+    /// own positional-index bookkeeping rather than reusing its resolved
+    /// output, since that loses exactly the named-vs-positional
+    /// distinction this check depends on.
+    fn check_boolean_trap_arguments(
+        &mut self,
+        callee_label: &str,
+        sig: &FunctionSig,
+        args: &[Arg],
+        defining_class: Option<&str>,
+        label: &str,
+    ) {
+        let mut positional_index = 0usize;
+        for arg in args {
+            if arg.spread || arg.name.is_some() {
+                continue;
+            }
+            let index = positional_index;
+            positional_index += 1;
+            let literal = match &unwrap_grouping(&arg.value).kind {
+                ExprKind::Literal(Literal::Bool(v)) => *v,
+                _ => continue,
+            };
+            let Some(param) = sig.params.get(index) else {
+                continue;
+            };
+            let param_ty = match defining_class {
+                Some(c) => self.resolve_pseudo(&param.ty, c),
+                None => param.ty.clone(),
+            };
+            if param_ty != Type::Bool {
+                continue;
+            }
+            self.report(
+                label.to_string(),
+                format!(
+                    "{callee_label}() argument #{} (${}) is a bare `{literal}` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead",
+                    index + 1,
+                    param.name
+                ),
+                arg.value.span,
+                0,
+                "argument.booleanTrap",
+            );
+        }
+    }
+
     fn check_argument_legality(
         &mut self,
         callee_label: &str,

@@ -270,6 +270,13 @@ impl Project {
         self.registry.check_duplicate_class_declarations = enabled;
     }
 
+    /// Opts the whole project's checking into boolean-trap detection -
+    /// see `registry::Registry::check_boolean_trap`'s own doc comment for
+    /// why this defaults to `false`.
+    pub fn set_check_boolean_trap(&mut self, enabled: bool) {
+        self.registry.check_boolean_trap = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

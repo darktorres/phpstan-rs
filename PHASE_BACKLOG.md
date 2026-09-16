@@ -19,15 +19,17 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with ten exceptions: Phases 166, 169, and 174 (unblocking two live
+with eleven exceptions: Phases 166, 169, and 174 (unblocking two live
 dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162, 167,
 170, 171, and 172 (the small narrowing-engine batch this unblocking
-made it natural to pick up next), and Phase 96's D8 (a small,
-self-contained "did you mean?" tip picked up next as a standalone
-unit). All ten are now **DONE** and have moved into ROADMAP.md's own
-Done section, per this project's standing "fold DONE phases into Done"
-convention - their entries are removed from this backlog file, not
-left in place with a status tag flipped.
+made it natural to pick up next), and Phase 96's D8 and D2 (two small,
+self-contained items picked up next as standalone units - D2 opt-in,
+per this project's "ship opt-in" convention for a novel rule category
+with a real false-positive risk on unambiguous single-bool-parameter
+calls). All eleven are now **DONE** and have moved into ROADMAP.md's
+own Done section, per this project's standing "fold DONE phases into
+Done" convention - their entries are removed from this backlog file,
+not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -426,10 +428,6 @@ rule of these shapes at all, confirmed by grep.
   novel "god object with a deep, complex dependency graph" smell worth
   a D1b sub-item; needs only recursive constructor-param-type
   resolution through the already-live closed-world registry.
-- **D2 (small).** Boolean-trap detection — a bare literal `true`/`false`
-  passed positionally into a `bool` parameter (`setVisible(true, false)`)
-  is always type-correct, so PHPStan's entire argument-checking family
-  is structurally blind to it.
 - **D3 (medium).** Identical-branch / structurally-duplicate conditional-
   body detection — two branches with satisfiable-but-different
   conditions and identical bodies; PHPStan's `Rules/Comparison`/

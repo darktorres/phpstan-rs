@@ -159,6 +159,13 @@ pub struct Registry {
     // for why this goes beyond real PHPStan, which has no whole-project
     // equivalent to mirror.
     pub check_duplicate_class_declarations: bool,
+    // "Boolean trap" detection (PHASE_BACKLOG Phase 96's D2) - a bare
+    // `true`/`false` literal passed *positionally* into a bare-`bool`-
+    // typed parameter is always type-correct, so no PHPStan rule can see
+    // it; opt-in since a well-named single-bool-parameter call (`$x->
+    // setEnabled(true)`) is unambiguous in practice and would otherwise
+    // be noise on every such call project-wide.
+    pub check_boolean_trap: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

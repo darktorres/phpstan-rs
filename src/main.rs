@@ -151,6 +151,13 @@ enum Command {
         /// doc comment.
         #[arg(long)]
         check_duplicate_class_declarations: bool,
+        /// Enables "boolean trap" detection - a bare `true`/`false`
+        /// literal passed positionally into a bare-`bool`-typed
+        /// parameter. Off by default: unambiguous single-bool-parameter
+        /// calls are common and would otherwise be pure noise - see
+        /// `registry::Registry::check_boolean_trap`'s own doc comment.
+        #[arg(long)]
+        check_boolean_trap: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -231,6 +238,7 @@ fn main() {
             check_method_throw_type_covariance,
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
+            check_boolean_trap,
             php_version,
             generate_baseline,
             baseline,
@@ -255,6 +263,7 @@ fn main() {
             check_method_throw_type_covariance,
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
+            check_boolean_trap,
             php_version,
             generate_baseline,
             baseline,

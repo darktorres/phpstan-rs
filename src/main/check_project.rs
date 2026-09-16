@@ -120,6 +120,7 @@ fn run_check_project(
     check_method_throw_type_covariance: bool,
     check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
+    check_boolean_trap: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -166,6 +167,7 @@ fn run_check_project(
     project.set_check_method_throw_type_covariance(check_method_throw_type_covariance);
     project.set_check_duplicate_function_declarations(check_duplicate_function_declarations);
     project.set_check_duplicate_class_declarations(check_duplicate_class_declarations);
+    project.set_check_boolean_trap(check_boolean_trap);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_php_version(php_version);
@@ -452,6 +454,7 @@ pub(crate) fn run_check_project_command(
     check_method_throw_type_covariance: bool,
     check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
+    check_boolean_trap: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -543,6 +546,7 @@ pub(crate) fn run_check_project_command(
             .unwrap_or(false);
     let check_duplicate_class_declarations = check_duplicate_class_declarations
         || config.check_duplicate_class_declarations.unwrap_or(false);
+    let check_boolean_trap = check_boolean_trap || config.check_boolean_trap.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -623,6 +627,7 @@ pub(crate) fn run_check_project_command(
         check_method_throw_type_covariance,
         check_duplicate_function_declarations,
         check_duplicate_class_declarations,
+        check_boolean_trap,
         configured_level,
         &stub_dirs,
         php_version,

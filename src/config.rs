@@ -20,6 +20,7 @@
 //! stub_paths = ["phpstan-stubs/Imagick.stub.php"]
 //! check_duplicate_function_declarations = false
 //! check_duplicate_class_declarations = false
+//! check_boolean_trap = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -115,6 +116,9 @@ pub struct Config {
     /// See `registry::Registry::check_duplicate_class_declarations` for
     /// why this needs `stub_paths` correctly populated first.
     pub check_duplicate_class_declarations: Option<bool>,
+    /// Opt-in "boolean trap" detection - see
+    /// `registry::Registry::check_boolean_trap`'s own doc comment for why.
+    pub check_boolean_trap: Option<bool>,
 }
 
 impl Config {

@@ -1677,6 +1677,22 @@ was the one undefined-symbol family with no tip at all before this -
 class/function/property already had at least a static "learn more"
 URL.
 
+**Opt-in "boolean trap" detection** (PHASE_BACKLOG Phase 96's D2,
+`argument.booleanTrap`). `Checker::check_boolean_trap_arguments`
+(`checker/calls.rs`) flags a bare `true`/`false` literal passed
+*positionally* (never named, never through a spread) into a bare-
+`Type::Bool`-typed parameter - a call shape no type-checking rule can
+ever see, since it's always type-correct. Gated behind a new
+`Registry::check_boolean_trap`/`Config::check_boolean_trap`/
+`--check-boolean-trap` flag, wired through `Project::
+set_check_boolean_trap` and `check-project`'s own config-merge
+plumbing exactly like every other opt-in check - off by default,
+since an unambiguous single-bool-parameter call (`$x->setEnabled
+(true)`) is common and would otherwise be pure noise project-wide. A
+named argument (`setVisible(visible: true)`) or a variable/expression
+argument is never flagged - only the bare literal shape is structurally
+invisible to ordinary type checking.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the
