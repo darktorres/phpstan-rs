@@ -1819,6 +1819,22 @@ port of that distinction. Gated behind `Registry::check_boolean_
 conditions`, off by default - real PHPStan ships this only via the
 separate, opt-in `phpstan/phpstan-strict-rules` package.
 
+**Opt-in strict `checkDynamicProperties` in `isset`/`empty`/`??`/`??=`**
+(PHASE_BACKLOG Phase 102's W1). `check_expr_quiet_root`'s own
+`PropertyAccess` arm (`checker/expr/probe_checks.rs`) previously always
+matched real PHPStan's lenient default - `isset($x->undefined)`'s whole
+point is probing for exactly that, so it stayed silently unchecked with
+no flag to ever turn it on. Now, gated behind `Registry::
+check_dynamic_properties`, that same arm additionally infers the
+base's real type and reuses `member_confirmed_missing` (the identical
+existence check the ordinary, non-quiet `PropertyAccess` path already
+runs) to flag a property that genuinely doesn't exist there, still
+`property.notFound`. Deliberately skips the ordinary path's
+`guarded_properties`/Pest-hook/visibility exemptions - a narrower,
+opt-in-only re-check, not a full duplicate of the real rule. Off by
+default, mirroring real PHPStan's own opt-in `checkDynamicProperties`
+parameter.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the

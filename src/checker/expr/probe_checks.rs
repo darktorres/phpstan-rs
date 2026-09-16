@@ -98,8 +98,33 @@ impl<'a> Checker<'a> {
                 }
                 Type::Mixed
             }
-            ExprKind::PropertyAccess(base, _, _) => {
+            ExprKind::PropertyAccess(base, prop, _) => {
                 self.check_expr_quiet_root(base, locals, label);
+                // Opt-in `checkDynamicProperties` strict mode
+                // (PHASE_BACKLOG Phase 102's W1) - real PHPStan's
+                // lenient default silently allows `isset($x->undefined)`
+                // (the whole point of `isset`/`??` is to probe for
+                // exactly that), but the stricter mode still flags it as
+                // a likely typo. Deliberately skips the ordinary path's
+                // `guarded_properties`/Pest-hook/visibility exemptions -
+                // this is a narrower, opt-in-only re-check, not a full
+                // duplicate of the real property-access rule.
+                if self.registry.check_dynamic_properties {
+                    let base_ty = self.infer_expr(base, locals);
+                    if self.member_confirmed_missing(&base_ty, |c| {
+                        c == "stdClass"
+                            || self.registry.lookup_property(c, prop).is_some()
+                            || self.registry.lookup_method(c, "__get").is_some()
+                    }) {
+                        self.report(
+                            label.to_string(),
+                            format!("access to undefined property {base_ty}::${prop}"),
+                            e.span,
+                            2,
+                            "property.notFound",
+                        );
+                    }
+                }
                 Type::Mixed
             }
             ExprKind::DynamicPropertyAccess(base, name_expr) => {

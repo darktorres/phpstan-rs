@@ -308,6 +308,14 @@ impl Project {
         self.registry.check_boolean_conditions = enabled;
     }
 
+    /// Opts the whole project's checking into strict `checkDynamic
+    /// Properties` behavior inside `isset()`/`empty()`/`??`/`??=` - see
+    /// `registry::Registry::check_dynamic_properties`'s own doc comment
+    /// for why this defaults to `false`.
+    pub fn set_check_dynamic_properties(&mut self, enabled: bool) {
+        self.registry.check_dynamic_properties = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

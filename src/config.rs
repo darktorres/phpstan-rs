@@ -25,6 +25,7 @@
 //! check_parent_constructor_call = false
 //! check_promoted_property_suggestions = false
 //! check_boolean_conditions = false
+//! check_dynamic_properties = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -139,6 +140,10 @@ pub struct Config {
     /// `registry::Registry::check_boolean_conditions`'s own doc comment
     /// for why.
     pub check_boolean_conditions: Option<bool>,
+    /// Opt-in strict `checkDynamicProperties` behavior inside
+    /// `isset()`/`empty()`/`??`/`??=` - see `registry::Registry::
+    /// check_dynamic_properties`'s own doc comment for why.
+    pub check_dynamic_properties: Option<bool>,
 }
 
 impl Config {

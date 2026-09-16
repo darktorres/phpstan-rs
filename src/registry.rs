@@ -191,6 +191,14 @@ pub struct Registry {
     // `BooleansInConditions` rule family). Real PHPStan ships this only
     // via that separate, opt-in package.
     pub check_boolean_conditions: bool,
+    // Strict `checkDynamicProperties` behavior inside `isset()`/
+    // `empty()`/`??`/`??=` (PHASE_BACKLOG Phase 102's W1) - real
+    // PHPStan's lenient default (this project's own unconditional
+    // behavior otherwise) silently allows probing a property that
+    // doesn't exist there; the stricter mode still flags it. Opt-in,
+    // mirroring real PHPStan's own opt-in `checkDynamicProperties`
+    // parameter.
+    pub check_dynamic_properties: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

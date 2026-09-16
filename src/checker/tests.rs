@@ -27,6 +27,7 @@ mod docblock_property_tags;
 mod doctrine_and_stdlib_specials;
 mod duplicate_operands;
 mod duplicates;
+mod dynamic_properties_strict;
 mod enums;
 mod foreach_iterables;
 mod generator_types;

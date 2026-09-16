@@ -189,6 +189,15 @@ enum Command {
         /// Registry::check_boolean_conditions`'s own doc comment.
         #[arg(long)]
         check_boolean_conditions: bool,
+        /// Enables strict `checkDynamicProperties` behavior inside
+        /// `isset()`/`empty()`/`??`/`??=` (still flags a property that
+        /// doesn't exist there, instead of real PHPStan's lenient
+        /// default of silently allowing the probe). Off by default,
+        /// mirroring real PHPStan's own opt-in `checkDynamicProperties`
+        /// parameter - see `registry::Registry::
+        /// check_dynamic_properties`'s own doc comment.
+        #[arg(long)]
+        check_dynamic_properties: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -274,6 +283,7 @@ fn main() {
             check_parent_constructor_call,
             check_promoted_property_suggestions,
             check_boolean_conditions,
+            check_dynamic_properties,
             php_version,
             generate_baseline,
             baseline,
@@ -303,6 +313,7 @@ fn main() {
             check_parent_constructor_call,
             check_promoted_property_suggestions,
             check_boolean_conditions,
+            check_dynamic_properties,
             php_version,
             generate_baseline,
             baseline,

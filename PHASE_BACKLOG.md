@@ -19,25 +19,26 @@ the source of truth for their own material:
   finding (e.g. "A1", "U3") for the full grounding before implementing.
 
 **Status:** every phase below is **PLANNED** — none of this is built,
-with eighteen exceptions: Phases 166, 169, and 174 (unblocking two
+with nineteen exceptions: Phases 166, 169, and 174 (unblocking two
 live dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162,
 167, 170, 171, and 172 (the small narrowing-engine batch this
 unblocking made it natural to pick up next), and Phase 96's D8, D2,
 D5, and D7, Phase 97's AA3, Phase 98's AB2, Phase 101's E4, E3, and
-E1, and Phase 103's Z1 (nine small, self-contained items picked up
-next as standalone units - D2, Z1, E3, AA3, and E1 all opt-in, per
-this project's "ship opt-in" convention: D2 for a real false-positive
-risk on unambiguous single-bool-parameter calls, Z1 because real
-PHPStan itself only ever ran it in a private issue-bot config leaving
-no real-world noise signal, E3 and E1 because real PHPStan ships both
-only via the separate `phpstan-strict-rules` package (E3's own
-legitimate-exception risk: a constructor genuinely choosing not to
-call an otherwise-real parent one), AA3 because it's a purely
-stylistic suggestion, not a bug). All eighteen are now **DONE** and
-have moved into ROADMAP.md's own Done section, per this project's
-standing "fold DONE phases into Done" convention - their entries are
-removed from this backlog file, not left in place with a status tag
-flipped.
+E1, Phase 102's W1, and Phase 103's Z1 (ten small, self-contained
+items picked up next as standalone units - D2, Z1, E3, AA3, E1, and
+W1 all opt-in, per this project's "ship opt-in" convention: D2 for a
+real false-positive risk on unambiguous single-bool-parameter calls,
+Z1 because real PHPStan itself only ever ran it in a private
+issue-bot config leaving no real-world noise signal, E3, E1, and W1
+because real PHPStan ships each only via a separate opt-in mechanism
+of its own (E3/E1 via `phpstan-strict-rules`, W1 via its own opt-in
+`checkDynamicProperties` parameter; E3's own legitimate-exception
+risk: a constructor genuinely choosing not to call an otherwise-real
+parent one), AA3 because it's a purely stylistic suggestion, not a
+bug). All nineteen are now **DONE** and have moved into ROADMAP.md's
+own Done section, per this project's standing "fold DONE phases into
+Done" convention - their entries are removed from this backlog file,
+not left in place with a status tag flipped.
 "Triaged" here means "assigned a phase number and scoped," not
 "scheduled" in any priority order; the numbering is sequential by
 source-document position, not urgency. Pick items the same way any
@@ -550,11 +551,6 @@ Grounded directly against the vendored `phpstan-strict-rules` submodule.
 
 ## Phase 102 — More `phpstan-strict-rules` "stricter defaults" config flags (§W)
 
-- **W1 (small).** Opt-in strict `checkDynamicProperties` behavior inside
-  `isset()`/`empty()`/`??`/`??=` — phpstan-rs's `check_expr_quiet_root`
-  unconditionally matches PHPStan's *lenient default* here, with no flag
-  or code path to ever run the check in that context at all, even
-  opt-in.
 - **W2 (medium).** Opt-in strict printf/sprintf placeholder-type
   checking — phpstan-rs's `format_specifier_accepts` is explicitly
   documented "deliberately lenient" (matches core PHPStan's own
