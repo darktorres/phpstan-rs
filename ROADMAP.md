@@ -1781,6 +1781,23 @@ and never a literal (`1 === 1` isn't a copy-paste mistake the way
 subtracting an expression from itself is almost always a mistake
 regardless of what it evaluates to.
 
+**Opt-in constructor-property-promotion suggestion** (PHASE_BACKLOG
+Phase 97's AA3, `constructor.promotionCandidate`) - real PHPStan's
+promoted-property machinery only ever *validates* an existing
+promotion, never *proposes* one. `Checker::check_promoted_property_
+candidate` (`checker/oop.rs`) flags a constructor that's a trivial
+forwarder: every parameter, in order, has exactly one matching
+`$this->name = $name;` statement and nothing else in the body, none of
+the parameters are already promoted (a partially-promoted constructor
+is left alone - this is about converting the *whole* thing), and each
+target property is a plain (non-static, non-hooked) declaration on the
+same class with the identical native type. Gated behind `Registry::
+check_promoted_property_suggestions` (opt-in - a purely stylistic
+suggestion, not a bug) and the configured PHP version being >= 8.0
+(`PhpFeature::PromotedProperties`) - without a configured version, this
+doesn't guess forward any more than any other version-gated check here
+does.
+
 **PCRE pattern-validity checking** (Phase 46). New optional `pcre2-sys`
 dependency (a new, first-ever C dependency, gated behind a `pcre-
 validate` Cargo feature defaulted on - `--no-default-features` keeps the

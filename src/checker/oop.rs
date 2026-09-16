@@ -1005,6 +1005,86 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// PHASE_BACKLOG Phase 97's AA3 - real PHPStan's promoted-property
+    /// machinery only ever *validates* an existing promotion, never
+    /// *proposes* one. Suggests constructor property promotion for a
+    /// trivially-forwarding constructor: every parameter, in order, has
+    /// exactly one matching `$this->name = $name;` statement and nothing
+    /// else in the body, none of the parameters are already promoted (a
+    /// partially-promoted constructor is left alone - this is about
+    /// converting the *whole* thing), and each target property is a
+    /// plain (non-static, non-hooked) declaration on this same class
+    /// with the identical native type. Gated on the configured PHP
+    /// version being >= 8.0 (`PhpFeature::PromotedProperties`) - without
+    /// one configured, this doesn't guess forward any more than any
+    /// other version-gated check here does.
+    pub(crate) fn check_promoted_property_candidate(&mut self, fqn: &str, c: &ClassDecl) {
+        if !self.registry.check_promoted_property_suggestions {
+            return;
+        }
+        if !self
+            .registry
+            .php_version
+            .is_some_and(|v| crate::php_version::PhpFeature::PromotedProperties.is_available(v))
+        {
+            return;
+        }
+        let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") else {
+            return;
+        };
+        let params = &ctor.function.params;
+        if params.is_empty()
+            || params
+                .iter()
+                .any(|p| p.by_ref || p.variadic || p.promoted_visibility.is_some())
+        {
+            return;
+        }
+        let body = &ctor.function.body;
+        if body.len() != params.len() {
+            return;
+        }
+        for (param, stmt) in params.iter().zip(body.iter()) {
+            let StmtKind::Expression(e) = &stmt.kind else {
+                return;
+            };
+            let ExprKind::Assign(lhs, rhs) = &unwrap_grouping(e).kind else {
+                return;
+            };
+            let ExprKind::PropertyAccess(recv, prop_name, false) = &unwrap_grouping(lhs).kind
+            else {
+                return;
+            };
+            if !matches!(&unwrap_grouping(recv).kind, ExprKind::Variable(v) if v == "this") {
+                return;
+            }
+            if prop_name != &param.name {
+                return;
+            }
+            if !matches!(&unwrap_grouping(rhs).kind, ExprKind::Variable(v) if v == &param.name) {
+                return;
+            }
+            let Some(prop) = c.properties.iter().find(|p| &p.name == prop_name) else {
+                return;
+            };
+            if prop.is_static || prop.hooks.is_some() || prop.type_hint != param.type_hint {
+                return;
+            }
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                fqn.to_string(),
+                format!(
+                    "{fqn}::__construct() only forwards its parameters into matching properties - consider constructor property promotion instead"
+                ),
+                ctor.function.span,
+                5,
+                "constructor.promotionCandidate",
+            )
+            .tip("merge each property's own declaration into its constructor parameter"),
+        );
+    }
+
     /// `@phpstan-require-extends`/`@phpstan-require-implements`'s
     /// consumer half, mirroring real PHPStan's `RequireExtendsRule`/
     /// `RequireImplementsRule`. For every interface/trait `fqn`

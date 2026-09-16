@@ -292,6 +292,14 @@ impl Project {
         self.registry.check_parent_constructor_call = enabled;
     }
 
+    /// Opts the whole project's checking into constructor-property-
+    /// promotion suggestions - see `registry::Registry::
+    /// check_promoted_property_suggestions`'s own doc comment for why
+    /// this defaults to `false`.
+    pub fn set_check_promoted_property_suggestions(&mut self, enabled: bool) {
+        self.registry.check_promoted_property_suggestions = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

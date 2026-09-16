@@ -175,6 +175,12 @@ enum Command {
         /// doc comment.
         #[arg(long)]
         check_parent_constructor_call: bool,
+        /// Enables constructor-property-promotion suggestions for a
+        /// trivially-forwarding constructor. Off by default - a purely
+        /// stylistic suggestion, not a bug - see `registry::Registry::
+        /// check_promoted_property_suggestions`'s own doc comment.
+        #[arg(long)]
+        check_promoted_property_suggestions: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -258,6 +264,7 @@ fn main() {
             check_boolean_trap,
             check_array_key_cast,
             check_parent_constructor_call,
+            check_promoted_property_suggestions,
             php_version,
             generate_baseline,
             baseline,
@@ -285,6 +292,7 @@ fn main() {
             check_boolean_trap,
             check_array_key_cast,
             check_parent_constructor_call,
+            check_promoted_property_suggestions,
             php_version,
             generate_baseline,
             baseline,

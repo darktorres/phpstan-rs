@@ -1204,6 +1204,7 @@ impl<'a> Checker<'a> {
                         );
                         self.check_too_wide_property_types(&fqn, c);
                         self.check_parent_constructor_call(&fqn, c);
+                        self.check_promoted_property_candidate(&fqn, c);
                     }
                 }
                 StmtKind::EnumDecl(e) => {

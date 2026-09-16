@@ -123,6 +123,7 @@ fn run_check_project(
     check_boolean_trap: bool,
     check_array_key_cast: bool,
     check_parent_constructor_call: bool,
+    check_promoted_property_suggestions: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -172,6 +173,7 @@ fn run_check_project(
     project.set_check_boolean_trap(check_boolean_trap);
     project.set_check_array_key_cast(check_array_key_cast);
     project.set_check_parent_constructor_call(check_parent_constructor_call);
+    project.set_check_promoted_property_suggestions(check_promoted_property_suggestions);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_php_version(php_version);
@@ -461,6 +463,7 @@ pub(crate) fn run_check_project_command(
     check_boolean_trap: bool,
     check_array_key_cast: bool,
     check_parent_constructor_call: bool,
+    check_promoted_property_suggestions: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -556,6 +559,8 @@ pub(crate) fn run_check_project_command(
     let check_array_key_cast = check_array_key_cast || config.check_array_key_cast.unwrap_or(false);
     let check_parent_constructor_call =
         check_parent_constructor_call || config.check_parent_constructor_call.unwrap_or(false);
+    let check_promoted_property_suggestions = check_promoted_property_suggestions
+        || config.check_promoted_property_suggestions.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -639,6 +644,7 @@ pub(crate) fn run_check_project_command(
         check_boolean_trap,
         check_array_key_cast,
         check_parent_constructor_call,
+        check_promoted_property_suggestions,
         configured_level,
         &stub_dirs,
         php_version,

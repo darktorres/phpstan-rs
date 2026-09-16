@@ -23,6 +23,7 @@
 //! check_boolean_trap = false
 //! check_array_key_cast = false
 //! check_parent_constructor_call = false
+//! check_promoted_property_suggestions = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -129,6 +130,10 @@ pub struct Config {
     /// `registry::Registry::check_parent_constructor_call`'s own doc
     /// comment for why.
     pub check_parent_constructor_call: Option<bool>,
+    /// Opt-in constructor-property-promotion suggestions - see
+    /// `registry::Registry::check_promoted_property_suggestions`'s own
+    /// doc comment for why.
+    pub check_promoted_property_suggestions: Option<bool>,
 }
 
 impl Config {

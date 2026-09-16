@@ -182,6 +182,10 @@ pub struct Registry {
     // inheritance patterns, a parent constructor that's a no-op by
     // design) is real enough that this stays opt-in here too.
     pub check_parent_constructor_call: bool,
+    // Constructor-property-promotion suggestion (PHASE_BACKLOG Phase
+    // 97's AA3) - a purely stylistic suggestion, not a bug, so opt-in
+    // like every other novel rule category shipped here.
+    pub check_promoted_property_suggestions: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats
