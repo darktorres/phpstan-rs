@@ -363,7 +363,7 @@ impl<'a> Checker<'a> {
                 inline_var.as_ref(),
             ),
             StmtKind::Switch { subject, cases } => {
-                self.check_switch(subject, cases, locals, declared_return, label)
+                self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
             }
             StmtKind::Try {
                 body,

@@ -190,6 +190,11 @@ pub struct Registry {
     // `never`-return-type suggestion for a body that provably never
     // returns normally - opt-in, a stylistic suggestion.
     pub check_never_return_suggestions: bool,
+    // A `switch` with no `default:` arm - opt-in, since a switch over an
+    // exhaustively-listed set of values (e.g. every case of a bounded
+    // string enumeration) can be a deliberate, correct choice this
+    // checker has no way to confirm is truly exhaustive.
+    pub check_switch_missing_default: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

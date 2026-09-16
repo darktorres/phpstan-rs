@@ -1875,6 +1875,15 @@ unbuilt dead-code question. Gated behind `Registry::
 check_never_return_suggestions`, off by default (a purely stylistic
 suggestion, not a bug).
 
+**Opt-in missing-`default:`-arm detection** (PHASE_BACKLOG Phase 147's
+147f, `switch.missingDefault`). `check_switch` (`checker/stmt/
+switch.rs`) flags a `switch` with no `default:` case at all. Opt-in:
+a switch over an exhaustively-listed set of values (every case of a
+bounded string enumeration, say) can be a deliberate, correct choice
+this checker has no way to confirm is truly exhaustive, unlike a real
+PHP `enum`'s own `match`-exhaustiveness the checker already reasons
+about elsewhere. Gated behind `Registry::check_switch_missing_default`.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

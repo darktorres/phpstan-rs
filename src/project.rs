@@ -332,6 +332,13 @@ impl Project {
         self.registry.check_never_return_suggestions = enabled;
     }
 
+    /// Opts the whole project's checking into missing-`default:`-arm
+    /// detection - see `registry::Registry::check_switch_missing_
+    /// default`'s own doc comment for why this defaults to `false`.
+    pub fn set_check_switch_missing_default(&mut self, enabled: bool) {
+        self.registry.check_switch_missing_default = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

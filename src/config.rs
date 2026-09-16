@@ -28,6 +28,7 @@
 //! check_dynamic_properties = false
 //! check_swapped_arguments = false
 //! check_never_return_suggestions = false
+//! check_switch_missing_default = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -154,6 +155,10 @@ pub struct Config {
     /// `registry::Registry::check_never_return_suggestions`'s own doc
     /// comment for why.
     pub check_never_return_suggestions: Option<bool>,
+    /// Opt-in missing-`default:`-arm detection - see
+    /// `registry::Registry::check_switch_missing_default`'s own doc
+    /// comment for why.
+    pub check_switch_missing_default: Option<bool>,
 }
 
 impl Config {

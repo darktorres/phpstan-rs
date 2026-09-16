@@ -1602,8 +1602,6 @@ real, widely-valued, and cheap:
 - **147d (small).** `throw new Exception()` with no message argument.
 - **147e (small).** Throwing the bare `\Exception`/`\Error` base class
   instead of a specific subclass.
-- **147f (small).** A `switch` statement with no `default` arm.
-
 ## Phase 148 — "No mixed member access" + null-coercion-safety + enum-exhaustiveness-enforcement families
 
 Confirmed independently by `rector/type-perfect` and `shipmonk/

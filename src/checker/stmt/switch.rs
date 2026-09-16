@@ -7,11 +7,21 @@ impl<'a> Checker<'a> {
         &mut self,
         subject: &Expr,
         cases: &[SwitchCase],
+        span: crate::token::Span,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
     ) {
         self.check_expr(subject, locals, label);
+        if self.registry.check_switch_missing_default && !cases.iter().any(|c| c.test.is_none()) {
+            self.report(
+                label.to_string(),
+                "Switch has no default branch.".to_string(),
+                span,
+                5,
+                "switch.missingDefault",
+            );
+        }
         // Two independent facts are tracked while walking cases
         // in order:
         //

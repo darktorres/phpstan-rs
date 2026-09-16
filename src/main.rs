@@ -215,6 +215,11 @@ enum Command {
         /// check_never_return_suggestions`'s own doc comment.
         #[arg(long)]
         check_never_return_suggestions: bool,
+        /// Enables missing-`default:`-arm detection for `switch`
+        /// statements. Off by default - see `registry::Registry::
+        /// check_switch_missing_default`'s own doc comment.
+        #[arg(long)]
+        check_switch_missing_default: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -303,6 +308,7 @@ fn main() {
             check_dynamic_properties,
             check_swapped_arguments,
             check_never_return_suggestions,
+            check_switch_missing_default,
             php_version,
             generate_baseline,
             baseline,
@@ -335,6 +341,7 @@ fn main() {
             check_dynamic_properties,
             check_swapped_arguments,
             check_never_return_suggestions,
+            check_switch_missing_default,
             php_version,
             generate_baseline,
             baseline,
