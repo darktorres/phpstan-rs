@@ -983,10 +983,24 @@ impl Registry {
     /// precomputed map - a real project has at most a few dozen entities,
     /// nowhere near enough for this to be a real cost next to everything
     /// else a single method-body check already does.
+    ///
+    /// `None` when more than one entity names the same `repository_fqn`
+    /// (real, valid Doctrine: one repository *class* can be instantiated
+    /// separately per entity via `EntityManager::getRepository()`/DI, so
+    /// nothing in `repository_fqn`'s own method bodies can say which
+    /// entity a given call site's instance is actually bound to) - a
+    /// confirmed real Piwigo shape (`ImageRepository` serves both
+    /// `ImageEntity` and `ImageFormatEntity`), not a hypothetical.
+    /// Guessing the first match produced a real false positive:
+    /// `ImageRepository::findByIds`'s own `$entity->id` flagged as
+    /// undefined because the scan happened to land on `ImageFormatEntity`
+    /// first.
     pub(crate) fn repository_entity(&self, repository_fqn: &str) -> Option<&str> {
-        self.classes.iter().find_map(|(name, info)| {
+        let mut matches = self.classes.iter().filter_map(|(name, info)| {
             let entity = info.doctrine_entity.as_ref()?;
             (entity.repository_class.as_deref() == Some(repository_fqn)).then_some(name.as_str())
-        })
+        });
+        let first = matches.next()?;
+        matches.next().is_none().then_some(first)
     }
 }

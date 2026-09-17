@@ -244,6 +244,50 @@ fn bare_execute_behaves_identically_to_get_result() {
 }
 
 #[test]
+fn a_repository_class_shared_by_two_entities_is_undecidable() {
+    // Real, valid Doctrine: one repository *class* can be instantiated
+    // separately per entity via `EntityManager::getRepository()`/DI (a
+    // real Piwigo shape - `ImageRepository` serves both `ImageEntity`
+    // and `ImageFormatEntity`) - nothing in the repository class's own
+    // method bodies says which entity a given call site's instance is
+    // actually bound to, so guessing either one would be a real false
+    // positive/negative risk, not a safe simplification.
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagFormatEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function all(): void
+            {
+                $rows = $this->createQueryBuilder('t')->getQuery()->getResult();
+                assertType('list', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_delete_chains_execute_is_a_plain_affected_row_count() {
     // `EntityRepository::createQueryBuilder($alias)` always pre-populates
     // its own `select($alias)`/`from(...)` (real Doctrine sugar), and
