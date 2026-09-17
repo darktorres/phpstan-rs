@@ -451,62 +451,60 @@ impl ClassInfo {
             })
             .unwrap_or_default();
 
-        let methods: HashMap<String, FunctionSig> =
-            collect_merged_methods(c.methods.iter().map(|m| {
-                (
-                    m.function.name.clone(),
-                    FunctionSig::from_decl(
-                        &m.function,
-                        ctx,
-                        &template_params,
-                        &type_aliases,
-                        m.visibility.clone(),
-                    ),
-                )
-            }));
-        let abstract_methods: HashSet<String> = c
-            .methods
-            .iter()
-            .filter(|m| m.is_abstract)
-            .map(|m| m.function.name.clone())
-            .collect();
-        // A `private` method isn't part of a class's inherited/overridable
-        // surface at all in real PHP - a subclass declaring its own
-        // same-named private method is an independent, unrelated
-        // declaration, not an override - so `final private` doesn't
-        // actually restrict anything a subclass does (real PHP raises no
-        // error for `Exception::__clone()`, `final private`, being
-        // freely redeclared by subclasses).
-        let final_methods: HashSet<String> = c
-            .methods
-            .iter()
-            .filter(|m| m.is_final && m.visibility != Visibility::Private)
-            .map(|m| m.function.name.clone())
-            .collect();
-        let static_methods: HashSet<String> = c
-            .methods
-            .iter()
-            .filter(|m| m.is_static)
-            .map(|m| m.function.name.clone())
-            .collect();
-        // `@final`'s docblock-only sibling to `final_methods` above -
-        // same private-is-not-overridable exemption (a purely static-
-        // analysis convention real PHP itself never enforces, so it
-        // needs its own explicit ancestor walk rather than piggybacking
-        // on the native keyword's compile-time guarantee).
-        let final_methods_by_phpdoc: HashSet<String> = c
-            .methods
-            .iter()
-            .filter(|m| {
-                m.visibility != Visibility::Private
-                    && m.function
-                        .doc_comment
-                        .as_deref()
-                        .map(docblock::parse)
-                        .is_some_and(|d| d.is_final)
-            })
-            .map(|m| m.function.name.clone())
-            .collect();
+        // A single pass over `c.methods` builds `methods` and all 4
+        // name-only `HashSet`s together - each method's own name is
+        // cloned only for the sets it actually belongs to, instead of
+        // every method in the class being filtered/name-cloned once per
+        // set across 5 separate iterations.
+        let mut methods_vec: Vec<(String, FunctionSig)> = Vec::with_capacity(c.methods.len());
+        let mut abstract_methods: HashSet<String> = HashSet::new();
+        let mut final_methods: HashSet<String> = HashSet::new();
+        let mut static_methods: HashSet<String> = HashSet::new();
+        let mut final_methods_by_phpdoc: HashSet<String> = HashSet::new();
+        for m in &c.methods {
+            let name = m.function.name.clone();
+            if m.is_abstract {
+                abstract_methods.insert(name.clone());
+            }
+            // A `private` method isn't part of a class's inherited/
+            // overridable surface at all in real PHP - a subclass
+            // declaring its own same-named private method is an
+            // independent, unrelated declaration, not an override - so
+            // `final private` doesn't actually restrict anything a
+            // subclass does (real PHP raises no error for
+            // `Exception::__clone()`, `final private`, being freely
+            // redeclared by subclasses).
+            if m.is_final && m.visibility != Visibility::Private {
+                final_methods.insert(name.clone());
+            }
+            if m.is_static {
+                static_methods.insert(name.clone());
+            }
+            // `@final`'s docblock-only sibling to `final_methods` above -
+            // same private-is-not-overridable exemption (a purely static-
+            // analysis convention real PHP itself never enforces, so it
+            // needs its own explicit ancestor walk rather than
+            // piggybacking on the native keyword's compile-time
+            // guarantee).
+            if m.visibility != Visibility::Private
+                && m.function
+                    .doc_comment
+                    .as_deref()
+                    .map(docblock::parse)
+                    .is_some_and(|d| d.is_final)
+            {
+                final_methods_by_phpdoc.insert(name.clone());
+            }
+            let sig = FunctionSig::from_decl(
+                &m.function,
+                ctx,
+                &template_params,
+                &type_aliases,
+                m.visibility.clone(),
+            );
+            methods_vec.push((name, sig));
+        }
+        let methods: HashMap<String, FunctionSig> = collect_merged_methods(methods_vec.into_iter());
         // Same private-is-not-overridable exemption `final_methods`
         // above applies, one member kind over - a private property
         // (final or not) is never part of a subclass's overridable
@@ -1395,24 +1393,23 @@ impl ClassInfo {
             implements.push("BackedEnum".to_string());
         }
 
-        let abstract_methods: HashSet<String> = e
-            .methods
-            .iter()
-            .filter(|m| m.is_abstract)
-            .map(|m| m.function.name.clone())
-            .collect();
-        let final_methods: HashSet<String> = e
-            .methods
-            .iter()
-            .filter(|m| m.is_final && m.visibility != Visibility::Private)
-            .map(|m| m.function.name.clone())
-            .collect();
-        let static_methods: HashSet<String> = e
-            .methods
-            .iter()
-            .filter(|m| m.is_static)
-            .map(|m| m.function.name.clone())
-            .collect();
+        // One pass over `e.methods` instead of 3 separate filtered ones -
+        // see `ClassInfo::from_decl`'s equivalent loop for the same
+        // reasoning.
+        let mut abstract_methods: HashSet<String> = HashSet::new();
+        let mut final_methods: HashSet<String> = HashSet::new();
+        let mut static_methods: HashSet<String> = HashSet::new();
+        for m in &e.methods {
+            if m.is_abstract {
+                abstract_methods.insert(m.function.name.clone());
+            }
+            if m.is_final && m.visibility != Visibility::Private {
+                final_methods.insert(m.function.name.clone());
+            }
+            if m.is_static {
+                static_methods.insert(m.function.name.clone());
+            }
+        }
         let trait_aliases: Vec<TraitAlias> = e
             .trait_aliases
             .iter()
