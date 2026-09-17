@@ -787,6 +787,11 @@ impl<'a> Checker<'a> {
         let mut else_locals = locals.clone();
         self.apply_narrowing(cond, &mut else_locals, false);
         self.apply_disjunctive_syllogism(cond, &mut else_locals);
+        // Before the else branch's own body is checked, so a flag the
+        // else branch itself also reassigns still gets purged by that
+        // check's own ordinary rebind-invalidation, the same as any
+        // other alias.
+        self.record_if_body_flag_alias(cond, then_branch, &mut then_locals, &mut else_locals);
         if let Some(e) = else_branch {
             if let StmtKind::If {
                 cond: nested_cond,

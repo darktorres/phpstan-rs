@@ -4406,3 +4406,79 @@ fn disjunctive_syllogism_does_not_fire_outside_a_pending_or_disjunction() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// A flag variable set unconditionally *inside* an `if`'s own body (`if
+// (A || B) { $flag = true; }`, not a direct `$flag = A || B;` assignment
+// expression) still correlates with the original condition later -
+// confirmed real shape:
+// `ImageDerivativeController::__invoke`'s own `$need_generate = false;
+// if ($derivative_mtime === false or $derivative_mtime < $src_mtime or
+// ...) { $need_generate = true; } ...; if (! $need_generate) { ...
+// gmdate(..., $derivative_mtime) ... }`.
+#[test]
+fn a_flag_set_inside_an_if_bodys_own_statement_correlates_with_the_original_condition() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): void {}
+            function f(int|false $mtime, int $threshold): void {
+                $need_generate = false;
+                if ($mtime === false or $mtime < $threshold) {
+                    $need_generate = true;
+                }
+                if (! $need_generate) {
+                    needsInt($mtime);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The same shape, but with a bare (brace-less) single-statement body -
+// `record_if_body_flag_alias` must unwrap both forms identically.
+#[test]
+fn a_flag_set_inside_a_brace_less_if_body_also_correlates() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): void {}
+            function f(int|false $mtime): void {
+                $need_generate = false;
+                if ($mtime === false) $need_generate = true;
+                if (! $need_generate) {
+                    needsInt($mtime);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative guard against over-firing: a branch that sets the flag
+// *alongside* another real effect isn't provably "this flag's value is
+// fully determined by the condition alone" - no alias should be
+// recorded, so the later read stays exactly as imprecise as it already
+// was (still no false claim, just no improvement).
+#[test]
+fn a_flag_set_alongside_another_effect_in_the_same_branch_is_not_aliased() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): void {}
+            function sideEffect(): void {}
+            function f(int|false $mtime): void {
+                $need_generate = false;
+                if ($mtime === false) {
+                    $need_generate = true;
+                    sideEffect();
+                }
+                if (! $need_generate) {
+                    needsInt($mtime);
+                }
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "the flag-only-effect restriction should leave this unimproved: {d:?}"
+    );
+}

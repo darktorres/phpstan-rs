@@ -99,7 +99,26 @@ pub(super) fn nullsafe_receiver(e: &Expr) -> Option<&Expr> {
 fn condition_alias_shape(rhs: &Expr) -> bool {
     match &rhs.kind {
         ExprKind::Instanceof(..)
-        | ExprKind::Binary(BinOp::Identical | BinOp::NotIdentical | BinOp::Eq | BinOp::NotEq, ..)
+        // `Lt`/`Gt`/`LtEq`/`GtEq` alongside the equality-family
+        // operators - needed so a numeric-comparison leaf inside a
+        // larger `&&`/`||` tree (`record_if_body_flag_alias`'s own real
+        // target shape: `$x === false or $x < $y or $x < $z`) doesn't
+        // block the *whole* compound condition from being alias-
+        // eligible, even though `apply_narrowing`'s own comparison
+        // narrowing doesn't do anything false-ness-specific for this one
+        // leaf - the useful narrowing still comes from whichever other
+        // leaf actually proves it.
+        | ExprKind::Binary(
+            BinOp::Identical
+            | BinOp::NotIdentical
+            | BinOp::Eq
+            | BinOp::NotEq
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::LtEq
+            | BinOp::GtEq,
+            ..,
+        )
         | ExprKind::Call(..)
         | ExprKind::Variable(_) => true,
         // A compound `&&`/`||` condition assigned to a flag variable,
@@ -408,8 +427,19 @@ impl<'a> Checker<'a> {
 fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
     match &rhs.kind {
         ExprKind::Instanceof(inner, _) => Some(vec![narrowing_key(inner)?]),
+        // `condition_alias_shape`'s own identical comparison-operator
+        // extension, mirrored here so a numeric-comparison leaf inside a
+        // larger tree still contributes its own narrowable operand as a
+        // real subject (not just a shape-eligibility check).
         ExprKind::Binary(
-            BinOp::Identical | BinOp::NotIdentical | BinOp::Eq | BinOp::NotEq,
+            BinOp::Identical
+            | BinOp::NotIdentical
+            | BinOp::Eq
+            | BinOp::NotEq
+            | BinOp::Lt
+            | BinOp::Gt
+            | BinOp::LtEq
+            | BinOp::GtEq,
             l,
             r,
         ) => Some(vec![narrowing_key(l).or_else(|| narrowing_key(r))?]),
@@ -1204,6 +1234,93 @@ impl<'a> Checker<'a> {
             return;
         }
         locals.set_condition_alias(name.clone(), target_keys, std::rc::Rc::new(rhs.clone()));
+    }
+
+    /// A different shape from `record_condition_alias` above: a flag
+    /// variable set unconditionally *inside* an `if`'s own body (`if (A
+    /// || B) { $flag = true; }`), not via a direct `$flag = A || B;`
+    /// assignment *expression*. Confirmed real corpus shape:
+    /// `ImageDerivativeController`'s own `$need_generate = false; if
+    /// ($derivative_mtime === false or $derivative_mtime < $src_mtime or
+    /// ...) { $need_generate = true; } ...; if (! $need_generate) { ...
+    /// gmdate(..., $derivative_mtime) ... }` - reaching `!$need_generate`
+    /// provably means every disjunct of the original `if`'s own
+    /// condition was false (including `$derivative_mtime === false`),
+    /// but nothing records that without this.
+    ///
+    /// Storing `cond` itself (not a synthetic negation) is enough:
+    /// `apply_narrowing`'s existing `ExprKind::Variable`/`Unary(Not,
+    /// ...)` dispatch already replays a stored alias at whichever
+    /// polarity the flag itself is tested at, so testing `!$need_generate`
+    /// later recurses into replaying `cond` with `branch_true` flipped -
+    /// proving the whole `A || B || ...` false exactly when
+    /// `!$need_generate` holds, via the identical OR-chain narrowing
+    /// mechanism a direct alias already gets.
+    ///
+    /// Recorded into *both* `then_locals` and `else_locals` directly
+    /// (with the identical `Rc`, not just one side left to `merge_scopes`'s
+    /// own "both branches must agree" `Rc::ptr_eq` filter) - unlike an
+    /// ordinary top-level `record_condition_alias` call (which runs
+    /// before any branching, so both forks inherit the same `Rc` for
+    /// free), this alias is only ever created on one specific path
+    /// through the `if`, so `else_locals` needs it written in explicitly
+    /// or the merge would drop it (else_locals never independently
+    /// produces a matching entry for `$need_generate` on its own). Sound
+    /// in `else_locals` too: reaching it already means `cond` was false
+    /// (`check_if`'s own `apply_narrowing(cond, else_locals, false)`
+    /// already applied there), so replaying it again later is at worst
+    /// redundant, never wrong.
+    ///
+    /// Scoped deliberately narrow: only a single, brace-or-bare `$flag =
+    /// <literal>;` statement as the *entire* `then_branch` body, and only
+    /// when the flag already had a real prior value before the `if` (the
+    /// real shape this targets - an as-yet-undefined flag wouldn't
+    /// survive `merge_scopes`'s own "present in only one branch" drop
+    /// anyway, so aliasing it here would never be consulted). A branch
+    /// that does anything else alongside the flag assignment isn't
+    /// provably "this flag's value is fully determined by `cond` alone",
+    /// so it's left alone rather than risking a wrong alias.
+    pub(crate) fn record_if_body_flag_alias(
+        &self,
+        cond: &Expr,
+        then_branch: &Stmt,
+        then_locals: &mut Locals,
+        else_locals: &mut Locals,
+    ) {
+        let single = match &then_branch.kind {
+            StmtKind::Block(stmts) => match stmts.as_slice() {
+                [only] => only,
+                _ => return,
+            },
+            _ => then_branch,
+        };
+        let StmtKind::Expression(assign) = &single.kind else {
+            return;
+        };
+        let ExprKind::Assign(lhs, rhs) = &assign.kind else {
+            return;
+        };
+        let ExprKind::Variable(name) = &lhs.kind else {
+            return;
+        };
+        if !matches!(rhs.kind, ExprKind::Literal(_)) {
+            return;
+        }
+        if !else_locals.contains_key(name) {
+            return;
+        }
+        if !condition_alias_shape(cond) {
+            return;
+        }
+        let Some(target_keys) = condition_alias_targets(cond) else {
+            return;
+        };
+        if target_keys.iter().any(|k| k == name) {
+            return;
+        }
+        let alias = std::rc::Rc::new(cond.clone());
+        then_locals.set_condition_alias(name.clone(), target_keys.clone(), alias.clone());
+        else_locals.set_condition_alias(name.clone(), target_keys, alias);
     }
 
     /// `AssertRuleHelper`'s equivalent - a `@phpstan-
