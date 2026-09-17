@@ -1512,6 +1512,7 @@ impl<'a> Checker<'a> {
                 self.check_param_out_assignment(lhs, &rhs_ty, label);
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 self.record_condition_alias(lhs, rhs, locals);
+                self.record_query_builder_alias(lhs, rhs, locals);
                 rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {

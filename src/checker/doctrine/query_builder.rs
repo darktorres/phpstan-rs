@@ -14,9 +14,26 @@
 //! module never even attempts to resolve their own arguments.
 
 use crate::ast::{Arg, Expr, ExprKind};
-use crate::checker::Checker;
 use crate::checker::assignment::literal_string_value;
+use crate::checker::{Checker, Locals};
 use crate::types::Type;
+
+/// A cheap syntactic pre-check mirroring `resolve_query_builder_chain`'s
+/// own `MethodCall`/`Grouping` walk - "does this expression's own chain
+/// spine eventually reach a `createQueryBuilder()` call" - without
+/// resolving anything semantically (no `Checker`/`Locals` needed).
+/// Storing every assignment's RHS unconditionally would also be correct
+/// (nothing ever reads an entry whose name is never tested via a later
+/// `->getQuery()`), but costs a real `Expr` clone per assignment,
+/// project-wide; this keeps that cost to the rare, actually-relevant one.
+fn looks_like_query_builder_chain(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::MethodCall(_, method, _, _) if method == "createQueryBuilder" => true,
+        ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
+        ExprKind::Grouping(inner) => looks_like_query_builder_chain(inner),
+        _ => false,
+    }
+}
 
 /// One `join`/`innerJoin`/`leftJoin` call's own target - either a real
 /// entity class (`join(Entity::class, alias)`) or a dotted association
@@ -61,13 +78,55 @@ pub(crate) struct QueryBuilderChain {
 /// One collected fluent-chain call, in AST (outermost-first) order -
 /// `resolve_query_builder_chain` reverses this once the chain root is
 /// identified, since a fluent chain reads outer-to-inner in the AST but
-/// executes root-to-outer chronologically.
-struct ChainCall<'a> {
-    method: &'a str,
-    args: &'a [Arg],
+/// executes root-to-outer chronologically. Owns its own data (not
+/// borrowed from the walked expression) since the walk's own `cursor`
+/// may switch from borrowing the original expression tree to an owned
+/// `Rc<Expr>` read back from `QueryBuilderAliasMap` partway through
+/// (`Cursor`'s own doc comment) - a borrow tied to one generation of
+/// `cursor` can't outlive its own replacement.
+struct ChainCall {
+    method: String,
+    args: Vec<Arg>,
+}
+
+/// `resolve_query_builder_chain`'s own walk cursor - starts borrowing the
+/// real receiver expression tree (the common case, no clone needed), but
+/// switches to owning a cloned `Rc<Expr>` the moment the walk reads
+/// through a `$qb = <chain>;` variable alias (`QueryBuilderAliasMap`'s
+/// own doc comment) - the stored expression's lifetime is independent of
+/// the original receiver's, so continuing to borrow from it isn't an
+/// option once that happens.
+enum Cursor<'a> {
+    Borrowed(&'a Expr),
+    Owned(std::rc::Rc<Expr>),
+}
+
+impl std::ops::Deref for Cursor<'_> {
+    type Target = Expr;
+
+    fn deref(&self) -> &Expr {
+        match self {
+            Cursor::Borrowed(e) => e,
+            Cursor::Owned(e) => e,
+        }
+    }
 }
 
 impl<'a> Checker<'a> {
+    /// The store half of `QueryBuilderAliasMap`'s own mechanism (see its
+    /// doc comment) - called right after an ordinary assignment binds
+    /// `lhs`, mirroring `record_condition_alias`'s own call site and
+    /// cheap-fast-path shape (a plain syntactic check with no clone,
+    /// paid only by the rare RHS that actually qualifies).
+    pub(crate) fn record_query_builder_alias(&self, lhs: &Expr, rhs: &Expr, locals: &mut Locals) {
+        let ExprKind::Variable(name) = &lhs.kind else {
+            return;
+        };
+        if looks_like_query_builder_chain(rhs) {
+            locals.set_query_builder_alias(name.clone(), std::rc::Rc::new(rhs.clone()));
+        }
+    }
+
     /// The receiver expression of a `->getQuery()` call - resolves its
     /// own fluent `QueryBuilder` chain, `None` when any part of it is
     /// undecidable (a dynamic argument, an unrecognized chain root) -
@@ -78,8 +137,8 @@ impl<'a> Checker<'a> {
         recv: &Expr,
         locals: &crate::checker::Locals,
     ) -> Option<QueryBuilderChain> {
-        let mut calls: Vec<ChainCall<'_>> = Vec::new();
-        let mut cursor = recv;
+        let mut calls: Vec<ChainCall> = Vec::new();
+        let mut cursor = Cursor::Borrowed(recv);
         loop {
             match &cursor.kind {
                 // `createQueryBuilder(...)` is the chain root itself
@@ -89,10 +148,27 @@ impl<'a> Checker<'a> {
                 // still point *at* this call node afterward.
                 ExprKind::MethodCall(_, method, _, _) if method == "createQueryBuilder" => break,
                 ExprKind::MethodCall(inner, method, args, _) => {
-                    calls.push(ChainCall { method, args });
-                    cursor = inner;
+                    calls.push(ChainCall {
+                        method: method.clone(),
+                        args: args.clone(),
+                    });
+                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
                 }
-                ExprKind::Grouping(inner) => cursor = inner,
+                ExprKind::Grouping(inner) => {
+                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()))
+                }
+                // `$qb = $this->createQueryBuilder(...)->...; ...; $qb->
+                // getQuery()...` - a chain split into a variable before
+                // its own terminal call, real and recurring in this
+                // corpus (`QueryBuilderAliasMap`'s own doc comment), not
+                // the "never happens" this module's own docs previously
+                // claimed. Substitutes the stored assignment expression
+                // and keeps walking - `$qb2 = $qb;` chains of aliases
+                // resolve the same way, one substitution at a time.
+                ExprKind::Variable(name) => match locals.query_builder_aliases.get(name) {
+                    Some(rhs) => cursor = Cursor::Owned(rhs.clone()),
+                    None => break,
+                },
                 _ => break,
             }
         }
@@ -101,9 +177,9 @@ impl<'a> Checker<'a> {
         // caller) can just read it in real chronological call order.
         calls.reverse();
 
-        let mut chain = self.resolve_chain_root(cursor, locals)?;
-        for call in calls {
-            self.apply_chain_call(&mut chain, call.method, call.args, locals)?;
+        let mut chain = self.resolve_chain_root(&cursor, locals)?;
+        for call in &calls {
+            self.apply_chain_call(&mut chain, &call.method, &call.args, locals)?;
         }
         Some(chain)
     }

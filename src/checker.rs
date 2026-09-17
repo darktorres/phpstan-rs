@@ -101,6 +101,25 @@ type BranchImpliedFactsMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// `$qb = $this->createQueryBuilder(...)->...;` - the assignment's own RHS,
+// stored verbatim so `resolve_query_builder_chain`'s backward walk
+// (`checker/doctrine/query_builder.rs`) can see *through* a variable read
+// to the real chain-rooted expression that built it, the same "replay the
+// original expression" idea `condition_aliases` already uses for a
+// narrowing condition, applied here to a symbolic `QueryBuilder` chain
+// instead. Unlike `condition_aliases`, there's no separate "target" to
+// invalidate on rebind - the alias variable *is* its own only key, and
+// nothing else ever mutates the stored expression text once recorded, so
+// `Locals::declare` purging this map's own entry for the rebound name is
+// the whole invalidation story. Simpler value type than `ConditionAliasMap`
+// for the same reason - just the expression, no accompanying target list.
+type QueryBuilderAliasMap = imbl::GenericHashMap<
+    String,
+    std::rc::Rc<Expr>,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 /// A checked scope's variable-name-to-inferred-type bindings, plus an
 /// opt-in, parallel declaration-span side-channel the LSP's local-variable-
 /// navigation feature reads through `Checker::probe_span`/
@@ -132,6 +151,7 @@ pub(crate) struct Locals {
     pub(crate) guarded_properties: GuardedMemberSet,
     pub(crate) condition_aliases: ConditionAliasMap,
     pub(crate) branch_implied_facts: BranchImpliedFactsMap,
+    pub(crate) query_builder_aliases: QueryBuilderAliasMap,
     // Whether `declare`/`insert_with_provenance` do anything - `false` by
     // default for every ordinary check-project run, `true` only for the
     // LSP's own per-request variable-navigation probe. Carried on `Locals`
@@ -173,6 +193,7 @@ impl Locals {
             self.provenance.insert(key.clone(), set);
         }
         self.purge_condition_aliases_targeting(&key);
+        self.query_builder_aliases.remove(&key);
         self.types.insert(key, ty)
     }
 
@@ -190,6 +211,12 @@ impl Locals {
     ) {
         self.condition_aliases
             .insert(name, (target_keys, condition));
+    }
+
+    /// The store half of `QueryBuilderAliasMap`'s own mechanism - see its
+    /// doc comment.
+    pub(crate) fn set_query_builder_alias(&mut self, name: String, rhs: std::rc::Rc<Expr>) {
+        self.query_builder_aliases.insert(name, rhs);
     }
 
     /// Drops `key`'s own alias (rebinding the alias variable makes it
@@ -251,6 +278,7 @@ impl Locals {
             guarded_properties: GuardedMemberSet::default(),
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
+            query_builder_aliases: QueryBuilderAliasMap::default(),
             track: self.track,
         }
     }

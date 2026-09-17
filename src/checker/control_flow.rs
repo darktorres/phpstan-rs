@@ -462,6 +462,20 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // Same "both branches inherited the identical, unchanged alias"
+    // dedup as `condition_aliases` above - a `QueryBuilder` alias has no
+    // separate target to intersect against, just the one stored `Rc<Expr>`.
+    merged.query_builder_aliases = then_locals
+        .query_builder_aliases
+        .iter()
+        .filter(|(k, rc)| {
+            else_locals
+                .query_builder_aliases
+                .get(*k)
+                .is_some_and(|other_rc| std::rc::Rc::ptr_eq(rc, other_rc))
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     // Unlike `condition_aliases` above, a `branch_implied_facts` entry is
     // a durable structural fact about the code at one exact discriminant
     // (see that field's own doc comment) - true whenever that

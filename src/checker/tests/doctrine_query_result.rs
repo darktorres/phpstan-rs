@@ -288,6 +288,81 @@ fn a_repository_class_shared_by_two_entities_is_undecidable() {
 }
 
 #[test]
+fn a_query_builder_split_into_a_variable_before_its_terminal_call_still_resolves() {
+    // A real, recurring Piwigo shape (5 confirmed corpus sites) -
+    // `$qb` built across several statements (a conditional `andWhere()`
+    // forces this), then `->getQuery()` called on the variable rather
+    // than a single direct fluent chain.
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function all(bool $withExtra): void
+            {
+                $qb = $this->createQueryBuilder('t');
+                if ($withExtra) {
+                    $qb->andWhere('t.id > 0');
+                }
+                $rows = $qb->getQuery()->getResult();
+                assertType('list<App\TagEntity>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reassigning_the_query_builder_variable_invalidates_its_own_alias() {
+    // If rebinding `$qb` didn't purge the alias, `$other->getQuery()->
+    // getResult()` would incorrectly resolve through the *stale*
+    // `TagEntity`-rooted chain instead of correctly falling back to
+    // `Mixed` for this unrelated `$other` object.
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+        use Doctrine\ORM\QueryBuilder;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function all(QueryBuilder $other): void
+            {
+                $qb = $this->createQueryBuilder('t');
+                $qb = $other;
+                $rows = $qb->getQuery()->getResult();
+                assertType('list', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_delete_chains_execute_is_a_plain_affected_row_count() {
     // `EntityRepository::createQueryBuilder($alias)` always pre-populates
     // its own `select($alias)`/`from(...)` (real Doctrine sugar), and
@@ -320,6 +395,41 @@ fn a_delete_chains_execute_is_a_plain_affected_row_count() {
                     ->delete()
                     ->getQuery()
                     ->execute();
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_split_variable_delete_chain_is_still_a_plain_affected_row_count() {
+    // `CommentRepository::delete`'s own real shape: the `dml` flag must
+    // still be visible through the `$qb` alias substitution, not just
+    // for a single direct fluent chain.
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function purgeAll(?int $authorId): int
+            {
+                $qb = $this->createQueryBuilder('t')->delete();
+                if ($authorId !== null) {
+                    $qb->andWhere('t.authorId = :authorId');
+                }
+                return $qb->getQuery()->execute();
             }
         }
         "#,
