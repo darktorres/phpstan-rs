@@ -385,11 +385,18 @@ impl<'a> Lexer<'a> {
         if is_ident_start(c) {
             let span = self.lex_ident_span();
             if let Some(kw) = Keyword::try_from_bytes(&self.src[span.clone()]) {
-                // Stash the raw source spelling out of band -
-                // `Token::Keyword` itself carries only `kw`'s own
-                // canonical (always-lowercase) form.
-                self.pending_keyword_raw =
-                    Some(String::from_utf8_lossy(&self.src[span]).into_owned());
+                // Stash the raw source spelling out of band, but only
+                // when it actually differs from `kw`'s own canonical
+                // (always-lowercase) spelling - `take_name_segment`
+                // already falls back to `kw.as_str().to_string()` for a
+                // `None` here, so the overwhelmingly common
+                // canonically-spelled case (`class`, `function`,
+                // `public`, ...) needs no allocation at all.
+                self.pending_keyword_raw = if &self.src[span.clone()] == kw.as_str().as_bytes() {
+                    None
+                } else {
+                    Some(String::from_utf8_lossy(&self.src[span]).into_owned())
+                };
                 return Token::Keyword(kw);
             }
             let s = String::from_utf8_lossy(&self.src[span]).into_owned();
