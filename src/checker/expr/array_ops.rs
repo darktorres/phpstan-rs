@@ -238,7 +238,28 @@ impl<'a> Checker<'a> {
                 }
                 if degraded {
                     elem_types.push(Self::array_element_type(&value_ty).unwrap_or(Type::Mixed));
-                    if !Self::is_list_like(&value_ty) {
+                    // `is_list_like` alone (the original check) wrongly
+                    // treats an *unmarked* int-keyed source
+                    // (`array<int, int>`, list-ness never proven, only
+                    // never disproven) as breaking list-ness - real PHP
+                    // spread semantics always renumber a source's own
+                    // *integer* keys sequentially, so only a possible
+                    // *string* key actually does (confirmed via
+                    // `dumpType()` against real PHPStan). Extending the
+                    // check to the source's own key type, rather than
+                    // replacing `is_list_like` outright, matters: a
+                    // real `list<T>`-tagged source's own boxed key type is
+                    // always the vestigial `unknown_array_key()`
+                    // (`int|string`) regardless of its real, accessory-
+                    // proven list-ness (list-ness is signaled only by the
+                    // `ArrayList` accessory in this project's own
+                    // representation, never by the boxed key type) - a
+                    // key-type-only check would wrongly call such a
+                    // source *not* list-safe.
+                    let list_safe_for_this_source = Self::is_list_like(&value_ty)
+                        || Self::array_key_type(&value_ty)
+                            .is_some_and(|k| !Self::key_type_could_be_string(&k));
+                    if !list_safe_for_this_source {
                         list_safe = false;
                     }
                     if Self::is_known_non_empty_array(&value_ty) {
@@ -822,6 +843,23 @@ impl<'a> Checker<'a> {
             },
             Type::Intersection(members) => members.iter().find_map(Self::array_key_type),
             _ => None,
+        }
+    }
+
+    /// `infer_spread_array_literal_type`'s own degraded-branch list-safety
+    /// check: whether a key type could genuinely include a `String`
+    /// member - the only thing that actually breaks a spread source's own
+    /// list-ness (real PHP always renumbers *integer* keys sequentially).
+    /// Conservative (`true`) for anything not provably int-only, matching
+    /// this project's "don't know, don't guess" leniency elsewhere.
+    fn key_type_could_be_string(ty: &Type) -> bool {
+        match ty {
+            Type::String | Type::StringLiteral(_) => true,
+            Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => false,
+            Type::Union(members) | Type::Intersection(members) => {
+                members.iter().any(Self::key_type_could_be_string)
+            }
+            _ => true,
         }
     }
 

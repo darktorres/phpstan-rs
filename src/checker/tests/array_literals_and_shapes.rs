@@ -882,6 +882,48 @@ fn spreading_a_list_and_a_plain_array_degrades_to_a_plain_array_not_a_list() {
     );
 }
 
+// Real PHP spread semantics always renumber a source's own *integer*
+// keys sequentially into the result - only a possible *string* key
+// actually breaks list-ness. A plain `array<int, T>` source (list-ness
+// itself unproven - it's not tagged `list<T>`) still spreads list-safe,
+// confirmed via `dumpType()` against real PHPStan: swapping the source's
+// own declared type to `array<string, int>` (a genuinely possible string
+// key) is what correctly still produces a mismatch, not a merely-unproven
+// `array<int, int>`.
+#[test]
+fn spreading_a_plain_int_keyed_array_still_produces_a_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<int, int> $a
+             *  @return list<int>
+             */
+            function f($a): array {
+                return [...$a];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn spreading_a_string_keyed_array_still_breaks_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array<string, int> $a
+             *  @return list<int>
+             */
+            function f($a): array {
+                return [...$a];
+            }
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "expected the list-ness mismatch to still be flagged for a genuinely string-keyed source: {d:?}"
+    );
+}
+
 // Spreading another object's own precisely-known shape and adding one
 // more field - `[...$this->userInfo->toArray(), 'theme_name' => $x]`.
 // Spreading a shape with only non-canonical (string) keys merges those
