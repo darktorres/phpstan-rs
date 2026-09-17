@@ -2583,6 +2583,37 @@ impl<'a> Checker<'a> {
                 if !is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
                 }
+                // `record_branch_implied_facts`'s own facts don't
+                // otherwise survive into a closure body at all -
+                // `fresh_scope()` starts `branch_implied_facts` empty,
+                // same as every other per-scope side-channel. A captured
+                // discriminant tested again inside the closure (`Rate
+                // Service::rate`'s own `$userAnonymous && $anonymousId
+                // !== $savedAnonymousId` replaying the outer `if
+                // ($userAnonymous) { $savedAnonymousId = ...; }`) still
+                // needs the fact available to replay. The *discriminant*
+                // side needs no filtering - the closure can only ever
+                // test a subject it actually captured, so a fact keyed to
+                // an uncaptured subject simply never gets looked up - but
+                // the *implied* side does: an implied fact naming a
+                // variable the closure never captured would otherwise
+                // spuriously `.insert()` it into `closure_locals`,
+                // masking a real `variable.undefined` on an unrelated,
+                // genuinely-uncaptured reference to the same bare name.
+                let captured_names: std::collections::HashSet<&str> =
+                    uses.iter().map(|u| u.name.as_str()).collect();
+                for (key, implied) in locals.branch_implied_facts.iter() {
+                    let filtered: Vec<(String, Type)> = implied
+                        .iter()
+                        .filter(|(name, _)| captured_names.contains(name.as_str()))
+                        .cloned()
+                        .collect();
+                    if !filtered.is_empty() {
+                        closure_locals
+                            .branch_implied_facts
+                            .insert(key.clone(), std::rc::Rc::new(filtered));
+                    }
+                }
                 let closure_label = format!("{label} (closure)");
                 for p in params {
                     let (ty, case_refs) =

@@ -4096,6 +4096,67 @@ fn a_variable_assigned_a_concrete_object_inside_a_branch_is_a_proxy_discriminant
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `record_branch_implied_facts`'s own facts surviving into a closure body
+// (Phase 175) - `RateService::rate`'s own real shape: an outer `if
+// ($userAnonymous) { $savedAnonymousId = ...; } else { $savedAnonymousId =
+// null; }`, then a `use (...)` closure re-testing `$userAnonymous` as part
+// of a compound condition. `fresh_scope()` starts a closure's own
+// `branch_implied_facts` empty, so without carrying the relevant facts
+// across at closure-construction time, this never replays.
+#[test]
+fn a_discriminant_fact_survives_into_a_use_capturing_closure() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function transactional(callable $cb): void {
+                $cb();
+            }
+            function f(bool $userAnonymous, string $anonymousId): void {
+                if ($userAnonymous) {
+                    $savedAnonymousId = "abc";
+                } else {
+                    $savedAnonymousId = null;
+                }
+                transactional(function () use ($userAnonymous, $anonymousId, $savedAnonymousId): void {
+                    if ($userAnonymous && $anonymousId !== $savedAnonymousId) {
+                        assertType("'abc'", $savedAnonymousId);
+                    }
+                });
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_implied_fact_naming_an_uncaptured_variable_is_dropped_at_the_closure_boundary() {
+    // The mirror-image safety check: if `$other` (never captured) still
+    // somehow got inserted into the closure's own `Locals` via a replayed
+    // fact, this would wrongly suppress a real `variable.undefined` here
+    // instead of reporting it.
+    let d = diagnostics_for(
+        r#"<?php
+            function transactional(callable $cb): void {
+                $cb();
+            }
+            function f(bool $flag): void {
+                if ($flag) {
+                    $other = "abc";
+                }
+                transactional(function () use ($flag): void {
+                    if ($flag) {
+                        echo $other;
+                    }
+                });
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "variable.undefined"),
+        "got: {d:?}"
+    );
+}
+
 // `is_a()` narrowing - the runtime-value-spelled twin of `instanceof`,
 // reusing its identical narrowing primitives.
 #[test]
