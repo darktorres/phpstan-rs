@@ -20,6 +20,7 @@ pub(crate) use generics::{
 };
 pub(crate) use type_resolution::{
     apply_implicit_nullable_default, reconcile_with_native, resolve_type,
+    resolve_type_with_parsed_native,
 };
 
 #[derive(Debug, Clone)]
@@ -317,11 +318,37 @@ impl FunctionSig {
                             .map(docblock::parse)
                             .and_then(|d| d.var_type)
                     });
-                let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
-                let ty = mark_template_params(ty, &template_params);
+                // Parsed once, shared by both the doc-reconciled `ty`
+                // pipeline below and the native-only `ty_native` one -
+                // `resolve_type`/`resolve_type(None, ...)` used to each
+                // independently re-parse this same hint string.
+                let native_hint = p.type_hint.as_deref();
+                let native_parsed = native_hint.map(types::parse_type_string);
+                let doc_reconciled = resolve_type_with_parsed_native(
+                    doc_ty.as_deref(),
+                    native_hint,
+                    native_parsed.as_ref(),
+                );
+                // Whenever the docblock contributed nothing beyond the
+                // native hint (no doc tag at all, or `reconcile_with_
+                // native` collapsed back to exactly the native type), the
+                // `ty` and `ty_native` pipelines are computing the
+                // identical value through `mark_template_params`/
+                // `resolve_names_in_type` - both are pure, deterministic
+                // functions, so reusing `ty`'s own result for `ty_native`
+                // is exact, not an approximation.
+                let shared = Some(&doc_reconciled) == native_parsed.as_ref();
+                let ty = mark_template_params(doc_reconciled, &template_params);
                 let mut case_refs = Vec::new();
                 collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty_native = if shared {
+                    ty.clone()
+                } else {
+                    let native_only = native_parsed.clone().unwrap_or(Type::Mixed);
+                    let t = mark_template_params(native_only, &template_params);
+                    resolve_names_in_type(t, ctx)
+                };
                 let ty = substitute_type_aliases(ty, class_type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 // Mirrors `ty` with `doc_ty` forced to `None` - the
@@ -330,9 +357,6 @@ impl FunctionSig {
                 // since that's a native-level PHP fact (an untyped `?`
                 // hint with a `null` default is implicitly nullable),
                 // independent of any docblock merge.
-                let ty_native = resolve_type(None, p.type_hint.as_deref());
-                let ty_native = mark_template_params(ty_native, &template_params);
-                let ty_native = resolve_names_in_type(ty_native, ctx);
                 let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
                 // A real `= value` default always wins; failing that, a
                 // `[optional]` marker on the `@param` tag is trusted too
@@ -386,16 +410,26 @@ impl FunctionSig {
         let params = dedup_versioned_params(params);
 
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
-        let return_type = resolve_type(doc_return, f.return_type.as_deref());
-        let return_type = mark_template_params(return_type, &template_params);
+        let native_return_hint = f.return_type.as_deref();
+        let native_return_parsed = native_return_hint.map(types::parse_type_string);
+        let doc_reconciled_return = resolve_type_with_parsed_native(
+            doc_return,
+            native_return_hint,
+            native_return_parsed.as_ref(),
+        );
+        let return_shared = Some(&doc_reconciled_return) == native_return_parsed.as_ref();
+        let return_type = mark_template_params(doc_reconciled_return, &template_params);
         let mut return_case_refs = Vec::new();
         collect_class_name_case_refs(&return_type, ctx, &mut return_case_refs);
         let return_type = resolve_names_in_type(return_type, ctx);
+        let return_type_native = if return_shared {
+            return_type.clone()
+        } else {
+            let native_only = native_return_parsed.clone().unwrap_or(Type::Mixed);
+            let t = mark_template_params(native_only, &template_params);
+            resolve_names_in_type(t, ctx)
+        };
         let return_type = substitute_type_aliases(return_type, class_type_aliases);
-
-        let return_type_native = resolve_type(None, f.return_type.as_deref());
-        let return_type_native = mark_template_params(return_type_native, &template_params);
-        let return_type_native = resolve_names_in_type(return_type_native, ctx);
 
         let no_discard = f
             .attrs
