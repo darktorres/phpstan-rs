@@ -26,7 +26,7 @@ fn array_map_infers_the_real_element_type_from_an_untyped_arrow_fn_param() {
     assert!(d[0].message.contains("needsStrings"), "got: {d:?}");
     assert!(
         d[0].message
-            .contains("expects array<string>, array<int> given"),
+            .contains("expects array<(int|string), string>, array<int> given"),
         "got: {d:?}"
     );
 }
@@ -47,7 +47,7 @@ fn array_map_infers_the_real_element_type_from_an_untyped_closure_param() {
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert!(
         d[0].message
-            .contains("expects array<string>, array<int> given"),
+            .contains("expects array<(int|string), string>, array<int> given"),
         "got: {d:?}"
     );
 }
@@ -301,7 +301,7 @@ fn array_filter_preserves_the_input_array_s_element_type() {
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert!(
         d[0].message
-            .contains("expects array<string>, array<int> given"),
+            .contains("expects array<(int|string), string>, array<(int|string), int> given"),
         "got: {d:?}"
     );
 }
@@ -988,7 +988,10 @@ fn array_chunk_wraps_the_original_element_type_in_an_extra_array_layer() {
             .contains("expects string[], array<array<int>> given")
             || d[0]
                 .message
-                .contains("expects array<string>, array<array<int>> given"),
+                .contains("expects array<string>, array<array<int>> given")
+            || d[0]
+                .message
+                .contains("expects array<(int|string), string>, array<array<int>> given"),
         "got: {d:?}"
     );
 }

@@ -610,7 +610,7 @@ fn parse_type_atom(s: &str) -> Type {
     {
         let mut ty = shape;
         for _ in 0..array_depth {
-            ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+            ty = Type::Array(Box::new(Type::benevolent_array_key()), Box::new(ty));
         }
         return ty;
     }
@@ -634,7 +634,7 @@ fn parse_type_atom(s: &str) -> Type {
             let base_ty = parse_type_string(base_part);
             let mut ty = offset_access_type(&base_ty, key);
             for _ in 0..array_depth {
-                ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+                ty = Type::Array(Box::new(Type::benevolent_array_key()), Box::new(ty));
             }
             return ty;
         }
@@ -653,7 +653,7 @@ fn parse_type_atom(s: &str) -> Type {
     {
         let mut ty = parse_type_string(inner);
         for _ in 0..array_depth {
-            ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+            ty = Type::Array(Box::new(Type::benevolent_array_key()), Box::new(ty));
         }
         return ty;
     }
@@ -676,7 +676,7 @@ fn parse_type_atom(s: &str) -> Type {
         parse_type_keyword_or_class(bare, original, &generic_args)
     };
     for _ in 0..array_depth {
-        ty = Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty));
+        ty = Type::Array(Box::new(Type::benevolent_array_key()), Box::new(ty));
     }
     ty
 }
@@ -940,13 +940,25 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "mixed" => Type::Mixed,
         "never" | "noreturn" => Type::Never,
         // `array<K, V>`'s key argument is real
-        // (`Type::Array`'s own key slot), not discarded. `array<V>`
-        // (1-arg) and bare `array` still mean "key unknown" -
-        // `Type::unknown_array_key()`. `class-string-map<TKey, TValue>`
-        // (Doctrine's own refinement of `array<class-string<TKey>,
-        // TValue>`) wraps its own key in `ClassString` to match.
+        // (`Type::Array`'s own key slot), not discarded. Bare `array`
+        // still means "key unknown" - `Type::unknown_array_key()`.
+        // `array<V>` (1-arg) is different: real PHPStan's own
+        // `TypeNodeResolver::resolveGenericTypeNode` constructs a real
+        // `BenevolentUnionType` key for exactly this one shape
+        // (confirmed reading it directly - the *same* construction its
+        // sibling `resolveArrayTypeNode` uses for the `V[]`-shorthand
+        // suffix, `Type::benevolent_array_key()`'s own doc comment).
+        // Scoped to `bare == "array"` only - `class-string-map<TKey,
+        // TValue>` (Doctrine's own refinement of `array<class-string
+        // <TKey>, TValue>`, this project's own extension with no real
+        // PHPStan precedent to check a 1-arg form against) keeps the
+        // plain, non-benevolent default it always had.
         "array" | "class-string-map" => match generic_args.len() {
             0 => Type::array_of(Type::Mixed),
+            1 if bare == "array" => Type::Array(
+                Box::new(Type::benevolent_array_key()),
+                Box::new(parse_type_string(generic_args[0])),
+            ),
             1 => Type::array_of(parse_type_string(generic_args[0])),
             _ => {
                 let key_ty = parse_type_string(generic_args[0]);

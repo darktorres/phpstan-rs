@@ -585,3 +585,115 @@ fn a_float_literal_concatenated_with_a_string_literal_narrows_via_the_composed_a
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// `Type::benevolent_array_key()` - real PHPStan's own `BenevolentUnionType`
+// marker, used for a PHPDoc `Type[]`-shorthand/single-generic-arg
+// `array<V>` key and the array-union `+` operator's own "neither side
+// had a more precise key" fallback. `RuleLevelHelper::accepts()` treats
+// it specially: accepted if *any* member matches, not only when *all*
+// do - the real difference a plain, strict `int|string` union doesn't
+// get. Confirmed via `dumpType()` against real PHPStan: a `@var
+// DisplayBlock[]` foreach-key passed to a `string`-typed parameter
+// produces zero errors.
+#[test]
+fn a_type_shorthand_array_key_is_accepted_by_a_string_typed_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            class DisplayBlock {}
+            function hideBlock(string $block_id): void {}
+            /** @param DisplayBlock[] $blocks */
+            function apply(array $blocks): void {
+                foreach ($blocks as $id => $block) {
+                    hideBlock($id);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The same leniency for the single-generic-arg `array<V>` spelling of
+// the identical shorthand - real PHPStan's own
+// `TypeNodeResolver::resolveGenericTypeNode` uses the identical
+// `BenevolentUnionType` construction for both forms.
+#[test]
+fn a_generic_one_arg_array_key_is_accepted_by_a_string_typed_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            function hideBlock(string $block_id): void {}
+            /** @param array<int> $blocks */
+            function apply(array $blocks): void {
+                foreach ($blocks as $id => $block) {
+                    hideBlock($id);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A plain, strict `int|string` union (not benevolent) is still held to
+// the ordinary strict rule - only the marker itself grants the
+// leniency, not "any union that happens to equal `int|string`".
+#[test]
+fn a_plain_non_benevolent_int_or_string_key_is_still_rejected_by_a_string_typed_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            function hideBlock(string $block_id): void {}
+            /** @param array<int|string, int> $blocks */
+            function apply(array $blocks): void {
+                foreach ($blocks as $id => $block) {
+                    hideBlock($id);
+                }
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+}
+
+// The benevolent marker survives `array_flip()`'s own key/value swap -
+// `array_key_type`/`array_element_type` return whatever `Type` is
+// stored verbatim, so a marker sitting in the key position travels to
+// the value position unchanged, with no dedicated `array_flip` handling
+// needed.
+#[test]
+fn array_flip_carries_the_benevolent_marker_from_key_to_value_position() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsString(string $s): void {}
+            /** @param array<int> $items */
+            function f(array $items): void {
+                $flipped = array_flip($items);
+                foreach ($flipped as $k => $v) {
+                    needsString($v);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The `+` operator's own real implementation
+// (`InitializerExprTypeResolver::getPlusType`) keeps a real
+// `BenevolentUnionType` fallback too when neither side has a more
+// precise key, confirmed reading it directly - two `Type[]`-shorthand-
+// keyed arrays unioned via `+` still accept an `int`-typed key read
+// against a `string`-typed parameter.
+#[test]
+fn the_plus_operator_s_fallback_key_type_is_also_benevolent() {
+    let d = diagnostics_for(
+        r#"<?php
+            function hideBlock(string $block_id): void {}
+            /** @param array<int> $a
+             *  @param array<int> $b
+             */
+            function f(array $a, array $b): void {
+                $combined = $a + $b;
+                foreach ($combined as $id => $v) {
+                    hideBlock($id);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

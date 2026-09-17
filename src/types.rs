@@ -182,6 +182,40 @@ impl Type {
     pub(crate) fn array_of(value: Type) -> Type {
         Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
     }
+
+    /// The `int|string` key type PHPDoc's `Type[]` array-shorthand
+    /// (`Item[]`), the single-generic-arg `array<V>` form, and the
+    /// array-union `+` operator's own "neither side had a more precise
+    /// key" fallback all use - a real `BenevolentUnionType([Int,
+    /// String])` marker (mirrors real PHPStan's
+    /// `TypeNodeResolver::resolveArrayTypeNode`/`resolveGenericTypeNode`'s
+    /// own `array<V>` arm/`InitializerExprTypeResolver::getPlusType`,
+    /// confirmed reading all three directly), *not* the plain, strict
+    /// `unknown_array_key()`. `RuleLevelHelper::accepts()` treats a
+    /// benevolent union specially - accepted if *any* member matches,
+    /// not only when *all* do - the real difference: a `@var Item[]`
+    /// foreach-key passed to a `string`-typed parameter produces zero
+    /// errors in real PHPStan (confirmed via `dumpType()`), unlike a
+    /// plain, strict `int|string` checked the same way. Deliberately a
+    /// *narrower* helper than `unknown_array_key()`, not a blanket
+    /// replacement for it: real PHPStan's own benevolence for a bare
+    /// `array` (no generic args at all)'s *stored* `Mixed` key type is a
+    /// separate, read-time-only substitution
+    /// (`ArrayType::getIterableKeyType()`) keyed on a distinction
+    /// (`Mixed` vs. an already-real key type) this project's own eagerly-
+    /// constructed `unknown_array_key()` has no way to preserve, and a
+    /// 2-arg `array<K, V>` with an explicit key never gets the marker
+    /// either - see this function's own real call sites (`types/parse.rs`'s
+    /// `Type[]`-shorthand and `array<V>` parses, `checker/expr.rs`'s `+`
+    /// operator fallback) for exactly which real-PHPStan-confirmed
+    /// construction sites this marker belongs at, not every "no more
+    /// precise key" site project-wide.
+    pub(crate) fn benevolent_array_key() -> Type {
+        Type::Intersection(vec![
+            Type::unknown_array_key(),
+            Type::Accessory(AccessoryKind::Benevolent),
+        ])
+    }
 }
 
 // Mirrors real PHPStan's `Accessory*Type` family
@@ -202,6 +236,10 @@ pub enum AccessoryKind {
     // A string proven to parse as a canonical decimal integer (no
     // leading zero/`+`/whitespace, round-trips through `i64`).
     DecimalIntegerString,
+    // Mirrors real PHPStan's `BenevolentUnionType` - only ever wraps a
+    // `Type::Union` (see `Type::benevolent_array_key()`'s own doc
+    // comment for exactly which two construction sites use it and why).
+    Benevolent,
 }
 
 #[cfg(test)]

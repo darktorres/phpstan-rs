@@ -3924,7 +3924,12 @@ impl<'a> Checker<'a> {
                         (Some(lk), Some(rk)) if lk == rk => lk,
                         (Some(lk), Some(rk)) => union_types(lk, rk),
                         (Some(k), None) | (None, Some(k)) => k,
-                        (None, None) => Type::unknown_array_key(),
+                        // Real PHPStan's own `+` implementation
+                        // (`InitializerExprTypeResolver::getPlusType`)
+                        // falls back to a real `BenevolentUnionType`
+                        // here too, not a plain strict union - confirmed
+                        // reading it directly.
+                        (None, None) => Type::benevolent_array_key(),
                     };
                     let val_ty = union_types(
                         Self::array_element_type(&lt).unwrap_or(Type::Mixed),

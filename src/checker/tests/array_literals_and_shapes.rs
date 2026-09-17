@@ -17,7 +17,10 @@ fn a_wrong_typed_array_literal_element_is_flagged_regardless_of_strict_mixed_arr
         "#;
     let d = diagnostics_for(src);
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
+    assert!(
+        d[0].message.contains("expects array<(int|string), int>"),
+        "got: {d:?}"
+    );
     // strict_mixed_arrays doesn't change this verdict either way.
     let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
     assert_eq!(d.len(), 1, "got: {d:?}");
@@ -53,7 +56,10 @@ fn strict_mixed_arrays_still_flags_a_genuinely_unknown_mixed_typed_array() {
     assert!(diagnostics_for(src).is_empty());
     let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert!(d[0].message.contains("expects array<int>"), "got: {d:?}");
+    assert!(
+        d[0].message.contains("expects array<(int|string), int>"),
+        "got: {d:?}"
+    );
 }
 
 // An array-literal shape whose individual fields are genuinely Mixed

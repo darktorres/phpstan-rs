@@ -84,14 +84,14 @@ fn a_leading_backslash_is_preserved_by_the_bare_parser() {
 fn phpdoc_array_shorthand_parses() {
     assert_eq!(
         parse_type_string("int[]"),
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
+        Type::Array(Box::new(Type::benevolent_array_key()), Box::new(Type::Int))
     );
     assert_eq!(
         parse_type_string("string[][]"),
         Type::Array(
-            Box::new(Type::unknown_array_key()),
+            Box::new(Type::benevolent_array_key()),
             Box::new(Type::Array(
-                Box::new(Type::unknown_array_key()),
+                Box::new(Type::benevolent_array_key()),
                 Box::new(Type::String)
             ))
         )
@@ -107,7 +107,7 @@ fn phpdoc_array_shorthand_with_a_parenthesized_union_element_type_parses() {
     assert_eq!(
         parse_type_string("(string|int)[]"),
         Type::Array(
-            Box::new(Type::unknown_array_key()),
+            Box::new(Type::benevolent_array_key()),
             Box::new(Type::Union(vec![Type::String, Type::Int]))
         )
     );
@@ -118,7 +118,7 @@ fn phpdoc_array_shorthand_with_a_parenthesized_intersection_element_type_parses(
     assert_eq!(
         parse_type_string("(Foo&Bar)[]"),
         Type::Array(
-            Box::new(Type::unknown_array_key()),
+            Box::new(Type::benevolent_array_key()),
             Box::new(Type::Intersection(vec![
                 Type::Object("Foo".to_string(), Vec::new()),
                 Type::Object("Bar".to_string(), Vec::new())
@@ -138,7 +138,7 @@ fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
     assert_eq!(
         parse_type_string("array{int, string, string}[]"),
         Type::Array(
-            Box::new(Type::unknown_array_key()),
+            Box::new(Type::benevolent_array_key()),
             Box::new(Type::ArrayShape(vec![
                 ("0".to_string(), Type::Int, false),
                 ("1".to_string(), Type::String, false),
@@ -228,7 +228,7 @@ fn a_keyed_array_shape_wrapped_in_array_shorthand_parses() {
     assert_eq!(
         parse_type_string("array{a: int}[]"),
         Type::Array(
-            Box::new(Type::unknown_array_key()),
+            Box::new(Type::benevolent_array_key()),
             Box::new(Type::ArrayShape(vec![("a".to_string(), Type::Int, false)]))
         )
     );
@@ -239,7 +239,7 @@ fn an_object_shape_wrapped_in_array_shorthand_parses() {
     assert_eq!(
         parse_type_string("object{a: int}[]"),
         Type::Array(
-            Box::new(Type::unknown_array_key()),
+            Box::new(Type::benevolent_array_key()),
             Box::new(Type::ObjectShape(vec![("a".to_string(), Type::Int, false)]))
         )
     );
@@ -283,7 +283,7 @@ fn an_empty_bracket_after_offset_access_still_parses_as_array_shorthand() {
     // be empty).
     assert_eq!(
         parse_type_string("array{age: int}['age'][]"),
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
+        Type::Array(Box::new(Type::benevolent_array_key()), Box::new(Type::Int))
     );
 }
 
@@ -324,15 +324,24 @@ fn class_constant_reference_types_degrade_to_mixed() {
     // still has to apply correctly around this degraded case.
     assert_eq!(
         parse_type_string("self::RFC_*[]"),
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+        Type::Array(
+            Box::new(Type::benevolent_array_key()),
+            Box::new(Type::Mixed)
+        )
     );
 }
 
 #[test]
 fn generic_array_with_one_type_arg_parses_as_value_type() {
+    // `array<V>` (one generic arg) builds a real `BenevolentUnionType`
+    // key, exactly like the `V[]`-shorthand suffix - real PHPStan's own
+    // `resolveGenericTypeNode` uses the identical construction for both
+    // (confirmed reading it directly), unlike bare `array` (no generic
+    // args at all) or `array<K, V>` (2 args, explicit key), neither of
+    // which get the benevolent marker.
     assert_eq!(
         parse_type_string("array<int>"),
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int))
+        Type::Array(Box::new(Type::benevolent_array_key()), Box::new(Type::Int))
     );
 }
 

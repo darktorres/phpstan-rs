@@ -374,7 +374,7 @@ fn filter_var_with_require_array_flag_and_a_known_array_input_wraps_the_element_
             use function PHPStan\Testing\assertType;
             /** @param array<string> $values */
             function f(array $values): void {
-                assertType('array<int|false>', filter_var($values, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY));
+                assertType('array<(int|string), int|false>', filter_var($values, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY));
             }
         "#,
     );
@@ -402,7 +402,7 @@ fn filter_var_require_array_takes_priority_over_force_array_when_both_are_set() 
             /** @param array<string> $values */
             function f(array $values): void {
                 assertType(
-                    'array<int|false>',
+                    'array<(int|string), int|false>',
                     filter_var($values, FILTER_VALIDATE_INT, FILTER_REQUIRE_ARRAY | FILTER_FORCE_ARRAY)
                 );
             }
@@ -425,7 +425,7 @@ fn filter_var_min_range_option_survives_require_array_wrap() {
             /** @param array<string> $values */
             function f(array $values): void {
                 assertType(
-                    'array<int<1, max>|false>',
+                    'array<(int|string), int<1, max>|false>',
                     filter_var($values, FILTER_VALIDATE_INT, [
                         'flags' => FILTER_REQUIRE_ARRAY,
                         'options' => ['min_range' => 1],
