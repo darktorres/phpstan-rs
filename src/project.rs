@@ -976,6 +976,7 @@ impl Project {
                 continue;
             }
             let mut checker = Checker::new(&self.registry);
+            checker.set_facts_only(true);
             checker.check_program(&file.ast);
             for (fqn, props) in checker.take_property_assign_facts() {
                 let entry = merged.entry(fqn).or_default();

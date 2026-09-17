@@ -705,6 +705,11 @@ pub struct Checker<'a> {
     // common case where a trait and the host using it are declared (and
     // visited, in that order) in the one file being checked.
     pub(crate) cross_file_property_assign_facts: Option<Arc<PropertyAssignFacts>>,
+    // When set, `check_program`/`check_function_impl` skip every
+    // diagnostic-only check that doesn't feed `property_assign_facts` -
+    // see `set_facts_only`'s own doc comment for why this exists and what
+    // stays unconditional regardless.
+    pub(crate) facts_only: bool,
     // One frame per currently-open loop or switch, collecting
     // the `locals` snapshot at every `break` reached inside it - a stack,
     // since loops/switches nest. `StmtKind::Foreach`/`While`/`For`/
@@ -955,6 +960,7 @@ impl<'a> Checker<'a> {
             anonymous_class_names: HashMap::new(),
             property_assign_facts: HashMap::new(),
             cross_file_property_assign_facts: None,
+            facts_only: false,
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
             loop_depth: 0,
@@ -1019,6 +1025,21 @@ impl<'a> Checker<'a> {
     /// assign_facts`'s own doc comment.
     pub fn set_cross_file_property_assign_facts(&mut self, facts: Arc<PropertyAssignFacts>) {
         self.cross_file_property_assign_facts = Some(facts);
+    }
+
+    /// Puts this `Checker` in "collect-only" mode: `check_program`/
+    /// `check_function_impl` skip every diagnostic-only check that
+    /// doesn't feed `property_assign_facts`, so `Project::collect_
+    /// property_assign_facts`'s throwaway per-file pass (whose only
+    /// purpose is harvesting that one fact, with every diagnostic it
+    /// would otherwise produce discarded) doesn't pay for computing
+    /// diagnostics nobody will ever read. The `check_function`/
+    /// `check_trait_methods` dispatch itself - the only path that
+    /// reaches `check_property_assignment` - and everything it needs
+    /// (`Locals` construction, the two Pest file-local overrides, name
+    /// resolution) always stay unconditional, in both modes.
+    pub fn set_facts_only(&mut self, facts_only: bool) {
+        self.facts_only = facts_only;
     }
 
     /// This run's own `property_assign_facts` - the collect half of the
@@ -1124,14 +1145,16 @@ impl<'a> Checker<'a> {
         // reused for `self.name_ctx` below, which has to be positional
         // instead (see that loop's own comment).
         let whole_file_ctx = NameContext::build(program);
-        self.check_use_function_imports(program);
-        self.check_use_const_imports(program);
-        self.check_use_class_imports(program);
-        self.check_used_names(program);
-        let (rebind_targets, rebind_escape_all) =
-            unused::scan_program_for_rebind_targets(program, &whole_file_ctx);
-        self.rebind_target_classes = rebind_targets;
-        self.rebind_escape_all = rebind_escape_all;
+        if !self.facts_only {
+            self.check_use_function_imports(program);
+            self.check_use_const_imports(program);
+            self.check_use_class_imports(program);
+            self.check_used_names(program);
+            let (rebind_targets, rebind_escape_all) =
+                unused::scan_program_for_rebind_targets(program, &whole_file_ctx);
+            self.rebind_target_classes = rebind_targets;
+            self.rebind_escape_all = rebind_escape_all;
+        }
         // A file-local `uses(...)` call (no `->in(...)`) wins over
         // whatever `Project::check_file` already set via
         // `set_pest_this_type` from directory-scoped Pest.php config -
@@ -1172,88 +1195,105 @@ impl<'a> Checker<'a> {
                     // for `new self()`/`new static()`), which is now
                     // FQN-keyed.
                     let fqn = self.name_ctx.declared_name(&c.name);
-                    self.check_class_generic_bounds(&fqn, c);
-                    self.check_class_completeness(&fqn, c.span);
-                    self.check_final_class_extension(&fqn, c.span);
-                    self.check_class_references_exist(&fqn, c.span);
-                    self.check_internal_inheritance(&fqn, c.kind, c.span);
-                    for (i, parent) in c.extends.iter().enumerate() {
-                        let span = c.extends_spans.get(i).copied().unwrap_or(c.span);
-                        self.check_class_name_case(&fqn, parent, span);
-                    }
-                    for (i, iface) in c.implements.iter().enumerate() {
-                        let span = c.implements_spans.get(i).copied().unwrap_or(c.span);
-                        self.check_class_name_case(&fqn, iface, span);
-                    }
-                    for (i, used) in c.uses.iter().enumerate() {
-                        let span = c.uses_spans.get(i).copied().unwrap_or(c.span);
-                        self.check_class_name_case(&fqn, used, span);
-                    }
-                    self.check_method_tag_types(&fqn, c.span);
-                    self.check_mixin_types(&fqn, c.span);
-                    self.check_type_alias_types(&fqn, c.span);
-                    self.check_method_overrides(&fqn, c);
-                    self.check_property_overrides(&fqn, c);
-                    self.check_require_tags(&fqn, c.span);
-                    self.check_require_tag_types(&fqn, c);
-                    self.check_sealed_hierarchy(&fqn, c.span);
-                    self.check_sealed_tag_types(&fqn, c.doc_comment.as_deref(), c.span, false);
-                    self.check_unknown_phpstan_tags_in_class(&fqn, c);
-                    self.check_property_hooks(&fqn, c);
-                    self.check_property_variances(&fqn, c);
-                    self.check_trait_conflicts(&fqn, c.span);
-                    self.check_uninitialized_properties(&fqn, c);
-                    self.check_premature_property_access(&fqn, c);
-                    self.check_duplicate_class_members(&fqn, c);
-                    self.check_method_declaration_sanity(&fqn, c.kind, c.is_abstract, &c.methods);
-                    self.check_reserved_class_constant_name(&fqn, &c.consts);
-                    self.check_typed_class_constant_values(&fqn, &c.consts);
-                    self.check_class_constant_modifiers(&fqn, &c.consts);
-                    // The class's own attributes, plus every property's/
-                    // const's - method/param attributes are checked
-                    // per-declaration inside `check_function` below
-                    // instead, the one place that runs for every method
-                    // regardless of how it's reached (a direct method
-                    // here, or via `check_trait_methods`'s per-host loop
-                    // for a trait).
-                    self.check_attributes(&c.attrs, &fqn);
-                    self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
-                    self.check_self_attribute_class_declaration(
-                        &c.attrs,
-                        &fqn,
-                        c.kind,
-                        c.is_abstract,
-                        &fqn,
-                    );
-                    self.check_class_like_marker_attributes(&c.attrs, c.kind, c.is_readonly, &fqn);
-                    for p in &c.properties {
-                        self.check_attributes(&p.attrs, &fqn);
+                    if !self.facts_only {
+                        self.check_class_generic_bounds(&fqn, c);
+                        self.check_class_completeness(&fqn, c.span);
+                        self.check_final_class_extension(&fqn, c.span);
+                        self.check_class_references_exist(&fqn, c.span);
+                        self.check_internal_inheritance(&fqn, c.kind, c.span);
+                        for (i, parent) in c.extends.iter().enumerate() {
+                            let span = c.extends_spans.get(i).copied().unwrap_or(c.span);
+                            self.check_class_name_case(&fqn, parent, span);
+                        }
+                        for (i, iface) in c.implements.iter().enumerate() {
+                            let span = c.implements_spans.get(i).copied().unwrap_or(c.span);
+                            self.check_class_name_case(&fqn, iface, span);
+                        }
+                        for (i, used) in c.uses.iter().enumerate() {
+                            let span = c.uses_spans.get(i).copied().unwrap_or(c.span);
+                            self.check_class_name_case(&fqn, used, span);
+                        }
+                        self.check_method_tag_types(&fqn, c.span);
+                        self.check_mixin_types(&fqn, c.span);
+                        self.check_type_alias_types(&fqn, c.span);
+                        self.check_method_overrides(&fqn, c);
+                        self.check_property_overrides(&fqn, c);
+                        self.check_require_tags(&fqn, c.span);
+                        self.check_require_tag_types(&fqn, c);
+                        self.check_sealed_hierarchy(&fqn, c.span);
+                        self.check_sealed_tag_types(&fqn, c.doc_comment.as_deref(), c.span, false);
+                        self.check_unknown_phpstan_tags_in_class(&fqn, c);
+                        self.check_property_hooks(&fqn, c);
+                        self.check_property_variances(&fqn, c);
+                        self.check_trait_conflicts(&fqn, c.span);
+                        self.check_uninitialized_properties(&fqn, c);
+                        self.check_premature_property_access(&fqn, c);
+                        self.check_duplicate_class_members(&fqn, c);
+                        self.check_method_declaration_sanity(
+                            &fqn,
+                            c.kind,
+                            c.is_abstract,
+                            &c.methods,
+                        );
+                        self.check_reserved_class_constant_name(&fqn, &c.consts);
+                        self.check_typed_class_constant_values(&fqn, &c.consts);
+                        self.check_class_constant_modifiers(&fqn, &c.consts);
+                        // The class's own attributes, plus every property's/
+                        // const's - method/param attributes are checked
+                        // per-declaration inside `check_function` below
+                        // instead, the one place that runs for every method
+                        // regardless of how it's reached (a direct method
+                        // here, or via `check_trait_methods`'s per-host loop
+                        // for a trait).
+                        self.check_attributes(&c.attrs, &fqn);
                         self.check_attribute_targets(
-                            &p.attrs,
-                            ATTRIBUTE_TARGET_PROPERTY,
-                            "property",
+                            &c.attrs,
+                            ATTRIBUTE_TARGET_CLASS,
+                            "class",
                             &fqn,
                         );
-                    }
-                    for cc in &c.consts {
-                        self.check_attributes(&cc.attrs, &fqn);
-                        self.check_attribute_targets(
-                            &cc.attrs,
-                            ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                            "class constant",
+                        self.check_self_attribute_class_declaration(
+                            &c.attrs,
+                            &fqn,
+                            c.kind,
+                            c.is_abstract,
                             &fqn,
                         );
+                        self.check_class_like_marker_attributes(
+                            &c.attrs,
+                            c.kind,
+                            c.is_readonly,
+                            &fqn,
+                        );
+                        for p in &c.properties {
+                            self.check_attributes(&p.attrs, &fqn);
+                            self.check_attribute_targets(
+                                &p.attrs,
+                                ATTRIBUTE_TARGET_PROPERTY,
+                                "property",
+                                &fqn,
+                            );
+                        }
+                        for cc in &c.consts {
+                            self.check_attributes(&cc.attrs, &fqn);
+                            self.check_attribute_targets(
+                                &cc.attrs,
+                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                                "class constant",
+                                &fqn,
+                            );
+                        }
+                        // A property/const's missing-typehint completeness is
+                        // about where it's textually declared, not which
+                        // class(es) end up using it - so it's checked once
+                        // here, regardless of trait-ness, unlike
+                        // `check_function` below, which runs once per host for
+                        // a trait's methods (a method's `$this`-dependent body
+                        // needs a real host; a property/const's declared type
+                        // never does).
+                        self.check_missing_property_typehints(&fqn, &c.properties);
+                        self.check_missing_class_constant_typehints(&fqn, &c.consts);
                     }
-                    // A property/const's missing-typehint completeness is
-                    // about where it's textually declared, not which
-                    // class(es) end up using it - so it's checked once
-                    // here, regardless of trait-ness, unlike
-                    // `check_function` below, which runs once per host for
-                    // a trait's methods (a method's `$this`-dependent body
-                    // needs a real host; a property/const's declared type
-                    // never does).
-                    self.check_missing_property_typehints(&fqn, &c.properties);
-                    self.check_missing_class_constant_typehints(&fqn, &c.consts);
                     if c.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
                     } else {
@@ -1270,75 +1310,94 @@ impl<'a> Checker<'a> {
                         // check_function's per-body checks - "was this
                         // ever referenced" needs every one of the class's
                         // bodies scanned together, not one at a time.
-                        self.check_unused_private_members(
-                            &fqn,
-                            c.kind,
-                            &c.methods,
-                            &c.properties,
-                            &c.consts,
-                        );
-                        self.check_too_wide_property_types(&fqn, c);
-                        self.check_parent_constructor_call(&fqn, c);
-                        self.check_promoted_property_candidate(&fqn, c);
+                        if !self.facts_only {
+                            self.check_unused_private_members(
+                                &fqn,
+                                c.kind,
+                                &c.methods,
+                                &c.properties,
+                                &c.consts,
+                            );
+                            self.check_too_wide_property_types(&fqn, c);
+                            self.check_parent_constructor_call(&fqn, c);
+                            self.check_promoted_property_candidate(&fqn, c);
+                        }
                     }
                 }
                 StmtKind::EnumDecl(e) => {
                     let fqn = self.name_ctx.declared_name(&e.name);
-                    self.check_class_completeness(&fqn, e.span);
-                    self.check_class_references_exist(&fqn, e.span);
-                    self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
-                    for (i, iface) in e.implements.iter().enumerate() {
-                        let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
-                        self.check_class_name_case(&fqn, iface, span);
-                    }
-                    for (i, used) in e.uses.iter().enumerate() {
-                        let span = e.uses_spans.get(i).copied().unwrap_or(e.span);
-                        self.check_class_name_case(&fqn, used, span);
-                    }
-                    self.check_ancestor_generic_bounds(&fqn, e.span);
-                    self.check_enum_template_tag(&fqn, e);
-                    self.check_sealed_tag_types(&fqn, e.doc_comment.as_deref(), e.span, true);
-                    self.check_enum_case_values(&fqn, e);
-                    self.check_enum_sanity(&fqn, e);
-                    self.check_trait_conflicts(&fqn, e.span);
-                    self.check_duplicate_enum_members(&fqn, e);
-                    self.check_method_declaration_sanity(&fqn, ClassKind::Enum, false, &e.methods);
-                    self.check_reserved_class_constant_name(&fqn, &e.consts);
-                    self.check_typed_class_constant_values(&fqn, &e.consts);
-                    self.check_class_constant_modifiers(&fqn, &e.consts);
-                    self.check_attributes(&e.attrs, &fqn);
-                    self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
-                    self.check_self_attribute_class_declaration(
-                        &e.attrs,
-                        &fqn,
-                        ClassKind::Enum,
-                        false,
-                        &fqn,
-                    );
-                    self.check_class_like_marker_attributes(&e.attrs, ClassKind::Enum, false, &fqn);
-                    for case in &e.cases {
-                        self.check_attributes(&case.attrs, &fqn);
+                    if !self.facts_only {
+                        self.check_class_completeness(&fqn, e.span);
+                        self.check_class_references_exist(&fqn, e.span);
+                        self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
+                        for (i, iface) in e.implements.iter().enumerate() {
+                            let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
+                            self.check_class_name_case(&fqn, iface, span);
+                        }
+                        for (i, used) in e.uses.iter().enumerate() {
+                            let span = e.uses_spans.get(i).copied().unwrap_or(e.span);
+                            self.check_class_name_case(&fqn, used, span);
+                        }
+                        self.check_ancestor_generic_bounds(&fqn, e.span);
+                        self.check_enum_template_tag(&fqn, e);
+                        self.check_sealed_tag_types(&fqn, e.doc_comment.as_deref(), e.span, true);
+                        self.check_enum_case_values(&fqn, e);
+                        self.check_enum_sanity(&fqn, e);
+                        self.check_trait_conflicts(&fqn, e.span);
+                        self.check_duplicate_enum_members(&fqn, e);
+                        self.check_method_declaration_sanity(
+                            &fqn,
+                            ClassKind::Enum,
+                            false,
+                            &e.methods,
+                        );
+                        self.check_reserved_class_constant_name(&fqn, &e.consts);
+                        self.check_typed_class_constant_values(&fqn, &e.consts);
+                        self.check_class_constant_modifiers(&fqn, &e.consts);
+                        self.check_attributes(&e.attrs, &fqn);
                         self.check_attribute_targets(
-                            &case.attrs,
-                            ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                            "class constant",
+                            &e.attrs,
+                            ATTRIBUTE_TARGET_CLASS,
+                            "class",
                             &fqn,
                         );
-                    }
-                    for cc in &e.consts {
-                        self.check_attributes(&cc.attrs, &fqn);
-                        self.check_attribute_targets(
-                            &cc.attrs,
-                            ATTRIBUTE_TARGET_CLASS_CONSTANT,
-                            "class constant",
+                        self.check_self_attribute_class_declaration(
+                            &e.attrs,
+                            &fqn,
+                            ClassKind::Enum,
+                            false,
                             &fqn,
                         );
+                        self.check_class_like_marker_attributes(
+                            &e.attrs,
+                            ClassKind::Enum,
+                            false,
+                            &fqn,
+                        );
+                        for case in &e.cases {
+                            self.check_attributes(&case.attrs, &fqn);
+                            self.check_attribute_targets(
+                                &case.attrs,
+                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                                "class constant",
+                                &fqn,
+                            );
+                        }
+                        for cc in &e.consts {
+                            self.check_attributes(&cc.attrs, &fqn);
+                            self.check_attribute_targets(
+                                &cc.attrs,
+                                ATTRIBUTE_TARGET_CLASS_CONSTANT,
+                                "class constant",
+                                &fqn,
+                            );
+                        }
+                        // An enum can't declare instance properties at all
+                        // (see `ast::EnumDecl`'s doc comment), but its consts
+                        // are as real a missing-typehint candidate as a
+                        // class's.
+                        self.check_missing_class_constant_typehints(&fqn, &e.consts);
                     }
-                    // An enum can't declare instance properties at all
-                    // (see `ast::EnumDecl`'s doc comment), but its consts
-                    // are as real a missing-typehint candidate as a
-                    // class's.
-                    self.check_missing_class_constant_typehints(&fqn, &e.consts);
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);
                     }
@@ -1346,13 +1405,15 @@ impl<'a> Checker<'a> {
                     // (see `ast::EnumDecl`'s own doc comment) - only its
                     // own consts/methods are real unused-private-member
                     // candidates.
-                    self.check_unused_private_members(
-                        &fqn,
-                        ClassKind::Enum,
-                        &e.methods,
-                        &[],
-                        &e.consts,
-                    );
+                    if !self.facts_only {
+                        self.check_unused_private_members(
+                            &fqn,
+                            ClassKind::Enum,
+                            &e.methods,
+                            &[],
+                            &e.consts,
+                        );
+                    }
                 }
                 // Top-level script statements share one scope across the
                 // whole file, so the extract()/eval() guard spans the

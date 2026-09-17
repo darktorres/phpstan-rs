@@ -253,105 +253,106 @@ impl<'a> Checker<'a> {
         // phpstan_tags_in_class`'s per-class walk (`checker.rs`'s
         // class-declaration loop) - only a genuine top-level function
         // needs it here, or every method would get double-checked.
-        if class_name.is_none() {
-            self.check_unknown_phpstan_tags_on(&label, f.doc_comment.as_deref(), f.name_span);
-        }
-        self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
-        self.check_purity_impure_points(f, sig, class_name.is_some(), &label);
-        self.check_declared_param_callable_tags(f, &label);
-        self.check_internal_param_and_return_types(f, class_name, &label);
-        self.check_assert_tag_types(sig, f.span, &label);
-        // `method.templateTypeNotInParameter` - neither a closure nor an
-        // arrow-fn is indexed into the registry at all (see
-        // `check_template_type_not_in_parameter`'s doc comment), so this
-        // only ever runs for a real, named function/method.
-        if let Some(sig) = sig {
-            self.check_template_type_not_in_parameter(sig, &f.name, class_name, &label, f.span);
-        }
-        // Mirrors real PHPStan's `FunctionDefinitionCheck`'s PHP-
-        // version-gated native declaration-syntax checks - see each
-        // one's doc comment. Real PHPStan runs these against a closure/
-        // arrow-fn's params/return too (`checkAnonymousFunction`); scoped
-        // here to a named function/method only, a deliberate narrower
-        // cut given this family's low expected value against a project
-        // targeting a modern PHP version.
-        self.check_native_union_types_supported(f, class_name.is_some(), &label);
-        self.check_implicitly_nullable_params(f, &label);
-        self.check_required_parameter_after_optional(f, &label);
-        // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-
-        // validity family plus `method.shadowTemplate`, method-level -
-        // see `check_class_generic_bounds`'s identical class-level call
-        // for the shared-check doc comment. Re-parses `f.doc_comment`
-        // fresh (mirroring `registry::function_sig::generics::
-        // build_template_params`'s shallow-then-resolve pipeline exactly,
-        // so a bound/default referencing a sibling template on the same
-        // docblock - `@template A` `@template B of A` - classifies
-        // correctly instead of misreading `A` as an unknown class) since
-        // `FunctionSig` has no persisted raw template-bound/-default map
-        // of its own. Cheap substring pre-filter before the real
-        // docblock::parse below - most documented methods declare no
-        // `@template` at all, so this skips a real parse cost on every
-        // one (matching the pattern in `noop.rs`'s `@impure`/
-        // `@phpstan-impure` gate). Both spellings must be checked:
-        // `@phpstan-template*` is an alias `docblock::parse` treats
-        // identically to `@template*` - a filter checking only the bare
-        // spelling would silently stop catching it.
-        let has_own_template = f
-            .doc_comment
-            .as_deref()
-            .is_some_and(|d| d.contains("@template") || d.contains("@phpstan-template"));
-        if let Some(c) = class_name
-            && has_own_template
-            && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
-            && !doc.templates.is_empty()
-        {
-            let shallow: std::collections::HashMap<String, types::TemplateParam> = doc
-                .templates
-                .iter()
-                .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
-                .collect();
-            let resolve = |raw: &str| -> Type {
-                let ty = types::parse_type_string(raw);
-                let ty = mark_template_params(ty, &shallow);
-                resolve_names_in_type(ty, &self.name_ctx)
-            };
-            let bounds: std::collections::HashMap<String, Type> = doc
-                .template_bounds
-                .iter()
-                .map(|(k, v)| (k.clone(), resolve(v)))
-                .collect();
-            let defaults: std::collections::HashMap<String, Type> = doc
-                .template_defaults
-                .iter()
-                .map(|(k, v)| (k.clone(), resolve(v)))
-                .collect();
-            let type_aliases = self
-                .registry
-                .classes
-                .get(c)
-                .map(|info| info.type_aliases.clone())
-                .unwrap_or_default();
-            let display_name = format!("method {c}::{}()", f.name);
-            self.check_template_declaration_validity(
-                &doc.templates,
-                &bounds,
-                &defaults,
-                &type_aliases,
-                &display_name,
-                &label,
-                f.span,
-            );
-            // `method.shadowTemplate`: a method-level `@template` reusing
-            // a name already declared on the enclosing class.
-            if let Some(info) = self.registry.classes.get(c) {
-                let mut shadowed: Vec<&String> = doc
+        if !self.facts_only {
+            if class_name.is_none() {
+                self.check_unknown_phpstan_tags_on(&label, f.doc_comment.as_deref(), f.name_span);
+            }
+            self.check_declared_purity_tag(f, sig, class_name.is_some(), &label);
+            self.check_purity_impure_points(f, sig, class_name.is_some(), &label);
+            self.check_declared_param_callable_tags(f, &label);
+            self.check_internal_param_and_return_types(f, class_name, &label);
+            self.check_assert_tag_types(sig, f.span, &label);
+            // `method.templateTypeNotInParameter` - neither a closure nor an
+            // arrow-fn is indexed into the registry at all (see
+            // `check_template_type_not_in_parameter`'s doc comment), so this
+            // only ever runs for a real, named function/method.
+            if let Some(sig) = sig {
+                self.check_template_type_not_in_parameter(sig, &f.name, class_name, &label, f.span);
+            }
+            // Mirrors real PHPStan's `FunctionDefinitionCheck`'s PHP-
+            // version-gated native declaration-syntax checks - see each
+            // one's doc comment. Real PHPStan runs these against a closure/
+            // arrow-fn's params/return too (`checkAnonymousFunction`); scoped
+            // here to a named function/method only, a deliberate narrower
+            // cut given this family's low expected value against a project
+            // targeting a modern PHP version.
+            self.check_native_union_types_supported(f, class_name.is_some(), &label);
+            self.check_implicitly_nullable_params(f, &label);
+            self.check_required_parameter_after_optional(f, &label);
+            // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-
+            // validity family plus `method.shadowTemplate`, method-level -
+            // see `check_class_generic_bounds`'s identical class-level call
+            // for the shared-check doc comment. Re-parses `f.doc_comment`
+            // fresh (mirroring `registry::function_sig::generics::
+            // build_template_params`'s shallow-then-resolve pipeline exactly,
+            // so a bound/default referencing a sibling template on the same
+            // docblock - `@template A` `@template B of A` - classifies
+            // correctly instead of misreading `A` as an unknown class) since
+            // `FunctionSig` has no persisted raw template-bound/-default map
+            // of its own. Cheap substring pre-filter before the real
+            // docblock::parse below - most documented methods declare no
+            // `@template` at all, so this skips a real parse cost on every
+            // one (matching the pattern in `noop.rs`'s `@impure`/
+            // `@phpstan-impure` gate). Both spellings must be checked:
+            // `@phpstan-template*` is an alias `docblock::parse` treats
+            // identically to `@template*` - a filter checking only the bare
+            // spelling would silently stop catching it.
+            let has_own_template = f
+                .doc_comment
+                .as_deref()
+                .is_some_and(|d| d.contains("@template") || d.contains("@phpstan-template"));
+            if let Some(c) = class_name
+                && has_own_template
+                && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
+                && !doc.templates.is_empty()
+            {
+                let shallow: std::collections::HashMap<String, types::TemplateParam> = doc
                     .templates
                     .iter()
-                    .filter(|n| info.templates.contains(n))
+                    .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
                     .collect();
-                shadowed.sort();
-                for name in shadowed {
-                    self.report(
+                let resolve = |raw: &str| -> Type {
+                    let ty = types::parse_type_string(raw);
+                    let ty = mark_template_params(ty, &shallow);
+                    resolve_names_in_type(ty, &self.name_ctx)
+                };
+                let bounds: std::collections::HashMap<String, Type> = doc
+                    .template_bounds
+                    .iter()
+                    .map(|(k, v)| (k.clone(), resolve(v)))
+                    .collect();
+                let defaults: std::collections::HashMap<String, Type> = doc
+                    .template_defaults
+                    .iter()
+                    .map(|(k, v)| (k.clone(), resolve(v)))
+                    .collect();
+                let type_aliases = self
+                    .registry
+                    .classes
+                    .get(c)
+                    .map(|info| info.type_aliases.clone())
+                    .unwrap_or_default();
+                let display_name = format!("method {c}::{}()", f.name);
+                self.check_template_declaration_validity(
+                    &doc.templates,
+                    &bounds,
+                    &defaults,
+                    &type_aliases,
+                    &display_name,
+                    &label,
+                    f.span,
+                );
+                // `method.shadowTemplate`: a method-level `@template` reusing
+                // a name already declared on the enclosing class.
+                if let Some(info) = self.registry.classes.get(c) {
+                    let mut shadowed: Vec<&String> = doc
+                        .templates
+                        .iter()
+                        .filter(|n| info.templates.contains(n))
+                        .collect();
+                    shadowed.sort();
+                    for name in shadowed {
+                        self.report(
                         label.to_string(),
                         format!(
                             "PHPDoc tag @template {name} for method {c}::{}() shadows @template {name} for class {c}.",
@@ -361,6 +362,7 @@ impl<'a> Checker<'a> {
                         6,
                         "method.shadowTemplate",
                     );
+                    }
                 }
             }
         }
@@ -686,7 +688,8 @@ impl<'a> Checker<'a> {
         }
         // `@throws` tag validity - see `checker::throws`'s module doc
         // comment.
-        if let Some(sig) = sig
+        if !self.facts_only
+            && let Some(sig) = sig
             && let Some(throws) = &sig.throws
         {
             self.check_throws_tag_validity(throws, f.span, &label);
@@ -722,30 +725,37 @@ impl<'a> Checker<'a> {
         // method re-checked once per host, a declaration nested inside
         // a block) - checking `f.attrs`/each parameter's attrs here
         // covers all of them at once.
-        self.check_attributes(&f.attrs, &label);
-        // Target-validity, mirroring real PHPStan's split between
-        // `MethodAttributesRule`/`FunctionAttributesRule` (one or the
-        // other, never both, for this same choke point).
-        if class_name.is_some() {
-            self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_METHOD, "method", &label);
-        } else {
-            self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_FUNCTION, "function", &label);
-        }
-        for p in &f.params {
-            self.check_attributes(&p.attrs, &label);
-            // `ParamAttributesRule`: a promoted param's own attributes
-            // may target either a parameter or the property it also
-            // declares - real PHP itself doesn't distinguish which one
-            // an attribute "means" here, so either target is accepted.
-            let (target, target_name) = if p.promoted_visibility.is_some() {
-                (
-                    ATTRIBUTE_TARGET_PARAMETER | ATTRIBUTE_TARGET_PROPERTY,
-                    "parameter or property",
-                )
+        if !self.facts_only {
+            self.check_attributes(&f.attrs, &label);
+            // Target-validity, mirroring real PHPStan's split between
+            // `MethodAttributesRule`/`FunctionAttributesRule` (one or the
+            // other, never both, for this same choke point).
+            if class_name.is_some() {
+                self.check_attribute_targets(&f.attrs, ATTRIBUTE_TARGET_METHOD, "method", &label);
             } else {
-                (ATTRIBUTE_TARGET_PARAMETER, "parameter")
-            };
-            self.check_attribute_targets(&p.attrs, target, target_name, &label);
+                self.check_attribute_targets(
+                    &f.attrs,
+                    ATTRIBUTE_TARGET_FUNCTION,
+                    "function",
+                    &label,
+                );
+            }
+            for p in &f.params {
+                self.check_attributes(&p.attrs, &label);
+                // `ParamAttributesRule`: a promoted param's own attributes
+                // may target either a parameter or the property it also
+                // declares - real PHP itself doesn't distinguish which one
+                // an attribute "means" here, so either target is accepted.
+                let (target, target_name) = if p.promoted_visibility.is_some() {
+                    (
+                        ATTRIBUTE_TARGET_PARAMETER | ATTRIBUTE_TARGET_PROPERTY,
+                        "parameter or property",
+                    )
+                } else {
+                    (ATTRIBUTE_TARGET_PARAMETER, "parameter")
+                };
+                self.check_attribute_targets(&p.attrs, target, target_name, &label);
+            }
         }
 
         // Bound-enforcement: checked once here, against the declaration
@@ -753,49 +763,51 @@ impl<'a> Checker<'a> {
         // dynamic-var-construct truncation below, since a bound
         // violation is about the signature as written, not something an
         // `extract()` in the body should be able to hide.
-        if let Some(sig) = sig {
-            for (param, ast_param) in sig.params.iter().zip(&f.params) {
-                self.check_generic_bounds(&param.ty, &label, ast_param.span);
+        if !self.facts_only {
+            if let Some(sig) = sig {
+                for (param, ast_param) in sig.params.iter().zip(&f.params) {
+                    self.check_generic_bounds(&param.ty, &label, ast_param.span);
+                }
             }
-        }
-        self.check_generic_bounds(
-            declared_return.as_ref().unwrap_or(&Type::Mixed),
-            &label,
-            f.span,
-        );
+            self.check_generic_bounds(
+                declared_return.as_ref().unwrap_or(&Type::Mixed),
+                &label,
+                f.span,
+            );
 
-        // Variance-enforcement half - same "check the declaration once"
-        // placement as bound-enforcement above, and only meaningful for
-        // a method (a plain top-level function has no enclosing class to
-        // have declared variance for). `__construct` is exempt, mirroring
-        // real PHPStan's own rule: a constructor is only ever called to
-        // build one specific, concrete instance (`new Success<Cat>($cat)`),
-        // never invoked polymorphically through a variable typed as the
-        // covariant supertype the way an ordinary method can be - so a
-        // covariant `T` constructor parameter doesn't actually violate
-        // covariance safety.
-        if let (Some(sig), Some(c)) = (sig, class_name)
-            && f.name != "__construct"
-        {
-            self.check_variance(sig, c, &label, f.span);
-        }
-        // `function.variance`/`method.variance` - the own-declaration
-        // half, unlike `check_variance` above, runs unconditionally
-        // (including for `__construct`/private methods).
-        self.check_own_template_variance_declaration(f, class_name.is_some(), &label, f.span);
+            // Variance-enforcement half - same "check the declaration once"
+            // placement as bound-enforcement above, and only meaningful for
+            // a method (a plain top-level function has no enclosing class to
+            // have declared variance for). `__construct` is exempt, mirroring
+            // real PHPStan's own rule: a constructor is only ever called to
+            // build one specific, concrete instance (`new Success<Cat>($cat)`),
+            // never invoked polymorphically through a variable typed as the
+            // covariant supertype the way an ordinary method can be - so a
+            // covariant `T` constructor parameter doesn't actually violate
+            // covariance safety.
+            if let (Some(sig), Some(c)) = (sig, class_name)
+                && f.name != "__construct"
+            {
+                self.check_variance(sig, c, &label, f.span);
+            }
+            // `function.variance`/`method.variance` - the own-declaration
+            // half, unlike `check_variance` above, runs unconditionally
+            // (including for `__construct`/private methods).
+            self.check_own_template_variance_declaration(f, class_name.is_some(), &label, f.span);
 
-        // Same "check the declaration once" placement as the bound/
-        // variance checks above - a missing typehint is about the
-        // signature as written, not something a body-local `extract()`
-        // should be able to hide either.
-        self.check_missing_function_typehints(
-            f,
-            class_name,
-            &label,
-            &resolved_params,
-            declared_return.as_ref(),
-            sig.or(ancestor_sig_hint),
-        );
+            // Same "check the declaration once" placement as the bound/
+            // variance checks above - a missing typehint is about the
+            // signature as written, not something a body-local `extract()`
+            // should be able to hide either.
+            self.check_missing_function_typehints(
+                f,
+                class_name,
+                &label,
+                &resolved_params,
+                declared_return.as_ref(),
+                sig.or(ancestor_sig_hint),
+            );
+        }
 
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
@@ -906,173 +918,175 @@ impl<'a> Checker<'a> {
         // which case falling off the end is exactly as real a miss as it
         // is for an ordinary function, just checked against TReturn
         // instead of the outer Generator type itself.
-        let generator_treturn = self
-            .current_function_is_generator
-            .then(|| {
-                generator_missing_return_type(
-                    self.current_declared_return_type.as_ref(),
-                    self.registry,
-                )
-            })
-            .flatten();
-        // The falls-off-the-end path's two separate contributions to
-        // `current_function_return_points`, mirroring real PHPStan's
-        // `TooWideTypeCheck`: pushes `VoidType` unconditionally whenever
-        // the body doesn't always-terminate (not folded into the `Null`
-        // push below), and a `Null` push only when there's no native
-        // return type at all (a native type always wins for "what does
-        // falling off the end actually produce" - an untyped function is
-        // the only shape where PHP's implicit-`null`-return is the real,
-        // uncommitted fact). Never for a generator, same reasoning as
-        // both `Return` arms in `stmt.rs`.
-        let body_falls_off_end = !f.body.iter().any(|s| self.always_terminates(s, &locals));
-        if !self.current_function_is_generator && body_falls_off_end {
-            self.current_function_return_points.push(Type::Void);
-            if native_return.is_none() {
-                self.current_function_return_points.push(Type::Null);
-            }
-        }
-        if let Some(expected) = &declared_return
-            && (!f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete))
-            && body_falls_off_end
-            && (!self.current_function_is_generator || generator_treturn.is_some())
-        {
-            let expected = if let Some(treturn) = generator_treturn {
-                treturn
-            } else {
-                match &self.current_class {
-                    Some(c) => self.resolve_pseudo(expected, c),
-                    None => expected.clone(),
+        if !self.facts_only {
+            let generator_treturn = self
+                .current_function_is_generator
+                .then(|| {
+                    generator_missing_return_type(
+                        self.current_declared_return_type.as_ref(),
+                        self.registry,
+                    )
+                })
+                .flatten();
+            // The falls-off-the-end path's two separate contributions to
+            // `current_function_return_points`, mirroring real PHPStan's
+            // `TooWideTypeCheck`: pushes `VoidType` unconditionally whenever
+            // the body doesn't always-terminate (not folded into the `Null`
+            // push below), and a `Null` push only when there's no native
+            // return type at all (a native type always wins for "what does
+            // falling off the end actually produce" - an untyped function is
+            // the only shape where PHP's implicit-`null`-return is the real,
+            // uncommitted fact). Never for a generator, same reasoning as
+            // both `Return` arms in `stmt.rs`.
+            let body_falls_off_end = !f.body.iter().any(|s| self.always_terminates(s, &locals));
+            if !self.current_function_is_generator && body_falls_off_end {
+                self.current_function_return_points.push(Type::Void);
+                if native_return.is_none() {
+                    self.current_function_return_points.push(Type::Null);
                 }
-            };
-            // A `never`-typed function/method whose body simply falls
-            // off the end without ever throwing/exiting is the same
-            // "should never return" claim `Return(Some(e))`/
-            // `Return(None)` already special-case, just reached via the
-            // implicit fall-through instead of an explicit `return`
-            // statement - real PHPStan's `return.never` covers both
-            // shapes identically.
-            if expected == Type::Never {
-                self.report(
-                    label.clone(),
-                    "should never return, but a return statement was reached".to_string(),
-                    f.span,
-                    3,
-                    "return.never",
-                );
-            } else if expected != Type::Void
-                && expected != Type::Mixed
-                && !self.registry.is_assignable(&Type::Null, &expected)
+            }
+            if let Some(expected) = &declared_return
+                && (!f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete))
+                && body_falls_off_end
+                && (!self.current_function_is_generator || generator_treturn.is_some())
+            {
+                let expected = if let Some(treturn) = generator_treturn {
+                    treturn
+                } else {
+                    match &self.current_class {
+                        Some(c) => self.resolve_pseudo(expected, c),
+                        None => expected.clone(),
+                    }
+                };
+                // A `never`-typed function/method whose body simply falls
+                // off the end without ever throwing/exiting is the same
+                // "should never return" claim `Return(Some(e))`/
+                // `Return(None)` already special-case, just reached via the
+                // implicit fall-through instead of an explicit `return`
+                // statement - real PHPStan's `return.never` covers both
+                // shapes identically.
+                if expected == Type::Never {
+                    self.report(
+                        label.clone(),
+                        "should never return, but a return statement was reached".to_string(),
+                        f.span,
+                        3,
+                        "return.never",
+                    );
+                } else if expected != Type::Void
+                    && expected != Type::Mixed
+                    && !self.registry.is_assignable(&Type::Null, &expected)
+                {
+                    self.report(
+                        label.clone(),
+                        format!("should return {expected} but return statement is missing"),
+                        f.span,
+                        3,
+                        "return.missing",
+                    );
+                }
+            }
+            // `body_falls_off_end == false` means the body already provably
+            // always terminates; paired with never seeing a real `return`
+            // (a bare `return;` counts too), that's "never returns
+            // normally". Scoped to an undeclared (reads as `Mixed`) or
+            // `void`-declared return type only.
+            if self.registry.check_never_return_suggestions
+                && !f.body.is_empty()
+                && !self.current_function_is_generator
+                && !body_falls_off_end
+                && !self.current_function_saw_explicit_return
+                && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed))
             {
                 self.report(
                     label.clone(),
-                    format!("should return {expected} but return statement is missing"),
-                    f.span,
-                    3,
-                    "return.missing",
+                    "could be declared to return never - it never returns normally".to_string(),
+                    f.return_type_span.unwrap_or(f.span),
+                    5,
+                    "return.neverCandidate",
                 );
             }
-        }
-        // `body_falls_off_end == false` means the body already provably
-        // always terminates; paired with never seeing a real `return`
-        // (a bare `return;` counts too), that's "never returns
-        // normally". Scoped to an undeclared (reads as `Mixed`) or
-        // `void`-declared return type only.
-        if self.registry.check_never_return_suggestions
-            && !f.body.is_empty()
-            && !self.current_function_is_generator
-            && !body_falls_off_end
-            && !self.current_function_saw_explicit_return
-            && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed))
-        {
-            self.report(
-                label.clone(),
-                "could be declared to return never - it never returns normally".to_string(),
-                f.return_type_span.unwrap_or(f.span),
-                5,
-                "return.neverCandidate",
-            );
-        }
 
-        // Needs the same body-level extract()/eval() guard as everything
-        // else checked in this function - placed before the truncation
-        // below (rather than after) so a constructor that calls
-        // extract()/eval() has this diagnostic discarded along with
-        // every other one from its own body.
-        self.check_unused_constructor_parameters(f, class_name, &label);
+            // Needs the same body-level extract()/eval() guard as everything
+            // else checked in this function - placed before the truncation
+            // below (rather than after) so a constructor that calls
+            // extract()/eval() has this diagnostic discarded along with
+            // every other one from its own body.
+            self.check_unused_constructor_parameters(f, class_name, &label);
 
-        // Both run once the whole body (every real throw point it
-        // contains) has been checked, still ahead of the
-        // `saw_dynamic_var_construct` truncation below, so a declaration
-        // using `extract()`/`eval()` gets these diagnostics swept away
-        // along with everything else from its own body.
-        //
-        // Gated on the identical "has a real body at all" condition the
-        // `return.missing`/`return.never` check above uses - an
-        // abstract/interface declaration's `@throws` tag documents what
-        // a real implementor is expected to throw, not what this
-        // (nonexistent) body throws, so `check_too_wide_throw_type`'s
-        // "nothing was thrown at all, flag every declared member"
-        // fallback would otherwise unconditionally fire on every
-        // `@throws` tag any interface/abstract method ever carries.
-        if !f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete) {
-            let subject = match class_name {
-                Some(c) => format!("Method {c}::{}()", f.name),
-                None => format!("Function {}()", f.name),
-            };
-            let throws_tag = sig.and_then(|s| s.throws.as_ref());
-            if let Some(throws) = throws_tag {
-                let should_check = match (class_name, sig) {
-                    (Some(c), Some(s)) => self.should_check_too_wide_method_throw_type(
-                        c,
-                        &f.name,
-                        s.visibility.clone(),
-                    ),
-                    // `TooWideFunctionThrowTypeRule` (a plain top-level
-                    // function, or a method whose signature somehow
-                    // isn't indexed) has no visibility/finality gate -
-                    // see `should_check_too_wide_method_throw_type`'s
-                    // doc comment.
-                    _ => true,
+            // Both run once the whole body (every real throw point it
+            // contains) has been checked, still ahead of the
+            // `saw_dynamic_var_construct` truncation below, so a declaration
+            // using `extract()`/`eval()` gets these diagnostics swept away
+            // along with everything else from its own body.
+            //
+            // Gated on the identical "has a real body at all" condition the
+            // `return.missing`/`return.never` check above uses - an
+            // abstract/interface declaration's `@throws` tag documents what
+            // a real implementor is expected to throw, not what this
+            // (nonexistent) body throws, so `check_too_wide_throw_type`'s
+            // "nothing was thrown at all, flag every declared member"
+            // fallback would otherwise unconditionally fire on every
+            // `@throws` tag any interface/abstract method ever carries.
+            if !f.body.is_empty() || (self.registry.check_empty_method_bodies && is_concrete) {
+                let subject = match class_name {
+                    Some(c) => format!("Method {c}::{}()", f.name),
+                    None => format!("Function {}()", f.name),
                 };
-                if should_check {
-                    self.check_too_wide_throw_type(throws, &subject, f.span, &label);
-                }
-            }
-            self.check_missing_checked_exceptions(throws_tag, &subject, &label);
-
-            // Same "has a real body at all" gate, same choke point as
-            // the throw-type check above.
-            if let Some(declared) = &declared_return {
-                let declared = match &self.current_class {
-                    Some(c) => self.resolve_pseudo(declared, c),
-                    None => declared.clone(),
-                };
-                let should_check = match (class_name, sig) {
-                    (Some(c), Some(s)) => self.should_check_too_wide_method_return_type(
-                        c,
-                        &f.name,
-                        s.visibility.clone(),
-                    ),
-                    _ => true,
-                };
-                if should_check {
-                    let is_first_declaration = match (class_name, sig) {
-                        (Some(c), Some(_)) => self
-                            .registry
-                            .find_method_signature_prototype(c, &f.name)
-                            .is_none(),
+                let throws_tag = sig.and_then(|s| s.throws.as_ref());
+                if let Some(throws) = throws_tag {
+                    let should_check = match (class_name, sig) {
+                        (Some(c), Some(s)) => self.should_check_too_wide_method_throw_type(
+                            c,
+                            &f.name,
+                            s.visibility.clone(),
+                        ),
+                        // `TooWideFunctionThrowTypeRule` (a plain top-level
+                        // function, or a method whose signature somehow
+                        // isn't indexed) has no visibility/finality gate -
+                        // see `should_check_too_wide_method_throw_type`'s
+                        // doc comment.
                         _ => true,
                     };
-                    let is_private = sig.is_some_and(|s| s.visibility == Visibility::Private);
-                    self.check_too_wide_return_type(
-                        &declared,
-                        is_first_declaration,
-                        is_private,
-                        &subject,
-                        f.span,
-                        &label,
-                    );
+                    if should_check {
+                        self.check_too_wide_throw_type(throws, &subject, f.span, &label);
+                    }
+                }
+                self.check_missing_checked_exceptions(throws_tag, &subject, &label);
+
+                // Same "has a real body at all" gate, same choke point as
+                // the throw-type check above.
+                if let Some(declared) = &declared_return {
+                    let declared = match &self.current_class {
+                        Some(c) => self.resolve_pseudo(declared, c),
+                        None => declared.clone(),
+                    };
+                    let should_check = match (class_name, sig) {
+                        (Some(c), Some(s)) => self.should_check_too_wide_method_return_type(
+                            c,
+                            &f.name,
+                            s.visibility.clone(),
+                        ),
+                        _ => true,
+                    };
+                    if should_check {
+                        let is_first_declaration = match (class_name, sig) {
+                            (Some(c), Some(_)) => self
+                                .registry
+                                .find_method_signature_prototype(c, &f.name)
+                                .is_none(),
+                            _ => true,
+                        };
+                        let is_private = sig.is_some_and(|s| s.visibility == Visibility::Private);
+                        self.check_too_wide_return_type(
+                            &declared,
+                            is_first_declaration,
+                            is_private,
+                            &subject,
+                            f.span,
+                            &label,
+                        );
+                    }
                 }
             }
         }
