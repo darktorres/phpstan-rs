@@ -3,7 +3,7 @@ use crate::checker::expr::builtin_calls::{
     date_format_return_type, date_interval_format_return_type,
 };
 use crate::checker::expr::doctrine_query_result_list_type;
-use crate::checker::expr::is_doctrine_query_get_result;
+use crate::checker::expr::doctrine_query_result_list_type_of;
 use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals, literal_string_value, resolve_call_args};
 use crate::registry::{FunctionSig, PropertySig};
@@ -369,14 +369,100 @@ impl<'a> Checker<'a> {
     /// types can genuinely return two different types).
     pub(crate) fn method_call_return_type(
         &self,
+        recv: &Expr,
         recv_ty: &Type,
         method: &str,
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
         match recv_ty {
-            Type::Object(class, _) if is_doctrine_query_get_result(self, class, method) => {
-                doctrine_query_result_list_type()
+            // `QueryBuilder::getQuery()` (PHASE_BACKLOG Phase 168 168e) -
+            // resolves the fluent chain (168b), parses its own select
+            // items (168c) and builds the row shape (168d), carrying it
+            // as `Doctrine\ORM\Query`'s own generic-argument slot (see
+            // `doctrine_query_row_type`'s own doc comment for why this
+            // reuses `Type::Object`'s existing slot rather than a new
+            // `Type` variant). An undecidable chain/select falls back to
+            // today's plain, argument-less `Query` object - no worse
+            // than before this phase existed.
+            Type::Object(class, _)
+                if method == "getQuery"
+                    && self
+                        .registry
+                        .is_subclass_of(class, "Doctrine\\ORM\\QueryBuilder") =>
+            {
+                let row_type = self
+                    .resolve_query_builder_chain(recv, locals)
+                    .and_then(|chain| {
+                        let items =
+                            crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
+                        crate::checker::doctrine::result_shape::build_result_row_type(
+                            self, &chain, &items,
+                        )
+                    });
+                match row_type {
+                    Some(row_type) => {
+                        Type::Object("Doctrine\\ORM\\Query".to_string(), vec![row_type])
+                    }
+                    None => Type::Object("Doctrine\\ORM\\Query".to_string(), Vec::new()),
+                }
+            }
+            // The five `AbstractQuery` terminal methods real
+            // `phpstan-doctrine` itself resolves precisely via its own
+            // `QueryResultDynamicReturnTypeExtension` (PHASE_BACKLOG
+            // Phase 168 168e) - checkable against that reference
+            // implementation's own `dumpType()` output.
+            // `getArrayResult`/`getSingleColumnResult`/
+            // `getSingleScalarResult`/`getScalarResult` (168f, beyond
+            // real PHPStan - none of those four get a dynamic-return-
+            // type extension there either) aren't handled here yet.
+            Type::Object(class, type_args)
+                if matches!(
+                    method,
+                    "getResult"
+                        | "execute"
+                        | "toIterable"
+                        | "getOneOrNullResult"
+                        | "getSingleResult"
+                ) && self
+                    .registry
+                    .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
+            {
+                let row_type = type_args.first();
+                match method {
+                    "getResult" => match row_type {
+                        Some(row_type) => doctrine_query_result_list_type_of(row_type.clone()),
+                        // Today's only previously-covered method - keep
+                        // its existing shape-only fallback rather than
+                        // regressing to bare `Mixed` when the chain
+                        // itself was undecidable.
+                        None => doctrine_query_result_list_type(),
+                    },
+                    "execute" => match resolve_hydration_mode_arg(args, 1) {
+                        HydrationMode::Object => row_type
+                            .cloned()
+                            .map(doctrine_query_result_list_type_of)
+                            .unwrap_or_else(doctrine_query_result_list_type),
+                        // The other hydration modes need 168f's own
+                        // per-mode transforms, not yet built.
+                        _ => Type::Mixed,
+                    },
+                    "toIterable" => match resolve_hydration_mode_arg(args, 0) {
+                        HydrationMode::Object => Type::Union(vec![
+                            Type::Array(
+                                Box::new(Type::unknown_array_key()),
+                                Box::new(row_type.cloned().unwrap_or(Type::Mixed)),
+                            ),
+                            Type::Object("Traversable".to_string(), Vec::new()),
+                        ]),
+                        _ => Type::Mixed,
+                    },
+                    "getOneOrNullResult" => {
+                        union_types(row_type.cloned().unwrap_or(Type::Mixed), Type::Null)
+                    }
+                    "getSingleResult" => row_type.cloned().unwrap_or(Type::Mixed),
+                    _ => unreachable!(),
+                }
             }
             // `DateTimeInterface::format()`'s own already-
             // shipped `date()` format-character table applies verbatim -
@@ -481,17 +567,41 @@ impl<'a> Checker<'a> {
                 .iter()
                 .rev()
                 .find_map(|m| {
-                    let ty = self.method_call_return_type(m, method, args, locals);
+                    let ty = self.method_call_return_type(recv, m, method, args, locals);
                     (ty != Type::Mixed).then_some(ty)
                 })
                 .unwrap_or(Type::Mixed),
             Type::Union(members) => members
                 .iter()
-                .map(|m| self.method_call_return_type(m, method, args, locals))
+                .map(|m| self.method_call_return_type(recv, m, method, args, locals))
                 .filter(|ty| *ty != Type::Mixed)
                 .reduce(union_types)
                 .unwrap_or(Type::Mixed),
             _ => Type::Mixed,
         }
+    }
+}
+
+/// Which of `AbstractQuery::HYDRATE_*` mode an `execute()`/`toIterable()`
+/// call's own hydration-mode argument names - `Object` both when it's
+/// omitted (real Doctrine's own default) and when it's the literal
+/// `HYDRATE_OBJECT` constant; `Unknown` for anything this project can't
+/// statically resolve (a runtime variable), which every caller treats as
+/// undecidable for that call, never guessed.
+enum HydrationMode {
+    Object,
+    Unknown,
+}
+
+fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
+    match args.get(index) {
+        None => HydrationMode::Object,
+        Some(arg) => match &arg.value.kind {
+            ExprKind::Literal(Literal::Null) => HydrationMode::Object,
+            ExprKind::StaticAccess(_, member) if member == "HYDRATE_OBJECT" => {
+                HydrationMode::Object
+            }
+            _ => HydrationMode::Unknown,
+        },
     }
 }

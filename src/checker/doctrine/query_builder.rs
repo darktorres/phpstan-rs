@@ -70,6 +70,12 @@ impl<'a> Checker<'a> {
         let mut cursor = recv;
         loop {
             match &cursor.kind {
+                // `createQueryBuilder(...)` is the chain root itself
+                // (`resolve_chain_root`'s own job to interpret), not
+                // just another call to collect and descend past -
+                // stopping here without descending is what makes `cursor`
+                // still point *at* this call node afterward.
+                ExprKind::MethodCall(_, method, _, _) if method == "createQueryBuilder" => break,
                 ExprKind::MethodCall(inner, method, args, _) => {
                     calls.push(ChainCall { method, args });
                     cursor = inner;

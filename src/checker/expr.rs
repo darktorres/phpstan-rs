@@ -1078,7 +1078,7 @@ impl<'a> Checker<'a> {
                 // plain `DateInterval` for `$diff`, discarding the
                 // `days: int` refinement the identical call written as
                 // one direct chain (`$a->diff($b)->days`) gets right.
-                let result = self.method_call_return_type(&recv_ty, method, args, locals);
+                let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
@@ -3321,7 +3321,7 @@ impl<'a> Checker<'a> {
                 // matching, the same real class the method is actually
                 // being looked up on either way.
                 let recv_ty = narrow_type_excluding(&self.infer_expr(recv, locals), &Type::Null);
-                let result = self.method_call_return_type(&recv_ty, method, args, locals);
+                let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
@@ -4363,31 +4363,24 @@ fn is_true_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
 }
 
-/// Whether `class::$method()` is Doctrine's `AbstractQuery::getResult()`
-/// (or an override/inheritor of it, e.g. `Query::getResult()`) - the
-/// native stub declares a bare `mixed` return with no docblock
-/// refinement. Real PHPStan's `phpstan-doctrine` extension gives this a
-/// much richer, query-builder-aware entity type (full DQL SELECT/FROM
-/// introspection, tracking `indexBy()` too) this project has no way to
-/// replicate, but the narrower, bounded fact it always proves is worth
-/// having on its own: a non-`indexBy()`'d query's result is always a
-/// real, sequentially-keyed list.
-pub(crate) fn is_doctrine_query_get_result(
-    checker: &Checker<'_>,
-    class: &str,
-    method: &str,
-) -> bool {
-    method == "getResult"
-        && checker
-            .registry
-            .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery")
+/// Doctrine's `AbstractQuery::getResult()` (and every real terminal
+/// method sharing its own `HYDRATE_OBJECT` shape - `execute()`/
+/// `toIterable()` when their own hydration-mode argument is omitted or
+/// explicit) always produces a real, sequentially-keyed list - true
+/// regardless of whether PHASE_BACKLOG Phase 168's own DQL-aware row-
+/// type inference (168b-168d) managed to resolve a real element type,
+/// in which case `element_ty` is that resolved `Type`; `Type::Mixed`
+/// when it didn't (matches this project's pre-Phase-168 fallback
+/// exactly, so an undecidable chain regresses nothing).
+pub(crate) fn doctrine_query_result_list_type_of(element_ty: Type) -> Type {
+    Type::Intersection(vec![
+        Type::Array(Box::new(Type::unknown_array_key()), Box::new(element_ty)),
+        Type::Accessory(AccessoryKind::ArrayList),
+    ])
 }
 
 pub(crate) fn doctrine_query_result_list_type() -> Type {
-    Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
-        Type::Accessory(AccessoryKind::ArrayList),
-    ])
+    doctrine_query_result_list_type_of(Type::Mixed)
 }
 
 /// Peels through any `(...)`-grouping wrapper(s) to the real expression

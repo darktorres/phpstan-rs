@@ -2027,6 +2027,44 @@ malformed query, and localizes to `Mixed` for that one field instead -
 matching real `phpstan-doctrine`'s own walker, which does the identical
 thing rather than discarding an otherwise-precise row shape.
 
+**Wiring `getQuery()`/`getResult()`/`getOneOrNullResult()`/
+`getSingleResult()`/`execute()`/`toIterable()`** (PHASE_BACKLOG Phase
+168's 168e). `checker::expr::member_resolution::method_call_return_type`
+gained a `recv: &Expr` parameter (the receiver AST, not just its
+inferred `Type`) specifically so `QueryBuilder::getQuery()` can walk its
+own fluent chain (168b) - resolving the row type via 168c/168d and
+carrying it as `Doctrine\ORM\Query`'s own generic-argument slot
+(`Type::Object("Doctrine\\ORM\\Query", vec![row_type])`). The five
+terminal methods real `phpstan-doctrine` itself resolves precisely (via
+its own `QueryResultDynamicReturnTypeExtension`) read that slot back
+out: `getResult()`/bare `execute()`/bare `toIterable()` → `list<row_type>`
+(`getResult()` keeps its pre-existing `list<mixed>` fallback when the
+chain itself was undecidable, so this regresses nothing);
+`getOneOrNullResult()` → `row_type|null`; `getSingleResult()` →
+`row_type` directly (real Doctrine throws
+`NoResultException`/`NonUniqueResultException` otherwise - unmodeled,
+same as every other unmodeled-exception-path precedent in this
+codebase). `execute()`/`toIterable()`'s own hydration-mode argument
+(index 1 and 0 respectively) is resolved against the literal
+`HYDRATE_OBJECT` constant or an omitted/explicit-`null` default; any
+other named mode falls back to `Mixed` until 168f's own per-mode
+transforms exist (`getArrayResult()`/etc. have no dynamic-return-type
+extension in real `phpstan-doctrine` either, so nothing here can be
+checked against a reference implementation until that hydrator-source
+transcription work lands).
+
+A real, structural bug was caught building this: `resolve_query_builder_
+chain`'s own backward walk unconditionally unwrapped *every*
+`MethodCall`, including `createQueryBuilder()` itself, so `resolve_
+chain_root` ended up receiving the *variable underneath* it (`$em`) as
+its own "root" argument rather than the `createQueryBuilder(...)` call
+node it expects - silently failing every chain, always falling back to
+`Mixed`, with no compiler error to catch it (only an end-to-end
+`assertType()` test surfaced it, one bare `$em->createQueryBuilder()->
+select('t')->from(...)->getQuery()->getResult()` call producing plain
+`list` instead of `list<Entity>`). Fixed by stopping the backward walk
+exactly at the `createQueryBuilder` call, without descending past it.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

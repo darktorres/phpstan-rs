@@ -2075,14 +2075,19 @@ from-scratch Doctrine mapping-metadata resolver.
   localizes to `Mixed` for that field alone rather than discarding the
   whole row - matches the real walker's own behavior; only a genuine
   DQL syntax problem (168b/168c) makes the whole query undecidable.
-- **168e (medium).** Wiring `getResult()`/`getOneOrNullResult()`/
-  `getSingleResult()`/`execute()`/`toIterable()` - the five methods real
-  `phpstan-doctrine` itself resolves precisely via its
-  `QueryResultDynamicReturnTypeExtension`, so checkable against a real
-  reference implementation's own `dumpType()` output.
-  `execute()`/`toIterable()` need a real hydration-mode-argument dispatch
-  (`Query::HYDRATE_*` constant → the matching transform), not a fixed
-  per-method table.
+- **168e (medium, DONE).** Wiring `getQuery()`/`getResult()`/
+  `getOneOrNullResult()`/`getSingleResult()`/`execute()`/`toIterable()` -
+  the five terminal methods real `phpstan-doctrine` itself resolves
+  precisely via its `QueryResultDynamicReturnTypeExtension`, checked
+  end-to-end against real, minimal Doctrine class-hierarchy fixtures
+  (`checker/tests/doctrine_query_result.rs`), including both real
+  `QueryBuilder` chain roots (`$em->createQueryBuilder()` and the
+  `$this->createQueryBuilder($alias)` repository shorthand).
+  `execute()`/`toIterable()` dispatch on their own hydration-mode
+  argument (an explicit non-`HYDRATE_OBJECT` mode falls back to `Mixed`
+  until 168f's own per-mode transforms exist). Reuses `Type::Object`'s
+  existing generic-argument slot to carry `getQuery()`'s own resolved
+  row type through to the terminal method - no new `Type` variant.
 - **168f (medium).** `getArrayResult()`/`getSingleColumnResult()`/
   `getSingleScalarResult()`/`getScalarResult()` - **beyond real
   PHPStan** (confirmed via `phpstan-doctrine`'s own stub: none of these
