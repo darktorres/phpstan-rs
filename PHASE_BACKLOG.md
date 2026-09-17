@@ -2124,13 +2124,19 @@ from-scratch Doctrine mapping-metadata resolver.
   dispatch specifically re-resolves a `->getQuery()`-shaped receiver,
   which `createQuery()` doesn't produce - a small, disclosed asymmetry
   matching this item's own zero real corpus need.
-- **168h (small).** Custom DQL function return types
-  (`DATE_FORMAT_YEAR_MONTH`/`REGEXP`/etc., project-registered via
-  `Configuration::addCustomStringFunction()`) - real `phpstan-doctrine`
-  itself can't infer these either, requiring a manually-declared config
-  surface (`doctrine.neon`'s own `customStringFunctions` etc.) - mirror
-  with a small `phpstan-rs.toml` config surface, same shape as this
-  project's existing `ignore_errors`/`restricted_symbols`.
+- **168h (small, DONE).** Custom DQL function return types
+  (`src/doctrine_functions.rs`) - `[[doctrine_custom_functions]]`
+  (`name`/`kind: "numeric"|"string"|"datetime"`), mirroring real
+  `phpstan-doctrine`'s own identical `customNumericFunctions`/
+  `customStringFunctions`/`customDatetimeFunctions` config surface,
+  since it can't infer these either (`DATE_FORMAT_YEAR_MONTH`/etc.,
+  confirmed real and project-registered in the corpus via
+  `Configuration::addCustomStringFunction()`). `Numeric` resolves to
+  `int|float`; `String`/`Datetime` both resolve to plain `string` - a
+  DQL scalar result is always a raw, unhydrated database value, never a
+  real `DateTime` object, regardless of a function's own semantic
+  category. Config-file-only, no CLI flag, same shape and reasoning as
+  this project's existing `ignore_errors`/`restricted_symbols`.
 - **168i (small, permanent boundary).** DBAL raw `fetchAssociative()`/
   `fetchAllAssociative()`/etc. - per-column typing needs the actual live
   SQL/schema; real PHPStan doesn't solve this generically either. Stays

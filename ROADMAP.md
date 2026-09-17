@@ -2145,6 +2145,41 @@ expression, which a `createQuery()`-produced `Query` value doesn't have
 - a small, disclosed asymmetry matching this item's own zero real
 corpus need.
 
+**Custom DQL function return types** (PHASE_BACKLOG Phase 168's 168h,
+the last buildable sub-item of the phase - 168i is a genuine, permanent
+boundary; 168j/168k remain real, disclosed, sequenced-later work).
+`doctrine_functions::DoctrineCustomFunctionEntry`
+(`[[doctrine_custom_functions]]`, config-file-only, no CLI flag, same
+shape as this project's existing `ignore_errors`/`restricted_symbols`) -
+mirrors real `phpstan-doctrine`'s own identical `customNumericFunctions`/
+`customStringFunctions`/`customDatetimeFunctions` config keys, since a
+project's own `Configuration::addCustomStringFunction()`-registered DQL
+function (`DATE_FORMAT_YEAR_MONTH`, confirmed real and project-
+registered in the corpus this phase targets) has no return type
+derivable from the DQL parser alone - true of real PHPStan's own
+extension too, not a gap specific to this project. `Numeric` resolves to
+`int|float`; `String`/`Datetime` both resolve to plain `string` - a DQL
+scalar result is always a raw, unhydrated database value, never a real
+`DateTime` object, regardless of which category a function's own
+semantic meaning falls into. Consulted from
+`checker::doctrine::result_shape`'s existing `SelectItemKind::Custom`
+handling (previously always `Mixed`), keyed by lowercased function name
+to match DQL's own case-insensitive function-name lookup.
+
+With 168a-168h now built, PHASE_BACKLOG Phase 168's entire *buildable*
+scope is complete: every terminal `AbstractQuery` method with real
+corpus usage now gets DQL-aware row-shape inference (168e's five methods
+checkable against real `phpstan-doctrine`'s own `dumpType()` output;
+168f's four beyond it, transcribed from Doctrine's own hydrator source),
+fed by either a `QueryBuilder` fluent chain (168b) or a literal DQL
+string (168g), with a config surface for what neither this project nor
+real PHPStan can infer on its own (168h). Only 168i (DBAL raw
+`fetchAssociative()`, a genuine live-schema-dependent boundary real
+PHPStan shares) stays permanently out of scope; 168j (entity
+inheritance) and 168k (a scalar subquery nested inside a select item)
+remain real, scoped, disclosed follow-on work with no known real-corpus
+instance to build or verify against yet.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

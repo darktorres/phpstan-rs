@@ -242,6 +242,11 @@ pub struct Registry {
     // once via `RestrictedSymbols::compile` (`Project::
     // set_restricted_symbols`).
     pub restricted_symbols: crate::restricted_symbols::RestrictedSymbols,
+    // A project's own `[[doctrine_custom_functions]]` config (PHASE_BACKLOG
+    // Phase 168 168h) - DQL function name (lowercased, matching DQL's own
+    // case-insensitive function-name lookup) -> declared category.
+    pub doctrine_custom_functions:
+        FxHashMap<String, crate::doctrine_functions::DoctrineFunctionKind>,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
     // treat as "nothing to check yet." See `crate::php_version::PhpFeature`

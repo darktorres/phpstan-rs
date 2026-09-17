@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 
 use output::OutputFormat;
 use phpstan_rs::{
-    baseline, checker, composer, config, ignore_errors, output, php_version, project,
-    restricted_symbols,
+    baseline, checker, composer, config, doctrine_functions, ignore_errors, output, php_version,
+    project, restricted_symbols,
 };
 use rayon::prelude::*;
 
@@ -139,6 +139,7 @@ fn run_check_project(
     baseline_path: Option<&Path>,
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
+    doctrine_custom_function_entries: &[doctrine_functions::DoctrineCustomFunctionEntry],
     phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
@@ -192,6 +193,7 @@ fn run_check_project(
     project.set_check_new_exception_discarded(check_new_exception_discarded);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
+    project.set_doctrine_custom_functions(doctrine_custom_function_entries);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -618,6 +620,7 @@ pub(crate) fn run_check_project_command(
     let baseline = baseline.or(config.baseline.map(resolve_against_config));
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
     let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
+    let doctrine_custom_function_entries = config.doctrine_custom_functions.unwrap_or_default();
 
     let mut scan_dirs = if !scan_dirs.is_empty() {
         scan_dirs
@@ -704,6 +707,7 @@ pub(crate) fn run_check_project_command(
         baseline.as_deref(),
         &ignore_error_entries,
         &restricted_symbol_entries,
+        &doctrine_custom_function_entries,
         phpstan_api_check_enabled,
         format.unwrap_or_default(),
     )

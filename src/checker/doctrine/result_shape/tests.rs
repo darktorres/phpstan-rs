@@ -351,3 +351,41 @@ fn scalar_result_flattens_entity_fields_under_alias_prefixed_keys() {
         ])
     );
 }
+
+#[test]
+fn a_declared_custom_function_resolves_to_its_own_category_type() {
+    let mut registry = build(ENTITIES);
+    registry.doctrine_custom_functions.insert(
+        "date_format_year_month".to_string(),
+        crate::doctrine_functions::DoctrineFunctionKind::String,
+    );
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["DATE_FORMAT_YEAR_MONTH(t.name) AS ym".to_string()]).unwrap();
+    let ty = build_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ArrayShape(vec![("ym".to_string(), Type::String, false)])
+    );
+}
+
+#[test]
+fn an_undeclared_custom_function_falls_back_to_mixed() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["SOME_UNDECLARED_FN(t.name) AS x".to_string()]).unwrap();
+    let ty = build_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ArrayShape(vec![("x".to_string(), Type::Mixed, false)])
+    );
+}

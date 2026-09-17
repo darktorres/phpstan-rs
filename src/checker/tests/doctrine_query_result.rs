@@ -64,6 +64,13 @@ fn diagnostics_with_stubs(src: &str) -> Vec<crate::checker::Diagnostic> {
     diagnostics_for(&format!("<?php\n{STUBS}\n{src}"))
 }
 
+fn diagnostics_with_stubs_and_config(
+    src: &str,
+    configure: impl FnOnce(&mut crate::registry::Registry),
+) -> Vec<crate::checker::Diagnostic> {
+    diagnostics_for_with(&format!("<?php\n{STUBS}\n{src}"), configure)
+}
+
 #[test]
 fn get_result_via_the_explicit_entity_manager_form_is_a_list_of_the_entity() {
     let d = diagnostics_with_stubs(
@@ -476,6 +483,50 @@ fn create_query_with_a_non_literal_dql_string_falls_back_to_todays_shape_only_li
             }
         }
         "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_declared_custom_dql_function_resolves_to_its_own_config_category() {
+    let d = diagnostics_with_stubs_and_config(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function months(): void
+            {
+                $rows = $this->createQueryBuilder('t')
+                    ->select('t.id', 'DATE_FORMAT_YEAR_MONTH(t.name) AS ym')
+                    ->getQuery()
+                    ->getResult();
+                assertType('list<array{0: int, ym: string}>', $rows);
+            }
+        }
+        "#,
+        |r| {
+            r.doctrine_custom_functions.insert(
+                "date_format_year_month".to_string(),
+                crate::doctrine_functions::DoctrineFunctionKind::String,
+            );
+        },
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

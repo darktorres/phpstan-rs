@@ -113,6 +113,17 @@ pub struct Config {
     /// message = "use the Db\\Connection service instead"
     /// ```
     pub restricted_symbols: Option<Vec<crate::restricted_symbols::RestrictedSymbolEntry>>,
+    /// A project's own custom DQL function registrations - see
+    /// `doctrine_functions::DoctrineCustomFunctionEntry`. Config-file-only,
+    /// no CLI flag, the same reasoning as `restricted_symbols`.
+    ///
+    /// ```toml
+    /// [[doctrine_custom_functions]]
+    /// name = "DATE_FORMAT_YEAR_MONTH"
+    /// kind = "string"
+    /// ```
+    pub doctrine_custom_functions:
+        Option<Vec<crate::doctrine_functions::DoctrineCustomFunctionEntry>>,
     /// Extra directories/files whose class-like declarations are
     /// designated overrides (e.g. a vendored `Imagick.stub.php`) rather
     /// than a genuine accidental duplicate - mirrors `scan_paths`'s

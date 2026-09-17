@@ -7,11 +7,22 @@ use std::collections::HashMap;
 
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
+use crate::doctrine_functions::DoctrineFunctionKind;
 use crate::registry::ClassInfo;
 use crate::types::Type;
 
 use super::dql::{AggregateFn, FieldRef, SelectItem, SelectItemKind};
 use super::query_builder::{JoinClause, QueryBuilderChain};
+
+/// A declared custom DQL function's own result type - see
+/// `DoctrineFunctionKind`'s own doc comment for why each category maps
+/// to exactly this type, not a narrower one.
+fn doctrine_custom_function_type(kind: DoctrineFunctionKind) -> Type {
+    match kind {
+        DoctrineFunctionKind::Numeric => Type::Union(vec![Type::Int, Type::Float]),
+        DoctrineFunctionKind::String | DoctrineFunctionKind::Datetime => Type::String,
+    }
+}
 
 /// `alias -> entity FQN`, built once from `chain.from` plus every join
 /// whose own target actually resolves (to a real entity class directly,
@@ -156,9 +167,18 @@ fn select_item_type(
         // (the same leniency an ordinary `new UnknownClass()` expression
         // already gets elsewhere in this project's own type system).
         SelectItemKind::New(class) => Type::Object(checker.name_ctx.resolve(class), Vec::new()),
-        // A custom, project-registered DQL function - PHASE_BACKLOG
-        // Phase 168 168h's own config surface isn't built yet.
-        SelectItemKind::Custom(_) => Type::Mixed,
+        // A custom, project-registered DQL function (PHASE_BACKLOG
+        // Phase 168 168h) - `Mixed` when this project's own
+        // `[[doctrine_custom_functions]]` config doesn't declare it,
+        // exactly like real `phpstan-doctrine`'s identical config
+        // dependency for the same reason (see `doctrine_functions`'s own
+        // module doc comment).
+        SelectItemKind::Custom(name) => checker
+            .registry
+            .doctrine_custom_functions
+            .get(&name.to_ascii_lowercase())
+            .map(|kind| doctrine_custom_function_type(*kind))
+            .unwrap_or(Type::Mixed),
     }
 }
 
