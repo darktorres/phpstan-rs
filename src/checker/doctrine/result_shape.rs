@@ -164,18 +164,17 @@ fn field_ref_type(
                 .get(field)
                 .cloned()
         }
-        FieldRef::Identity(alias, assoc_prop) => {
-            let entity = aliases.get(alias)?;
-            let assoc = entity_info(checker, entity)?
-                .doctrine_entity
-                .as_ref()?
-                .associations
-                .get(assoc_prop)?;
-            let target_info = entity_info(checker, &assoc.target)?;
-            let target_entity = target_info.doctrine_entity.as_ref()?;
-            let id_field = target_entity.id_field.as_ref()?;
-            target_entity.fields.get(id_field).cloned()
-        }
+        // `IDENTITY()`'s own real Doctrine `SqlWalker` implementation
+        // (`IdentityFunction::getSql`) doesn't implement `Expression
+        // WithReturnType`, so the generic `FunctionNode` fallback in
+        // `walkSelectExpression` hardcodes its `ResultSetMapping` type to
+        // `Types::STRING` unconditionally - it never goes through the
+        // target entity's own id-column type conversion the way a plain
+        // `alias.field` select does (confirmed directly against
+        // `vendor/doctrine-orm`), so this project has no honest way to
+        // claim the target's own (possibly value-object-wrapped) id
+        // field type here even when it's otherwise known.
+        FieldRef::Identity(..) => None,
     }
 }
 

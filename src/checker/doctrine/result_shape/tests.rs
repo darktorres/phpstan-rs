@@ -164,7 +164,12 @@ fn an_entity_plus_scalar_field_from_a_real_join_alias() {
 }
 
 #[test]
-fn identity_resolves_the_target_entitys_own_id_field_type() {
+fn identity_falls_back_to_mixed_never_the_targets_own_id_field_type() {
+    // Real Doctrine's `IdentityFunction` bypasses the target's own
+    // id-column type conversion entirely (see `field_ref_type`'s own
+    // `FieldRef::Identity` doc comment) - claiming its declared type here
+    // would be a real, confirmed mismatch with what a live query actually
+    // hydrates.
     let registry = build(ENTITIES);
     let checker = Checker::new(&registry);
     let chain = QueryBuilderChain {
@@ -176,7 +181,7 @@ fn identity_resolves_the_target_entitys_own_id_field_type() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(vec![("tagId".to_string(), Type::Int, false)])
+        Type::ArrayShape(vec![("tagId".to_string(), Type::Mixed, false)])
     );
 }
 
