@@ -11,6 +11,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::regex_groups;
+use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
 mod array_ops;
@@ -101,6 +102,21 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    /// A `new class { ... }` expression's own inferred type - looks its
+    /// span up in `anonymous_class_names` (populated once, at parse time,
+    /// by `registry::collect_anonymous_classes` - see that module's own
+    /// doc comment) rather than recomputing its synthetic name here, so
+    /// the checker and the registry entry it resolves against always
+    /// agree by construction. Falls back to `Type::Mixed` when the span
+    /// isn't found - every existing test (which never calls
+    /// `set_anonymous_class_names`) keeps today's behavior unchanged.
+    fn anonymous_class_type(&self, span: Span) -> Type {
+        self.anonymous_class_names
+            .get(&span)
+            .map(|name| Type::Object(name.clone(), Vec::new()))
+            .unwrap_or(Type::Mixed)
+    }
+
     #[hotpath::measure]
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         // See `Checker::in_bare_statement_position`'s doc comment - taken,
@@ -1836,9 +1852,10 @@ impl<'a> Checker<'a> {
                     self.check_expr(&a.value, locals, label);
                 }
                 // The anonymous class's own methods are still worth
-                // checking, even though the class itself isn't indexed
-                // into the registry under any stable name - check_function
-                // only needs a FunctionDecl and a label to check against.
+                // checking - check_function only needs a FunctionDecl and
+                // a label to check against, independent of whether the
+                // class itself is indexed into the registry under a
+                // stable name.
                 //
                 // `ancestor_sig` looks up the same method name directly
                 // against whichever real, already-registered interface/
@@ -1890,7 +1907,7 @@ impl<'a> Checker<'a> {
                         &decl.name,
                     );
                 }
-                Type::Mixed
+                self.anonymous_class_type(e.span)
             }
             ExprKind::StaticCall(class_name, method, args) => {
                 // Mirrors ExprKind::MethodCall's own structure exactly -
@@ -3213,10 +3230,7 @@ impl<'a> Checker<'a> {
             // is exactly the right type for it, the same way it's used for
             // a function that always throws or exits.
             ExprKind::Throw(_) => Type::Never,
-            // Never given a stable nominal type, since multiple such
-            // expressions in the same file could share the placeholder
-            // name - Mixed is the honest answer, not an oversight.
-            ExprKind::NewAnonymousClass(..) => Type::Mixed,
+            ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
             ExprKind::Cast(ty, _) => match ty.as_str() {
                 "int" => Type::Int,
                 "float" => Type::Float,

@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use crate::ast::Stmt;
 use crate::types::Type;
 
+mod anonymous_class;
 mod assignability;
 mod class_info;
 mod function_sig;
@@ -14,6 +15,7 @@ mod name_context;
 mod purity;
 mod resolve;
 
+pub(crate) use anonymous_class::collect_anonymous_classes;
 pub(crate) use class_info::hook_body_references_property;
 pub(crate) use class_info::object_class_names;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};

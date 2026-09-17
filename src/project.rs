@@ -42,6 +42,10 @@ struct FileState {
     // diagnostic identifiers are suppressed on a given line, computed
     // alongside `ignore_lines` above for the identical reason.
     ignore_identifiers: HashMap<u32, Vec<String>>,
+    // See `ParsedFile::anonymous_class_names`'s own doc comment - carried
+    // here too so `Project::check_file_impl` can hand it to a fresh
+    // `Checker` on every re-check, not just the initial load.
+    anonymous_class_names: HashMap<crate::token::Span, String>,
     // This file's own raw source text, kept only when
     // `Project::retain_source` is on (see that field's own doc comment) -
     // `None` for every ordinary `check-project` batch run, which never
@@ -497,10 +501,12 @@ impl Project {
             ignore_lines,
             ignore_identifiers,
             built_decls,
+            anonymous_class_decls,
+            anonymous_class_names,
             duplicate_fn_sites,
             duplicate_class_sites,
         } = parsed;
-        for decl in built_decls {
+        for decl in built_decls.into_iter().chain(anonymous_class_decls) {
             self.registry.insert_built_decl(decl, analyzed);
         }
         if self.retain_source {
@@ -526,6 +532,7 @@ impl Project {
                 references,
                 ignore_lines,
                 ignore_identifiers,
+                anonymous_class_names,
                 source: self.retain_source.then_some(source),
             },
         );
@@ -617,6 +624,21 @@ impl Project {
         // already clears any prior unconditional entry this file itself
         // owned before this re-index runs.
         self.registry.index(&ast, true);
+        // Best-effort, not full incremental invalidation: a prior version
+        // of this file's own anonymous-class entries (registered under
+        // synthetic names keyed by `path:line[:index]`) aren't removed
+        // here first - `functions`/`classes` above (what `remove_
+        // declarations` purges) never included them to begin with, since
+        // `declared_names` only sees top-level declarations. A stale
+        // entry from a since-deleted-or-moved anonymous class can
+        // therefore linger in the registry across edits; harmless (an
+        // orphaned class nothing references), just imprecise, the same
+        // tradeoff this path already accepts elsewhere.
+        let (anonymous_class_decls, anonymous_class_names) =
+            crate::registry::collect_anonymous_classes(&ast, &path.display().to_string());
+        for decl in anonymous_class_decls {
+            self.registry.insert_built_decl(decl, true);
+        }
         for name in &classes {
             self.registry.record_phpstan_class_file(name, path);
         }
@@ -669,6 +691,7 @@ impl Project {
                 references,
                 ignore_lines,
                 ignore_identifiers,
+                anonymous_class_names,
                 source: self.retain_source.then(|| new_source.to_string()),
             },
         );
@@ -782,6 +805,7 @@ impl Project {
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
+        checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         if let Some(facts) = cross_file_property_assign_facts {
             checker.set_cross_file_property_assign_facts(facts.clone());
         }
@@ -978,6 +1002,21 @@ pub struct ParsedFile {
     // (baked into every `FnDeclSite`), which is why `parse_file` below
     // takes one now.
     duplicate_fn_sites: DuplicateFunctionSites,
+    // Every `new class { ... }` expression this file contains, already
+    // built into `BuiltDecl::Class`es under their own stable synthetic
+    // names (see `registry::collect_anonymous_classes`'s own doc comment)
+    // - merged into `built_decls` by `insert_parsed_file` the same way an
+    // ordinary class is, just computed as a separate pass since it needs
+    // `path` (to seed the name hash) the same way `duplicate_fn_sites`
+    // does.
+    anonymous_class_decls: Vec<crate::registry::BuiltDecl>,
+    // `NewAnonymousClass` expression span -> that same synthetic name,
+    // so `Checker`'s own inference site can look its type up without
+    // recomputing the name a second time (see the module doc comment on
+    // `registry::anonymous_class` for why that matters). Carried on
+    // `FileState` (below) rather than only used transiently here, since
+    // `check_file_impl` needs it again on every re-check.
+    anonymous_class_names: HashMap<crate::token::Span, String>,
     // The class-like counterpart to `duplicate_fn_sites` above, built the
     // same way and for the same reason - `parse_file`'s own `is_stub`
     // parameter is baked into every `ClassDeclSite` here (see that
@@ -1005,6 +1044,8 @@ pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile
     let ignore_lines = ignore_comments::ignored_lines(source);
     let ignore_identifiers = ignore_comments::ignored_identifiers(source);
     let built_decls = crate::registry::build_declarations(&ast);
+    let (anonymous_class_decls, anonymous_class_names) =
+        crate::registry::collect_anonymous_classes(&ast, &path.display().to_string());
     let mut duplicate_fn_sites = DuplicateFunctionSites::default();
     duplicate_fn_sites.index(&ast, &mut NameContext::default(), path, false);
     let mut duplicate_class_sites = DuplicateClassSites::default();
@@ -1015,6 +1056,8 @@ pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile
         classes,
         references,
         built_decls,
+        anonymous_class_decls,
+        anonymous_class_names,
         duplicate_fn_sites,
         duplicate_class_sites,
         ignore_lines,

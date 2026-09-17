@@ -9,6 +9,7 @@ clap = { version = "4", features = ["derive"] }
 hotpath = "0.24"
 imbl = "7.0.1"
 lsp-server = "0.10.0"
+md5 = "0.7"
 lsp-types = "0.97.0"
 pcre2-sys = { version = "0.2.10", optional = true }
 rayon = "1"

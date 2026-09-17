@@ -1,5 +1,6 @@
 mod helpers;
 
+mod anonymous_class_naming;
 mod duplicate_classes;
 mod duplicate_functions;
 mod file_discovery_and_misc;

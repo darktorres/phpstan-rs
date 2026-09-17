@@ -1,5 +1,6 @@
 mod helpers;
 
+mod anonymous_class;
 mod assignability;
 mod class_hierarchy;
 mod doctrine_entities;

@@ -665,6 +665,16 @@ pub struct Checker<'a> {
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
     pub(crate) pest_hook_properties: HashSet<String>,
+    // `NewAnonymousClass` expression span -> its own stable synthetic
+    // registry name, computed once at parse time
+    // (`registry::collect_anonymous_classes`) and set via
+    // `set_anonymous_class_names` before `check_program` runs - see that
+    // module's own doc comment for why the checker looks this up rather
+    // than recomputing the name itself. Empty (not populated) in every
+    // existing test, the same "no signal, stay quiet" leniency
+    // `pest_this_type`'s own default gets - a lookup miss just falls back
+    // to `Type::Mixed`, matching today's unconditional behavior.
+    pub(crate) anonymous_class_names: HashMap<crate::token::Span, String>,
     // Every private property write's own assigned type, discovered
     // anywhere in this file's own `check_program` run - keyed by
     // (declaring class fqn, property name), never reset per-class:
@@ -936,6 +946,7 @@ impl<'a> Checker<'a> {
             in_exempt_last_condition: false,
             pest_this_type: Type::Mixed,
             pest_hook_properties: HashSet::new(),
+            anonymous_class_names: HashMap::new(),
             property_assign_facts: HashMap::new(),
             cross_file_property_assign_facts: None,
             loop_break_states: Vec::new(),
@@ -987,6 +998,13 @@ impl<'a> Checker<'a> {
     /// finds itself, rather than one overriding the other.
     pub fn set_pest_hook_properties(&mut self, props: HashSet<String>) {
         self.pest_hook_properties = props;
+    }
+
+    /// Seeds the `NewAnonymousClass`-span -> synthetic-name map - see
+    /// `anonymous_class_names`'s own doc comment. A setter for the same
+    /// reason `set_pest_this_type` is one.
+    pub fn set_anonymous_class_names(&mut self, names: HashMap<crate::token::Span, String>) {
+        self.anonymous_class_names = names;
     }
 
     /// Seeds the whole-project merge of every file's own `property_
