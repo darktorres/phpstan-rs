@@ -35,10 +35,26 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
 }
 
 pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) -> Type {
+    let native_ty = native_hint.map(types::parse_type_string);
+    resolve_type_with_parsed_native(doc_type, native_hint, native_ty.as_ref())
+}
+
+/// `resolve_type`'s own real body, taking the native hint's already-parsed
+/// `Type` instead of re-deriving it from `native_hint` via a second
+/// `types::parse_type_string` call - a caller that also needs the
+/// native-only type on its own (`FunctionSig::from_decl`'s `ty`/`ty_native`
+/// split) parses `native_hint` once and passes the same `Type` to both,
+/// instead of each independently re-parsing the identical string.
+/// `native_hint`'s own raw text is still needed alongside `native_ty` for
+/// the two checks below that read it as text (nullability prefix, the
+/// `object` exclusion) rather than as a parsed `Type`.
+pub(crate) fn resolve_type_with_parsed_native(
+    doc_type: Option<&str>,
+    native_hint: Option<&str>,
+    native_ty: Option<&Type>,
+) -> Type {
     let Some(doc) = doc_type else {
-        return native_hint
-            .map(types::parse_type_string)
-            .unwrap_or(Type::Mixed);
+        return native_ty.cloned().unwrap_or(Type::Mixed);
     };
     let ty = types::parse_type_string(doc);
     // A docblock type is trusted as the complete picture and otherwise
@@ -87,9 +103,9 @@ pub(crate) fn resolve_type(doc_type: Option<&str>, native_hint: Option<&str>) ->
     // name-equality-only (see `types::is_subtype`'s own doc comment), so
     // it doesn't get the same automatic fallout and still needs the
     // explicit guard.
-    match native_hint {
-        Some(native) if native.trim() != "object" => {
-            reconcile_with_native(ty, types::parse_type_string(native))
+    match (native_hint, native_ty) {
+        (Some(native), Some(native_ty)) if native.trim() != "object" => {
+            reconcile_with_native(ty, native_ty.clone())
         }
         _ => ty,
     }
