@@ -3314,6 +3314,27 @@ section used to carry:
   genuinely harder problem than the single-loop accumulator shape above)
   if the two loops aren't provably iterating the same key set - reassess
   after O1, don't assume it's fully subsumed.
+- A `QueryBuilder` split into a variable before its own terminal method
+  call (`$qb = $this->createQueryBuilder(...); ...; $qb->getQuery()->
+  getResult()`) isn't resolved at all - `resolve_query_builder_chain`'s
+  own backward walk (168b) only follows a syntactic fluent-`MethodCall`
+  chain; hitting a bare `Variable` node stops it cold, with no way back
+  to the assignment that built it. Phase 168's own doc comments
+  previously claimed real corpus usage was "100% one direct chained
+  expression, never split across a variable assignment first" -
+  confirmed false: `UserRepository::findAuthorizedFavoriteImageIds`
+  does exactly this (`$qb = $this->em->createQueryBuilder()->...; ...;
+  $qb->getQuery()->getSingleColumnResult()`), degrading to bare `mixed`
+  and cascading into a real `argument.type` false positive
+  (`toIntList()` expects `list`, got the resulting untyped `array`).
+  A real fix needs the same shape `condition_aliases`/`branch_implied_
+  facts` (`checker.rs`) already use for a different kind of symbolic
+  expression alias: a new `Locals` side-channel storing `$qb`'s own
+  `Rc<Expr>` right-hand side at assignment time, purged on reassignment,
+  consulted by `resolve_query_builder_chain`'s cursor walk when it hits
+  a bare `Variable` in place of failing outright - not attempted this
+  round (one confirmed corpus site, not chased further before deciding
+  whether it's worth the new mechanism).
 
 ## Permanent design boundaries (not planned, by choice)
 

@@ -538,10 +538,16 @@ impl<'a> Checker<'a> {
             // hydration transform (`entity_array_shape`'s nested
             // identifier-only associations, the flat `getScalarResult`
             // key format), not a single fixed `HYDRATE_OBJECT` shape to
-            // reuse. Confirmed real corpus usage is chain-shaped just
-            // like `getResult()`'s own 100%-chained call sites (never
-            // split across a variable assignment first), so this loses
-            // no real coverage in exchange for the simpler design.
+            // reuse. Real corpus usage is overwhelmingly chain-shaped
+            // like `getResult()`'s own call sites, but not exclusively -
+            // `$qb = ...; ...; $qb->getQuery()->getSingleColumnResult()`
+            // is a real, confirmed Piwigo shape (`UserRepository::
+            // findAuthorizedFavoriteImageIds`) this design can't resolve
+            // (`resolve_query_builder_chain`'s own backward walk stops at
+            // a bare variable, with no way back to the assignment that
+            // built it) - degrades to `Mixed` for that one call site
+            // rather than a false claim, a real, disclosed coverage gap
+            // (see PHASE_BACKLOG.md), not a design defect.
             Type::Object(class, _)
                 if matches!(
                     method,
@@ -749,12 +755,10 @@ fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
 /// `getScalarResult` dispatch (168f) to re-resolve the fluent chain
 /// directly, rather than reading back a row type `getQuery()`'s own
 /// dispatch already computed and stored for a different (`HYDRATE_
-/// OBJECT`) hydration mode. `None` for anything else (a variable holding
-/// an already-built `Query`, an unrelated method) - real corpus usage of
-/// every terminal method is 100% one direct chained expression, never
-/// split across a variable assignment first, so this loses no real
-/// coverage in exchange for not needing a second, parallel row-type-
-/// storage mechanism per hydration mode.
+/// OBJECT`) hydration mode. `None` for anything else, including a
+/// variable holding an already-built `Query` - a real, disclosed gap
+/// (see this function's own caller's doc comment), not a claim that
+/// shape never occurs.
 fn doctrine_get_query_receiver(recv: &Expr) -> Option<&Expr> {
     match &recv.kind {
         ExprKind::MethodCall(qb, method, call_args, _)
