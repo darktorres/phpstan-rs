@@ -51,6 +51,7 @@ const STUBS: &str = r#"
         class Query extends AbstractQuery {}
         interface EntityManagerInterface {
             public function createQueryBuilder(): QueryBuilder;
+            public function createQuery(string $dql): Query;
         }
         class EntityRepository {
             public function createQueryBuilder(string $alias): QueryBuilder {}
@@ -420,6 +421,58 @@ fn get_scalar_result_flattens_the_entity_under_alias_prefixed_keys() {
             {
                 $rows = $this->createQueryBuilder('t')->getQuery()->getScalarResult();
                 assertType('list<array{t_id: int, t_name: string}>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn create_query_with_a_literal_dql_string_is_a_list_of_the_entity() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityManagerInterface;
+
+        #[ORM\Entity]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class TagService
+        {
+            public function all(EntityManagerInterface $em): void
+            {
+                $rows = $em->createQuery('SELECT t FROM App\TagEntity t')->getResult();
+                assertType('list<App\TagEntity>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn create_query_with_a_non_literal_dql_string_falls_back_to_todays_shape_only_list() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\EntityManagerInterface;
+
+        class TagService
+        {
+            public function all(EntityManagerInterface $em, string $dql): void
+            {
+                $rows = $em->createQuery($dql)->getResult();
+                assertType('list', $rows);
             }
         }
         "#,

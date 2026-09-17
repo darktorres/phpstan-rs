@@ -159,3 +159,72 @@ fn a_nested_subquery_select_item_is_undecidable_not_misparsed() {
     let args = vec!["(SELECT COUNT(x) FROM App\\X x) AS cnt".to_string()];
     assert!(parse_select_items(&args).is_none());
 }
+
+#[test]
+fn a_full_select_statement_parses_its_from_clause_and_select_items() {
+    let (chain, items) = parse_select_statement("SELECT t FROM App\\TagEntity t").unwrap();
+    assert_eq!(
+        chain.from,
+        Some(("App\\TagEntity".to_string(), "t".to_string()))
+    );
+    assert!(chain.joins.is_empty());
+    assert_eq!(
+        items,
+        vec![SelectItem {
+            kind: SelectItemKind::Field(FieldRef::Alias("t".to_string())),
+            alias: None,
+        }]
+    );
+}
+
+#[test]
+fn a_full_select_statement_parses_a_comma_joined_select_list() {
+    let (_, items) =
+        parse_select_statement("SELECT t, COUNT(it.imageId) AS counter FROM App\\TagEntity t")
+            .unwrap();
+    assert_eq!(items.len(), 2);
+}
+
+#[test]
+fn a_full_select_statement_parses_an_inner_join_with_an_association_path() {
+    let (chain, _) =
+        parse_select_statement("SELECT t FROM App\\TagEntity t INNER JOIN t.imageTags it").unwrap();
+    assert_eq!(chain.joins.len(), 1);
+    assert_eq!(chain.joins[0].target, "t.imageTags");
+    assert_eq!(chain.joins[0].alias, "it");
+}
+
+#[test]
+fn a_full_select_statement_parses_a_join_naming_an_entity_class_directly() {
+    let (chain, _) =
+        parse_select_statement("SELECT t FROM App\\TagEntity t JOIN App\\ImageTagEntity it")
+            .unwrap();
+    assert_eq!(chain.joins[0].target, "App\\ImageTagEntity");
+}
+
+#[test]
+fn a_full_select_statement_skips_a_with_condition_before_the_next_join() {
+    let (chain, _) = parse_select_statement(
+        "SELECT t FROM App\\TagEntity t INNER JOIN t.imageTags it WITH it.imageId = 1 JOIN App\\Other o",
+    )
+    .unwrap();
+    assert_eq!(chain.joins.len(), 2);
+    assert_eq!(chain.joins[0].target, "t.imageTags");
+    assert_eq!(chain.joins[1].target, "App\\Other");
+}
+
+#[test]
+fn a_full_select_statement_stops_before_where() {
+    let (chain, items) =
+        parse_select_statement("SELECT t FROM App\\TagEntity t WHERE t.id = 1").unwrap();
+    assert_eq!(
+        chain.from,
+        Some(("App\\TagEntity".to_string(), "t".to_string()))
+    );
+    assert_eq!(items.len(), 1);
+}
+
+#[test]
+fn a_dml_statement_is_not_a_select_statement() {
+    assert!(parse_select_statement("DELETE FROM App\\TagEntity t").is_none());
+}

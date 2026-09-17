@@ -376,6 +376,42 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         match recv_ty {
+            // `EntityManager::createQuery($dql)` (PHASE_BACKLOG Phase 168
+            // 168g) - the same DQL-aware row-shape inference as
+            // `QueryBuilder::getQuery()` just below, fed a literal DQL
+            // string directly instead of a `QueryBuilder`-reconstructed
+            // one. Not corpus-confirmed necessary (the real corpus's only
+            // literal-DQL-string usages are `DELETE`/`UPDATE` DML, never
+            // `SELECT`), but the same select-item grammar doing strictly
+            // less work, so building it keeps the feature honestly
+            // general rather than `QueryBuilder`-only.
+            Type::Object(class, _)
+                if method == "createQuery"
+                    && self
+                        .registry
+                        .is_subclass_of(class, "Doctrine\\ORM\\EntityManagerInterface") =>
+            {
+                let row_type = args.first().and_then(|arg| {
+                    let dql = match literal_string_value(&arg.value) {
+                        Some(s) => Some(s.into_owned()),
+                        None => match self.infer_expr(&arg.value, locals) {
+                            Type::StringLiteral(s) => Some(s),
+                            _ => None,
+                        },
+                    }?;
+                    let (chain, items) =
+                        crate::checker::doctrine::dql::parse_select_statement(&dql)?;
+                    crate::checker::doctrine::result_shape::build_result_row_type(
+                        self, &chain, &items,
+                    )
+                });
+                match row_type {
+                    Some(row_type) => {
+                        Type::Object("Doctrine\\ORM\\Query".to_string(), vec![row_type])
+                    }
+                    None => Type::Object("Doctrine\\ORM\\Query".to_string(), Vec::new()),
+                }
+            }
             // `QueryBuilder::getQuery()` (PHASE_BACKLOG Phase 168 168e) -
             // resolves the fluent chain (168b), parses its own select
             // items (168c) and builds the row shape (168d), carrying it

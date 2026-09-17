@@ -2113,6 +2113,38 @@ one direct chained expression (never split across a variable assignment
 first), so this loses no real coverage in exchange for not building a
 second, parallel row-type-storage mechanism per hydration mode.
 
+**Direct `EntityManager::createQuery($dql)`** (PHASE_BACKLOG Phase 168's
+168g). `checker::doctrine::dql::parse_select_statement` - a full
+`SELECT <items> FROM Entity alias [[INNER|LEFT|OUTER] JOIN <target>
+alias [WITH <condition>]]*` statement parser, sharing 168c's own
+select-item grammar entirely rather than a second, parallel one (each
+select item between `SELECT` and the top-level `FROM` keyword - found
+via a paren-depth-aware token scan, not a naive text search - is parsed
+by the exact same per-item parser 168b's own `QueryBuilder`-chain-
+derived arguments use). A `JOIN` target reduces to the identical text
+format `QueryBuilder::join()`'s own argument already does (`alias.assoc`
+or a qualified entity name), so 168d's existing alias-resolution logic
+applies completely unchanged. A `WITH <condition>` clause is skipped
+(never affects row shape, matching every other WHERE-shaped exclusion
+in this phase) by scanning to the next real join/terminating keyword -
+safe because a condition's own comparison/literal tokens all tokenize
+as an opaque `Other` token, never as an `Ident` this scan could mistake
+for one. No WHERE/GROUP BY/HAVING/ORDER BY parsing, for the same reason.
+Wired in `checker::expr::member_resolution` to produce the identical
+`Type::Object("Doctrine\\ORM\\Query", vec![row_type])` shape
+`QueryBuilder::getQuery()` does, so `getResult()`/`getOneOrNullResult()`/
+`getSingleResult()`/`execute()`/`toIterable()` (168e) work through it
+unchanged. Not corpus-confirmed necessary (the real corpus's only
+literal-DQL-string usages are `DELETE`/`UPDATE` DML, never `SELECT`),
+but the same select-item grammar doing strictly less work, so building
+it keeps the feature honestly general rather than `QueryBuilder`-only.
+`getArrayResult()`/`getSingleColumnResult()`/`getSingleScalarResult()`/
+`getScalarResult()` (168f) don't benefit the same way - their own
+dispatch specifically re-resolves a `->getQuery()`-shaped receiver
+expression, which a `createQuery()`-produced `Query` value doesn't have
+- a small, disclosed asymmetry matching this item's own zero real
+corpus need.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

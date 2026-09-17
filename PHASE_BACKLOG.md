@@ -2113,9 +2113,17 @@ from-scratch Doctrine mapping-metadata resolver.
   (never split across a variable assignment first), so nothing is lost
   by not building a second, parallel row-type-storage mechanism per
   hydration mode.
-- **168g (small).** Direct `EntityManager::createQuery($dql)->getResult()`
-  - the same DQL parser fed a literal string instead of a
-  QueryBuilder-reconstructed one.
+- **168g (small, DONE).** Direct `EntityManager::createQuery($dql)`
+  (`checker/doctrine/dql.rs`'s `parse_select_statement`) - a full
+  `SELECT ... FROM Entity alias [JOIN ...]*` statement parser, sharing
+  168c's own select-item grammar, fed a literal DQL string instead of a
+  `QueryBuilder`-reconstructed one, producing the identical
+  `Type::Object("Doctrine\\ORM\\Query", vec![row_type])` shape
+  `getQuery()` does, so `getResult()`/`getOneOrNullResult()`/etc. (168e)
+  work unchanged. `getArrayResult()`/etc. (168f) don't - their own
+  dispatch specifically re-resolves a `->getQuery()`-shaped receiver,
+  which `createQuery()` doesn't produce - a small, disclosed asymmetry
+  matching this item's own zero real corpus need.
 - **168h (small).** Custom DQL function return types
   (`DATE_FORMAT_YEAR_MONTH`/`REGEXP`/etc., project-registered via
   `Configuration::addCustomStringFunction()`) - real `phpstan-doctrine`

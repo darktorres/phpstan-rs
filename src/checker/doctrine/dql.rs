@@ -428,5 +428,169 @@ pub(crate) fn parse_select_items(select_args: &[String]) -> Option<Vec<SelectIte
     Some(items)
 }
 
+/// Splits `tokens` on every top-level `Comma` (never one nested inside
+/// parentheses) - `split_top_level_commas`'s own token-level twin, used
+/// by `parse_select_statement` below so a full DQL string's own select
+/// list doesn't need a separate round trip back through raw text.
+fn split_top_level_commas_tokens(tokens: &[Token]) -> Vec<&[Token]> {
+    let mut parts = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0usize;
+    for (i, t) in tokens.iter().enumerate() {
+        match t {
+            Token::LParen => depth += 1,
+            Token::RParen => depth -= 1,
+            Token::Comma if depth == 0 => {
+                parts.push(&tokens[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    parts.push(&tokens[start..]);
+    parts
+}
+
+fn ident_ci(tokens: &[Token], pos: usize, word: &str) -> bool {
+    matches!(tokens.get(pos), Some(Token::Ident(s)) if s.eq_ignore_ascii_case(word))
+}
+
+/// The index of the first top-level (paren-depth 0) `Ident` token
+/// matching `word`, searching from `start` - used to find the boundary
+/// between the select-item list and `FROM`.
+fn find_top_level_keyword(tokens: &[Token], start: usize, word: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    for (i, t) in tokens.iter().enumerate().skip(start) {
+        match t {
+            Token::LParen => depth += 1,
+            Token::RParen => depth -= 1,
+            Token::Ident(s) if depth == 0 && s.eq_ignore_ascii_case(word) => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// A `FROM`/`JOIN` target's own qualified name (`App\Entity`) or dotted
+/// alias path (`alias.assoc`), consumed starting at `pos` - returns the
+/// joined text (matching 168b's own `JoinClause::target` format exactly,
+/// so the same `result_shape` resolution logic applies unchanged) plus
+/// the position just past it.
+fn parse_path_text(tokens: &[Token], pos: usize) -> Option<(String, usize)> {
+    let mut pos = pos;
+    let first = match tokens.get(pos)? {
+        Token::Ident(s) | Token::QualifiedName(s) => s.clone(),
+        _ => return None,
+    };
+    pos += 1;
+    if matches!(tokens.get(pos), Some(Token::Dot)) {
+        pos += 1;
+        let Some(Token::Ident(second)) = tokens.get(pos) else {
+            return None;
+        };
+        let joined = format!("{first}.{second}");
+        return Some((joined, pos + 1));
+    }
+    Some((first, pos))
+}
+
+const JOIN_BOUNDARY_KEYWORDS: [&str; 7] =
+    ["INNER", "LEFT", "OUTER", "JOIN", "WHERE", "GROUP", "ORDER"];
+
+fn at_join_boundary(tokens: &[Token], pos: usize) -> bool {
+    JOIN_BOUNDARY_KEYWORDS
+        .iter()
+        .any(|kw| ident_ci(tokens, pos, kw))
+        || ident_ci(tokens, pos, "HAVING")
+}
+
+/// A full `SELECT ... FROM Entity alias [JOIN ...]*` DQL statement -
+/// PHASE_BACKLOG Phase 168 168g's own literal-`createQuery($dql)` entry
+/// point, feeding a real DQL string directly into the same select-item
+/// grammar 168b's own `QueryBuilder`-chain-derived arguments use, rather
+/// than needing a second, parallel grammar. No WHERE/GROUP BY/HAVING/
+/// ORDER BY parsing - stops at the first one, matching 168b/168c's own
+/// identical exclusion (none of those clauses can ever add or remove a
+/// result column). Returns a `QueryBuilderChain` with an empty
+/// `select_args` (the select items are already parsed, returned
+/// alongside it) so the exact same `result_shape` functions 168b's own
+/// chain feeds apply here completely unchanged.
+pub(crate) fn parse_select_statement(
+    dql: &str,
+) -> Option<(super::query_builder::QueryBuilderChain, Vec<SelectItem>)> {
+    let tokens = tokenize(dql)?;
+    if !ident_ci(&tokens, 0, "SELECT") {
+        return None;
+    }
+    let from_idx = find_top_level_keyword(&tokens, 1, "FROM")?;
+    let mut items = Vec::new();
+    for fragment in split_top_level_commas_tokens(&tokens[1..from_idx]) {
+        if fragment.is_empty() {
+            continue;
+        }
+        let mut parser = Parser {
+            tokens: fragment.to_vec(),
+            pos: 0,
+        };
+        items.push(parser.parse_select_item()?);
+    }
+
+    let (from_entity, mut pos) = parse_path_text(&tokens, from_idx + 1)?;
+    let Some(Token::Ident(from_alias)) = tokens.get(pos) else {
+        return None;
+    };
+    let from_alias = from_alias.clone();
+    pos += 1;
+
+    let mut joins = Vec::new();
+    while ident_ci(&tokens, pos, "INNER")
+        || ident_ci(&tokens, pos, "LEFT")
+        || ident_ci(&tokens, pos, "OUTER")
+        || ident_ci(&tokens, pos, "JOIN")
+    {
+        while ident_ci(&tokens, pos, "INNER")
+            || ident_ci(&tokens, pos, "LEFT")
+            || ident_ci(&tokens, pos, "OUTER")
+        {
+            pos += 1;
+        }
+        if !ident_ci(&tokens, pos, "JOIN") {
+            return None;
+        }
+        pos += 1;
+        let (target, next_pos) = parse_path_text(&tokens, pos)?;
+        pos = next_pos;
+        let Some(Token::Ident(join_alias)) = tokens.get(pos) else {
+            return None;
+        };
+        joins.push(super::query_builder::JoinClause {
+            target,
+            alias: join_alias.clone(),
+        });
+        pos += 1;
+        // `WITH <condition>` - the condition never affects row shape
+        // (same WHERE-clause exclusion as everywhere else in this
+        // phase) - skipped by running to the next real join/terminating
+        // keyword. A condition's own comparison/literal tokens all
+        // tokenize as `Token::Other`, never as an `Ident` this scan
+        // would mistake for one of those keywords.
+        if ident_ci(&tokens, pos, "WITH") {
+            pos += 1;
+            while pos < tokens.len() && !at_join_boundary(&tokens, pos) {
+                pos += 1;
+            }
+        }
+    }
+
+    Some((
+        super::query_builder::QueryBuilderChain {
+            from: Some((from_entity, from_alias)),
+            joins,
+            select_args: Vec::new(),
+        },
+        items,
+    ))
+}
+
 #[cfg(test)]
 mod tests;
