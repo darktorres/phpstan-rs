@@ -779,12 +779,18 @@ fn array_flip_preserves_non_emptiness_but_not_list_ness() {
 // The internal-array-pointer family - reset/current/end/key/
 // array_key_first/array_key_last/next/prev.
 
-// Each pointer function gets its own dedicated `$xs`/function - passing
-// it to one of these by-ref functions widens this project's own tracked
-// type for it afterward (a deliberate, pre-existing conservative
-// simplification, not something these tests are about), so reusing one
-// variable across several calls in the same body would make a later
-// assertion see the *previous* call's own widening instead of its own.
+// Each pointer function still gets its own dedicated `$xs`/function
+// below, purely for test isolation - not because of the stale widening
+// concern this comment used to describe. `reset`/`end`/`next`/`prev`
+// are declared by-ref in their own real stub (`object|array &$array` -
+// none of them actually mutate the array's *value*, only its internal
+// pointer), and this project's own generic by-ref-argument-widening
+// used to apply anyway, discarding the argument's own precise type down
+// to the stub's coarse declared one - confirmed a real, corpus-relevant
+// bug (`Checker::calls`'s own by-ref-widening loop now exempts them the
+// same way the `sort()`/`asort()` families already are, see its own doc
+// comment) - see `reset_current_end_preserve_the_arguments_own_precise_type_afterward`
+// below for the regression test.
 
 #[test]
 fn reset_reports_the_element_type_when_provably_non_empty() {
@@ -854,6 +860,43 @@ fn reset_unions_with_false_when_emptiness_is_unknown() {
             /** @param list<string> $xs */
             function f(array $xs): void {
                 assertType('string|false', reset($xs));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The real corpus-confirmed regression: `Checker::calls`'s own generic
+// by-ref-argument widening (`param.by_ref` gated) used to apply to
+// `reset`/`end`/`next`/`prev`'s own declared `object|array &$array`
+// stub param unconditionally, discarding the argument's real, precise
+// type - confirmed via `dumpType()` against real PHPStan that it stays
+// completely unchanged afterward, including through a shape real
+// PHPStan verifiably keeps well past this project's own union-member
+// cap (a many-independently-conditional-field accumulator, each field
+// still a real `list<int>`, never collapsed into one shape the way real
+// PHPStan's own `TypeCombinator` would).
+#[test]
+fn reset_current_end_preserve_the_arguments_own_precise_type_afterward() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param list<int> $tags
+             * @param list<int> $custom
+             */
+            function f(bool $hasTags, bool $hasCustom, array $tags, array $custom): void {
+                $imageIdsForFilter = [];
+                if ($hasTags) {
+                    $imageIdsForFilter['tags'] = $tags;
+                }
+                if ($hasCustom) {
+                    $imageIdsForFilter['custom'] = $custom;
+                }
+                if ($imageIdsForFilter !== []) {
+                    $first = reset($imageIdsForFilter);
+                    assertType('list<int>', $first);
+                }
             }
         "#,
     );
@@ -1262,6 +1305,26 @@ fn array_filter_array_combine_and_array_unique_no_longer_claim_the_result_is_sti
         "#,
     );
     assert_eq!(d.len(), 3, "got: {d:?}");
+}
+
+// `array_unique`'s own list-ness-loss above doesn't extend to non-
+// emptiness: real PHP only ever removes *duplicates* (always keeping
+// at least the first occurrence of each distinct value), so a non-empty
+// input can never come out empty - confirmed via `dumpType()` against
+// real PHPStan, unlike `array_diff`/`array_intersect`, which really can
+// empty a non-empty input and correctly don't get this same treatment.
+#[test]
+fn array_unique_preserves_non_emptiness_but_not_list_ness() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<int> $x */
+            function f(array $x): void {
+                assertType('non-empty-array<int, int>', array_unique($x));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
 // `strip_accessory_markers` must strip through a `Union` branch too

@@ -127,6 +127,25 @@ impl<'a> Checker<'a> {
                     }
                     "asort" | "arsort" | "ksort" | "krsort" | "uasort" | "uksort" | "natsort"
                     | "natcasesort" => continue,
+                    // `reset`/`end`/`next`/`prev` (`current`/`key` are
+                    // native by-value, never reach this by-ref-only loop
+                    // at all) only ever move the array's own internal
+                    // pointer - none of them ever change the array's
+                    // *value* at all (confirmed via `dumpType()` against
+                    // real PHPStan: a precise argument type, including
+                    // one this project's own dynamic-return-type logic
+                    // for these exact functions relies on -
+                    // `infer_builtin_call_return_type`'s own `"reset" |
+                    // "current" | "end"` arm - survives `reset()`
+                    // completely unchanged). Without this, the by-ref
+                    // stub's own declared `object|array &$array` param
+                    // type (real shape: `phpstorm-stubs`' own `function
+                    // reset(object|array &$array): mixed`) would widen a
+                    // precise argument down to the generic declared-type
+                    // fallback below, discarding real information the
+                    // *same* call's own return-type computation still
+                    // needs.
+                    "reset" | "end" | "next" | "prev" => continue,
                     // `array_walk` never adds, removes, or reorders keys,
                     // and never changes a value's type unless the
                     // callback's `$value` parameter is itself declared

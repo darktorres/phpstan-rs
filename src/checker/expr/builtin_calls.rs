@@ -467,10 +467,27 @@ impl<'a> Checker<'a> {
             }
             "array_unique" if !args.is_empty() => {
                 // Removing a duplicate can leave a gap in the surviving
-                // sequential keys, so list-ness doesn't survive.
+                // sequential keys, so list-ness doesn't survive. Non-
+                // emptiness is different: `array_unique` only ever
+                // removes *duplicates* (real PHP always keeps at least
+                // the first occurrence of each distinct value), so a
+                // non-empty input can never come out empty - confirmed
+                // via `dumpType()` against real PHPStan
+                // (`non-empty-list<int>` stays `non-empty-array<...>`,
+                // unlike `array_diff`/`array_intersect`, which really
+                // can empty a non-empty input and correctly don't get
+                // this same treatment).
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    return strip_accessory_markers(arr_ty);
+                    let stripped = strip_accessory_markers(arr_ty.clone());
+                    return if Self::is_known_non_empty_array(&arr_ty) {
+                        Type::Intersection(vec![
+                            stripped,
+                            Type::Accessory(AccessoryKind::NonEmptyArray),
+                        ])
+                    } else {
+                        stripped
+                    };
                 }
             }
             // Real PHP always takes every kept key/value pair's type

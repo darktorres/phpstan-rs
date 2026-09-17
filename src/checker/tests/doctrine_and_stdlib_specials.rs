@@ -366,9 +366,27 @@ fn generated_stub_return_type_catches_a_real_bug() {
 // with `@return mixed|false`) must not resolve to the literal
 // `mixed|false` - a stray `False` member fails `strtoupper()`'s plain
 // `string` argument check on its own, even though the whole union is
-// vacuously satisfiable via `Mixed`.
+// vacuously satisfiable via `Mixed`. Needs a provably non-empty array to
+// actually verify this cleanly (a genuinely possibly-empty one, real
+// shape below, legitimately keeps its own real `false` alternative -
+// confirmed via `dumpType()` against real PHPStan, which flags the
+// identical `string|false` mismatch against `strtoupper()`'s plain
+// `string` param).
 #[test]
-fn strtoupper_accepts_ends_own_still_mixed_return_type() {
+fn strtoupper_accepts_ends_own_precise_return_type_for_a_provably_non_empty_array() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-array<string> $items */
+            function f(array $items): string {
+                return strtoupper(end($items));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn strtoupper_rejects_ends_own_real_false_alternative_for_a_not_provably_non_empty_array() {
     let d = diagnostics_for(
         r#"<?php
             /** @param string[] $items */
@@ -377,7 +395,11 @@ fn strtoupper_accepts_ends_own_still_mixed_return_type() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(
+        d[0].message.contains("expects string, string|false given"),
+        "got: {d:?}"
+    );
 }
 
 // `get_called_class()`/`get_parent_class()` model late-static-binding
