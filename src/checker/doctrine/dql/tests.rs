@@ -155,8 +155,32 @@ fn an_unresolvable_select_item_makes_the_whole_query_undecidable() {
 }
 
 #[test]
-fn a_nested_subquery_select_item_is_undecidable_not_misparsed() {
+fn a_nested_scalar_subquery_select_item_parses_its_own_inner_query() {
     let args = vec!["(SELECT COUNT(x) FROM App\\X x) AS cnt".to_string()];
+    let got = parse_select_items(&args).unwrap();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].alias.as_deref(), Some("cnt"));
+    let SelectItemKind::Subquery(chain, items) = &got[0].kind else {
+        panic!("expected a Subquery item, got {:?}", got[0].kind);
+    };
+    assert_eq!(chain.from, Some(("App\\X".to_string(), "x".to_string())));
+    assert_eq!(items.len(), 1);
+    assert_eq!(
+        items[0].kind,
+        SelectItemKind::Aggregate {
+            func: AggregateFn::Count,
+            operand: Some(FieldRef::Alias("x".to_string())),
+        }
+    );
+}
+
+#[test]
+fn a_correlated_subquery_is_undecidable_not_misparsed() {
+    // No `FROM` at all inside the parens - an outer-alias reference like
+    // `(SELECT COUNT(y.id) FROM y.items y2)` isn't valid DQL either way,
+    // but a subquery missing its own `FROM` entirely is the simplest
+    // real case this grammar correctly declines rather than misparses.
+    let args = vec!["(SELECT COUNT(x)) AS cnt".to_string()];
     assert!(parse_select_items(&args).is_none());
 }
 
@@ -227,4 +251,29 @@ fn a_full_select_statement_stops_before_where() {
 #[test]
 fn a_dml_statement_is_not_a_select_statement() {
     assert!(parse_select_statement("DELETE FROM App\\TagEntity t").is_none());
+}
+
+#[test]
+fn a_full_select_statement_with_a_nested_scalar_subquery_select_item() {
+    let (chain, items) = parse_select_statement(
+        "SELECT t, (SELECT COUNT(it) FROM App\\ImageTagEntity it) AS cnt FROM App\\TagEntity t",
+    )
+    .unwrap();
+    assert_eq!(
+        chain.from,
+        Some(("App\\TagEntity".to_string(), "t".to_string()))
+    );
+    assert_eq!(items.len(), 2);
+    assert_eq!(
+        items[0].kind,
+        SelectItemKind::Field(FieldRef::Alias("t".to_string()))
+    );
+    let SelectItemKind::Subquery(inner_chain, inner_items) = &items[1].kind else {
+        panic!("expected a Subquery item, got {:?}", items[1].kind);
+    };
+    assert_eq!(
+        inner_chain.from,
+        Some(("App\\ImageTagEntity".to_string(), "it".to_string()))
+    );
+    assert_eq!(inner_items.len(), 1);
 }

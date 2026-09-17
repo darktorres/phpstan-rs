@@ -2207,6 +2207,32 @@ feature gets built" standard, since real Doctrine's own inheritance
 mapping is exactly that: a real, common, and precisely well-defined
 feature, not a guess.
 
+**Scalar subqueries nested inside a SELECT item** (PHASE_BACKLOG Phase
+168's 168k - the last of the two previously-disclosed-but-not-yet-built
+follow-ons; with this, every item Phase 168 ever disclosed is built).
+`SelectItemKind::Subquery` (`checker/doctrine/dql.rs`) recognizes
+`(SELECT ... FROM ...)` at a select item's own position and recurses
+directly into 168b/168c's own grammar via
+`parse_select_statement_tokens` - the core of 168g's own
+`parse_select_statement` factored out to operate on an already-
+tokenized buffer at an arbitrary starting position, shared rather than
+duplicated, so the top-level `createQuery($dql)` entry point and a
+nested subquery can never drift into two subtly different grammars.
+`checker::doctrine::result_shape::select_item_type`'s new `Subquery` arm
+resolves the inner query against its own, entirely independent alias
+map (never the outer query's), then reuses `single_scalar_column_type`
+(168f) completely unchanged for the "resolves to exactly one scalar
+column" requirement a subquery-used-as-a-value needs - the identical
+requirement `getSingleColumnResult()`/`getSingleScalarResult()` already
+have. Only an *uncorrelated* inner query (a complete, self-contained
+`FROM` of its own) is recognized at all; a subquery referencing an
+outer alias isn't modeled and falls through to the ordinary
+"undecidable" outcome, the same as any other construct this grammar
+doesn't recognize. Zero real corpus usage (confirmed) - unit-tested
+only, the same "corpus incidence affects verification confidence, never
+whether a real, well-defined feature gets built" standard 168j was
+built under.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

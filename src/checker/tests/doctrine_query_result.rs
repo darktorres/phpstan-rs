@@ -583,3 +583,41 @@ fn a_polymorphic_from_infers_a_union_across_every_mapped_subclass() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_scalar_subquery_select_item_resolves_its_own_single_column_type() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityManagerInterface;
+
+        #[ORM\Entity]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+        #[ORM\Entity]
+        class ImageTagEntity
+        {
+            #[ORM\Id]
+            public int $imageId;
+        }
+
+        class TagService
+        {
+            public function all(EntityManagerInterface $em): void
+            {
+                $rows = $em->createQuery(
+                    'SELECT t, (SELECT it.imageId FROM App\ImageTagEntity it) AS firstImageId FROM App\TagEntity t'
+                )->getResult();
+                assertType('list<array{0: App\TagEntity, firstImageId: int}>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -212,6 +212,18 @@ fn select_item_type(
             .get(&name.to_ascii_lowercase())
             .map(|kind| doctrine_custom_function_type(*kind))
             .unwrap_or(Type::Mixed),
+        // A scalar subquery (PHASE_BACKLOG Phase 168 168k) - its own
+        // `FROM`/`JOIN` scope is entirely independent of the outer
+        // query's own `aliases` map (only an uncorrelated subquery is
+        // recognized at all - see `dql`'s own module doc comment), so
+        // its inner items resolve against their own, freshly-built
+        // alias map, then reuse the identical single-scalar-column
+        // requirement `getSingleColumnResult()`/`getSingleScalarResult()`
+        // (168f) already have - a scalar subquery is only valid DQL
+        // when it resolves to exactly one scalar column.
+        SelectItemKind::Subquery(inner_chain, inner_items) => {
+            single_scalar_column_type(checker, inner_chain, inner_items).unwrap_or(Type::Mixed)
+        }
     }
 }
 

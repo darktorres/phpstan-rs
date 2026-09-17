@@ -450,6 +450,28 @@ fn an_ordinary_from_never_produces_a_union() {
 }
 
 #[test]
+fn a_scalar_subquery_select_item_resolves_its_own_single_column_type() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let (chain, items) = crate::checker::doctrine::dql::parse_select_statement(
+        "SELECT t, (SELECT it.imageId FROM ImageTagEntity it) AS firstImageId FROM TagEntity t",
+    )
+    .unwrap();
+    let ty = build_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ArrayShape(vec![
+            (
+                "0".to_string(),
+                Type::Object("TagEntity".to_string(), Vec::new()),
+                false
+            ),
+            ("firstImageId".to_string(), Type::Int, false),
+        ])
+    );
+}
+
+#[test]
 fn array_result_converts_a_polymorphic_row_member_by_member() {
     let registry = build(INHERITANCE_ENTITIES);
     let checker = Checker::new(&registry);

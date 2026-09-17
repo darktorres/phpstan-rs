@@ -2152,9 +2152,21 @@ from-scratch Doctrine mapping-metadata resolver.
   genuinely one concrete subclass instance). `getArrayResult()`'s own
   entity-to-array conversion (168f) recurses into a `Union` the same
   way. Zero corpus usage to verify against - unit-tested only.
-- **168k (medium).** Scalar subqueries nested inside a SELECT item
-  (`SELECT (SELECT COUNT(...) FROM ...) AS cnt`) - needs 168b-168d
-  applied recursively to the inner query. Zero corpus usage.
+- **168k (medium, DONE).** Scalar subqueries nested inside a SELECT item
+  (`SELECT (SELECT COUNT(...) FROM ...) AS cnt`) -
+  `SelectItemKind::Subquery` recurses into 168c/168b's own grammar
+  directly (`parse_select_statement_tokens`, factored out of 168g's own
+  `parse_select_statement` so the two never drift into two subtly
+  different grammars), then reuses `single_scalar_column_type` (168f)
+  unchanged for the "resolves to exactly one scalar column" requirement
+  a subquery-as-value needs. Only an *uncorrelated* inner query (a
+  complete `FROM` of its own) is recognized - a subquery referencing an
+  outer alias falls through to the ordinary "undecidable" outcome, the
+  same as any other unrecognized construct. Zero corpus usage - unit-
+  tested only. With this, every item PHASE_BACKLOG originally disclosed
+  for Phase 168 is now built; only 168i (DBAL raw `fetchAssociative()`,
+  a genuine live-schema-dependent boundary real PHPStan shares) remains
+  permanently out of scope.
 
 ## Phase 173 — Same-function parallel dynamically-keyed array correlation
 

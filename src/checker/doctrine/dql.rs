@@ -13,12 +13,13 @@
 //! is Doctrine's own, unrelated grammar.
 //!
 //! A scalar subquery nested inside a select item (`SELECT (SELECT
-//! COUNT(...) FROM ...) AS cnt`) is a disclosed follow-on (PHASE_BACKLOG
-//! Phase 168 168k) - this grammar has no select-item production starting
-//! with `(`, so a leading parenthesis (a subquery's only possible shape
-//! here) always falls through to `parse_field_ref`'s own "expected an
-//! identifier" failure and reports the whole item undecidable, never a
-//! silent misparse into some other construct.
+//! COUNT(...) FROM ...) AS cnt`, PHASE_BACKLOG Phase 168 168k) recurses
+//! into this exact same grammar via `parse_select_statement_tokens` -
+//! not a second, parallel one - only an uncorrelated inner query (a
+//! complete, self-contained `FROM` of its own) is modeled; a subquery
+//! referencing an outer alias isn't recognized and falls through to the
+//! ordinary "undecidable" outcome the same as any other unrecognized
+//! construct.
 
 /// One select item's own operand - a bare alias (the whole entity), a
 /// dotted scalar field, or an `IDENTITY(...)` association reference.
@@ -76,6 +77,19 @@ pub(crate) enum SelectItemKind {
     /// built-in aggregates - a custom, project-registered DQL function
     /// (PHASE_BACKLOG Phase 168 168h).
     Custom(String),
+    /// A scalar subquery nested inside a select item (`SELECT (SELECT
+    /// COUNT(...) FROM ...) AS cnt`, PHASE_BACKLOG Phase 168 168k) - the
+    /// inner query's own resolved chain/items, exactly the same shape
+    /// `parse_select_statement` itself returns. Only valid DQL when the
+    /// inner query resolves to exactly one scalar column -
+    /// `result_shape`'s own `single_scalar_column_type` is reused
+    /// unchanged for this, the identical requirement
+    /// `getSingleColumnResult()`/`getSingleScalarResult()` (168f)
+    /// already have.
+    Subquery(
+        Box<super::query_builder::QueryBuilderChain>,
+        Vec<SelectItem>,
+    ),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -295,6 +309,19 @@ impl Parser {
     }
 
     fn parse_select_item_kind(&mut self) -> Option<SelectItemKind> {
+        // A parenthesized scalar subquery (168k) - checked before the
+        // generic `DISTINCT`/`NEW`/`CASE`/function-call dispatch below,
+        // none of which ever start with `(`.
+        if matches!(self.peek(), Some(Token::LParen))
+            && ident_ci(&self.tokens, self.pos + 1, "SELECT")
+        {
+            let (chain, items, end) = parse_select_statement_tokens(&self.tokens, self.pos + 1)?;
+            if self.tokens.get(end) != Some(&Token::RParen) {
+                return None;
+            }
+            self.pos = end + 1;
+            return Some(SelectItemKind::Subquery(Box::new(chain), items));
+        }
         if self.eat_ident_ci("DISTINCT") {
             // Shape-irrelevant, but must still be consumed - the real
             // operand follows it.
@@ -519,12 +546,33 @@ pub(crate) fn parse_select_statement(
     dql: &str,
 ) -> Option<(super::query_builder::QueryBuilderChain, Vec<SelectItem>)> {
     let tokens = tokenize(dql)?;
-    if !ident_ci(&tokens, 0, "SELECT") {
+    let (chain, items, _end) = parse_select_statement_tokens(&tokens, 0)?;
+    Some((chain, items))
+}
+
+/// `parse_select_statement`'s own real implementation, operating
+/// directly on an already-tokenized buffer starting at `start` - shared
+/// with a select item's own nested-subquery production (PHASE_BACKLOG
+/// Phase 168 168k, `SelectItemKind::Subquery`) so the two never risk
+/// drifting into two subtly different grammars. Returns the position
+/// just past the parsed statement (its caller decides what, if
+/// anything, legally follows - the top-level `dql: &str` entry point
+/// requires nothing else; a subquery's own caller requires exactly a
+/// closing `)`).
+fn parse_select_statement_tokens(
+    tokens: &[Token],
+    start: usize,
+) -> Option<(
+    super::query_builder::QueryBuilderChain,
+    Vec<SelectItem>,
+    usize,
+)> {
+    if !ident_ci(tokens, start, "SELECT") {
         return None;
     }
-    let from_idx = find_top_level_keyword(&tokens, 1, "FROM")?;
+    let from_idx = find_top_level_keyword(tokens, start + 1, "FROM")?;
     let mut items = Vec::new();
-    for fragment in split_top_level_commas_tokens(&tokens[1..from_idx]) {
+    for fragment in split_top_level_commas_tokens(&tokens[start + 1..from_idx]) {
         if fragment.is_empty() {
             continue;
         }
@@ -535,7 +583,7 @@ pub(crate) fn parse_select_statement(
         items.push(parser.parse_select_item()?);
     }
 
-    let (from_entity, mut pos) = parse_path_text(&tokens, from_idx + 1)?;
+    let (from_entity, mut pos) = parse_path_text(tokens, from_idx + 1)?;
     let Some(Token::Ident(from_alias)) = tokens.get(pos) else {
         return None;
     };
@@ -543,22 +591,22 @@ pub(crate) fn parse_select_statement(
     pos += 1;
 
     let mut joins = Vec::new();
-    while ident_ci(&tokens, pos, "INNER")
-        || ident_ci(&tokens, pos, "LEFT")
-        || ident_ci(&tokens, pos, "OUTER")
-        || ident_ci(&tokens, pos, "JOIN")
+    while ident_ci(tokens, pos, "INNER")
+        || ident_ci(tokens, pos, "LEFT")
+        || ident_ci(tokens, pos, "OUTER")
+        || ident_ci(tokens, pos, "JOIN")
     {
-        while ident_ci(&tokens, pos, "INNER")
-            || ident_ci(&tokens, pos, "LEFT")
-            || ident_ci(&tokens, pos, "OUTER")
+        while ident_ci(tokens, pos, "INNER")
+            || ident_ci(tokens, pos, "LEFT")
+            || ident_ci(tokens, pos, "OUTER")
         {
             pos += 1;
         }
-        if !ident_ci(&tokens, pos, "JOIN") {
+        if !ident_ci(tokens, pos, "JOIN") {
             return None;
         }
         pos += 1;
-        let (target, next_pos) = parse_path_text(&tokens, pos)?;
+        let (target, next_pos) = parse_path_text(tokens, pos)?;
         pos = next_pos;
         let Some(Token::Ident(join_alias)) = tokens.get(pos) else {
             return None;
@@ -571,12 +619,17 @@ pub(crate) fn parse_select_statement(
         // `WITH <condition>` - the condition never affects row shape
         // (same WHERE-clause exclusion as everywhere else in this
         // phase) - skipped by running to the next real join/terminating
-        // keyword. A condition's own comparison/literal tokens all
-        // tokenize as `Token::Other`, never as an `Ident` this scan
-        // would mistake for one of those keywords.
-        if ident_ci(&tokens, pos, "WITH") {
+        // keyword, or a closing `)` (a nested subquery's own own
+        // terminator - `at_join_boundary` alone wouldn't stop there).
+        // A condition's own comparison/literal tokens all tokenize as
+        // `Token::Other`, never as an `Ident` this scan would mistake
+        // for one of those keywords.
+        if ident_ci(tokens, pos, "WITH") {
             pos += 1;
-            while pos < tokens.len() && !at_join_boundary(&tokens, pos) {
+            while pos < tokens.len()
+                && !at_join_boundary(tokens, pos)
+                && tokens[pos] != Token::RParen
+            {
                 pos += 1;
             }
         }
@@ -589,6 +642,7 @@ pub(crate) fn parse_select_statement(
             select_args: Vec::new(),
         },
         items,
+        pos,
     ))
 }
 
