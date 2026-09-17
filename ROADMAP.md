@@ -2180,6 +2180,33 @@ inheritance) and 168k (a scalar subquery nested inside a select item)
 remain real, scoped, disclosed follow-on work with no known real-corpus
 instance to build or verify against yet.
 
+**Entity inheritance mapping (single-table/joined-table)**
+(PHASE_BACKLOG Phase 168's 168j - the first of the two previously-
+disclosed-but-not-yet-built follow-ons; 168k remains open).
+`ClassInfo::doctrine_entity`'s own `discriminator_map` field
+(`registry/class_info/doctrine_entity.rs`) is now populated from a root
+entity's own real `#[ORM\DiscriminatorMap(['cat' => CatEntity::class,
+...])]` attribute (its value -> concrete-subclass map, accepting either
+a named `value:` argument or a positional one, matching real Doctrine's
+own attribute constructor signature). `checker::doctrine::
+result_shape::entity_row_type` consumes it: a bare-entity select item
+whose alias resolves to an entity carrying a real, non-empty
+discriminator map produces a union across every mapped subclass instead
+of the base type alone - any one row of a real, unfiltered polymorphic
+`FROM BaseEntity` query is genuinely one concrete subclass instance,
+never the abstract base type itself, and a plain `Object(entity, [])`
+would misrepresent that. `getArrayResult()`'s own entity-to-array
+conversion (168f) was extended to recurse into a `Union` member-by-
+member for the identical reason - it previously only matched a bare
+`Type::Object`, which would have silently skipped a polymorphic row
+entirely (left as real objects instead of converted to array shapes).
+Zero real corpus usage to verify against (confirmed, not assumed) -
+unit-tested only, following this project's own "corpus incidence
+affects verification confidence, never whether a real, well-defined
+feature gets built" standard, since real Doctrine's own inheritance
+mapping is exactly that: a real, common, and precisely well-defined
+feature, not a guess.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

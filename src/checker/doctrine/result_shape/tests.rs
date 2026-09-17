@@ -33,6 +33,31 @@ const ENTITIES: &str = r#"<?php
     }
 "#;
 
+const INHERITANCE_ENTITIES: &str = r#"<?php
+    use Doctrine\ORM\Mapping as ORM;
+
+    #[ORM\Entity]
+    class CatEntity
+    {
+        #[ORM\Id]
+        public int $id;
+    }
+    #[ORM\Entity]
+    class DogEntity
+    {
+        #[ORM\Id]
+        public int $id;
+    }
+
+    #[ORM\Entity]
+    #[ORM\DiscriminatorMap(['cat' => CatEntity::class, 'dog' => DogEntity::class])]
+    class AnimalEntity
+    {
+        #[ORM\Id]
+        public int $id;
+    }
+"#;
+
 fn build(src: &str) -> Registry {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
@@ -387,5 +412,59 @@ fn an_undeclared_custom_function_falls_back_to_mixed() {
     assert_eq!(
         ty,
         Type::ArrayShape(vec![("x".to_string(), Type::Mixed, false)])
+    );
+}
+
+#[test]
+fn a_polymorphic_from_produces_a_union_across_every_mapped_subclass() {
+    let registry = build(INHERITANCE_ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("AnimalEntity".to_string(), "a".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["a".to_string()]).unwrap();
+    let ty = build_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::Union(vec![
+            Type::Object("CatEntity".to_string(), Vec::new()),
+            Type::Object("DogEntity".to_string(), Vec::new()),
+        ])
+    );
+}
+
+#[test]
+fn an_ordinary_from_never_produces_a_union() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t".to_string()]).unwrap();
+    let ty = build_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(ty, Type::Object("TagEntity".to_string(), Vec::new()));
+}
+
+#[test]
+fn array_result_converts_a_polymorphic_row_member_by_member() {
+    let registry = build(INHERITANCE_ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("AnimalEntity".to_string(), "a".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["a".to_string()]).unwrap();
+    let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::Union(vec![
+            Type::ObjectShape(vec![("id".to_string(), Type::Int, false)]),
+            Type::ObjectShape(vec![("id".to_string(), Type::Int, false)]),
+        ])
     );
 }

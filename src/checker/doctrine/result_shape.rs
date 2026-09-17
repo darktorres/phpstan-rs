@@ -71,6 +71,39 @@ fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassInfo> {
     info.doctrine_entity.as_ref().map(|_| info)
 }
 
+/// A whole-entity select item's own row type (PHASE_BACKLOG Phase 168
+/// 168j) - a plain `Object(entity, [])` for the overwhelming majority
+/// (an ordinary, non-hierarchical entity), or, when `entity` is the
+/// *root* of a single-table/joined-table inheritance hierarchy (a real,
+/// non-empty `#[ORM\DiscriminatorMap]`), a union across every one of its
+/// mapped concrete subclasses instead - matching what a real,
+/// unfiltered polymorphic `FROM BaseEntity` query actually returns
+/// (any *one* row is genuinely one concrete subclass instance, never
+/// the abstract base type itself). Falls back to the plain base-entity
+/// object when `entity` isn't itself resolvable at all - defensive
+/// only, since every caller already confirmed `entity` names a known
+/// entity before reaching here.
+fn entity_row_type(checker: &Checker, entity: &str) -> Type {
+    let discriminator_map = entity_info(checker, entity)
+        .and_then(|i| i.doctrine_entity.as_ref())
+        .map(|e| &e.discriminator_map);
+    match discriminator_map {
+        Some(map) if !map.is_empty() => {
+            let mut subclasses: Vec<&String> = map.values().collect();
+            // Deterministic order - a `HashMap`'s own iteration order is
+            // unspecified, and this union must render identically
+            // across runs.
+            subclasses.sort();
+            subclasses
+                .into_iter()
+                .map(|class| Type::Object(class.clone(), Vec::new()))
+                .reduce(union_types)
+                .unwrap_or_else(|| Type::Object(entity.to_string(), Vec::new()))
+        }
+        _ => Type::Object(entity.to_string(), Vec::new()),
+    }
+}
+
 /// `None` for a semantically-unresolvable reference (an unknown alias, a
 /// field/association 168a's metadata doesn't know) - every caller here
 /// falls back to `Mixed` for that one piece rather than failing the
@@ -94,7 +127,7 @@ fn field_ref_type(
     match r {
         FieldRef::Alias(alias) => {
             let entity = aliases.get(alias)?;
-            Some(Type::Object(entity.clone(), Vec::new()))
+            Some(entity_row_type(checker, entity))
         }
         FieldRef::Field(alias, field) => {
             let entity = aliases.get(alias)?;
@@ -307,11 +340,19 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
 /// `HYDRATE_OBJECT` computation, rather than duplicating every select-
 /// item-kind match arm a second time for the array-mode case.
 fn to_array_mode(checker: &Checker, ty: Type) -> Type {
-    match &ty {
-        Type::Object(class, _) if entity_info(checker, class).is_some() => {
+    match ty {
+        Type::Object(ref class, _) if entity_info(checker, class).is_some() => {
             entity_array_shape(checker, class)
         }
-        _ => ty,
+        // A polymorphic (168j, entity-inheritance) row - every mapped
+        // subclass member converts independently.
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| to_array_mode(checker, m))
+                .collect(),
+        ),
+        other => other,
     }
 }
 

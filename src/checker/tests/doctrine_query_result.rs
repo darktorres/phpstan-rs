@@ -1,5 +1,5 @@
 //! DQL-aware Doctrine ORM result-type inference (PHASE_BACKLOG Phase 168,
-//! 168b-168f) - end-to-end `assertType()` coverage through a minimal
+//! 168b-168j) - end-to-end `assertType()` coverage through a minimal
 //! Doctrine class hierarchy declared directly in each fixture (this
 //! project vendors no real `doctrine-orm`/`doctrine-doctrine` stubs).
 
@@ -20,6 +20,11 @@ const STUBS: &str = r#"
         #[\Attribute]
         class OneToMany {
             public function __construct(public string $mappedBy, public ?string $targetEntity = null) {}
+        }
+        #[\Attribute]
+        class DiscriminatorMap {
+            /** @param array<string, class-string> $value */
+            public function __construct(public array $value) {}
         }
     }
     namespace Doctrine\ORM {
@@ -527,6 +532,54 @@ fn a_declared_custom_dql_function_resolves_to_its_own_config_category() {
                 crate::doctrine_functions::DoctrineFunctionKind::String,
             );
         },
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_polymorphic_from_infers_a_union_across_every_mapped_subclass() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityManagerInterface;
+
+        #[ORM\Entity]
+        class CatEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+        #[ORM\Entity]
+        class DogEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        #[ORM\Entity]
+        #[ORM\DiscriminatorMap(['cat' => CatEntity::class, 'dog' => DogEntity::class])]
+        class AnimalEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class AnimalService
+        {
+            public function all(EntityManagerInterface $em): void
+            {
+                $rows = $em->createQueryBuilder()
+                    ->select('a')
+                    ->from(AnimalEntity::class, 'a')
+                    ->getQuery()
+                    ->getResult();
+                assertType('list<App\CatEntity|App\DogEntity>', $rows);
+            }
+        }
+        "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

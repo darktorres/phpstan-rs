@@ -156,3 +156,68 @@ fn a_composite_identifier_records_no_single_id_field() {
     assert!(entity.id_field.is_none());
     assert_eq!(entity.associations.len(), 2);
 }
+
+#[test]
+fn a_root_entity_records_its_discriminator_map() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            class CatEntity {}
+            #[ORM\Entity]
+            class DogEntity {}
+
+            #[ORM\Entity]
+            #[ORM\InheritanceType('SINGLE_TABLE')]
+            #[ORM\DiscriminatorColumn(name: 'type')]
+            #[ORM\DiscriminatorMap(['cat' => CatEntity::class, 'dog' => DogEntity::class])]
+            class AnimalEntity
+            {
+                #[ORM\Id]
+                public int $id;
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\AnimalEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert_eq!(
+        entity.discriminator_map.get("cat").map(String::as_str),
+        Some("App\\CatEntity")
+    );
+    assert_eq!(
+        entity.discriminator_map.get("dog").map(String::as_str),
+        Some("App\\DogEntity")
+    );
+}
+
+#[test]
+fn an_ordinary_entity_has_no_discriminator_map() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            class TagEntity
+            {
+                #[ORM\Id]
+                public int $id;
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\TagEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert!(entity.discriminator_map.is_empty());
+}

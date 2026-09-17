@@ -2141,10 +2141,17 @@ from-scratch Doctrine mapping-metadata resolver.
   `fetchAllAssociative()`/etc. - per-column typing needs the actual live
   SQL/schema; real PHPStan doesn't solve this generically either. Stays
   `array<string, mixed>|false`.
-- **168j (medium).** Entity inheritance mapping (single-table/joined-
-  table) - extends `DoctrineEntity` with a discriminator concept; a
-  `FROM BaseEntity` with mapped subclasses should produce a union row
-  type across them. Zero corpus usage to verify against.
+- **168j (medium, DONE).** Entity inheritance mapping (single-table/
+  joined-table) - `DoctrineEntity::discriminator_map` (`#[ORM\
+  DiscriminatorMap([...])]`'s own value -> concrete-subclass map, parsed
+  on the root entity). `checker::doctrine::result_shape::entity_row_type`:
+  a `FROM BaseEntity alias` (or any other bare-entity select item) whose
+  entity carries a real, non-empty map produces a union across every
+  mapped subclass instead of the base type alone - matches what a real,
+  unfiltered polymorphic query actually returns (any one row is
+  genuinely one concrete subclass instance). `getArrayResult()`'s own
+  entity-to-array conversion (168f) recurses into a `Union` the same
+  way. Zero corpus usage to verify against - unit-tested only.
 - **168k (medium).** Scalar subqueries nested inside a SELECT item
   (`SELECT (SELECT COUNT(...) FROM ...) AS cnt`) - needs 168b-168d
   applied recursively to the inner query. Zero corpus usage.

@@ -9,14 +9,19 @@
 //! (confirmed directly - zero `@ORM\...` legacy docblock annotations
 //! anywhere in the corpus), so only the attribute style is supported.
 //!
-//! Entity inheritance (`#[ORM\InheritanceType]`/`#[ORM\DiscriminatorColumn]`/
-//! `#[ORM\DiscriminatorMap]`) is a real, disclosed gap - PHASE_BACKLOG's
-//! own Phase 168 168j - confirmed absent from the corpus, not assumed
-//! absent.
+//! Entity inheritance (PHASE_BACKLOG Phase 168 168j) - `#[ORM\
+//! DiscriminatorMap]`'s own value -> concrete-subclass map is parsed on
+//! the root entity; a `FROM BaseEntity alias` with a non-empty map
+//! produces a union across every mapped subclass (`checker::doctrine::
+//! result_shape`'s own consumer), matching what a real, unfiltered
+//! polymorphic query actually returns. Confirmed absent from the real
+//! corpus this phase targets, not assumed absent - built anyway, since
+//! corpus incidence affects verification confidence, never whether a
+//! real, well-defined Doctrine feature gets built at all.
 
 use std::collections::HashMap;
 
-use crate::ast::{Attribute, ClassDecl, Expr, ExprKind};
+use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal};
 use crate::registry::name_context::NameContext;
 use crate::types::Type;
 
@@ -56,6 +61,11 @@ pub struct DoctrineEntity {
     /// `#[ORM\Entity(repositoryClass: ...)]`'s own argument, if present -
     /// resolved to a fully-qualified class name.
     pub repository_class: Option<String>,
+    /// `#[ORM\DiscriminatorMap([...])]`'s own value -> concrete-subclass
+    /// map, non-empty only on the root entity of a single-table/joined-
+    /// table inheritance hierarchy. Empty for every ordinary, non-
+    /// hierarchical entity - the overwhelming majority.
+    pub discriminator_map: HashMap<String, String>,
 }
 
 fn resolved_attr_name(ctx: &NameContext, attr: &Attribute) -> String {
@@ -99,6 +109,39 @@ fn class_name_of_class_const(e: &Expr) -> Option<&str> {
     }
 }
 
+/// `#[ORM\DiscriminatorMap(['cat' => CatEntity::class, ...])]`'s own
+/// array-literal argument, resolved to a plain (discriminator value ->
+/// concrete subclass FQN) map - the argument may be named (`value:
+/// [...]`, matching real Doctrine's own attribute constructor
+/// signature) or positional, so both are checked. A key that isn't a
+/// literal string, or a value that isn't a `SomeClass::class` reference,
+/// is simply skipped rather than guessed - the same "don't guess"
+/// leniency this module applies everywhere else.
+fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String, String> {
+    let array = attr
+        .args
+        .iter()
+        .find(|a| a.name.as_deref() == Some("value"))
+        .or_else(|| attr.args.iter().find(|a| a.name.is_none()))
+        .and_then(|a| match &a.value.kind {
+            ExprKind::ArrayLiteral(items) => Some(items),
+            _ => None,
+        });
+    let Some(items) = array else {
+        return HashMap::new();
+    };
+    items
+        .iter()
+        .filter_map(|item: &ArrayItem| {
+            let ExprKind::Literal(Literal::String(value)) = &item.key.as_ref()?.kind else {
+                return None;
+            };
+            let class = class_name_of_class_const(&item.value)?;
+            Some((value.clone(), ctx.resolve(class)))
+        })
+        .collect()
+}
+
 /// One mapped property's own raw attribute list, alongside the FQN
 /// association target this project can already tell from its
 /// already-resolved native type (`PropertySig::ty_native`) - the same
@@ -127,6 +170,9 @@ pub(crate) fn compute_doctrine_entity(
     let entity_attr = find_orm_attribute(ctx, &c.attrs, "Entity")?;
     let repository_class =
         class_const_arg(entity_attr, "repositoryClass").map(|name| ctx.resolve(name));
+    let discriminator_map = find_orm_attribute(ctx, &c.attrs, "DiscriminatorMap")
+        .map(|attr| discriminator_map_arg(ctx, attr))
+        .unwrap_or_default();
 
     // Every property's own raw attrs, from both a plain body declaration
     // and constructor property promotion - `PropertyDecl`/`Param` are
@@ -204,5 +250,6 @@ pub(crate) fn compute_doctrine_entity(
         fields,
         associations,
         repository_class,
+        discriminator_map,
     })
 }
