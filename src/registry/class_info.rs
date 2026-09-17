@@ -4,7 +4,7 @@ use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, 
 use crate::docblock::{self, DocBlock};
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
-    build_type_aliases, infer_const_type, mark_template_params, resolve_type,
+    build_type_aliases, infer_const_type, mark_template_params, resolve_type_with_parsed_native,
     substitute_type_aliases,
 };
 use crate::registry::name_context::{
@@ -568,18 +568,28 @@ impl ClassInfo {
             .iter()
             .map(|p| {
                 let doc_ty = p.doc_comment.as_deref().map(docblock::parse);
-                let ty = resolve_type(
+                let native_hint = p.type_hint.as_deref();
+                let native_parsed = native_hint.map(types::parse_type_string);
+                let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
-                    p.type_hint.as_deref(),
+                    native_hint,
+                    native_parsed.as_ref(),
                 );
-                let ty = mark_template_params(ty, &template_params);
+                // See `FunctionSig::from_decl`'s param loop for why this
+                // sharing is exact, not an approximation.
+                let shared = Some(&doc_reconciled) == native_parsed.as_ref();
+                let ty = mark_template_params(doc_reconciled, &template_params);
                 let mut case_refs = Vec::new();
                 collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty_native = if shared {
+                    ty.clone()
+                } else {
+                    let native_only = native_parsed.clone().unwrap_or(Type::Mixed);
+                    let t = mark_template_params(native_only, &template_params);
+                    resolve_names_in_type(t, ctx)
+                };
                 let ty = substitute_type_aliases(ty, &type_aliases);
-                let ty_native = resolve_type(None, p.type_hint.as_deref());
-                let ty_native = mark_template_params(ty_native, &template_params);
-                let ty_native = resolve_names_in_type(ty_native, ctx);
                 let (set_ty, set_case_refs) =
                     property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
@@ -646,16 +656,29 @@ impl ClassInfo {
                             .map(docblock::parse)
                             .and_then(|d| d.var_type)
                     });
-                let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
-                let ty = mark_template_params(ty, &template_params);
+                let native_hint = p.type_hint.as_deref();
+                let native_parsed = native_hint.map(types::parse_type_string);
+                let doc_reconciled = resolve_type_with_parsed_native(
+                    doc_ty.as_deref(),
+                    native_hint,
+                    native_parsed.as_ref(),
+                );
+                // See `FunctionSig::from_decl`'s param loop for why this
+                // sharing is exact, not an approximation.
+                let shared = Some(&doc_reconciled) == native_parsed.as_ref();
+                let ty = mark_template_params(doc_reconciled, &template_params);
                 let mut case_refs = Vec::new();
                 collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                 let ty = resolve_names_in_type(ty, ctx);
+                let ty_native = if shared {
+                    ty.clone()
+                } else {
+                    let native_only = native_parsed.clone().unwrap_or(Type::Mixed);
+                    let t = mark_template_params(native_only, &template_params);
+                    resolve_names_in_type(t, ctx)
+                };
                 let ty = substitute_type_aliases(ty, &type_aliases);
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
-                let ty_native = resolve_type(None, p.type_hint.as_deref());
-                let ty_native = mark_template_params(ty_native, &template_params);
-                let ty_native = resolve_names_in_type(ty_native, ctx);
                 let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
                 // A promoted param's own inline `@readonly` - cheap to
                 // support given `p.doc_comment` is already parsed above
