@@ -87,17 +87,28 @@ fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
     let Token::InterpString(parts) = tok else {
         unreachable!()
     };
-    let (src_text, base) = parts
+    let part = parts
         .iter()
         .find_map(|p| match p {
-            StringPart::ComplexExpr(src, base) => Some((src.clone(), *base)),
+            StringPart::PropertyAccess {
+                var,
+                var_start,
+                var_end,
+                prop,
+                end,
+            } => Some((var.clone(), *var_start, *var_end, prop.clone(), *end)),
             _ => None,
         })
-        .expect("expected a ComplexExpr part");
-    assert_eq!(src_text, "$obj->prop");
-    // `$s = "x $obj->prop y";` - the `$` of `$obj` is the 9th
-    // character.
-    assert_eq!(base, Position { line: 2, col: 9 });
+        .expect("expected a PropertyAccess part");
+    let (var, var_start, var_end, prop, end) = part;
+    assert_eq!(var, "obj");
+    assert_eq!(prop, "prop");
+    // `$s = "x $obj->prop y";` - the `$` of `$obj` is the 9th character,
+    // `->` starts at the 13th (right after `obj`), and `prop` ends right
+    // before the trailing space at the 19th.
+    assert_eq!(var_start, Position { line: 2, col: 9 });
+    assert_eq!(var_end, Position { line: 2, col: 13 });
+    assert_eq!(end, Position { line: 2, col: 19 });
 }
 
 #[test]

@@ -1,5 +1,34 @@
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
-use crate::token::{StringPart, Token};
+use crate::token::{SimpleIndexKey, StringPart, Token};
+
+/// Whether `s` is a full, well-formed PHP identifier (not just that it
+/// *starts* like one) - `$var[key]` interpolation's own bareword-string-key
+/// and variable-key shapes both need this, since `scan_interpolated`
+/// extracts everything up to the closing `]` first and only classifies it
+/// afterward, unlike the `->prop` shape (whose own entry condition already
+/// guarantees a well-formed identifier by construction).
+fn is_full_identifier(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    match bytes.split_first() {
+        Some((&first, rest)) => is_ident_start(first) && rest.iter().all(|&b| is_ident_continue(b)),
+        None => false,
+    }
+}
+
+/// Classifies a `$var[key]` interpolation's own raw `key` text into one of
+/// `SimpleIndexKey`'s three shapes, or `None` when it doesn't fit any of
+/// them (the caller then falls back to `StringPart::ComplexExpr`'s re-lex
+/// path) - see `SimpleIndexKey`'s own doc comment for what real PHP accepts
+/// here.
+fn classify_index_key(key: &str) -> Option<SimpleIndexKey> {
+    if let Some(var_name) = key.strip_prefix('$') {
+        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(var_name.to_string()));
+    }
+    if let Ok(n) = key.parse::<i64>() {
+        return Some(SimpleIndexKey::Int(n));
+    }
+    is_full_identifier(key).then(|| SimpleIndexKey::Str(key.to_string()))
+}
 
 impl<'a> Lexer<'a> {
     pub(crate) fn lex_single_quoted(&mut self) -> Token {
@@ -377,14 +406,23 @@ impl<'a> Lexer<'a> {
                     && bytes.get(i + 1) == Some(&b'>')
                     && bytes.get(i + 2).is_some_and(|&c| is_ident_start(c))
                 {
+                    let var_end = self.line_col_at(abs_base + i);
                     i += 2;
                     let prop_start = i;
                     while i < bytes.len() && is_ident_continue(bytes[i]) {
                         i += 1;
                     }
                     let prop = String::from_utf8_lossy(&bytes[prop_start..i]).into_owned();
-                    parts.push(StringPart::ComplexExpr(format!("${name}->{prop}"), base));
+                    let end = self.line_col_at(abs_base + i);
+                    parts.push(StringPart::PropertyAccess {
+                        var: name,
+                        var_start: base,
+                        var_end,
+                        prop,
+                        end,
+                    });
                 } else if bytes.get(i) == Some(&b'[') {
+                    let var_end = self.line_col_at(abs_base + i);
                     i += 1;
                     let key_start = i;
                     while i < bytes.len() && bytes[i] != b']' {
@@ -392,15 +430,29 @@ impl<'a> Lexer<'a> {
                     }
                     let key = String::from_utf8_lossy(&bytes[key_start..i]).into_owned();
                     i = (i + 1).min(bytes.len());
-                    let key_expr = if key.starts_with('$') || key.parse::<i64>().is_ok() {
-                        key
-                    } else {
-                        format!("'{key}'")
-                    };
-                    parts.push(StringPart::ComplexExpr(
-                        format!("${name}[{key_expr}]"),
-                        base,
-                    ));
+                    match classify_index_key(&key) {
+                        Some(key) => {
+                            let end = self.line_col_at(abs_base + i);
+                            parts.push(StringPart::Index {
+                                var: name,
+                                var_start: base,
+                                var_end,
+                                key,
+                                end,
+                            });
+                        }
+                        None => {
+                            let key_expr = if key.starts_with('$') || key.parse::<i64>().is_ok() {
+                                key
+                            } else {
+                                format!("'{key}'")
+                            };
+                            parts.push(StringPart::ComplexExpr(
+                                format!("${name}[{key_expr}]"),
+                                base,
+                            ));
+                        }
+                    }
                 } else {
                     parts.push(StringPart::SimpleVar(name));
                 }

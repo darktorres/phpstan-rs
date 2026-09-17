@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
-use crate::token::{Position, Span, StringPart};
+use crate::token::{Position, SimpleIndexKey, Span, StringPart};
 
 impl Parser {
     /// `base` is the whole interpolated string literal's own starting
@@ -36,6 +36,69 @@ impl Parser {
                     let mut parsed = sub.parse_expression()?;
                     bias_expr_spans(&mut parsed, frag_base);
                     exprs.push(parsed);
+                }
+                // `$var->prop`/`$var[key]` simple syntax - built directly
+                // from the pieces the lexer already extracted, with real
+                // (not fragment-relative) positions, instead of round-
+                // tripping through a synthesized source string and a full
+                // second `Lexer`/`Parser` the way `ComplexExpr` above does.
+                StringPart::PropertyAccess {
+                    var,
+                    var_start,
+                    var_end,
+                    prop,
+                    end,
+                } => {
+                    let var_expr = Expr {
+                        kind: ExprKind::Variable(var),
+                        span: Span {
+                            start: var_start,
+                            end: var_end,
+                        },
+                    };
+                    exprs.push(Expr {
+                        // Real PHP's simple interpolation syntax has no
+                        // `?->` form - always non-nullsafe.
+                        kind: ExprKind::PropertyAccess(Box::new(var_expr), prop, false),
+                        span: Span {
+                            start: var_start,
+                            end,
+                        },
+                    });
+                }
+                StringPart::Index {
+                    var,
+                    var_start,
+                    var_end,
+                    key,
+                    end,
+                } => {
+                    let var_expr = Expr {
+                        kind: ExprKind::Variable(var),
+                        span: Span {
+                            start: var_start,
+                            end: var_end,
+                        },
+                    };
+                    let key_kind = match key {
+                        SimpleIndexKey::Var(name) => ExprKind::Variable(name),
+                        SimpleIndexKey::Int(n) => ExprKind::Literal(Literal::Int(n)),
+                        SimpleIndexKey::Str(s) => ExprKind::Literal(Literal::String(s)),
+                    };
+                    let key_expr = Expr {
+                        kind: key_kind,
+                        span: Span {
+                            start: var_end,
+                            end,
+                        },
+                    };
+                    exprs.push(Expr {
+                        kind: ExprKind::Index(Box::new(var_expr), Some(Box::new(key_expr))),
+                        span: Span {
+                            start: var_start,
+                            end,
+                        },
+                    });
                 }
             }
         }

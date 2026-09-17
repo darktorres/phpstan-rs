@@ -274,9 +274,20 @@ impl Keyword {
 }
 
 // A piece of a double-quoted (interpolated) string. `ComplexExpr` holds raw
-// PHP source text (the inside of `{$...}`, or a reconstructed `$var->prop` /
-// `$var[key]` access) that gets re-lexed and re-parsed as a full expression -
-// this avoids writing a second, cut-down expression grammar just for strings.
+// PHP source text (the inside of `{$...}`, or a `$var[key]` access whose own
+// key doesn't fit `Index`'s `SimpleIndexKey`) that gets re-lexed and
+// re-parsed as a full expression - this avoids writing a second, cut-down
+// expression grammar just for strings. `PropertyAccess`/`Index` cover the
+// two "simple syntax" shapes (`$var->prop`, `$var[key]`) directly instead -
+// the lexer already has the variable/property/key text as separate pieces
+// at the point it would otherwise throw them away into a synthesized
+// `format!("${name}->{prop}")`-style source string, so building the `Expr`
+// straight from those pieces (`parser::build_interpolated`) skips a full
+// second `Lexer`/`Parser` round-trip per occurrence. `$var->prop`'s own
+// property name is always a well-formed identifier by construction (the
+// lexer only enters that branch after confirming it starts with an
+// identifier byte), so it has no fallback; `[key]` does, since anything can
+// sit between the brackets - see `SimpleIndexKey`'s own doc comment.
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum StringPart {
@@ -290,6 +301,45 @@ pub enum StringPart {
     // at its real position instead of somewhere relative to a throwaway
     // re-lex.
     ComplexExpr(String, Position),
+    // `$var->prop` simple syntax. `var_start` is the `$`'s own position,
+    // `var_end` the position right after the variable name (where `->`
+    // starts), `end` the position right after `prop`.
+    PropertyAccess {
+        var: String,
+        var_start: Position,
+        var_end: Position,
+        prop: String,
+        end: Position,
+    },
+    // `$var[key]` simple syntax, `key` restricted to `SimpleIndexKey`'s
+    // three shapes - anything else falls back to `ComplexExpr` instead
+    // (see `SimpleIndexKey`'s own doc comment). Position fields mirror
+    // `PropertyAccess`'s own: `var_start`/`var_end` bracket the variable
+    // name, `end` is the position right after the closing `]`.
+    Index {
+        var: String,
+        var_start: Position,
+        var_end: Position,
+        key: SimpleIndexKey,
+        end: Position,
+    },
+}
+
+// The three key shapes PHP's own `$var[key]` string-interpolation simple
+// syntax accepts natively (a bare identifier reads as a string key, not a
+// constant reference, unlike ordinary PHP code - real PHP's own lexer
+// special-cases this exact position). Anything else (a nested expression,
+// a quoted string, whitespace, an operator) isn't valid simple syntax at
+// all and falls back to `StringPart::ComplexExpr`'s re-lex path, which is
+// a defensive fallback (a well-formed key not fitting one of these three
+// shapes shouldn't occur in real, already-lexable PHP source) rather than
+// a real, expected case.
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
+pub enum SimpleIndexKey {
+    Var(String),
+    Int(i64),
+    Str(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]
