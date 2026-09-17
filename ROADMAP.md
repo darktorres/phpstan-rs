@@ -3201,7 +3201,16 @@ section used to carry:
   not just this one) through that same convergence machinery instead of
   a single pass - architecturally similar in shape to work already done
   for ordinary loops, but needs its own integration at the closure-
-  literal-as-argument checking call site(s). Not attempted here.
+  literal-as-argument checking call site(s). **Traced to the exact
+  site**: `checker/expr.rs`'s `ExprKind::Closure` arm, the `for u in
+  uses { if !u.by_ref { continue; } ... }` loop (currently ~line 2751) -
+  `let original = locals.get(&u.name)...; locals.insert(u.name.clone(),
+  union_types(original, mutated));` is exactly the single-pass "one
+  execution merged with never running" union this entry describes,
+  confirmed by reading the code directly. Not attempted here - the
+  "which builtins call their callback zero-to-many times" classification
+  and the multi-pass convergence loop are both real, unbuilt work, not
+  a small patch to this one call site.
 - `UploadService::addUploadedFile`'s own `$dbnow` - **root-caused, not
   simply "unresolved"**: a bisection of the real file (a temporary,
   immediately-reverted edit confirmed byte-identical via `md5sum` before
