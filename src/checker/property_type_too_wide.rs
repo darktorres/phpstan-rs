@@ -14,7 +14,7 @@
 //! here - a disclosed leniency, not a false negative this check claims
 //! to catch.
 
-use crate::ast::{ClassDecl, Visibility};
+use crate::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
 use crate::types::Type;
@@ -24,6 +24,21 @@ fn flatten_union(ty: &Type) -> Vec<&Type> {
         Type::Union(members) => members.iter().collect(),
         other => vec![other],
     }
+}
+
+/// A property's own `= null` default is a real, reachable value (every
+/// instance starts there until a real write happens), but only an
+/// `ExprKind::Assign` node inside a method body ever accumulates a
+/// `property_assign_facts`/`cross_file_property_assign_facts` entry, so
+/// a declaration-site default is otherwise invisible to this check.
+fn is_null_default(default: &Option<Expr>) -> bool {
+    matches!(
+        default,
+        Some(Expr {
+            kind: ExprKind::Literal(Literal::Null),
+            ..
+        })
+    )
 }
 
 impl<'a> Checker<'a> {
@@ -74,6 +89,11 @@ impl<'a> Checker<'a> {
             };
             let Some(actual) = assign_types.iter().cloned().reduce(union_types) else {
                 continue;
+            };
+            let actual = if is_null_default(&p.default) {
+                union_types(actual, Type::Null)
+            } else {
+                actual
             };
             let actual_members = flatten_union(&actual);
             let identifier = if prop_sig.is_static {
