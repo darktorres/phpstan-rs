@@ -442,3 +442,39 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   vendor code with a slightly more precise (wider, correctly by-ref-
   aware) "got" type in the message - same diagnostic, same line, still
   flagged either way, not a new or fixed finding.
+- `01cc3f2` - fixed a real OOM crash: `merge_scopes`'s own
+  `branch_implied_facts` merge blind-`extend`ed two fact-list `Vec`s
+  whenever their `Rc` pointers differed, but a fresh `Rc` is allocated on
+  every merge, so `Rc::ptr_eq` only ever caught the *first* repeat -
+  every subsequent `converge_loop_body` pass re-concatenated an already-
+  stable list onto itself, compounding across nested loops. Found via a
+  real SIGABRT (confirmed with `gdb`: a 4-level-nested `foreach`,
+  `RawVecInner::reserve` failing a 150MB+ single allocation) checking
+  Piwigo's own corpus - every phase since `2c6bf5f` had gone un-corpus-
+  tested against this repo's real Doctrine-ORM-heavy code (46 real
+  `#[ORM\Entity]` classes, 51 files using `QueryBuilder`), which this
+  crash needed to manifest at all. Fixed by deduping the merge by
+  content instead. Scoped 47 -> 215 (huge jump - see `3100a71` below,
+  most of it was a separate false-positive class this same corpus run
+  exposed for the first time). Unscoped 40017 -> 40236.
+- `3100a71` - fixed the majority of `01cc3f2`'s own scoped jump: Doctrine
+  result-shape row keys (`build_result_row_type`/
+  `build_scalar_result_row_type`, Phase 168 168d/168f) keyed every
+  unaliased select item by its raw position in the select list. Real
+  Doctrine (confirmed directly against `SqlWalker::
+  walkSelectExpression()`/`AbstractHydrator::gatherScalarRowData()` in
+  `vendor/doctrine-orm`) keys a bare `alias.field` by its own field name,
+  falling back to a `scalarResultCounter` - scoped to non-field scalar
+  expressions only, not the raw list position - only for aggregates/
+  functions/subqueries/literals/`CASE`. Real Piwigo false positives
+  fixed: code written against the correct field-name key (e.g.
+  `$row['action']`) was flagged as accessing a nonexistent shape key.
+  Scoped 215 -> 135 (80 removed, all confirmed instances of this one
+  key-naming bug: `shapeAccess.notFound`, `nullCoalesce.offset`,
+  `cast.int`, `property.unusedType` findings cascading from a mis-keyed
+  row shape). Unscoped 40236 -> 40156. The remaining scoped 135 (vs.
+  `2c6bf5f`'s 47) haven't been individually triaged yet - the new
+  Doctrine-aware inference now actually engaging with Piwigo's real
+  entities/`QueryBuilder` chains for the first time plausibly explains
+  a real, legitimate jump, but this hasn't been confirmed finding-by-
+  finding.
