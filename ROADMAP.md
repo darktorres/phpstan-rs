@@ -1040,6 +1040,34 @@ separate key variable too (`foreach ($x as $k => $v)` binds two names,
 the same ambiguity every other unresolvable shape already declines to
 guess between).
 
+Phases 169/170/171/175's own real corpus target sites - despite being
+recorded as built - were still flagged in a later corpus re-run, each
+for a reason narrower than its own filing text anticipated (commits
+`2403e36`/`a5224e6`/`f7047fe`): `condition_alias_target` required
+every leaf of a compound `&&`/`||` to share one single subject and had
+no arm for a `Unary(Not, ...)` leaf at all, so `PasswordController::
+processVerificationCode`'s own two-subject, negated-leaf condition
+never got stored as an alias in the first place - generalized to
+`condition_alias_targets` (collects every distinct subject, `Vec`
+instead of one `String`) plus a `Not` arm recursing into the negated
+operand. `record_branch_implied_facts` only ever keyed a branch's own
+implied facts under the *tested condition itself*, never a *proxy*
+variable that condition merely caused to become a literal `true`/
+`false` or a concrete `Object` inside the same branch
+(`AlbumsPageRenderer::render`'s own flag re-tested bare;
+`UploadService::addUploadedFile`'s own connection object re-tested via
+`instanceof`, needing a new `replay_object_discriminant_facts`
+alongside the existing bare-truthiness replay) - generalized to treat
+either as an equally valid subject for the same implied-facts bundle.
+`RateService::rate`'s own shape needed a third, unrelated fix: a plain
+`Closure`'s `fresh_scope()` starts `branch_implied_facts` empty (unlike
+an `ArrowFn`'s full `locals.clone()`), so a fact recorded outside a
+`use (...)`-capturing closure never survived into its body at all -
+now carried across at closure-construction time, filtered to only the
+facts naming an actually-captured variable (an unfiltered carry-over
+would otherwise mask a real `variable.undefined` on a genuinely-
+uncaptured same-named reference inside the closure).
+
 ## Rule catalog (checker)
 
 Symbol existence (classes/functions/use-imports/typehints, catch
@@ -1973,6 +2001,24 @@ real, distinct Doctrine semantics. A `select`/`from`/`join` argument
 that isn't a literal or class-constant-fetch expression makes the whole
 chain undecidable (`None`), the identical fallback real PHPStan's own
 extension takes at the same point.
+
+**`QueryBuilder` chains split across a variable assignment** (commit
+`45005e2`). The walk above originally only ever followed a syntactic
+fluent `MethodCall` chain - hitting a bare `Variable` node stopped it
+cold, with no way back to the assignment that built it, despite this
+project's own prior doc comments claiming real corpus usage was "100%
+one direct chained expression, never split across a variable assignment
+first." Confirmed false, and confirmed *recurring*, not a one-off: 5
+real corpus sites split `$qb` into a variable (usually to attach a
+conditional `andWhere()`/`orderBy()`) before its own terminal call.
+Fixed with the same "replay the original expression" idea
+`condition_aliases` already uses for a narrowing condition: a new
+`QueryBuilderAliasMap` stores `$qb = <chain>`'s own RHS verbatim
+whenever it looks chain-shaped, purged by `Locals::declare` on
+reassignment. The walk's own `cursor` became a `Cursor` enum
+(`Borrowed`/`Owned`) so it can substitute the stored `Rc<Expr>` in
+place of a bare `Variable` read and keep walking - `$qb2 = $qb;` chains
+of aliases resolve the same way, one substitution at a time.
 
 **A small DQL select-item parser** (PHASE_BACKLOG Phase 168's 168c).
 `checker::doctrine::dql::parse_select_items` (`checker/doctrine/dql.rs`)
@@ -3324,31 +3370,6 @@ section used to carry:
   genuinely harder problem than the single-loop accumulator shape above)
   if the two loops aren't provably iterating the same key set - reassess
   after O1, don't assume it's fully subsumed.
-- A `QueryBuilder` split into a variable before its own terminal method
-  call (`$qb = $this->createQueryBuilder(...); ...; $qb->getQuery()->
-  getResult()`) isn't resolved at all - `resolve_query_builder_chain`'s
-  own backward walk (168b) only follows a syntactic fluent-`MethodCall`
-  chain; hitting a bare `Variable` node stops it cold, with no way back
-  to the assignment that built it. Phase 168's own doc comments
-  previously claimed real corpus usage was "100% one direct chained
-  expression, never split across a variable assignment first" -
-  confirmed false, and confirmed *recurring*, not a one-off: 5 real
-  corpus sites split a `$qb` into a variable (usually to attach a
-  conditional `andWhere()`/`orderBy()`) before its own terminal call -
-  `UserRepository::findAuthorizedFavoriteImageIds:862` (`argument.type`,
-  degrades to bare `mixed`, cascading into `toIntList()` expecting
-  `list`), `CommentRepository::delete:128` (`return.type`, expected
-  `int`, got `list`), `CommentRepository::update:158` (`greater.invalid`,
-  `execute() > 0` on a `list`), `RateRepository::
-  deleteByOptionalConditions:485` (`return.type`, same as `delete`),
-  `TagRepository::findCommonTags:251` (`return.type`, degrades to
-  `mixed`, corrupting the accumulated row shape). A real fix needs the
-  same shape `condition_aliases`/`branch_implied_facts` (`checker.rs`)
-  already use for a different kind of symbolic expression alias: a new
-  `Locals` side-channel storing `$qb`'s own `Rc<Expr>` right-hand side
-  at assignment time, purged on reassignment, consulted by `resolve_
-  query_builder_chain`'s cursor walk when it hits a bare `Variable` in
-  place of failing outright - not attempted this round.
 - A discriminant flag set by an `if`-statement's own body (`if (A or B
   or C) { $flag = true; }`), later checked as `if (!$flag) { ... }`,
   doesn't narrow away `A`/`B`/`C`'s own negation at that later check
@@ -3375,25 +3396,6 @@ section used to carry:
   finding may partly be `token_get_all()`'s own generically-`mixed`
   stub shape rather than purely the already-documented `!== []`-
   narrowing gap above - not confirmed either way.
-- Phases 169 (same-branch discriminant correlation), 170 (same
-  condition expression evaluated twice), and 171 (compound `&&`/`||`
-  flag reuse) are recorded as built (commits `5258c9d`, `ea9b789`), but
-  a corpus run at `0e34322` still flags every one of their own
-  originally-cited target sites, unfixed: `AuthService::
-  authKeyLogin:547`, `AlbumsPageRenderer::render:111`, `UploadService::
-  addUploadedFile:618` (Phase 169's own `$dup_detect_lock_conn`/
-  `$dup_detect_lock_name` co-assignment shape); `NotificationByMailSender
-  ::sendMailNotifications:707` (Phase 170); `PasswordController::
-  processVerificationCode:449` (Phase 171 - its own `$skip_mail = !
-  $is_user_found || $email === null || $email === '';` is exactly the
-  direct-assignment, equality-comparison-leaf shape Phase 171's own
-  entry says it fixed). Not re-investigated this round - either these
-  phases' real implementations don't cover the exact shape their own
-  citing text describes, or something else masks them (a different,
-  unrelated gap reached first, the same way `01cc3f2`'s OOM bug hid
-  behind a mis-keyed row shape until that was fixed first). Needs a
-  fresh, direct investigation before trusting either the "Done" status
-  or the original citations at face value.
 - Two `0e34322` corpus findings flagged but not root-caused, not
   confirmed as this project's own bug either way:
   `SearchService::qsearchGetTextTokenSearchSql:1037`'s own `return.type`
