@@ -37,7 +37,7 @@ pub(crate) use type_ops::{narrow_type_excluding, narrow_type_to};
 /// `narrowing_key` (a bare `count(...)` call isn't itself a narrowable
 /// key). Returns the call's own argument and whether `count(...)` was
 /// written on the left (`count($x) > 0`) or the right (`0 < count($x)`).
-fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, bool)> {
+pub(crate) fn count_call_operand<'e>(l: &'e Expr, r: &'e Expr) -> Option<(&'e Expr, bool)> {
     fn as_count_arg(e: &Expr) -> Option<&Expr> {
         if let ExprKind::Call(callee, args) = &e.kind
             && let ExprKind::Name(name) = &callee.kind

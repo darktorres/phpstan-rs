@@ -1432,3 +1432,110 @@ fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// A dynamic-key write inside a `for ($i = 0; $i < count($container);
+// $i++) { $container[$i] = ...; }` loop rewrites an existing element in
+// place - never growing past the end or skipping an index - so real PHP
+// list-ness survives it, unlike an arbitrary dynamic-key write.
+// Confirmed real corpus shape: `CalendarRenderer::render`'s own
+// `$page_chronology_date` (a `while (count(...) > N) { array_pop(...); }`
+// loop followed by exactly this `for` shape), confirmed via `dumpType()`
+// against real PHPStan.
+#[test]
+fn an_in_range_index_write_inside_a_for_loop_bounded_by_count_of_the_same_container_stays_a_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param list<int|string> $chronologyDate
+             */
+            function render(array $chronologyDate): void {
+                $page_chronology_date = $chronologyDate;
+                while (count($page_chronology_date) > 3) {
+                    array_pop($page_chronology_date);
+                }
+                for ($i = 0; $i < count($page_chronology_date); $i++) {
+                    $chronology_date_part = $page_chronology_date[$i];
+                    $page_chronology_date[$i] = is_numeric($chronology_date_part) ? (int) $chronology_date_part : 0;
+                }
+                needsList($page_chronology_date);
+            }
+            /** @param list<int|string> $x */
+            function needsList(array $x): void {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The mirrored `count($x) > $i` operand order.
+#[test]
+fn the_mirrored_count_greater_than_index_operand_order_also_stays_a_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $arr */
+            function f(array $arr): void {
+                for ($i = 0; count($arr) > $i; $i++) {
+                    $arr[$i] = 0;
+                }
+                needsList($arr);
+            }
+            /** @param list<int> $x */
+            function needsList(array $x): void {}
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative guard, confirmed via `dumpType()` against real PHPStan (which
+// also drops list-ness here): a loop bound *unrelated* to the container
+// being written doesn't get the list-preserving treatment - an arbitrary
+// index could genuinely introduce a gap.
+#[test]
+fn an_index_write_inside_a_for_loop_with_an_unrelated_bound_does_not_stay_a_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $arr */
+            function f(array $arr): void {
+                for ($i = 0; $i < 10; $i++) {
+                    $arr[$i] = 0;
+                }
+                needsList($arr);
+            }
+            /** @param list<int> $x */
+            function needsList(array $x): void {}
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "an unrelated loop bound should not get the list-preserving treatment: {d:?}"
+    );
+}
+
+// Negative guard, confirmed via `dumpType()` against real PHPStan (also
+// drops list-ness): `count($container)` *captured into a variable*
+// before the loop, rather than re-evaluated fresh in the condition
+// itself, doesn't get the list-preserving treatment either - only the
+// exact syntactic shape this project can verify against real PHPStan
+// matters, not the semantically-equivalent-looking captured form.
+#[test]
+fn an_index_write_bounded_by_a_captured_count_variable_does_not_stay_a_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<int> $arr */
+            function f(array $arr): void {
+                $n = count($arr);
+                for ($i = 0; $i < $n; $i++) {
+                    $arr[$i] = 0;
+                }
+                needsList($arr);
+            }
+            /** @param list<int> $x */
+            function needsList(array $x): void {}
+        "#,
+    );
+    assert_eq!(
+        d.len(),
+        1,
+        "a captured count() variable should not get the list-preserving treatment: {d:?}"
+    );
+}

@@ -1,9 +1,47 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, LoopZeroIterations, body_contains_yield, is_truthy_literal, merge_scopes,
-    stmt_contains_break, stmt_contains_escaping_exit, union_types,
+    Checker, Locals, LoopZeroIterations, body_contains_yield, count_call_operand,
+    is_truthy_literal, merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, union_types,
+    unwrap_grouping,
 };
 use crate::types::Type;
+
+/// `Checker::in_range_index_writes`'s own trigger - whether `cond` is
+/// syntactically `$i < count($container)` (either operand order,
+/// reusing `count_call_operand`'s own existing `count(...)`-call
+/// detection, already correct about a leading-`\`/namespaced call),
+/// returning `(container name, index variable name)`. Deliberately
+/// syntactic only: a `count($x)` *captured into a variable* before the
+/// loop (`$n = count($x); for (; $i < $n; )`) does *not* match -
+/// confirmed via `dumpType()` against real PHPStan that list-ness
+/// genuinely isn't preserved for that shape, only for a fresh `count()`
+/// re-evaluated in the condition itself.
+fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
+    let ExprKind::Binary(op, l, r) = &unwrap_grouping(cond).kind else {
+        return None;
+    };
+    if !matches!(op, BinOp::Lt | BinOp::Gt) {
+        return None;
+    }
+    // `count_call_operand`'s own bool means "found in `l`" (true) or
+    // "found in `r`" (false) - `$i < count($x)` has `count(...)` in `r`
+    // (`count_on_left = false`), matching `Lt`'s own natural left-to-
+    // right reading; `count($x) > $i` has it in `l` (`true`), the `Gt`
+    // mirror.
+    let (count_arg, count_on_left) = count_call_operand(l, r)?;
+    let idx_expr = match (op, count_on_left) {
+        (BinOp::Lt, false) => l,
+        (BinOp::Gt, true) => r,
+        _ => return None,
+    };
+    let ExprKind::Variable(idx_name) = &unwrap_grouping(idx_expr).kind else {
+        return None;
+    };
+    let ExprKind::Variable(container_name) = &unwrap_grouping(count_arg).kind else {
+        return None;
+    };
+    Some((container_name.clone(), idx_name.clone()))
+}
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_while(
@@ -330,6 +368,10 @@ impl<'a> Checker<'a> {
                 self.diagnostics.truncate(diagnostics_before);
                 let entry = locals.clone();
                 self.loop_depth += 1;
+                let in_range_pair = in_range_index_write_loop_vars(c);
+                if let Some(pair) = in_range_pair.clone() {
+                    self.in_range_index_writes.push(pair);
+                }
                 let (body_locals, break_states) = self.converge_loop_body(
                     &entry,
                     declared_return,
@@ -355,6 +397,9 @@ impl<'a> Checker<'a> {
                         }
                     },
                 );
+                if in_range_pair.is_some() {
+                    self.in_range_index_writes.pop();
+                }
                 self.loop_depth -= 1;
                 // Same "may run zero times" merge `While` uses, for
                 // the same reason - the body isn't treated as if it

@@ -253,9 +253,29 @@ impl<'a> Checker<'a> {
                                 Type::ArrayShape(vec![])
                             }
                         });
-                        if let Some(new_ty) =
-                            write_index_into(&current, idx.as_deref(), idx_ty.as_ref(), ty)
-                        {
+                        // `Checker::in_range_index_writes`'s own doc
+                        // comment - a write whose index is syntactically
+                        // the exact loop variable this exact container's
+                        // own `for (...; $i < count($container); ...)`
+                        // bound is scoped to.
+                        let in_range = idx
+                            .as_deref()
+                            .and_then(|i| match &i.kind {
+                                ExprKind::Variable(idx_name) => Some(idx_name.as_str()),
+                                _ => None,
+                            })
+                            .is_some_and(|idx_name| {
+                                self.in_range_index_writes
+                                    .iter()
+                                    .any(|(c, i)| c == name && i == idx_name)
+                            });
+                        if let Some(new_ty) = write_index_into(
+                            &current,
+                            idx.as_deref(),
+                            idx_ty.as_ref(),
+                            ty,
+                            in_range,
+                        ) {
                             if was_defined || is_superglobal(name) {
                                 locals.insert(name.clone(), new_ty);
                             } else {
@@ -265,9 +285,17 @@ impl<'a> Checker<'a> {
                     }
                     ExprKind::Index(..) => {
                         let current_base_ty = self.infer_expr(base, locals);
-                        if let Some(new_base_ty) =
-                            write_index_into(&current_base_ty, idx.as_deref(), idx_ty.as_ref(), ty)
-                        {
+                        // A nested write's own container isn't a bare
+                        // variable name `in_range_index_writes` could
+                        // ever match against - out of scope for this
+                        // narrow mechanism.
+                        if let Some(new_base_ty) = write_index_into(
+                            &current_base_ty,
+                            idx.as_deref(),
+                            idx_ty.as_ref(),
+                            ty,
+                            false,
+                        ) {
                             self.bind_assignment_target(base, new_base_ty, locals);
                         }
                     }
@@ -428,6 +456,7 @@ fn write_index_into(
     idx: Option<&Expr>,
     idx_ty: Option<&Type>,
     value_ty: Type,
+    in_range: bool,
 ) -> Option<Type> {
     match container_ty {
         // `Null` is the same "not really an array yet" case a top-level
@@ -436,7 +465,7 @@ fn write_index_into(
         // too) - delegate rather than bail, so a `Union` member that's
         // provably `Null` doesn't sink the whole write via `Union`'s
         // "all or nothing" `?`.
-        Type::Null => write_index_into(&Type::ArrayShape(vec![]), idx, idx_ty, value_ty),
+        Type::Null => write_index_into(&Type::ArrayShape(vec![]), idx, idx_ty, value_ty, in_range),
         Type::ArrayShape(fields) => match idx.and_then(literal_string_key) {
             Some(key) => {
                 let mut fields = fields.clone();
@@ -496,7 +525,13 @@ fn write_index_into(
         Type::Union(members) => {
             let mut updated = Vec::with_capacity(members.len());
             for m in members {
-                updated.push(write_index_into(m, idx, idx_ty, value_ty.clone())?);
+                updated.push(write_index_into(
+                    m,
+                    idx,
+                    idx_ty,
+                    value_ty.clone(),
+                    in_range,
+                )?);
             }
             Some(
                 updated
@@ -510,7 +545,19 @@ fn write_index_into(
         // drops any `Accessory` marker - an arbitrary key can't preserve
         // a list's sequential-key guarantee - but a real append (`idx`
         // absent) onto an already-list-marked container keeps it a list,
-        // now provably non-empty.
+        // now provably non-empty. `in_range` is the one further
+        // exception: `Checker::in_range_index_writes`'s own doc comment -
+        // a write whose index is syntactically the exact loop variable
+        // bounded by `count()` of this exact container (`for ($i = 0; $i
+        // < count($x); $i++) { $x[$i] = ...; }`) rewrites an existing
+        // element in place, never growing past the end or skipping an
+        // index, so real PHP list-ness genuinely survives it too -
+        // confirmed via `dumpType()` against real PHPStan. Non-emptiness
+        // is handled differently for the two cases: a real append always
+        // proves it (the container just grew), but an in-range rewrite
+        // doesn't change whether the container was already empty, so it
+        // only carries `NonEmptyArray` forward when the container already
+        // had it, never adds it fresh.
         Type::Intersection(members) => {
             let inner = members.iter().find_map(Checker::array_element_type)?;
             let widened = union_types(value_ty, inner);
@@ -518,12 +565,18 @@ fn write_index_into(
                 .and(idx_ty)
                 .map(dynamic_write_key_type)
                 .unwrap_or_else(Type::unknown_array_key);
-            if idx.is_none() && members.contains(&Type::Accessory(AccessoryKind::ArrayList)) {
-                Some(Type::Intersection(vec![
+            let is_append = idx.is_none();
+            if (is_append || in_range)
+                && members.contains(&Type::Accessory(AccessoryKind::ArrayList))
+            {
+                let mut new_members = vec![
                     Type::Array(Box::new(key_ty), Box::new(widened)),
                     Type::Accessory(AccessoryKind::ArrayList),
-                    Type::Accessory(AccessoryKind::NonEmptyArray),
-                ]))
+                ];
+                if is_append || members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray)) {
+                    new_members.push(Type::Accessory(AccessoryKind::NonEmptyArray));
+                }
+                Some(Type::Intersection(new_members))
             } else {
                 Some(Type::Array(Box::new(key_ty), Box::new(widened)))
             }

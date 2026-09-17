@@ -730,6 +730,25 @@ pub struct Checker<'a> {
     // still open right now" signal, distinct from `loop_break_states`'s
     // own stack (which also counts an enclosing `Switch` frame).
     pub(crate) loop_depth: u32,
+    // `(container variable name, index variable name)` pairs currently
+    // "in range" - pushed by `check_for` when a `for` loop's own
+    // condition is syntactically `$i < count($container)` (the loop
+    // variable bounded by a fresh `count()` of the exact container being
+    // indexed inside the body), popped on exit. Consulted by
+    // `write_index_into` (`checker/assignment.rs`) so a dynamic-key
+    // write `$container[$i] = ...;` inside such a loop can be recognized
+    // as rewriting an existing element in place - never growing past the
+    // end or skipping an index - so real PHP list-ness genuinely
+    // survives it, unlike an arbitrary dynamic-key write (confirmed via
+    // `dumpType()` against real PHPStan: `array<int, int>`, a plain,
+    // unmarked source, stays `list<int>` through exactly this loop
+    // shape, but not through `for ($i = 0; $i < 10; $i++)` or a `count()`
+    // captured into a variable *before* the loop instead of re-evaluated
+    // in the condition itself - both real PHPStan drops list-ness for
+    // too, matching this mechanism's own narrow syntactic trigger). A
+    // `Vec`, not a single `Option`, so nested `for` loops over
+    // different containers don't clobber each other.
+    pub(crate) in_range_index_writes: Vec<(String, String)>,
     // Every variable name seen bound via `static $x = ...;` anywhere in
     // the file being checked. A `static` local can carry a value left
     // over from an earlier call - the same "this single forward pass
@@ -876,7 +895,7 @@ pub(crate) use missing_typehint::{
     ITERABLE_GENERIC_CLASS_NAMES, class_kind_word, has_explicit_mixed_nested_somewhere,
 };
 pub(crate) use narrowing::{
-    array_value_type_for_key, is_real_variable_key, is_unsealed_shape,
+    array_value_type_for_key, count_call_operand, is_real_variable_key, is_unsealed_shape,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
     narrow_type_to, narrowing_key, purge_stale_narrowing_for, resolve_concat_type,
     string_type_has_accessory,
@@ -922,6 +941,7 @@ impl<'a> Checker<'a> {
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
             loop_depth: 0,
+            in_range_index_writes: Vec::new(),
             static_var_names: HashSet::new(),
             rebind_target_classes: HashSet::new(),
             rebind_escape_all: false,
