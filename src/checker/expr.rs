@@ -3495,6 +3495,36 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// A closure/arrow-fn literal's own declared `: T` return hint isn't
+    /// necessarily the most precise answer - unlike an ordinary named
+    /// function/method (already reconciled against its own inferred body
+    /// return type elsewhere), a literal's signature previously used the
+    /// bare hint unconditionally. Real PHPStan doesn't: confirmed via
+    /// `\PHPStan\dumpType()` that `array_map(static fn (OptionallyQualified
+    /// Name $name): string => $name->getUnqualifiedName()->getValue(),
+    /// ...)` infers the closure literal's own type as `Closure(Name):
+    /// non-empty-string` - the body's own more precise `getValue(): non-
+    /// empty-string`, not the bare `: string` hint - so `array_map()`'s
+    /// result element type comes out `non-empty-string` too (a real
+    /// Piwigo false positive fixed: `DbMaintenanceRepositoryTest`'s own
+    /// `OptionallyQualifiedName::unquoted(non-empty-string $unqualifiedName,
+    /// ...)` argument check). Only trusts `inferred` when it's a real,
+    /// non-`Mixed` subtype of the declared hint - anything else (a body
+    /// that doesn't type-check against its own declared hint at all, or
+    /// simply couldn't be inferred) falls back to the hint unchanged,
+    /// exactly today's prior behavior.
+    fn prefer_inferred_over_declared_return(&self, hint: Option<&str>, inferred: Type) -> Type {
+        let Some(hint) = hint else {
+            return inferred;
+        };
+        let declared = self.resolve_type_hint(Some(hint));
+        if inferred != Type::Mixed && self.registry.is_assignable(&inferred, &declared) {
+            inferred
+        } else {
+            declared
+        }
+    }
+
     /// Infers a closure or arrow-fn's own return type *as if* its
     /// parameters were bound to `param_overrides` (positionally),
     /// instead of the `Mixed` they'd otherwise get standalone (a
@@ -3523,9 +3553,6 @@ impl<'a> Checker<'a> {
                 return_type,
                 ..
             } => {
-                if return_type.is_some() {
-                    return Some(self.resolve_type_hint(return_type.as_deref()));
-                }
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -3535,7 +3562,8 @@ impl<'a> Checker<'a> {
                 for (p, ty) in params.iter().zip(param_overrides) {
                     arrow_locals.insert(p.name.clone(), ty.clone());
                 }
-                Some(self.infer_expr(body, &arrow_locals))
+                let inferred = self.infer_expr(body, &arrow_locals);
+                Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
             }
             ExprKind::Closure {
                 params,
@@ -3545,9 +3573,6 @@ impl<'a> Checker<'a> {
                 return_type,
                 ..
             } => {
-                if return_type.is_some() {
-                    return Some(self.resolve_type_hint(return_type.as_deref()));
-                }
                 if params.len() != param_overrides.len()
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
@@ -3569,15 +3594,16 @@ impl<'a> Checker<'a> {
                 // "only handle the shape that actually comes up, don't
                 // guess at the rest" precedent) - a closure with a more
                 // complex body safely falls back to None too.
-                match body.as_slice() {
+                let inferred = match body.as_slice() {
                     [
                         Stmt {
                             kind: StmtKind::Return(Some(e)),
                             ..
                         },
-                    ] => Some(self.infer_expr(e, &closure_locals)),
-                    _ => None,
-                }
+                    ] => self.infer_expr(e, &closure_locals),
+                    _ => return None,
+                };
+                Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
             }
             // A first-class callable (`intval(...)`, `TagId::from(...)`,
             // PHP 8.1) used as `array_map`'s callback would otherwise

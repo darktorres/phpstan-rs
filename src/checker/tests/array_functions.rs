@@ -67,6 +67,54 @@ fn array_map_trusts_an_explicit_closure_return_type_hint_over_the_array_element_
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+#[test]
+fn array_map_prefers_the_closures_own_more_precise_inferred_return_over_its_hint() {
+    // `DbMaintenanceRepositoryTest`'s own real shape: a closure literal's
+    // declared `: string` hint isn't the most precise answer when its own
+    // body actually returns something narrower - unlike an ordinary named
+    // function/method (already reconciled elsewhere), a closure/arrow-fn
+    // literal's signature used to trust the bare hint unconditionally.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param non-empty-string[] $xs */
+            function needsNonEmptyStrings(array $xs): void {}
+            $mapped = array_map(static function (int $x): string {
+                return "not-empty";
+            }, [1, 2, 3]);
+            needsNonEmptyStrings($mapped);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_map_falls_back_to_the_hint_when_the_bodys_inference_is_less_precise() {
+    // The exact mirror of the test above: `alwaysMixed()` gives the
+    // closure's own body inference nothing better than `Mixed`, so the
+    // declared `: string` hint must still win, not get discarded to
+    // `Mixed` (which `is_assignable` would trivially treat as
+    // compatible with anything, silently losing the hint's own real
+    // precision).
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param string[] $xs */
+            function needsStrings(array $xs): void {}
+            /** @param int[] $xs */
+            function needsInts(array $xs): void {}
+            function alwaysMixed(): mixed {
+                return 1;
+            }
+            $mapped = array_map(static function (int $x): string {
+                return alwaysMixed();
+            }, [1, 2, 3]);
+            needsStrings($mapped);
+            needsInts($mapped);
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("needsInts"), "got: {d:?}");
+}
+
 // A first-class callable (`intval(...)`, PHP 8.1) used as array_map's
 // own callback must be recognized, or it discards both the mapped
 // element type and any list-ness/non-emptiness the input already had.
