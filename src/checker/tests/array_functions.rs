@@ -2240,6 +2240,55 @@ fn array_values_on_a_non_list_array_is_never_flagged() {
     );
 }
 
+// A by-ref `use (&$values)` capture mutated inside a closure passed to
+// `preg_replace_callback()`. A single-pass check would see the closure
+// body run exactly once, ending with a real list - real PHP (and real
+// PHPStan, confirmed via `dumpType()`) instead treats the callback as
+// running zero-to-many times, each run seeing the *previous* run's own
+// effect as its entry, converging to a bare `array<mixed>` - not already
+// list-shaped, so the `array_values()` call is doing real work, not a
+// redundant no-op.
+//
+// Deliberately an ordinary `if`/`else` here, not an early-`return`ing
+// guard clause: `SearchService::positionalCondition`'s own real shape
+// mutates `$values` right before a `return` inside the spread-merge
+// branch - `check_if`'s own `then_terminates` handling correctly
+// discards a terminated branch's `Locals` for what code *after* the
+// `if` sees (nothing ever reaches there via that path), but that also
+// means a by-ref-captured variable's own mutation made just before the
+// `return` never reaches this convergence loop's own end-of-pass read at
+// all, unlike a real PHP invocation (where the mutation still takes
+// effect in the caller before returning). Confirmed via `dumpType()`
+// that real PHPStan still answers the same bare `array` for that exact
+// shape too - a further, deeper gap this fix doesn't close, tracked
+// separately, not asserted here.
+#[test]
+fn array_values_after_a_byref_closure_mutated_across_multiple_preg_replace_callback_matches_is_not_flagged()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $pattern, string $subject, array $value): array {
+                $values = [];
+                preg_replace_callback($pattern, static function (array $matches) use (&$values, $value): string {
+                    if ($matches[1] ?? null) {
+                        $values = [...$values, ...$value];
+                    } else {
+                        $values[] = $matches[0];
+                    }
+
+                    return '?';
+                }, $subject);
+
+                return array_values($values);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arrayValues.")),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // ArrayPopFunctionReturnTypeExtension/ArrayShiftFunctionReturnTypeExtension:
 // investigated and declined - see the long-form doc comment on the
 // (reverted) match arm in `builtin_calls.rs` for the two compounding

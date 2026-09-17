@@ -2,10 +2,10 @@ use crate::ast::*;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
-    CheckArgsCall, Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, TemplateBindings,
-    body_contains_yield, collect_goto_targets, expr_contains_yield, generator_template_param,
-    is_language_construct, is_real_variable_key, is_superglobal, literal_string_key,
-    literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
+    CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
+    TemplateBindings, body_contains_yield, collect_goto_targets, expr_contains_yield,
+    generator_template_param, is_language_construct, is_real_variable_key, is_superglobal,
+    literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
     purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
     superglobal_default_type, to_bitwise_not,
 };
@@ -2722,12 +2722,34 @@ impl<'a> Checker<'a> {
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
                 self.check_generator_return_type(declared_return.as_ref(), e.span, &closure_label);
-                self.check_block(
-                    body,
-                    &mut closure_locals,
+                // A closure literal may run zero-to-many times (any
+                // callback-accepting builtin, or simply being called more
+                // than once through an ordinary variable) - a single
+                // `check_block` pass here would only ever see one
+                // captured-by-ref variable's own *first* mutation, not a
+                // fixed point across repeated invocations (real corpus
+                // shape: `SearchService::positionalCondition`'s own
+                // `use (&$values)` closure passed to
+                // `preg_replace_callback`, mutated across however many
+                // regex matches the pattern finds). Routes through the
+                // same convergence primitive an ordinary loop body
+                // already gets - `LoopZeroIterations::Possible` performs
+                // exactly the "union the fixed-point result with never-
+                // having-run" merge the by-ref-`use` handling below used
+                // to do by hand, so `closure_locals` already comes back
+                // correctly converged for that too.
+                let (converged, _) = self.converge_loop_body(
+                    &closure_locals,
                     declared_return.as_ref(),
                     &closure_label,
+                    LoopZeroIterations::Possible {
+                        subject_exempt: None,
+                    },
+                    |this, pass_locals, declared_return, label, _pass| {
+                        this.check_block(body, pass_locals, declared_return, label);
+                    },
                 );
+                closure_locals = converged;
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_function_throw_points = previous_throw_points;
@@ -2743,12 +2765,13 @@ impl<'a> Checker<'a> {
                 // A `use (&$x)` capture is a real reference - any
                 // mutation the closure body makes to `$x` is visible in
                 // the declaring scope too, from the closure literal's
-                // own point onward. Conservatively widens rather than
-                // replaces outright (real PHP doesn't guarantee the
-                // closure is ever actually called, or called only once) -
-                // `union_types` with the pre-closure type covers "never
-                // called" the same way an `if` without an `else` covers
-                // its own branch.
+                // own point onward. `mutated` (read from `closure_locals`
+                // *after* the `converge_loop_body` call above) is already
+                // the fixed-point-converged result unioned with the
+                // pre-closure entry state - `LoopZeroIterations::Possible`
+                // performed that same "never called" merge a manual
+                // `union_types(original, mutated)` used to do by hand, so
+                // no second union is needed here.
                 for u in uses {
                     if !u.by_ref {
                         continue;
@@ -2774,8 +2797,7 @@ impl<'a> Checker<'a> {
                                 Some([u.span].into_iter().collect());
                         }
                     } else {
-                        let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                        locals.insert(u.name.clone(), union_types(original, mutated));
+                        locals.insert(u.name.clone(), mutated);
                     }
                 }
                 Type::Object("Closure".to_string(), Vec::new())

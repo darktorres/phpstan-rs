@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, body_contains_yield, collect_goto_targets, is_superglobal,
-    union_types,
+    Checker, DiagnosticBuilder, Locals, LoopZeroIterations, body_contains_yield,
+    collect_goto_targets, is_superglobal,
 };
 use crate::types::Type;
 
@@ -314,12 +314,20 @@ impl<'a> Checker<'a> {
                     closure_expr.span,
                     &closure_label,
                 );
-                self.check_block(
-                    body,
-                    &mut closure_locals,
+                // See `checker::expr`'s `ExprKind::Closure` arm's
+                // identical `converge_loop_body` fix and comment.
+                let (converged, _) = self.converge_loop_body(
+                    &closure_locals,
                     declared_return.as_ref(),
                     &closure_label,
+                    LoopZeroIterations::Possible {
+                        subject_exempt: None,
+                    },
+                    |this, pass_locals, declared_return, label, _pass| {
+                        this.check_block(body, pass_locals, declared_return, label);
+                    },
                 );
+                closure_locals = converged;
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_function_throw_points = previous_throw_points;
@@ -331,6 +339,10 @@ impl<'a> Checker<'a> {
                     if !u.by_ref {
                         continue;
                     }
+                    // Already the fixed-point-converged result unioned
+                    // with the pre-closure entry state - see the
+                    // identical fix's own comment at `checker::expr`'s
+                    // `ExprKind::Closure` arm.
                     let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
                     if !locals.contains_key(&u.name) {
                         // See the identical fix's own comment at
@@ -341,8 +353,7 @@ impl<'a> Checker<'a> {
                                 Some([u.span].into_iter().collect());
                         }
                     } else {
-                        let original = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                        locals.insert(u.name.clone(), union_types(original, mutated));
+                        locals.insert(u.name.clone(), mutated);
                     }
                 }
                 true
