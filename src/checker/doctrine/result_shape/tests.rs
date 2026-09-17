@@ -181,7 +181,7 @@ fn identity_resolves_the_target_entitys_own_id_field_type() {
 }
 
 #[test]
-fn a_scalar_only_select_positions_every_unaliased_item_by_index() {
+fn a_scalar_only_select_keys_each_unaliased_field_by_its_own_name() {
     let registry = build(ENTITIES);
     let checker = Checker::new(&registry);
     let chain = QueryBuilderChain {
@@ -194,8 +194,33 @@ fn a_scalar_only_select_positions_every_unaliased_item_by_index() {
     assert_eq!(
         ty,
         Type::ArrayShape(vec![
-            ("0".to_string(), Type::Int, false),
-            ("1".to_string(), Type::String, false),
+            ("id".to_string(), Type::Int, false),
+            ("name".to_string(), Type::String, false),
+        ])
+    );
+}
+
+#[test]
+fn an_unaliased_aggregate_keys_by_its_own_scalar_counter_not_its_list_position() {
+    // `t.name AS n` never advances `scalarResultCounter` (only a real
+    // Doctrine generic-expression item does, when unaliased) - the
+    // `COUNT(...)` right after it is the *first* such item, so it keys
+    // `"0"` despite being at list position 1.
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items =
+        parse_select_items(&["t.name AS n".to_string(), "COUNT(t.id)".to_string()]).unwrap();
+    let ty = build_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ArrayShape(vec![
+            ("n".to_string(), Type::String, false),
+            ("0".to_string(), Type::IntRange(Some(0), None), false),
         ])
     );
 }
@@ -213,7 +238,7 @@ fn a_reference_to_an_unknown_alias_falls_back_to_mixed_for_that_field() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(vec![("0".to_string(), Type::Mixed, false)])
+        Type::ArrayShape(vec![("field".to_string(), Type::Mixed, false)])
     );
 }
 

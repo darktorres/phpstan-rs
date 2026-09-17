@@ -66,6 +66,32 @@ fn resolve_join_target(
     Some(assoc.target.clone())
 }
 
+/// The row key real Doctrine assigns a select item with no `AS` alias -
+/// confirmed directly against `SqlWalker::walkSelectExpression()`: a bare
+/// `alias.field` (`AST\PathExpression`) keys by its own field name
+/// (`resultAlias = fieldIdentificationVariable ?: fieldName`), while
+/// every other scalar-expression shape (aggregate, function, subquery,
+/// `CASE`, literal) keys by `scalarResultCounter++` - a running counter
+/// scoped to just those items, not the item's raw position in the whole
+/// select list.
+fn unaliased_scalar_key(kind: &SelectItemKind, index: usize, scalar_counter: &mut usize) -> String {
+    match kind {
+        SelectItemKind::Field(FieldRef::Field(_, field)) => field.clone(),
+        // A bare, unaliased whole-entity item mixed into a select list
+        // alongside other items - real Doctrine keys this by its own
+        // `entityMappings` slot, not `scalarResultCounter`, a mixed-
+        // result shape this project doesn't otherwise model (`IDENTITY()`
+        // is a DQL function, not a path expression, so it takes the
+        // `scalarResultCounter` branch below like any other function).
+        SelectItemKind::Field(FieldRef::Alias(_)) => index.to_string(),
+        _ => {
+            let key = scalar_counter.to_string();
+            *scalar_counter += 1;
+            key
+        }
+    }
+}
+
 fn entity_info<'a>(checker: &'a Checker, class: &str) -> Option<&'a ClassInfo> {
     let (_, info) = checker.registry.lookup_class(class)?;
     info.doctrine_entity.as_ref().map(|_| info)
@@ -259,16 +285,19 @@ pub(crate) fn build_result_row_type(
     }
 
     // Every other shape (an entity plus scalars, or scalar-only, single
-    // or multiple) - real Doctrine's mixed/positional hydration: each
-    // item keys its own row entry by its own `AS`-alias when it has one,
-    // otherwise by its absolute position in the select list (matching
-    // real Doctrine, not a separately-counted "unaliased items only"
-    // index).
+    // or multiple) - each item keys its own row entry by its own
+    // `AS`-alias when it has one, otherwise by `unaliased_scalar_key`'s
+    // own rule (see its doc comment - a raw select-list position is
+    // never the real key for any of this project's modeled item shapes).
+    let mut scalar_counter = 0usize;
     let fields = items
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            let key = item.alias.clone().unwrap_or_else(|| i.to_string());
+            let key = item
+                .alias
+                .clone()
+                .unwrap_or_else(|| unaliased_scalar_key(&item.kind, i, &mut scalar_counter));
             (key, select_item_type(checker, &aliases, item), false)
         })
         .collect();
@@ -394,19 +423,13 @@ pub(crate) fn build_array_result_row_type(
 
 /// `getScalarResult()` (PHASE_BACKLOG Phase 168 168f) - flattens every
 /// selected entity's own scalar fields directly into one flat row
-/// (`{alias}_{field}`-keyed, matching real Doctrine's own column-naming
-/// convention for a plain, unaliased entity field), alongside every
-/// plain scalar/aggregate item under its own key exactly like
-/// `build_result_row_type`'s general case. Zero real corpus usage
-/// (confirmed) - built for completeness, not because any known call site
-/// needs it, and with correspondingly lower confidence than the other
-/// three: `AbstractHydrator::gatherScalarRowData`'s own exact key-naming
-/// rule was not read in full before writing this (this module's key
-/// format above is inferred from `ScalarHydrator`'s own doc comment,
-/// "almost the same as a regular SQL result set" - a real column-naming
-/// convention, but not independently confirmed against the method body
-/// itself), so treat this specific shape as needing verification against
-/// real Doctrine before trusting it on a real query.
+/// (`{alias}_{field}`-keyed) alongside every plain scalar/aggregate item
+/// under `unaliased_scalar_key`'s own rule when unaliased, exactly like
+/// `build_result_row_type`'s general case - both confirmed directly
+/// against `AbstractHydrator::gatherScalarRowData`'s own body (the
+/// `{alias}_{field}` form for a non-scalar/entity-field column, the
+/// scalar-item `fieldName` otherwise). Zero real corpus usage (confirmed)
+/// - built for completeness, not because any known call site needs it.
 pub(crate) fn build_scalar_result_row_type(
     checker: &Checker,
     chain: &QueryBuilderChain,
@@ -417,6 +440,7 @@ pub(crate) fn build_scalar_result_row_type(
     }
     let aliases = build_alias_map(checker, chain);
     let mut fields: Vec<(String, Type, bool)> = Vec::new();
+    let mut scalar_counter = 0usize;
     for (i, item) in items.iter().enumerate() {
         match &item.kind {
             SelectItemKind::Field(FieldRef::Alias(entity_alias)) => {
@@ -441,7 +465,10 @@ pub(crate) fn build_scalar_result_row_type(
                 }
             }
             _ => {
-                let key = item.alias.clone().unwrap_or_else(|| i.to_string());
+                let key = item
+                    .alias
+                    .clone()
+                    .unwrap_or_else(|| unaliased_scalar_key(&item.kind, i, &mut scalar_counter));
                 fields.push((key, select_item_type(checker, &aliases, item), false));
             }
         }

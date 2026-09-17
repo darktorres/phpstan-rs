@@ -203,7 +203,7 @@ fn get_single_result_of_a_single_scalar_field_select_is_still_row_shaped() {
                     ->select('t.name')
                     ->getQuery()
                     ->getSingleResult();
-                assertType('array{0: string}', $name);
+                assertType('array{name: string}', $name);
             }
         }
         "#,
@@ -522,7 +522,7 @@ fn a_declared_custom_dql_function_resolves_to_its_own_config_category() {
                     ->select('t.id', 'DATE_FORMAT_YEAR_MONTH(t.name) AS ym')
                     ->getQuery()
                     ->getResult();
-                assertType('list<array{0: int, ym: string}>', $rows);
+                assertType('list<array{id: int, ym: string}>', $rows);
             }
         }
         "#,
