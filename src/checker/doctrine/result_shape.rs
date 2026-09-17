@@ -303,16 +303,16 @@ pub(crate) fn build_result_row_type(
     Some(Type::ArrayShape(fields))
 }
 
-/// `getSingleColumnResult()`/`getSingleScalarResult()`'s own shared
-/// requirement (PHASE_BACKLOG Phase 168 168f): the select must have
-/// exactly one item, and that item's own resolved type must not be an
-/// entity object (a real Doctrine `HYDRATE_SCALAR_COLUMN`/
-/// `HYDRATE_SINGLE_SCALAR` query only ever targets a genuine scalar
-/// column - selecting a whole entity through either method is undefined
-/// behavior in real Doctrine, so this project doesn't guess a shape for
-/// it either). `None` when the requirement isn't met - callers fall
-/// back to their own pre-Phase-168 status quo (`list<mixed>`/`Mixed`),
-/// not a scope cut.
+/// `getSingleScalarResult()` (`SingleScalarHydrator` -> `gatherScalarRowData`,
+/// which really does apply the item's own registered type conversion,
+/// confirmed against `vendor/doctrine-orm`): the select must have exactly
+/// one item, and that item's own resolved type must not be an entity
+/// object (a real Doctrine `HYDRATE_SINGLE_SCALAR` query only ever
+/// targets a genuine scalar column - selecting a whole entity is
+/// undefined behavior in real Doctrine, so this project doesn't guess a
+/// shape for it either). `None` when the requirement isn't met - the
+/// caller falls back to its own pre-Phase-168 status quo (`Mixed`), not a
+/// scope cut.
 pub(crate) fn single_scalar_column_type(
     checker: &Checker,
     chain: &QueryBuilderChain,
@@ -324,6 +324,39 @@ pub(crate) fn single_scalar_column_type(
         Type::Object(..) => None,
         ty => Some(ty),
     }
+}
+
+/// Whether `ty` is, or anywhere contains, an entity/value-object `Type::
+/// Object` member.
+fn contains_object(ty: &Type) -> bool {
+    match ty {
+        Type::Object(..) => true,
+        Type::Union(members) | Type::Intersection(members) => members.iter().any(contains_object),
+        _ => false,
+    }
+}
+
+/// `getSingleColumnResult()` - unlike `getSingleScalarResult()` above,
+/// this one hydrates via `ScalarColumnHydrator`, a raw `Statement::
+/// fetchFirstColumn()` that applies no type conversion at all (confirmed
+/// directly against `vendor/doctrine-orm`), so a field mapped through a
+/// custom Doctrine `Type` (a value-object id, a wrapped scalar) never
+/// actually comes back as that PHP type here, only its own raw driver
+/// value - `contains_object` catches both a bare custom-typed field and
+/// the equally common `?EntityId $id = null` (pre-`GeneratedValue`)
+/// nullable-object-union shape. A plain, un-wrapped native scalar (no
+/// custom `Type`) genuinely does coincide with its own raw driver value,
+/// so precision is kept for that case rather than blanket-falling back
+/// to `Mixed` regardless of shape.
+pub(crate) fn raw_scalar_column_type(
+    checker: &Checker,
+    chain: &QueryBuilderChain,
+    items: &[SelectItem],
+) -> Option<Type> {
+    let [item] = items else { return None };
+    let aliases = build_alias_map(checker, chain);
+    let ty = select_item_type(checker, &aliases, item);
+    if contains_object(&ty) { None } else { Some(ty) }
 }
 
 /// An entity's own `HYDRATE_ARRAY` shape - every mapped scalar field

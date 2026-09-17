@@ -368,6 +368,56 @@ fn get_single_column_result_of_one_scalar_field_is_a_list_of_that_type() {
 }
 
 #[test]
+fn get_single_column_result_of_a_value_object_id_field_falls_back_to_mixed() {
+    // Unlike `getSingleScalarResult()`'s own `SingleScalarHydrator`,
+    // `getSingleColumnResult()`'s `ScalarColumnHydrator` does a raw
+    // `fetchFirstColumn()` with no type conversion at all - a
+    // custom-`Type`-mapped id field (a real Piwigo pattern: `?GroupId
+    // $id = null` backed by `#[ORM\Column(type: 'group_id')]`) never
+    // actually comes back as that value object here.
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        final class TagId
+        {
+            public function __construct(public readonly int $value) {}
+        }
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            #[ORM\Column]
+            public ?TagId $id = null;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function allIds(): void
+            {
+                $ids = $this->createQueryBuilder('t')
+                    ->select('t.id')
+                    ->getQuery()
+                    ->getSingleColumnResult();
+                assertType('list', $ids);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn get_single_scalar_result_of_one_scalar_field_is_that_fields_own_type() {
     let d = diagnostics_with_stubs(
         r#"

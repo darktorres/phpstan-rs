@@ -542,7 +542,7 @@ impl<'a> Checker<'a> {
                         .unwrap_or_else(doctrine_query_result_list_type)
                     }
                     ("getSingleColumnResult", Some((chain, items))) => {
-                        crate::checker::doctrine::result_shape::single_scalar_column_type(
+                        crate::checker::doctrine::result_shape::raw_scalar_column_type(
                             self, &chain, &items,
                         )
                         .map(doctrine_query_result_list_type_of)
