@@ -4041,6 +4041,61 @@ fn a_different_discriminant_value_does_not_imply_the_correlated_variable() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `record_branch_implied_facts`'s own boolean-flag-proxy subject -
+// `AlbumsPageRenderer::render`'s own real shape: the *tested* condition
+// (`str_starts_with(...)`) is never re-evaluated verbatim anywhere else,
+// but a plain local flag it sets to a literal `true` inside that same
+// branch (`$orderByDate`) is re-tested bare later, with no lexical
+// relationship to the original `if` - a real proxy for "that branch ran."
+#[test]
+fn a_flag_literal_assigned_inside_a_branch_is_a_proxy_discriminant() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $orderByField): void {
+                $orderByDate = false;
+                if (str_starts_with($orderByField, 'date_')) {
+                    $orderByDate = true;
+                    $refDates = [1, 2, 3];
+                }
+                echo "unrelated code in between";
+                if ($orderByDate) {
+                    assertType('array{0: 1, 1: 2, 2: 3}', $refDates);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `record_branch_implied_facts`'s own concrete-object-proxy subject,
+// replayed via `replay_object_discriminant_facts` from `instanceof` -
+// `UploadService::addUploadedFile`'s own real shape: a variable that
+// became a concrete object specifically inside the branch, later
+// re-tested via `instanceof` rather than bare truthiness.
+#[test]
+fn a_variable_assigned_a_concrete_object_inside_a_branch_is_a_proxy_discriminant() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Connection {}
+            function f(bool $shouldLock): void {
+                $conn = null;
+                $name = null;
+                if ($shouldLock) {
+                    $conn = new Connection();
+                    $name = "lockname";
+                }
+                echo "unrelated code in between";
+                if ($conn instanceof Connection) {
+                    assertType("'lockname'", $name);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // `is_a()` narrowing - the runtime-value-spelled twin of `instanceof`,
 // reusing its identical narrowing primitives.
 #[test]

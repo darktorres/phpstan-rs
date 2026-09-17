@@ -248,6 +248,32 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `replay_truthiness_discriminant_facts`'s own `instanceof` sibling -
+    /// `record_branch_implied_facts`'s own third subject shape (a variable
+    /// that became a concrete `Object` type, not a boolean, specifically
+    /// within the recording branch - `UploadService::addUploadedFile`'s
+    /// own `$dup_detect_lock_conn = DbConnection::build();` inside `if
+    /// (...) { ... }`, later re-tested via `if ($dup_detect_lock_conn
+    /// instanceof Connection)`). True-branch only, like the equality
+    /// discriminant above: `instanceof` false says nothing reusable about
+    /// one fixed identity to key facts under.
+    pub(crate) fn replay_object_discriminant_facts(
+        &self,
+        subject: &str,
+        resolved_class: &Type,
+        locals: &mut Locals,
+    ) {
+        if let Some(implied) = locals
+            .branch_implied_facts
+            .get(&discriminant_canonical_key(subject, resolved_class))
+            .cloned()
+        {
+            for (implied_key, implied_ty) in implied.iter() {
+                locals.insert(implied_key.clone(), implied_ty.clone());
+            }
+        }
+    }
+
     /// Records a same-branch discriminant-variable correlation for one
     /// branch (`branch_true` - which one `after` is the checked result
     /// of): when checking that branch caused some *other* variable to
@@ -255,18 +281,30 @@ impl<'a> Checker<'a> {
     /// stores that as a durable fact under a discriminant key - replayed
     /// the next time the identical discriminant is tested with the same
     /// polarity anywhere else in the program, even with no lexical
-    /// relationship to this `if` at all. Two recognized discriminant
+    /// relationship to this `if` at all. Three recognized discriminant
     /// shapes, each with its own scoping: `$subject === value` (or
     /// `==`), scoped to the *true* branch only (an equality's false
     /// branch says nothing reusable - "not equal to X" isn't one fixed
     /// identity to key facts under) and a value comparably concrete
     /// enough to make "the identical comparison" reproducible (an enum
-    /// case, a literal); and a bare truthiness discriminant
+    /// case, a literal); a bare truthiness discriminant
     /// (`truthiness_discriminant_subject`), keyed by `Type::True`/
-    /// `Type::False` as `discriminant_canonical_key`'s own "value" half.
-    /// The truthiness shape is safe for either branch, unlike the
-    /// equality shape, since truthy/falsy are the whole space of a
-    /// boolean condition's own outcomes, not one value out of many.
+    /// `Type::False` as `discriminant_canonical_key`'s own "value" half;
+    /// and any *other* local variable that itself became a literal
+    /// `true`/`false` specifically within this branch (`AlbumsPageRenderer
+    /// ::render`'s own `$order_by_date = true;` inside `if (str_starts_with
+    /// (...)) { ... }`, later re-tested bare as `if ($order_by_date)`) - a
+    /// real proxy discriminant for "this branch ran," the same as the
+    /// tested condition itself, confirmed distinct from it only by not
+    /// already being one (`before.get(name) != Some(after_ty)` - a value
+    /// already `True`/`False` *before* this branch ran says nothing about
+    /// *this* branch). The truthiness-shaped subjects are safe for either
+    /// branch, unlike the equality shape, since truthy/falsy are the whole
+    /// space of a boolean condition's own outcomes, not one value out of
+    /// many. A branch can yield several such subjects at once (the tested
+    /// condition plus zero or more flag variables) - the identical implied
+    /// facts get recorded under every one of them, each a valid, separate
+    /// way to later prove "this branch ran."
     pub(crate) fn record_branch_implied_facts(
         &self,
         cond: &Expr,
@@ -274,7 +312,7 @@ impl<'a> Checker<'a> {
         after: &mut Locals,
         branch_true: bool,
     ) {
-        let subject = if branch_true
+        let primary_subject = if branch_true
             && let ExprKind::Binary(BinOp::Identical | BinOp::Eq, l, r) = &cond.kind
         {
             match (narrowing_key(l), narrowing_key(r)) {
@@ -292,12 +330,28 @@ impl<'a> Checker<'a> {
             truthiness_discriminant_subject(cond)
                 .map(|key| (key, if branch_true { Type::True } else { Type::False }))
         };
-        let Some((subject_key, value_ty)) = subject else {
+        let mut subjects: Vec<(String, Type)> = primary_subject.into_iter().collect();
+        for (name, after_ty) in after.iter() {
+            let is_flag_proxy = matches!(after_ty, Type::True | Type::False);
+            // A variable that became a concrete `Object` type specifically
+            // within this branch is `instanceof`'s own proxy discriminant
+            // (`replay_object_discriminant_facts`'s own doc comment) - the
+            // object-typed counterpart of the boolean-flag-proxy case
+            // above.
+            let is_object_proxy = matches!(after_ty, Type::Object(..));
+            if (is_flag_proxy || is_object_proxy)
+                && before.get(name) != Some(after_ty)
+                && !subjects.iter().any(|(k, _)| k == name)
+            {
+                subjects.push((name.clone(), after_ty.clone()));
+            }
+        }
+        if subjects.is_empty() {
             return;
-        };
+        }
         let mut implied: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
-            if *name == subject_key {
+            if subjects.iter().any(|(k, _)| k == name) {
                 continue;
             }
             if type_definitely_excludes_null(after_ty)
@@ -310,16 +364,28 @@ impl<'a> Checker<'a> {
         if implied.is_empty() {
             return;
         }
-        let key = discriminant_canonical_key(&subject_key, &value_ty);
-        let mut combined = after
-            .branch_implied_facts
-            .get(&key)
-            .map(|existing| (**existing).clone())
-            .unwrap_or_default();
-        combined.extend(implied);
-        after
-            .branch_implied_facts
-            .insert(key, std::rc::Rc::new(combined));
+        for (subject_key, value_ty) in subjects {
+            let key = discriminant_canonical_key(&subject_key, &value_ty);
+            let mut combined = after
+                .branch_implied_facts
+                .get(&key)
+                .map(|existing| (**existing).clone())
+                .unwrap_or_default();
+            // Deduped, not a blind `extend` - re-recording the identical
+            // fact across repeated loop-convergence passes (this branch
+            // sits inside a loop body re-checked up to `MAX_PASSES` times)
+            // must reach a fixed point rather than growing every pass, the
+            // same unbounded-growth hazard `merge_scopes`'s own
+            // `branch_implied_facts` merge had.
+            for fact in &implied {
+                if !combined.contains(fact) {
+                    combined.push(fact.clone());
+                }
+            }
+            after
+                .branch_implied_facts
+                .insert(key, std::rc::Rc::new(combined));
+        }
     }
 }
 
@@ -1009,6 +1075,7 @@ impl<'a> Checker<'a> {
                 {
                     let resolved = self.resolve_name_expr(class_name);
                     if branch_true {
+                        self.replay_object_discriminant_facts(&key, &resolved, locals);
                         let current = self.current_narrowed_type(inner, &key, locals);
                         locals.insert(key, narrow_instanceof_true(&current, &resolved));
                     } else {
