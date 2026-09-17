@@ -586,19 +586,28 @@ impl<'a> Checker<'a> {
             {
                 continue;
             }
-            let class_part = class_part.trim_start_matches('\\');
-            if class_part.is_empty()
-                || !class_part
+            let trimmed = class_part.trim_start_matches('\\');
+            if trimmed.is_empty()
+                || !trimmed
                     .split('\\')
                     .all(|seg| is_php_identifier(seg) && !seg.is_empty())
             {
                 continue;
             }
+            // `class_part`, not `trimmed`, is passed here - a leading `\`
+            // means "already fully qualified" to `NameContext::resolve`
+            // (`resolve_as`'s own `strip_prefix('\\')` check), matching
+            // real PHP name-resolution rules. Resolving the already-
+            // stripped form re-qualified an FQN `@see` target against the
+            // current namespace a second time, corrupting it into a name
+            // that could never resolve (a real, confirmed false positive:
+            // `\Piwigo\Controller\Projection\PictureElement` from a
+            // `Piwigo\Controller\Projection`-namespaced file).
             let resolved = self.name_ctx.resolve(class_part);
             if self.registry.lookup_class(&resolved).is_none() {
                 self.report(
                     label.to_string(),
-                    format!("PHPDoc tag @see contains unknown class {class_part}"),
+                    format!("PHPDoc tag @see contains unknown class {trimmed}"),
                     span,
                     2,
                     "phpDoc.seeTag",
@@ -621,7 +630,7 @@ impl<'a> Checker<'a> {
             if !found {
                 self.report(
                     label.to_string(),
-                    format!("PHPDoc tag @see contains unknown reference {class_part}::{member}"),
+                    format!("PHPDoc tag @see contains unknown reference {trimmed}::{member}"),
                     span,
                     2,
                     "phpDoc.seeTag",

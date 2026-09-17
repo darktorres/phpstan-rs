@@ -157,3 +157,25 @@ fn a_method_target_on_a_class_declaration_is_checked_too() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_fully_qualified_target_in_a_namespaced_file_is_not_re_qualified() {
+    // A leading `\` means "already fully qualified" to `NameContext::
+    // resolve` - stripping it before resolving re-qualified the target
+    // against the current namespace a second time (`App\App\Real`
+    // instead of `App\Real`), a real false positive on a real Piwigo
+    // `@see \Fully\Qualified\Target` reference from within that exact
+    // same namespace.
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            class Real {}
+            /** @see \App\Real */
+            function f(): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpDoc.seeTag"),
+        "got: {d:?}"
+    );
+}
