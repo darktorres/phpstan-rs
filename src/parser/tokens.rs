@@ -242,14 +242,27 @@ impl Parser {
     }
 
     pub(crate) fn parse_qualified_name(&mut self) -> String {
+        let leading_backslash = self.eat(&Token::Backslash);
+        let Some(first) = self.take_name_segment() else {
+            return if leading_backslash {
+                "\\".to_string()
+            } else {
+                String::new()
+            };
+        };
+        // Fast path: the overwhelmingly common single-segment,
+        // non-namespaced name - `first` is already an owned `String`
+        // taken directly out of the token stream (`take_name_segment`),
+        // so return it as-is instead of copying it into a second,
+        // separately-heap-allocated `String`.
+        if !leading_backslash && !matches!(self.peek(), Token::Backslash) {
+            return first;
+        }
         let mut s = String::new();
-        if self.eat(&Token::Backslash) {
+        if leading_backslash {
             s.push('\\');
         }
-        match self.take_name_segment() {
-            Some(part) => s.push_str(&part),
-            None => return s,
-        }
+        s.push_str(&first);
         while matches!(self.peek(), Token::Backslash) {
             self.skip();
             s.push('\\');
