@@ -47,30 +47,6 @@ use crate::types::{self, AccessoryKind, TemplateParam, Type};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 
-/// Parses one stub file's source into `(name, FunctionSig)` pairs,
-/// reusing the exact same pipeline real project source goes through -
-/// stub files are just PHP with empty function bodies, so nothing new was
-/// needed to read them.
-pub fn generate_from_source(source: &str) -> Vec<(String, FunctionSig)> {
-    let tokens = Lexer::new(source).tokenize_with_spans();
-    let program = Parser::new(tokens)
-        .parse_program()
-        .expect("vendored phpstorm-stubs source failed to parse");
-    let registry = Registry::index_and_flatten(&program);
-    registry
-        .functions
-        .into_iter()
-        .map(|(name, mut sig)| {
-            // See `FunctionSig::is_stub`'s own doc comment: a stub file's
-            // own body is never real - `Registry::index_and_flatten` has
-            // no way to know that on its own, so this is set here
-            // instead, the one place that does.
-            sig.is_stub = true;
-            (name, sig)
-        })
-        .collect()
-}
-
 /// phpstorm-stubs' own real (and, per real PHP's own C-level `arg_info`,
 /// genuinely accurate) declaration of `array_multisort`'s variadic tail
 /// is `&...$rest` - every "rest" argument marked by-reference uniformly.
@@ -333,116 +309,7 @@ fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
 /// for the same function in different files); taking the first is a
 /// simplification, not a precision-critical choice.
 pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
-    // Re-parsing the combined 2351-file corpus from scratch on every
-    // call is fine for the CLI binary, which calls this exactly once per
-    // process, but makes the test suite (hundreds of
-    // `diagnostics_for`/`Project::new` calls, each independently
-    // re-parsing the whole corpus) measurably slower.
-    // `LazyLock` computes the expensive part (parsing every file)
-    // exactly once per process regardless of caller count; each call
-    // here still returns a fresh, independently-owned `Vec` (cloning
-    // already-built `FunctionSig`s, not re-parsing anything) so this
-    // function's own public signature - and every one of its call sites,
-    // which all consume the returned `Vec` by value - stays unchanged.
-    static CACHE: std::sync::LazyLock<Vec<(String, FunctionSig)>> =
-        std::sync::LazyLock::new(|| {
-            let mut seen = std::collections::HashSet::new();
-            let mut result = Vec::new();
-            for source in PHPSTORM_STUBS_SOURCES
-                .iter()
-                .chain(PHPSTAN_SRC_SOURCES.iter())
-            {
-                for (name, sig) in generate_from_source(source) {
-                    if seen.insert(name.clone()) {
-                        result.push((name, sig));
-                    }
-                }
-            }
-            patch_array_multisort_by_ref(&mut result);
-            patch_debug_backtrace(&mut result);
-            patch_usleep(&mut result);
-            patch_functionmap_array_shapes(&mut result);
-            result
-        });
-    CACHE.clone()
-}
-
-/// Parses one stub file's source into `(name, ClassInfo)` pairs for every
-/// class/interface/enum it declares - undefined-class detection
-/// needs built-in classes to actually be known, the same way
-/// undefined-function detection needs `generated_stubs`' functions to be
-/// known; without this, every reference to a built-in like `Exception` or
-/// `ArrayObject` would look undefined.
-pub fn generate_classes_from_source(source: &str) -> Vec<(String, ClassInfo)> {
-    let tokens = Lexer::new(source).tokenize_with_spans();
-    let program = Parser::new(tokens)
-        .parse_program()
-        .expect("vendored phpstorm-stubs source failed to parse");
-    let registry = Registry::index_and_flatten(&program);
-    registry
-        .classes
-        .into_iter()
-        .map(|(name, mut info)| {
-            // Same reasoning as `generate_from_source`'s own
-            // `FunctionSig::is_stub` marking, one level down: every
-            // method a stub class declares has an equally empty,
-            // unreal body.
-            for sig in info.methods.values_mut() {
-                sig.is_stub = true;
-            }
-            (name, info)
-        })
-        .collect()
-}
-
-/// The constant-side sibling of
-/// `generate_classes_from_source` just above - undefined-`use const`/
-/// bare-constant detection needs built-in/extension constants
-/// (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually be
-/// known, the same way undefined-function detection needs
-/// `generated_stubs()`'s functions to be known. Real phpstorm-stubs
-/// declares these via ordinary top-level `define('NAME', value)` calls
-/// (6781 of them across the vendored corpus) - `Registry::index_and_
-/// flatten` already collects those into its own `global_constants` map
-/// via the identical `define_call_constant`/`register_global_constant`
-/// path project source goes through, so there's nothing new to parse,
-/// only a new place to read the result from.
-pub fn generate_constants_from_source(source: &str) -> Vec<(String, Type)> {
-    let tokens = Lexer::new(source).tokenize_with_spans();
-    let program = Parser::new(tokens)
-        .parse_program()
-        .expect("vendored phpstorm-stubs source failed to parse");
-    let registry = Registry::index_and_flatten(&program);
-    registry.global_constants.into_iter().collect()
-}
-
-/// All constants generated from the vendored phpstorm-stubs sources,
-/// merged via `register_global_constant`'s own "poison to Mixed on any
-/// real disagreement" policy - unlike `generated_stubs`/`generated_
-/// stub_classes`'s first-occurrence-wins dedup (a stub function/class
-/// name conflict is resolved by this project's own conditional-
-/// declaration tiebreaking instead), a bare global constant has no such
-/// tiebreaking mechanism, so this reuses the exact same conflict policy
-/// already used *within* one file's own `global_constants` map, across
-/// the whole corpus at once - the identical merge `Registry::
-/// merge_stub_constants` (`registry/index.rs`) applies again for a
-/// project's own constants layered on top.
-pub fn generated_stub_constants() -> Vec<(String, Type)> {
-    // See `generated_stubs`' own doc comment - identical `LazyLock`
-    // caching, same reason.
-    static CACHE: std::sync::LazyLock<Vec<(String, Type)>> = std::sync::LazyLock::new(|| {
-        let mut merged: rustc_hash::FxHashMap<String, Type> = rustc_hash::FxHashMap::default();
-        for source in PHPSTORM_STUBS_SOURCES
-            .iter()
-            .chain(PHPSTAN_SRC_SOURCES.iter())
-        {
-            for (name, ty) in generate_constants_from_source(source) {
-                register_global_constant(&mut merged, name, ty);
-            }
-        }
-        merged.into_iter().collect()
-    });
-    CACHE.clone()
+    generated_stub_data().functions.clone()
 }
 
 /// Real phpstorm-stubs' own `ReflectionClass::__construct`
@@ -742,27 +609,112 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
-    // See `generated_stubs`' own doc comment - identical `LazyLock`
-    // caching, same reason.
-    static CACHE: std::sync::LazyLock<Vec<(String, ClassInfo)>> = std::sync::LazyLock::new(|| {
-        let mut seen = std::collections::HashSet::new();
-        let mut result = Vec::new();
+    generated_stub_data().classes.clone()
+}
+
+/// The constant-side sibling of `generated_stub_classes` just above -
+/// undefined-`use const`/bare-constant detection needs built-in/extension
+/// constants (`JSON_PRETTY_PRINT`, `SORT_*`, `CURLOPT_*`, ...) to actually
+/// be known, the same way undefined-function detection needs
+/// `generated_stubs()`'s functions to be known. Real phpstorm-stubs
+/// declares these via ordinary top-level `define('NAME', value)` calls
+/// (6781 of them across the vendored corpus) - `Registry::index_and_
+/// flatten` already collects those into its own `global_constants` map
+/// via the identical `define_call_constant`/`register_global_constant`
+/// path project source goes through, so there's nothing new to parse,
+/// only a new place to read the result from. Merged via `register_
+/// global_constant`'s own "poison to Mixed on any real disagreement"
+/// policy - unlike `generated_stubs`/`generated_stub_classes`'s
+/// first-occurrence-wins dedup (a stub function/class name conflict is
+/// resolved by this project's own conditional-declaration tiebreaking
+/// instead), a bare global constant has no such tiebreaking mechanism, so
+/// this reuses the exact same conflict policy already used *within* one
+/// file's own `global_constants` map, across the whole corpus at once.
+pub fn generated_stub_constants() -> Vec<(String, Type)> {
+    generated_stub_data().constants.clone()
+}
+
+/// The three projections `generated_stubs`/`generated_stub_classes`/
+/// `generated_stub_constants` each expose, computed together from one
+/// shared pass over the vendored corpus instead of three independent
+/// ones - `Registry::index_and_flatten` already builds `.functions`,
+/// `.classes`, and `.global_constants` together on the same `Registry`
+/// per file, so lexing/parsing/indexing each of the 2351 vendored files
+/// three separate times (once per projection) just to read a different
+/// field off what is otherwise the identical deterministic per-file
+/// result was pure waste.
+struct GeneratedStubData {
+    functions: Vec<(String, FunctionSig)>,
+    classes: Vec<(String, ClassInfo)>,
+    constants: Vec<(String, Type)>,
+}
+
+/// Computes `GeneratedStubData` exactly once per process
+/// (`std::sync::LazyLock`) and returns a `'static` reference to it -
+/// re-parsing the combined 2351-file corpus from scratch on every call
+/// is fine for the CLI binary, which calls each of the three public
+/// accessors above exactly once per process, but makes the test suite
+/// (hundreds of `diagnostics_for`/`Project::new` calls, each
+/// independently needing the same data) measurably slower. Each public
+/// accessor still returns a fresh, independently-owned `Vec` (cloning
+/// already-built values, not re-parsing anything), so none of their
+/// public signatures - or any of their call sites, which all consume the
+/// returned `Vec` by value - change.
+fn generated_stub_data() -> &'static GeneratedStubData {
+    static CACHE: std::sync::LazyLock<GeneratedStubData> = std::sync::LazyLock::new(|| {
+        let mut seen_functions = std::collections::HashSet::new();
+        let mut functions = Vec::new();
+        let mut seen_classes = std::collections::HashSet::new();
+        let mut classes = Vec::new();
+        let mut merged_constants: rustc_hash::FxHashMap<String, Type> =
+            rustc_hash::FxHashMap::default();
         for source in PHPSTORM_STUBS_SOURCES
             .iter()
             .chain(PHPSTAN_SRC_SOURCES.iter())
         {
-            for (name, info) in generate_classes_from_source(source) {
-                if seen.insert(name.clone()) {
-                    result.push((name, info));
+            let tokens = Lexer::new(source).tokenize_with_spans();
+            let program = Parser::new(tokens)
+                .parse_program()
+                .expect("vendored phpstorm-stubs source failed to parse");
+            let registry = Registry::index_and_flatten(&program);
+            for (name, mut sig) in registry.functions {
+                // See `FunctionSig::is_stub`'s own doc comment: a stub
+                // file's own body is never real - `Registry::
+                // index_and_flatten` has no way to know that on its own,
+                // so this is set here instead, the one place that does.
+                sig.is_stub = true;
+                if seen_functions.insert(name.clone()) {
+                    functions.push((name, sig));
                 }
             }
+            for (name, mut info) in registry.classes {
+                // Same reasoning one level down: every method a stub
+                // class declares has an equally empty, unreal body.
+                for sig in info.methods.values_mut() {
+                    sig.is_stub = true;
+                }
+                if seen_classes.insert(name.clone()) {
+                    classes.push((name, info));
+                }
+            }
+            for (name, ty) in registry.global_constants {
+                register_global_constant(&mut merged_constants, name, ty);
+            }
         }
-        patch_reflection_class_constructor_template(&mut result);
-        patch_reflection_method_and_property_templates(&mut result);
-        patch_reflection_and_exception_list_types(&mut result);
-        result
+        patch_array_multisort_by_ref(&mut functions);
+        patch_debug_backtrace(&mut functions);
+        patch_usleep(&mut functions);
+        patch_functionmap_array_shapes(&mut functions);
+        patch_reflection_class_constructor_template(&mut classes);
+        patch_reflection_method_and_property_templates(&mut classes);
+        patch_reflection_and_exception_list_types(&mut classes);
+        GeneratedStubData {
+            functions,
+            classes,
+            constants: merged_constants.into_iter().collect(),
+        }
     });
-    CACHE.clone()
+    &CACHE
 }
 
 #[cfg(test)]
