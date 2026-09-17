@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use output::OutputFormat;
 use phpstan_rs::{
@@ -341,8 +342,9 @@ fn run_check_project(
     // collect_property_assign_facts`'s own doc comment). Run before the
     // real, diagnostic-producing pass below, which consumes the merge via
     // `check_file_with_property_assign_facts` instead of `check_file`.
-    let property_assign_facts =
-        std::panic::catch_unwind(|| project.collect_property_assign_facts()).unwrap_or_default();
+    let property_assign_facts = Arc::new(
+        std::panic::catch_unwind(|| project.collect_property_assign_facts()).unwrap_or_default(),
+    );
     let checked_results: Vec<(PathBuf, Result<Vec<checker::Diagnostic>, String>)> =
         pool.install(|| {
             analyze_files_by_size

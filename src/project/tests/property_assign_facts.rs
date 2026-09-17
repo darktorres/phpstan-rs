@@ -4,6 +4,8 @@
 //! with_property_assign_facts`) that lets a trait-donated property write
 //! discovered in one file reach it for a host declared in another.
 
+use std::sync::Arc;
+
 use super::super::*;
 
 #[test]
@@ -25,7 +27,7 @@ fn a_private_property_never_assigned_one_declared_union_member_is_flagged() {
         .unwrap();
     project.finish_loading();
 
-    let facts = project.collect_property_assign_facts();
+    let facts = Arc::new(project.collect_property_assign_facts());
     let diags = project.check_file_with_property_assign_facts(&PathBuf::from("a.php"), &facts);
     assert!(
         diags.iter().any(|d| d.identifier == "property.unusedType"),
@@ -53,7 +55,7 @@ fn a_private_property_assigned_every_declared_union_member_is_never_flagged() {
         .unwrap();
     project.finish_loading();
 
-    let facts = project.collect_property_assign_facts();
+    let facts = Arc::new(project.collect_property_assign_facts());
     let diags = project.check_file_with_property_assign_facts(&PathBuf::from("a.php"), &facts);
     assert!(
         !diags.iter().any(|d| d.identifier == "property.unusedType"),
@@ -91,7 +93,7 @@ fn a_trait_donated_property_write_discovered_in_a_different_file_reaches_the_hos
         .unwrap();
     project.finish_loading();
 
-    let facts = project.collect_property_assign_facts();
+    let facts = Arc::new(project.collect_property_assign_facts());
     // The trait's own contribution was discovered while checking
     // trait.php, attributed to Foo's own fqn - host.php's own check must
     // see it too, via the whole-project merge, not just its own file's
@@ -133,7 +135,7 @@ fn a_trait_donated_property_write_missing_one_union_member_is_flagged_on_the_hos
         .unwrap();
     project.finish_loading();
 
-    let facts = project.collect_property_assign_facts();
+    let facts = Arc::new(project.collect_property_assign_facts());
     let diags = project.check_file_with_property_assign_facts(&PathBuf::from("host.php"), &facts);
     assert!(
         diags.iter().any(|d| d.identifier == "property.unusedType"),

@@ -1,5 +1,6 @@
 use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::ast::*;
 use crate::pest_config;
@@ -489,6 +490,12 @@ impl DiagnosticBuilder {
 /// file's `namespace`/`use` statements) before any registry key is read or
 /// written - two classes with the same short name in different namespaces
 /// get distinct keys, the same way real PHP tells them apart.
+/// A private property's every discovered assigned type, keyed by
+/// (declaring class fqn, property name) - see `Checker::
+/// property_assign_facts`/`cross_file_property_assign_facts`'s own doc
+/// comments.
+pub(crate) type PropertyAssignFacts = HashMap<String, HashMap<String, Vec<Type>>>;
+
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) diagnostics: Vec<Diagnostic>,
@@ -687,7 +694,7 @@ pub struct Checker<'a> {
     // class starts being checked. Consumed by
     // `check_too_wide_property_types`, this project's own
     // `TooWideFunctionReturnTypehintRule`-equivalent for properties.
-    pub(crate) property_assign_facts: HashMap<String, HashMap<String, Vec<Type>>>,
+    pub(crate) property_assign_facts: PropertyAssignFacts,
     // The project-wide merge of every file's own `property_assign_facts`
     // - set via `set_cross_file_property_assign_facts` (by `Project::
     // check_file`, from a first, fact-collecting pass over every loaded
@@ -697,8 +704,7 @@ pub struct Checker<'a> {
     // this run's own same-file `property_assign_facts`, correct for the
     // common case where a trait and the host using it are declared (and
     // visited, in that order) in the one file being checked.
-    pub(crate) cross_file_property_assign_facts:
-        Option<HashMap<String, HashMap<String, Vec<Type>>>>,
+    pub(crate) cross_file_property_assign_facts: Option<Arc<PropertyAssignFacts>>,
     // One frame per currently-open loop or switch, collecting
     // the `locals` snapshot at every `break` reached inside it - a stack,
     // since loops/switches nest. `StmtKind::Foreach`/`While`/`For`/
@@ -1011,10 +1017,7 @@ impl<'a> Checker<'a> {
     /// assign_facts`, computed by `Project`'s own collect pass before the
     /// real, diagnostic-producing pass runs - see `cross_file_property_
     /// assign_facts`'s own doc comment.
-    pub fn set_cross_file_property_assign_facts(
-        &mut self,
-        facts: HashMap<String, HashMap<String, Vec<Type>>>,
-    ) {
+    pub fn set_cross_file_property_assign_facts(&mut self, facts: Arc<PropertyAssignFacts>) {
         self.cross_file_property_assign_facts = Some(facts);
     }
 
@@ -1023,7 +1026,7 @@ impl<'a> Checker<'a> {
     /// (one per file) to build the project-wide merge every other file's
     /// own real pass then consumes via `set_cross_file_property_assign_
     /// facts`.
-    pub fn take_property_assign_facts(&mut self) -> HashMap<String, HashMap<String, Vec<Type>>> {
+    pub fn take_property_assign_facts(&mut self) -> PropertyAssignFacts {
         std::mem::take(&mut self.property_assign_facts)
     }
 

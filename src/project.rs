@@ -2,9 +2,10 @@ use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::ast::{Stmt, StmtKind};
-use crate::checker::{self, Checker, Diagnostic};
+use crate::checker::{self, Checker, Diagnostic, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
 use crate::lexer::Lexer;
@@ -12,7 +13,6 @@ use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
-use crate::types::Type;
 
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
@@ -789,7 +789,7 @@ impl Project {
     pub fn check_file_with_property_assign_facts(
         &self,
         path: &Path,
-        facts: &HashMap<String, HashMap<String, Vec<Type>>>,
+        facts: &Arc<PropertyAssignFacts>,
     ) -> Vec<Diagnostic> {
         self.check_file_impl(path, Some(facts))
     }
@@ -797,7 +797,7 @@ impl Project {
     fn check_file_impl(
         &self,
         path: &Path,
-        cross_file_property_assign_facts: Option<&HashMap<String, HashMap<String, Vec<Type>>>>,
+        cross_file_property_assign_facts: Option<&Arc<PropertyAssignFacts>>,
     ) -> Vec<Diagnostic> {
         let Some(file) = self.files.get(path) else {
             return Vec::new();
@@ -807,7 +807,7 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         if let Some(facts) = cross_file_property_assign_facts {
-            checker.set_cross_file_property_assign_facts(facts.clone());
+            checker.set_cross_file_property_assign_facts(Arc::clone(facts));
         }
         checker.check_program(&file.ast);
         let mut diagnostics = checker.into_diagnostics();
@@ -910,8 +910,8 @@ impl Project {
     /// contribution to each host's real fqn (see `property_assign_facts`'s
     /// own doc comment), so merging here needs no extra trait-awareness
     /// of its own - just concatenating every file's own per-key `Vec`.
-    pub fn collect_property_assign_facts(&self) -> HashMap<String, HashMap<String, Vec<Type>>> {
-        let mut merged: HashMap<String, HashMap<String, Vec<Type>>> = HashMap::new();
+    pub fn collect_property_assign_facts(&self) -> PropertyAssignFacts {
+        let mut merged: PropertyAssignFacts = HashMap::new();
         for path in self.files.keys() {
             let Some(file) = self.files.get(path) else {
                 continue;
@@ -941,7 +941,7 @@ impl Project {
     /// `check_too_wide_property_types` in whichever file declares the
     /// host using it.
     pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let facts = self.collect_property_assign_facts();
+        let facts = Arc::new(self.collect_property_assign_facts());
         self.files
             .keys()
             .map(|path| {
