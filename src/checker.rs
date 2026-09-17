@@ -58,22 +58,24 @@ type GuardedMemberSet = imbl::GenericHashSet<
 
 // `name -> (target_key, Rc<Expr>)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
-// `condition_alias_shape`/`condition_alias_target` in `checker/
+// `condition_alias_shape`/`condition_alias_targets` in `checker/
 // narrowing.rs`), replayed through `apply_narrowing` when `name` is later
 // checked bare (`if ($name)`) - correlates a *second* variable's narrowing
 // to `name`'s own truthiness without any new type math: the stored `Expr`
 // is the original AST node, re-run through the exact dispatch a direct
-// `if (<rhsExpr>)` would use. `target_key` (computed once at store time,
-// mirroring `narrowing_key`'s own string form) is what `Locals::declare`
-// scans for to invalidate a stale alias whose *target* was rebound, not
-// just the alias variable itself. `Rc`, not a deep clone, so every branch
-// fork of `Locals` stays O(1); a given alias's `Expr` never changes after
-// it's first stored, only wholesale-replaced or purged, so `Rc::ptr_eq` is
-// a correct, cheap "did both branches inherit this unchanged" merge test
-// (see `merge_scopes`).
+// `if (<rhsExpr>)` would use. `target_keys` (computed once at store time,
+// mirroring `narrowing_key`'s own string form - one entry per distinct
+// subject a compound `&&`/`||` condition names, e.g. both `$isUserFound`
+// and `$email` for `! $isUserFound || $email === null || $email === ''`)
+// is what `Locals::declare` scans for to invalidate a stale alias whose
+// *any* target was rebound, not just the alias variable itself. `Rc`, not
+// a deep clone, so every branch fork of `Locals` stays O(1); a given
+// alias's `Expr` never changes after it's first stored, only wholesale-
+// replaced or purged, so `Rc::ptr_eq` is a correct, cheap "did both
+// branches inherit this unchanged" merge test (see `merge_scopes`).
 type ConditionAliasMap = imbl::GenericHashMap<
     String,
-    (String, std::rc::Rc<Expr>),
+    (Vec<String>, std::rc::Rc<Expr>),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -175,29 +177,32 @@ impl Locals {
     }
 
     /// The store half of the condition-alias mechanism - see
-    /// `ConditionAliasMap`'s doc comment. `target_key` is `condition`'s
-    /// narrowing target (e.g. `$x` for `$x instanceof Foo`), computed by
-    /// the caller (`Checker::record_condition_alias`) via
-    /// `condition_alias_target`.
+    /// `ConditionAliasMap`'s doc comment. `target_keys` are `condition`'s
+    /// own narrowing targets (e.g. `["x"]` for `$x instanceof Foo`, or
+    /// `["isUserFound", "email"]` for a compound condition naming both),
+    /// computed by the caller (`Checker::record_condition_alias`) via
+    /// `condition_alias_targets`.
     pub(crate) fn set_condition_alias(
         &mut self,
         name: String,
-        target_key: String,
+        target_keys: Vec<String>,
         condition: std::rc::Rc<Expr>,
     ) {
-        self.condition_aliases.insert(name, (target_key, condition));
+        self.condition_aliases
+            .insert(name, (target_keys, condition));
     }
 
     /// Drops `key`'s own alias (rebinding the alias variable makes it
-    /// stale) and every other alias whose `target_key` is `key` (rebinding
-    /// an alias's *target* makes the alias stale too, even though its own
-    /// name is untouched). `Checker::record_condition_alias` re-inserts a
-    /// fresh alias for `key` right after, when the new RHS qualifies, so a
-    /// genuine re-alias isn't lost - only ever a stale one.
+    /// stale) and every other alias whose own `target_keys` contains `key`
+    /// (rebinding any one of an alias's targets makes the whole alias
+    /// stale too, even though its own name is untouched). `Checker::
+    /// record_condition_alias` re-inserts a fresh alias for `key` right
+    /// after, when the new RHS qualifies, so a genuine re-alias isn't lost
+    /// - only ever a stale one.
     fn purge_condition_aliases_targeting(&mut self, key: &str) {
         self.condition_aliases.remove(key);
         self.condition_aliases
-            .retain(|_, (target, _)| target != key);
+            .retain(|_, (targets, _)| !targets.iter().any(|t| t == key));
     }
 
     /// The provenance-*copying* primitive - used where a value moves

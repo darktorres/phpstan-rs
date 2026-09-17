@@ -168,15 +168,20 @@ impl<'a> Checker<'a> {
         // a nullsafe *method* call has no `narrowing_key` of its own to
         // reach `narrowed_expr` through. This replays through `key`'s
         // own `condition_aliases` entry, whose target was stored as the
-        // *receiver*'s key already (`condition_alias_target`'s own
-        // nullsafe arm), not the chain's.
+        // *receiver*'s key already (`condition_alias_targets`'s own
+        // nullsafe arm - always exactly one target for this shape), not
+        // the chain's.
         if !matches_when_true
             && target_ty == Type::Null
-            && let Some((alias_target, alias_expr)) = locals.condition_aliases.get(&key).cloned()
+            && let Some((alias_targets, alias_expr)) = locals.condition_aliases.get(&key).cloned()
             && let Some(receiver) = super::nullsafe_receiver(&alias_expr)
+            && let [alias_target] = alias_targets.as_slice()
         {
-            let current = self.current_narrowed_type(receiver, &alias_target, locals);
-            locals.insert(alias_target, narrow_type_excluding(&current, &Type::Null));
+            let current = self.current_narrowed_type(receiver, alias_target, locals);
+            locals.insert(
+                alias_target.clone(),
+                narrow_type_excluding(&current, &Type::Null),
+            );
         }
         locals.insert(key, narrowed);
     }

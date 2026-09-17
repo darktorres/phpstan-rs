@@ -4100,6 +4100,47 @@ fn a_flag_holding_a_compound_or_equality_condition_narrows_on_replay() {
 }
 
 #[test]
+fn a_flag_holding_a_compound_condition_spanning_two_subjects_narrows_both_on_replay() {
+    // `PasswordController::processVerificationCode`'s own real shape -
+    // unlike the single-subject case above, `$isUserFound`/`$email` are
+    // two genuinely different variables, and the first leaf is negated
+    // (`! $isUserFound`, not a bare equality/predicate call).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(bool $isUserFound, ?string $email): void {
+                $skipMail = ! $isUserFound || $email === null || $email === '';
+                if (! $skipMail) {
+                    assertType('non-empty-string', $email);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn rebinding_either_subject_of_a_multi_target_flag_alias_invalidates_it() {
+    // If rebinding `$email` didn't purge the alias, `if (! $skipMail)`
+    // would incorrectly replay the *stale* `$email === null` narrowing
+    // and claim `$email` excludes `null` here, when it's really just
+    // whatever `$other` holds.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(bool $isUserFound, ?string $email, ?string $other): void {
+                $skipMail = ! $isUserFound || $email === null;
+                $email = $other;
+                if (! $skipMail) {
+                    assertType('string|null', $email);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_flag_holding_a_compound_and_inequality_condition_narrows_on_replay() {
     let d = diagnostics_for(
         r#"<?php
