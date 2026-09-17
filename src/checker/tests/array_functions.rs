@@ -115,6 +115,36 @@ fn array_map_falls_back_to_the_hint_when_the_bodys_inference_is_less_precise() {
     assert!(d[0].message.contains("needsInts"), "got: {d:?}");
 }
 
+#[test]
+fn array_map_still_trusts_the_hint_for_a_multi_statement_closure_body() {
+    // A real regression, caught by this project's own corpus run: only a
+    // single-implicit-return-statement body is inferred at all (`infer_
+    // closure_return_with_param_overrides`'s own doc comment) - a real
+    // corpus shape (`ExtensionRepository::findUserIdsByTheme`'s own
+    // `if (! is_numeric(...)) { throw ...; } return ...;` guard-then-
+    // return body) has two statements, not one. The declared `: string`
+    // hint must still be used for *this* shape too - discarding it
+    // entirely (rather than falling back to it, the same as no body
+    // inference being attempted at all) silently lost `array_map()`'s
+    // own list-ness preservation, not just element-type precision.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param list<string> $xs */
+            function needsListOfStrings(array $xs): void {}
+            /** @return list<int> */
+            function ids(): array { return [1, 2, 3]; }
+            $mapped = array_map(static function (int $x): string {
+                if ($x < 0) {
+                    throw new \RuntimeException('negative');
+                }
+                return (string) $x;
+            }, ids());
+            needsListOfStrings($mapped);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // A first-class callable (`intval(...)`, PHP 8.1) used as array_map's
 // own callback must be recognized, or it discards both the mapped
 // element type and any list-ness/non-emptiness the input already had.

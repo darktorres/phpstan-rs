@@ -3594,17 +3594,33 @@ impl<'a> Checker<'a> {
                 // shape is handled (mirrors check_shape_key_access's
                 // "only handle the shape that actually comes up, don't
                 // guess at the rest" precedent) - a closure with a more
-                // complex body safely falls back to None too.
-                let inferred = match body.as_slice() {
+                // complex body falls back to the declared hint (still
+                // `None` when there isn't one), never silently discarding
+                // an explicit `: T` the caller could otherwise have kept
+                // trusting - regressed once already: a multi-statement
+                // body (an `if`-guard before the real `return`, a real
+                // corpus shape) used to still return the hint here, since
+                // the old code checked for one before ever looking at the
+                // body at all.
+                match body.as_slice() {
                     [
                         Stmt {
                             kind: StmtKind::Return(Some(e)),
                             ..
                         },
-                    ] => self.infer_expr(e, &closure_locals),
-                    _ => return None,
-                };
-                Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
+                    ] => {
+                        let inferred = self.infer_expr(e, &closure_locals);
+                        Some(
+                            self.prefer_inferred_over_declared_return(
+                                return_type.as_deref(),
+                                inferred,
+                            ),
+                        )
+                    }
+                    _ => return_type
+                        .as_deref()
+                        .map(|hint| self.resolve_type_hint(Some(hint))),
+                }
             }
             // A first-class callable (`intval(...)`, `TagId::from(...)`,
             // PHP 8.1) used as `array_map`'s callback would otherwise
