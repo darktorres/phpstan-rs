@@ -559,3 +559,51 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   new stateful `Locals` side-channel (mirroring `condition_aliases`) -
   exactly the class of mechanism that caused `01cc3f2`'s own OOM bug
   when done carelessly.
+- `6e0aa99` - implemented most of the phases/gaps `0e34322`'s own
+  triage filed, rather than leaving them all for a future session.
+  Scoped 75 -> 77 (net; see below), unscoped 40236 -> 39413.
+  - `2403e36`/`a5224e6`/`f7047fe` (Phase 169/170/171/175 cluster):
+    generalized `condition_aliases` to a compound condition's *every*
+    distinct subject (not one shared one) plus a `Unary(Not, ...)` leaf
+    arm (`PasswordController::processVerificationCode`); recognized a
+    branch-local flag/object variable assigned a literal `true`/`false`
+    or a concrete `Object` type as its own proxy discriminant, alongside
+    the tested condition itself (`AlbumsPageRenderer::render`,
+    `UploadService::addUploadedFile`); carried `branch_implied_facts`
+    across a `use (...)`-capturing closure boundary, filtered to only
+    the captured names (`RateService::rate`). All 6 of that cluster's
+    own originally-cited target sites confirmed fixed.
+  - `a9dfe95` (closure-literal return precision): a closure/arrow-fn
+    literal's declared `: T` hint no longer wins unconditionally over a
+    genuinely more precise inferred body return - confirmed against
+    `dumpType()` that real PHPStan already does this.
+    `DbMaintenanceRepositoryTest` confirmed fixed.
+  - `6e0aa99` itself: a real regression in the fix directly above - a
+    closure body with more than one statement (a throw-guard before the
+    real `return`) used to still get the declared hint (the old code
+    checked for one before ever looking at the body), but the rewrite's
+    `_ => return None` for any non-single-return-statement shape
+    discarded it outright, losing `array_map()`'s own list-ness
+    preservation project-wide, not just element-type precision. Caught
+    by this exact corpus re-run showing new `return.type` findings in
+    repositories nothing else had touched (`ExtensionRepository`,
+    `AuditRepository`, `GroupRepository` x4, `ImageRepository`,
+    `MigrationUpgradePathTest`) - all confirmed gone after the fix.
+  - `45005e2` (QueryBuilder split-variable chains): new
+    `QueryBuilderAliasMap`, storing `$qb = <chain>`'s own RHS so
+    `resolve_query_builder_chain`'s backward walk can substitute it in
+    place of a bare `Variable` read. All 5 of the filed cluster's own
+    sites confirmed fixed, plus this legitimately surfaced a broad new
+    class of genuine `arrayValues.list` true positives across several
+    more repositories the same split-`$qb` pattern reaches
+    (`CategoryRepository` x2, `MetadataRepository`,
+    `NotificationRepository`, `SearchRepository`, `SectionRepository`
+    x5, `TagRepository`, `UserRepository`) - the net +2 scoped count
+    despite 6 real bugs fixed.
+  - Not attempted this round (still filed, unchanged): Phase 84
+    (`checkBenevolentUnionTypes`, 8 findings), Phase 123 O2 (anonymous
+    class registration, 3 findings), the `ArrayShape`-with-all-optional-
+    fields non-empty gap (`SearchService::getRegularSearchResults`),
+    and the by-ref-closure-capture loop-convergence gap
+    (`SearchService::positionalCondition`) - all four need real new
+    design/architecture work, not a contained fix.
