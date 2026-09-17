@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{Stmt, StmtKind};
+use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use crate::checker::{self, Checker, Diagnostic, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
@@ -899,6 +899,62 @@ impl Project {
         out
     }
 
+    /// A file whose classes (including anonymous ones) can structurally
+    /// never contribute a `property_assign_facts` entry is safe to skip -
+    /// `Checker::check_property_assignment` only records a `$this->prop
+    /// = expr` write when `prop_sig.write_visibility ==
+    /// Visibility::Private` (see that function's own gate). Skipping such
+    /// a file lets `collect_property_assign_facts` avoid constructing a
+    /// `Checker` and running the full diagnostic-producing
+    /// `check_program` pass on it purely to discover nothing.
+    ///
+    /// Two things a naive "does this class declare a private property"
+    /// check would miss:
+    /// - Anonymous classes: checked via `file.anonymous_class_names` too,
+    ///   not just `file.classes` - an anonymous class's own
+    ///   private-property writes are processed the same way during the
+    ///   same file's `check_program` walk (via `check_expr`'s
+    ///   `NewAnonymousClass` handling).
+    /// - Traits: a trait's own methods are re-checked once per *real
+    ///   host* that uses it (`Checker::check_trait_methods`), with that
+    ///   host's own class context - a `$this->prop = ...` write inside a
+    ///   trait method can assign to a *host's* private property even
+    ///   though the trait itself declares none. A file declaring a trait
+    ///   is only skippable if none of its (transitively resolved) real
+    ///   hosts have a private property either.
+    ///
+    /// `Registry::classes`' own `ClassInfo::properties` map is already
+    /// trait-flattened by the time this runs (`Project::finish_loading`
+    /// flattens traits before `collect_property_assign_facts` is ever
+    /// called), so a plain lookup here is sound.
+    fn file_may_write_private_property(&self, file: &FileState) -> bool {
+        fn has_private_property(info: &crate::registry::ClassInfo) -> bool {
+            info.properties
+                .values()
+                .any(|p| p.write_visibility == Visibility::Private)
+        }
+        let class_may_write = |name: &str| {
+            let Some(info) = self.registry.classes.get(name) else {
+                return false;
+            };
+            if has_private_property(info) {
+                return true;
+            }
+            info.kind == ClassKind::Trait
+                && self.registry.classes_using_trait(name).iter().any(|host| {
+                    self.registry
+                        .classes
+                        .get(host)
+                        .is_some_and(has_private_property)
+                })
+        };
+        file.classes.iter().any(|name| class_may_write(name))
+            || file
+                .anonymous_class_names
+                .values()
+                .any(|name| class_may_write(name))
+    }
+
     /// The collect half of the two-pass (collect-then-consume) checking
     /// architecture: runs the checker once over every currently-loaded
     /// file purely to gather `Checker::property_assign_facts` (this
@@ -916,6 +972,9 @@ impl Project {
             let Some(file) = self.files.get(path) else {
                 continue;
             };
+            if !self.file_may_write_private_property(file) {
+                continue;
+            }
             let mut checker = Checker::new(&self.registry);
             checker.check_program(&file.ast);
             for (fqn, props) in checker.take_property_assign_facts() {
