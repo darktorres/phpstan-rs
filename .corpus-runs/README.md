@@ -472,9 +472,90 @@ one. Only fall back to a worktree rebuild when it's genuinely missing.
   Scoped 215 -> 135 (80 removed, all confirmed instances of this one
   key-naming bug: `shapeAccess.notFound`, `nullCoalesce.offset`,
   `cast.int`, `property.unusedType` findings cascading from a mis-keyed
-  row shape). Unscoped 40236 -> 40156. The remaining scoped 135 (vs.
-  `2c6bf5f`'s 47) haven't been individually triaged yet - the new
-  Doctrine-aware inference now actually engaging with Piwigo's real
-  entities/`QueryBuilder` chains for the first time plausibly explains
-  a real, legitimate jump, but this hasn't been confirmed finding-by-
-  finding.
+  row shape). Unscoped 40236 -> 40156.
+- `841395e` - `check_too_wide_property_types` only ever consulted
+  `property_assign_facts` (explicit `$this->x = ...` writes), never a
+  property's own `= null` default - a real, reachable value (every
+  instance starts there until a real write happens). Real Piwigo false
+  positive: `CoreTabsContext::$context` (`?CoreTabsContext $context =
+  null`, only ever written a non-null value by `setContext()`).
+- `b30bfdd` - two more real Doctrine-semantics bugs, found while
+  finishing the `3100a71` triage. (1) `IDENTITY()`'s own real
+  `IdentityFunction` doesn't implement `ExpressionWithReturnType`, so
+  `SqlWalker`'s generic `FunctionNode` fallback hardcodes its type to
+  `Types::STRING` - it never goes through the target entity's own
+  id-column type conversion, unlike a plain `alias.field` select, so
+  `field_ref_type` claiming the target's own (possibly value-object)
+  id type was a confirmed mismatch; now falls back to `Mixed`. (2)
+  `getSingleColumnResult()` (`ScalarColumnHydrator`, a raw `Statement::
+  fetchFirstColumn()` with zero type conversion) and
+  `getSingleScalarResult()` (`SingleScalarHydrator` -> `gatherScalarRowData`,
+  which really does convert) were wrongly sharing one function - a
+  custom-typed field (a value-object id) never actually comes back as
+  that PHP type through the former. New `raw_scalar_column_type`,
+  `contains_object`-gated so a plain native scalar (no custom `Type`)
+  keeps its existing precision. Both confirmed directly against
+  `vendor/doctrine-orm`. Real Piwigo false positives: `ActivityRepository
+  ::countByUser`'s `(int) $row['performed_by']` (`IDENTITY()`),
+  `GroupRepository::findIdsByNameLike`'s `(int) $id` (`getSingleColumnResult()`
+  on a `?GroupId`-typed id field).
+- `c035984` - `EntityRepository::createQueryBuilder($alias)` always
+  pre-populates its own `select($alias)`/`from(...)`, and `QueryBuilder::
+  delete()`/`update()` only flip an internal query-type flag without
+  clearing that select - so a `->delete()->where(...)` chain looked
+  exactly like an ordinary `SELECT` to `resolve_query_builder_chain`.
+  Confirmed against `vendor/doctrine-orm` that `_doExecute()` returns a
+  plain affected-row `int` for any DML statement, bypassing hydration
+  entirely, for every one of `getResult`/`execute`/`getOneOrNullResult`/
+  `getSingleResult`/`getArrayResult`/`getSingleColumnResult`/
+  `getSingleScalarResult`/`getScalarResult` (`toIterable` is the one
+  exception - calls `_doExecute()` directly with no such bypass, a real
+  runtime `TypeError` on a DML chain, not a value to type). New
+  `QueryBuilderChain::dml` flag; `getQuery()` encodes it as a
+  `Type::Never` sentinel row type. Real Piwigo false positive: every
+  `*Repository::purgeOlderThan(): int` built on
+  `->delete()->getQuery()->execute()` was inferred as `list<Entity>`.
+- `df9e3e2` - `repository_entity()`'s linear scan (a `HashMap` iteration,
+  arbitrary order) picked whichever entity happened to come first when
+  more than one entity names the same `repositoryClass` - real, valid
+  Doctrine (one repository *class* can be instantiated separately per
+  entity via `EntityManager::getRepository()`/DI), so nothing in the
+  repository class's own method bodies says which entity a given call
+  site's instance is bound to. Now returns `None` (undecidable) rather
+  than guessing. Real Piwigo false positive: `ImageRepository` serves
+  both `ImageEntity` and `ImageFormatEntity`; `findByIds`'s own
+  `$entity->id` was flagged as undefined because the scan landed on
+  `ImageFormatEntity` (no `$id`) instead of `ImageEntity`.
+- `f4d4cd3` - unrelated to Doctrine: `check_doc_see_tag_targets`
+  (Phase 96 D5) stripped a `@see` target's leading `\` *before* calling
+  `NameContext::resolve`, but `resolve_as`'s own `strip_prefix('\\')`
+  check is exactly what means "already fully qualified, don't
+  re-resolve" - stripped first, a real FQN target got re-qualified
+  against the current namespace a second time, corrupting it into a
+  name that could never resolve. 3 real Piwigo false positives (all
+  `@see \Fully\Qualified\Class` from within that same namespace).
+- `0e34322` - final commit of this triage round; also corrected two
+  now-falsified doc-comment claims in `member_resolution.rs` ("real
+  corpus usage is 100% one direct chained expression, never split
+  across a variable assignment first") and filed the real gap those
+  claims were papering over in ROADMAP.md's Known-but-not-yet-scheduled
+  section: a `QueryBuilder` split into a variable before its own
+  terminal method call isn't resolved at all (`resolve_query_builder_
+  chain`'s backward walk stops cold at a bare `Variable` node). Scoped
+  215 -> 75, unscoped 40236 -> 39444 across this whole round
+  (`01cc3f2`..`0e34322`). Every one of the remaining 39 new-vs-`2c6bf5f`
+  scoped findings is now individually accounted for: 26 `arrayValues.list`
+  + 8 `nullCoalesce.offset` are confirmed genuine (real precision from
+  Doctrine-aware inference actually engaging with Piwigo's real
+  entities/`QueryBuilder` chains for the first time), and the remaining
+  4 (`return.type` x2, `greater.invalid`, `argument.type`) are every one
+  a confirmed instance of the one filed split-variable gap above
+  (`CommentRepository::delete`/`update`, `RateRepository::
+  deleteByOptionalConditions`, `UserRepository::
+  findAuthorizedFavoriteImageIds`) - a real, recurring pattern (a
+  conditional `andWhere` forces splitting the fluent chain across
+  statements), confirmed common enough to be worth a dedicated future
+  session rather than a rushed fix here, given the fix itself needs a
+  new stateful `Locals` side-channel (mirroring `condition_aliases`) -
+  exactly the class of mechanism that caused `01cc3f2`'s own OOM bug
+  when done carelessly.
