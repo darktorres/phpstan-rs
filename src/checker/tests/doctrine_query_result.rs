@@ -38,6 +38,8 @@ const STUBS: &str = r#"
             public function where(string $where): static {}
             public function andWhere(string $where): static {}
             public function groupBy(string $groupBy): static {}
+            public function delete(?string $delete = null, ?string $alias = null): static {}
+            public function update(?string $update = null, ?string $alias = null): static {}
             public function getQuery(): Query {}
         }
         abstract class AbstractQuery {
@@ -234,6 +236,46 @@ fn bare_execute_behaves_identically_to_get_result() {
             {
                 $rows = $this->createQueryBuilder('t')->getQuery()->execute();
                 assertType('list<App\TagEntity>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_delete_chains_execute_is_a_plain_affected_row_count() {
+    // `EntityRepository::createQueryBuilder($alias)` always pre-populates
+    // its own `select($alias)`/`from(...)` (real Doctrine sugar), and
+    // `->delete()` only flips an internal query-type flag without
+    // clearing that select - so this chain looks exactly like an
+    // ordinary `SELECT t FROM TagEntity t` to everything but the `dml`
+    // flag. Real `AbstractQuery::_doExecute()` returns a plain int for
+    // any DML statement, bypassing hydration entirely - the real Piwigo
+    // pattern this targets (`*Repository::purgeOlderThan(): int`).
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function purgeAll(): int
+            {
+                return $this->createQueryBuilder('t')
+                    ->delete()
+                    ->getQuery()
+                    ->execute();
             }
         }
         "#,

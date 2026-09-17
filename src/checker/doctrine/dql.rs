@@ -640,6 +640,7 @@ fn parse_select_statement_tokens(
             from: Some((from_entity, from_alias)),
             joins,
             select_args: Vec::new(),
+            dml: false,
         },
         items,
         pos,

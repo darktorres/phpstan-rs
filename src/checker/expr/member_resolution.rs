@@ -430,6 +430,14 @@ impl<'a> Checker<'a> {
                 let row_type = self
                     .resolve_query_builder_chain(recv, locals)
                     .and_then(|chain| {
+                        // A `->delete(...)`/`->update(...)` chain never
+                        // produces row data at all (see `QueryBuilderChain::
+                        // dml`'s own doc comment) - `Type::Never` marks
+                        // that here, read back by `getResult`/`execute`'s
+                        // own dispatch below.
+                        if chain.dml {
+                            return Some(Type::Never);
+                        }
                         let items =
                             crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
                         crate::checker::doctrine::result_shape::build_result_row_type(
@@ -466,6 +474,24 @@ impl<'a> Checker<'a> {
             {
                 let row_type = type_args.first();
                 match method {
+                    // `Type::Never` marks a `->delete(...)`/`->update(...)`
+                    // chain (`QueryBuilderChain::dml`'s own doc comment).
+                    // `getResult`/`getOneOrNullResult`/`getSingleResult`
+                    // all funnel through `execute()` internally in real
+                    // Doctrine (confirmed against `vendor/doctrine-orm`),
+                    // which returns a plain affected-row `int` for either
+                    // DML statement, bypassing hydration (and any `NoResult
+                    // Exception`/`NonUniqueResultException` wrapping)
+                    // entirely regardless of hydration mode - `toIterable`
+                    // is the one exception (calls `_doExecute()` directly,
+                    // with no such bypass, so a DML chain there is a real
+                    // runtime `TypeError` in real Doctrine, not a value
+                    // this project needs to type sensibly).
+                    "getResult" | "execute" | "getOneOrNullResult" | "getSingleResult"
+                        if matches!(row_type, Some(Type::Never)) =>
+                    {
+                        Type::IntRange(Some(0), None)
+                    }
                     "getResult" => match row_type {
                         Some(row_type) => doctrine_query_result_list_type_of(row_type.clone()),
                         // Today's only previously-covered method - keep
@@ -527,8 +553,19 @@ impl<'a> Checker<'a> {
                     .registry
                     .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
             {
-                let resolved = doctrine_get_query_receiver(recv).and_then(|qb_recv| {
-                    let chain = self.resolve_query_builder_chain(qb_recv, locals)?;
+                let chain = doctrine_get_query_receiver(recv)
+                    .and_then(|qb_recv| self.resolve_query_builder_chain(qb_recv, locals));
+                // Every one of these four also funnels through `execute()`
+                // internally in real Doctrine (confirmed directly against
+                // `vendor/doctrine-orm`), so a `->delete(...)`/`->update(...)`
+                // chain returns a plain affected-row `int` here too,
+                // bypassing hydration regardless of which of these four was
+                // actually called - see `QueryBuilderChain::dml`'s own doc
+                // comment.
+                if matches!(&chain, Some(c) if c.dml) {
+                    return Type::IntRange(Some(0), None);
+                }
+                let resolved = chain.and_then(|chain| {
                     let items =
                         crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
                     Some((chain, items))

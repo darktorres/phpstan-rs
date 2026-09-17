@@ -44,6 +44,18 @@ pub(crate) struct QueryBuilderChain {
     /// `addSelect()` appends to whatever's already here. 168c parses
     /// each entry as one DQL select item.
     pub(crate) select_args: Vec<String>,
+    /// Whether `->delete(...)`/`->update(...)` appeared anywhere in the
+    /// chain. `EntityRepository::createQueryBuilder()` (`vendor/doctrine-
+    /// orm/src/EntityRepository.php:53-58`) always pre-populates a
+    /// `select`/`from` for its own entity, and real `QueryBuilder::
+    /// delete()`/`update()` only flip an internal query-type flag without
+    /// clearing it - so a `->delete()->where(...)` chain looks exactly
+    /// like an ordinary `SELECT` to everything else in this module.
+    /// `AbstractQuery::_doExecute()` returns a plain affected-row `int`
+    /// for either statement type, bypassing hydration entirely
+    /// (confirmed directly against `vendor/doctrine-orm`), so every
+    /// select-shape field above is meaningless once this is `true`.
+    pub(crate) dml: bool,
 }
 
 /// One collected fluent-chain call, in AST (outermost-first) order -
@@ -129,6 +141,7 @@ impl<'a> Checker<'a> {
                 from: Some((entity.to_string(), alias.clone())),
                 joins: Vec::new(),
                 select_args: vec![alias],
+                dml: false,
             });
         }
         // `$em->createQueryBuilder()` (or `$this->getEntityManager()->
@@ -172,6 +185,9 @@ impl<'a> Checker<'a> {
                     .get(1)
                     .and_then(|a| self.foldable_arg_string(a, locals))?;
                 chain.from = Some((entity, alias));
+            }
+            "delete" | "update" => {
+                chain.dml = true;
             }
             "join" | "innerJoin" | "leftJoin" => {
                 let target = args
