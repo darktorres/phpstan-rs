@@ -477,8 +477,18 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         match merged.branch_implied_facts.get(key) {
             Some(then_facts) if std::rc::Rc::ptr_eq(then_facts, else_facts) => {}
             Some(then_facts) => {
+                // Content-deduped: `Rc::ptr_eq` above only catches an
+                // unchanged pair, and a fresh `Rc` is allocated below on
+                // every call, so a converged pair re-merged again (e.g.
+                // each `converge_loop_body` pass, nested loops compounding
+                // it further) would otherwise blind-`extend` its own
+                // already-stable content onto itself without bound.
                 let mut combined = (**then_facts).clone();
-                combined.extend((**else_facts).clone());
+                for fact in else_facts.iter() {
+                    if !combined.contains(fact) {
+                        combined.push(fact.clone());
+                    }
+                }
                 merged
                     .branch_implied_facts
                     .insert(key.clone(), std::rc::Rc::new(combined));
