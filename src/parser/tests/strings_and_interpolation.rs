@@ -125,6 +125,122 @@ fn int_index_interpolation_including_negative_parses_as_an_index_with_an_int_lit
     }
 }
 
+/// Regression test: a bare `{$var}` (no property/index) must NOT be
+/// fast-pathed into `StringPart::SimpleVar`, which carries no position of
+/// its own (`build_interpolated` gives every `SimpleVar`/`Literal` part
+/// the whole string's own start position, not a per-occurrence one) -
+/// doing so once collapsed every bare-braced-var diagnostic in a string
+/// with more than one onto the same wrong column (found via a real
+/// corpus diff: six distinct `{$var}` interpolations on one line, e.g.
+/// `"Q: {$sniff}:{$line} ... {$tokenLine}"`, all reported the identical
+/// `undefined variable` column instead of six distinct ones).
+#[test]
+fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
+    let program = parse("<?php\nfunction f() {\n    return \"{$foo} and {$bar}\";\n}\n");
+    let StmtKind::FunctionDecl(f) = &program[0].kind else {
+        panic!("expected a function declaration, got {:?}", program[0].kind);
+    };
+    let StmtKind::Return(Some(ret_expr)) = &f.body[0].kind else {
+        panic!("expected a return statement, got {:?}", f.body[0].kind);
+    };
+    let ExprKind::Interpolated(parts) = &ret_expr.kind else {
+        panic!("expected an interpolated string, got {:?}", ret_expr.kind);
+    };
+    let var_spans: Vec<(String, Span)> = parts
+        .iter()
+        .filter_map(|p| match &p.kind {
+            ExprKind::Variable(name) => Some((name.clone(), p.span)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        var_spans
+            .iter()
+            .map(|(n, _)| n.as_str())
+            .collect::<Vec<_>>(),
+        ["foo", "bar"]
+    );
+    assert_ne!(
+        var_spans[0].1, var_spans[1].1,
+        "both {{$foo}} and {{$bar}} got the same span - a real per-occurrence position was lost"
+    );
+    // `    return "{$foo} and {$bar}";` - `{$foo}`'s own `$` sits at
+    // column 14, `{$bar}`'s at column 25.
+    assert_eq!(var_spans[0].1.start, Position { line: 3, col: 14 });
+    assert_eq!(var_spans[1].1.start, Position { line: 3, col: 25 });
+}
+
+/// `"{$var->prop}"`/`"{$var[key]}"` - the explicitly-braced spelling of
+/// the same two simple shapes Stage 1 covers for the bare-`$` form -
+/// also skip re-lexing, via `try_parse_simple_interpolation`.
+#[test]
+fn braced_property_access_interpolation_parses_as_a_property_access() {
+    let program = parse(r#"<?php $x = "{$obj->prop}";"#);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::Interpolated(parts) = &rhs.kind else {
+        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    };
+    let ExprKind::PropertyAccess(base, prop, nullsafe) = &parts[0].kind else {
+        panic!("expected a PropertyAccess part, got {:?}", parts[0].kind);
+    };
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "obj"));
+    assert_eq!(prop, "prop");
+    assert!(!nullsafe);
+}
+
+#[test]
+fn braced_index_interpolation_parses_as_an_index() {
+    let program = parse(r#"<?php $x = "{$arr[key]}";"#);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::Interpolated(parts) = &rhs.kind else {
+        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    };
+    let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
+        panic!("expected an Index part, got {:?}", parts[0].kind);
+    };
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "arr"));
+    assert!(matches!(
+        &key.kind,
+        ExprKind::Literal(Literal::String(s)) if s == "key"
+    ));
+}
+
+/// A braced block that's genuinely complex (here: a method call, not just
+/// a property/index access) must still go through the original re-lex
+/// path - `try_parse_simple_interpolation` only matches when the simple
+/// shape consumes the block's *entire* inner text.
+#[test]
+fn a_braced_method_call_is_not_mistaken_for_a_simple_property_access() {
+    let program = parse(r#"<?php $x = "{$obj->method()}";"#);
+    let StmtKind::Expression(Expr {
+        kind: ExprKind::Assign(_, rhs),
+        ..
+    }) = &program[0].kind
+    else {
+        panic!("expected assignment, got {:?}", program[0].kind);
+    };
+    let ExprKind::Interpolated(parts) = &rhs.kind else {
+        panic!("expected an interpolated string, got {:?}", rhs.kind);
+    };
+    assert!(
+        matches!(&parts[0].kind, ExprKind::MethodCall(_, name, _, _) if name == "method"),
+        "got {:?}",
+        parts[0].kind
+    );
+}
+
 /// A key that fits none of `SimpleIndexKey`'s three shapes (here: starts
 /// with a digit but isn't a plain integer) still falls back to the
 /// original `ComplexExpr` re-lex path, unchanged.

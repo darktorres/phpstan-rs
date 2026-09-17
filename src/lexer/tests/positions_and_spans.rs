@@ -62,18 +62,30 @@ fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
     let Token::InterpString(parts) = tok else {
         unreachable!()
     };
-    let (_, base) = parts
+    let part = parts
         .iter()
         .find_map(|p| match p {
-            StringPart::ComplexExpr(src, base) => Some((src.clone(), *base)),
+            StringPart::PropertyAccess {
+                var,
+                var_start,
+                var_end,
+                prop,
+                end,
+            } => Some((var.clone(), *var_start, *var_end, prop.clone(), *end)),
             _ => None,
         })
-        .expect("expected a ComplexExpr part");
+        .expect("expected a PropertyAccess part");
+    let (var, var_start, var_end, prop, end) = part;
+    assert_eq!(var, "obj");
+    assert_eq!(prop, "prop");
     // The literal "a\n" inside the string doesn't introduce a real
     // newline in the source - {$obj->prop} is still on line 2.
     // `$s = "a\n{$obj->prop}";` - the `$` of `$obj` is the 11th
-    // character (right after `{`, the 10th).
-    assert_eq!(base, Position { line: 2, col: 11 });
+    // character (right after `{`, the 10th), `->` starts at the 15th
+    // (right after `obj`), and the closing `}` sits at the 21st.
+    assert_eq!(var_start, Position { line: 2, col: 11 });
+    assert_eq!(var_end, Position { line: 2, col: 15 });
+    assert_eq!(end, Position { line: 2, col: 21 });
 }
 
 #[test]

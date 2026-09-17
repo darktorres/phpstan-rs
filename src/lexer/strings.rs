@@ -15,6 +15,91 @@ fn is_full_identifier(s: &str) -> bool {
     }
 }
 
+/// A `{$...}` complex-interpolation block's own inner text, classified as
+/// one of the two simple-syntax shapes bare `$var->prop`/`$var[key]`
+/// already special-case - byte offsets are relative to the start of the
+/// classified slice (which itself starts at the `$`), not the whole file.
+/// `None` from `try_parse_simple_interpolation` means the block doesn't
+/// consist of *only* one of these shapes (a bare `{$var}`, a method call,
+/// an operator, a nested `{$...}`, ...) - real complex syntax (or the
+/// bare-var case, which gains nothing from fast-pathing - see its own
+/// note below), still routed through `StringPart::ComplexExpr`'s re-lex
+/// path unchanged.
+enum SimpleInterpolationShape {
+    PropertyAccess {
+        name_end: usize,
+        prop_start: usize,
+    },
+    Index {
+        name_end: usize,
+        key_start: usize,
+        key_end: usize,
+    },
+}
+
+/// Tries to classify `bytes` (a `{$...}` block's own inner text, e.g. the
+/// `$var->prop` in `{$var->prop}`) as one of `SimpleInterpolationShape`'s
+/// two shapes - unlike the bare-`$` scan below (which stops as soon as
+/// the name/prop/key ends, since whatever follows is separate literal
+/// text), this requires the shape to consume the *entire* slice, since a
+/// braced block's own text could just as easily continue into a method
+/// call, an operator, or anything else complex syntax allows.
+///
+/// Deliberately does NOT fast-path a bare `{$var}` (unlike the bare-`$`
+/// scan, which does via `StringPart::SimpleVar`): `SimpleVar` carries no
+/// position of its own (`build_interpolated` gives every `SimpleVar`/
+/// `Literal` part the whole *string's* own start position, not a
+/// per-occurrence one - harmless there since a string's bare `$var`
+/// parts don't need finer-grained positions for any existing diagnostic),
+/// but `{$var}` today gets a real per-occurrence position via the
+/// `ComplexExpr` + `bias_expr_spans` path - fast-pathing it into a
+/// position-less `SimpleVar` would collapse every bare-braced-var
+/// diagnostic in a string with more than one onto the same (wrong)
+/// column, confirmed as a real regression via corpus diff before this
+/// fix. A bare-var re-lex is already the cheapest possible `ComplexExpr`
+/// case anyway, so there's no real perf reason to fast-path it.
+fn try_parse_simple_interpolation(bytes: &[u8]) -> Option<SimpleInterpolationShape> {
+    if bytes.first() != Some(&b'$') || !bytes.get(1).is_some_and(|&c| is_ident_start(c)) {
+        return None;
+    }
+    let mut j = 2;
+    while j < bytes.len() && is_ident_continue(bytes[j]) {
+        j += 1;
+    }
+    let name_end = j;
+    if j == bytes.len() {
+        return None;
+    }
+    if bytes[j] == b'-'
+        && bytes.get(j + 1) == Some(&b'>')
+        && bytes.get(j + 2).is_some_and(|&c| is_ident_start(c))
+    {
+        let mut k = j + 2;
+        while k < bytes.len() && is_ident_continue(bytes[k]) {
+            k += 1;
+        }
+        return (k == bytes.len()).then_some(SimpleInterpolationShape::PropertyAccess {
+            name_end,
+            prop_start: j + 2,
+        });
+    }
+    if bytes[j] == b'[' {
+        let key_start = j + 1;
+        let mut k = key_start;
+        while k < bytes.len() && bytes[k] != b']' {
+            k += 1;
+        }
+        return (k < bytes.len() && k + 1 == bytes.len()).then_some(
+            SimpleInterpolationShape::Index {
+                name_end,
+                key_start,
+                key_end: k,
+            },
+        );
+    }
+    None
+}
+
 /// Classifies a `$var[key]` interpolation's own raw `key` text into one of
 /// `SimpleIndexKey`'s three shapes, or `None` when it doesn't fit any of
 /// them (the caller then falls back to `StringPart::ComplexExpr`'s re-lex
@@ -380,10 +465,59 @@ impl<'a> Lexer<'a> {
                         i += 1;
                     }
                 }
-                let inner = String::from_utf8_lossy(&bytes[start..i]).into_owned();
+                let inner_bytes = &bytes[start..i];
                 let base = self.line_col_at(abs_base + start);
+                let close_brace_pos = i;
                 i = (i + 1).min(bytes.len());
-                parts.push(StringPart::ComplexExpr(inner, base));
+                match try_parse_simple_interpolation(inner_bytes) {
+                    Some(SimpleInterpolationShape::PropertyAccess {
+                        name_end,
+                        prop_start,
+                    }) => {
+                        let name = String::from_utf8_lossy(&inner_bytes[1..name_end]).into_owned();
+                        let prop = String::from_utf8_lossy(&inner_bytes[prop_start..]).into_owned();
+                        let var_end = self.line_col_at(abs_base + start + name_end);
+                        let end = self.line_col_at(abs_base + close_brace_pos);
+                        parts.push(StringPart::PropertyAccess {
+                            var: name,
+                            var_start: base,
+                            var_end,
+                            prop,
+                            end,
+                        });
+                    }
+                    Some(SimpleInterpolationShape::Index {
+                        name_end,
+                        key_start,
+                        key_end,
+                    }) => {
+                        let key_text =
+                            String::from_utf8_lossy(&inner_bytes[key_start..key_end]).into_owned();
+                        match classify_index_key(&key_text) {
+                            Some(key) => {
+                                let name =
+                                    String::from_utf8_lossy(&inner_bytes[1..name_end]).into_owned();
+                                let var_end = self.line_col_at(abs_base + start + name_end);
+                                let end = self.line_col_at(abs_base + close_brace_pos);
+                                parts.push(StringPart::Index {
+                                    var: name,
+                                    var_start: base,
+                                    var_end,
+                                    key,
+                                    end,
+                                });
+                            }
+                            None => {
+                                let inner = String::from_utf8_lossy(inner_bytes).into_owned();
+                                parts.push(StringPart::ComplexExpr(inner, base));
+                            }
+                        }
+                    }
+                    None => {
+                        let inner = String::from_utf8_lossy(inner_bytes).into_owned();
+                        parts.push(StringPart::ComplexExpr(inner, base));
+                    }
+                }
                 continue;
             }
 
