@@ -3083,35 +3083,36 @@ section used to carry:
   specific site (closure-literal signature construction). Not attempted
   here - the exact call site(s) building a closure literal's own
   `Type::Closure` weren't inventoried this round.
-- **`$x !== []` (and presumably `$x != []`) isn't recognized as proving
-  `$x` non-empty, unlike `count($x) > 0`, which already is.** Found
-  investigating `SearchService::getRegularSearchResults`'s own `if
-  ($imageIdsForFilter !== []) { if (count($imageIdsForFilter) > 1) {
-  ...; } else { $first = reset($imageIdsForFilter); $items = array_map
-  (intval(...), $first); } }` - flagged `argument.type`/`return.type`
-  because `reset()`'s own existing "provably non-empty excludes `false`"
-  precision (`checker/expr/builtin_calls.rs`'s `array_pointer_result`,
-  Phase 74) never fires: nothing marks `$imageIdsForFilter`'s own tracked
-  type as non-empty from the `!== []` guard alone, so `reset()` still
-  returns `T|false`, and `array_map()` over a `T|false` argument can't
-  stay `list<T>` - it degrades toward a generic `array`, which is what
-  actually produces the observed `list<int>|array` mismatch two levels
-  up. Confirmed via `\PHPStan\dumpType()` against a faithful minimal
-  reproduction of the exact shape (the outer `!== []` guard, the nested
-  `count() > 1`/`else` split, `reset()`, `array_map(intval(...), ...)`):
-  real PHPStan's own answer for both `reset()`'s result and the final
-  `array_map()` result is a clean `list<int>`, confirming the `!== []`
-  guard alone is what real PHPStan uses to exclude the empty case here -
-  the `count() > 1`/`else` split only decides *how many* elements, never
-  *whether* there's at least one. A real, well-scoped narrowing addition:
-  `apply_narrowing`'s existing equality-narrowing arm (`checker/
-  narrowing/assertions.rs::apply_equality_narrowing`, the same one
-  `$x === null`/`$x !== null` already goes through) needs a case
-  recognizing an empty-array-literal `[]` on either side of `===`/`!==`
-  as a known "empty" fact, upgrading the narrowed variable to its own
-  non-empty-array accessory the same way `count($x) > 0` already does -
-  not a new mechanism, an additional recognized shape in an existing one.
-  Not attempted here.
+- **`$x !== []` already proves a plain `Type::Array`/`Intersection`
+  non-empty (`is_known_single_value`/`narrow_type_excluding` both
+  already special-case an empty `ArrayShape` target, confirmed reading
+  the code directly, superseding this entry's own prior "isn't
+  recognized at all" claim) - the real, narrower gap is one specific
+  shape neither one covers: an `ArrayShape` whose own fields are *all
+  optional*.** Found investigating `SearchService::
+  getRegularSearchResults`'s own `if ($imageIdsForFilter !== []) { if
+  (count($imageIdsForFilter) > 1) { ...; } else { $first = reset(
+  $imageIdsForFilter); $items = array_map(intval(...), $first); } }` -
+  `$imageIdsForFilter` is built via several independently-conditional
+  keyed writes (`$imageIdsForFilter['width'] = ...`, `['tags'] = ...`,
+  `['custom'] = ...`), so its own tracked type is `array{width?:
+  list<int>, tags?: list<int>, custom?: list<int>}` - every field
+  optional, not a plain `Type::Array`. `upgrade_array_to_non_empty`
+  (`checker/narrowing/accessory_range.rs`) only has an arm for a
+  literally *empty* `ArrayShape` (`fields.is_empty()`, collapsing it to
+  `Never`) - an all-optional-but-nonempty-*field-list* shape falls
+  through to its `_ => ty.clone()` catch-all unchanged, so `reset()`
+  still returns `T|false` and cascades into the observed `list<int>|
+  array` mismatch, exactly as this entry's own prior text described,
+  just from a different root cause than claimed. Not a quick fix: "not
+  exactly `array{}`" for an all-optional-fields shape means "at least
+  one of these N fields is present," a genuine disjunctive fact this
+  project's `ArrayShape`/`AccessoryKind` representation has no clean
+  way to carry (unlike a plain non-empty `Array(K, V)`, which needs no
+  disjunction - *some* key exists, full stop). Needs real design work
+  (a new accessory, or unioning every "exactly one field present"
+  combination, which is exponential in field count for anything but a
+  tiny shape) before attempting - not attempted here.
 - **The 4 `SiteUpdateSubController` `int|string`-vs-`int`/`list<int>`
   findings are not a separate gap - they're another instance of the
   benevolent-`int|string`-array-key-union item above, reached through
