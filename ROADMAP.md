@@ -3322,19 +3322,79 @@ section used to carry:
   to the assignment that built it. Phase 168's own doc comments
   previously claimed real corpus usage was "100% one direct chained
   expression, never split across a variable assignment first" -
-  confirmed false: `UserRepository::findAuthorizedFavoriteImageIds`
-  does exactly this (`$qb = $this->em->createQueryBuilder()->...; ...;
-  $qb->getQuery()->getSingleColumnResult()`), degrading to bare `mixed`
-  and cascading into a real `argument.type` false positive
-  (`toIntList()` expects `list`, got the resulting untyped `array`).
-  A real fix needs the same shape `condition_aliases`/`branch_implied_
-  facts` (`checker.rs`) already use for a different kind of symbolic
-  expression alias: a new `Locals` side-channel storing `$qb`'s own
-  `Rc<Expr>` right-hand side at assignment time, purged on reassignment,
-  consulted by `resolve_query_builder_chain`'s cursor walk when it hits
-  a bare `Variable` in place of failing outright - not attempted this
-  round (one confirmed corpus site, not chased further before deciding
-  whether it's worth the new mechanism).
+  confirmed false, and confirmed *recurring*, not a one-off: 5 real
+  corpus sites split a `$qb` into a variable (usually to attach a
+  conditional `andWhere()`/`orderBy()`) before its own terminal call -
+  `UserRepository::findAuthorizedFavoriteImageIds:862` (`argument.type`,
+  degrades to bare `mixed`, cascading into `toIntList()` expecting
+  `list`), `CommentRepository::delete:128` (`return.type`, expected
+  `int`, got `list`), `CommentRepository::update:158` (`greater.invalid`,
+  `execute() > 0` on a `list`), `RateRepository::
+  deleteByOptionalConditions:485` (`return.type`, same as `delete`),
+  `TagRepository::findCommonTags:251` (`return.type`, degrades to
+  `mixed`, corrupting the accumulated row shape). A real fix needs the
+  same shape `condition_aliases`/`branch_implied_facts` (`checker.rs`)
+  already use for a different kind of symbolic expression alias: a new
+  `Locals` side-channel storing `$qb`'s own `Rc<Expr>` right-hand side
+  at assignment time, purged on reassignment, consulted by `resolve_
+  query_builder_chain`'s cursor walk when it hits a bare `Variable` in
+  place of failing outright - not attempted this round.
+- A discriminant flag set by an `if`-statement's own body (`if (A or B
+  or C) { $flag = true; }`), later checked as `if (!$flag) { ... }`,
+  doesn't narrow away `A`/`B`/`C`'s own negation at that later check
+  site - a different shape from Phase 171's already-built compound-
+  condition-flag narrowing, which only recognizes a flag set via a
+  *direct* `$flag = A || B;` assignment *expression*, not a flag
+  conditionally set inside an `if`'s own statement body. Confirmed at
+  `ImageDerivativeController`'s own `$derivative_mtime = @filemtime(
+  ...); if ($derivative_mtime === false or $derivative_mtime <
+  $src_mtime or $derivative_mtime < $params->last_mod_time) {
+  $need_generate = true; } ...; if (! $need_generate) { ...
+  gmdate(..., $derivative_mtime) ... }` - reaching `! $need_generate`
+  provably means `$derivative_mtime !== false` (among the other
+  disjuncts), but nothing records that fact. A real fix likely needs
+  `branch_implied_facts` (or an equivalent mechanism) to record, at the
+  point an `if`'s body unconditionally sets a flag from an otherwise-
+  unchanged initial value, that the flag's own later negation implies
+  the condition's own logical negation - a genuinely different
+  mechanism from Phase 171's expression-level OR-chain narrowing
+  (which fires at the *condition* site itself, not at a *later*,
+  separate check of a flag that condition set). Not filed as a
+  numbered phase; scope not fully worked out. Not investigated this
+  round: `StructuralTest::findBareCallSites:903`'s own `return.type`
+  finding may partly be `token_get_all()`'s own generically-`mixed`
+  stub shape rather than purely the already-documented `!== []`-
+  narrowing gap above - not confirmed either way.
+- Phases 169 (same-branch discriminant correlation), 170 (same
+  condition expression evaluated twice), and 171 (compound `&&`/`||`
+  flag reuse) are recorded as built (commits `5258c9d`, `ea9b789`), but
+  a corpus run at `0e34322` still flags every one of their own
+  originally-cited target sites, unfixed: `AuthService::
+  authKeyLogin:547`, `AlbumsPageRenderer::render:111`, `UploadService::
+  addUploadedFile:618` (Phase 169's own `$dup_detect_lock_conn`/
+  `$dup_detect_lock_name` co-assignment shape); `NotificationByMailSender
+  ::sendMailNotifications:707` (Phase 170); `PasswordController::
+  processVerificationCode:449` (Phase 171 - its own `$skip_mail = !
+  $is_user_found || $email === null || $email === '';` is exactly the
+  direct-assignment, equality-comparison-leaf shape Phase 171's own
+  entry says it fixed). Not re-investigated this round - either these
+  phases' real implementations don't cover the exact shape their own
+  citing text describes, or something else masks them (a different,
+  unrelated gap reached first, the same way `01cc3f2`'s OOM bug hid
+  behind a mis-keyed row shape until that was fixed first). Needs a
+  fresh, direct investigation before trusting either the "Done" status
+  or the original citations at face value.
+- Two `0e34322` corpus findings flagged but not root-caused, not
+  confirmed as this project's own bug either way:
+  `SearchService::qsearchGetTextTokenSearchSql:1037`'s own `return.type`
+  (a nested-loop `$clauses`/`$values` accumulation combined with a
+  mid-loop `array_splice()` call, producing a far more literal-string-
+  specific union than expected - not traced to an exact mechanism);
+  `tests/Browser/PictureModifyInteractionTest.php:150`'s own
+  `argument.type` against `Pest\Browser\Api\Webpage::keys()` (could be
+  a genuinely too-strict third-party stub, or a real test bug passing
+  `'Enter'` instead of `['Enter']` - the real `pestphp/pest-plugin-
+  browser` package source wasn't checked).
 
 ## Permanent design boundaries (not planned, by choice)
 
