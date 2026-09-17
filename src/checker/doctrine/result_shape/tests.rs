@@ -217,3 +217,137 @@ fn an_empty_select_is_undecidable() {
     };
     assert_eq!(build_result_row_type(&checker, &chain, &[]), None);
 }
+
+#[test]
+fn single_scalar_column_type_resolves_a_lone_scalar_field() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t.name".to_string()]).unwrap();
+    assert_eq!(
+        single_scalar_column_type(&checker, &chain, &items),
+        Some(Type::String)
+    );
+}
+
+#[test]
+fn single_scalar_column_type_rejects_a_whole_entity_select() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t".to_string()]).unwrap();
+    assert_eq!(single_scalar_column_type(&checker, &chain, &items), None);
+}
+
+#[test]
+fn single_scalar_column_type_rejects_more_than_one_item() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t.id".to_string(), "t.name".to_string()]).unwrap();
+    assert_eq!(single_scalar_column_type(&checker, &chain, &items), None);
+}
+
+#[test]
+fn array_result_converts_a_bare_entity_select_into_an_object_shape() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t".to_string()]).unwrap();
+    let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ObjectShape(vec![
+            ("id".to_string(), Type::Int, false),
+            ("name".to_string(), Type::String, false),
+        ])
+    );
+}
+
+#[test]
+fn array_result_converts_a_to_one_association_into_an_identifier_only_shape() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("ImageTagEntity".to_string(), "it".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["it".to_string()]).unwrap();
+    let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ObjectShape(vec![
+            ("imageId".to_string(), Type::Int, false),
+            (
+                "tag".to_string(),
+                Type::ObjectShape(vec![("id".to_string(), Type::Int, false)]),
+                false
+            ),
+        ])
+    );
+}
+
+#[test]
+fn array_result_converts_an_entity_plus_aggregate_select_field_by_field() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t".to_string(), "COUNT(t.id) AS cnt".to_string()]).unwrap();
+    let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ArrayShape(vec![
+            (
+                "0".to_string(),
+                Type::ObjectShape(vec![
+                    ("id".to_string(), Type::Int, false),
+                    ("name".to_string(), Type::String, false),
+                ]),
+                false
+            ),
+            ("cnt".to_string(), Type::IntRange(Some(0), None), false),
+        ])
+    );
+}
+
+#[test]
+fn scalar_result_flattens_entity_fields_under_alias_prefixed_keys() {
+    let registry = build(ENTITIES);
+    let checker = Checker::new(&registry);
+    let chain = QueryBuilderChain {
+        from: Some(("TagEntity".to_string(), "t".to_string())),
+        joins: Vec::new(),
+        select_args: Vec::new(),
+    };
+    let items = parse_select_items(&["t".to_string(), "COUNT(t.id) AS cnt".to_string()]).unwrap();
+    let ty = build_scalar_result_row_type(&checker, &chain, &items).unwrap();
+    assert_eq!(
+        ty,
+        Type::ArrayShape(vec![
+            ("t_id".to_string(), Type::Int, false),
+            ("t_name".to_string(), Type::String, false),
+            ("cnt".to_string(), Type::IntRange(Some(0), None), false),
+        ])
+    );
+}

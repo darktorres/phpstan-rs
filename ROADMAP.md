@@ -2065,6 +2065,54 @@ select('t')->from(...)->getQuery()->getResult()` call producing plain
 `list` instead of `list<Entity>`). Fixed by stopping the backward walk
 exactly at the `createQueryBuilder` call, without descending past it.
 
+**`getArrayResult()`/`getSingleColumnResult()`/`getSingleScalarResult()`/
+`getScalarResult()`** (PHASE_BACKLOG Phase 168's 168f) - the largest real
+payoff of the whole Doctrine phase (`getArrayResult`/
+`getSingleColumnResult`/`getSingleScalarResult` alone are 295 of the
+corpus's 526 real terminal-method call sites), and beyond real PHPStan:
+`phpstan-doctrine`'s own stub declares all four bare (`mixed[]`/
+`mixed`), no dynamic-return-type extension covers any of them, so
+nothing here is checkable against a reference implementation's own
+`dumpType()` output - each transcribed directly from Doctrine ORM's own
+hydrator source instead (`ArrayHydrator`/`ScalarHydrator`/
+`ScalarColumnHydrator`).
+`checker::doctrine::result_shape::{build_array_result_row_type,
+single_scalar_column_type, build_scalar_result_row_type}`:
+`getArrayResult()` converts every entity member of `getResult()`'s own
+row shape into a nested `object{...}` shape instead of a real object -
+a to-one association converts to a further-nested `object{}` carrying
+just its own target's identifier (real Doctrine's default, unfetched-
+association array shape); a to-many association is omitted from the
+shape entirely rather than guessed, since its own array-hydration shape
+needs a separate, recursive-list rule this project doesn't model yet.
+`getSingleColumnResult()`/`getSingleScalarResult()` share one
+requirement (`single_scalar_column_type`): the select must have exactly
+one item whose own resolved type isn't an entity object - `list<T>` for
+the former, `T` directly for the latter (real Doctrine throws
+`NoResultException`/`NonUniqueResultException` otherwise, unmodeled,
+same precedent as `getSingleResult()`). `getScalarResult()` flattens
+every selected entity's own scalar fields directly into the row under
+`{alias}_{field}`-keyed entries, alongside every plain scalar/aggregate
+item under its own key - zero real corpus usage (confirmed), built for
+completeness with correspondingly lower confidence than the other
+three: `AbstractHydrator::gatherScalarRowData`'s own exact key-naming
+rule was inferred from `ScalarHydrator`'s own doc comment ("almost the
+same as a regular SQL result set"), not independently confirmed against
+the method body itself - flagged as needing verification against real
+Doctrine before trusting this specific shape on a real query.
+
+Wired differently from 168e's five methods: rather than reading back a
+pre-computed row type from `getQuery()`'s own stored `HYDRATE_OBJECT`
+shape, `checker::expr::member_resolution::doctrine_get_query_receiver`
+recognizes `->getQuery()` as `recv`'s own immediate receiver and
+re-resolves the fluent chain (168b) and select items (168c) directly at
+each of these four call sites - every one of them needs its own,
+differently-shaped hydration transform, not a single fixed shape to
+reuse, and real corpus usage of every terminal method is confirmed 100%
+one direct chained expression (never split across a variable assignment
+first), so this loses no real coverage in exchange for not building a
+second, parallel row-type-storage mechanism per hydration mode.
+
 **Opt-in call-site function/method-name-case checking, plus a real
 case-insensitive-method-call bugfix** (PHASE_BACKLOG Phase 102's W3,
 now fully built). Extends the existing `function.nameCase` mechanism

@@ -1,5 +1,5 @@
 //! DQL-aware Doctrine ORM result-type inference (PHASE_BACKLOG Phase 168,
-//! 168b-168e) - end-to-end `assertType()` coverage through a minimal
+//! 168b-168f) - end-to-end `assertType()` coverage through a minimal
 //! Doctrine class hierarchy declared directly in each fixture (this
 //! project vendors no real `doctrine-orm`/`doctrine-doctrine` stubs).
 
@@ -43,6 +43,10 @@ const STUBS: &str = r#"
             public function toIterable($parameters = [], $hydrationMode = null): iterable {}
             public function getOneOrNullResult($hydrationMode = null): mixed {}
             public function getSingleResult($hydrationMode = null): mixed {}
+            public function getArrayResult(): array {}
+            public function getSingleColumnResult(): array {}
+            public function getSingleScalarResult(): mixed {}
+            public function getScalarResult(): array {}
         }
         class Query extends AbstractQuery {}
         interface EntityManagerInterface {
@@ -270,6 +274,152 @@ fn an_undecidable_chain_falls_back_to_todays_shape_only_list_for_get_result() {
             {
                 $rows = $em->createQueryBuilder()->select($dql)->getQuery()->getResult();
                 assertType('list', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_array_result_converts_the_entity_into_an_object_shape() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function all(): void
+            {
+                $rows = $this->createQueryBuilder('t')->getQuery()->getArrayResult();
+                assertType('list<object{id: int, name: string}>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_single_column_result_of_one_scalar_field_is_a_list_of_that_type() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function allNames(): void
+            {
+                $names = $this->createQueryBuilder('t')
+                    ->select('t.name')
+                    ->getQuery()
+                    ->getSingleColumnResult();
+                assertType('list<string>', $names);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_single_scalar_result_of_one_scalar_field_is_that_fields_own_type() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function oneName(): void
+            {
+                $name = $this->createQueryBuilder('t')
+                    ->select('t.name')
+                    ->getQuery()
+                    ->getSingleScalarResult();
+                assertType('string', $name);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_scalar_result_flattens_the_entity_under_alias_prefixed_keys() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function all(): void
+            {
+                $rows = $this->createQueryBuilder('t')->getQuery()->getScalarResult();
+                assertType('list<array{t_id: int, t_name: string}>', $rows);
             }
         }
         "#,

@@ -464,6 +464,70 @@ impl<'a> Checker<'a> {
                     _ => unreachable!(),
                 }
             }
+            // `getArrayResult`/`getSingleColumnResult`/
+            // `getSingleScalarResult`/`getScalarResult` (PHASE_BACKLOG
+            // Phase 168 168f) - beyond real PHPStan (168e's own stub
+            // check confirms none of these four get a dynamic-return-
+            // type extension in real `phpstan-doctrine` either).
+            // Re-resolves the `QueryBuilder` chain directly from
+            // `->getQuery()`'s own receiver rather than reading back a
+            // pre-stored row type the way the five methods above do -
+            // every one of these four needs its own, differently-shaped
+            // hydration transform (`entity_array_shape`'s nested
+            // identifier-only associations, the flat `getScalarResult`
+            // key format), not a single fixed `HYDRATE_OBJECT` shape to
+            // reuse. Confirmed real corpus usage is chain-shaped just
+            // like `getResult()`'s own 100%-chained call sites (never
+            // split across a variable assignment first), so this loses
+            // no real coverage in exchange for the simpler design.
+            Type::Object(class, _)
+                if matches!(
+                    method,
+                    "getArrayResult"
+                        | "getSingleColumnResult"
+                        | "getSingleScalarResult"
+                        | "getScalarResult"
+                ) && self
+                    .registry
+                    .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
+            {
+                let resolved = doctrine_get_query_receiver(recv).and_then(|qb_recv| {
+                    let chain = self.resolve_query_builder_chain(qb_recv, locals)?;
+                    let items =
+                        crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
+                    Some((chain, items))
+                });
+                match (method, resolved) {
+                    ("getArrayResult", Some((chain, items))) => {
+                        crate::checker::doctrine::result_shape::build_array_result_row_type(
+                            self, &chain, &items,
+                        )
+                        .map(doctrine_query_result_list_type_of)
+                        .unwrap_or_else(doctrine_query_result_list_type)
+                    }
+                    ("getSingleColumnResult", Some((chain, items))) => {
+                        crate::checker::doctrine::result_shape::single_scalar_column_type(
+                            self, &chain, &items,
+                        )
+                        .map(doctrine_query_result_list_type_of)
+                        .unwrap_or_else(doctrine_query_result_list_type)
+                    }
+                    ("getSingleScalarResult", Some((chain, items))) => {
+                        crate::checker::doctrine::result_shape::single_scalar_column_type(
+                            self, &chain, &items,
+                        )
+                        .unwrap_or(Type::Mixed)
+                    }
+                    ("getScalarResult", Some((chain, items))) => {
+                        crate::checker::doctrine::result_shape::build_scalar_result_row_type(
+                            self, &chain, &items,
+                        )
+                        .map(doctrine_query_result_list_type_of)
+                        .unwrap_or_else(doctrine_query_result_list_type)
+                    }
+                    _ => Type::Mixed,
+                }
+            }
             // `DateTimeInterface::format()`'s own already-
             // shipped `date()` format-character table applies verbatim -
             // real, substantial corpus usage (dozens of literal
@@ -603,5 +667,28 @@ fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
             }
             _ => HydrationMode::Unknown,
         },
+    }
+}
+
+/// `recv`'s own `QueryBuilder` receiver, when `recv` is exactly a bare
+/// `->getQuery()` call (`MethodCall(qb, "getQuery", [], _)`) - used by
+/// the `getArrayResult`/`getSingleColumnResult`/`getSingleScalarResult`/
+/// `getScalarResult` dispatch (168f) to re-resolve the fluent chain
+/// directly, rather than reading back a row type `getQuery()`'s own
+/// dispatch already computed and stored for a different (`HYDRATE_
+/// OBJECT`) hydration mode. `None` for anything else (a variable holding
+/// an already-built `Query`, an unrelated method) - real corpus usage of
+/// every terminal method is 100% one direct chained expression, never
+/// split across a variable assignment first, so this loses no real
+/// coverage in exchange for not needing a second, parallel row-type-
+/// storage mechanism per hydration mode.
+fn doctrine_get_query_receiver(recv: &Expr) -> Option<&Expr> {
+    match &recv.kind {
+        ExprKind::MethodCall(qb, method, call_args, _)
+            if method == "getQuery" && call_args.is_empty() =>
+        {
+            Some(qb)
+        }
+        _ => None,
     }
 }

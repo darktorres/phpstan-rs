@@ -210,5 +210,171 @@ pub(crate) fn build_result_row_type(
     Some(Type::ArrayShape(fields))
 }
 
+/// `getSingleColumnResult()`/`getSingleScalarResult()`'s own shared
+/// requirement (PHASE_BACKLOG Phase 168 168f): the select must have
+/// exactly one item, and that item's own resolved type must not be an
+/// entity object (a real Doctrine `HYDRATE_SCALAR_COLUMN`/
+/// `HYDRATE_SINGLE_SCALAR` query only ever targets a genuine scalar
+/// column - selecting a whole entity through either method is undefined
+/// behavior in real Doctrine, so this project doesn't guess a shape for
+/// it either). `None` when the requirement isn't met - callers fall
+/// back to their own pre-Phase-168 status quo (`list<mixed>`/`Mixed`),
+/// not a scope cut.
+pub(crate) fn single_scalar_column_type(
+    checker: &Checker,
+    chain: &QueryBuilderChain,
+    items: &[SelectItem],
+) -> Option<Type> {
+    let [item] = items else { return None };
+    let aliases = build_alias_map(checker, chain);
+    match select_item_type(checker, &aliases, item) {
+        Type::Object(..) => None,
+        ty => Some(ty),
+    }
+}
+
+/// An entity's own `HYDRATE_ARRAY` shape - every mapped scalar field
+/// flattens directly into the shape; a to-one association converts to a
+/// nested shape carrying just its own target's identifier (real
+/// Doctrine's own default, unfetched-association array shape). A
+/// to-many (`OneToMany`/`ManyToMany`) association's own array-hydration
+/// shape is a separate, recursive-list rule this project doesn't model
+/// yet - omitted from the shape entirely rather than guessed, the same
+/// "don't guess" leniency as every other unresolved piece in this
+/// phase. A deeper limitation, disclosed rather than silently assumed
+/// solved: a to-one association that *is* eagerly joined and separately
+/// selected in the same query still gets this same identifier-only
+/// shape, not the fully recursive one real Doctrine would produce for
+/// an actually-hydrated join - the real corpus's own joins never select
+/// the joined alias itself (confirmed directly), so this gap has no
+/// known real false-positive/negative to trace yet.
+fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
+    let Some(de) = entity_info(checker, entity).and_then(|i| i.doctrine_entity.as_ref()) else {
+        return Type::Mixed;
+    };
+    let mut fields: Vec<(String, Type, bool)> = de
+        .fields
+        .iter()
+        .filter(|(name, _)| !de.associations.contains_key(*name))
+        .map(|(name, ty)| (name.clone(), ty.clone(), false))
+        .collect();
+    for (name, assoc) in &de.associations {
+        if assoc.is_collection {
+            continue;
+        }
+        let target = entity_info(checker, &assoc.target).and_then(|i| i.doctrine_entity.as_ref());
+        let shape = target
+            .and_then(|t| t.id_field.as_ref())
+            .map(|id_field| {
+                let id_ty = target
+                    .and_then(|t| t.fields.get(id_field))
+                    .cloned()
+                    .unwrap_or(Type::Mixed);
+                Type::ObjectShape(vec![(id_field.clone(), id_ty, false)])
+            })
+            .unwrap_or(Type::Mixed);
+        fields.push((name.clone(), shape, false));
+    }
+    // Deterministic order - a `HashMap`'s own iteration order is
+    // unspecified, and this shape must render identically across runs.
+    fields.sort_by(|a, b| a.0.cmp(&b.0));
+    Type::ObjectShape(fields)
+}
+
+/// Converts an entity object type to its own `HYDRATE_ARRAY` shape when
+/// `ty` names a known entity, leaving every other type unchanged -
+/// applied once per field on top of `build_result_row_type`'s own
+/// `HYDRATE_OBJECT` computation, rather than duplicating every select-
+/// item-kind match arm a second time for the array-mode case.
+fn to_array_mode(checker: &Checker, ty: Type) -> Type {
+    match &ty {
+        Type::Object(class, _) if entity_info(checker, class).is_some() => {
+            entity_array_shape(checker, class)
+        }
+        _ => ty,
+    }
+}
+
+/// `getArrayResult()` (PHASE_BACKLOG Phase 168 168f) - the identical row
+/// shape `build_result_row_type` computes, except every entity member
+/// converts to its own `entity_array_shape` instead of a real object
+/// (real Doctrine's `HYDRATE_ARRAY` mode). Beyond real PHPStan (168e's
+/// own stub check confirms `getArrayResult()` has no dynamic-return-type
+/// extension there at all), so this is transcribed directly from
+/// Doctrine ORM's own `ArrayHydrator` source, not checked against a
+/// reference implementation's `dumpType()` output.
+pub(crate) fn build_array_result_row_type(
+    checker: &Checker,
+    chain: &QueryBuilderChain,
+    items: &[SelectItem],
+) -> Option<Type> {
+    build_result_row_type(checker, chain, items).map(|ty| match ty {
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, v, opt)| (k, to_array_mode(checker, v), opt))
+                .collect(),
+        ),
+        other => to_array_mode(checker, other),
+    })
+}
+
+/// `getScalarResult()` (PHASE_BACKLOG Phase 168 168f) - flattens every
+/// selected entity's own scalar fields directly into one flat row
+/// (`{alias}_{field}`-keyed, matching real Doctrine's own column-naming
+/// convention for a plain, unaliased entity field), alongside every
+/// plain scalar/aggregate item under its own key exactly like
+/// `build_result_row_type`'s general case. Zero real corpus usage
+/// (confirmed) - built for completeness, not because any known call site
+/// needs it, and with correspondingly lower confidence than the other
+/// three: `AbstractHydrator::gatherScalarRowData`'s own exact key-naming
+/// rule was not read in full before writing this (this module's key
+/// format above is inferred from `ScalarHydrator`'s own doc comment,
+/// "almost the same as a regular SQL result set" - a real column-naming
+/// convention, but not independently confirmed against the method body
+/// itself), so treat this specific shape as needing verification against
+/// real Doctrine before trusting it on a real query.
+pub(crate) fn build_scalar_result_row_type(
+    checker: &Checker,
+    chain: &QueryBuilderChain,
+    items: &[SelectItem],
+) -> Option<Type> {
+    if items.is_empty() {
+        return None;
+    }
+    let aliases = build_alias_map(checker, chain);
+    let mut fields: Vec<(String, Type, bool)> = Vec::new();
+    for (i, item) in items.iter().enumerate() {
+        match &item.kind {
+            SelectItemKind::Field(FieldRef::Alias(entity_alias)) => {
+                let Some(entity) = aliases.get(entity_alias) else {
+                    fields.push((i.to_string(), Type::Mixed, false));
+                    continue;
+                };
+                let Some(de) =
+                    entity_info(checker, entity).and_then(|e| e.doctrine_entity.as_ref())
+                else {
+                    fields.push((i.to_string(), Type::Mixed, false));
+                    continue;
+                };
+                let mut scalar_fields: Vec<(&String, &Type)> = de
+                    .fields
+                    .iter()
+                    .filter(|(name, _)| !de.associations.contains_key(*name))
+                    .collect();
+                scalar_fields.sort_by(|a, b| a.0.cmp(b.0));
+                for (name, ty) in scalar_fields {
+                    fields.push((format!("{entity_alias}_{name}"), ty.clone(), false));
+                }
+            }
+            _ => {
+                let key = item.alias.clone().unwrap_or_else(|| i.to_string());
+                fields.push((key, select_item_type(checker, &aliases, item), false));
+            }
+        }
+    }
+    Some(Type::ArrayShape(fields))
+}
+
 #[cfg(test)]
 mod tests;

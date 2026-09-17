@@ -2088,7 +2088,7 @@ from-scratch Doctrine mapping-metadata resolver.
   until 168f's own per-mode transforms exist). Reuses `Type::Object`'s
   existing generic-argument slot to carry `getQuery()`'s own resolved
   row type through to the terminal method - no new `Type` variant.
-- **168f (medium).** `getArrayResult()`/`getSingleColumnResult()`/
+- **168f (medium, DONE).** `getArrayResult()`/`getSingleColumnResult()`/
   `getSingleScalarResult()`/`getScalarResult()` - **beyond real
   PHPStan** (confirmed via `phpstan-doctrine`'s own stub: none of these
   four get a dynamic-return-type extension there either), transcribed
@@ -2097,7 +2097,22 @@ from-scratch Doctrine mapping-metadata resolver.
   real payoff of this whole phase. `getSingleScalarResult()` (a single
   scalar value, alias for `getSingleResult(HYDRATE_SINGLE_SCALAR)`) is
   not the same method as `getScalarResult()` (a flat multi-column array,
-  zero corpus usage) - easy to conflate.
+  zero corpus usage) - easy to conflate. `getArrayResult()`'s own entity
+  conversion (a to-one association becomes a nested identifier-only
+  shape, matching real Doctrine's default unfetched-association array)
+  is a one-level rule, not a fully recursive one - an eagerly-joined
+  *and separately selected* association still gets the identifier-only
+  shape rather than the fully recursive one real Doctrine would produce,
+  a disclosed gap with no known real corpus instance to trace (the
+  corpus's own joins only ever filter, never select the joined alias).
+  Wired via a direct re-resolution of `->getQuery()`'s own receiver
+  chain at each of these four call sites, not a read-back of a pre-
+  stored row type the way the five 168e methods are - each needs its
+  own, differently-shaped hydration transform, and real corpus usage of
+  every terminal method is confirmed 100% one direct chained expression
+  (never split across a variable assignment first), so nothing is lost
+  by not building a second, parallel row-type-storage mechanism per
+  hydration mode.
 - **168g (small).** Direct `EntityManager::createQuery($dql)->getResult()`
   - the same DQL parser fed a literal string instead of a
   QueryBuilder-reconstructed one.
