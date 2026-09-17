@@ -52,7 +52,7 @@ impl Parser {
             // Aliasing isn't modeled anywhere in this checker, so it's
             // just consumed.
             self.eat(&Token::Amp);
-            let is_set = matches!(self.peek(), Token::Identifier(s) if s == "set");
+            let is_set = matches!(self.peek(), Token::Identifier(s) if **s == *"set");
             self.skip(); // `get` or `set`
 
             let param = if is_set && self.eat(&Token::LParen) {

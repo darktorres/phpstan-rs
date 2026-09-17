@@ -10,8 +10,8 @@ fn top_level_const_declaration_parses() {
         panic!("expected GlobalConst");
     };
     assert_eq!(consts.len(), 2);
-    assert_eq!(consts[0].name, "FOO");
-    assert_eq!(consts[1].name, "BAR");
+    assert_eq!(consts[0].name, "FOO".into());
+    assert_eq!(consts[1].name, "BAR".into());
 }
 
 #[test]
@@ -38,10 +38,10 @@ fn pure_enum_parses_with_unbacked_cases() {
     let StmtKind::EnumDecl(e) = &program[0].kind else {
         panic!("expected EnumDecl");
     };
-    assert_eq!(e.name, "SortDirection");
+    assert_eq!(e.name, "SortDirection".into());
     assert!(e.backing_type.is_none());
     assert_eq!(e.cases.len(), 2);
-    assert_eq!(e.cases[0].name, "Ascending");
+    assert_eq!(e.cases[0].name, "Ascending".into());
     assert!(e.cases[0].value.is_none());
 }
 
@@ -75,7 +75,7 @@ fn backed_enum_with_interface_and_method_parses() {
         })
     ));
     assert_eq!(e.methods.len(), 1);
-    assert_eq!(e.methods[0].function.name, "label");
+    assert_eq!(e.methods[0].function.name, "label".into());
 }
 
 #[test]
@@ -111,7 +111,7 @@ fn a_class_named_the_same_as_a_keyword_keeps_its_own_declared_case() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.name, "Enum");
+    assert_eq!(c.name, "Enum".into());
 }
 
 #[test]
@@ -139,13 +139,13 @@ fn a_final_method_is_recorded_as_final_and_a_non_final_one_is_not() {
     let locked = c
         .methods
         .iter()
-        .find(|m| m.function.name == "locked")
+        .find(|m| m.function.name == "locked".into())
         .unwrap();
     assert!(locked.is_final);
     let open = c
         .methods
         .iter()
-        .find(|m| m.function.name == "open")
+        .find(|m| m.function.name == "open".into())
         .unwrap();
     assert!(!open.is_final);
 }
@@ -156,9 +156,9 @@ fn a_readonly_property_modifier_is_recorded_per_property() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    let x = c.properties.iter().find(|p| p.name == "x").unwrap();
+    let x = c.properties.iter().find(|p| p.name == "x".into()).unwrap();
     assert!(x.is_readonly);
-    let y = c.properties.iter().find(|p| p.name == "y").unwrap();
+    let y = c.properties.iter().find(|p| p.name == "y".into()).unwrap();
     assert!(!y.is_readonly);
 }
 
@@ -181,7 +181,7 @@ fn a_promoted_constructor_parameter_captures_its_own_readonly_modifier() {
     let ctor = c
         .methods
         .iter()
-        .find(|m| m.function.name == "__construct")
+        .find(|m| m.function.name == "__construct".into())
         .unwrap();
     assert!(ctor.function.params[0].promoted_readonly);
 }
@@ -296,7 +296,7 @@ fn a_named_by_ref_function_declaration_is_unaffected_by_the_anonymous_statement_
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a FunctionDecl, got {:?}", program[0].kind);
     };
-    assert_eq!(f.name, "bar");
+    assert_eq!(f.name, "bar".into());
 }
 
 #[test]
@@ -366,9 +366,9 @@ fn asymmetric_visibility_property_parses() {
         panic!("expected ClassDecl");
     };
     assert_eq!(c.properties.len(), 2);
-    assert_eq!(c.properties[0].name, "name");
+    assert_eq!(c.properties[0].name, "name".into());
     assert_eq!(c.properties[0].visibility, Visibility::Public);
-    assert_eq!(c.properties[1].name, "count");
+    assert_eq!(c.properties[1].name, "count".into());
     assert_eq!(c.properties[1].visibility, Visibility::Public);
 }
 
@@ -398,7 +398,7 @@ fn property_hooks_parse() {
     let hooks = c.properties[0].hooks.as_ref().expect("expected hooks");
     assert!(matches!(hooks.get, Some(PropertyHookBody::Arrow(_))));
     let (param, body) = hooks.set.as_ref().expect("expected set hook");
-    assert_eq!(param.as_ref().unwrap().name, "value");
+    assert_eq!(param.as_ref().unwrap().name, "value".into());
     assert!(matches!(body, PropertyHookBody::Block(_)));
 
     // A bodyless hook (`get;`/`set;`) parses to
@@ -509,7 +509,7 @@ fn public_set_and_final_promoted_params_parse() {
     };
     let ctor = &c.methods[0].function;
     assert_eq!(ctor.params[0].promoted_visibility, Some(Visibility::Public));
-    assert_eq!(ctor.params[1].name, "b");
+    assert_eq!(ctor.params[1].name, "b".into());
 }
 
 #[test]
@@ -524,7 +524,7 @@ fn legacy_var_property_declaration_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.properties[0].name, "a");
+    assert_eq!(c.properties[0].name, "a".into());
     assert_eq!(c.properties[0].visibility, Visibility::Public);
     assert_eq!(c.properties[0].type_hint.as_deref(), Some("A|(B&C)"));
 }
@@ -555,7 +555,7 @@ fn hooks_on_promoted_constructor_property_parse() {
 #[test]
 fn readonly_class_still_parses_as_a_class() {
     let program = parse(r#"<?php readonly class Foo {}"#);
-    assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo"));
+    assert!(matches!(&program[0].kind, StmtKind::ClassDecl(c) if c.name == "Foo".into()));
 }
 
 // These exercise the real `Attribute { name, args }` node parsed onto
@@ -573,7 +573,7 @@ fn class_attribute_with_a_named_argument_parses() {
     assert_eq!(c.attrs[0].args[0].name.as_deref(), Some("table"));
     assert!(matches!(
         &c.attrs[0].args[0].value.kind,
-        ExprKind::Literal(Literal::String(s)) if s == "users"
+        ExprKind::Literal(Literal::String(s)) if **s == *"users"
     ));
 }
 

@@ -172,7 +172,7 @@ impl<'a> Checker<'a> {
                     && let ExprKind::Literal(Literal::String(expected)) = &expected_arg.value.kind
                 {
                     let actual = self.infer_expr(&actual_arg.value, locals).to_string();
-                    if &actual != expected {
+                    if *actual != **expected {
                         self.report(label.to_string(), format!(
                                 "assertType() mismatch: expected type \"{expected}\", actual type \"{actual}\""
                             ), actual_arg.value.span, 0, "phpstanRs.assertType");
@@ -740,9 +740,9 @@ impl<'a> Checker<'a> {
                     // (an already-existing `$matches` keeps its own real
                     // provenance instead).
                     if locals.contains_key(matches_name) {
-                        locals.insert(matches_name.clone(), shape);
+                        locals.insert(matches_name.to_string(), shape);
                     } else {
-                        locals.declare(matches_name.clone(), shape, matches_arg.span);
+                        locals.declare(matches_name.to_string(), shape, matches_arg.span);
                     }
                 }
                 // `preg_match_all`'s by-ref `$matches` shape - a sibling
@@ -787,9 +787,9 @@ impl<'a> Checker<'a> {
                     // Same reasoning as `preg_match`'s identical treatment
                     // above.
                     if locals.contains_key(matches_name) {
-                        locals.insert(matches_name.clone(), shape);
+                        locals.insert(matches_name.to_string(), shape);
                     } else {
-                        locals.declare(matches_name.clone(), shape, matches_arg.span);
+                        locals.declare(matches_name.to_string(), shape, matches_arg.span);
                     }
                 }
                 // `proc_open()`'s by-ref `$pipes` out-parameter (its 3rd
@@ -813,9 +813,9 @@ impl<'a> Checker<'a> {
                     );
                     purge_stale_narrowing_for(locals, pipes_name);
                     if locals.contains_key(pipes_name) {
-                        locals.insert(pipes_name.clone(), shape);
+                        locals.insert(pipes_name.to_string(), shape);
                     } else {
-                        locals.declare(pipes_name.clone(), shape, pipes_arg.span);
+                        locals.declare(pipes_name.to_string(), shape, pipes_arg.span);
                     }
                 }
                 // Reuses the `resolved_name`/`sig` already resolved above
@@ -851,7 +851,7 @@ impl<'a> Checker<'a> {
                 // *body* under a rebound `$this`, it doesn't compute
                 // `recv`'s own type - so `recv` still needs its own
                 // `infer_expr` call there specifically.
-                let recv_ty = if method == "bindTo"
+                let recv_ty = if **method == *"bindTo"
                     && matches!(
                         unwrap_grouping(recv).kind,
                         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
@@ -886,7 +886,7 @@ impl<'a> Checker<'a> {
                 // pass.
                 if *nullsafe
                     && self.loop_depth == 0
-                    && !matches!(&recv.kind, ExprKind::Variable(n) if self.static_var_names.contains(n))
+                    && !matches!(&recv.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
                     && type_definitely_excludes_null(&recv_ty)
                 {
                     self.report(
@@ -1021,7 +1021,9 @@ impl<'a> Checker<'a> {
                     let method_exists_guarded = matches!(
                         &unwrap_grouping(recv).kind,
                         ExprKind::Variable(name)
-                            if locals.guarded_methods.contains(&(name.clone(), method.clone()))
+                            if locals
+                                .guarded_methods
+                                .contains(&(name.to_string(), method.to_string()))
                     );
                     if !method_exists_guarded
                         && self.registry.classes.contains_key(class)
@@ -1504,7 +1506,7 @@ impl<'a> Checker<'a> {
                 // `$this` is real PHP's reserved, implicitly-bound
                 // reference to the current object - reassigning it is an
                 // unconditional fatal error ("Cannot re-assign $this.").
-                if matches!(&lhs.kind, ExprKind::Variable(v) if v == "this") {
+                if matches!(&lhs.kind, ExprKind::Variable(v) if **v == *"this") {
                     self.report(
                         label.to_string(),
                         "cannot re-assign $this".to_string(),
@@ -2272,7 +2274,7 @@ impl<'a> Checker<'a> {
                 // guard on the `MethodCall` arm above for why.
                 if *nullsafe
                     && self.loop_depth == 0
-                    && !matches!(&base.kind, ExprKind::Variable(n) if self.static_var_names.contains(n))
+                    && !matches!(&base.kind, ExprKind::Variable(n) if self.static_var_names.contains(n.as_ref()))
                     && type_definitely_excludes_null(&base_ty)
                 {
                     self.report(
@@ -2293,7 +2295,8 @@ impl<'a> Checker<'a> {
                 // literal `$this` expression, unlike the real
                 // `pestphp/pest-plugin-phpstan` extension, which resolves
                 // by the base's type.
-                let is_pest_this = matches!(&base.kind, ExprKind::Variable(name) if name == "this");
+                let is_pest_this =
+                    matches!(&base.kind, ExprKind::Variable(name) if **name == *"this");
                 // `stdClass` (a real, registered, zero-property class in
                 // the vendored stubs) is PHP's canonical "arbitrary
                 // property bag" - real PHP (and real PHPStan) never flag
@@ -2309,14 +2312,16 @@ impl<'a> Checker<'a> {
                 let property_exists_guarded = matches!(
                     &base.kind,
                     ExprKind::Variable(name)
-                        if locals.guarded_properties.contains(&(name.clone(), prop.clone()))
+                        if locals
+                            .guarded_properties
+                            .contains(&(name.to_string(), prop.to_string()))
                 );
                 if !property_exists_guarded
                     && self.member_confirmed_missing(&base_ty, |c| {
                         c == "stdClass"
                             || self.registry.lookup_property(c, prop).is_some()
                             || self.registry.lookup_method(c, "__get").is_some()
-                            || (is_pest_this && self.pest_hook_properties.contains(prop.as_str()))
+                            || (is_pest_this && self.pest_hook_properties.contains(prop.as_ref()))
                     })
                 {
                     self.report(
@@ -2531,7 +2536,7 @@ impl<'a> Checker<'a> {
                     // all (a real PHP compile error), distinct from - and
                     // checked before - the plain "undefined variable"
                     // case below.
-                    if u.name == "this" {
+                    if u.name == "this".into() {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 label.to_string(),
@@ -2596,7 +2601,7 @@ impl<'a> Checker<'a> {
                     // two probes (`probe_hit`/`probe_var_provenance`) are
                     // independent.
                     self.probe_hit_at(u.span, &ty);
-                    closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
+                    closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
                 }
                 if !is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
@@ -2619,7 +2624,7 @@ impl<'a> Checker<'a> {
                 // masking a real `variable.undefined` on an unrelated,
                 // genuinely-uncaptured reference to the same bare name.
                 let captured_names: std::collections::HashSet<&str> =
-                    uses.iter().map(|u| u.name.as_str()).collect();
+                    uses.iter().map(|u| u.name.as_ref()).collect();
                 for (key, implied) in locals.branch_implied_facts.iter() {
                     let filtered: Vec<(String, Type)> = implied
                         .iter()
@@ -2662,7 +2667,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    closure_locals.declare(p.name.clone(), ty, p.name_span);
+                    closure_locals.declare(p.name.to_string(), ty, p.name_span);
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -2801,7 +2806,7 @@ impl<'a> Checker<'a> {
                         // argument auto-vivification this project models
                         // in `predefine_byref_or_unknown_args`, now given
                         // a real, navigable declaration site.
-                        locals.declare(u.name.clone(), mutated, u.span);
+                        locals.declare(u.name.to_string(), mutated, u.span);
                         // `locals.declare` above is this variable's only
                         // provenance site in this case (it didn't exist
                         // in the outer scope before), so the probe hook
@@ -2814,7 +2819,7 @@ impl<'a> Checker<'a> {
                                 Some([u.span].into_iter().collect());
                         }
                     } else {
-                        locals.insert(u.name.clone(), mutated);
+                        locals.insert(u.name.to_string(), mutated);
                     }
                 }
                 Type::Object("Closure".to_string(), Vec::new())
@@ -2860,7 +2865,7 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
-                    arrow_locals.declare(p.name.clone(), ty, p.name_span);
+                    arrow_locals.declare(p.name.to_string(), ty, p.name_span);
                 }
                 // An arrow function's body is a single expression, not
                 // a `Vec<Stmt>` `body_contains_yield` can walk -
@@ -3146,7 +3151,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
                 Literal::Float(_) => Type::Float,
-                Literal::String(s) => Type::StringLiteral(s.clone()),
+                Literal::String(s) => Type::StringLiteral(s.to_string()),
                 Literal::Bool(true) => Type::True,
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
@@ -3162,7 +3167,7 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(lit) => match lit {
                 Literal::Int(n) => Type::IntLiteral(*n),
                 Literal::Float(_) => Type::Float,
-                Literal::String(s) => Type::StringLiteral(s.clone()),
+                Literal::String(s) => Type::StringLiteral(s.to_string()),
                 Literal::Bool(true) => Type::True,
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
@@ -3597,7 +3602,7 @@ impl<'a> Checker<'a> {
                 }
                 let mut arrow_locals = locals.clone();
                 for (p, ty) in params.iter().zip(param_overrides) {
-                    arrow_locals.insert(p.name.clone(), ty.clone());
+                    arrow_locals.insert(p.name.to_string(), ty.clone());
                 }
                 let inferred = self.infer_expr(body, &arrow_locals);
                 Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
@@ -3618,13 +3623,13 @@ impl<'a> Checker<'a> {
                 let mut closure_locals: Locals = Locals::default();
                 for u in uses {
                     let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
-                    closure_locals.insert(u.name.clone(), ty);
+                    closure_locals.insert(u.name.to_string(), ty);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
                 }
                 for (p, ty) in params.iter().zip(param_overrides) {
-                    closure_locals.insert(p.name.clone(), ty.clone());
+                    closure_locals.insert(p.name.to_string(), ty.clone());
                 }
                 // Only the common single-implicit-return-statement body
                 // shape is handled (mirrors check_shape_key_access's

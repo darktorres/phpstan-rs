@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 /// A single point in a source file, 1-indexed (matching editor convention).
 /// `col` counts UTF-8 characters, not raw bytes - real PHP source can and
 /// does contain multi-byte content inside actual code, not just comments
@@ -291,24 +293,30 @@ impl Keyword {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum StringPart {
-    Literal(String),
-    SimpleVar(String),
+    Literal(Arc<str>),
+    SimpleVar(Arc<str>),
     // The fragment's own source text, plus the real file position it
     // starts at - `parser::build_interpolated` re-lexes the fragment in
     // isolation (its own byte offsets have no connection to the real
     // file), then biases the fragment-relative spans it gets back using
     // this as the base, so an error inside `"{$obj->prop}"` still points
     // at its real position instead of somewhere relative to a throwaway
-    // re-lex.
+    // re-lex. Deliberately kept as plain `String`, not interned: this
+    // text is re-lexed by a throwaway sub-`Lexer`/`Parser` and then
+    // immediately discarded (`Parser::build_interpolated`'s own
+    // `ComplexExpr` arm is its only consumer) - interning it would pay a
+    // real lookup/lock cost for text that's read exactly once and never
+    // compared/deduplicated again, with no downstream `Arc<str>` field to
+    // carry the saved allocation into anyway.
     ComplexExpr(String, Position),
     // `$var->prop` simple syntax. `var_start` is the `$`'s own position,
     // `var_end` the position right after the variable name (where `->`
     // starts), `end` the position right after `prop`.
     PropertyAccess {
-        var: String,
+        var: Arc<str>,
         var_start: Position,
         var_end: Position,
-        prop: String,
+        prop: Arc<str>,
         end: Position,
     },
     // `$var[key]` simple syntax, `key` restricted to `SimpleIndexKey`'s
@@ -317,7 +325,7 @@ pub enum StringPart {
     // `PropertyAccess`'s own: `var_start`/`var_end` bracket the variable
     // name, `end` is the position right after the closing `]`.
     Index {
-        var: String,
+        var: Arc<str>,
         var_start: Position,
         var_end: Position,
         key: SimpleIndexKey,
@@ -337,31 +345,36 @@ pub enum StringPart {
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum SimpleIndexKey {
-    Var(String),
+    Var(Arc<str>),
     Int(i64),
-    Str(String),
+    Str(Arc<str>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(feature = "fuzzing", derive(arbitrary::Arbitrary))]
 pub enum Token {
-    InlineHtml(String),
+    InlineHtml(Arc<str>),
     // Raw `/** ... */` text, including the delimiters. Regular `/* */` and
     // `//` comments are still discarded as whitespace - only doc comments
     // are worth carrying through, so the parser can pair one with the
     // declaration it precedes.
-    DocComment(String),
+    DocComment(Arc<str>),
 
-    Variable(String),
+    Variable(Arc<str>),
     Integer(i64),
     Float(f64),
+    // Deliberately plain `String`, not interned - unlike an identifier or
+    // variable name, a string literal's own contents rarely repeat
+    // (real, distinct message/SQL/template text almost every time), so
+    // interning it would pay a real lookup/lock cost for little to no
+    // dedup benefit.
     StringLit(String),
     InterpString(Vec<StringPart>),
     // `` `shell command $with $interpolation` `` - same interpolation
     // rules as a double-quoted string, different delimiter and runtime
     // meaning (shell_exec).
     ShellExec(Vec<StringPart>),
-    Identifier(String),
+    Identifier(Arc<str>),
     Keyword(Keyword),
 
     // punctuation / operators

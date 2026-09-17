@@ -33,7 +33,7 @@ impl<'a> Checker<'a> {
             let Some(hooks) = &p.hooks else {
                 continue;
             };
-            let Some(prop_sig) = info.properties.get(&p.name).cloned() else {
+            let Some(prop_sig) = info.properties.get(p.name.as_ref()).cloned() else {
                 continue;
             };
             if let Some(body) = &hooks.get {
@@ -63,7 +63,11 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+        if let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        {
             for param in &ctor.function.params {
                 if param.promoted_visibility.is_none() {
                     continue;
@@ -71,7 +75,7 @@ impl<'a> Checker<'a> {
                 let Some(hooks) = param.hooks.as_deref() else {
                     continue;
                 };
-                let Some(prop_sig) = info.properties.get(&param.name).cloned() else {
+                let Some(prop_sig) = info.properties.get(param.name.as_ref()).cloned() else {
                     continue;
                 };
                 if let Some(body) = &hooks.get {
@@ -409,7 +413,7 @@ impl<'a> Checker<'a> {
                         fqn.to_string(),
                         format!(
                             "Parameter ${} of set hook has a native type but the property {fqn}::${name} does not.",
-                            param.map(|p| p.name.as_str()).unwrap_or("value"),
+                            param.map(|p| p.name.as_ref()).unwrap_or("value"),
                         ),
                         span,
                         0,
@@ -424,7 +428,7 @@ impl<'a> Checker<'a> {
                         fqn.to_string(),
                         format!(
                             "Parameter ${} of set hook does not have a native type but the property {fqn}::${name} does.",
-                            param.map(|p| p.name.as_str()).unwrap_or("value"),
+                            param.map(|p| p.name.as_ref()).unwrap_or("value"),
                         ),
                         span,
                         0,
@@ -442,7 +446,7 @@ impl<'a> Checker<'a> {
                             fqn.to_string(),
                             format!(
                                 "Native type {param_ty} of set hook parameter ${} is not contravariant with native type {prop_native_ty} of property {fqn}::${name}.",
-                                param.map(|p| p.name.as_str()).unwrap_or("value"),
+                                param.map(|p| p.name.as_ref()).unwrap_or("value"),
                             ),
                             span,
                             0,
@@ -462,7 +466,7 @@ impl<'a> Checker<'a> {
                 set_ty,
                 &format!(
                     "Parameter ${} of set hook for property {fqn}::${name}",
-                    param.map(|p| p.name.as_str()).unwrap_or("value"),
+                    param.map(|p| p.name.as_ref()).unwrap_or("value"),
                 ),
                 span,
                 &label,
@@ -473,7 +477,7 @@ impl<'a> Checker<'a> {
                 set_ty,
                 &format!(
                     "Parameter ${} of set hook for property {fqn}::${name}",
-                    param.map(|p| p.name.as_str()).unwrap_or("value"),
+                    param.map(|p| p.name.as_ref()).unwrap_or("value"),
                 ),
                 span,
                 &label,
@@ -492,13 +496,13 @@ impl<'a> Checker<'a> {
         );
         let param_name = param
             .map(|p| p.name.clone())
-            .unwrap_or_else(|| "value".to_string());
+            .unwrap_or_else(|| "value".to_string().into());
         let param_span = param.map(|p| p.name_span).unwrap_or(span);
         let value_ty = prop_sig
             .set_ty
             .clone()
             .unwrap_or_else(|| prop_sig.ty.clone());
-        locals.declare(param_name, value_ty, param_span);
+        locals.declare(param_name.to_string(), value_ty, param_span);
         let declared_return = Some(Type::Void);
         let previous_generator_flag = self.current_function_is_generator;
         let previous_declared_return_type = std::mem::replace(

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
@@ -105,8 +107,10 @@ impl Parser {
         let decl = ClassDecl {
             // No name multiple anonymous classes in the same file could
             // share safely - never indexed into the registry by this name,
-            // only used structurally within this one expression.
-            name: "class@anonymous".to_string(),
+            // only used structurally within this one expression. Interned
+            // like any other name: every anonymous class in the corpus
+            // shares this identical text, a real (if small) dedup win.
+            name: crate::intern::intern("class@anonymous"),
             // No real name token to point at - see `ClassDecl::name_span`'s
             // own doc comment.
             name_span: decl_span,
@@ -148,7 +152,7 @@ impl Parser {
             Vec<ClassConst>,
             Vec<String>,
             Vec<Span>,
-            Vec<Option<String>>,
+            Vec<Option<Arc<str>>>,
             Vec<TraitAlias>,
             Vec<String>,
         ),
@@ -266,7 +270,7 @@ impl Parser {
                     // equivalent to `public $x;`. `var` isn't a reserved
                     // word (unlike every other modifier here), so it only
                     // arrives as a plain Identifier.
-                    Token::Identifier(s) if s == "var" => {
+                    Token::Identifier(s) if **s == *"var" => {
                         visibility = Visibility::Public;
                         self.skip();
                     }
@@ -471,11 +475,11 @@ impl Parser {
             // plain `expect_ident`.
             let first = self.parse_qualified_name();
             let (trait_name, method) = if self.eat(&Token::DoubleColon) {
-                (Some(first), self.expect_ident()?)
+                (Some(first), self.expect_ident()?.to_string())
             } else {
                 (None, first)
             };
-            if matches!(self.peek(), Token::Identifier(s) if s == "insteadof") {
+            if matches!(self.peek(), Token::Identifier(s) if **s == *"insteadof") {
                 self.skip();
                 self.parse_qualified_name();
                 while self.eat(&Token::Comma) {
@@ -494,7 +498,7 @@ impl Parser {
                     aliases.push(TraitAlias {
                         trait_name,
                         method: method.clone(),
-                        alias,
+                        alias: alias.to_string(),
                     });
                 }
                 resolved.push(method);

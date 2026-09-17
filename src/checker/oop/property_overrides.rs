@@ -31,21 +31,21 @@ impl<'a> Checker<'a> {
             return;
         };
         for p in &c.properties {
-            let Some(own_sig) = info.properties.get(&p.name).cloned() else {
+            let Some(own_sig) = info.properties.get(p.name.as_ref()).cloned() else {
                 continue;
             };
             self.check_property_override_attribute(fqn, &p.name, &p.attrs, p.span);
             self.check_one_property_override(fqn, &p.name, &own_sig, p.span);
         }
         for m in &c.methods {
-            if m.function.name != "__construct" {
+            if m.function.name != "__construct".into() {
                 continue;
             }
             for param in &m.function.params {
                 if param.promoted_visibility.is_none() {
                     continue;
                 }
-                let Some(own_sig) = info.properties.get(&param.name).cloned() else {
+                let Some(own_sig) = info.properties.get(param.name.as_ref()).cloned() else {
                     continue;
                 };
                 self.check_property_override_attribute(fqn, &param.name, &param.attrs, param.span);

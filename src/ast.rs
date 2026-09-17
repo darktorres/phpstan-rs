@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::token::Span;
 
 /// One `Name(args)` entry inside an attribute group
@@ -25,13 +27,18 @@ pub struct Stmt {
     // that's also a declaration (e.g. a function) claiming its own doc
     // comment via `Parser::take_doc_comment` still gets the same raw text
     // here too - harmless, since a declaration's own docblock never has a
-    // `@var $name` tag for that logic to act on.
-    pub doc_comment: Option<String>,
+    // `@var $name` tag for that logic to act on. `Arc<str>`, not `String`:
+    // moved straight out of the lexer's own interned `Token::DocComment`
+    // (via `Parser`'s `doc_comments` map), and cloned onto more than one
+    // statement/declaration when several share one preceding doc comment
+    // (e.g. a comma-separated `use`/`const` list) - a refcount bump instead
+    // of a full text copy each time.
+    pub doc_comment: Option<Arc<str>>,
 }
 
 #[derive(Debug, Clone)]
 pub enum StmtKind {
-    InlineHtml(String),
+    InlineHtml(Arc<str>),
     Expression(Expr),
     Echo(Vec<Expr>),
     Return(Option<Expr>),
@@ -78,8 +85,10 @@ pub enum StmtKind {
     // `static $x = 1, $y;` - a function-local static variable declaration
     // (name, optional initializer). Persistence across calls isn't
     // modeled - only its scoping (the variable is defined from here on)
-    // matters for a single-call static analysis pass.
-    StaticVar(Vec<(String, Option<Expr>)>),
+    // matters for a single-call static analysis pass. The name is
+    // `Arc<str>`, moved straight out of the lexer's own interned
+    // `Token::Variable`, same as `ExprKind::Variable`.
+    StaticVar(Vec<(Arc<str>, Option<Expr>)>),
     EnumDecl(EnumDecl),
     Switch {
         subject: Expr,
@@ -91,11 +100,13 @@ pub enum StmtKind {
         finally: Option<Vec<Stmt>>,
     },
     Throw(Expr),
-    Goto(String),
+    // `Arc<str>`, moved straight out of the lexer's own interned
+    // `Token::Identifier` - see `FunctionDecl::name`'s own doc comment.
+    Goto(Arc<str>),
     // `label:` - a goto target. Control flow through goto/labels isn't
     // modeled (no effect on narrowing, terminal-statement detection,
     // etc.) - only enough structure to parse past them.
-    Label(String),
+    Label(Arc<str>),
 }
 
 #[derive(Debug, Clone)]
@@ -111,7 +122,9 @@ pub struct CatchClause {
     // See `FunctionDecl::return_type_span`'s own doc comment, one span
     // per `types` entry (same index).
     pub types_spans: Vec<Span>,
-    pub var: Option<String>,
+    // Taken via `Parser::expect_variable` - see `FunctionDecl::name`'s
+    // own doc comment.
+    pub var: Option<Arc<str>>,
     // `var`'s own `$name` token span, populated at the same
     // parse point `var` itself is consumed - `None` exactly when `var` is
     // (a catch clause with no bound variable, `catch (Foo) {}`).
@@ -122,7 +135,11 @@ pub struct CatchClause {
 
 #[derive(Debug, Clone)]
 pub struct Param {
-    pub name: String,
+    // `Arc<str>`, moved straight out of the lexer's own interned
+    // `Token::Variable` - see `FunctionDecl::name`'s own doc comment for
+    // why this preserves (rather than throws away) the lexer's own
+    // interning.
+    pub name: Arc<str>,
     // This parameter's own `$name` token's span - populated by
     // the parser at the exact point it consumes it (`expect_variable`),
     // needed for local-variable-declaration navigation (a read inside the
@@ -160,13 +177,20 @@ pub struct Param {
     // constructor property (`/** @var array<string, mixed>|null */
     // public ?array $details,`), since it doubles as that property's own
     // docblock. `None` for the overwhelming majority of parameters.
-    pub doc_comment: Option<String>,
+    pub doc_comment: Option<Arc<str>>,
     pub span: Span,
 }
 
 #[derive(Debug, Clone)]
 pub struct FunctionDecl {
-    pub name: String,
+    // `Arc<str>`, moved straight out of the lexer's own interned
+    // `Token::Identifier` (`Parser::expect_ident`/`take_name_segment`,
+    // `Parser::take_token`'s existing move-based construction) rather than
+    // re-materializing a fresh `String` at this token->AST boundary - see
+    // Fix 10 Stage 1's own design note (the "wash trap": a partial
+    // `Token`-only conversion that still re-allocates here would gain
+    // nothing).
+    pub name: Arc<str>,
     // This function/method's own name token's span - `span`
     // below covers the *whole* declaration (from `function`/its
     // modifiers through the closing brace), which is where the LSP's own
@@ -182,7 +206,7 @@ pub struct FunctionDecl {
     pub return_type_span: Option<Span>,
     pub body: Vec<Stmt>,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
-    pub doc_comment: Option<String>,
+    pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this declaration - shared by a
     // top-level function and (via `MethodDecl.function`) a class method,
     // since real PHP attaches attributes to the same source position
@@ -200,7 +224,9 @@ pub enum Visibility {
 
 #[derive(Debug, Clone)]
 pub struct PropertyDecl {
-    pub name: String,
+    // See `FunctionDecl::name`'s own doc comment - moved straight out of
+    // the lexer's own interned `Token::Variable`.
+    pub name: Arc<str>,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     pub visibility: Visibility,
@@ -223,7 +249,7 @@ pub struct PropertyDecl {
     // See `FunctionDecl::return_type_span`'s own doc comment.
     pub type_hint_span: Option<Span>,
     pub default: Option<Expr>,
-    pub doc_comment: Option<String>,
+    pub doc_comment: Option<Arc<str>>,
     // PHP 8.4 property hooks (`{ get => ...; set(Type $value) { ... } }`).
     // Parsed so the file doesn't fail to parse at all, but the hook bodies
     // aren't type-checked (they're arbitrary code referencing $this/$value
@@ -266,8 +292,8 @@ pub struct PropertyHooks {
     // hook's own `get`/`set` keyword (after any `#[Attr]` group(s)) -
     // mirrors `FunctionDecl::doc_comment` exactly, needed so a hook can
     // carry its own `@throws` tag the same way an ordinary method does.
-    pub get_doc: Option<String>,
-    pub set_doc: Option<String>,
+    pub get_doc: Option<Arc<str>>,
+    pub set_doc: Option<Arc<str>>,
     // Whether this hook itself carries its own `final` modifier
     // (independent of the property's own/declaring class's finality) -
     // see `TooWideMethodThrowTypeRule`'s property-hook sibling's own gate.
@@ -288,7 +314,9 @@ pub struct MethodDecl {
 #[derive(Debug, Clone)]
 pub struct UseImport {
     pub path: String,
-    pub alias: Option<String>,
+    // Always taken via `Parser::expect_ident` (a single-token name, never
+    // namespace-qualified) - see `FunctionDecl::name`'s own doc comment.
+    pub alias: Option<Arc<str>>,
     // Which of PHP's three `use`-import namespaces this member belongs
     // to (`use Foo;` vs `use function foo;` vs `use const FOO;`) - a
     // plain `use Foo;` isn't checked for existence at all, matching real
@@ -310,7 +338,9 @@ pub enum UseKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassConst {
-    pub name: String,
+    // See `FunctionDecl::name`'s own doc comment - always taken via
+    // `Parser::expect_ident`.
+    pub name: Arc<str>,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     pub value: Expr,
@@ -332,7 +362,7 @@ pub struct ClassConst {
     // directly above it (the common case) or one parsed via the rarer
     // top-level (non-class) `const` statement path, which doesn't thread
     // a doc comment through at all.
-    pub doc_comment: Option<String>,
+    pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this const declaration - the
     // same group applies to every name in a comma-separated
     // `const A = 1, B = 2;` list, mirroring how `visibility`/`doc_comment`
@@ -364,7 +394,12 @@ pub enum ClassKind {
 
 #[derive(Debug, Clone)]
 pub struct ClassDecl {
-    pub name: String,
+    // See `FunctionDecl::name`'s own doc comment - always taken via
+    // `Parser::expect_ident`, except an anonymous class's own synthetic
+    // placeholder (`"class@anonymous"`, interned like any other name -
+    // real corpora declare many, so it dedups the same way a repeated
+    // real class name would).
+    pub name: Arc<str>,
     // See `FunctionDecl::name_span`'s own doc comment. For an
     // anonymous class (which has no real name to navigate to at all -
     // `name` is the synthetic placeholder `"class@anonymous"`) this is
@@ -396,7 +431,7 @@ pub struct ClassDecl {
     // index/shape as `uses_spans`. Needed for `@use Trait<Args>`: real
     // PHPStan resolves that tag from the `TraitUse` statement's own doc
     // comment, not the class's top-of-class docblock.
-    pub uses_doc_comments: Vec<Option<String>>,
+    pub uses_doc_comments: Vec<Option<Arc<str>>>,
     // `use A, B { B::hello as helloB; }` - each `as`-clause that
     // introduces a new name for an existing trait method (a
     // visibility-only `as public;` with no new name isn't captured, since
@@ -412,7 +447,7 @@ pub struct ClassDecl {
     pub resolved_trait_conflicts: Vec<String>,
     // The class's own `/** ... */` doc comment, if any - needed for its
     // own `@template T` declarations (class-level generics).
-    pub doc_comment: Option<String>,
+    pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this class/interface/trait
     // declaration (e.g. `#[Attribute(Attribute::TARGET_CLASS)]`, marking
     // the class itself usable as an attribute).
@@ -422,7 +457,8 @@ pub struct ClassDecl {
 
 #[derive(Debug, Clone)]
 pub struct EnumCase {
-    pub name: String,
+    // See `FunctionDecl::name`'s own doc comment.
+    pub name: Arc<str>,
     // See `FunctionDecl::name_span`'s own doc comment.
     pub name_span: Span,
     // Some(...) for a backed enum (`case Hearts = 'H';`), None for a pure
@@ -435,7 +471,8 @@ pub struct EnumCase {
 
 #[derive(Debug, Clone)]
 pub struct EnumDecl {
-    pub name: String,
+    // See `FunctionDecl::name`'s own doc comment.
+    pub name: Arc<str>,
     pub name_span: Span,
     // "int" | "string" for a backed enum, None for a pure one. Enums can't
     // extend anything or declare instance properties, unlike ClassDecl.
@@ -448,12 +485,12 @@ pub struct EnumDecl {
     pub uses: Vec<String>,
     pub uses_spans: Vec<Span>,
     // See `ClassDecl::uses_doc_comments`'s own doc comment.
-    pub uses_doc_comments: Vec<Option<String>>,
+    pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
     pub resolved_trait_conflicts: Vec<String>,
     // The enum's own `/** ... */` doc comment, if any - needed
     // only to reject a stray `@template` tag (enums can't be generic).
-    pub doc_comment: Option<String>,
+    pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this enum declaration.
     pub attrs: Vec<Attribute>,
     pub span: Span,
@@ -496,7 +533,17 @@ pub struct ArrayItem {
 pub enum Literal {
     Int(i64),
     Float(f64),
-    String(String),
+    // `Arc<str>`, not `String`: fed both by an ordinary `Token::StringLit`
+    // (plain `String`, converted at that one construction site - a string
+    // literal's own contents have low interning payoff, same reasoning as
+    // `Token::StringLit` itself staying `String`) and by
+    // `StringPart::Literal`/`SimpleIndexKey::Str` (already interned
+    // `Arc<str>` - an interpolated string's own literal chunks, moved
+    // straight through with no extra allocation). Keeping this `String`
+    // would make the latter, explicitly-interned path a wash (the
+    // interned value immediately re-copied into a fresh `String` at its
+    // very next - and only - consumer).
+    String(Arc<str>),
     Bool(bool),
     Null,
 }
@@ -554,7 +601,9 @@ pub enum UnaryOp {
 
 #[derive(Debug, Clone)]
 pub struct ClosureUse {
-    pub name: String,
+    // See `FunctionDecl::name`'s own doc comment - taken via
+    // `Parser::expect_variable`.
+    pub name: Arc<str>,
     pub by_ref: bool,
     // The captured variable's own name span - lets a `use (&$x)`
     // capture that auto-vivifies `$x` in the outer scope (see
@@ -587,7 +636,13 @@ pub struct Expr {
 #[derive(Debug, Clone)]
 pub enum ExprKind {
     Literal(Literal),
-    Variable(String),
+    // `Arc<str>`, moved straight out of the lexer's own interned
+    // `Token::Variable` (or, for a string-interpolation `$var`/`$var->
+    // prop`/`$var[key]` occurrence, the identically-interned
+    // `StringPart::SimpleVar`/`PropertyAccess::var`/`Index::var`/
+    // `SimpleIndexKey::Var`) - see `FunctionDecl::name`'s own doc comment
+    // for why this preserves rather than discards that interning.
+    Variable(Arc<str>),
     // `${expr}` - the older "variable variable" syntax: the variable's own
     // name is computed at runtime by evaluating expr, so unlike Variable
     // there's no fixed name here to look up or bind in `locals`.
@@ -605,8 +660,14 @@ pub enum ExprKind {
     // syntactically, but real PHP's `?->` implicitly makes the whole
     // access `null` when its base is `null`, which `infer_expr` needs to
     // know to union `Null` into the result.
-    PropertyAccess(Box<Expr>, String, bool),
-    MethodCall(Box<Expr>, String, Vec<Arg>, bool),
+    // The property/method name: `Arc<str>`, moved straight out of either
+    // an interned `Token::Identifier`/`Token::Keyword` (via
+    // `Parser::take_name_segment`) or an interned `Token::Variable` (the
+    // rarer `$obj->$prop` dynamic-by-variable-name shape) - or, for a
+    // string-interpolation `$obj->prop` occurrence, the identically-
+    // interned `StringPart::PropertyAccess::prop`.
+    PropertyAccess(Box<Expr>, Arc<str>, bool),
+    MethodCall(Box<Expr>, Arc<str>, Vec<Arg>, bool),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still

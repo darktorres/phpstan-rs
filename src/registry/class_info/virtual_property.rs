@@ -86,8 +86,8 @@ fn stmt_references_property(stmt: &Stmt, prop_name: &str) -> bool {
 
 fn expr_references_property(e: &Expr, prop_name: &str) -> bool {
     if let ExprKind::PropertyAccess(base, name, _) = &e.kind
-        && name == prop_name
-        && matches!(&base.kind, ExprKind::Variable(v) if v == "this")
+        && **name == *prop_name
+        && matches!(&base.kind, ExprKind::Variable(v) if **v == *"this")
     {
         return true;
     }

@@ -49,7 +49,7 @@ impl<'a> Checker<'a> {
             };
             let key = match &value.kind {
                 ExprKind::Literal(Literal::Int(n)) => (true, n.to_string()),
-                ExprKind::Literal(Literal::String(s)) => (false, s.clone()),
+                ExprKind::Literal(Literal::String(s)) => (false, s.to_string()),
                 _ => continue,
             };
             if let Some(first_case) = seen.get(&key) {

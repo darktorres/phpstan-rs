@@ -167,7 +167,7 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
     match &value.kind {
         ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
         ExprKind::Literal(Literal::Float(_)) => Type::Float,
-        ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
+        ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.to_string()),
         ExprKind::Literal(Literal::Bool(true)) => Type::True,
         ExprKind::Literal(Literal::Bool(false)) => Type::False,
         ExprKind::Literal(Literal::Null) => Type::Null,
@@ -310,7 +310,7 @@ impl FunctionSig {
                 // absent.
                 let doc_ty: Option<String> = doc
                     .as_ref()
-                    .and_then(|d| d.params.get(&p.name))
+                    .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
                     .or_else(|| {
                         p.doc_comment
@@ -367,12 +367,12 @@ impl FunctionSig {
                 let has_default = p.default.is_some()
                     || doc
                         .as_ref()
-                        .is_some_and(|d| d.optional_params.contains(&p.name));
+                        .is_some_and(|d| d.optional_params.contains(p.name.as_ref()));
                 // `@param-closure-this Type $name` - same
                 // mark-then-resolve-then-substitute pipeline `ty` uses.
                 let closure_this_type = doc
                     .as_ref()
-                    .and_then(|d| d.param_closure_this.get(&p.name))
+                    .and_then(|d| d.param_closure_this.get(p.name.as_ref()))
                     .map(|raw| {
                         let ty = types::parse_type_string(raw);
                         let ty = mark_template_params(ty, &template_params);
@@ -382,7 +382,7 @@ impl FunctionSig {
                 // Mirrors `closure_this_type`'s resolution pipeline.
                 let out_ty = doc
                     .as_ref()
-                    .and_then(|d| d.param_out.get(&p.name))
+                    .and_then(|d| d.param_out.get(p.name.as_ref()))
                     .map(|raw| {
                         let ty = types::parse_type_string(raw);
                         let ty = mark_template_params(ty, &template_params);
@@ -390,7 +390,7 @@ impl FunctionSig {
                         substitute_type_aliases(ty, class_type_aliases)
                     });
                 ParamSig {
-                    name: p.name.clone(),
+                    name: p.name.to_string(),
                     ty,
                     ty_native,
                     variadic: p.variadic,
@@ -455,7 +455,7 @@ impl FunctionSig {
                     })
                 });
 
-        let param_names: Vec<&str> = f.params.iter().map(|p| p.name.as_str()).collect();
+        let param_names: Vec<&str> = f.params.iter().map(|p| p.name.as_ref()).collect();
         let (assert_if_true, assert_if_false, assert) = doc
             .as_ref()
             .map(|d| {

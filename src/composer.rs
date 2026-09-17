@@ -158,7 +158,7 @@ fn parse_static_file(path: &Path, vendor_dir: &Path, base_dir: &Path) -> Option<
         let Some(default) = &prop.default else {
             continue;
         };
-        match prop.name.as_str() {
+        match prop.name.as_ref() {
             "classMap" | "files" => {
                 collect_files(default, vendor_dir, base_dir, generated_dir, &mut ctx.files)
             }
@@ -291,16 +291,16 @@ fn eval_concat(
     generated_dir: &Path,
 ) -> Option<String> {
     match &expr.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.clone()),
+        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         // The directory containing the generated file itself, i.e.
         // `vendor/composer/` - `autoload_static.php` concatenates `/..`
         // or `/../..` onto this to reach `vendor/` or the project root.
         ExprKind::Name(n) if n == "__DIR__" => Some(generated_dir.to_string_lossy().into_owned()),
         // Only appears in the separate, non-static autoload_*.php files.
-        ExprKind::Variable(n) if n == "vendorDir" => {
+        ExprKind::Variable(n) if **n == *"vendorDir" => {
             Some(vendor_dir.to_string_lossy().into_owned())
         }
-        ExprKind::Variable(n) if n == "baseDir" => Some(base_dir.to_string_lossy().into_owned()),
+        ExprKind::Variable(n) if **n == *"baseDir" => Some(base_dir.to_string_lossy().into_owned()),
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
             let mut left = eval_concat(lhs, vendor_dir, base_dir, generated_dir)?;
             let right = eval_concat(rhs, vendor_dir, base_dir, generated_dir)?;

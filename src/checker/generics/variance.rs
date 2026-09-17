@@ -179,7 +179,7 @@ impl<'a> Checker<'a> {
             return;
         }
         for p in &c.properties {
-            let Some(prop_sig) = info.properties.get(&p.name) else {
+            let Some(prop_sig) = info.properties.get(p.name.as_ref()) else {
                 continue;
             };
             if prop_sig.visibility == Visibility::Private {
@@ -208,12 +208,16 @@ impl<'a> Checker<'a> {
         // real PHPStan's own `PropertyVarianceRule` runs over a
         // `ClassPropertyNode` built uniformly for plain and promoted
         // shapes, so this project's own variance walk should too.
-        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+        if let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        {
             for param in &ctor.function.params {
                 if param.promoted_visibility.is_none() {
                     continue;
                 }
-                let Some(prop_sig) = info.properties.get(&param.name) else {
+                let Some(prop_sig) = info.properties.get(param.name.as_ref()) else {
                     continue;
                 };
                 if prop_sig.visibility == Visibility::Private {

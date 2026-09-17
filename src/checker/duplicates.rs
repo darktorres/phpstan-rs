@@ -48,7 +48,7 @@ impl<'a> Checker<'a> {
     ) {
         let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
         for case in cases {
-            if !seen.insert(case.name.as_str()) {
+            if !seen.insert(case.name.as_ref()) {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         fqn.to_string(),
@@ -62,7 +62,7 @@ impl<'a> Checker<'a> {
             }
         }
         for c in consts {
-            if !seen.insert(c.name.as_str()) {
+            if !seen.insert(c.name.as_ref()) {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         fqn.to_string(),
@@ -87,7 +87,7 @@ impl<'a> Checker<'a> {
         let mut seen: std::collections::HashMap<&str, &PropertyDecl> =
             std::collections::HashMap::new();
         for p in properties {
-            if let Some(prev) = seen.insert(p.name.as_str(), p)
+            if let Some(prev) = seen.insert(p.name.as_ref(), p)
                 && !property_shapes_differ(prev, p)
             {
                 self.report_builder(
@@ -117,7 +117,7 @@ impl<'a> Checker<'a> {
                 if param.promoted_visibility.is_none() {
                     continue;
                 }
-                if seen.contains_key(param.name.as_str()) {
+                if seen.contains_key(param.name.as_ref()) {
                     self.report_builder(
                         DiagnosticBuilder::new(
                             fqn.to_string(),
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
                     );
                     continue;
                 }
-                if let Some(prev) = seen_promoted.insert(param.name.as_str(), param)
+                if let Some(prev) = seen_promoted.insert(param.name.as_ref(), param)
                     && prev.type_hint == param.type_hint
                 {
                     self.report_builder(

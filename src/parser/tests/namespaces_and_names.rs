@@ -70,7 +70,7 @@ fn braced_namespace_declarations_splice_their_body_in() {
     let class_names: Vec<&str> = program
         .iter()
         .filter_map(|s| match &s.kind {
-            StmtKind::ClassDecl(c) => Some(c.name.as_str()),
+            StmtKind::ClassDecl(c) => Some(c.name.as_ref()),
             _ => None,
         })
         .collect();
@@ -78,7 +78,7 @@ fn braced_namespace_declarations_splice_their_body_in() {
     assert!(
         program
             .iter()
-            .any(|s| matches!(&s.kind, StmtKind::FunctionDecl(f) if f.name == "f"))
+            .any(|s| matches!(&s.kind, StmtKind::FunctionDecl(f) if f.name == "f".into()))
     );
     assert!(matches!(&program[0].kind, StmtKind::Namespace(n) if n == "Foo\\Bar"));
 }
@@ -139,7 +139,7 @@ fn use_group_expands_each_member_with_the_shared_prefix() {
     assert_eq!(imports[0].path, "Foo\\Bar\\Baz");
     assert_eq!(imports[0].alias, None);
     assert_eq!(imports[1].path, "Foo\\Bar\\Qux");
-    assert_eq!(imports[1].alias, Some("Quux".to_string()));
+    assert_eq!(imports[1].alias, Some("Quux".into()));
 }
 
 #[test]
@@ -152,7 +152,7 @@ fn readonly_abstract_final_usable_as_plain_names() {
             final();
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "readonly"));
+    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "readonly".into()));
     for stmt in &program[1..] {
         assert!(matches!(
             &stmt.kind,
@@ -174,8 +174,8 @@ fn enum_usable_as_plain_function_and_constant_name() {
             enum Suit { case Hearts; }
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum"));
-    assert!(matches!(&program[3].kind, StmtKind::EnumDecl(e) if e.name == "Suit"));
+    assert!(matches!(&program[0].kind, StmtKind::FunctionDecl(f) if f.name == "enum".into()));
+    assert!(matches!(&program[3].kind, StmtKind::EnumDecl(e) if e.name == "Suit".into()));
 }
 
 #[test]

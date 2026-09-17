@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
                 // this same function is a real jump target, not dead
                 // code, whatever the statement immediately before it
                 // does - see `collect_goto_targets`'s own doc comment.
-                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(name))
+                && !matches!(&next.kind, StmtKind::Label(name) if self.current_function_goto_targets.contains(name.as_ref()))
             {
                 self.report(
                     label.to_string(),
@@ -119,8 +119,10 @@ impl<'a> Checker<'a> {
                 // `assert($cond)` above, just per-assertion-name rather
                 // than a generic boolean condition.
                 match &e.kind {
-                    ExprKind::MethodCall(_, method, args, _)
-                    | ExprKind::StaticCall(_, method, args) => {
+                    ExprKind::MethodCall(_, method, args, _) => {
+                        self.apply_phpunit_assertion_narrowing(method, args, locals);
+                    }
+                    ExprKind::StaticCall(_, method, args) => {
                         self.apply_phpunit_assertion_narrowing(method, args, locals);
                     }
                     _ => {}
@@ -412,7 +414,7 @@ impl<'a> Checker<'a> {
                 for (name, default) in vars {
                     // Same idea as `global $this;` just above - "Cannot
                     // use $this as static variable."
-                    if name == "this" {
+                    if **name == *"this" {
                         self.report(
                             label.to_string(),
                             "cannot use $this as static variable".to_string(),
@@ -431,8 +433,8 @@ impl<'a> Checker<'a> {
                     // `StaticVar` (only the whole statement's), same as
                     // `Global` just above.
                     self.probe_hit_at(stmt.span, &ty);
-                    locals.declare(name.clone(), ty, stmt.span);
-                    self.static_var_names.insert(name.clone());
+                    locals.declare(name.to_string(), ty, stmt.span);
+                    self.static_var_names.insert(name.to_string());
                 }
             }
             // `check_program`'s own top-level loop already handles a
@@ -627,7 +629,7 @@ impl<'a> Checker<'a> {
                 if !self
                     .registry
                     .names_with_assert_tags
-                    .contains(method.as_str())
+                    .contains(method.as_ref())
                 {
                     return;
                 }
@@ -916,7 +918,7 @@ impl<'a> Checker<'a> {
         let ExprKind::Variable(lhs_name) = &lhs.kind else {
             return;
         };
-        if lhs_name != name {
+        if **lhs_name != *name {
             return;
         }
         if matches!(declared_ty, Type::Mixed) {
@@ -999,7 +1001,7 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
     match kind {
         StmtKind::Expression(e) => match &e.kind {
             ExprKind::Assign(lhs, _) => match &lhs.kind {
-                ExprKind::Variable(name) => vec![name.clone()],
+                ExprKind::Variable(name) => vec![name.to_string()],
                 _ => Vec::new(),
             },
             _ => Vec::new(),
@@ -1012,7 +1014,7 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
         // so both existing mechanisms (the nameless-tag target inference
         // and the post-dispatch reapplication) pick a `static`
         // declaration up for free.
-        StmtKind::StaticVar(vars) => vars.iter().map(|(name, _)| name.clone()).collect(),
+        StmtKind::StaticVar(vars) => vars.iter().map(|(name, _)| name.to_string()).collect(),
         // A bare `@var Type` header on a `foreach` targets the loop's
         // own value variable, mirroring every other statement kind
         // here - only when it's a plain `$value` (not a destructuring
@@ -1023,7 +1025,7 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
         // every other unlisted shape already gets by falling through to
         // the empty-`Vec` arm.
         StmtKind::Foreach { key, value, .. } if key.is_none() => match &value.kind {
-            ExprKind::Variable(name) => vec![name.clone()],
+            ExprKind::Variable(name) => vec![name.to_string()],
             _ => Vec::new(),
         },
         _ => Vec::new(),

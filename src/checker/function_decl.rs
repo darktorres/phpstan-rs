@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
         let own_info = ClassInfo::from_decl(c, &self.name_ctx);
         for host in contexts {
             for m in &c.methods {
-                let own_sig = own_info.methods.get(&m.function.name);
+                let own_sig = own_info.methods.get(m.function.name.as_ref());
                 self.check_function_with_own_sig(
                     &m.function,
                     Some(&host),
@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
         class_name: Option<&str>,
     ) -> Option<&'a FunctionSig> {
         match class_name {
-            Some(c) => self.registry.classes.get(c)?.methods.get(&f.name),
+            Some(c) => self.registry.classes.get(c)?.methods.get(f.name.as_ref()),
             None => self
                 .registry
                 .functions
@@ -247,7 +247,7 @@ impl<'a> Checker<'a> {
         let sig = own_sig_override.or_else(|| self.lookup_own_signature(f, class_name));
         let label = match class_name {
             Some(c) => format!("{c}::{}", f.name),
-            None => f.name.clone(),
+            None => f.name.to_string(),
         };
         // A method's docblock is already covered by `check_unknown_
         // phpstan_tags_in_class`'s per-class walk (`checker.rs`'s
@@ -470,7 +470,7 @@ impl<'a> Checker<'a> {
                     // as `FunctionSig::from_decl`'s param loop.
                     let doc_ty: Option<String> = doc
                         .as_ref()
-                        .and_then(|d| d.params.get(&p.name))
+                        .and_then(|d| d.params.get(p.name.as_ref()))
                         .cloned()
                         .or_else(|| {
                             p.doc_comment
@@ -510,8 +510,10 @@ impl<'a> Checker<'a> {
                     let ty = if doc_ty.is_none() {
                         ancestor_sig_hint
                             .and_then(|s| {
-                                if f.name == "__construct" {
-                                    s.params.iter().find(|ap| ap.name == p.name)
+                                if f.name.as_ref() == "__construct" {
+                                    s.params
+                                        .iter()
+                                        .find(|ap| ap.name.as_str() == p.name.as_ref())
                                 } else {
                                     s.params.get(i)
                                 }
@@ -539,14 +541,14 @@ impl<'a> Checker<'a> {
                     self.check_no_parent_ref(&ty, &subject, p.span, &label, "parameter.noParent");
                     self.check_type_class_name_case(&case_refs, &label, p.span);
                     self.check_type_internal_usage(&case_refs, &label, p.span);
-                    resolved_params.push((p.name.clone(), ty.clone(), p.span));
+                    resolved_params.push((p.name.to_string(), ty.clone(), p.span));
                     let ty = if p.variadic {
                         Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
                     } else {
                         ty
                     };
                     self.probe_hit_at(p.name_span, &ty);
-                    locals.declare(p.name.clone(), ty, p.name_span);
+                    locals.declare(p.name.to_string(), ty, p.name_span);
                 }
             }
         }
@@ -786,7 +788,7 @@ impl<'a> Checker<'a> {
             // covariant `T` constructor parameter doesn't actually violate
             // covariance safety.
             if let (Some(sig), Some(c)) = (sig, class_name)
-                && f.name != "__construct"
+                && f.name != "__construct".into()
             {
                 self.check_variance(sig, c, &label, f.span);
             }
@@ -812,7 +814,7 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.take();
         self.current_class = class_name.map(|s| s.to_string());
         let previous_method = self.current_method.take();
-        self.current_method = Some(f.name.clone());
+        self.current_method = Some(f.name.to_string());
         // Mirrors real PHPStan's `DeprecatedScopeHelper` - suppresses
         // every deprecated-usage diagnostic from within a deprecated
         // function/method, class, or trait's own body.
@@ -883,7 +885,7 @@ impl<'a> Checker<'a> {
                     if p.by_ref {
                         let ty = self.resolve_type_hint(p.type_hint.as_deref());
                         self.current_function_by_ref_params
-                            .insert(p.name.clone(), ty);
+                            .insert(p.name.to_string(), ty);
                     }
                 }
             }

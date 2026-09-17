@@ -129,7 +129,7 @@ impl<'a> Checker<'a> {
                     && p.type_hint.is_some()
                     && property_assigned_anywhere_in_hierarchy(self, c, fqn, &p.name)
             })
-            .map(|p| p.name.clone())
+            .map(|p| p.name.to_string())
             .collect();
         if candidates.is_empty() {
             return;
@@ -165,7 +165,7 @@ fn is_unset_call(callee: &Expr) -> bool {
 }
 
 fn is_this(e: &Expr) -> bool {
-    matches!(&e.kind, ExprKind::Variable(v) if v == "this")
+    matches!(&e.kind, ExprKind::Variable(v) if **v == *"this")
 }
 
 /// Whether `e` evaluates to the very same object `$this` refers to -
@@ -179,7 +179,7 @@ fn is_this(e: &Expr) -> bool {
 /// target beyond that point.
 fn resolves_to_this(e: &Expr, ctx: &PropertyInitCtx) -> bool {
     match &e.kind {
-        ExprKind::Variable(v) => v == "this",
+        ExprKind::Variable(v) => **v == *"this",
         ExprKind::MethodCall(recv, name, _, _) if resolves_to_this(recv, ctx) => ctx
             .checker
             .registry
@@ -419,8 +419,11 @@ fn walk_expr(
     match &e.kind {
         ExprKind::PropertyAccess(base, name, _) => {
             state = walk_expr(base, state, ctx, declaring_class);
-            if is_this(base) && ctx.candidates.contains(name) && !state.contains(name) {
-                ctx.premature_reads.push((name.clone(), e.span));
+            if is_this(base)
+                && ctx.candidates.contains(name.as_ref())
+                && !state.contains(name.as_ref())
+            {
+                ctx.premature_reads.push((name.to_string(), e.span));
             }
             state
         }
@@ -472,7 +475,7 @@ fn walk_expr(
                 if let ExprKind::PropertyAccess(base, name, _) = &a.value.kind
                     && is_this(base)
                 {
-                    state = state.without(name);
+                    state = state.without(name.as_ref());
                     continue;
                 }
                 state = walk_expr(&a.value, state, ctx, declaring_class);
@@ -567,7 +570,7 @@ fn assign_target(
     if let ExprKind::PropertyAccess(base, name, _) = &lhs.kind
         && is_this(base)
     {
-        state.insert(name.clone());
+        state.insert(name.to_string());
         return state;
     }
     if let ExprKind::ArrayLiteral(items) = &lhs.kind {

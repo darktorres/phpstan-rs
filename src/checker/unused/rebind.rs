@@ -148,7 +148,7 @@ fn scan_expr_for_rebinds(
         // `$closure->bindTo($newThis, $scope)` - same idea, on the
         // receiver instead of the first argument, so the scope is
         // argument index 1, not 2.
-        ExprKind::MethodCall(_, method, args, _) if method == "bindTo" => {
+        ExprKind::MethodCall(_, method, args, _) if **method == *"bindTo" => {
             record_rebind_scope(args.get(1), ctx, targets, escape_all);
         }
         // `expr_children` deliberately excludes these three (see

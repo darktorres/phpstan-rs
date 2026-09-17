@@ -497,7 +497,7 @@ impl<'a> Checker<'a> {
     /// unrelated to methods.
     pub(crate) fn check_reserved_class_constant_name(&mut self, fqn: &str, consts: &[ClassConst]) {
         for c in consts {
-            if c.name == "class" {
+            if c.name == "class".into() {
                 self.report_builder(
                     DiagnosticBuilder::new(
                         fqn.to_string(),
@@ -858,7 +858,9 @@ impl<'a> Checker<'a> {
             // constructor is a real, common, legitimate singleton-
             // pattern idiom, not the "forgot final does nothing here"
             // mistake this check otherwise exists to catch.
-            if m.is_final && m.visibility == Visibility::Private && m.function.name != "__construct"
+            if m.is_final
+                && m.visibility == Visibility::Private
+                && m.function.name != "__construct".into()
             {
                 self.report(
                     fqn.to_string(),
@@ -975,7 +977,11 @@ impl<'a> Checker<'a> {
         if c.kind == ClassKind::Trait || c.kind == ClassKind::Interface {
             return;
         }
-        let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") else {
+        let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        else {
             return;
         };
         if ctor.is_abstract {
@@ -1028,7 +1034,11 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") else {
+        let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        else {
             return;
         };
         let params = &ctor.function.params;
@@ -1054,7 +1064,7 @@ impl<'a> Checker<'a> {
             else {
                 return;
             };
-            if !matches!(&unwrap_grouping(recv).kind, ExprKind::Variable(v) if v == "this") {
+            if !matches!(&unwrap_grouping(recv).kind, ExprKind::Variable(v) if **v == *"this") {
                 return;
             }
             if prop_name != &param.name {

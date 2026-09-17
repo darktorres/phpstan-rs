@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
                     k
                 }
                 Some(k) => match &k.kind {
-                    ExprKind::Literal(Literal::String(s)) => s.clone(),
+                    ExprKind::Literal(Literal::String(s)) => s.to_string(),
                     ExprKind::Literal(Literal::Int(n)) => {
                         next_index = next_index.max(n + 1);
                         n.to_string()
@@ -159,7 +159,7 @@ impl<'a> Checker<'a> {
                     k
                 }
                 Some(k) => match &k.kind {
-                    ExprKind::Literal(Literal::String(s)) => s.clone(),
+                    ExprKind::Literal(Literal::String(s)) => s.to_string(),
                     ExprKind::Literal(Literal::Int(n)) => {
                         next_index = next_index.max(n + 1);
                         n.to_string()
@@ -279,9 +279,12 @@ impl<'a> Checker<'a> {
                         }
                         Some(k) => match &k.kind {
                             ExprKind::Literal(Literal::String(s)) => {
-                                match fields.iter_mut().find(|(fk, _, _)| fk == s) {
+                                match fields
+                                    .iter_mut()
+                                    .find(|(fk, _, _)| fk.as_str() == s.as_ref())
+                                {
                                     Some(field) => field.1 = value_ty.clone(),
-                                    None => fields.push((s.clone(), value_ty.clone(), false)),
+                                    None => fields.push((s.to_string(), value_ty.clone(), false)),
                                 }
                             }
                             ExprKind::Literal(Literal::Int(n)) => {

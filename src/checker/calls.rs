@@ -71,7 +71,7 @@ impl<'a> Checker<'a> {
                 // `declare`, not `insert`, matching
                 // `bind_assignment_target`'s own index-write treatment.
                 if !locals.contains_key(name) {
-                    locals.declare(name.clone(), Type::Mixed, arg.value.span);
+                    locals.declare(name.to_string(), Type::Mixed, arg.value.span);
                 }
             }
             return;
@@ -98,7 +98,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !locals.contains_key(name) {
-                locals.declare(name.clone(), Type::Mixed, arg_expr.span);
+                locals.declare(name.to_string(), Type::Mixed, arg_expr.span);
                 continue;
             }
             // Real PHPStan models the sort() family's own dynamic
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
                                 members.push(Type::Accessory(types::AccessoryKind::NonEmptyArray));
                             }
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.clone(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::Intersection(members));
                             continue;
                         }
                     }
@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
                                 Type::Accessory(types::AccessoryKind::NonEmptyArray),
                             ];
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.clone(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::Intersection(members));
                             continue;
                         }
                     }
@@ -202,7 +202,7 @@ impl<'a> Checker<'a> {
                                 Type::Accessory(types::AccessoryKind::ArrayList),
                             ];
                             purge_stale_narrowing_for(locals, name);
-                            locals.insert(name.clone(), Type::Intersection(members));
+                            locals.insert(name.to_string(), Type::Intersection(members));
                             continue;
                         }
                     }
@@ -244,7 +244,7 @@ impl<'a> Checker<'a> {
             // keep answering for whatever the callee may have replaced
             // it with.
             purge_stale_narrowing_for(locals, name);
-            locals.insert(name.clone(), widened);
+            locals.insert(name.to_string(), widened);
         }
     }
 

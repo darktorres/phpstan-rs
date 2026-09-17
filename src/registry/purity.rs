@@ -434,7 +434,7 @@ fn expr_disqualifies(
             {
                 return true;
             }
-            if !matches!(&recv.kind, ExprKind::Variable(v) if v == "this") {
+            if !matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this") {
                 return true;
             }
             let Some(class) = declaring_class else {
@@ -916,7 +916,7 @@ fn collect_expr_impure_points(
         }
         ExprKind::MethodCall(recv, name, args, _) => {
             let resolved =
-                matches!(&recv.kind, ExprKind::Variable(v) if v == "this")
+                matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
                     && declaring_class.is_some_and(|class| {
                         registry.lookup_method_with_owner(class, name).is_some_and(
                             |(owner, sig)| is_non_overridable(registry, class, &owner, name, sig),

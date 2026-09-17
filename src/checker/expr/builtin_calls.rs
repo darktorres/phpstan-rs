@@ -1761,7 +1761,7 @@ fn collect_int_literals(ty: &Type) -> Vec<i64> {
 }
 
 fn is_var_named(e: &Expr, name: &str) -> bool {
-    matches!(&e.kind, ExprKind::Variable(n) if n == name)
+    matches!(&e.kind, ExprKind::Variable(n) if **n == *name)
 }
 
 /// Whether `ty` is a literal `Type::ArrayShape`, or an `Intersection`

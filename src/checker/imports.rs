@@ -249,7 +249,7 @@ impl<'a> Checker<'a> {
                         .or_default();
                     if !scope.insert(c.name.to_ascii_lowercase()) {
                         let qualified = if current_namespace.is_empty() {
-                            c.name.clone()
+                            c.name.to_string()
                         } else {
                             format!("{current_namespace}\\{}", c.name)
                         };
@@ -273,7 +273,7 @@ impl<'a> Checker<'a> {
                         .or_default();
                     if !scope.insert(e.name.to_ascii_lowercase()) {
                         let qualified = if current_namespace.is_empty() {
-                            e.name.clone()
+                            e.name.to_string()
                         } else {
                             format!("{current_namespace}\\{}", e.name)
                         };

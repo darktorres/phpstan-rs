@@ -37,7 +37,7 @@ fn an_assignment_nested_as_an_identical_comparisons_rhs_parses_as_real_php_does(
     let ExprKind::Assign(target, value) = &rhs.kind else {
         panic!("expected the RHS to be an Assign, got {:?}", rhs.kind);
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "params"));
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"params"));
     assert!(matches!(&value.kind, ExprKind::Call(..)));
 }
 
@@ -80,7 +80,7 @@ fn an_ordinary_comparison_with_no_trailing_assignment_is_unaffected() {
     let ExprKind::Binary(BinOp::Identical, _, rhs) = &cond.kind else {
         panic!("expected a top-level Identical binary expression, got {cond:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "params"));
+    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if **name == *"params"));
 }
 
 // An assignment nested (unparenthesized) as `&&`'s/`||`'s own RHS - the
@@ -105,7 +105,7 @@ fn an_assignment_nested_as_a_logical_and_rhs_parses_as_real_php_does() {
     let ExprKind::Assign(target, value) = &rhs.kind else {
         panic!("expected the RHS to be an Assign, got {:?}", rhs.kind);
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "x"));
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"x"));
     assert!(matches!(&value.kind, ExprKind::Call(..)));
 }
 
@@ -130,7 +130,7 @@ fn an_ordinary_logical_and_with_no_trailing_assignment_is_unaffected() {
     let ExprKind::Binary(BinOp::And, _, rhs) = &cond.kind else {
         panic!("expected a top-level And binary expression, got {cond:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "x"));
+    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if **name == *"x"));
 }
 
 // `!$var = expr` parses as `!($var = expr)`, not `(!$var) = expr` -
@@ -155,7 +155,7 @@ fn a_bang_negated_assignment_parses_as_negating_the_assignment_result() {
             inner.kind
         );
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "dir"));
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"dir"));
     assert!(matches!(&value.kind, ExprKind::Call(..)));
 }
 
@@ -200,10 +200,10 @@ fn an_assignment_nested_as_a_concat_rhs_parses_as_real_php_does() {
             rhs.kind
         );
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "v"));
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"v"));
     assert!(matches!(
         &inner_value.kind,
-        ExprKind::Literal(Literal::String(s)) if s == "y"
+        ExprKind::Literal(Literal::String(s)) if **s == *"y"
     ));
 }
 
@@ -222,7 +222,7 @@ fn an_ordinary_concat_with_no_trailing_assignment_is_unaffected() {
     let ExprKind::Binary(BinOp::Concat, _, rhs) = &value.kind else {
         panic!("expected a top-level Concat binary expression, got {value:?}");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if name == "v"));
+    assert!(matches!(&rhs.kind, ExprKind::Variable(name) if **name == *"v"));
 }
 
 #[test]
@@ -249,7 +249,7 @@ fn an_assignment_nested_as_a_cast_operand_parses_as_real_php_does() {
             operand.kind
         );
     };
-    assert!(matches!(&target.kind, ExprKind::Variable(name) if name == "v"));
+    assert!(matches!(&target.kind, ExprKind::Variable(name) if **name == *"v"));
     assert!(matches!(
         &inner_value.kind,
         ExprKind::Literal(Literal::Int(5))

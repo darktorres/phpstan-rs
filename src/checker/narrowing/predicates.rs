@@ -68,7 +68,7 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // and this has to produce the exact same key for a bare variable
         // to stay a drop-in replacement at the Instanceof-narrowing call
         // site.
-        ExprKind::Variable(name) => Some(name.clone()),
+        ExprKind::Variable(name) => Some(name.to_string()),
         ExprKind::PropertyAccess(base, prop, _) => {
             narrowing_key(base).map(|base_key| format!("{base_key}->{prop}"))
         }

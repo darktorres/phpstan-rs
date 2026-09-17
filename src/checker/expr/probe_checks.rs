@@ -178,7 +178,7 @@ impl<'a> Checker<'a> {
         // call - see `Checker::static_var_names`'s own doc comment
         // (e.g. `static $curlVersion = null; $curlVersion ??=
         // curl_version();`, genuinely silent in real PHPStan too).
-        if self.static_var_names.contains(name) {
+        if self.static_var_names.contains(name.as_ref()) {
             return;
         }
         let Some(ty) = locals.get(name) else {
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
             ExprKind::Variable(name) => {
                 if is_superglobal(name)
                     || self.loop_depth > 0
-                    || self.static_var_names.contains(name)
+                    || self.static_var_names.contains(name.as_ref())
                 {
                     return None;
                 }

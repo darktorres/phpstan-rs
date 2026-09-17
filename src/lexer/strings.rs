@@ -1,3 +1,4 @@
+use crate::intern::intern;
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
 use crate::token::{SimpleIndexKey, StringPart, Token};
 
@@ -107,12 +108,12 @@ fn try_parse_simple_interpolation(bytes: &[u8]) -> Option<SimpleInterpolationSha
 /// here.
 fn classify_index_key(key: &str) -> Option<SimpleIndexKey> {
     if let Some(var_name) = key.strip_prefix('$') {
-        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(var_name.to_string()));
+        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(intern(var_name)));
     }
     if let Ok(n) = key.parse::<i64>() {
         return Some(SimpleIndexKey::Int(n));
     }
-    is_full_identifier(key).then(|| SimpleIndexKey::Str(key.to_string()))
+    is_full_identifier(key).then(|| SimpleIndexKey::Str(intern(key)))
 }
 
 impl<'a> Lexer<'a> {
@@ -332,7 +333,7 @@ impl<'a> Lexer<'a> {
         macro_rules! flush {
             () => {
                 if !literal.is_empty() {
-                    parts.push(StringPart::Literal(std::mem::take(&mut literal)));
+                    parts.push(StringPart::Literal(intern(&std::mem::take(&mut literal))));
                 }
             };
         }
@@ -474,8 +475,8 @@ impl<'a> Lexer<'a> {
                         name_end,
                         prop_start,
                     }) => {
-                        let name = String::from_utf8_lossy(&inner_bytes[1..name_end]).into_owned();
-                        let prop = String::from_utf8_lossy(&inner_bytes[prop_start..]).into_owned();
+                        let name = intern(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                        let prop = intern(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
                         let var_end = self.line_col_at(abs_base + start + name_end);
                         let end = self.line_col_at(abs_base + close_brace_pos);
                         parts.push(StringPart::PropertyAccess {
@@ -491,12 +492,11 @@ impl<'a> Lexer<'a> {
                         key_start,
                         key_end,
                     }) => {
-                        let key_text =
-                            String::from_utf8_lossy(&inner_bytes[key_start..key_end]).into_owned();
+                        let key_text = String::from_utf8_lossy(&inner_bytes[key_start..key_end]);
                         match classify_index_key(&key_text) {
                             Some(key) => {
                                 let name =
-                                    String::from_utf8_lossy(&inner_bytes[1..name_end]).into_owned();
+                                    intern(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
                                 let var_end = self.line_col_at(abs_base + start + name_end);
                                 let end = self.line_col_at(abs_base + close_brace_pos);
                                 parts.push(StringPart::Index {
@@ -528,7 +528,7 @@ impl<'a> Lexer<'a> {
                 while i < bytes.len() && is_ident_continue(bytes[i]) {
                     i += 1;
                 }
-                let name = String::from_utf8_lossy(&bytes[name_start..i]).into_owned();
+                let name = intern(&String::from_utf8_lossy(&bytes[name_start..i]));
                 // Points at the `$` itself (one byte before `name_start`),
                 // matching where the reconstructed `${name}...` string below
                 // begins - precision within the reconstruction (distinguishing
@@ -546,7 +546,7 @@ impl<'a> Lexer<'a> {
                     while i < bytes.len() && is_ident_continue(bytes[i]) {
                         i += 1;
                     }
-                    let prop = String::from_utf8_lossy(&bytes[prop_start..i]).into_owned();
+                    let prop = intern(&String::from_utf8_lossy(&bytes[prop_start..i]));
                     let end = self.line_col_at(abs_base + i);
                     parts.push(StringPart::PropertyAccess {
                         var: name,
@@ -618,7 +618,7 @@ impl<'a> Lexer<'a> {
         flush!();
 
         if parts.is_empty() {
-            parts.push(StringPart::Literal(String::new()));
+            parts.push(StringPart::Literal(intern("")));
         }
         parts
     }

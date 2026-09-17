@@ -682,7 +682,7 @@ fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
         "__NAMESPACE__",
         "__PROPERTY__",
     ]
-    .contains(&const_name.as_str())
+    .contains(&const_name.as_ref())
     {
         return None;
     }
@@ -710,10 +710,10 @@ fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
     // `constant.notFound`. `Type::Int` (not a literal, and deliberately
     // not `infer_const_type`'s own float-overflow-affected inference)
     // is the safe, correct level of precision.
-    if const_name == "PHP_INT_MIN" {
-        return Some((const_name.clone(), Type::Int));
+    if **const_name == *"PHP_INT_MIN" {
+        return Some((const_name.to_string(), Type::Int));
     }
-    Some((const_name.clone(), infer_const_type(&args[1].value)))
+    Some((const_name.to_string(), infer_const_type(&args[1].value)))
 }
 
 /// Records one `const`/`define()` declaration site for `name`,

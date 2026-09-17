@@ -10,7 +10,7 @@ fn tokens_on_a_later_line_get_real_line_and_column_positions() {
     let toks = Lexer::new(src).tokenize_with_spans();
     // toks: Variable(x), Equals, Integer(1), Semicolon, Variable(y), ...
     let (tok, span, _) = &toks[4];
-    assert_eq!(*tok, Token::Variable("y".to_string()));
+    assert_eq!(*tok, Token::Variable("y".to_string().into()));
     assert_eq!(span.start, Position { line: 3, col: 1 });
     assert_eq!(span.end, Position { line: 3, col: 3 });
 }
@@ -31,9 +31,9 @@ fn a_token_spanning_multiple_lines_does_not_throw_off_the_next_token_s_position(
     assert_eq!(heredoc_end.line, 5);
     let (next_tok, next_span, _) = toks
         .iter()
-        .find(|(t, _, _)| *t == Token::Variable("y".to_string()))
+        .find(|(t, _, _)| *t == Token::Variable("y".to_string().into()))
         .unwrap();
-    assert_eq!(*next_tok, Token::Variable("y".to_string()));
+    assert_eq!(*next_tok, Token::Variable("y".to_string().into()));
     assert_eq!(next_span.start, Position { line: 6, col: 1 });
 }
 
@@ -46,7 +46,7 @@ fn a_multi_byte_character_earlier_on_a_line_does_not_shift_later_columns() {
     let toks = Lexer::new(src).tokenize_with_spans();
     let (_, span, _) = toks
         .iter()
-        .find(|(t, _, _)| *t == Token::Variable("x".to_string()))
+        .find(|(t, _, _)| *t == Token::Variable("x".to_string().into()))
         .unwrap();
     assert_eq!(span.start, Position { line: 2, col: 6 });
 }
@@ -76,8 +76,8 @@ fn complex_interpolation_gets_a_real_base_position_on_a_later_line() {
         })
         .expect("expected a PropertyAccess part");
     let (var, var_start, var_end, prop, end) = part;
-    assert_eq!(var, "obj");
-    assert_eq!(prop, "prop");
+    assert_eq!(var, "obj".into());
+    assert_eq!(prop, "prop".into());
     // The literal "a\n" inside the string doesn't introduce a real
     // newline in the source - {$obj->prop} is still on line 2.
     // `$s = "a\n{$obj->prop}";` - the `$` of `$obj` is the 11th
@@ -113,8 +113,8 @@ fn shorthand_property_interpolation_base_points_at_the_dollar_sign() {
         })
         .expect("expected a PropertyAccess part");
     let (var, var_start, var_end, prop, end) = part;
-    assert_eq!(var, "obj");
-    assert_eq!(prop, "prop");
+    assert_eq!(var, "obj".into());
+    assert_eq!(prop, "prop".into());
     // `$s = "x $obj->prop y";` - the `$` of `$obj` is the 9th character,
     // `->` starts at the 13th (right after `obj`), and `prop` ends right
     // before the trailing space at the 19th.

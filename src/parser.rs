@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::ast::*;
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -50,8 +52,11 @@ pub struct Parser {
     // filtering) of the token it immediately precedes. Built once up front
     // so the rest of the parser never has to know DocComment tokens
     // existed - only the specific call sites that attach one to a
-    // declaration look here.
-    pub(crate) doc_comments: std::collections::HashMap<usize, String>,
+    // declaration look here. `Arc<str>`, not `String`: carries the
+    // lexer's own interned `Token::DocComment` value through unchanged -
+    // converting to `String` here and back to `Arc<str>` at the AST
+    // fields that ultimately store it would be a pure wash.
+    pub(crate) doc_comments: std::collections::HashMap<usize, Arc<str>>,
     // Incremented/decremented around the parser's self-recursive
     // expression productions (parse_unary, parse_assignment,
     // parse_coalesce) - see MAX_EXPR_DEPTH.
@@ -78,7 +83,7 @@ impl Parser {
         let mut filtered_spans = Vec::with_capacity(tokens.len());
         let mut filtered_keyword_raw = Vec::with_capacity(tokens.len());
         let mut doc_comments = std::collections::HashMap::new();
-        let mut pending: Option<String> = None;
+        let mut pending: Option<Arc<str>> = None;
         for (tok, span, keyword_raw) in tokens {
             match tok {
                 Token::DocComment(s) => pending = Some(s),
@@ -155,7 +160,7 @@ impl Parser {
 
     /// Consumes any doc comment immediately preceding the current position -
     /// call this before advancing past the first token of a declaration.
-    pub(crate) fn take_doc_comment(&mut self) -> Option<String> {
+    pub(crate) fn take_doc_comment(&mut self) -> Option<Arc<str>> {
         self.doc_comments.remove(&self.pos)
     }
 

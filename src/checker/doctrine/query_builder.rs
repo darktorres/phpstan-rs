@@ -28,7 +28,7 @@ use crate::types::Type;
 /// project-wide; this keeps that cost to the rare, actually-relevant one.
 fn looks_like_query_builder_chain(e: &Expr) -> bool {
     match &e.kind {
-        ExprKind::MethodCall(_, method, _, _) if method == "createQueryBuilder" => true,
+        ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
         ExprKind::MethodCall(inner, _, _, _) => looks_like_query_builder_chain(inner),
         ExprKind::Grouping(inner) => looks_like_query_builder_chain(inner),
         _ => false,
@@ -123,7 +123,7 @@ impl<'a> Checker<'a> {
             return;
         };
         if looks_like_query_builder_chain(rhs) {
-            locals.set_query_builder_alias(name.clone(), std::rc::Rc::new(rhs.clone()));
+            locals.set_query_builder_alias(name.to_string(), std::rc::Rc::new(rhs.clone()));
         }
     }
 
@@ -146,10 +146,10 @@ impl<'a> Checker<'a> {
                 // just another call to collect and descend past -
                 // stopping here without descending is what makes `cursor`
                 // still point *at* this call node afterward.
-                ExprKind::MethodCall(_, method, _, _) if method == "createQueryBuilder" => break,
+                ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => break,
                 ExprKind::MethodCall(inner, method, args, _) => {
                     calls.push(ChainCall {
-                        method: method.clone(),
+                        method: method.to_string(),
                         args: args.clone(),
                     });
                     cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
@@ -165,7 +165,7 @@ impl<'a> Checker<'a> {
                 // claimed. Substitutes the stored assignment expression
                 // and keeps walking - `$qb2 = $qb;` chains of aliases
                 // resolve the same way, one substitution at a time.
-                ExprKind::Variable(name) => match locals.query_builder_aliases.get(name) {
+                ExprKind::Variable(name) => match locals.query_builder_aliases.get(name.as_ref()) {
                     Some(rhs) => cursor = Cursor::Owned(rhs.clone()),
                     None => break,
                 },
@@ -196,7 +196,7 @@ impl<'a> Checker<'a> {
         let ExprKind::MethodCall(target, method, args, _) = &root.kind else {
             return None;
         };
-        if method != "createQueryBuilder" {
+        if **method != *"createQueryBuilder" {
             return None;
         }
         // `$this->createQueryBuilder($alias)` - real Doctrine defines
@@ -206,7 +206,7 @@ impl<'a> Checker<'a> {
         // corpus-dominant shape (100+ real call sites across 18
         // repository files), likely more common than the explicit-
         // `from()` form below.
-        if matches!(&target.kind, ExprKind::Variable(v) if v == "this")
+        if matches!(&target.kind, ExprKind::Variable(v) if **v == *"this")
             && let Some(alias) = args
                 .first()
                 .and_then(|a| self.foldable_arg_string(a, locals))

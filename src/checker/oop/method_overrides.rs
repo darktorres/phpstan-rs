@@ -28,7 +28,7 @@ impl<'a> Checker<'a> {
         // ...).
         if !c.uses.is_empty() {
             let own_method_names: std::collections::HashSet<&str> =
-                c.methods.iter().map(|m| m.function.name.as_str()).collect();
+                c.methods.iter().map(|m| m.function.name.as_ref()).collect();
             let mut trait_method_names: Vec<String> = info
                 .methods
                 .keys()

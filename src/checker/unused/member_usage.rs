@@ -54,7 +54,7 @@ fn class_ref_is_self(class_ref: &str, fqn: &str, ctx: &NameContext) -> bool {
 }
 
 fn is_this(e: &Expr) -> bool {
-    matches!(&e.kind, ExprKind::Variable(name) if name == "this")
+    matches!(&e.kind, ExprKind::Variable(name) if **name == *"this")
 }
 
 /// `$this`, or a local variable syntactically proven (`usage.aliases`) to
@@ -63,7 +63,8 @@ fn is_this(e: &Expr) -> bool {
 /// `if ($x instanceof self) { ...; $x->privateProp; }`. See
 /// `MemberUsage::aliases`'s own doc comment for how that set is built.
 fn is_this_or_aliased(e: &Expr, usage: &MemberUsage) -> bool {
-    is_this(e) || matches!(&e.kind, ExprKind::Variable(name) if usage.aliases.contains(name))
+    is_this(e)
+        || matches!(&e.kind, ExprKind::Variable(name) if usage.aliases.contains(name.as_ref()))
 }
 
 /// `new self(...)`/`new static(...)`/`new <SameClass>(...)` - the
@@ -92,9 +93,9 @@ fn mark_write_target(
 ) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.writes.insert(name.clone());
+            usage.writes.insert(name.to_string());
             if also_read {
-                usage.reads.insert(name.clone());
+                usage.reads.insert(name.to_string());
             }
             true
         }
@@ -192,7 +193,7 @@ pub(crate) fn walk_expr_for_members(
             if let ExprKind::Variable(name) = &l.kind
                 && is_new_self_instance(r, fqn, ctx)
             {
-                usage.aliases.insert(name.clone());
+                usage.aliases.insert(name.to_string());
             }
             if !mark_write_target(l, fqn, ctx, usage, false) {
                 walk_expr_for_members(l, fqn, ctx, usage);
@@ -207,7 +208,7 @@ pub(crate) fn walk_expr_for_members(
             return;
         }
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.reads.insert(name.clone());
+            usage.reads.insert(name.to_string());
         }
         // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
         // anywhere in the body - see `MemberUsage::aliases`'s own doc
@@ -221,7 +222,7 @@ pub(crate) fn walk_expr_for_members(
             if let ExprKind::Variable(name) = &inner.kind
                 && class_ref_is_self(class_ref, fqn, ctx)
             {
-                usage.aliases.insert(name.clone());
+                usage.aliases.insert(name.to_string());
             }
         }
         ExprKind::StaticAccess(class_ref, member) => {
@@ -241,7 +242,7 @@ pub(crate) fn walk_expr_for_members(
             }
         }
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
-            usage.methods.insert(name.clone());
+            usage.methods.insert(name.to_string());
         }
         ExprKind::StaticCall(class_ref, name, _) if class_ref_is_self(class_ref, fqn, ctx) => {
             usage.methods.insert(name.clone());
@@ -265,7 +266,7 @@ pub(crate) fn walk_expr_for_members(
                 && is_this_or_aliased(&a.value, usage)
                 && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
             {
-                usage.methods.insert(name.clone());
+                usage.methods.insert(name.to_string());
             }
         }
         // `expr_children` deliberately returns no children for these
@@ -394,7 +395,7 @@ pub(crate) fn seed_self_typed_param_aliases(
             .as_deref()
             .is_some_and(|t| class_ref_is_self(t, fqn, ctx))
         {
-            usage.aliases.insert(p.name.clone());
+            usage.aliases.insert(p.name.to_string());
         }
     }
 }

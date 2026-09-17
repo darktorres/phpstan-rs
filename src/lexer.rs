@@ -1,5 +1,6 @@
 use std::borrow::Cow;
 
+use crate::intern::intern;
 use crate::token::{Keyword, Position, Span, Token};
 
 mod strings;
@@ -234,7 +235,7 @@ impl<'a> Lexer<'a> {
                 if let Some((Token::DocComment(doc), _, _)) =
                     end.checked_sub(1).and_then(|i| tokens.get_mut(i))
                 {
-                    *doc = append_return_type_override(doc, &override_ty);
+                    *doc = append_return_type_override(doc, &override_ty).into();
                 }
             }
             if let Some(type_tokens) = self.pending_param_type_tokens.take() {
@@ -265,7 +266,7 @@ impl<'a> Lexer<'a> {
                 for (t, _, _) in tokens.iter_mut().rev() {
                     match t {
                         Token::DocComment(doc) => {
-                            *doc = append_param_type_override(doc, &name, &override_ty);
+                            *doc = append_param_type_override(doc, &name, &override_ty).into();
                             break;
                         }
                         Token::Semicolon | Token::LBrace | Token::RBrace => break,
@@ -348,7 +349,7 @@ impl<'a> Lexer<'a> {
         if c == b'$' && (is_ident_start(self.peek_at(1))) {
             self.pos += 1;
             let s = self.lex_ident_raw();
-            return Token::Variable(s);
+            return Token::Variable(intern(&s));
         }
 
         // `${expr}` - the older "variable variable" syntax, where the
@@ -399,8 +400,8 @@ impl<'a> Lexer<'a> {
                 };
                 return Token::Keyword(kw);
             }
-            let s = String::from_utf8_lossy(&self.src[span]).into_owned();
-            return Token::Identifier(s);
+            let s = String::from_utf8_lossy(&self.src[span]);
+            return Token::Identifier(intern(&s));
         }
 
         if c.is_ascii_digit() || (c == b'.' && self.peek_at(1).is_ascii_digit()) {
@@ -440,7 +441,7 @@ impl<'a> Lexer<'a> {
             self.pos += 3;
             self.in_php = true;
             if !html.is_empty() {
-                return Token::InlineHtml(html);
+                return Token::InlineHtml(intern(&html));
             }
             // `<?=` is shorthand for `echo `; surface it as the keyword so
             // the parser can treat it identically to an echo statement.
@@ -453,7 +454,7 @@ impl<'a> Lexer<'a> {
             }
             return self.next_token();
         }
-        Token::InlineHtml(html)
+        Token::InlineHtml(intern(&html))
     }
 
     /// Advances past a single- or double-quoted string literal starting
@@ -676,7 +677,7 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
         self.pos = (self.pos + 2).min(self.src.len());
-        Token::DocComment(String::from_utf8_lossy(&self.src[start..self.pos]).into_owned())
+        Token::DocComment(intern(&String::from_utf8_lossy(&self.src[start..self.pos])))
     }
 
     fn lex_operator(&mut self) -> Token {

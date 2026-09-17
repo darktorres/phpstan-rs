@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
         // sorted HashMap walk - the AST's `Vec<PropertyDecl>` is already
         // deterministic, unlike the registry's `HashMap`-backed lookup).
         for p in &c.properties {
-            if let Some(prop_sig) = info.properties.get(&p.name) {
+            if let Some(prop_sig) = info.properties.get(p.name.as_ref()) {
                 self.check_generic_bounds(&prop_sig.ty, fqn, p.span);
                 // `ExistingClassesInPropertiesRule`'s own check -
                 // reuses this exact loop (same resolved `PropertySig::ty`,

@@ -419,7 +419,7 @@ fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
     let mut out = ParamTypes::new();
     for p in &c.properties {
         if let Some(fqn) = resolved_class_from_hint(p.type_hint.as_deref(), ctx) {
-            out.insert(p.name.clone(), fqn);
+            out.insert(p.name.to_string(), fqn);
         }
     }
     if let Some(ctor) = c
@@ -431,7 +431,7 @@ fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
             if p.promoted_visibility.is_some()
                 && let Some(fqn) = resolved_param_class(p, ctx)
             {
-                out.insert(p.name.clone(), fqn);
+                out.insert(p.name.to_string(), fqn);
             }
         }
     }
@@ -453,9 +453,9 @@ fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
 fn param_types_with(base: &ParamTypes, params: &[Param], ctx: &NameContext) -> ParamTypes {
     let mut out = base.clone();
     for p in params {
-        out.remove(&p.name);
+        out.remove(p.name.as_ref());
         if let Some(fqn) = resolved_param_class(p, ctx) {
-            out.insert(p.name.clone(), fqn);
+            out.insert(p.name.to_string(), fqn);
         }
     }
     out
@@ -1431,8 +1431,8 @@ impl<'a> Walker<'a> {
                     .iter()
                     .filter_map(|u| {
                         param_types
-                            .get(&u.name)
-                            .map(|ty| (u.name.clone(), ty.clone()))
+                            .get(u.name.as_ref())
+                            .map(|ty| (u.name.to_string(), ty.clone()))
                     })
                     .collect();
                 let nested = param_types_with(&captured, params, ctx);

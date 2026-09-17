@@ -52,7 +52,7 @@ impl<'a> Checker<'a> {
             return;
         };
         for p in &c.properties {
-            let Some(prop_sig) = info.properties.get(&p.name) else {
+            let Some(prop_sig) = info.properties.get(p.name.as_ref()) else {
                 continue;
             };
             if prop_sig.write_visibility != Visibility::Private {
@@ -73,11 +73,11 @@ impl<'a> Checker<'a> {
                 .cross_file_property_assign_facts
                 .as_ref()
                 .and_then(|f| f.get(fqn))
-                .and_then(|m| m.get(&p.name))
+                .and_then(|m| m.get(p.name.as_ref()))
                 .or_else(|| {
                     self.property_assign_facts
                         .get(fqn)
-                        .and_then(|m| m.get(&p.name))
+                        .and_then(|m| m.get(p.name.as_ref()))
                 });
             // Never assigned anywhere this project saw at all - not this
             // check's own concern (an always-`null`-default/never-

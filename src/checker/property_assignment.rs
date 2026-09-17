@@ -107,7 +107,7 @@ impl<'a> Checker<'a> {
             self.property_assign_facts
                 .entry(owner.clone())
                 .or_default()
-                .entry(prop.clone())
+                .entry(prop.to_string())
                 .or_default()
                 .push(actual.clone());
         }

@@ -12,7 +12,7 @@ fn hex_escape_decodes_to_the_real_byte() {
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("ABC".to_string())])
+        Token::InterpString(vec![StringPart::Literal("ABC".to_string().into())])
     );
 }
 
@@ -27,7 +27,9 @@ fn a_multi_byte_utf8_character_in_a_double_quoted_literal_run_survives_intact() 
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("caf\u{e9} \u{2764}".to_string())])
+        Token::InterpString(vec![StringPart::Literal(
+            "caf\u{e9} \u{2764}".to_string().into()
+        )])
     );
 }
 
@@ -46,7 +48,7 @@ fn octal_escape_decodes_to_the_real_byte() {
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("ABC".to_string())])
+        Token::InterpString(vec![StringPart::Literal("ABC".to_string().into())])
     );
 }
 
@@ -56,7 +58,7 @@ fn unicode_escape_decodes_to_the_real_codepoint() {
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("ABC".to_string())])
+        Token::InterpString(vec![StringPart::Literal("ABC".to_string().into())])
     );
 }
 
@@ -66,7 +68,9 @@ fn vertical_tab_escape_and_form_feed_decode_correctly() {
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("\u{0B}\u{1B}\u{0C}".to_string())])
+        Token::InterpString(vec![StringPart::Literal(
+            "\u{0B}\u{1B}\u{0C}".to_string().into()
+        )])
     );
 }
 
@@ -76,7 +80,7 @@ fn an_unrecognized_escape_still_keeps_the_literal_backslash_and_character() {
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("\\d+".to_string())])
+        Token::InterpString(vec![StringPart::Literal("\\d+".to_string().into())])
     );
 }
 
@@ -86,6 +90,8 @@ fn the_original_six_escapes_still_decode_correctly() {
     let toks = Lexer::new(src).tokenize();
     assert_eq!(
         toks[0],
-        Token::InterpString(vec![StringPart::Literal("a\nb\tc\r\"d\\e$f".to_string())])
+        Token::InterpString(vec![StringPart::Literal(
+            "a\nb\tc\r\"d\\e$f".to_string().into()
+        )])
     );
 }

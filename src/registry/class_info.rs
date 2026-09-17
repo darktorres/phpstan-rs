@@ -464,7 +464,7 @@ impl ClassInfo {
         for m in &c.methods {
             let name = m.function.name.clone();
             if m.is_abstract {
-                abstract_methods.insert(name.clone());
+                abstract_methods.insert(name.to_string());
             }
             // A `private` method isn't part of a class's inherited/
             // overridable surface at all in real PHP - a subclass
@@ -475,10 +475,10 @@ impl ClassInfo {
             // `Exception::__clone()`, `final private`, being freely
             // redeclared by subclasses).
             if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(name.clone());
+                final_methods.insert(name.to_string());
             }
             if m.is_static {
-                static_methods.insert(name.clone());
+                static_methods.insert(name.to_string());
             }
             // `@final`'s docblock-only sibling to `final_methods` above -
             // same private-is-not-overridable exemption (a purely static-
@@ -493,7 +493,7 @@ impl ClassInfo {
                     .map(docblock::parse)
                     .is_some_and(|d| d.is_final)
             {
-                final_methods_by_phpdoc.insert(name.clone());
+                final_methods_by_phpdoc.insert(name.to_string());
             }
             let sig = FunctionSig::from_decl(
                 &m.function,
@@ -502,7 +502,7 @@ impl ClassInfo {
                 &type_aliases,
                 m.visibility.clone(),
             );
-            methods_vec.push((name, sig));
+            methods_vec.push((name.to_string(), sig));
         }
         let methods: HashMap<String, FunctionSig> = collect_merged_methods(methods_vec.into_iter());
         // Same private-is-not-overridable exemption `final_methods`
@@ -513,14 +513,18 @@ impl ClassInfo {
             .properties
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
-            .map(|p| p.name.clone())
+            .map(|p| p.name.to_string())
             .collect();
         // `public final int $x` is real, valid PHP on a promoted
         // constructor property too, and real PHP does enforce "Cannot
         // override final property" for it - unlike `abstract`, which
         // really is impossible there (an abstract constructor can't
         // declare any promoted property, a real fatal error).
-        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+        if let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        {
             final_properties.extend(
                 ctor.function
                     .params
@@ -529,7 +533,7 @@ impl ClassInfo {
                         p.promoted_final
                             && p.promoted_visibility.as_ref() != Some(&Visibility::Private)
                     })
-                    .map(|p| p.name.clone()),
+                    .map(|p| p.name.to_string()),
             );
         }
 
@@ -545,9 +549,13 @@ impl ClassInfo {
                         .map(docblock::parse)
                         .is_some_and(|d| d.is_final)
             })
-            .map(|p| p.name.clone())
+            .map(|p| p.name.to_string())
             .collect();
-        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+        if let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        {
             final_properties_by_phpdoc.extend(
                 ctor.function
                     .params
@@ -559,7 +567,7 @@ impl ClassInfo {
                                 .map(docblock::parse)
                                 .is_some_and(|d| d.is_final)
                     })
-                    .map(|p| p.name.clone()),
+                    .map(|p| p.name.to_string()),
             );
         }
 
@@ -597,7 +605,7 @@ impl ClassInfo {
                     .as_ref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 (
-                    p.name.clone(),
+                    p.name.to_string(),
                     PropertySig {
                         ty,
                         ty_native,
@@ -633,7 +641,11 @@ impl ClassInfo {
         // parameter - the parser records this via Param::promoted_visibility.
         // A `@param` on the constructor's own docblock describes the same
         // promoted property, so it gets the same PHPDoc-wins treatment.
-        if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+        if let Some(ctor) = c
+            .methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into())
+        {
             let ctor_doc = ctor.function.doc_comment.as_deref().map(docblock::parse);
             for p in &ctor.function.params {
                 if p.promoted_visibility.is_none() {
@@ -648,7 +660,7 @@ impl ClassInfo {
                 // builds for the same parameter.
                 let doc_ty: Option<String> = ctor_doc
                     .as_ref()
-                    .and_then(|d| d.params.get(&p.name))
+                    .and_then(|d| d.params.get(p.name.as_ref()))
                     .cloned()
                     .or_else(|| {
                         p.doc_comment
@@ -699,7 +711,7 @@ impl ClassInfo {
                     .as_deref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 properties.insert(
-                    p.name.clone(),
+                    p.name.to_string(),
                     PropertySig {
                         ty,
                         ty_native,
@@ -823,7 +835,7 @@ impl ClassInfo {
                     None => infer_const_type(&cc.value),
                 };
                 (
-                    cc.name.clone(),
+                    cc.name.to_string(),
                     ConstSig {
                         ty,
                         visibility: cc.visibility.clone(),
@@ -1108,7 +1120,7 @@ impl ClassInfo {
         let mut methods: HashMap<String, FunctionSig> =
             collect_merged_methods(e.methods.iter().map(|m| {
                 (
-                    m.function.name.clone(),
+                    m.function.name.to_string(),
                     FunctionSig::from_decl(
                         &m.function,
                         ctx,
@@ -1252,7 +1264,7 @@ impl ClassInfo {
             .map(|cc| {
                 let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 (
-                    cc.name.clone(),
+                    cc.name.to_string(),
                     ConstSig {
                         ty: infer_const_type(&cc.value),
                         visibility: cc.visibility.clone(),
@@ -1271,9 +1283,9 @@ impl ClassInfo {
         // syntax in real PHP - always public.
         for case in &e.cases {
             consts.insert(
-                case.name.clone(),
+                case.name.to_string(),
                 ConstSig {
-                    ty: Type::EnumCase(fqn.clone(), case.name.clone()),
+                    ty: Type::EnumCase(fqn.clone(), case.name.to_string()),
                     visibility: Visibility::Public,
                     // A case has no doc-comment/`@internal`/`@deprecated`
                     // convention of its own in real PHP either - same
@@ -1296,11 +1308,11 @@ impl ClassInfo {
             .filter_map(|c| {
                 let v = c.value.as_ref()?;
                 let ty = match &v.kind {
-                    ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.clone()),
+                    ExprKind::Literal(Literal::String(s)) => Type::StringLiteral(s.to_string()),
                     ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
                     _ => return None,
                 };
-                Some((c.name.clone(), ty))
+                Some((c.name.to_string(), ty))
             })
             .collect();
 
@@ -1359,7 +1371,7 @@ impl ClassInfo {
             let case_values: Vec<Type> = e
                 .cases
                 .iter()
-                .filter_map(|c| enum_case_values.get(&c.name).cloned())
+                .filter_map(|c| enum_case_values.get(c.name.as_ref()).cloned())
                 .collect();
             let value_ty = if !case_values.is_empty() && case_values.len() == e.cases.len() {
                 match case_values.len() {
@@ -1424,13 +1436,13 @@ impl ClassInfo {
         let mut static_methods: HashSet<String> = HashSet::new();
         for m in &e.methods {
             if m.is_abstract {
-                abstract_methods.insert(m.function.name.clone());
+                abstract_methods.insert(m.function.name.to_string());
             }
             if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(m.function.name.clone());
+                final_methods.insert(m.function.name.to_string());
             }
             if m.is_static {
-                static_methods.insert(m.function.name.clone());
+                static_methods.insert(m.function.name.to_string());
             }
         }
         let trait_aliases: Vec<TraitAlias> = e

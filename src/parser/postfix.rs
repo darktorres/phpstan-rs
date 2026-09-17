@@ -116,7 +116,7 @@ impl Parser {
                     // (`Foo::new()`, `Foo::default()`, `Foo::list()`).
                     let member = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => {
-                            self.take_name_segment().unwrap()
+                            self.take_name_segment().unwrap().to_string()
                         }
                         Token::Variable(_) => {
                             let Token::Variable(s) = self.take_token() else {
@@ -225,7 +225,7 @@ impl Parser {
             {
                 let name = self.take_name_segment().unwrap();
                 self.skip();
-                Some(name)
+                Some(name.to_string())
             } else {
                 None
             };

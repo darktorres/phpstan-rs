@@ -64,12 +64,12 @@ fn symbol(
 }
 
 fn function_symbol(f: &FunctionDecl, kind: SymbolKind) -> DocumentSymbol {
-    symbol(f.name.clone(), kind, f.span, f.name_span, Vec::new())
+    symbol(f.name.to_string(), kind, f.span, f.name_span, Vec::new())
 }
 
 fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
     symbol(
-        m.function.name.clone(),
+        m.function.name.to_string(),
         SymbolKind::METHOD,
         m.span,
         m.function.name_span,
@@ -86,7 +86,7 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
     let mut children: Vec<DocumentSymbol> = c.consts.iter().map(const_symbol).collect();
     children.extend(c.properties.iter().map(|p| {
         symbol(
-            p.name.clone(),
+            p.name.to_string(),
             SymbolKind::PROPERTY,
             p.span,
             p.name_span,
@@ -94,14 +94,14 @@ fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
         )
     }));
     children.extend(c.methods.iter().map(method_symbol));
-    symbol(c.name.clone(), kind, c.span, c.name_span, children)
+    symbol(c.name.to_string(), kind, c.span, c.name_span, children)
 }
 
 fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {
     let mut children: Vec<DocumentSymbol> = e.consts.iter().map(const_symbol).collect();
     children.extend(e.cases.iter().map(|case| {
         symbol(
-            case.name.clone(),
+            case.name.to_string(),
             SymbolKind::ENUM_MEMBER,
             case.span,
             case.name_span,
@@ -110,7 +110,7 @@ fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {
     }));
     children.extend(e.methods.iter().map(method_symbol));
     symbol(
-        e.name.clone(),
+        e.name.to_string(),
         SymbolKind::ENUM,
         e.span,
         e.name_span,
@@ -120,7 +120,7 @@ fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {
 
 fn const_symbol(cst: &crate::ast::ClassConst) -> DocumentSymbol {
     symbol(
-        cst.name.clone(),
+        cst.name.to_string(),
         SymbolKind::CONSTANT,
         cst.name_span,
         cst.name_span,

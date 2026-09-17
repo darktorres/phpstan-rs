@@ -42,7 +42,7 @@ impl<'a> Checker<'a> {
         let Some(fqn) = class_name else {
             return;
         };
-        if f.name != "__construct" || f.body.is_empty() {
+        if f.name != "__construct".into() || f.body.is_empty() {
             return;
         }
         let candidates: Vec<&Param> = f
@@ -126,7 +126,9 @@ impl<'a> Checker<'a> {
         }
 
         let mut usage = MemberUsage::default();
-        let ctor = methods.iter().find(|m| m.function.name == "__construct");
+        let ctor = methods
+            .iter()
+            .find(|m| m.function.name == "__construct".into());
         for m in methods {
             usage.aliases.clear();
             seed_self_typed_param_aliases(&m.function.params, fqn, &self.name_ctx, &mut usage);
@@ -184,7 +186,7 @@ impl<'a> Checker<'a> {
         }
 
         for c in consts {
-            if c.visibility != Visibility::Private || usage.consts.contains(&c.name) {
+            if c.visibility != Visibility::Private || usage.consts.contains(c.name.as_ref()) {
                 continue;
             }
             self.report(
@@ -198,9 +200,9 @@ impl<'a> Checker<'a> {
 
         for m in methods {
             if m.visibility != Visibility::Private
-                || m.function.name == "__construct"
+                || m.function.name == "__construct".into()
                 || m.function.name.eq_ignore_ascii_case("__clone")
-                || usage.methods.contains(&m.function.name)
+                || usage.methods.contains(m.function.name.as_ref())
             {
                 continue;
             }
@@ -234,7 +236,7 @@ impl<'a> Checker<'a> {
             {
                 continue;
             }
-            let written = p.default.is_some() || usage.writes.contains(&p.name);
+            let written = p.default.is_some() || usage.writes.contains(p.name.as_ref());
             if written {
                 continue;
             }

@@ -501,7 +501,7 @@ impl<'a> Walker<'a> {
             // for `lsp.rs`'s own orchestration to run it, at either scope
             // `probe_scope` covers (a named function/method, or top-level
             // script scope).
-            ExprKind::Variable(name) if name != "this" => {
+            ExprKind::Variable(name) if **name != *"this" => {
                 if contains(expr.span, self.pos) {
                     *best = Some(Resolved::VariableRead {
                         span: expr.span,
@@ -522,17 +522,17 @@ impl<'a> Walker<'a> {
                 self.expr(recv, ctx, current_class, best);
                 if contains(expr.span, self.pos)
                     && let Some(spans) =
-                        split_identifier_spans(self.source, expr.span, &[method.as_str()])
+                        split_identifier_spans(self.source, expr.span, &[method.as_ref()])
                     && contains(spans[0], self.pos)
                 {
-                    if matches!(&recv.kind, ExprKind::Variable(v) if v == "this")
+                    if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
                         && let Some(owner) = current_class
                     {
-                        *best = Some(Resolved::Member(owner.to_string(), method.clone()));
+                        *best = Some(Resolved::Member(owner.to_string(), method.to_string()));
                     } else {
                         *best = Some(Resolved::Instance {
                             receiver_span: recv.span,
-                            member: method.clone(),
+                            member: method.to_string(),
                             scope: self.probe_scope(),
                             is_static: self.current_is_static,
                             class: current_class.map(str::to_string),
@@ -658,7 +658,7 @@ impl<'a> Walker<'a> {
             self.record(
                 best,
                 p.name_span,
-                Resolved::Member(fqn.clone(), p.name.clone()),
+                Resolved::Member(fqn.clone(), p.name.to_string()),
             );
             if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
                 self.record_type_hint(best, hint, span, Some(&fqn), ctx);
@@ -671,7 +671,7 @@ impl<'a> Walker<'a> {
             self.record(
                 best,
                 m.function.name_span,
-                Resolved::Member(fqn.clone(), m.function.name.clone()),
+                Resolved::Member(fqn.clone(), m.function.name.to_string()),
             );
             self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
         }
@@ -679,7 +679,7 @@ impl<'a> Walker<'a> {
             self.record(
                 best,
                 cst.name_span,
-                Resolved::Member(fqn.clone(), cst.name.clone()),
+                Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
             if let (Some(hint), Some(span)) = (&cst.type_hint, cst.type_hint_span) {
                 self.record_type_hint(best, hint, span, Some(&fqn), ctx);
@@ -709,7 +709,7 @@ impl<'a> Walker<'a> {
             self.record(
                 best,
                 m.function.name_span,
-                Resolved::Member(fqn.clone(), m.function.name.clone()),
+                Resolved::Member(fqn.clone(), m.function.name.to_string()),
             );
             self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
         }
@@ -717,7 +717,7 @@ impl<'a> Walker<'a> {
             self.record(
                 best,
                 cst.name_span,
-                Resolved::Member(fqn.clone(), cst.name.clone()),
+                Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), best);
         }
@@ -725,7 +725,7 @@ impl<'a> Walker<'a> {
             self.record(
                 best,
                 case.name_span,
-                Resolved::Member(fqn.clone(), case.name.clone()),
+                Resolved::Member(fqn.clone(), case.name.to_string()),
             );
             if let Some(v) = &case.value {
                 self.expr(v, &mut ctx.clone(), Some(&fqn), best);

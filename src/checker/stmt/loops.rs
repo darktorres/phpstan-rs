@@ -40,7 +40,7 @@ fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
     let ExprKind::Variable(container_name) = &unwrap_grouping(count_arg).kind else {
         return None;
     };
-    Some((container_name.clone(), idx_name.clone()))
+    Some((container_name.to_string(), idx_name.to_string()))
 }
 
 impl<'a> Checker<'a> {
@@ -569,7 +569,7 @@ impl<'a> Checker<'a> {
         // `subject_exempt` keeps exactly this one name out of the
         // "may run zero times" merge every other variable now gets.
         let subject_exempt = match &subject.kind {
-            ExprKind::Variable(name) => Some(name.as_str()),
+            ExprKind::Variable(name) => Some(name.as_ref()),
             _ => None,
         };
         let subject_ty = self.check_expr(subject, locals, label);
@@ -620,7 +620,9 @@ impl<'a> Checker<'a> {
         // not just whatever `check_stmt`'s own generic preamble happened
         // to insert before this function's own rebinding overwrote it.
         let element_ty = match (&value.kind, inline_var) {
-            (ExprKind::Variable(name), Some((annotated_name, ty))) if name == annotated_name => {
+            (ExprKind::Variable(name), Some((annotated_name, ty)))
+                if **name == **annotated_name =>
+            {
                 ty.clone()
             }
             _ => element_ty,
@@ -731,7 +733,7 @@ impl<'a> Checker<'a> {
         {
             let widened_element_ty = union_types(old_element_ty, final_value_ty);
             locals.insert(
-                subject_name.clone(),
+                subject_name.to_string(),
                 replace_array_element_type(&current_subject_ty, &widened_element_ty),
             );
         }

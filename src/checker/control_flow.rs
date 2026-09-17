@@ -660,7 +660,7 @@ pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> std::collections::HashSet<
     // loop exactly.
     fn walk(stmt: &Stmt, targets: &mut std::collections::HashSet<String>) {
         if let StmtKind::Goto(name) = &stmt.kind {
-            targets.insert(name.clone());
+            targets.insert(name.to_string());
         }
         any_stmt_child(stmt, &mut |child| {
             walk(child, targets);

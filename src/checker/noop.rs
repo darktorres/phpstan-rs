@@ -386,7 +386,7 @@ impl<'a> Checker<'a> {
             }
         }
         if sig.return_type == Type::Void
-            && f.name != "__construct"
+            && f.name != "__construct".into()
             && sig.throws.is_none()
             && sig.assert.is_empty()
             && sig.assert_if_true.is_empty()
@@ -454,7 +454,7 @@ impl<'a> Checker<'a> {
         let block = docblock::parse(doc);
         for (name, immediately) in &block.param_immediately_invoked_callable {
             let tag = if *immediately { "immediately" } else { "later" };
-            let Some(param) = f.params.iter().find(|p| &p.name == name) else {
+            let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
                 self.report(
                     label.to_string(),
                     format!(
@@ -485,7 +485,7 @@ impl<'a> Checker<'a> {
             }
         }
         for name in block.param_closure_this.keys() {
-            let Some(param) = f.params.iter().find(|p| &p.name == name) else {
+            let Some(param) = f.params.iter().find(|p| *p.name == **name) else {
                 self.report(
                     label.to_string(),
                     format!("PHPDoc tag @param-closure-this references unknown parameter: ${name}"),

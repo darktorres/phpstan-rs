@@ -68,19 +68,19 @@ impl DeclLocations {
                         .insert(fqn.clone(), (path.to_path_buf(), c.name_span));
                     for m in &c.methods {
                         self.members.insert(
-                            (fqn.clone(), m.function.name.clone()),
+                            (fqn.clone(), m.function.name.to_string()),
                             (path.to_path_buf(), m.function.name_span),
                         );
                     }
                     for p in &c.properties {
                         self.members.insert(
-                            (fqn.clone(), p.name.clone()),
+                            (fqn.clone(), p.name.to_string()),
                             (path.to_path_buf(), p.name_span),
                         );
                     }
                     for cst in &c.consts {
                         self.members.insert(
-                            (fqn.clone(), cst.name.clone()),
+                            (fqn.clone(), cst.name.to_string()),
                             (path.to_path_buf(), cst.name_span),
                         );
                     }
@@ -91,19 +91,19 @@ impl DeclLocations {
                         .insert(fqn.clone(), (path.to_path_buf(), e.name_span));
                     for m in &e.methods {
                         self.members.insert(
-                            (fqn.clone(), m.function.name.clone()),
+                            (fqn.clone(), m.function.name.to_string()),
                             (path.to_path_buf(), m.function.name_span),
                         );
                     }
                     for cst in &e.consts {
                         self.members.insert(
-                            (fqn.clone(), cst.name.clone()),
+                            (fqn.clone(), cst.name.to_string()),
                             (path.to_path_buf(), cst.name_span),
                         );
                     }
                     for case in &e.cases {
                         self.members.insert(
-                            (fqn.clone(), case.name.clone()),
+                            (fqn.clone(), case.name.to_string()),
                             (path.to_path_buf(), case.name_span),
                         );
                     }

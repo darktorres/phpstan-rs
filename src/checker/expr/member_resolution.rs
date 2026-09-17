@@ -762,7 +762,7 @@ fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
 fn doctrine_get_query_receiver(recv: &Expr) -> Option<&Expr> {
     match &recv.kind {
         ExprKind::MethodCall(qb, method, call_args, _)
-            if method == "getQuery" && call_args.is_empty() =>
+            if **method == *"getQuery" && call_args.is_empty() =>
         {
             Some(qb)
         }

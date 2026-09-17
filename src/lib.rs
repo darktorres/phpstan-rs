@@ -16,6 +16,7 @@ pub mod docblock;
 pub mod doctrine_functions;
 pub mod ignore_comments;
 pub mod ignore_errors;
+pub(crate) mod intern;
 pub mod lexer;
 pub mod lsp;
 pub mod output;

@@ -318,7 +318,9 @@ impl Parser {
             // block-scoped form's body is a plain nested block, unlike
             // `namespace { ... }`, since declare directives don't carry
             // any declarations that a registry needs to see spliced out.
-            Token::Identifier(s) if s == "declare" && matches!(self.peek_at(1), Token::LParen) => {
+            Token::Identifier(s)
+                if **s == *"declare" && matches!(self.peek_at(1), Token::LParen) =>
+            {
                 self.skip();
                 self.expect(&Token::LParen)?;
                 while !self.check(&Token::RParen) {
@@ -400,6 +402,6 @@ impl Parser {
             self.parse_primary()?;
             return Ok("{dynamic}".to_string());
         }
-        self.expect_variable()
+        self.expect_variable().map(|s| s.to_string())
     }
 }

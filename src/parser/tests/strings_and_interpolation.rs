@@ -64,10 +64,10 @@ fn bareword_index_interpolation_parses_as_an_index_with_a_string_literal_key() {
     let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
         panic!("expected an Index part, got {:?}", parts[0].kind);
     };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "arr"));
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
         &key.kind,
-        ExprKind::Literal(Literal::String(s)) if s == "key"
+        ExprKind::Literal(Literal::String(s)) if **s == *"key"
     ));
 }
 
@@ -88,8 +88,8 @@ fn variable_index_interpolation_parses_as_an_index_with_a_variable_key() {
     let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
         panic!("expected an Index part, got {:?}", parts[0].kind);
     };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "arr"));
-    assert!(matches!(&key.kind, ExprKind::Variable(v) if v == "idx"));
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
+    assert!(matches!(&key.kind, ExprKind::Variable(v) if **v == *"idx"));
 }
 
 /// `"$arr[0]"`/`"$arr[-1]"` - a plain (optionally negative) integer key.
@@ -149,7 +149,7 @@ fn multiple_bare_braced_vars_in_one_string_each_keep_their_own_real_position() {
     let var_spans: Vec<(String, Span)> = parts
         .iter()
         .filter_map(|p| match &p.kind {
-            ExprKind::Variable(name) => Some((name.clone(), p.span)),
+            ExprKind::Variable(name) => Some((name.to_string(), p.span)),
             _ => None,
         })
         .collect();
@@ -189,8 +189,8 @@ fn braced_property_access_interpolation_parses_as_a_property_access() {
     let ExprKind::PropertyAccess(base, prop, nullsafe) = &parts[0].kind else {
         panic!("expected a PropertyAccess part, got {:?}", parts[0].kind);
     };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "obj"));
-    assert_eq!(prop, "prop");
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"obj"));
+    assert_eq!(prop.as_ref(), "prop");
     assert!(!nullsafe);
 }
 
@@ -210,10 +210,10 @@ fn braced_index_interpolation_parses_as_an_index() {
     let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
         panic!("expected an Index part, got {:?}", parts[0].kind);
     };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "arr"));
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
         &key.kind,
-        ExprKind::Literal(Literal::String(s)) if s == "key"
+        ExprKind::Literal(Literal::String(s)) if **s == *"key"
     ));
 }
 
@@ -235,7 +235,7 @@ fn a_braced_method_call_is_not_mistaken_for_a_simple_property_access() {
         panic!("expected an interpolated string, got {:?}", rhs.kind);
     };
     assert!(
-        matches!(&parts[0].kind, ExprKind::MethodCall(_, name, _, _) if name == "method"),
+        matches!(&parts[0].kind, ExprKind::MethodCall(_, name, _, _) if **name == *"method"),
         "got {:?}",
         parts[0].kind
     );
@@ -264,10 +264,10 @@ fn a_malformed_index_key_falls_back_to_complex_expr_re_lexing() {
     let ExprKind::Index(base, Some(key)) = &parts[0].kind else {
         panic!("expected an Index part, got {:?}", parts[0].kind);
     };
-    assert!(matches!(&base.kind, ExprKind::Variable(v) if v == "arr"));
+    assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"arr"));
     assert!(matches!(
         &key.kind,
-        ExprKind::Literal(Literal::String(s)) if s == "1a"
+        ExprKind::Literal(Literal::String(s)) if **s == *"1a"
     ));
 }
 

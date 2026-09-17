@@ -447,7 +447,7 @@ fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
             [single_arg] => Some(vec![narrowing_key(&single_arg.value)?]),
             _ => None,
         },
-        ExprKind::Variable(name) => Some(vec![name.clone()]),
+        ExprKind::Variable(name) => Some(vec![name.to_string()]),
         ExprKind::Binary(BinOp::And | BinOp::Or, l, r) => {
             let mut targets = condition_alias_targets(l)?;
             for key in condition_alias_targets(r)? {
@@ -499,7 +499,7 @@ impl<'a> Checker<'a> {
                 Type::ArrayShape(vec![])
             };
             purge_stale_narrowing_for(locals, matches_name);
-            locals.insert(matches_name.clone(), narrowed);
+            locals.insert(matches_name.to_string(), narrowed);
         }
         // `function_exists('foo')`'s own true branch proves `foo` is
         // callable for the rest of that branch - a project-specific
@@ -545,11 +545,11 @@ impl<'a> Checker<'a> {
             if bare.eq_ignore_ascii_case("method_exists") {
                 locals
                     .guarded_methods
-                    .insert((recv_name.clone(), member_name.into_owned()));
+                    .insert((recv_name.to_string(), member_name.into_owned()));
             } else if bare.eq_ignore_ascii_case("property_exists") {
                 locals
                     .guarded_properties
-                    .insert((recv_name.clone(), member_name.into_owned()));
+                    .insert((recv_name.to_string(), member_name.into_owned()));
             }
         }
         match &cond.kind {
@@ -1173,13 +1173,13 @@ impl<'a> Checker<'a> {
             // condition, never a behavior change when there's no alias
             // to replay.
             ExprKind::Variable(name) => {
-                if let Some((_, alias)) = locals.condition_aliases.get(name).cloned() {
+                if let Some((_, alias)) = locals.condition_aliases.get(name.as_ref()).cloned() {
                     self.apply_narrowing(&alias, locals, branch_true);
                 }
                 self.replay_truthiness_discriminant_facts(name, locals, branch_true);
                 if branch_true {
                     let current = self.current_narrowed_type(cond, name, locals);
-                    locals.insert(name.clone(), narrow_type_excluding_falsy(&current));
+                    locals.insert(name.to_string(), narrow_type_excluding_falsy(&current));
                 }
             }
             // A bare truthiness check (`if ($x)` / `if (!$x)`, the latter
@@ -1230,10 +1230,10 @@ impl<'a> Checker<'a> {
         // above, generalized: `$flag = $flag || $x === null;` naming
         // `$flag` as one of its own compound condition's targets would
         // replay `$flag`'s own not-yet-narrowed self the same way.
-        if target_keys.iter().any(|k| k == name) {
+        if target_keys.iter().any(|k| **k == **name) {
             return;
         }
-        locals.set_condition_alias(name.clone(), target_keys, std::rc::Rc::new(rhs.clone()));
+        locals.set_condition_alias(name.to_string(), target_keys, std::rc::Rc::new(rhs.clone()));
     }
 
     /// A different shape from `record_condition_alias` above: a flag
@@ -1315,12 +1315,12 @@ impl<'a> Checker<'a> {
         let Some(target_keys) = condition_alias_targets(cond) else {
             return;
         };
-        if target_keys.iter().any(|k| k == name) {
+        if target_keys.iter().any(|k| **k == **name) {
             return;
         }
         let alias = std::rc::Rc::new(cond.clone());
-        then_locals.set_condition_alias(name.clone(), target_keys.clone(), alias.clone());
-        else_locals.set_condition_alias(name.clone(), target_keys, alias);
+        then_locals.set_condition_alias(name.to_string(), target_keys.clone(), alias.clone());
+        else_locals.set_condition_alias(name.to_string(), target_keys, alias);
     }
 
     /// `AssertRuleHelper`'s equivalent - a `@phpstan-

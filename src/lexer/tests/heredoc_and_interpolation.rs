@@ -19,9 +19,9 @@ fn heredoc_strips_indentation_and_still_interpolates_variables() {
     assert_eq!(
         toks[2],
         Token::InterpString(vec![
-            StringPart::Literal("Hello, ".to_string()),
-            StringPart::SimpleVar("name".to_string()),
-            StringPart::Literal("!".to_string()),
+            StringPart::Literal("Hello, ".to_string().into()),
+            StringPart::SimpleVar("name".to_string().into()),
+            StringPart::Literal("!".to_string().into()),
         ])
     );
 }

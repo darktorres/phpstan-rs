@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use crate::ast::Attribute;
+use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
 
@@ -53,7 +56,7 @@ impl Parser {
     /// that also happens to start with `(`.
     pub(crate) fn peek_is_set_visibility_marker(&self) -> bool {
         matches!(self.peek_at(1), Token::LParen)
-            && matches!(self.peek_at(2), Token::Identifier(s) if s == "set")
+            && matches!(self.peek_at(2), Token::Identifier(s) if **s == *"set")
             && matches!(self.peek_at(3), Token::RParen)
     }
 
@@ -176,7 +179,7 @@ impl Parser {
     /// take_name_segment is: PHP reserves most keywords only in specific
     /// declaration positions, not universally - `const DEFAULT = 1;` is
     /// valid PHP even though `default` is a keyword.
-    pub(crate) fn expect_ident(&mut self) -> Result<String, ParseError> {
+    pub(crate) fn expect_ident(&mut self) -> Result<Arc<str>, ParseError> {
         match self.peek() {
             Token::Identifier(_) | Token::Keyword(_) => Ok(self.take_name_segment().unwrap()),
             other => {
@@ -189,7 +192,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn expect_variable(&mut self) -> Result<String, ParseError> {
+    pub(crate) fn expect_variable(&mut self) -> Result<Arc<str>, ParseError> {
         let span = self.spans.get(self.pos).copied().unwrap_or_default();
         match self.take_token() {
             Token::Variable(s) => Ok(s),
@@ -210,7 +213,18 @@ impl Parser {
     /// keywords are only reserved in declaration position in real PHP
     /// ("semi-reserved words"), so `Enum`/`Match`/`New`/... are all valid
     /// namespace segments (`Piwigo\Common\Enum\Foo`).
-    pub(crate) fn take_name_segment(&mut self) -> Option<String> {
+    // Returns `Arc<str>` (not `String`): an `Identifier` token's own
+    // payload is already interned by the lexer, and this is the *only*
+    // place that value gets moved out of the token stream into every
+    // name-in-declaration-position AST field (`expect_ident`) or, for the
+    // fast (non-namespaced) path, into `parse_qualified_name`'s own
+    // result - re-materializing a fresh `String` here would throw that
+    // interning away right at the token->AST boundary (see Fix 10 Stage
+    // 1's own "wash trap" note). The rarer `Keyword` case has no interned
+    // source of its own to move (`keyword_raw` is a plain, deliberately
+    // non-interned `String` - see its own doc comment), so it's interned
+    // here instead, same as any other identifier text.
+    pub(crate) fn take_name_segment(&mut self) -> Option<Arc<str>> {
         match self.peek() {
             Token::Identifier(_) => {
                 let Token::Identifier(part) = self.take_token() else {
@@ -229,13 +243,13 @@ impl Parser {
                 // canonical (always-lowercase) form only if it's somehow
                 // missing (shouldn't happen for a real lexer-produced
                 // token stream).
-                Some(
-                    self.keyword_raw
-                        .get(idx)
-                        .cloned()
-                        .flatten()
-                        .unwrap_or_else(|| kw.as_str().to_string()),
-                )
+                let raw = self
+                    .keyword_raw
+                    .get(idx)
+                    .cloned()
+                    .flatten()
+                    .unwrap_or_else(|| kw.as_str().to_string());
+                Some(intern(&raw))
             }
             _ => None,
         }
@@ -251,12 +265,16 @@ impl Parser {
             };
         };
         // Fast path: the overwhelmingly common single-segment,
-        // non-namespaced name - `first` is already an owned `String`
-        // taken directly out of the token stream (`take_name_segment`),
-        // so return it as-is instead of copying it into a second,
-        // separately-heap-allocated `String`.
+        // non-namespaced name - unlike `expect_ident`/`take_name_segment`
+        // itself, this function's own return type is a plain, general
+        // `String` (many call sites build a genuinely multi-segment,
+        // backslash-joined name here, which has no single token to move
+        // out of and thus no interning to preserve either way), so
+        // `first`'s own interned `Arc<str>` is copied into one here -
+        // still just the one allocation this fast path always needed,
+        // not an extra one.
         if !leading_backslash && !matches!(self.peek(), Token::Backslash) {
-            return first;
+            return first.to_string();
         }
         let mut s = String::new();
         if leading_backslash {

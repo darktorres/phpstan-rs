@@ -75,7 +75,16 @@ impl Parser {
                 let Token::StringLit(s) = self.take_token() else {
                     unreachable!()
                 };
-                self.expr(ExprKind::Literal(Literal::String(s)), start)
+                // `Token::StringLit` stays a plain `String` (an ordinary
+                // string literal's own contents have low interning
+                // payoff - see `Token::StringLit`'s own doc comment), but
+                // `Literal::String` is `Arc<str>` (needed so the
+                // *interpolation* literal-chunk path - `StringPart::
+                // Literal`/`SimpleIndexKey::Str`, both already interned -
+                // doesn't immediately throw that away at this same enum).
+                // This is the one real allocation this particular path
+                // pays for that unification.
+                self.expr(ExprKind::Literal(Literal::String(s.into())), start)
             }
             Token::Keyword(Keyword::True) => {
                 self.skip();

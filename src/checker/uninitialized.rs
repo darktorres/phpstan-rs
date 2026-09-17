@@ -176,11 +176,11 @@ fn is_tracked_property(e: &Expr, prop: &str, self_vars: &HashSet<String>) -> boo
     let ExprKind::PropertyAccess(base, name, _) = &e.kind else {
         return false;
     };
-    if name != prop {
+    if **name != *prop {
         return false;
     }
     match &base.kind {
-        ExprKind::Variable(v) => v == "this" || self_vars.contains(v),
+        ExprKind::Variable(v) => **v == *"this" || self_vars.contains(v.as_ref()),
         _ => false,
     }
 }
@@ -202,7 +202,7 @@ fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut 
             && let ExprKind::Variable(v) = &lhs.kind
             && is_new_self_instance(rhs, class_name)
         {
-            vars.insert(v.clone());
+            vars.insert(v.to_string());
         }
         for child in stmt_children(s) {
             collect_self_instance_vars_into(std::slice::from_ref(child), class_name, vars);

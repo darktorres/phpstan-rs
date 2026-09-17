@@ -171,7 +171,7 @@ impl NameContext {
         for import in imports {
             let path = strip_leading_backslash(&import.path);
             let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
-            let short_name = import.alias.clone().unwrap_or_else(|| bare.clone());
+            let short_name = import.alias.clone().unwrap_or_else(|| bare.clone().into());
             self.use_map
                 .insert(short_name.to_ascii_lowercase(), (path, import.kind));
         }

@@ -117,13 +117,13 @@ fn walk_stmt_for_vars(stmt: &Stmt, names: &mut HashSet<String>, escaped: &mut bo
 fn walk_expr_for_vars(expr: &Expr, names: &mut HashSet<String>, escaped: &mut bool) {
     match &expr.kind {
         ExprKind::Variable(name) => {
-            if name != "this" {
-                names.insert(name.clone());
+            if **name != *"this" {
+                names.insert(name.to_string());
             }
         }
         ExprKind::DynamicVariable(inner) => {
             if let ExprKind::Literal(Literal::String(s)) = &inner.kind {
-                names.insert(s.clone());
+                names.insert(s.to_string());
             } else {
                 *escaped = true;
             }
@@ -154,7 +154,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut HashSet<String>, escaped: &mut bo
         // this is the only place its variables are ever collected from.
         ExprKind::Closure { uses, .. } => {
             for u in uses {
-                names.insert(u.name.clone());
+                names.insert(u.name.to_string());
             }
         }
         // Unlike `Closure`, an arrow function implicitly captures every
@@ -199,7 +199,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut HashSet<String>, escaped: &mut bo
 fn collect_compact_names(e: &Expr, names: &mut HashSet<String>, escaped: &mut bool) {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
-            names.insert(s.clone());
+            names.insert(s.to_string());
         }
         ExprKind::ArrayLiteral(items) => {
             for item in items {

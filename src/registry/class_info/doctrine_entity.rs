@@ -137,7 +137,7 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String,
                 return None;
             };
             let class = class_name_of_class_const(&item.value)?;
-            Some((value.clone(), ctx.resolve(class)))
+            Some((value.to_string(), ctx.resolve(class)))
         })
         .collect()
 }
@@ -183,7 +183,11 @@ pub(crate) fn compute_doctrine_entity(
     for p in &c.properties {
         attrs_by_property.insert(&p.name, &p.attrs);
     }
-    if let Some(ctor) = c.methods.iter().find(|m| m.function.name == "__construct") {
+    if let Some(ctor) = c
+        .methods
+        .iter()
+        .find(|m| m.function.name == "__construct".into())
+    {
         for p in &ctor.function.params {
             if p.promoted_visibility.is_some() {
                 attrs_by_property.insert(&p.name, &p.attrs);

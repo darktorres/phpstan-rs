@@ -419,7 +419,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|c| c.properties.get(&p.name))
+                .and_then(|c| c.properties.get(p.name.as_ref()))
                 .map(|sig| sig.ty.clone())
             else {
                 continue;
@@ -486,7 +486,7 @@ impl<'a> Checker<'a> {
                 .registry
                 .classes
                 .get(fqn)
-                .and_then(|info| info.consts.get(&c.name))
+                .and_then(|info| info.consts.get(c.name.as_ref()))
                 .map(|cs| cs.ty.clone())
             else {
                 continue;
@@ -575,7 +575,7 @@ impl<'a> Checker<'a> {
             let native_hint = f
                 .params
                 .iter()
-                .find(|p| &p.name == name)
+                .find(|p| *p.name == **name)
                 .and_then(|p| p.type_hint.as_deref());
             let doc_ty = doc
                 .as_ref()

@@ -22,8 +22,8 @@ fn goto_and_labels_parse() {
             echo "here";
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::Goto(n) if n == "label"));
-    assert!(matches!(&program[2].kind, StmtKind::Label(n) if n == "label"));
+    assert!(matches!(&program[0].kind, StmtKind::Goto(n) if **n == *"label"));
+    assert!(matches!(&program[2].kind, StmtKind::Label(n) if **n == *"label"));
 }
 
 #[test]

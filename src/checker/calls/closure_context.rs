@@ -114,7 +114,7 @@ impl<'a> Checker<'a> {
                         "parameter.trait",
                     );
                     self.check_type_class_name_case(&case_refs, label, p.span);
-                    arrow_locals.declare(p.name.clone(), ty, p.name_span);
+                    arrow_locals.declare(p.name.to_string(), ty, p.name_span);
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
@@ -177,7 +177,7 @@ impl<'a> Checker<'a> {
                 for u in uses {
                     // See the identical fix's own comment at
                     // `checker::expr`'s `ExprKind::Closure` arm.
-                    if u.name == "this" {
+                    if u.name == "this".into() {
                         self.report_builder(
                             DiagnosticBuilder::new(
                                 label.to_string(),
@@ -231,7 +231,7 @@ impl<'a> Checker<'a> {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
-                    closure_locals.insert_with_provenance(u.name.clone(), ty, provenance);
+                    closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {
                     closure_locals.insert("this".to_string(), this_ty.clone());
@@ -257,7 +257,7 @@ impl<'a> Checker<'a> {
                         "parameter.trait",
                     );
                     self.check_type_class_name_case(&case_refs, &closure_label, p.span);
-                    closure_locals.declare(p.name.clone(), ty, p.name_span);
+                    closure_locals.declare(p.name.to_string(), ty, p.name_span);
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -347,13 +347,13 @@ impl<'a> Checker<'a> {
                     if !locals.contains_key(&u.name) {
                         // See the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.
-                        locals.declare(u.name.clone(), mutated, u.span);
+                        locals.declare(u.name.to_string(), mutated, u.span);
                         if self.probe_span.get() == Some(u.span) {
                             *self.probe_var_provenance.borrow_mut() =
                                 Some([u.span].into_iter().collect());
                         }
                     } else {
-                        locals.insert(u.name.clone(), mutated);
+                        locals.insert(u.name.to_string(), mutated);
                     }
                 }
                 true

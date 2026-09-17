@@ -140,7 +140,7 @@ impl<'a> Checker<'a> {
             ExprKind::Variable(name) => {
                 // See `Checker::probe_hit_at`'s doc comment.
                 self.probe_hit_at(lhs.span, &ty);
-                locals.declare(name.clone(), ty, lhs.span);
+                locals.declare(name.to_string(), ty, lhs.span);
             }
             ExprKind::ArrayLiteral(items) => match &ty {
                 // A known array shape (from a `@return array{0: int, 1:
@@ -155,7 +155,7 @@ impl<'a> Checker<'a> {
                 Type::ArrayShape(fields) => {
                     for (position, item) in items.iter().enumerate() {
                         let field_key = match item.key.as_ref().map(|k| &k.kind) {
-                            Some(ExprKind::Literal(Literal::String(s))) => Some(s.clone()),
+                            Some(ExprKind::Literal(Literal::String(s))) => Some(s.to_string()),
                             Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
                             Some(_) => None,
                             None => Some(position.to_string()),
@@ -261,13 +261,13 @@ impl<'a> Checker<'a> {
                         let in_range = idx
                             .as_deref()
                             .and_then(|i| match &i.kind {
-                                ExprKind::Variable(idx_name) => Some(idx_name.as_str()),
+                                ExprKind::Variable(idx_name) => Some(idx_name.as_ref()),
                                 _ => None,
                             })
                             .is_some_and(|idx_name| {
                                 self.in_range_index_writes
                                     .iter()
-                                    .any(|(c, i)| c == name && i == idx_name)
+                                    .any(|(c, i)| c.as_str() == name.as_ref() && i == idx_name)
                             });
                         if let Some(new_ty) = write_index_into(
                             &current,
@@ -277,9 +277,9 @@ impl<'a> Checker<'a> {
                             in_range,
                         ) {
                             if was_defined || is_superglobal(name) {
-                                locals.insert(name.clone(), new_ty);
+                                locals.insert(name.to_string(), new_ty);
                             } else {
-                                locals.declare(name.clone(), new_ty, base.span);
+                                locals.declare(name.to_string(), new_ty, base.span);
                             }
                         }
                     }
@@ -312,7 +312,7 @@ impl<'a> Checker<'a> {
             // Real rebind - `target` is a `foreach` key's bare `$var`
             // expression (its only caller), a real declaration site.
             self.probe_hit_at(target.span, &ty);
-            locals.declare(name.clone(), ty, target.span);
+            locals.declare(name.to_string(), ty, target.span);
         }
     }
 
@@ -423,7 +423,7 @@ pub(crate) fn superglobal_default_type(name: &str) -> Type {
 /// can't be resolved against a shape's field names statically.
 pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(s.clone()),
+        ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),
         ExprKind::Literal(Literal::Int(n)) => Some(n.to_string()),
         _ => None,
     }
@@ -596,7 +596,7 @@ fn write_index_into(
 /// value, since this function only sees the raw `Expr`.
 pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_str())),
+        ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_ref())),
         ExprKind::Grouping(inner) => literal_string_value(inner),
         ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
             let l = literal_string_value(lhs)?;

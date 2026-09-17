@@ -169,8 +169,8 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut HashSet<String>) {
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
             continue;
         };
-        if matches!(&base.kind, ExprKind::Variable(name) if name == "this") {
-            props.insert(prop.clone());
+        if matches!(&base.kind, ExprKind::Variable(name) if **name == *"this") {
+            props.insert(prop.to_string());
         }
     }
 }
@@ -193,7 +193,7 @@ fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut HashSet<String>) -> Opti
             (name == "uses").then_some(args.as_slice())
         }
         ExprKind::MethodCall(inner, method, call_args, _) => {
-            if method == "beforeEach" {
+            if **method == *"beforeEach" {
                 for arg in call_args {
                     collect_hook_closure_properties(&arg.value, hook_props);
                 }
@@ -239,7 +239,7 @@ impl PestConfig {
                 else {
                     continue;
                 };
-                if method != "in" {
+                if **method != *"in" {
                     continue;
                 }
                 let mut chain_props = HashSet::new();

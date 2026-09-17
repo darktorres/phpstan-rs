@@ -181,7 +181,7 @@ impl<'a> Checker<'a> {
                 // together), `c.span` is a defensive fallback only.
                 let var_span = c.var_span.unwrap_or(c.span);
                 self.probe_hit_at(var_span, &ty);
-                catch_locals.declare(var.clone(), ty, var_span);
+                catch_locals.declare(var.to_string(), ty, var_span);
             }
             self.check_block(&c.body, &mut catch_locals, declared_return, label);
             let catch_terminates = c
