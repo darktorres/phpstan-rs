@@ -1,7 +1,25 @@
-use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::ast::{Stmt, StmtKind, UseImport, UseKind};
 use crate::types::{CallableParam, CallableSig, Type};
+
+/// `NameContext::use_map`'s own backing map - `imbl::HashMap` (a
+/// persistent, structurally-shared HAMT), not `std::collections::HashMap`:
+/// `NameContext` is deep-cloned once per branch of every top-level
+/// conditional-declaration idiom (`registry::index::build_declarations_
+/// with_context`'s own `StmtKind::If` arm) to keep each branch's own
+/// `use`/namespace changes from leaking, and a plain `HashMap` clone
+/// rehashes every key and deep-clones every `String` pair. `imbl::
+/// HashMap::clone` is O(1) (a pointer bump plus a refcount increment) -
+/// see `Checker`'s own `LocalsMap` (`src/checker.rs`) for the identical
+/// rationale, applied there to the checker's per-branch variable-type
+/// map instead of this registry-side use-import map.
+type UseMap = imbl::GenericHashMap<
+    String,
+    (String, UseKind),
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
 
 /// A single leading `\` marks "fully qualified from the global namespace"
 /// (`\Exception`) - every declaration is keyed by its own fully-qualified
@@ -47,12 +65,15 @@ fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
 /// the two halves of this registry would disagree with each other.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct NameContext {
-    namespace: String,
+    // `Arc<str>`, not `String`, for the same O(1)-clone reason `use_map`
+    // is `imbl`-backed rather than `std::collections::HashMap` - see
+    // `UseMap`'s own doc comment.
+    namespace: Arc<str>,
     // Short name (or `as Alias`) -> (the full path it was imported from,
     // which of PHP's three `use`-namespaces it belongs to). The kind is
     // load-bearing, not decorative - see `add_uses`'s own doc comment for
     // why conflating them is unsafe.
-    use_map: HashMap<String, (String, UseKind)>,
+    use_map: UseMap,
 }
 
 impl NameContext {
@@ -89,7 +110,7 @@ impl NameContext {
     /// `namespace { ... } namespace Pdo { ... }`-shaped files - see
     /// `Registry::index`'s doc comment on why that real shape matters).
     pub(crate) fn set_namespace(&mut self, name: &str) {
-        self.namespace = strip_leading_backslash(name);
+        self.namespace = strip_leading_backslash(name).into();
         self.use_map.clear();
     }
 
