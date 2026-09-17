@@ -216,7 +216,7 @@ fn check_project_strict_mixed_arrays_flag_opts_into_the_extra_check() {
         .unwrap();
     let strict_stdout = String::from_utf8_lossy(&strict.stdout);
     assert!(
-        strict_stdout.contains("expects array<int>"),
+        strict_stdout.contains("expects array<(int|string), int>"),
         "got: {strict_stdout}"
     );
     assert!(
@@ -318,7 +318,10 @@ fn check_project_a_wrong_typed_array_literal_is_flagged_without_strict_mixed_arr
 
     let output = bin().arg("check-project").arg(dir.path()).output().unwrap();
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("expects array<int>"), "got: {stdout}");
+    assert!(
+        stdout.contains("expects array<(int|string), int>"),
+        "got: {stdout}"
+    );
 }
 
 #[test]
