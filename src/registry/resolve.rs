@@ -1061,7 +1061,7 @@ fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
 /// every call site skip the much more expensive rebuild-with-clone
 /// `resolve_deferred_value_of_in_type` does for the overwhelming majority
 /// of types, which never contain it.
-fn type_contains_deferred_value_of(ty: &Type) -> bool {
+pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
     match ty {
         Type::Object(name, args) => {
             name == "$$valueof" || args.iter().any(type_contains_deferred_value_of)

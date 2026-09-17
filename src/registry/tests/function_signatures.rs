@@ -367,6 +367,41 @@ fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closur
     assert_eq!(members[1], Type::Null);
 }
 
+// A doc union that only narrows *one* member of a native union must keep
+// the native's *other*, untouched alternatives alongside the refined one
+// - `reconcile_with_native` previously only ever filtered the doc type's
+// own member list down, never added a native member back. Real shape:
+// `Pest\Browser\Api\Concerns\InteractsWithElements::keys(string $selector,
+// array|string $keys)`, `@param array<int, string> $keys` - confirmed via
+// `dumpType()` against the real method that real PHPStan's own resolved
+// type keeps both `array<int, string>` (the refined alternative) and the
+// untouched `string` alternative.
+#[test]
+fn a_doc_union_refining_one_native_union_member_keeps_the_others_untouched() {
+    let r = build_registry(
+        r#"<?php
+            /** @param array<int, string> $keys */
+            function f(array|string $keys) {}
+        "#,
+    );
+    let Type::Union(members) = &r.functions["f"].params[0].ty else {
+        panic!(
+            "expected a top-level union, got {:?}",
+            r.functions["f"].params[0].ty
+        );
+    };
+    assert_eq!(members.len(), 2, "got {members:?}");
+    assert!(
+        members.contains(&Type::String),
+        "the untouched native `string` alternative must survive: {members:?}"
+    );
+    assert!(
+        matches!(&members[0], Type::Array(_, v) if **v == Type::String)
+            || matches!(&members[1], Type::Array(_, v) if **v == Type::String),
+        "the refined `array<int, string>` alternative must also survive: {members:?}"
+    );
+}
+
 // An `array<K, V>`-shaped doc member's *key* must not be checked against
 // the native `array` hint the way any other member is - a `@template`-
 // bound key placeholder (`array<TKey, TValue>`) is still a bare,

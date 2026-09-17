@@ -1,4 +1,5 @@
 use crate::ast::{Expr, ExprKind, Literal};
+use crate::registry::resolve::type_contains_deferred_value_of;
 use crate::types::{self, Type};
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
@@ -106,16 +107,84 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
         Type::Union(members) => members,
         other => vec![other],
     };
-    let kept: Vec<Type> = members
+    let mut kept: Vec<Type> = members
         .into_iter()
         .filter(|m| member_possible_given_native(m, &native_ty))
         .map(|m| refine_callable_member(m, &native_ty))
         .collect();
+    // A doc union that only narrows *one* member of a native union
+    // (`array|string` native, `@param array<int, string>` doc) must keep
+    // the native's *other*, untouched alternatives alongside the refined
+    // one - the filter above only ever narrows `kept`'s own member list
+    // down, it never adds one back. Mirrors real PHPStan's own
+    // `TypehintHelper::decideType` per-native-member keep-or-refine
+    // logic, confirmed via `dumpType()`: a native `string|array` refined
+    // by `@param array<int, string>` resolves to `array<int,
+    // string>|string`, not bare `array<int, string>`. A native member
+    // already covered by a surviving, narrower `kept` entry (`kept`
+    // contains a real subtype of it) was the one the docblock refined -
+    // only an *uncovered* native member (the docblock said nothing about
+    // it at all) survives verbatim.
+    //
+    // Skipped whenever a kept member still contains an unresolved
+    // `"$$valueof"` sentinel (`value-of<T>` on a still-unbound
+    // `@template` - `types::parse_type_keyword_or_class`'s own deferred
+    // marker): `Registry::resolve_deferred_value_of_with_native_fallback`
+    // runs *after* this function, expects to find the sentinel alone
+    // (not already unioned with extra native members this function
+    // doesn't yet know will turn out unneeded), and does its own,
+    // separate "resolved to bare `Mixed`? use the native type instead"
+    // swap once the sentinel's real value is known - unioning native
+    // members in early would corrupt that later check's own `resolved ==
+    // Type::Mixed` test (a real regression caught by this project's own
+    // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
+    // test).
+    if let Type::Union(native_members) = &native_ty
+        && !kept.iter().any(type_contains_deferred_value_of)
+    {
+        for nm in native_members {
+            if native_member_addable(nm) && !kept.iter().any(|k| types::is_subtype(k, nm)) {
+                kept.push(nm.clone());
+            }
+        }
+    }
     match kept.len() {
         0 => native_ty,
         1 => kept.into_iter().next().unwrap(),
         _ => Type::Union(kept),
     }
+}
+
+/// Whether a native union member is safe for `reconcile_with_native` to
+/// add back on its own "the docblock never addressed this alternative"
+/// theory - deliberately excludes *every* `Type::Object` native member,
+/// including the `object`/`resource` pseudo-types: a doc member naming a
+/// real *subclass* of that native class, or a plain instance covered by
+/// the native `object` pseudo-type's own "accepts any object" leniency,
+/// or (for `Closure` specifically) a `Closure(...)`-shaped doc member
+/// `refine_callable_member` above deliberately leaves as a bare
+/// `Type::Callable` rather than the native `Object("Closure", _)` itself,
+/// all genuinely *did* address that native alternative - but
+/// `types::is_subtype`'s own Object handling is name-equality only, with
+/// none of those leniencies (this function has no `&Registry` to check
+/// real hierarchy or any of `Registry::is_assignable`'s own object-
+/// specific rules with - see `member_possible_given_native`'s own
+/// identical "no hierarchy this early" doc comment). Wrongly adding a
+/// covered class-named member back produces a real, new false positive
+/// (confirmed twice over a first pass of this fix: the `object`
+/// pseudo-type case broke `a_call_through_a_method_scoped_backfilled_template_binds_t_from_the_real_argument`/
+/// `a_class_string_template_parameter_binds_from_a_literal_naming_a_real_class_through_an_ordinary_call`/
+/// `an_anonymous_class_inherits_a_method_scoped_template_parameterized_type`
+/// with a spurious extra `object` alternative, and a narrower attempt
+/// that special-cased only `Closure`-vs-`Callable` broke nothing new but
+/// left the `object` case unguarded) - strictly worse than this
+/// mechanism's own pre-existing gap of simply not backfilling that one
+/// alternative, so no `Type::Object` native member is ever added back
+/// here; only the non-Object cases this function can decide with no
+/// hierarchy needed (the actual target shape - a native `array|string`
+/// refined by `@param array<int, string>` - is one of these).
+fn native_member_addable(native_member: &Type) -> bool {
+    !matches!(native_member, Type::Object(_, _))
 }
 
 /// A surviving `Type::Callable` member (kept only because
