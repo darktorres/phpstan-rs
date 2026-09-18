@@ -45,7 +45,7 @@ impl<'a> Checker<'a> {
             return;
         };
         self.current_function_by_ref_assigned_types
-            .entry(name.to_string())
+            .entry(std::sync::Arc::from(name))
             .or_default()
             .push(actual.clone());
         if *actual == Type::Mixed || self.registry.accepts_at_configured_level(actual, &declared) {

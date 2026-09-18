@@ -650,7 +650,9 @@ pub(crate) fn stmt_contains_escaping_exit(stmt: &Stmt) -> bool {
 /// labeled statement immediately following one that "always terminates"
 /// isn't unreachable at all if some earlier `goto` in the same function
 /// can jump straight to it.
-pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> std::collections::HashSet<String> {
+pub(crate) fn collect_goto_targets(
+    stmts: &[Stmt],
+) -> std::collections::HashSet<std::sync::Arc<str>> {
     // `any_stmt_child` (non-allocating - see its own doc comment) instead
     // of `stmt_children`/a `for` loop: this runs on every function/
     // method/closure body checked, a real, measured cost at that call
@@ -658,9 +660,9 @@ pub(crate) fn collect_goto_targets(stmts: &[Stmt]) -> std::collections::HashSet<
     // never short-circuits - every child gets visited, matching the
     // original unconditional `for child in stmt_children(stmt) { ... }`
     // loop exactly.
-    fn walk(stmt: &Stmt, targets: &mut std::collections::HashSet<String>) {
+    fn walk(stmt: &Stmt, targets: &mut std::collections::HashSet<std::sync::Arc<str>>) {
         if let StmtKind::Goto(name) = &stmt.kind {
-            targets.insert(name.to_string());
+            targets.insert(name.clone());
         }
         any_stmt_child(stmt, &mut |child| {
             walk(child, targets);

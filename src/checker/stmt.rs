@@ -434,7 +434,7 @@ impl<'a> Checker<'a> {
                     // `Global` just above.
                     self.probe_hit_at(stmt.span, &ty);
                     locals.declare(name.to_string(), ty, stmt.span);
-                    self.static_var_names.insert(name.to_string());
+                    self.static_var_names.insert(name.clone());
                 }
             }
             // `check_program`'s own top-level loop already handles a

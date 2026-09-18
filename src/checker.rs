@@ -493,8 +493,10 @@ impl DiagnosticBuilder {
 /// A private property's every discovered assigned type, keyed by
 /// (declaring class fqn, property name) - see `Checker::
 /// property_assign_facts`/`cross_file_property_assign_facts`'s own doc
-/// comments.
-pub(crate) type PropertyAssignFacts = HashMap<String, HashMap<String, Vec<Type>>>;
+/// comments. Both keys are identity-like text (interned `Arc<str>`, not
+/// `String`); `Arc<str>: Borrow<str>` keeps every `&str` lookup/`.get()`
+/// call site unchanged.
+pub(crate) type PropertyAssignFacts = HashMap<Arc<str>, HashMap<Arc<str>, Vec<Type>>>;
 
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
@@ -605,13 +607,14 @@ pub struct Checker<'a> {
     // function/method/closure (native type, or `@param-out` when the tag
     // supplies one - see `ParamSig::out_ty`'s doc comment), set/restored
     // at the same choke point as `current_declared_return_type`.
-    pub(crate) current_function_by_ref_params: std::collections::HashMap<String, Type>,
+    pub(crate) current_function_by_ref_params: std::collections::HashMap<Arc<str>, Type>,
     // Every value ever assigned to a by-ref parameter anywhere in the
     // enclosing body (direct/compound assignment, destructuring,
     // `foreach`-rebind) - unioned and compared against each by-ref
     // parameter's declared type by `check_too_wide_by_ref_param_type`, the
     // by-ref-parameter analogue of `current_function_return_points`.
-    pub(crate) current_function_by_ref_assigned_types: std::collections::HashMap<String, Vec<Type>>,
+    pub(crate) current_function_by_ref_assigned_types:
+        std::collections::HashMap<Arc<str>, Vec<Type>>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (see
     // `collect_goto_targets`'s doc comment for the real corpus false
@@ -619,7 +622,7 @@ pub struct Checker<'a> {
     // `deadCode.unreachable` check, which has no direct access to the
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
-    pub(crate) current_function_goto_targets: std::collections::HashSet<String>,
+    pub(crate) current_function_goto_targets: std::collections::HashSet<Arc<str>>,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -671,7 +674,7 @@ pub struct Checker<'a> {
     // unioned (not overridden - a property-name set has no "most specific
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
-    pub(crate) pest_hook_properties: HashSet<String>,
+    pub(crate) pest_hook_properties: HashSet<Arc<str>>,
     // `NewAnonymousClass` expression span -> its own stable synthetic
     // registry name, computed once at parse time
     // (`registry::collect_anonymous_classes`) and set via
@@ -779,7 +782,7 @@ pub struct Checker<'a> {
     // this shape too). Accumulated across the whole file rather than
     // reset per function/closure - a stale entry only costs a missed
     // diagnostic on an unrelated later local sharing the same name.
-    pub(crate) static_var_names: HashSet<String>,
+    pub(crate) static_var_names: HashSet<Arc<str>>,
     // Every class named as the resolved `$scope` of a `Closure::
     // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
     // (`unused::scan_program_for_rebind_targets`, built once per
@@ -792,7 +795,7 @@ pub struct Checker<'a> {
     // every class's private-member check for the whole file than risk a
     // false "unused" report on a member a rebound closure actually
     // reaches.
-    pub(crate) rebind_target_classes: HashSet<String>,
+    pub(crate) rebind_target_classes: HashSet<Arc<str>>,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
     // `probe_span` is the exact `Span` of the receiver `Expr` the caller
@@ -1007,9 +1010,16 @@ impl<'a> Checker<'a> {
     /// name set (`PestConfig::resolve_hook_properties`) - a setter for
     /// the same reason `set_pest_this_type` is one. `check_program`
     /// unions this with whatever file-local `beforeEach(...)` calls it
-    /// finds itself, rather than one overriding the other.
+    /// finds itself, rather than one overriding the other. Takes owned
+    /// `String`s (`PestConfig::resolve_hook_properties`'s own return
+    /// type is unchanged) and interns each one into the shared `Arc<str>`
+    /// table on the way in, matching the field's own interned
+    /// representation.
     pub fn set_pest_hook_properties(&mut self, props: HashSet<String>) {
-        self.pest_hook_properties = props;
+        self.pest_hook_properties = props
+            .into_iter()
+            .map(|p| crate::intern::intern(&p))
+            .collect();
     }
 
     /// Seeds the `NewAnonymousClass`-span -> synthetic-name map - see
@@ -1165,9 +1175,14 @@ impl<'a> Checker<'a> {
         }
         // Unlike `pest_this_type` above, hook properties are unioned, not
         // overridden - a property-name set has no "file-local wins"
-        // precedence to apply.
-        self.pest_hook_properties
-            .extend(pest_config::file_local_hook_properties(program));
+        // precedence to apply. `file_local_hook_properties` returns owned
+        // `String`s, interned here on the way in to match
+        // `pest_hook_properties`'s own interned representation.
+        self.pest_hook_properties.extend(
+            pest_config::file_local_hook_properties(program)
+                .into_iter()
+                .map(|p| crate::intern::intern(&p)),
+        );
 
         let mut top_locals: Locals = Locals::default();
         top_locals.set_track(self.probe_span.get().is_some());

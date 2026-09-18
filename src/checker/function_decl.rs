@@ -876,7 +876,7 @@ impl<'a> Checker<'a> {
                     if param.by_ref {
                         let check_ty = param.out_ty.clone().unwrap_or_else(|| param.ty.clone());
                         self.current_function_by_ref_params
-                            .insert(param.name.clone(), check_ty);
+                            .insert(std::sync::Arc::from(param.name.as_str()), check_ty);
                     }
                 }
             }
@@ -885,7 +885,7 @@ impl<'a> Checker<'a> {
                     if p.by_ref {
                         let ty = self.resolve_type_hint(p.type_hint.as_deref());
                         self.current_function_by_ref_params
-                            .insert(p.name.to_string(), ty);
+                            .insert(p.name.clone(), ty);
                     }
                 }
             }

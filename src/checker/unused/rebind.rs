@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
@@ -21,7 +22,7 @@ use crate::registry::NameContext;
 pub(crate) fn scan_program_for_rebind_targets(
     program: &[Stmt],
     ctx: &NameContext,
-) -> (HashSet<String>, bool) {
+) -> (HashSet<Arc<str>>, bool) {
     let mut targets = HashSet::new();
     let mut escape_all = false;
     for stmt in program {
@@ -33,7 +34,7 @@ pub(crate) fn scan_program_for_rebind_targets(
 fn scan_stmts_for_rebinds(
     body: &[Stmt],
     ctx: &NameContext,
-    targets: &mut HashSet<String>,
+    targets: &mut HashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     for s in body {
@@ -44,7 +45,7 @@ fn scan_stmts_for_rebinds(
 fn scan_stmt_for_rebinds(
     stmt: &Stmt,
     ctx: &NameContext,
-    targets: &mut HashSet<String>,
+    targets: &mut HashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     match &stmt.kind {
@@ -135,7 +136,7 @@ fn scan_stmt_for_rebinds(
 fn scan_expr_for_rebinds(
     expr: &Expr,
     ctx: &NameContext,
-    targets: &mut HashSet<String>,
+    targets: &mut HashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     match &expr.kind {
@@ -175,12 +176,12 @@ fn scan_expr_for_rebinds(
 fn record_rebind_scope(
     scope_arg: Option<&Arg>,
     ctx: &NameContext,
-    targets: &mut HashSet<String>,
+    targets: &mut HashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     match scope_arg.map(|a| &a.value.kind) {
         Some(ExprKind::StaticAccess(class_name, member)) if member == "class" => {
-            targets.insert(ctx.resolve(class_name));
+            targets.insert(Arc::from(ctx.resolve(class_name)));
         }
         // An omitted scope argument, or one that isn't a literal
         // `Foo::class` this project can resolve without real type

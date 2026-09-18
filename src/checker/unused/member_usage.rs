@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
@@ -20,10 +21,10 @@ use crate::registry::NameContext;
 /// a member that dynamic code actually does reach.
 #[derive(Default)]
 pub(crate) struct MemberUsage {
-    pub(crate) consts: HashSet<String>,
-    pub(crate) methods: HashSet<String>,
-    pub(crate) reads: HashSet<String>,
-    pub(crate) writes: HashSet<String>,
+    pub(crate) consts: HashSet<Arc<str>>,
+    pub(crate) methods: HashSet<Arc<str>>,
+    pub(crate) reads: HashSet<Arc<str>>,
+    pub(crate) writes: HashSet<Arc<str>>,
     pub(crate) escaped: bool,
     /// Local variable names, scoped to the one function/hook body
     /// currently being scanned, syntactically proven (never via real type
@@ -36,7 +37,7 @@ pub(crate) struct MemberUsage {
     /// class-wide, so the caller (`check_unused_private_members`) clears
     /// this before each function/hook body's own scan rather than letting
     /// it accumulate across bodies.
-    pub(crate) aliases: HashSet<String>,
+    pub(crate) aliases: HashSet<Arc<str>>,
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/
@@ -93,18 +94,18 @@ fn mark_write_target(
 ) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.writes.insert(name.to_string());
+            usage.writes.insert(name.clone());
             if also_read {
-                usage.reads.insert(name.to_string());
+                usage.reads.insert(name.clone());
             }
             true
         }
         ExprKind::StaticAccess(class_ref, member) if class_ref_is_self(class_ref, fqn, ctx) => {
             match member.strip_prefix('$') {
                 Some(prop) => {
-                    usage.writes.insert(prop.to_string());
+                    usage.writes.insert(Arc::from(prop));
                     if also_read {
-                        usage.reads.insert(prop.to_string());
+                        usage.reads.insert(Arc::from(prop));
                     }
                     true
                 }
@@ -193,7 +194,7 @@ pub(crate) fn walk_expr_for_members(
             if let ExprKind::Variable(name) = &l.kind
                 && is_new_self_instance(r, fqn, ctx)
             {
-                usage.aliases.insert(name.to_string());
+                usage.aliases.insert(name.clone());
             }
             if !mark_write_target(l, fqn, ctx, usage, false) {
                 walk_expr_for_members(l, fqn, ctx, usage);
@@ -208,7 +209,7 @@ pub(crate) fn walk_expr_for_members(
             return;
         }
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.reads.insert(name.to_string());
+            usage.reads.insert(name.clone());
         }
         // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
         // anywhere in the body - see `MemberUsage::aliases`'s own doc
@@ -222,7 +223,7 @@ pub(crate) fn walk_expr_for_members(
             if let ExprKind::Variable(name) = &inner.kind
                 && class_ref_is_self(class_ref, fqn, ctx)
             {
-                usage.aliases.insert(name.to_string());
+                usage.aliases.insert(name.clone());
             }
         }
         ExprKind::StaticAccess(class_ref, member) => {
@@ -235,17 +236,17 @@ pub(crate) fn walk_expr_for_members(
                 usage.escaped = true;
             } else if let Some(prop) = member.strip_prefix('$') {
                 if class_ref_is_self(class_ref, fqn, ctx) {
-                    usage.reads.insert(prop.to_string());
+                    usage.reads.insert(Arc::from(prop));
                 }
             } else if class_ref_is_self(class_ref, fqn, ctx) {
-                usage.consts.insert(member.clone());
+                usage.consts.insert(Arc::from(member.as_str()));
             }
         }
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
-            usage.methods.insert(name.to_string());
+            usage.methods.insert(name.clone());
         }
         ExprKind::StaticCall(class_ref, name, _) if class_ref_is_self(class_ref, fqn, ctx) => {
-            usage.methods.insert(name.clone());
+            usage.methods.insert(Arc::from(name.as_str()));
         }
         // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
         // access this walker can't attribute to any specific member.
@@ -266,7 +267,7 @@ pub(crate) fn walk_expr_for_members(
                 && is_this_or_aliased(&a.value, usage)
                 && let ExprKind::Literal(Literal::String(name)) = &b.value.kind
             {
-                usage.methods.insert(name.to_string());
+                usage.methods.insert(name.clone());
             }
         }
         // `expr_children` deliberately returns no children for these
@@ -395,7 +396,7 @@ pub(crate) fn seed_self_typed_param_aliases(
             .as_deref()
             .is_some_and(|t| class_ref_is_self(t, fqn, ctx))
         {
-            usage.aliases.insert(p.name.to_string());
+            usage.aliases.insert(p.name.clone());
         }
     }
 }

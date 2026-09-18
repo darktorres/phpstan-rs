@@ -105,9 +105,9 @@ impl<'a> Checker<'a> {
         // wider than private).
         if prop_sig.write_visibility == Visibility::Private {
             self.property_assign_facts
-                .entry(owner.clone())
+                .entry(crate::intern::intern(&owner))
                 .or_default()
-                .entry(prop.to_string())
+                .entry(prop.clone())
                 .or_default()
                 .push(actual.clone());
         }
