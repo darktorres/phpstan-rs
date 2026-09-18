@@ -282,6 +282,7 @@ impl FunctionSig {
     // `@phpstan-type`s of its own isn't supported - real code
     // overwhelmingly declares aliases once, on the class, referenced
     // from many members - not attempted here.
+    #[hotpath::measure]
     pub(crate) fn from_decl(
         f: &FunctionDecl,
         ctx: &NameContext,

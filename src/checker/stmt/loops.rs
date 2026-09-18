@@ -44,6 +44,7 @@ fn in_range_index_write_loop_vars(cond: &Expr) -> Option<(String, String)> {
 }
 
 impl<'a> Checker<'a> {
+    #[hotpath::measure]
     pub(crate) fn check_while(
         &mut self,
         cond: &Expr,
@@ -210,6 +211,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn check_do_while(
         &mut self,
         body: &Stmt,
@@ -325,6 +327,7 @@ impl<'a> Checker<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[hotpath::measure]
     pub(crate) fn check_for(
         &mut self,
         init: &[Expr],
@@ -548,6 +551,7 @@ impl<'a> Checker<'a> {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[hotpath::measure]
     pub(crate) fn check_foreach(
         &mut self,
         subject: &Expr,

@@ -5,6 +5,7 @@ use crate::token::{Keyword, Position, Token};
 impl Parser {
     // ---- expressions (precedence climbing) ----
 
+    #[hotpath::measure]
     pub fn parse_expression(&mut self) -> Result<Expr, ParseError> {
         self.parse_low_precedence_or()
     }

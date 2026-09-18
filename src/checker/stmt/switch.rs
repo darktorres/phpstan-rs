@@ -3,6 +3,7 @@ use crate::checker::{Checker, Locals, is_switch_break_equivalent, merge_scopes};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
+    #[hotpath::measure]
     pub(crate) fn check_switch(
         &mut self,
         subject: &Expr,

@@ -406,6 +406,7 @@ fn collect_merged_methods(
 }
 
 impl ClassInfo {
+    #[hotpath::measure]
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
         let templates: Vec<Arc<str>> = class_doc
@@ -1096,6 +1097,7 @@ impl ClassInfo {
     /// inference, which nothing in the checker does for *any* class today,
     /// not just enums - a separate, pre-existing gap this doesn't attempt
     /// to close.
+    #[hotpath::measure]
     pub(crate) fn from_enum_decl(e: &EnumDecl, ctx: &NameContext) -> ClassInfo {
         // Enums can't be generic in real PHP (no `@template` on an enum
         // means anything), so there's no enclosing-class template list to
