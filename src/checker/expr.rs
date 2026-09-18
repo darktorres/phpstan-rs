@@ -909,18 +909,12 @@ impl<'a> Checker<'a> {
                 // `catch` variable), using a representative member (the
                 // first `Object` found) for argument-checking.
                 let recv_class = match &recv_ty {
-                    Type::Object(class, type_args) => Some((class.clone(), type_args.clone())),
-                    // An enum can't be generic, so there's no real
-                    // template-args list to carry through here - same as
-                    // every other synthesized enum-instance type this
-                    // checker builds.
-                    Type::EnumCase(fqn, _) => Some((fqn.clone(), Vec::new())),
+                    Type::Object(class, _) => Some(class.clone()),
+                    Type::EnumCase(fqn, _) => Some(fqn.clone()),
                     Type::Union(members) | Type::Intersection(members) => {
                         members.iter().find_map(|m| match m {
-                            Type::Object(class, type_args) => {
-                                Some((class.clone(), type_args.clone()))
-                            }
-                            Type::EnumCase(fqn, _) => Some((fqn.clone(), Vec::new())),
+                            Type::Object(class, _) => Some(class.clone()),
+                            Type::EnumCase(fqn, _) => Some(fqn.clone()),
                             _ => None,
                         })
                     }
@@ -956,7 +950,7 @@ impl<'a> Checker<'a> {
                 {
                     self.check_phpstan_api_method_call(owner, method, s, e.span, label);
                 }
-                if let Some((class, _)) = &recv_class {
+                if let Some(class) = &recv_class {
                     self.check_node_connecting_attribute(class, method, args, e.span, label);
                 }
                 // This method call's own throw contribution.
@@ -995,7 +989,7 @@ impl<'a> Checker<'a> {
                         self.check_expr(&a.value, locals, label);
                     }
                 }
-                if let Some((class, _)) = &recv_class {
+                if let Some(class) = &recv_class {
                     // Checked before falling back to whether the
                     // representative member's `sig` was found: for a
                     // `Union`, the representative is just the first
