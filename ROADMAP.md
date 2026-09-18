@@ -936,6 +936,26 @@ corrected across the vendored tree (`Composer\Pcre`, Symfony
 `php-standard-library`, Nette `Utils`), independent of the narrowing
 mechanism below.
 
+**`token_get_all()` stub precision** (commit `9e8f13e`). Added to
+`php_stubs.rs`'s existing `patch_functionmap_array_shapes` table
+(`list<array{0: int, 1: string, 2: int}|string>`, PHP's own real
+documented per-token tuple shape) - the `functionMap.php`-derived stub
+gave no per-element shape at all, so a token's own line-number index
+(`$tok[2]`) inferred as `mixed` instead of `int`. Fixes `StructuralTest::
+findBareCallSites` and, incidentally, two PHP_CodeSniffer findings in the
+wider unscoped corpus.
+
+**`strtotime()` literal relative-offset narrowing** (commit `7f1e8cf`).
+Mirrors real PHPStan's own `StrtotimeFunctionReturnTypeExtension`
+(confirmed by direct extraction from the vendored `phpstan.phar`): a
+constant-string first argument matching the bounded "N unit(s) [ago]"
+relative-time grammar (`'-1 hour'`, `'-90 days'`, ...) narrows the return
+type from the stub's blanket `int|false` to plain `int`, ignoring a
+second `$now` argument even when one is passed - matching real PHPStan
+exactly, which evaluates only the first argument in isolation. Fixes 3
+`AdminShellTest`/`PictureControllerTest` findings and, incidentally, one
+in `node_modules/plupload`.
+
 ## Narrowing engine
 
 `instanceof`, equality/identity, `isset`/`??`/`??=` (including the
@@ -1217,6 +1237,41 @@ needed. Fixes `NotificationByMailSender::sendMailNotifications`'s own
 `return $returnList;` (`$returnList` pushed a `string` under
 `$isActionSend` and a `UserMailNotification` otherwise, checked against
 a conditional return type keyed on `$action === 'send'`).
+
+**`record_branch_implied_facts`'s missing enum-case proxy discriminant,
+plus a general self-referential-implication guard** (commit `21d03c5`).
+The proxy-discriminant scan only ever recognized `Type::True`/`Type::False`
+and `Type::Object` as a subject a fact could be recorded under - a
+variable that became a concrete `Type::EnumCase` specifically within a
+branch (`$valid_key = ConnectedWith::ApiKey;`) was never recorded at
+all. Adding it exposed a real, pre-existing soundness gap the mechanism
+already had for the other two proxy kinds: a candidate "implied"
+variable whose own name is directly referenced by the branch's own
+condition (a real corpus regression - `League\Uri\QueryString::
+composeRecursive`'s `$value`, `instanceof`-narrowed by that exact `if`)
+must never be recorded as implied by a *different*, co-occurring
+discriminant - replaying that stale fact on a later loop pass overwrote
+`$value`'s freshly re-narrowed `instanceof` type with a leftover value
+from an earlier pass. Fixed generally (a `cond_references_variable` AST
+walk over the branch's own `cond`), not just for the enum-case trigger
+that surfaced it. Fixes `AuthService::authKeyLogin`'s own
+`$valid_key`/`$secret_key` correlation.
+
+**Dynamic-key array writes resolved when the key is known by type, not
+just AST syntax** (commit `b3d6e7c`). Two complementary mechanisms, both
+needed for the real target: (1) `write_index_into`'s `ArrayShape` arm
+only resolved a literal key syntactically (`literal_string_key`, an
+AST-token check) - a non-literal index expression whose own *inferred*
+type is already a precise `StringLiteral`/`IntLiteral` (`$key = 'id';
+$row[$key] = ...;`) fell through to the generic degrade; (2) even with
+(1), a container already widened past `ArrayShape` (no docblock on its
+own producing method, e.g. `CategoryAvailableListRow::toArray(): array`)
+has no per-field precision left to update at all -
+`bind_assignment_target` now also writes each resolved literal key's
+own `narrowing_key`-format synthetic entry directly, independent of
+`write_index_into`'s own container-type-based update. Fixes
+`CategoryAvailableListController::__invoke` and, incidentally, 3 more
+findings in the wider unscoped corpus (Latte `Tracer`, PHP-CS-Fixer x2).
 
 ## Rule catalog (checker)
 
