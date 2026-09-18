@@ -487,7 +487,7 @@ impl FunctionSig {
             assert_if_true,
             assert_if_false,
             assert,
-            body: Some(Arc::new(f.body.clone())),
+            body: Some(f.body.clone()),
             purity_dependencies: None,
             is_transitively_pure: false,
             is_stub: false,

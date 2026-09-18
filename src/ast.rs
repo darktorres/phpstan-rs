@@ -204,7 +204,16 @@ pub struct FunctionDecl {
     // the LSP's own text-split utility recovers those on demand from
     // this span's source text). `None` exactly when `return_type` is.
     pub return_type_span: Option<Span>,
-    pub body: Vec<Stmt>,
+    // `Arc`, not a plain `Vec` - `registry::FunctionSig::from_decl` shares
+    // this exact allocation into its own `body: Option<Arc<Vec<Stmt>>>`
+    // field (an `Arc` clone, not a deep AST clone) rather than
+    // re-materializing an owned copy at that boundary, the same
+    // move/share-not-reallocate reasoning as `name`'s own doc comment
+    // above. Never mutated after `parse_function_decl` builds it, so
+    // sharing it needs no `Arc::make_mut` anywhere. `Arc`, not `Rc`: like
+    // `src/intern.rs`'s own table, parsing/registry-building runs in
+    // parallel across files via a real `rayon` thread pool.
+    pub body: Arc<Vec<Stmt>>,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this declaration - shared by a

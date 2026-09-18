@@ -914,7 +914,7 @@ impl<'a> Walker<'a> {
 
     fn check_function(&mut self, f: &FunctionDecl, ctx: &NameContext, label: &str) {
         let param_types = param_types_with(&ParamTypes::new(), &f.params, ctx);
-        for s in &f.body {
+        for s in f.body.iter() {
             self.check_stmt(s, ctx, &param_types, label);
         }
         for p in &f.params {

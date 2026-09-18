@@ -392,7 +392,7 @@ fn bitwise_compound_assignment_operators_parse() {
         panic!("expected FunctionDecl");
     };
     assert_eq!(f.body.len(), 5);
-    for stmt in &f.body {
+    for stmt in f.body.iter() {
         assert!(matches!(
             &stmt.kind,
             StmtKind::Expression(Expr {

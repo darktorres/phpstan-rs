@@ -157,7 +157,7 @@ impl Parser {
             params,
             return_type,
             return_type_span,
-            body,
+            body: std::sync::Arc::new(body),
             // Callers that saw a preceding doc comment overwrite this -
             // parse_function_decl itself is entered after any modifiers
             // (and thus after the doc comment's position) have already

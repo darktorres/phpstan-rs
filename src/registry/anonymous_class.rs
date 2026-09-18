@@ -162,7 +162,7 @@ fn walk_function<'a>(f: &'a FunctionDecl, found: &mut Vec<(&'a Expr, &'a ClassDe
             walk_property_hooks(hooks, found);
         }
     }
-    for s in &f.body {
+    for s in f.body.iter() {
         walk_stmt(s, found);
     }
 }

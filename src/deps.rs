@@ -123,7 +123,7 @@ fn collect_function(f: &FunctionDecl, names: &mut HashSet<String>) {
     if let Some(rt) = &f.return_type {
         collect_type_hint(rt, names);
     }
-    for s in &f.body {
+    for s in f.body.iter() {
         collect_stmt(s, names);
     }
 }
