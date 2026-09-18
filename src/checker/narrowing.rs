@@ -473,6 +473,7 @@ impl<'a> Checker<'a> {
     /// common, safe patterns - equality against a known-type value
     /// (`$x === null`, `null !== $x`), `is_*()` guards, and `instanceof` -
     /// anything else leaves `locals` untouched rather than guess.
+    #[hotpath::measure]
     pub(crate) fn apply_narrowing(&self, cond: &Expr, locals: &mut Locals, branch_true: bool) {
         // `preg_match(...)` (bare, or compared against a literal 0/1)
         // doesn't otherwise match any existing narrowing shape below,

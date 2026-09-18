@@ -248,6 +248,7 @@ impl<'a> Checker<'a> {
         }
     }
 
+    #[hotpath::measure]
     pub(crate) fn check_args(&mut self, call: CheckArgsCall) {
         let CheckArgsCall {
             callee_label,

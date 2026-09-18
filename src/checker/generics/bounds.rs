@@ -28,6 +28,7 @@ impl<'a> Checker<'a> {
     /// class's properties, its `@extends`/`@implements` tags) rather
     /// than at every call/access site - a generic type only needs
     /// flagging once, where it's *written*.
+    #[hotpath::measure]
     pub(crate) fn check_generic_bounds(&mut self, ty: &Type, label: &str, span: Span) {
         self.check_generic_bounds_and_arity(ty, label, span, true);
     }

@@ -13,6 +13,7 @@ mod switch;
 mod try_catch;
 
 impl<'a> Checker<'a> {
+    #[hotpath::measure]
     pub(crate) fn check_block(
         &mut self,
         stmts: &[Stmt],

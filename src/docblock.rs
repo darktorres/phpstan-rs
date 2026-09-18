@@ -261,6 +261,7 @@ pub struct PropertyTag {
     pub writable: bool,
 }
 
+#[hotpath::measure]
 pub fn parse(raw: &str) -> DocBlock {
     let mut block = DocBlock::default();
 
