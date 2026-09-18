@@ -46,3 +46,11 @@ proptest = "1.11.0"
 [[bench]]
 name = "vendored_corpus"
 harness = false
+
+# `third_party/hotpath` - a vendored, patched `hotpath` 0.24.0 (bumps its
+# hardcoded hotpath-alloc frame-depth limit; see
+# `third_party/hotpath/HOTPATH_PATCH.md` for why). Zero effect on an
+# ordinary build - only the `hotpath`/`hotpath-alloc` features (both
+# off by default) exercise the patched code path at all.
+[patch.crates-io]
+hotpath = { path = "third_party/hotpath" }
