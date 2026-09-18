@@ -1,6 +1,7 @@
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::ast::{ClassKind, Visibility};
 use crate::registry::Registry;
@@ -39,7 +40,7 @@ impl Registry {
     /// (no remove/reinsert dance) is sound to run concurrently.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
-        let mut canonical_by_lower: HashMap<String, String> = HashMap::new();
+        let mut canonical_by_lower: HashMap<String, Arc<str>> = HashMap::new();
         for key in self.classes.keys() {
             canonical_by_lower
                 .entry(key.to_ascii_lowercase())
@@ -54,9 +55,9 @@ impl Registry {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-        let canonicalize = |name: &mut String| {
+        let canonicalize = |name: &mut Arc<str>| {
             if let Some(canonical) = canonical_by_lower.get(&name.to_ascii_lowercase())
-                && canonical != name
+                && canonical.as_ref() != name.as_ref()
             {
                 *name = canonical.clone();
             }
@@ -129,14 +130,14 @@ impl Registry {
     /// with corpus size, not the cheap, still-sequential apply step.
     fn flatten_traits_one_pass(&mut self) -> bool {
         type TraitAddition = (
-            String,
-            Vec<(String, FunctionSig)>,
-            Vec<(String, PropertySig)>,
-            HashSet<String>,
-            HashSet<String>,
+            Arc<str>,
+            Vec<(Arc<str>, FunctionSig)>,
+            Vec<(Arc<str>, PropertySig)>,
+            HashSet<Arc<str>>,
+            HashSet<Arc<str>>,
         );
 
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
         let additions: Vec<TraitAddition> = class_names
             .par_iter()
@@ -152,14 +153,14 @@ impl Registry {
                 // before any trait's contribution is applied) always wins,
                 // matching the same `or_insert` "first/own wins" semantics
                 // `methods` itself already uses below.
-                let own_method_names: HashSet<String> = registry.classes[class_name]
+                let own_method_names: HashSet<Arc<str>> = registry.classes[class_name]
                     .methods
                     .keys()
                     .cloned()
                     .collect();
                 let mut methods = Vec::new();
                 let mut properties = Vec::new();
-                let mut abstract_from_traits: HashSet<String> = HashSet::new();
+                let mut abstract_from_traits: HashSet<Arc<str>> = HashSet::new();
                 // `static_methods` needs the identical trait-flattening
                 // treatment `abstract_from_traits` gets below - without
                 // it, a using class's own `static_methods` set would
@@ -167,7 +168,7 @@ impl Registry {
                 // doesn't also redeclare itself, even though that
                 // method's (correctly flattened-in) `FunctionSig` is
                 // right there in `info.methods`.
-                let mut static_from_traits: HashSet<String> = HashSet::new();
+                let mut static_from_traits: HashSet<Arc<str>> = HashSet::new();
                 for trait_name in &uses {
                     if let Some(trait_info) = registry.classes.get(trait_name) {
                         for (name, sig) in &trait_info.methods {
@@ -345,7 +346,7 @@ impl Registry {
     /// already allows without help.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
         for class_name in class_names {
             let Some(mut info) = self.classes.remove(&class_name) else {
                 continue;
@@ -445,8 +446,8 @@ impl Registry {
     /// referencing each other.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_type_imports(&mut self) {
-        let mut classes_with_imports: Vec<String> = Vec::new();
-        let mut resolved: Vec<(String, String, Type)> = Vec::new();
+        let mut classes_with_imports: Vec<Arc<str>> = Vec::new();
+        let mut resolved: Vec<(Arc<str>, Arc<str>, Type)> = Vec::new();
         for (class_name, info) in &self.classes {
             if info.type_imports.is_empty() {
                 continue;
@@ -460,7 +461,7 @@ impl Registry {
                 if let Some(ty) = self
                     .classes
                     .get(&imp.source_class_fqn)
-                    .and_then(|src| src.type_aliases.get(&source_key))
+                    .and_then(|src| src.type_aliases.get(source_key.as_str()))
                 {
                     resolved.push((class_name.clone(), imp.local_key.clone(), ty.clone()));
                 }
@@ -469,7 +470,7 @@ impl Registry {
         if classes_with_imports.is_empty() {
             return;
         }
-        let mut by_class: HashMap<String, HashMap<String, Type>> = HashMap::new();
+        let mut by_class: HashMap<Arc<str>, HashMap<Arc<str>, Type>> = HashMap::new();
         for (class_name, local_key, ty) in resolved {
             by_class
                 .entry(class_name)
@@ -531,8 +532,8 @@ impl Registry {
     /// type_aliases`'s alias-of-alias handling accepts.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_mixins(&mut self) {
-        let mut method_additions: Vec<(String, String, FunctionSig)> = Vec::new();
-        let mut property_additions: Vec<(String, String, PropertySig)> = Vec::new();
+        let mut method_additions: Vec<(Arc<str>, Arc<str>, FunctionSig)> = Vec::new();
+        let mut property_additions: Vec<(Arc<str>, Arc<str>, PropertySig)> = Vec::new();
         for (class_name, info) in &self.classes {
             for mixin_fqn in &info.mixins {
                 let Some(mixin_info) = self.classes.get(mixin_fqn) else {
@@ -678,7 +679,7 @@ impl Registry {
     pub(crate) fn template_param_scopes_all_safe_to_backfill(
         ty: &Type,
         method_name: &str,
-        ancestor_bindings: &HashMap<String, HashMap<String, Type>>,
+        ancestor_bindings: &HashMap<Arc<str>, HashMap<String, Type>>,
     ) -> bool {
         match ty {
             Type::TemplateParam(tp) => {
@@ -801,13 +802,13 @@ impl Registry {
     /// `flatten_traits_one_pass` parallelizes.
     fn flatten_phpdoc_inheritance_one_pass(&mut self) -> bool {
         type Backfill = (
-            String,
-            String,
+            Arc<str>,
+            Arc<str>,
             Vec<(usize, Type, bool)>,
             Option<(Type, bool)>,
         );
 
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
         let backfills: Vec<Backfill> = class_names
             .par_iter()
@@ -843,7 +844,7 @@ impl Registry {
                     // backfill`'s doc comment for why this must be the
                     // real resolved bindings, not merely "is this
                     // ancestor name reachable at all.""
-                    let ancestor_bindings: HashMap<String, HashMap<String, Type>> = registry
+                    let ancestor_bindings: HashMap<Arc<str>, HashMap<String, Type>> = registry
                         .all_ancestor_names(class_name)
                         .into_iter()
                         .filter(|a| {
@@ -874,7 +875,7 @@ impl Registry {
                     // real vendored userland base class (Symfony's
                     // `Command`, Doctrine's console commands, ...), which
                     // must still participate in this pass normally.
-                    if method_name == "__construct"
+                    if method_name.as_ref() == "__construct"
                         && registry.built_in_stub_classes.contains(&owner)
                     {
                         continue;
@@ -892,7 +893,7 @@ impl Registry {
                         // (`resolveMethodPhpDocFromParentClass`'s
                         // `$lowercaseMethodName !== '__construct'` guard):
                         // match by parameter name instead.
-                        if method_name == "__construct" {
+                        if method_name.as_ref() == "__construct" {
                             for (i, p) in sig.params.iter().enumerate() {
                                 if p.has_own_doc {
                                     continue;
@@ -1087,7 +1088,7 @@ pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
 /// comment for why this exists, and
 /// `types::parse_type_keyword_or_class`'s `"value-of"` arm for where the
 /// sentinel is produced.
-fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<String, ClassInfo>) -> Type {
+fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
     match ty {
         Type::Object(name, mut args) if name == "$$valueof" => {
             let Some(Type::Object(target_fqn, _)) = args.pop() else {
@@ -1145,7 +1146,7 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<String, Class
 /// (`registry/class_info.rs`, built for the enum's real `->value`
 /// property) is already the exact union-of-case-literal-values type real
 /// PHPStan computes independently - reused directly, not recomputed.
-fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<String, ClassInfo>) -> Type {
+fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
     let Some(info) = classes.get(target_fqn) else {
         return Type::Mixed;
     };
@@ -1175,7 +1176,7 @@ fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<String, ClassIn
 fn resolve_deferred_value_of_with_native_fallback(
     ty: Type,
     native: &Type,
-    classes: &FxHashMap<String, ClassInfo>,
+    classes: &FxHashMap<Arc<str>, ClassInfo>,
 ) -> Type {
     let resolved = resolve_deferred_value_of_in_type(ty, classes);
     if resolved == Type::Mixed && *native != Type::Mixed {

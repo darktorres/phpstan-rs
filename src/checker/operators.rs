@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
                 is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
             }
             Type::Object(name, _) if name == "resource" => false,
-            Type::Object(name, _) if self.registry.classes.contains_key(name) => {
+            Type::Object(name, _) if self.registry.classes.contains_key(name.as_str()) => {
                 self.registry.is_subclass_of(name, "SimpleXMLElement")
                     || self.registry.is_subclass_of(name, "GMP")
                     || self.registry.is_subclass_of(name, "BcMath\\Number")

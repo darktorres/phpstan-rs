@@ -26,7 +26,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
     let sig = registry::FunctionSig {
         params: vec![
             registry::ParamSig {
-                name: "x".to_string(),
+                name: "x".to_string().into(),
                 ty: types::Type::Int,
                 ty_native: types::Type::Int,
                 variadic: false,
@@ -39,7 +39,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
                 out_ty: None,
             },
             registry::ParamSig {
-                name: "rest".to_string(),
+                name: "rest".to_string().into(),
                 ty: types::Type::String,
                 ty_native: types::Type::String,
                 variadic: true,

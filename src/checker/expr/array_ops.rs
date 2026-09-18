@@ -603,7 +603,7 @@ impl<'a> Checker<'a> {
                 self.registry.lookup_class(s).map(|(c, _)| c.to_string())
             });
             types::bind_template_param(&param.ty, &promoted, &mut bindings);
-            param_bindings.insert(param.name.clone(), arg_ty);
+            param_bindings.insert(param.name.to_string(), arg_ty);
         }
         let substituted = types::substitute_template(&sig.return_type, &bindings);
         types::resolve_conditional(&substituted, &param_bindings)

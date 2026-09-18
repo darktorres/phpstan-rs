@@ -172,7 +172,8 @@ fn throws_is_valid(ty: &Type, registry: &Registry) -> bool {
     match ty {
         Type::Union(members) => members.iter().all(|m| throws_is_valid(m, registry)),
         Type::Object(class, _) => {
-            !registry.classes.contains_key(class) || registry.is_subclass_of(class, "Throwable")
+            !registry.classes.contains_key(class.as_str())
+                || registry.is_subclass_of(class, "Throwable")
         }
         _ => true,
     }

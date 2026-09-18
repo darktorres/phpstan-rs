@@ -63,7 +63,7 @@ fn resolve_join_target(
         .as_ref()?
         .associations
         .get(assoc_prop)?;
-    Some(assoc.target.clone())
+    Some(assoc.target.to_string())
 }
 
 /// The row key real Doctrine assigns a select item with no `AS` alias -
@@ -115,14 +115,14 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
         .map(|e| &e.discriminator_map);
     match discriminator_map {
         Some(map) if !map.is_empty() => {
-            let mut subclasses: Vec<&String> = map.values().collect();
+            let mut subclasses: Vec<&std::sync::Arc<str>> = map.values().collect();
             // Deterministic order - a `HashMap`'s own iteration order is
             // unspecified, and this union must render identically
             // across runs.
             subclasses.sort();
             subclasses
                 .into_iter()
-                .map(|class| Type::Object(class.clone(), Vec::new()))
+                .map(|class| Type::Object(class.to_string(), Vec::new()))
                 .reduce(union_types)
                 .unwrap_or_else(|| Type::Object(entity.to_string(), Vec::new()))
         }
@@ -161,7 +161,7 @@ fn field_ref_type(
                 .doctrine_entity
                 .as_ref()?
                 .fields
-                .get(field)
+                .get(field.as_str())
                 .cloned()
         }
         // `IDENTITY()`'s own real Doctrine `SqlWalker` implementation
@@ -382,7 +382,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
         .fields
         .iter()
         .filter(|(name, _)| !de.associations.contains_key(*name))
-        .map(|(name, ty)| (name.clone(), ty.clone(), false))
+        .map(|(name, ty)| (name.to_string(), ty.clone(), false))
         .collect();
     for (name, assoc) in &de.associations {
         if assoc.is_collection {
@@ -396,10 +396,10 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
                     .and_then(|t| t.fields.get(id_field))
                     .cloned()
                     .unwrap_or(Type::Mixed);
-                Type::ObjectShape(vec![(id_field.clone(), id_ty, false)])
+                Type::ObjectShape(vec![(id_field.to_string(), id_ty, false)])
             })
             .unwrap_or(Type::Mixed);
-        fields.push((name.clone(), shape, false));
+        fields.push((name.to_string(), shape, false));
     }
     // Deterministic order - a `HashMap`'s own iteration order is
     // unspecified, and this shape must render identically across runs.
@@ -486,7 +486,7 @@ pub(crate) fn build_scalar_result_row_type(
                     fields.push((i.to_string(), Type::Mixed, false));
                     continue;
                 };
-                let mut scalar_fields: Vec<(&String, &Type)> = de
+                let mut scalar_fields: Vec<(&std::sync::Arc<str>, &Type)> = de
                     .fields
                     .iter()
                     .filter(|(name, _)| !de.associations.contains_key(*name))

@@ -560,7 +560,7 @@ impl<'a> Checker<'a> {
                 positional_counter += 1;
                 p
             } else {
-                sig.params.iter().find(|p| &p.name == key)
+                sig.params.iter().find(|p| p.name.as_ref() == key.as_str())
             };
             let Some(param) = param else {
                 continue;
@@ -796,7 +796,7 @@ impl<'a> Checker<'a> {
 
             if let Some(name) = &arg.name {
                 named_seen = true;
-                match sig.params.iter().find(|p| &p.name == name) {
+                match sig.params.iter().find(|p| p.name.as_ref() == name.as_str()) {
                     // A named argument targeting the real, declared
                     // variadic parameter's own name (rather than an
                     // unmatched name collected *into* it, the `None`
@@ -851,7 +851,7 @@ impl<'a> Checker<'a> {
             // above, so a *later* named argument re-targeting that same
             // parameter is caught as a duplicate too.
             if !spread_seen && let Some(p) = sig.params.get(positional_index) {
-                used_param_names.insert(p.name.as_str());
+                used_param_names.insert(p.name.as_ref());
             }
             positional_index += 1;
         }
@@ -1143,7 +1143,7 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
             continue;
         }
         if let Some(name) = &arg.name {
-            if let Some(pos) = params.iter().position(|p| &p.name == name) {
+            if let Some(pos) = params.iter().position(|p| p.name.as_ref() == name.as_str()) {
                 resolved[pos] = Some(&arg.value);
             }
             continue;

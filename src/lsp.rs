@@ -100,7 +100,7 @@ fn resolve_member_owners(
                     .lookup_const_with_owner(&class, member)
                     .map(|(o, _)| o)
             });
-        if let Some(o) = owner
+        if let Some(o) = owner.map(|o| o.to_string())
             && !owners.contains(&o)
         {
             owners.push(o);
@@ -227,7 +227,7 @@ impl Server {
                 Some(format_signature(fqn, registry.lookup_function(fqn)?))
             }
             navigation::Resolved::Class(fqn) => {
-                let info = registry.classes.get(fqn)?;
+                let info = registry.classes.get(fqn.as_str())?;
                 let kind = match info.kind {
                     ClassKind::Class => "class",
                     ClassKind::Interface => "interface",

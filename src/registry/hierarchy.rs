@@ -1,9 +1,11 @@
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::ClassKind;
+use crate::intern::intern;
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig};
 use crate::types::Type;
@@ -28,9 +30,9 @@ impl Registry {
     /// `instanceof`/`is_subclass_of` never recognizes). `class` itself
     /// is never included (matching `is_subclass_of`'s own separate
     /// `class == of` check).
-    fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<String> {
+    fn class_extends_implements_closure(&self, class: &str) -> FxHashSet<Arc<str>> {
         let mut seen = FxHashSet::default();
-        let mut stack = vec![class.to_string()];
+        let mut stack = vec![intern(class)];
         let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -57,7 +59,7 @@ impl Registry {
     /// class's result can invalidate another's.
     #[hotpath::measure]
     pub fn precompute_ancestor_names(&mut self) {
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
         self.ancestor_names = class_names
             .par_iter()
@@ -77,7 +79,7 @@ impl Registry {
     /// `getParentClass()` only, never `implements`/`uses`).
     pub(crate) fn class_is_immutable(&self, class: &str) -> bool {
         let mut seen = HashSet::new();
-        let mut stack = vec![class.to_string()];
+        let mut stack = vec![intern(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -100,9 +102,9 @@ impl Registry {
     /// Needed by `checker::oop::check_require_tags`: real PHPStan's
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
-    pub(crate) fn all_ancestor_names(&self, class: &str) -> HashSet<String> {
+    pub(crate) fn all_ancestor_names(&self, class: &str) -> HashSet<Arc<str>> {
         let mut seen = HashSet::new();
-        let mut stack = vec![class.to_string()];
+        let mut stack = vec![intern(class)];
         let mut result = HashSet::new();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -130,9 +132,9 @@ impl Registry {
     /// trait used only by another trait (`trait B { ... } trait A {
     /// use B; } class X { use A; }`) still needs `B` checked against
     /// `X`, the real, final host.
-    pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<String> {
+    pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<Arc<str>> {
         let mut result = Vec::new();
-        let mut stack = vec![trait_fqn.to_string()];
+        let mut stack = vec![intern(trait_fqn)];
         let mut seen = HashSet::new();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -173,20 +175,21 @@ impl Registry {
     /// (rather than `entry(name.to_string()).or_insert_with(...)`) avoid
     /// allocating a String key on a name a closer ancestor already
     /// claimed.
+    #[allow(clippy::type_complexity)]
     fn own_owner_names(
         &self,
         class: &str,
     ) -> (
-        FxHashMap<String, String>,
-        FxHashMap<String, String>,
-        FxHashMap<String, String>,
+        FxHashMap<Arc<str>, Arc<str>>,
+        FxHashMap<Arc<str>, Arc<str>>,
+        FxHashMap<Arc<str>, Arc<str>>,
     ) {
         let mut method_owner = FxHashMap::default();
         let mut property_owner = FxHashMap::default();
         let mut const_owner = FxHashMap::default();
         let mut seen = HashSet::new();
         let mut queue = VecDeque::new();
-        queue.push_back(class.to_string());
+        queue.push_back(intern(class));
         while let Some(current) = queue.pop_front() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -227,9 +230,9 @@ impl Registry {
     /// exact "try parent 0 fully, then parent 1 fully" priority without
     /// re-walking anything.
     fn merge_ancestor_owner_names(
-        parents: impl Iterator<Item = String>,
-        own_owner_by_class: &FxHashMap<String, FxHashMap<String, String>>,
-    ) -> FxHashMap<String, String> {
+        parents: impl Iterator<Item = Arc<str>>,
+        own_owner_by_class: &FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
+    ) -> FxHashMap<Arc<str>, Arc<str>> {
         let mut merged = FxHashMap::default();
         for parent in parents {
             if let Some(parent_map) = own_owner_by_class.get(&parent) {
@@ -263,7 +266,7 @@ impl Registry {
     /// finish before any class's `ancestor` map starts.
     #[hotpath::measure]
     pub fn precompute_member_owners(&mut self) {
-        let class_names: Vec<String> = self.classes.keys().cloned().collect();
+        let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
         let registry: &Registry = self;
 
         // Every `self.X = ...`-style assignment below is deferred to
@@ -289,7 +292,7 @@ impl Registry {
             const_owner_by_class.insert(name, consts);
         }
 
-        let ancestor_method_owner_by_class: FxHashMap<String, FxHashMap<String, String>> =
+        let ancestor_method_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>> =
             class_names
                 .par_iter()
                 .map(|name| {
@@ -318,7 +321,7 @@ impl Registry {
         // `lookup_ancestor_property_with_owner`'s own walk (unlike the
         // method version) only ever considers `extends`, never
         // `implements` - mirrored here.
-        let ancestor_property_owner_by_class: FxHashMap<String, FxHashMap<String, String>> =
+        let ancestor_property_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>> =
             class_names
                 .par_iter()
                 .map(|name| {
@@ -368,7 +371,7 @@ impl Registry {
         let (name, owner) = owners
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(method))?;
-        self.classes.get(owner)?.methods.get(name.as_str())
+        self.classes.get(owner)?.methods.get(name.as_ref())
     }
 
     /// The real declared spelling `lookup_method`/`lookup_method_with_
@@ -377,12 +380,12 @@ impl Registry {
     pub(crate) fn lookup_method_canonical_name(&self, class: &str, method: &str) -> Option<&str> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some((name, _)) = owners.get_key_value(method) {
-            return Some(name.as_str());
+            return Some(name.as_ref());
         }
         owners
             .keys()
             .find(|name| name.eq_ignore_ascii_case(method))
-            .map(String::as_str)
+            .map(|s| s.as_ref())
     }
 
     /// Every method name callable on `class` (own + inherited), for
@@ -393,7 +396,7 @@ impl Registry {
         self.method_owner_by_class
             .get(class)
             .into_iter()
-            .flat_map(|m| m.keys().map(String::as_str))
+            .flat_map(|m| m.keys().map(|s| s.as_ref()))
     }
 
     /// `method_owner_by_class[class]` is keyed by exact declared
@@ -404,10 +407,10 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(String, String)> {
+    ) -> Option<(Arc<str>, Arc<str>)> {
         let owners = self.method_owner_by_class.get(class)?;
         owners.iter().find_map(|(name, owner)| {
-            (name.eq_ignore_ascii_case(method) && name != method)
+            (name.eq_ignore_ascii_case(method) && name.as_ref() != method)
                 .then(|| (owner.clone(), name.clone()))
         })
     }
@@ -423,7 +426,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(String, &FunctionSig)> {
+    ) -> Option<(Arc<str>, &FunctionSig)> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some(owner) = owners.get(method) {
             let sig = self.classes.get(owner)?.methods.get(method)?;
@@ -434,7 +437,7 @@ impl Registry {
         let (name, owner) = owners
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(method))?;
-        let sig = self.classes.get(owner)?.methods.get(name.as_str())?;
+        let sig = self.classes.get(owner)?.methods.get(name.as_ref())?;
         Some((owner.clone(), sig))
     }
 
@@ -446,7 +449,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(String, &FunctionSig)> {
+    ) -> Option<(Arc<str>, &FunctionSig)> {
         let owner = self
             .ancestor_method_owner_by_class
             .get(class)?
@@ -486,7 +489,7 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Option<(String, &FunctionSig, bool)> {
+    ) -> Option<(Arc<str>, &FunctionSig, bool)> {
         let info = self.classes.get(class)?;
         // 1. Immediately-implemented interfaces - walks each interface's
         //    *own* ancestor chain too (`lookup_method_with_owner`, not a
@@ -549,7 +552,7 @@ impl Registry {
     pub(crate) fn find_consistent_constructor_ancestor(
         &self,
         class: &str,
-    ) -> Option<(String, &FunctionSig)> {
+    ) -> Option<(Arc<str>, &FunctionSig)> {
         let mut current = self.classes.get(class)?.extends.first()?.clone();
         for _ in 0..self.classes.len().max(1) {
             let info = self.classes.get(&current)?;
@@ -617,7 +620,7 @@ impl Registry {
             return false;
         };
         let mut seen = HashSet::new();
-        let mut queue: VecDeque<String> = info
+        let mut queue: VecDeque<Arc<str>> = info
             .extends
             .iter()
             .chain(info.implements.iter())
@@ -648,7 +651,7 @@ impl Registry {
         &self,
         class: &str,
         prop: &str,
-    ) -> Option<(String, &PropertySig)> {
+    ) -> Option<(Arc<str>, &PropertySig)> {
         let owner = self
             .ancestor_property_owner_by_class
             .get(class)?
@@ -670,10 +673,14 @@ impl Registry {
     /// has both (mirrors real PHPStan's own `OverridingMethodRule`
     /// if/elseif order: `method.parentMethodFinal` vs.
     /// `method.parentMethodFinalByPhpDoc`).
-    pub fn find_final_ancestor_method(&self, class: &str, method: &str) -> Option<(String, bool)> {
+    pub fn find_final_ancestor_method(
+        &self,
+        class: &str,
+        method: &str,
+    ) -> Option<(Arc<str>, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = HashSet::new();
-        let mut stack: Vec<String> = info.extends.clone();
+        let mut stack: Vec<Arc<str>> = info.extends.clone();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -703,10 +710,10 @@ impl Registry {
         &self,
         class: &str,
         property: &str,
-    ) -> Option<(String, bool)> {
+    ) -> Option<(Arc<str>, bool)> {
         let info = self.classes.get(class)?;
         let mut seen = HashSet::new();
-        let mut stack: Vec<String> = info.extends.clone();
+        let mut stack: Vec<Arc<str>> = info.extends.clone();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -736,10 +743,10 @@ impl Registry {
         &self,
         class: &str,
         method: &str,
-    ) -> Vec<(String, &FunctionSig)> {
+    ) -> Vec<(Arc<str>, &FunctionSig)> {
         let mut seen_classes = HashSet::new();
-        let mut class_queue: VecDeque<String> = VecDeque::new();
-        class_queue.push_back(class.to_string());
+        let mut class_queue: VecDeque<Arc<str>> = VecDeque::new();
+        class_queue.push_back(intern(class));
         let mut seen_ifaces = HashSet::new();
         let mut result = Vec::new();
         while let Some(c) = class_queue.pop_front() {
@@ -750,7 +757,7 @@ impl Registry {
                 continue;
             };
             class_queue.extend(info.extends.iter().cloned());
-            let mut iface_queue: VecDeque<String> = info.implements.iter().cloned().collect();
+            let mut iface_queue: VecDeque<Arc<str>> = info.implements.iter().cloned().collect();
             while let Some(iface) = iface_queue.pop_front() {
                 if !seen_ifaces.insert(iface.clone()) {
                     continue;
@@ -779,10 +786,10 @@ impl Registry {
     /// its own concrete override), so a plain walk of `abstract_methods`
     /// here already covers it, with no separate trait-specific case
     /// needed.
-    pub fn required_abstract_methods(&self, class: &str) -> Vec<String> {
+    pub fn required_abstract_methods(&self, class: &str) -> Vec<Arc<str>> {
         let mut required = HashSet::new();
         let mut seen = HashSet::new();
-        let mut stack = vec![class.to_string()];
+        let mut stack = vec![intern(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -809,7 +816,7 @@ impl Registry {
                 stack.push(parent.clone());
             }
         }
-        let mut required: Vec<String> = required.into_iter().collect();
+        let mut required: Vec<Arc<str>> = required.into_iter().collect();
         required.sort();
         required
     }
@@ -826,7 +833,7 @@ impl Registry {
     /// implementation is reachable elsewhere.
     pub fn has_concrete_implementation(&self, class: &str, method: &str) -> bool {
         let mut seen = HashSet::new();
-        let mut stack = vec![class.to_string()];
+        let mut stack = vec![intern(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -864,7 +871,7 @@ impl Registry {
         &self,
         class: &str,
         prop: &str,
-    ) -> Option<(String, &PropertySig)> {
+    ) -> Option<(Arc<str>, &PropertySig)> {
         let owner = self.property_owner_by_class.get(class)?.get(prop)?;
         let sig = self.classes.get(owner)?.properties.get(prop)?;
         Some((owner.clone(), sig))
@@ -887,7 +894,7 @@ impl Registry {
         &self,
         class: &str,
         const_name: &str,
-    ) -> Option<(String, &ConstSig)> {
+    ) -> Option<(Arc<str>, &ConstSig)> {
         let owner = self.const_owner_by_class.get(class)?.get(const_name)?;
         let sig = self.classes.get(owner)?.consts.get(const_name)?;
         Some((owner.clone(), sig))
@@ -911,7 +918,7 @@ impl Registry {
         info.enum_case_values
             .iter()
             .find(|(_, v)| *v == value)
-            .map(|(name, _)| name.as_str())
+            .map(|(name, _)| name.as_ref())
     }
 
     /// Real PHP function calls are case-
@@ -941,12 +948,12 @@ impl Registry {
     /// declared casing rather than just presence.
     pub(crate) fn lookup_function_with_name(&self, name: &str) -> Option<(&str, &FunctionSig)> {
         if let Some((k, v)) = self.functions.get_key_value(name) {
-            return Some((k.as_str(), v));
+            return Some((k.as_ref(), v));
         }
         self.functions
             .iter()
             .find(|(k, _)| k.eq_ignore_ascii_case(name))
-            .map(|(k, v)| (k.as_str(), v))
+            .map(|(k, v)| (k.as_ref(), v))
     }
 
     /// `lookup_function`'s class-side mirror - real PHP resolves
@@ -966,12 +973,12 @@ impl Registry {
     /// once per return type on every function checked.
     pub fn lookup_class(&self, name: &str) -> Option<(&str, &ClassInfo)> {
         if let Some((k, v)) = self.classes.get_key_value(name) {
-            return Some((k.as_str(), v));
+            return Some((k.as_ref(), v));
         }
         let canonical = self.classes_lowercase.get(&name.to_ascii_lowercase())?;
         self.classes
             .get_key_value(canonical)
-            .map(|(k, v)| (k.as_str(), v))
+            .map(|(k, v)| (k.as_ref(), v))
     }
 
     /// The entity that names `repository_fqn` as its own
@@ -998,7 +1005,7 @@ impl Registry {
     pub(crate) fn repository_entity(&self, repository_fqn: &str) -> Option<&str> {
         let mut matches = self.classes.iter().filter_map(|(name, info)| {
             let entity = info.doctrine_entity.as_ref()?;
-            (entity.repository_class.as_deref() == Some(repository_fqn)).then_some(name.as_str())
+            (entity.repository_class.as_deref() == Some(repository_fqn)).then_some(name.as_ref())
         });
         let first = matches.next()?;
         matches.next().is_none().then_some(first)

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::registry::Registry;
 use crate::types::{self, Type, Variance};
@@ -132,7 +133,7 @@ impl Registry {
         let own_bindings: HashMap<String, Type> = info
             .templates
             .iter()
-            .cloned()
+            .map(|s| s.to_string())
             .zip(type_args.iter().cloned())
             .collect();
 
@@ -205,7 +206,7 @@ impl Registry {
     /// the (at least two) paths reads the signature next.
     pub(crate) fn substitute_class_scoped_ancestor_templates(
         ty: &Type,
-        ancestor_bindings: &HashMap<String, HashMap<String, Type>>,
+        ancestor_bindings: &HashMap<Arc<str>, HashMap<String, Type>>,
     ) -> Type {
         match ty {
             Type::TemplateParam(tp) => tp

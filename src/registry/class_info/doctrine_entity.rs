@@ -20,8 +20,10 @@
 //! real, well-defined Doctrine feature gets built at all.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal};
+use crate::intern::intern;
 use crate::registry::name_context::NameContext;
 use crate::types::Type;
 
@@ -32,7 +34,7 @@ use super::PropertySig;
 #[derive(Debug, Clone)]
 pub struct DoctrineAssociation {
     /// The target entity's fully-qualified class name.
-    pub target: String,
+    pub target: Arc<str>,
     /// `OneToMany`/`ManyToMany` - the property holds a collection of
     /// `target`, not a single instance.
     pub is_collection: bool,
@@ -50,22 +52,25 @@ pub struct DoctrineEntity {
     /// `IDENTITY()` on a composite-key association is already a DQL
     /// error in real Doctrine, so this project has nothing incorrect to
     /// produce either way).
-    pub id_field: Option<String>,
+    pub id_field: Option<Arc<str>>,
     /// Every mapped scalar field's own already-resolved native type
     /// (reused from `ClassInfo::properties`, not re-resolved here) -
     /// keyed by property name, association properties included too
     /// (their "field type" is the association's own declared type,
     /// consulted only via `associations` below in practice).
-    pub fields: HashMap<String, Type>,
-    pub associations: HashMap<String, DoctrineAssociation>,
+    pub fields: HashMap<Arc<str>, Type>,
+    pub associations: HashMap<Arc<str>, DoctrineAssociation>,
     /// `#[ORM\Entity(repositoryClass: ...)]`'s own argument, if present -
     /// resolved to a fully-qualified class name.
-    pub repository_class: Option<String>,
+    pub repository_class: Option<Arc<str>>,
     /// `#[ORM\DiscriminatorMap([...])]`'s own value -> concrete-subclass
     /// map, non-empty only on the root entity of a single-table/joined-
     /// table inheritance hierarchy. Empty for every ordinary, non-
-    /// hierarchical entity - the overwhelming majority.
-    pub discriminator_map: HashMap<String, String>,
+    /// hierarchical entity - the overwhelming majority. The key is an
+    /// arbitrary literal discriminator tag (developer-chosen, not a
+    /// source identifier), so it stays `String`; the value is a real
+    /// class FQN.
+    pub discriminator_map: HashMap<String, Arc<str>>,
 }
 
 fn resolved_attr_name(ctx: &NameContext, attr: &Attribute) -> String {
@@ -117,7 +122,7 @@ fn class_name_of_class_const(e: &Expr) -> Option<&str> {
 /// literal string, or a value that isn't a `SomeClass::class` reference,
 /// is simply skipped rather than guessed - the same "don't guess"
 /// leniency this module applies everywhere else.
-fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String, String> {
+fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String, Arc<str>> {
     let array = attr
         .args
         .iter()
@@ -137,7 +142,7 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String,
                 return None;
             };
             let class = class_name_of_class_const(&item.value)?;
-            Some((value.to_string(), ctx.resolve(class)))
+            Some((value.to_string(), intern(&ctx.resolve(class))))
         })
         .collect()
 }
@@ -165,11 +170,11 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 pub(crate) fn compute_doctrine_entity(
     c: &ClassDecl,
     ctx: &NameContext,
-    properties: &HashMap<String, PropertySig>,
+    properties: &HashMap<Arc<str>, PropertySig>,
 ) -> Option<DoctrineEntity> {
     let entity_attr = find_orm_attribute(ctx, &c.attrs, "Entity")?;
     let repository_class =
-        class_const_arg(entity_attr, "repositoryClass").map(|name| ctx.resolve(name));
+        class_const_arg(entity_attr, "repositoryClass").map(|name| intern(&ctx.resolve(name)));
     let discriminator_map = find_orm_attribute(ctx, &c.attrs, "DiscriminatorMap")
         .map(|attr| discriminator_map_arg(ctx, attr))
         .unwrap_or_default();
@@ -195,16 +200,16 @@ pub(crate) fn compute_doctrine_entity(
         }
     }
 
-    let mut id_fields = Vec::new();
-    let mut fields = HashMap::new();
-    let mut associations = HashMap::new();
+    let mut id_fields: Vec<Arc<str>> = Vec::new();
+    let mut fields: HashMap<Arc<str>, Type> = HashMap::new();
+    let mut associations: HashMap<Arc<str>, DoctrineAssociation> = HashMap::new();
     for (name, attrs) in &attrs_by_property {
         let Some(sig) = properties.get(*name) else {
             continue;
         };
-        fields.insert((*name).to_string(), sig.ty_native.clone());
+        fields.insert(intern(name), sig.ty_native.clone());
         if find_orm_attribute(ctx, attrs, "Id").is_some() {
-            id_fields.push((*name).to_string());
+            id_fields.push(intern(name));
         }
         let to_one = find_orm_attribute(ctx, attrs, "ManyToOne")
             .or_else(|| find_orm_attribute(ctx, attrs, "OneToOne"));
@@ -213,17 +218,17 @@ pub(crate) fn compute_doctrine_entity(
         if let Some(assoc_attr) = to_one {
             if let Some(target) = association_target_from_native_type(&sig.ty_native) {
                 associations.insert(
-                    (*name).to_string(),
+                    intern(name),
                     DoctrineAssociation {
-                        target,
+                        target: intern(&target),
                         is_collection: false,
                     },
                 );
             } else if let Some(target) = class_const_arg(assoc_attr, "targetEntity") {
                 associations.insert(
-                    (*name).to_string(),
+                    intern(name),
                     DoctrineAssociation {
-                        target: ctx.resolve(target),
+                        target: intern(&ctx.resolve(target)),
                         is_collection: false,
                     },
                 );
@@ -236,9 +241,9 @@ pub(crate) fn compute_doctrine_entity(
             // source here.
             if let Some(target) = class_const_arg(assoc_attr, "targetEntity") {
                 associations.insert(
-                    (*name).to_string(),
+                    intern(name),
                     DoctrineAssociation {
-                        target: ctx.resolve(target),
+                        target: intern(&ctx.resolve(target)),
                         is_collection: true,
                     },
                 );

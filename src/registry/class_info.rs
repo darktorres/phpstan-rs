@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use crate::docblock::{self, DocBlock};
+use crate::intern::intern;
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
     build_type_aliases, infer_const_type, mark_template_params, resolve_type_with_parsed_native,
@@ -116,10 +118,10 @@ pub struct PropertySig {
     // identically at all three real construction sites (plain declared
     // property, promoted constructor property, `@property`/`-read`/
     // `-write` tag).
-    pub case_refs: Vec<(String, String)>,
+    pub case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `set_ty`'s case_refs equivalent - `property_hook_set_type` never
     // collected these, unlike the sibling `ty` field above.
-    pub set_case_refs: Vec<(String, String)>,
+    pub set_case_refs: Vec<(Arc<str>, Arc<str>)>,
 }
 
 // A class constant's `public`/`private`/`protected` modifier (PHP 7.1+).
@@ -139,6 +141,7 @@ pub struct ConstSig {
 }
 
 #[derive(Debug, Clone)]
+#[allow(clippy::type_complexity)]
 pub struct ClassInfo {
     pub kind: ClassKind,
     pub is_abstract: bool,
@@ -156,31 +159,31 @@ pub struct ClassInfo {
     // declaration carry the tag," not "is this class immutable
     // considering its whole ancestor chain."
     pub is_immutable: bool,
-    pub extends: Vec<String>,
-    pub implements: Vec<String>,
-    pub methods: HashMap<String, FunctionSig>,
-    pub properties: HashMap<String, PropertySig>,
-    pub consts: HashMap<String, ConstSig>,
-    pub uses: Vec<String>,
+    pub extends: Vec<Arc<str>>,
+    pub implements: Vec<Arc<str>>,
+    pub methods: HashMap<Arc<str>, FunctionSig>,
+    pub properties: HashMap<Arc<str>, PropertySig>,
+    pub consts: HashMap<Arc<str>, ConstSig>,
+    pub uses: Vec<Arc<str>>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
     // `extends`/`implements` itself and consult each ancestor's own set).
-    pub abstract_methods: HashSet<String>,
+    pub abstract_methods: HashSet<Arc<str>>,
     // Method names declared `final` in this class's own body.
-    pub final_methods: HashSet<String>,
+    pub final_methods: HashSet<Arc<str>>,
     // Method names declared `static` in this class's own body - same
     // "not walked up the hierarchy" shape as `abstract_methods`/
     // `final_methods` above, used by `check_one_method_override`'s
     // `method.nonStatic`/`method.static` check, mirroring real PHPStan's
     // `OverridingMethodRule`: an override must match its ancestor's
     // static-ness exactly, either direction.
-    pub static_methods: HashSet<String>,
+    pub static_methods: HashSet<Arc<str>>,
     // Property names declared `final` in this class's own body (PHP 8.4) -
     // same "not walked up the hierarchy" shape as `final_methods` above;
     // `Registry::find_final_ancestor_property` does that walk. Real PHP
     // fatals overriding a `final` property in a subclass exactly like a
     // `final` method.
-    pub final_properties: HashSet<String>,
+    pub final_properties: HashSet<Arc<str>>,
     // `@final`'s docblock-only siblings to `final_methods`/
     // `final_properties` above - real PHP never enforces this convention
     // (no engine-level guarantee backs it, unlike the native keyword), so
@@ -188,8 +191,8 @@ pub struct ClassInfo {
     // (`Registry::find_final_ancestor_method`/
     // `find_final_ancestor_property`, real keyword taking priority when
     // both somehow apply on the same ancestor).
-    pub final_methods_by_phpdoc: HashSet<String>,
-    pub final_properties_by_phpdoc: HashSet<String>,
+    pub final_methods_by_phpdoc: HashSet<Arc<str>>,
+    pub final_properties_by_phpdoc: HashSet<Arc<str>>,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -200,12 +203,12 @@ pub struct ClassInfo {
     // these as already addressed by the class author, even for
     // `insteadof` (whose actual trait-selection this project doesn't
     // otherwise model).
-    pub resolved_trait_conflicts: HashSet<String>,
+    pub resolved_trait_conflicts: HashSet<Arc<str>>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
     // class_template_bindings`). Empty for a non-generic class.
-    pub templates: Vec<String>,
+    pub templates: Vec<Arc<str>>,
     // `@extends Parent<Arg, ...>`'s argument list - fixes
     // `extends.first()`'s `@template` names for every instance of this
     // class, independent of whether this class is itself generic (e.g.
@@ -222,7 +225,7 @@ pub struct ClassInfo {
     // `@implements Iface<Arg, ...>` tag applies to (a class can implement
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
-    pub implements_args: HashMap<String, Vec<Type>>,
+    pub implements_args: HashMap<Arc<str>, Vec<Type>>,
     // Same idea again, but for a generic trait named in an `@use
     // Trait<Arg, ...>` tag - keyed the same way as `implements_args`.
     // Unlike `extends`/`implements`, which are both written on the
@@ -232,12 +235,12 @@ pub struct ClassInfo {
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `ClassDecl::uses_doc_comments`'s doc
     // comment for where this project captures that.
-    pub uses_args: HashMap<String, Vec<Type>>,
+    pub uses_args: HashMap<Arc<str>, Vec<Type>>,
     // `@template T of Bound` - the resolved bound for whichever of
     // `templates` above declared one. Checked by
     // `checker::check_generic_bounds` wherever this class is referenced
     // with concrete type arguments (`Collection<Foo>`).
-    pub template_bounds: HashMap<String, Type>,
+    pub template_bounds: HashMap<Arc<str>, Type>,
     // `@template T = Default` - the resolved default for whichever of
     // `templates` above declared one, mirroring `template_bounds`'s
     // shape/construction exactly. A generic reference supplying fewer
@@ -245,12 +248,12 @@ pub struct ClassInfo {
     // (`check_generic_reference_arity`, `checker/generics.rs`) for a
     // template name absent from this map - one with a default is
     // legitimately optional to supply.
-    pub template_defaults: HashMap<String, Type>,
+    pub template_defaults: HashMap<Arc<str>, Type>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant.
-    pub covariant_templates: HashSet<String>,
-    pub contravariant_templates: HashSet<String>,
+    pub covariant_templates: HashSet<Arc<str>>,
+    pub contravariant_templates: HashSet<Arc<str>>,
     // This class/interface/trait's own docblock carries `@api` (or,
     // equivalently, `@api-do-not-implement`, which implies it - see
     // `DocBlock::api`'s doc comment). Consulted only by
@@ -294,7 +297,7 @@ pub struct ClassInfo {
     // `->value` union-of-literals property type applies) - empty for a
     // non-enum, an unbacked enum, or a backed enum with any non-literal
     // case value (a case naming a class constant).
-    pub enum_case_values: HashMap<String, Type>,
+    pub enum_case_values: HashMap<Arc<str>, Type>,
     // This class's own `@phpstan-type Name TypeExpr` local alias table
     // (`function_sig::build_type_aliases`), keyed by each alias's own
     // resolved FQN - already spliced into every member's `ty` at
@@ -303,7 +306,7 @@ pub struct ClassInfo {
     // check-time `@var` resolution path, which needs the same table to
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
-    pub type_aliases: HashMap<String, Type>,
+    pub type_aliases: HashMap<Arc<str>, Type>,
     // `ParamSig::case_refs`'s `@phpstan-type` equivalent - keyed the
     // same way `type_aliases` itself is (the alias's resolved local
     // name), `(raw, resolved)` pairs for every class-name reference the
@@ -311,7 +314,7 @@ pub struct ClassInfo {
     // elsewhere - that's this same mechanism at whatever
     // `@param`/`@return`/property tag actually uses the alias, via its
     // own `case_refs`).
-    pub type_alias_case_refs: HashMap<String, Vec<(String, String)>>,
+    pub type_alias_case_refs: HashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
@@ -326,7 +329,7 @@ pub struct ClassInfo {
     // yet inserted into `methods` - insertion has to wait for
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
-    pub method_tags: Vec<(String, FunctionSig)>,
+    pub method_tags: Vec<(Arc<str>, FunctionSig)>,
     // `#[ORM\Entity]` metadata (PHASE_BACKLOG Phase 168 168a) - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
@@ -339,20 +342,20 @@ pub struct ClassInfo {
     // project's "don't guess" precedent elsewhere). See
     // `checker::oop::check_require_tags`/`check_sealed_hierarchy` for
     // the two, differently-shaped consuming checks.
-    pub require_extends: Vec<String>,
-    pub require_implements: Vec<String>,
-    pub sealed: Vec<String>,
+    pub require_extends: Vec<Arc<str>>,
+    pub require_implements: Vec<Arc<str>>,
+    pub sealed: Vec<Arc<str>>,
     // `@mixin Type` - resolved FQNs, same shape/flattening as the three
     // above. Not yet looked up in the target's own `methods`/`properties`
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
     // mirroring `resolve_deferred_type_imports`'s own two-step shape.
-    pub mixins: Vec<String>,
+    pub mixins: Vec<Arc<str>>,
     // `ParamSig::case_refs`'s `@mixin`-tag equivalent - `(raw, resolved)`
     // pairs for every `@mixin` target on this class's docblock, in
     // declaration order (not keyed by name - unlike
     // `type_alias_case_refs`, a class can carry several `@mixin` tags
     // with no unique name to key by).
-    pub mixin_case_refs: Vec<(String, String)>,
+    pub mixin_case_refs: Vec<(Arc<str>, Arc<str>)>,
 }
 
 /// See `ClassInfo::type_imports`'s own doc comment.
@@ -361,14 +364,14 @@ pub struct ResolvedTypeImport {
     // The key this class's own already-built member types reference the
     // import under (`substitute_type_aliases` matches on this exact key,
     // same as an ordinary local `@phpstan-type` alias would).
-    pub local_key: String,
-    pub source_class_fqn: String,
+    pub local_key: Arc<str>,
+    pub source_class_fqn: Arc<str>,
     // The name as declared on the *source* class's own `@phpstan-type` -
     // not yet resolved to that class's own key (needs its own namespace,
     // reconstructed from `source_class_fqn` at resolution time rather
     // than carried here, since a class's own containing namespace is
     // always recoverable from its own FQN).
-    pub source_alias_name: String,
+    pub source_alias_name: Arc<str>,
 }
 
 /// Same "two full declarations of one name collapse into their positional
@@ -386,9 +389,9 @@ pub struct ResolvedTypeImport {
 /// first, 3-required-arg overload - vanishes entirely, since the file's
 /// last declaration is the unrelated `($isostr, $options = 0)` form).
 fn collect_merged_methods(
-    methods: impl Iterator<Item = (String, FunctionSig)>,
-) -> HashMap<String, FunctionSig> {
-    let mut out: HashMap<String, FunctionSig> = HashMap::new();
+    methods: impl Iterator<Item = (Arc<str>, FunctionSig)>,
+) -> HashMap<Arc<str>, FunctionSig> {
+    let mut out: HashMap<Arc<str>, FunctionSig> = HashMap::new();
     for (name, sig) in methods {
         match out.remove(&name) {
             Some(existing) => {
@@ -405,9 +408,9 @@ fn collect_merged_methods(
 impl ClassInfo {
     pub(crate) fn from_decl(c: &ClassDecl, ctx: &NameContext) -> ClassInfo {
         let class_doc: Option<DocBlock> = c.doc_comment.as_deref().map(docblock::parse);
-        let templates: Vec<String> = class_doc
+        let templates: Vec<Arc<str>> = class_doc
             .as_ref()
-            .map(|d| d.templates.clone())
+            .map(|d| d.templates.iter().map(|s| intern(s)).collect())
             .unwrap_or_default();
         // This class's `@template` metadata (bound/variance/default),
         // keyed by name - `templates` above stays a plain `Vec<String>`
@@ -442,9 +445,9 @@ impl ClassInfo {
                     .map(|imp| {
                         let local_name = imp.as_name.as_deref().unwrap_or(&imp.alias);
                         ResolvedTypeImport {
-                            local_key: ctx.resolve(local_name),
-                            source_class_fqn: ctx.resolve(&imp.from),
-                            source_alias_name: imp.alias.clone(),
+                            local_key: intern(&ctx.resolve(local_name)),
+                            source_class_fqn: intern(&ctx.resolve(&imp.from)),
+                            source_alias_name: intern(&imp.alias),
                         }
                     })
                     .collect()
@@ -456,15 +459,15 @@ impl ClassInfo {
         // cloned only for the sets it actually belongs to, instead of
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
-        let mut methods_vec: Vec<(String, FunctionSig)> = Vec::with_capacity(c.methods.len());
-        let mut abstract_methods: HashSet<String> = HashSet::new();
-        let mut final_methods: HashSet<String> = HashSet::new();
-        let mut static_methods: HashSet<String> = HashSet::new();
-        let mut final_methods_by_phpdoc: HashSet<String> = HashSet::new();
+        let mut methods_vec: Vec<(Arc<str>, FunctionSig)> = Vec::with_capacity(c.methods.len());
+        let mut abstract_methods: HashSet<Arc<str>> = HashSet::new();
+        let mut final_methods: HashSet<Arc<str>> = HashSet::new();
+        let mut static_methods: HashSet<Arc<str>> = HashSet::new();
+        let mut final_methods_by_phpdoc: HashSet<Arc<str>> = HashSet::new();
         for m in &c.methods {
             let name = m.function.name.clone();
             if m.is_abstract {
-                abstract_methods.insert(name.to_string());
+                abstract_methods.insert(name.clone());
             }
             // A `private` method isn't part of a class's inherited/
             // overridable surface at all in real PHP - a subclass
@@ -475,10 +478,10 @@ impl ClassInfo {
             // `Exception::__clone()`, `final private`, being freely
             // redeclared by subclasses).
             if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(name.to_string());
+                final_methods.insert(name.clone());
             }
             if m.is_static {
-                static_methods.insert(name.to_string());
+                static_methods.insert(name.clone());
             }
             // `@final`'s docblock-only sibling to `final_methods` above -
             // same private-is-not-overridable exemption (a purely static-
@@ -493,7 +496,7 @@ impl ClassInfo {
                     .map(docblock::parse)
                     .is_some_and(|d| d.is_final)
             {
-                final_methods_by_phpdoc.insert(name.to_string());
+                final_methods_by_phpdoc.insert(name.clone());
             }
             let sig = FunctionSig::from_decl(
                 &m.function,
@@ -502,18 +505,19 @@ impl ClassInfo {
                 &type_aliases,
                 m.visibility.clone(),
             );
-            methods_vec.push((name.to_string(), sig));
+            methods_vec.push((name.clone(), sig));
         }
-        let methods: HashMap<String, FunctionSig> = collect_merged_methods(methods_vec.into_iter());
+        let methods: HashMap<Arc<str>, FunctionSig> =
+            collect_merged_methods(methods_vec.into_iter());
         // Same private-is-not-overridable exemption `final_methods`
         // above applies, one member kind over - a private property
         // (final or not) is never part of a subclass's overridable
         // surface either.
-        let mut final_properties: HashSet<String> = c
+        let mut final_properties: HashSet<Arc<str>> = c
             .properties
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
-            .map(|p| p.name.to_string())
+            .map(|p| p.name.clone())
             .collect();
         // `public final int $x` is real, valid PHP on a promoted
         // constructor property too, and real PHP does enforce "Cannot
@@ -533,13 +537,13 @@ impl ClassInfo {
                         p.promoted_final
                             && p.promoted_visibility.as_ref() != Some(&Visibility::Private)
                     })
-                    .map(|p| p.name.to_string()),
+                    .map(|p| p.name.clone()),
             );
         }
 
         // `@final`'s docblock-only sibling to `final_properties` above -
         // same private-is-not-overridable exemption.
-        let mut final_properties_by_phpdoc: HashSet<String> = c
+        let mut final_properties_by_phpdoc: HashSet<Arc<str>> = c
             .properties
             .iter()
             .filter(|p| {
@@ -549,7 +553,7 @@ impl ClassInfo {
                         .map(docblock::parse)
                         .is_some_and(|d| d.is_final)
             })
-            .map(|p| p.name.to_string())
+            .map(|p| p.name.clone())
             .collect();
         if let Some(ctor) = c
             .methods
@@ -567,11 +571,11 @@ impl ClassInfo {
                                 .map(docblock::parse)
                                 .is_some_and(|d| d.is_final)
                     })
-                    .map(|p| p.name.to_string()),
+                    .map(|p| p.name.clone()),
             );
         }
 
-        let mut properties: HashMap<String, PropertySig> = c
+        let mut properties: HashMap<Arc<str>, PropertySig> = c
             .properties
             .iter()
             .map(|p| {
@@ -605,7 +609,7 @@ impl ClassInfo {
                     .as_ref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 (
-                    p.name.to_string(),
+                    p.name.clone(),
                     PropertySig {
                         ty,
                         ty_native,
@@ -711,7 +715,7 @@ impl ClassInfo {
                     .as_deref()
                     .is_some_and(|h| !hooks_reference_backing_storage(h, &p.name));
                 properties.insert(
-                    p.name.to_string(),
+                    p.name.clone(),
                     PropertySig {
                         ty,
                         ty_native,
@@ -752,7 +756,7 @@ impl ClassInfo {
         // same as a plain `@property` (readable and writable).
         if let Some(doc) = &class_doc {
             for tag in &doc.properties {
-                properties.entry(tag.name.clone()).or_insert_with(|| {
+                properties.entry(intern(&tag.name)).or_insert_with(|| {
                     let ty = types::parse_type_string(&tag.ty);
                     let ty = mark_template_params(ty, &template_params);
                     let mut case_refs = Vec::new();
@@ -801,12 +805,17 @@ impl ClassInfo {
         // is also vacant-only.
         // `Registry::resolve_method_tags` runs this insertion later
         // instead, once `flatten_traits` has had its own say.
-        let method_tags: Vec<(String, FunctionSig)> = class_doc
+        let method_tags: Vec<(Arc<str>, FunctionSig)> = class_doc
             .as_ref()
             .map(|d| {
                 d.method_tags
                     .iter()
-                    .map(|tag| (tag.name.clone(), method_tag_sig(tag, &template_params, ctx)))
+                    .map(|tag| {
+                        (
+                            intern(&tag.name),
+                            method_tag_sig(tag, &template_params, ctx),
+                        )
+                    })
                     .collect()
             })
             .unwrap_or_default();
@@ -835,7 +844,7 @@ impl ClassInfo {
                     None => infer_const_type(&cc.value),
                 };
                 (
-                    cc.name.to_string(),
+                    cc.name.clone(),
                     ConstSig {
                         ty,
                         visibility: cc.visibility.clone(),
@@ -878,11 +887,11 @@ impl ClassInfo {
                 _ => Vec::new(),
             })
             .unwrap_or_default();
-        let implements_args: HashMap<String, Vec<Type>> = class_doc
+        let implements_args: HashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(|raw| match resolve_generic_tag(raw) {
-                Type::Object(name, args) => Some((name, args)),
+                Type::Object(name, args) => Some((intern(&name), args)),
                 _ => None,
             })
             .collect();
@@ -893,7 +902,7 @@ impl ClassInfo {
         // name in a multi-name `use A, B;` statement, so dedup (collect
         // into a `HashSet` first) before re-parsing each distinct doc
         // comment only once.
-        let uses_args: HashMap<String, Vec<Type>> = c
+        let uses_args: HashMap<Arc<str>, Vec<Type>> = c
             .uses_doc_comments
             .iter()
             .filter_map(|d| d.as_deref())
@@ -902,35 +911,40 @@ impl ClassInfo {
             .map(docblock::parse)
             .flat_map(|d| d.uses)
             .filter_map(|raw| match resolve_generic_tag(&raw) {
-                Type::Object(name, args) => Some((name, args)),
+                Type::Object(name, args) => Some((intern(&name), args)),
                 _ => None,
             })
             .collect();
-        let template_bounds: HashMap<String, Type> = class_doc
+        let template_bounds: HashMap<Arc<str>, Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_bounds
                     .iter()
-                    .map(|(name, raw)| (name.clone(), resolve_generic_tag(raw)))
+                    .map(|(name, raw)| (intern(name), resolve_generic_tag(raw)))
                     .collect()
             })
             .unwrap_or_default();
-        let template_defaults: HashMap<String, Type> = class_doc
+        let template_defaults: HashMap<Arc<str>, Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_defaults
                     .iter()
-                    .map(|(name, raw)| (name.clone(), resolve_generic_tag(raw)))
+                    .map(|(name, raw)| (intern(name), resolve_generic_tag(raw)))
                     .collect()
             })
             .unwrap_or_default();
-        let covariant_templates = class_doc
+        let covariant_templates: HashSet<Arc<str>> = class_doc
             .as_ref()
-            .map(|d| d.covariant_templates.clone())
+            .map(|d| d.covariant_templates.iter().map(|s| intern(s)).collect())
             .unwrap_or_default();
-        let contravariant_templates = class_doc
+        let contravariant_templates: HashSet<Arc<str>> = class_doc
             .as_ref()
-            .map(|d| d.contravariant_templates.clone())
+            .map(|d| {
+                d.contravariant_templates
+                    .iter()
+                    .map(|s| intern(s))
+                    .collect()
+            })
             .unwrap_or_default();
 
         // Real PHP (8.0+) makes any class declaring a public
@@ -941,15 +955,19 @@ impl ClassInfo {
         // modification. Same shape as the enum UnitEnum/BackedEnum
         // implicit-interface handling below, for a different implicit
         // interface.
-        let mut implements: Vec<String> = c.implements.iter().map(|s| ctx.resolve(s)).collect();
+        let mut implements: Vec<Arc<str>> = c
+            .implements
+            .iter()
+            .map(|s| intern(&ctx.resolve(s)))
+            .collect();
         if methods.contains_key("__toString") {
-            implements.push("Stringable".to_string());
+            implements.push(intern("Stringable"));
         }
         let trait_aliases: Vec<TraitAlias> = c
             .trait_aliases
             .iter()
             .map(|a| TraitAlias {
-                trait_name: a.trait_name.as_ref().map(|t| ctx.resolve(t)),
+                trait_name: a.trait_name.as_ref().map(|t| intern(&ctx.resolve(t))),
                 method: a.method.clone(),
                 alias: a.alias.clone(),
             })
@@ -979,11 +997,12 @@ impl ClassInfo {
         // flattened to the class names it names (`object_class_names`),
         // mirroring real PHPStan's `getObjectClassNames()` call sites
         // for these same three tags.
-        let resolve_tag_types = |raw: &[String]| -> Vec<String> {
+        let resolve_tag_types = |raw: &[String]| -> Vec<Arc<str>> {
             raw.iter()
                 .flat_map(|text| {
                     object_class_names(resolve_names_in_type(types::parse_type_string(text), ctx))
                 })
+                .map(|s| intern(&s))
                 .collect()
         };
         let require_extends = class_doc
@@ -1004,7 +1023,7 @@ impl ClassInfo {
             .unwrap_or_default();
         // Own small dedicated closure, not `resolve_tag_types` above -
         // see `mixin_case_refs`'s doc comment.
-        let mixin_case_refs: Vec<(String, String)> = class_doc
+        let mixin_case_refs: Vec<(Arc<str>, Arc<str>)> = class_doc
             .as_ref()
             .map(|d| {
                 d.mixins
@@ -1027,12 +1046,12 @@ impl ClassInfo {
             is_abstract: c.is_abstract,
             is_final: c.is_final,
             is_readonly: c.is_readonly,
-            extends: c.extends.iter().map(|s| ctx.resolve(s)).collect(),
+            extends: c.extends.iter().map(|s| intern(&ctx.resolve(s))).collect(),
             implements,
             methods,
             properties,
             consts,
-            uses: c.uses.iter().map(|s| ctx.resolve(s)).collect(),
+            uses: c.uses.iter().map(|s| intern(&ctx.resolve(s))).collect(),
             abstract_methods,
             static_methods,
             final_methods,
@@ -1088,12 +1107,12 @@ impl ClassInfo {
         // level template a tag's argument could reference.
         let fqn = ctx.declared_name(&e.name);
         let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
-        let implements_args: HashMap<String, Vec<Type>> = class_doc
+        let implements_args: HashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(
                 |raw| match resolve_names_in_type(types::parse_type_string(raw), ctx) {
-                    Type::Object(name, args) => Some((name, args)),
+                    Type::Object(name, args) => Some((intern(&name), args)),
                     _ => None,
                 },
             )
@@ -1102,7 +1121,7 @@ impl ClassInfo {
         // construction - the reasoning (`@use` lives on the `use`
         // statement's own doc comment) is unrelated to whether the
         // enclosing declaration is a class or an enum.
-        let uses_args: HashMap<String, Vec<Type>> = e
+        let uses_args: HashMap<Arc<str>, Vec<Type>> = e
             .uses_doc_comments
             .iter()
             .filter_map(|d| d.as_deref())
@@ -1112,15 +1131,15 @@ impl ClassInfo {
             .flat_map(|d| d.uses)
             .filter_map(
                 |raw| match resolve_names_in_type(types::parse_type_string(&raw), ctx) {
-                    Type::Object(name, args) => Some((name, args)),
+                    Type::Object(name, args) => Some((intern(&name), args)),
                     _ => None,
                 },
             )
             .collect();
-        let mut methods: HashMap<String, FunctionSig> =
+        let mut methods: HashMap<Arc<str>, FunctionSig> =
             collect_merged_methods(e.methods.iter().map(|m| {
                 (
-                    m.function.name.to_string(),
+                    m.function.name.clone(),
                     FunctionSig::from_decl(
                         &m.function,
                         ctx,
@@ -1150,7 +1169,7 @@ impl ClassInfo {
             Type::Accessory(AccessoryKind::ArrayList),
         ]);
         methods.insert(
-            "cases".to_string(),
+            intern("cases"),
             FunctionSig {
                 params: Vec::new(),
                 return_type: cases_return_ty.clone(),
@@ -1190,7 +1209,7 @@ impl ClassInfo {
         if let Some(backing) = &e.backing_type {
             let backing_ty = types::parse_type_string(backing);
             let value_param = ParamSig {
-                name: "value".to_string(),
+                name: intern("value"),
                 ty: backing_ty.clone(),
                 ty_native: backing_ty,
                 variadic: false,
@@ -1203,7 +1222,7 @@ impl ClassInfo {
                 out_ty: None,
             };
             methods.insert(
-                "from".to_string(),
+                intern("from"),
                 FunctionSig {
                     params: vec![value_param.clone()],
                     return_type: self_ty.clone(),
@@ -1232,7 +1251,7 @@ impl ClassInfo {
                 },
             );
             methods.insert(
-                "tryFrom".to_string(),
+                intern("tryFrom"),
                 FunctionSig {
                     params: vec![value_param],
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
@@ -1258,13 +1277,13 @@ impl ClassInfo {
                 },
             );
         }
-        let mut consts: HashMap<String, ConstSig> = e
+        let mut consts: HashMap<Arc<str>, ConstSig> = e
             .consts
             .iter()
             .map(|cc| {
                 let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 (
-                    cc.name.to_string(),
+                    cc.name.clone(),
                     ConstSig {
                         ty: infer_const_type(&cc.value),
                         visibility: cc.visibility.clone(),
@@ -1283,7 +1302,7 @@ impl ClassInfo {
         // syntax in real PHP - always public.
         for case in &e.cases {
             consts.insert(
-                case.name.to_string(),
+                case.name.clone(),
                 ConstSig {
                     ty: Type::EnumCase(fqn.clone(), case.name.to_string()),
                     visibility: Visibility::Public,
@@ -1302,7 +1321,7 @@ impl ClassInfo {
         // `::from()`/`::tryFrom()` narrowing only needs to know a given
         // literal argument's matching case, if any, and a partial map
         // still answers that for the literal-valued cases it covers.
-        let enum_case_values: HashMap<String, Type> = e
+        let enum_case_values: HashMap<Arc<str>, Type> = e
             .cases
             .iter()
             .filter_map(|c| {
@@ -1312,7 +1331,7 @@ impl ClassInfo {
                     ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
                     _ => return None,
                 };
-                Some((c.name.to_string(), ty))
+                Some((c.name.clone(), ty))
             })
             .collect();
 
@@ -1325,7 +1344,7 @@ impl ClassInfo {
         // every real `$case->value` access.
         let mut properties = HashMap::new();
         properties.insert(
-            "name".to_string(),
+            intern("name"),
             PropertySig {
                 ty: Type::String,
                 // Every enum case's `->name` is language-guaranteed to
@@ -1382,7 +1401,7 @@ impl ClassInfo {
                 types::parse_type_string(backing)
             };
             properties.insert(
-                "value".to_string(),
+                intern("value"),
                 PropertySig {
                     ty: value_ty,
                     // Same reasoning as `->name` above - language-
@@ -1422,34 +1441,38 @@ impl ClassInfo {
         // Without this, real code narrowing/typing an enum against
         // `UnitEnum` would be flagged as a bound violation despite being
         // exactly what real PHP guarantees.
-        let mut implements: Vec<String> = e.implements.iter().map(|s| ctx.resolve(s)).collect();
-        implements.push("UnitEnum".to_string());
+        let mut implements: Vec<Arc<str>> = e
+            .implements
+            .iter()
+            .map(|s| intern(&ctx.resolve(s)))
+            .collect();
+        implements.push(intern("UnitEnum"));
         if e.backing_type.is_some() {
-            implements.push("BackedEnum".to_string());
+            implements.push(intern("BackedEnum"));
         }
 
         // One pass over `e.methods` instead of 3 separate filtered ones -
         // see `ClassInfo::from_decl`'s equivalent loop for the same
         // reasoning.
-        let mut abstract_methods: HashSet<String> = HashSet::new();
-        let mut final_methods: HashSet<String> = HashSet::new();
-        let mut static_methods: HashSet<String> = HashSet::new();
+        let mut abstract_methods: HashSet<Arc<str>> = HashSet::new();
+        let mut final_methods: HashSet<Arc<str>> = HashSet::new();
+        let mut static_methods: HashSet<Arc<str>> = HashSet::new();
         for m in &e.methods {
             if m.is_abstract {
-                abstract_methods.insert(m.function.name.to_string());
+                abstract_methods.insert(m.function.name.clone());
             }
             if m.is_final && m.visibility != Visibility::Private {
-                final_methods.insert(m.function.name.to_string());
+                final_methods.insert(m.function.name.clone());
             }
             if m.is_static {
-                static_methods.insert(m.function.name.to_string());
+                static_methods.insert(m.function.name.clone());
             }
         }
         let trait_aliases: Vec<TraitAlias> = e
             .trait_aliases
             .iter()
             .map(|a| TraitAlias {
-                trait_name: a.trait_name.as_ref().map(|t| ctx.resolve(t)),
+                trait_name: a.trait_name.as_ref().map(|t| intern(&ctx.resolve(t))),
                 method: a.method.clone(),
                 alias: a.alias.clone(),
             })
@@ -1472,7 +1495,7 @@ impl ClassInfo {
             methods,
             properties,
             consts,
-            uses: e.uses.iter().map(|s| ctx.resolve(s)).collect(),
+            uses: e.uses.iter().map(|s| intern(&ctx.resolve(s))).collect(),
             abstract_methods,
             final_methods,
             static_methods,

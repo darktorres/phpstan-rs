@@ -330,7 +330,7 @@ impl<'a> Checker<'a> {
     /// fully-qualified name this check needs.
     pub(crate) fn check_type_internal_usage(
         &mut self,
-        case_refs: &[(String, String)],
+        case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
         label: &str,
         span: Span,
     ) {

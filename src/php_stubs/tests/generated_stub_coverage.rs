@@ -9,7 +9,7 @@ fn generates_a_real_ctype_signature() {
     let stubs = generated_stubs();
     let (_, sig) = stubs
         .iter()
-        .find(|(name, _)| name == "ctype_alpha")
+        .find(|(name, _)| name.as_ref() == "ctype_alpha")
         .expect("ctype_alpha should be generated");
     assert_eq!(sig.params.len(), 1);
 }
@@ -17,14 +17,14 @@ fn generates_a_real_ctype_signature() {
 #[test]
 fn generates_a_real_json_signature() {
     let stubs = generated_stubs();
-    assert!(stubs.iter().any(|(name, _)| name == "json_encode"));
-    assert!(stubs.iter().any(|(name, _)| name == "json_decode"));
+    assert!(stubs.iter().any(|(name, _)| name.as_ref() == "json_encode"));
+    assert!(stubs.iter().any(|(name, _)| name.as_ref() == "json_decode"));
 }
 
 #[test]
 fn generated_stub_classes_cover_real_built_in_classes() {
     let classes = generated_stub_classes();
-    let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_str()).collect();
+    let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_ref()).collect();
     assert!(names.contains("Exception"));
     assert!(names.contains("ArrayObject"));
     assert!(names.contains("PDO"));
@@ -37,7 +37,7 @@ fn generated_stub_classes_cover_real_phpstan_src_classes() {
     // confirms PHPSTAN_SRC_SOURCES is actually wired in, not just
     // declared.
     let classes = generated_stub_classes();
-    let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_str()).collect();
+    let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_ref()).collect();
     assert!(names.contains("PHPStan\\Type\\StringType"));
     assert!(names.contains("PHPStan\\Rules\\Rule"));
 }
@@ -45,7 +45,7 @@ fn generated_stub_classes_cover_real_phpstan_src_classes() {
 #[test]
 fn generated_stubs_cover_hundreds_of_functions_across_the_full_corpus() {
     let stubs = generated_stubs();
-    let names: std::collections::HashSet<&str> = stubs.iter().map(|(n, _)| n.as_str()).collect();
+    let names: std::collections::HashSet<&str> = stubs.iter().map(|(n, _)| n.as_ref()).collect();
     // Spot-check functions from extensions far apart in the corpus,
     // not just ctype/json (the only two the old two-file pipeline
     // covered) - proof the full vendored tree is actually being read.
@@ -61,7 +61,7 @@ fn array_map_s_real_stub_no_longer_miscounts_its_superseded_parameter() {
     let stubs = generated_stubs();
     let (_, sig) = stubs
         .iter()
-        .find(|(name, _)| name == "array_map")
+        .find(|(name, _)| name.as_ref() == "array_map")
         .expect("array_map should be generated");
     let required = sig
         .params
@@ -77,7 +77,7 @@ fn array_keys_and_mt_rand_s_optional_trailing_params_are_not_miscounted() {
     for name in ["array_keys", "mt_rand"] {
         let (_, sig) = stubs
             .iter()
-            .find(|(n, _)| n == name)
+            .find(|(n, _)| n.as_ref() == name)
             .unwrap_or_else(|| panic!("{name} should be generated"));
         let required = sig
             .params

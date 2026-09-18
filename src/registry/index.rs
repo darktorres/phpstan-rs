@@ -1,6 +1,8 @@
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 use crate::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
+use crate::intern::intern;
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, FunctionSig, NameContext, infer_const_type};
 use crate::types::Type;
@@ -14,22 +16,22 @@ use crate::types::Type;
 /// wholly separate step from the insertion logic below.
 pub(crate) enum BuiltDecl {
     Class {
-        name: String,
+        name: Arc<str>,
         conditional: bool,
         info: ClassInfo,
     },
     Enum {
-        name: String,
+        name: Arc<str>,
         conditional: bool,
         info: ClassInfo,
     },
     Function {
-        name: String,
+        name: Arc<str>,
         conditional: bool,
         sig: FunctionSig,
     },
     GlobalConst {
-        name: String,
+        name: Arc<str>,
         ty: Type,
     },
 }
@@ -329,7 +331,7 @@ impl Registry {
                     // first, the same bare-name shape method names
                     // already are.
                     let bare = name.rsplit('\\').next().unwrap_or(name);
-                    self.names_with_assert_tags.insert(bare.to_string());
+                    self.names_with_assert_tags.insert(intern(bare));
                 }
             }
             BuiltDecl::Class { info, .. } | BuiltDecl::Enum { info, .. } => {
@@ -358,16 +360,17 @@ impl Registry {
     /// namespace-modeling gap.
     pub(crate) fn remove_declarations(&mut self, functions: &[String], classes: &[String]) {
         for name in functions {
-            self.functions.remove(name);
+            self.functions.remove(name.as_str());
             // Stay in lockstep with `functions`, for the identical
             // reason the class side does below - otherwise a later
             // re-index of the same name would find a stale "already
             // unconditionally declared" marker with nothing left in
             // `functions` for it to point at.
-            self.unconditionally_declared_functions.remove(name);
+            self.unconditionally_declared_functions
+                .remove(name.as_str());
         }
         for name in classes {
-            self.classes.remove(name);
+            self.classes.remove(name.as_str());
             // Must stay in lockstep with `classes` - otherwise a
             // later re-index of the same name (incremental re-checking's
             // whole reason for calling this) would find a stale "already
@@ -375,7 +378,7 @@ impl Registry {
             // `classes` for it to point at, wrongly taking the merge path
             // (`insert_built_decl`'s `BuiltDecl::Class` arm) against a
             // now-nonexistent entry instead of a clean first insertion.
-            self.unconditionally_declared_classes.remove(name);
+            self.unconditionally_declared_classes.remove(name.as_str());
             // Must stay in lockstep with `classes` too, for the identical
             // reason - otherwise a later re-index would find a stale
             // declaring-file entry pointing at a name that may no longer
@@ -410,9 +413,9 @@ impl Registry {
     /// legitimately declaring a function with the same name as a builtin
     /// correctly takes `insert_built_decl`'s merge path (the `strtr`
     /// case) instead of blindly overwriting.
-    pub fn merge_stubs<S: Into<String>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
+    pub fn merge_stubs<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, FunctionSig)>) {
         for (name, sig) in stubs {
-            let name: String = name.into();
+            let name: Arc<str> = name.into();
             self.unconditionally_declared_functions.insert(name.clone());
             self.stub_provided_functions.insert(name.clone());
             self.functions.entry(name).or_insert(sig);
@@ -437,9 +440,9 @@ impl Registry {
     /// even if user code was somehow indexed before this runs - existing
     /// user info is `other` in `ClassInfo::merge`, so it still wins any
     /// member-name conflict.
-    pub fn merge_stub_classes<S: Into<String>>(&mut self, stubs: Vec<(S, ClassInfo)>) {
+    pub fn merge_stub_classes<S: Into<Arc<str>>>(&mut self, stubs: Vec<(S, ClassInfo)>) {
         for (name, info) in stubs {
-            let name: String = name.into();
+            let name: Arc<str> = name.into();
             self.unconditionally_declared_classes.insert(name.clone());
             self.built_in_stub_classes.insert(name.clone());
             match self.classes.remove(&name) {
@@ -462,7 +465,7 @@ impl Registry {
     /// disagreement" conflict policy - the same policy already used
     /// within one file's `global_constants` map, applied here across
     /// every vendored stub file at once.
-    pub fn merge_stub_constants(&mut self, stubs: Vec<(String, Type)>) {
+    pub fn merge_stub_constants(&mut self, stubs: Vec<(Arc<str>, Type)>) {
         for (name, ty) in stubs {
             register_global_constant(&mut self.global_constants, name, ty);
         }
@@ -521,7 +524,7 @@ fn build_declarations_with_context(
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::ClassDecl(c) => {
-                let name = ctx.declared_name(&c.name);
+                let name = intern(&ctx.declared_name(&c.name));
                 let info = ClassInfo::from_decl(c, ctx);
                 out.push(BuiltDecl::Class {
                     name,
@@ -530,7 +533,7 @@ fn build_declarations_with_context(
                 });
             }
             StmtKind::EnumDecl(e) => {
-                let name = ctx.declared_name(&e.name);
+                let name = intern(&ctx.declared_name(&e.name));
                 let info = ClassInfo::from_enum_decl(e, ctx);
                 out.push(BuiltDecl::Enum {
                     name,
@@ -539,7 +542,7 @@ fn build_declarations_with_context(
                 });
             }
             StmtKind::FunctionDecl(f) => {
-                let name = ctx.declared_name(&f.name);
+                let name = intern(&ctx.declared_name(&f.name));
                 let sig = FunctionSig::from_decl(
                     f,
                     ctx,
@@ -594,7 +597,7 @@ fn build_declarations_with_context(
             StmtKind::Block(inner) => build_declarations_with_context(inner, ctx, conditional, out),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
-                    let name = ctx.declared_name(&c.name);
+                    let name = intern(&ctx.declared_name(&c.name));
                     let ty = infer_const_type(&c.value);
                     out.push(BuiltDecl::GlobalConst { name, ty });
                 }
@@ -628,7 +631,7 @@ fn build_declarations_with_context(
 /// `\null` reference for every file in the corpus - every `!== \false`-
 /// style narrowing idiom would silently stop narrowing away `false` at
 /// all once such a stub was indexed.
-fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
+fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     let ExprKind::Call(callee, args) = &e.kind else {
         return None;
     };
@@ -711,9 +714,9 @@ fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
     // not `infer_const_type`'s own float-overflow-affected inference)
     // is the safe, correct level of precision.
     if **const_name == *"PHP_INT_MIN" {
-        return Some((const_name.to_string(), Type::Int));
+        return Some((const_name.clone(), Type::Int));
     }
-    Some((const_name.to_string(), infer_const_type(&args[1].value)))
+    Some((const_name.clone(), infer_const_type(&args[1].value)))
 }
 
 /// Records one `const`/`define()` declaration site for `name`,
@@ -734,7 +737,11 @@ fn define_call_constant(e: &Expr) -> Option<(String, Type)> {
 /// to a specific type, since the true value is still just as
 /// undetermined regardless of which site happens to run at this
 /// constant's real, load-order-dependent definition time.
-pub(crate) fn register_global_constant(map: &mut FxHashMap<String, Type>, name: String, ty: Type) {
+pub(crate) fn register_global_constant(
+    map: &mut FxHashMap<Arc<str>, Type>,
+    name: Arc<str>,
+    ty: Type,
+) {
     match map.get(&name) {
         None => {
             map.insert(name, ty);

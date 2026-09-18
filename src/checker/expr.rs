@@ -1026,7 +1026,7 @@ impl<'a> Checker<'a> {
                                 .contains(&(name.to_string(), method.to_string()))
                     );
                     if !method_exists_guarded
-                        && self.registry.classes.contains_key(class)
+                        && self.registry.classes.contains_key(class.as_str())
                         && self.member_confirmed_missing(&recv_ty, |c| {
                             self.registry.lookup_method(c, method).is_some()
                                 || self.registry.lookup_method(c, "__call").is_some()
@@ -2048,7 +2048,7 @@ impl<'a> Checker<'a> {
                             defining_class: Some(class),
                             span: e.span,
                         });
-                    } else if self.registry.classes.contains_key(class)
+                    } else if self.registry.classes.contains_key(class.as_str())
                         && self.registry.lookup_method(class, "__callStatic").is_none()
                     {
                         // Same leniency as MethodCall's own undefined-
@@ -2063,7 +2063,7 @@ impl<'a> Checker<'a> {
                             0,
                             "staticMethod.notFound",
                         );
-                    } else if !self.registry.classes.contains_key(class) {
+                    } else if !self.registry.classes.contains_key(class.as_str()) {
                         // Mirrors real PHPStan's `StaticMethodCallCheck`'s
                         // "class doesn't exist at all" half - neither
                         // branch above fires for a genuinely undefined
@@ -2130,7 +2130,7 @@ impl<'a> Checker<'a> {
                     .lookup_class(&class)
                     .map(|(canonical, _)| canonical.to_string())
                     .unwrap_or(class);
-                if !self.registry.classes.contains_key(&class) {
+                if !self.registry.classes.contains_key(class.as_str()) {
                     // Mirrors real PHPStan's `AccessStaticPropertiesCheck`/
                     // `ClassConstantRule`'s "class doesn't exist at all"
                     // half, for both a static-property and a
@@ -3046,7 +3046,7 @@ impl<'a> Checker<'a> {
                             _ => None,
                         };
                         if let Some(class) = &recv_class
-                            && self.registry.classes.contains_key(class)
+                            && self.registry.classes.contains_key(class.as_str())
                         {
                             if self.member_confirmed_missing(&recv_ty, |c| {
                                 self.registry.lookup_method(c, method).is_some()
@@ -3093,7 +3093,7 @@ impl<'a> Checker<'a> {
                     }
                     ExprKind::StaticCall(class_name, method, _) => {
                         if let Some(class) = self.resolve_static_class_name(class_name)
-                            && self.registry.classes.contains_key(&class)
+                            && self.registry.classes.contains_key(class.as_str())
                         {
                             self.check_call_site_method_name_case(&class, method, e.span, label);
                             if self.registry.lookup_method(&class, method).is_none()
@@ -3305,7 +3305,7 @@ impl<'a> Checker<'a> {
                         let templates = self
                             .registry
                             .classes
-                            .get(&canonical)
+                            .get(canonical.as_str())
                             .map(|info| info.templates.as_slice())
                             .unwrap_or(&[]);
                         if templates.is_empty() {
@@ -3354,12 +3354,12 @@ impl<'a> Checker<'a> {
                             // `Mixed` there.
                             let last_bound = templates
                                 .iter()
-                                .rposition(|t| bindings.contains_key(t))
+                                .rposition(|t| bindings.contains_key(t.as_ref()))
                                 .map(|i| i + 1)
                                 .unwrap_or(0);
                             let bound_args = templates[..last_bound]
                                 .iter()
-                                .map(|t| bindings.get(t).cloned().unwrap_or(Type::Mixed))
+                                .map(|t| bindings.get(t.as_ref()).cloned().unwrap_or(Type::Mixed))
                                 .collect();
                             Type::Object(canonical, bound_args)
                         }

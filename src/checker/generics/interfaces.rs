@@ -77,7 +77,7 @@ impl<'a> Checker<'a> {
         );
 
         for (iface, idx, new_ty, old_ty) in diagnostics {
-            let Some(info) = self.registry.classes.get(&iface) else {
+            let Some(info) = self.registry.classes.get(iface.as_str()) else {
                 continue;
             };
             let Some(template_name) = info.templates.get(idx) else {
@@ -211,7 +211,7 @@ impl<'a> Checker<'a> {
         let next_bindings: HashMap<String, Type> = info
             .templates
             .iter()
-            .cloned()
+            .map(|s| s.to_string())
             .zip(concrete_args.iter().cloned())
             .collect();
         self.walk_for_interface_conflicts(name, &next_bindings, found, diagnostics, visited);
@@ -230,9 +230,9 @@ fn identity_template_bindings(info: &ClassInfo, class: &str) -> HashMap<String, 
                 Variance::Invariant
             };
             (
-                name.clone(),
+                name.to_string(),
                 Type::TemplateParam(TemplateParam {
-                    name: name.clone(),
+                    name: name.to_string(),
                     bound: Box::new(
                         info.template_bounds
                             .get(name)

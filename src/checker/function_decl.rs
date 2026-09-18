@@ -28,10 +28,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_trait_methods(&mut self, fqn: &str, c: &ClassDecl) {
         let hosts = self.registry.classes_using_trait(fqn);
         let has_hosts = !hosts.is_empty();
-        let contexts: Vec<String> = if has_hosts {
+        let contexts: Vec<std::sync::Arc<str>> = if has_hosts {
             hosts
         } else {
-            vec![fqn.to_string()]
+            vec![std::sync::Arc::from(fqn)]
         };
         let previous_trait = self.current_trait.take();
         self.current_trait = Some(fqn.to_string());
@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
             None => self
                 .registry
                 .functions
-                .get(&self.name_ctx.declared_name(&f.name)),
+                .get(self.name_ctx.declared_name(&f.name).as_str()),
         }
     }
 
@@ -316,15 +316,20 @@ impl<'a> Checker<'a> {
                     let ty = mark_template_params(ty, &shallow);
                     resolve_names_in_type(ty, &self.name_ctx)
                 };
-                let bounds: std::collections::HashMap<String, Type> = doc
+                let templates: Vec<std::sync::Arc<str>> = doc
+                    .templates
+                    .iter()
+                    .map(|s| crate::intern::intern(s))
+                    .collect();
+                let bounds: std::collections::HashMap<std::sync::Arc<str>, Type> = doc
                     .template_bounds
                     .iter()
-                    .map(|(k, v)| (k.clone(), resolve(v)))
+                    .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
                     .collect();
-                let defaults: std::collections::HashMap<String, Type> = doc
+                let defaults: std::collections::HashMap<std::sync::Arc<str>, Type> = doc
                     .template_defaults
                     .iter()
-                    .map(|(k, v)| (k.clone(), resolve(v)))
+                    .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
                     .collect();
                 let type_aliases = self
                     .registry
@@ -334,7 +339,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or_default();
                 let display_name = format!("method {c}::{}()", f.name);
                 self.check_template_declaration_validity(
-                    &doc.templates,
+                    &templates,
                     &bounds,
                     &defaults,
                     &type_aliases,
@@ -348,7 +353,7 @@ impl<'a> Checker<'a> {
                     let mut shadowed: Vec<&String> = doc
                         .templates
                         .iter()
-                        .filter(|n| info.templates.contains(n))
+                        .filter(|n| info.templates.iter().any(|t| t.as_ref() == n.as_str()))
                         .collect();
                     shadowed.sort();
                     for name in shadowed {
@@ -429,7 +434,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&param.case_refs, &label, ast_param.span);
                     self.check_type_internal_usage(&param.case_refs, &label, ast_param.span);
-                    resolved_params.push((param.name.clone(), ty.clone(), ast_param.span));
+                    resolved_params.push((param.name.to_string(), ty.clone(), ast_param.span));
                     // `ParamSig::ty` holds a variadic parameter's own
                     // *element* type (the right shape for checking each
                     // individual argument at a call site) - inside the
@@ -442,7 +447,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     self.probe_hit_at(ast_param.name_span, &ty);
-                    locals.declare(param.name.clone(), ty, ast_param.name_span);
+                    locals.declare(param.name.to_string(), ty, ast_param.name_span);
                 }
             }
             // This is exactly what every anonymous class method hits,
@@ -513,7 +518,7 @@ impl<'a> Checker<'a> {
                                 if f.name.as_ref() == "__construct" {
                                     s.params
                                         .iter()
-                                        .find(|ap| ap.name.as_str() == p.name.as_ref())
+                                        .find(|ap| ap.name.as_ref() == p.name.as_ref())
                                 } else {
                                     s.params.get(i)
                                 }
@@ -571,7 +576,10 @@ impl<'a> Checker<'a> {
         // Captured (moved into) by the `.or_else` closure below when
         // `sig` is `None`. Stays empty (and unused) when `sig` is
         // `Some`, since the closure never runs in that case.
-        let mut declared_return_case_refs_none_path: Vec<(String, String)> = Vec::new();
+        let mut declared_return_case_refs_none_path: Vec<(
+            std::sync::Arc<str>,
+            std::sync::Arc<str>,
+        )> = Vec::new();
         let declared_return = sig.map(|s| s.return_type.clone()).or_else(|| {
             // Same "the registry-side merge this branch otherwise skips"
             // fix as the param loop above, for the return position - an
@@ -876,7 +884,7 @@ impl<'a> Checker<'a> {
                     if param.by_ref {
                         let check_ty = param.out_ty.clone().unwrap_or_else(|| param.ty.clone());
                         self.current_function_by_ref_params
-                            .insert(std::sync::Arc::from(param.name.as_str()), check_ty);
+                            .insert(std::sync::Arc::from(param.name.as_ref()), check_ty);
                     }
                 }
             }

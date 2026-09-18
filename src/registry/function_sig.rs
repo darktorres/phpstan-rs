@@ -25,7 +25,7 @@ pub(crate) use type_resolution::{
 
 #[derive(Debug, Clone)]
 pub struct ParamSig {
-    pub name: String,
+    pub name: Arc<str>,
     pub ty: Type,
     // The native, no-docblock-merge type (see `return_type_native`'s
     // doc comment for the same split on the return side).
@@ -55,7 +55,7 @@ pub struct ParamSig {
     // original spelling. Empty for a backfilled position - the raw text
     // belongs to an ancestor file's own `use` imports, not this one's
     // `name_ctx`.
-    pub case_refs: Vec<(String, String)>,
+    pub case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `@param-closure-this Type $name`'s resolved `Type` - what `$this`
     // becomes inside a `Closure`/`ArrowFn` argument at this position.
     // `None` when untagged.
@@ -78,7 +78,7 @@ pub struct FunctionSig {
     // `ParamSig::has_own_doc`'s return-position equivalent.
     pub return_has_own_doc: bool,
     // `ParamSig::case_refs`'s return-position equivalent.
-    pub return_case_refs: Vec<(String, String)>,
+    pub return_case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `ParamSig::explicit_mixed_hint`'s return-position equivalent.
     pub return_explicit_mixed_hint: bool,
     // PHP 8.5's `#[\NoDiscard]` marker - `true` when a bare, unused
@@ -286,7 +286,7 @@ impl FunctionSig {
         f: &FunctionDecl,
         ctx: &NameContext,
         class_templates: &HashMap<String, TemplateParam>,
-        class_type_aliases: &HashMap<String, Type>,
+        class_type_aliases: &HashMap<Arc<str>, Type>,
         visibility: Visibility,
     ) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
@@ -390,7 +390,7 @@ impl FunctionSig {
                         substitute_type_aliases(ty, class_type_aliases)
                     });
                 ParamSig {
-                    name: p.name.to_string(),
+                    name: p.name.clone(),
                     ty,
                     ty_native,
                     variadic: p.variadic,
@@ -668,8 +668,8 @@ impl FunctionSig {
 /// *position* of its *first*, so later uniquely-named parameters aren't
 /// shifted.
 fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
-    let mut order: Vec<String> = Vec::new();
-    let mut by_name: HashMap<String, ParamSig> = HashMap::new();
+    let mut order: Vec<Arc<str>> = Vec::new();
+    let mut by_name: HashMap<Arc<str>, ParamSig> = HashMap::new();
     for p in params {
         if !by_name.contains_key(&p.name) {
             order.push(p.name.clone());

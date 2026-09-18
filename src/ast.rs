@@ -444,7 +444,7 @@ pub struct ClassDecl {
     // - the trait-conflict check needs this to know a name the class
     // author already explicitly addressed, even though this project
     // doesn't model *which* trait `insteadof` actually picked.
-    pub resolved_trait_conflicts: Vec<String>,
+    pub resolved_trait_conflicts: Vec<Arc<str>>,
     // The class's own `/** ... */` doc comment, if any - needed for its
     // own `@template T` declarations (class-level generics).
     pub doc_comment: Option<Arc<str>>,
@@ -487,7 +487,7 @@ pub struct EnumDecl {
     // See `ClassDecl::uses_doc_comments`'s own doc comment.
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
-    pub resolved_trait_conflicts: Vec<String>,
+    pub resolved_trait_conflicts: Vec<Arc<str>>,
     // The enum's own `/** ... */` doc comment, if any - needed
     // only to reject a stray `@template` tag (enums can't be generic).
     pub doc_comment: Option<Arc<str>>,
@@ -499,9 +499,9 @@ pub struct EnumDecl {
 // `use A, B { B::hello as helloB; }` - see `ClassDecl.trait_aliases`.
 #[derive(Debug, Clone)]
 pub struct TraitAlias {
-    pub trait_name: Option<String>,
-    pub method: String,
-    pub alias: String,
+    pub trait_name: Option<Arc<str>>,
+    pub method: Arc<str>,
+    pub alias: Arc<str>,
 }
 
 /// One argument in a call's own argument list - `name` is

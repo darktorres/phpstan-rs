@@ -1,5 +1,6 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::HashSet;
+use std::sync::Arc;
 
 use crate::ast::Stmt;
 use crate::types::Type;
@@ -60,8 +61,8 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 /// project code in a real implementation.
 #[derive(Debug, Default)]
 pub struct Registry {
-    pub classes: FxHashMap<String, ClassInfo>,
-    pub functions: FxHashMap<String, FunctionSig>,
+    pub classes: FxHashMap<Arc<str>, ClassInfo>,
+    pub functions: FxHashMap<Arc<str>, FunctionSig>,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
     // `functions`: a `const` gets its namespace-qualified name; a
@@ -71,7 +72,7 @@ pub struct Registry {
     // (`infer_const_type`'s scope) - anything more dynamic is left
     // unindexed, the same "don't know, don't guess" leniency that
     // function already documents.
-    pub global_constants: FxHashMap<String, Type>,
+    pub global_constants: FxHashMap<Arc<str>, Type>,
     // A strictness-parameter half: an unknown array literal's type
     // (`Array(Mixed)`) freely satisfies any array/shape type it's
     // checked against. Defaults to `false` (today's permissive
@@ -261,7 +262,7 @@ pub struct Registry {
     // "this name's entry is only a conditional stub, so the first real
     // unconditional declaration should replace it outright" - both look
     // identical from `self.classes.contains_key(&name)` alone.
-    unconditionally_declared_classes: HashSet<String>,
+    unconditionally_declared_classes: HashSet<Arc<str>>,
     // Names `merge_stub_classes` provided a built-in native-class stub
     // for (jetbrains/phpstorm-stubs) - a *subset* of
     // `unconditionally_declared_classes` above, distinguishing "a
@@ -272,7 +273,7 @@ pub struct Registry {
     // class (`PHPUnit\Framework\TestCase`-vs-`class_exists`-guarded-
     // fallback) would wrongly leak a defensive fallback's members onto
     // the real class everything else sees.
-    pub(crate) built_in_stub_classes: HashSet<String>,
+    pub(crate) built_in_stub_classes: HashSet<Arc<str>>,
     // The function-side sibling of the tracking set above -
     // phpstorm-stubs represents a real PHP internal function overload
     // (different signatures by argument shape, not version) as two
@@ -281,7 +282,7 @@ pub struct Registry {
     // `array $replace_pairs` form). Needed so the second declaration
     // merges into a callable accepting either shape, instead of a blind
     // `self.functions.insert` discarding the first's params.
-    unconditionally_declared_functions: HashSet<String>,
+    unconditionally_declared_functions: HashSet<Arc<str>>,
     // Names `merge_stubs` provided a signature for, not yet
     // overwritten by a real, already-indexed conditional declaration -
     // the same ambiguity `unconditionally_declared_functions` resolves
@@ -291,7 +292,7 @@ pub struct Registry {
     // symfony/polyfill-php80) doesn't lose its real, more-precise
     // (here, nullable) parameter types to `entry(...).or_insert_with(...)`
     // being a no-op once the built-in stub already occupies the slot.
-    stub_provided_functions: HashSet<String>,
+    stub_provided_functions: HashSet<Arc<str>>,
     // Every bare function/method name with a non-empty `assert` list
     // on some indexed `FunctionSig`. `@phpstan-assert` is rare in real
     // corpora (zero occurrences across the full Symfony monorepo plus
@@ -302,24 +303,24 @@ pub struct Registry {
     // `remove_declarations` - a harmless, rare false positive (still a
     // "may still do the real check" set, not a "known good" one), never
     // a false negative.
-    pub(crate) names_with_assert_tags: HashSet<String>,
+    pub(crate) names_with_assert_tags: HashSet<Arc<str>>,
     // Every class's precomputed `extends`+`implements` transitive
     // closure - see `is_subclass_of`/`precompute_ancestor_names`
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could
     // have changed.
-    pub(crate) ancestor_names: FxHashMap<String, FxHashSet<String>>,
+    pub(crate) ancestor_names: FxHashMap<Arc<str>, FxHashSet<Arc<str>>>,
     // Every registered class's lowercased name -> canonical key - see
     // `lookup_class`. A byproduct of `canonicalize_class_name_case`'s
     // already-built map, persisted here instead of discarded.
-    pub(crate) classes_lowercase: FxHashMap<String, String>,
+    pub(crate) classes_lowercase: FxHashMap<String, Arc<str>>,
     // Every registered class's precomputed member-name ->
     // owning-ancestor-name map, one per member kind - see
     // `lookup_method`/`precompute_member_owners` (`registry/hierarchy.rs`).
-    pub(crate) method_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
-    pub(crate) ancestor_method_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
-    pub(crate) property_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
-    pub(crate) ancestor_property_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
-    pub(crate) const_owner_by_class: FxHashMap<String, FxHashMap<String, String>>,
+    pub(crate) method_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
+    pub(crate) ancestor_method_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
+    pub(crate) property_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
+    pub(crate) ancestor_property_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
+    pub(crate) const_owner_by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Arc<str>>>,
 }
 
 impl Registry {

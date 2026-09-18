@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::{Stmt, StmtKind, UseImport, UseKind};
+use crate::intern::intern;
 use crate::types::{CallableParam, CallableSig, Type};
 
 /// `NameContext::use_map`'s own backing map - `imbl::HashMap` (a
@@ -441,7 +442,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
 pub(crate) fn collect_class_name_case_refs(
     ty: &Type,
     ctx: &NameContext,
-    out: &mut Vec<(String, String)>,
+    out: &mut Vec<(Arc<str>, Arc<str>)>,
 ) {
     match ty {
         // Mirrors `resolve_names_in_type`'s own sentinel arms exactly:
@@ -466,7 +467,7 @@ pub(crate) fn collect_class_name_case_refs(
             }
         }
         Type::Object(name, args) => {
-            out.push((name.clone(), ctx.resolve(name)));
+            out.push((intern(name), intern(&ctx.resolve(name))));
             for a in args {
                 collect_class_name_case_refs(a, ctx, out);
             }

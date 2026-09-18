@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
             let Type::Object(class, _) = &thrown else {
                 continue;
             };
-            if !self.registry.classes.contains_key(class) {
+            if !self.registry.classes.contains_key(class.as_str()) {
                 continue;
             }
             let covered = throws.is_some_and(|t| self.registry.is_assignable(&thrown, t));

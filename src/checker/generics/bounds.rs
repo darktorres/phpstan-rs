@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::ast::*;
 use crate::checker::{
@@ -58,7 +59,7 @@ impl<'a> Checker<'a> {
         match ty {
             Type::Object(class, args) => {
                 if !args.is_empty()
-                    && let Some(info) = self.registry.classes.get(class)
+                    && let Some(info) = self.registry.classes.get(class.as_str())
                     && !info.template_bounds.is_empty()
                 {
                     // Bound-checking cares about the real referenced
@@ -74,7 +75,7 @@ impl<'a> Checker<'a> {
                     let bindings: TemplateBindings = info
                         .templates
                         .iter()
-                        .cloned()
+                        .map(|s| s.to_string())
                         .zip(args.iter().map(|a| {
                             types::strip_call_site_variance(a)
                                 .cloned()
@@ -168,7 +169,7 @@ impl<'a> Checker<'a> {
                     .is_none_or(|inner| self.is_type_fully_known(inner))
             }
             Type::Object(name, args) => {
-                (name == "object" || self.registry.classes.contains_key(name))
+                (name == "object" || self.registry.classes.contains_key(name.as_str()))
                     && args.iter().all(|a| self.is_type_fully_known(a))
             }
             Type::Array(key, inner) => {
@@ -283,7 +284,7 @@ impl<'a> Checker<'a> {
         };
         let block = docblock::parse(raw);
         for tag in &block.properties {
-            let Some(prop_sig) = info.properties.get(&tag.name) else {
+            let Some(prop_sig) = info.properties.get(tag.name.as_str()) else {
                 continue;
             };
             let tag_name = match (tag.readable, tag.writable) {
@@ -346,27 +347,27 @@ impl<'a> Checker<'a> {
         // - `check_generic_bounds_and_arity`'s `check_arity` flag is how
         // this call site opts out of that check.
         if let Some(parent) = info.extends.first() {
-            let parent_ty = Type::Object(parent.clone(), info.extends_args.clone());
+            let parent_ty = Type::Object(parent.to_string(), info.extends_args.clone());
             types_to_check.push((parent_ty, info.extends.len() == 1));
         }
         // `implements_args` is a `HashMap` with no guaranteed iteration
         // order - sorted by key so two diagnostics from it always come out
         // in the same relative order, not one that silently varies by
         // process (Rust's default hasher is randomly seeded per run).
-        let mut iface_names: Vec<&String> = info.implements_args.keys().collect();
+        let mut iface_names: Vec<&Arc<str>> = info.implements_args.keys().collect();
         iface_names.sort();
         for iface in iface_names {
-            let iface_ty = Type::Object(iface.clone(), info.implements_args[iface].clone());
+            let iface_ty = Type::Object(iface.to_string(), info.implements_args[iface].clone());
             types_to_check.push((iface_ty, true));
         }
         // `@use Trait<Arg, ...>` - a `HashMap` like `implements_args`,
         // each trait keyed independently (no `extends_args`-style
         // conflation risk: PHP requires one `@use` tag per trait), so
         // every entry is as safe to arity-check as an interface is.
-        let mut trait_names: Vec<&String> = info.uses_args.keys().collect();
+        let mut trait_names: Vec<&Arc<str>> = info.uses_args.keys().collect();
         trait_names.sort();
         for trait_name in trait_names {
-            let trait_ty = Type::Object(trait_name.clone(), info.uses_args[trait_name].clone());
+            let trait_ty = Type::Object(trait_name.to_string(), info.uses_args[trait_name].clone());
             types_to_check.push((trait_ty, true));
         }
         for (ty, check_arity) in &types_to_check {
@@ -403,7 +404,7 @@ impl<'a> Checker<'a> {
         if args.is_empty() {
             return;
         }
-        let Some(info) = self.registry.classes.get(class) else {
+        let Some(info) = self.registry.classes.get(class.as_str()) else {
             return;
         };
         // A referenced class with *no* declared templates at all is
@@ -572,15 +573,15 @@ impl<'a> Checker<'a> {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_template_declaration_validity(
         &mut self,
-        templates: &[String],
-        bounds: &HashMap<String, Type>,
-        defaults: &HashMap<String, Type>,
-        type_aliases: &HashMap<String, Type>,
+        templates: &[std::sync::Arc<str>],
+        bounds: &HashMap<std::sync::Arc<str>, Type>,
+        defaults: &HashMap<std::sync::Arc<str>, Type>,
+        type_aliases: &HashMap<std::sync::Arc<str>, Type>,
         display_name: &str,
         label: &str,
         span: Span,
     ) {
-        let mut template_with_default: Option<&str> = None;
+        let mut template_with_default: Option<&std::sync::Arc<str>> = None;
         for name in templates {
             if self.class_name_exists(name) {
                 self.report(

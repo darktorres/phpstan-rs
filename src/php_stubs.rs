@@ -40,6 +40,8 @@
 //! classes from its own dependency, `nikic/php-doc-parser`
 //! (`PHPStan\PhpDocParser\Ast\Type\*`), not vendored here.
 
+use std::sync::Arc;
+
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
@@ -68,9 +70,9 @@ include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 /// mechanism - a single, narrow, explicitly justified post-generation
 /// patch for this one function is more honest than reintroducing a
 /// whole overlay system for it.
-fn patch_array_multisort_by_ref(stubs: &mut [(String, FunctionSig)]) {
+fn patch_array_multisort_by_ref(stubs: &mut [(Arc<str>, FunctionSig)]) {
     for (name, sig) in stubs.iter_mut() {
-        if name != "array_multisort" {
+        if name.as_ref() != "array_multisort" {
             continue;
         }
         for param in &mut sig.params {
@@ -84,9 +86,9 @@ fn patch_array_multisort_by_ref(stubs: &mut [(String, FunctionSig)]) {
 /// `list<array{function: string, ...}>` shape `Exception::getTrace()`
 /// shares (`backtrace_frame_list_type`, `patch_reflection_and_exception_
 /// list_types`'s own doc comment).
-fn patch_debug_backtrace(stubs: &mut [(String, FunctionSig)]) {
+fn patch_debug_backtrace(stubs: &mut [(Arc<str>, FunctionSig)]) {
     for (name, sig) in stubs.iter_mut() {
-        if name == "debug_backtrace" {
+        if name.as_ref() == "debug_backtrace" {
             sig.return_type = backtrace_frame_list_type();
         }
     }
@@ -116,9 +118,9 @@ fn patch_debug_backtrace(stubs: &mut [(String, FunctionSig)]) {
 /// one-function-at-a-time discipline `patch_array_multisort_by_ref`
 /// above already established rather than reintroducing a whole
 /// stub-overlay system for a still-hypothetical wider gap.
-fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
+fn patch_usleep(stubs: &mut [(Arc<str>, FunctionSig)]) {
     for (name, sig) in stubs.iter_mut() {
-        if name == "usleep" {
+        if name.as_ref() == "usleep" {
             for param in &mut sig.params {
                 param.ty = Type::Int;
             }
@@ -186,7 +188,7 @@ fn patch_usleep(stubs: &mut [(String, FunctionSig)]) {
 /// real PHPStan-bundled dynamic-return-type extension either, so bare
 /// (whatever the native/PHPDoc return type already resolves to) is
 /// already the correct real-PHPStan-matching answer for all of them too.
-fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
+fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionSig)]) {
     let date_parse_shape = types::parse_type_string(
         "array{year: int|false, month: int|false, day: int|false, hour: int|false, \
          minute: int|false, second: int|false, fraction: float|false, warning_count: int, \
@@ -297,7 +299,7 @@ fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
         ("pathinfo", &types::parse_type_string("array|string")),
     ];
     for (name, sig) in stubs.iter_mut() {
-        if let Some((_, shape)) = patches.iter().find(|(n, _)| n == name) {
+        if let Some((_, shape)) = patches.iter().find(|(n, _)| *n == name.as_ref()) {
             sig.return_type = (*shape).clone();
         }
     }
@@ -308,7 +310,7 @@ fn patch_functionmap_array_shapes(stubs: &mut [(String, FunctionSig)]) {
 /// once across the corpus (e.g. a version-conditional pair of signatures
 /// for the same function in different files); taking the first is a
 /// simplification, not a precision-critical choice.
-pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
+pub fn generated_stubs() -> Vec<(Arc<str>, FunctionSig)> {
     generated_stub_data().functions.clone()
 }
 
@@ -343,14 +345,14 @@ pub fn generated_stubs() -> Vec<(String, FunctionSig)> {
 /// a real `Type::ClassString` construction via `::class`/`get_class()`
 /// triggers that arm) - the `Foo::class`/object-instance shapes this fixes
 /// are the idiomatic PHP 8+ styles anyway.
-fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo)]) {
+fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassInfo)]) {
     let Some((_, info)) = classes
         .iter_mut()
-        .find(|(name, _)| name == "ReflectionClass")
+        .find(|(name, _)| name.as_ref() == "ReflectionClass")
     else {
         return;
     };
-    if !info.templates.iter().any(|t| t == "T") {
+    if !info.templates.iter().any(|t| t.as_ref() == "T") {
         return;
     }
     let tp = TemplateParam {
@@ -431,18 +433,21 @@ fn patch_reflection_class_constructor_template(classes: &mut [(String, ClassInfo
 /// attribute reader) would start getting flagged at level 6+ for a
 /// template this project invented, not one a user ever wrote or could
 /// satisfy.
-fn patch_reflection_method_and_property_templates(classes: &mut [(String, ClassInfo)]) {
+fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
     for class_name in ["ReflectionMethod", "ReflectionProperty"] {
-        let Some((_, info)) = classes.iter_mut().find(|(name, _)| name == class_name) else {
+        let Some((_, info)) = classes
+            .iter_mut()
+            .find(|(name, _)| name.as_ref() == class_name)
+        else {
             continue;
         };
-        if info.templates.iter().any(|t| t == "TClass") {
+        if info.templates.iter().any(|t| t.as_ref() == "TClass") {
             continue;
         }
-        info.templates.push("TClass".to_string());
-        info.covariant_templates.insert("TClass".to_string());
+        info.templates.push(Arc::from("TClass"));
+        info.covariant_templates.insert(Arc::from("TClass"));
         info.template_bounds.insert(
-            "TClass".to_string(),
+            Arc::from("TClass"),
             Type::Object("object".to_string(), Vec::new()),
         );
         let tp = TemplateParam {
@@ -465,9 +470,9 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(String, ClassI
     // `T`, rather than reaching into that function's own local variable.
     let Some(t_ty) = classes
         .iter()
-        .find(|(name, _)| name == "ReflectionClass")
+        .find(|(name, _)| name.as_ref() == "ReflectionClass")
         .and_then(|(_, info)| {
-            if !info.templates.iter().any(|t| t == "T") {
+            if !info.templates.iter().any(|t| t.as_ref() == "T") {
                 return None;
             }
             Some(Type::TemplateParam(TemplateParam {
@@ -495,7 +500,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(String, ClassI
 
     let Some((_, rc_info)) = classes
         .iter_mut()
-        .find(|(name, _)| name == "ReflectionClass")
+        .find(|(name, _)| name.as_ref() == "ReflectionClass")
     else {
         return;
     };
@@ -575,10 +580,10 @@ fn backtrace_frame_list_type() -> Type {
 ///   ReflectionParameter>`.
 /// - `Exception`/`Error::getTrace()` -> the shared `backtrace_frame_
 ///   list_type()` shape above.
-fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]) {
+fn patch_reflection_and_exception_list_types(classes: &mut [(Arc<str>, ClassInfo)]) {
     if let Some((_, info)) = classes
         .iter_mut()
-        .find(|(name, _)| name == "ReflectionFunctionAbstract")
+        .find(|(name, _)| name.as_ref() == "ReflectionFunctionAbstract")
         && let Some(m) = info.methods.get_mut("getParameters")
     {
         m.return_type = Type::Intersection(vec![
@@ -596,7 +601,10 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]
     // they both also implement, covers every real throwable via
     // ordinary inheritance.
     for class_name in ["Exception", "Error"] {
-        let Some((_, info)) = classes.iter_mut().find(|(name, _)| name == class_name) else {
+        let Some((_, info)) = classes
+            .iter_mut()
+            .find(|(name, _)| name.as_ref() == class_name)
+        else {
             continue;
         };
         let Some(m) = info.methods.get_mut("getTrace") else {
@@ -608,7 +616,7 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(String, ClassInfo)]
 
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
-pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
+pub fn generated_stub_classes() -> Vec<(Arc<str>, ClassInfo)> {
     generated_stub_data().classes.clone()
 }
 
@@ -630,7 +638,7 @@ pub fn generated_stub_classes() -> Vec<(String, ClassInfo)> {
 /// instead), a bare global constant has no such tiebreaking mechanism, so
 /// this reuses the exact same conflict policy already used *within* one
 /// file's own `global_constants` map, across the whole corpus at once.
-pub fn generated_stub_constants() -> Vec<(String, Type)> {
+pub fn generated_stub_constants() -> Vec<(Arc<str>, Type)> {
     generated_stub_data().constants.clone()
 }
 
@@ -644,9 +652,9 @@ pub fn generated_stub_constants() -> Vec<(String, Type)> {
 /// field off what is otherwise the identical deterministic per-file
 /// result was pure waste.
 struct GeneratedStubData {
-    functions: Vec<(String, FunctionSig)>,
-    classes: Vec<(String, ClassInfo)>,
-    constants: Vec<(String, Type)>,
+    functions: Vec<(Arc<str>, FunctionSig)>,
+    classes: Vec<(Arc<str>, ClassInfo)>,
+    constants: Vec<(Arc<str>, Type)>,
 }
 
 /// Computes `GeneratedStubData` exactly once per process
@@ -666,7 +674,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         let mut functions = Vec::new();
         let mut seen_classes = std::collections::HashSet::new();
         let mut classes = Vec::new();
-        let mut merged_constants: rustc_hash::FxHashMap<String, Type> =
+        let mut merged_constants: rustc_hash::FxHashMap<Arc<str>, Type> =
             rustc_hash::FxHashMap::default();
         for source in PHPSTORM_STUBS_SOURCES
             .iter()

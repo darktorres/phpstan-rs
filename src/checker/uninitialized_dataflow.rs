@@ -602,7 +602,7 @@ fn absorb(
 /// method, or simply unresolvable) contributes nothing: the caller's
 /// state passes through unchanged.
 fn absorb_resolved(
-    resolved: Option<(String, &FunctionSig)>,
+    resolved: Option<(std::sync::Arc<str>, &FunctionSig)>,
     method_name: &str,
     state: PropertyInitState,
     ctx: &mut PropertyInitCtx,

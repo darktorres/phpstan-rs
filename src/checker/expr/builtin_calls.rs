@@ -1548,7 +1548,9 @@ impl<'a> Checker<'a> {
     fn find_declared_parent_class(&self, class: &str) -> Option<Type> {
         let info = self.registry.classes.get(class)?;
         Some(match info.extends.first() {
-            Some(parent) => Type::ClassString(Box::new(Type::Object(parent.clone(), Vec::new()))),
+            Some(parent) => {
+                Type::ClassString(Box::new(Type::Object(parent.to_string(), Vec::new())))
+            }
             None => Type::False,
         })
     }
@@ -2377,7 +2379,7 @@ fn get_debug_type_for(ty: &Type, registry: &Registry) -> Option<Type> {
         Type::Object(class, _) => Some(
             if registry
                 .classes
-                .get(class)
+                .get(class.as_str())
                 .is_some_and(|info| info.is_final)
             {
                 Type::StringLiteral(class.clone())

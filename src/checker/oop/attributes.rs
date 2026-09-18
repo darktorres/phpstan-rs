@@ -163,7 +163,7 @@ impl<'a> Checker<'a> {
         let mut seen_non_repeatable: HashSet<String> = HashSet::new();
         for attr in attrs {
             let fqn = self.name_ctx.resolve(&attr.name);
-            let Some(info) = self.registry.classes.get(&fqn) else {
+            let Some(info) = self.registry.classes.get(fqn.as_str()) else {
                 continue;
             };
             let Some(flags) = info.attribute_targets else {

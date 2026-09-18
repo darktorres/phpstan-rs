@@ -20,7 +20,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(String, &PropertySig)> {
+    ) -> Option<(std::sync::Arc<str>, &PropertySig)> {
         match base_ty {
             Type::Object(class, _) => self.registry.lookup_property_with_owner(class, prop),
             Type::EnumCase(fqn, _) => self.registry.lookup_property_with_owner(fqn, prop),
@@ -50,7 +50,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> Option<(String, &FunctionSig)> {
+    ) -> Option<(std::sync::Arc<str>, &FunctionSig)> {
         match base_ty {
             Type::Object(class, _) => self.registry.lookup_method_with_owner(class, method),
             Type::EnumCase(fqn, _) => self.registry.lookup_method_with_owner(fqn, method),
@@ -167,7 +167,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(String, Vec<Type>, String, PropertySig)> {
+    ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, PropertySig)> {
         match base_ty {
             Type::Object(class, type_args) => self
                 .registry
@@ -217,7 +217,7 @@ impl<'a> Checker<'a> {
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> Option<(String, Vec<Type>, String, FunctionSig)> {
+    ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, FunctionSig)> {
         match base_ty {
             Type::Object(class, type_args) => self
                 .registry

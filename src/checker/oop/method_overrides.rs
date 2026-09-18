@@ -29,12 +29,12 @@ impl<'a> Checker<'a> {
         if !c.uses.is_empty() {
             let own_method_names: std::collections::HashSet<&str> =
                 c.methods.iter().map(|m| m.function.name.as_ref()).collect();
-            let mut trait_method_names: Vec<String> = info
+            let mut trait_method_names: Vec<std::sync::Arc<str>> = info
                 .methods
                 .keys()
                 .filter(|name| {
-                    name.as_str() != "__construct"
-                        && !own_method_names.contains(name.as_str())
+                    name.as_ref() != "__construct"
+                        && !own_method_names.contains(name.as_ref())
                         && !info.abstract_methods.contains(*name)
                 })
                 .cloned()
@@ -108,7 +108,7 @@ impl<'a> Checker<'a> {
             && parent_sig.visibility != Visibility::Private
         {
             ancestors.push((
-                parent.clone(),
+                parent.to_string(),
                 parent_sig.throws.clone().unwrap_or_else(throwable),
             ));
         }
@@ -116,7 +116,10 @@ impl<'a> Checker<'a> {
             .registry
             .all_interfaces_declaring_method(fqn, method_name)
         {
-            ancestors.push((owner, sig.throws.clone().unwrap_or_else(throwable)));
+            ancestors.push((
+                owner.to_string(),
+                sig.throws.clone().unwrap_or_else(throwable),
+            ));
         }
         for used in &info.uses {
             if let Some(trait_info) = self.registry.classes.get(used)
@@ -124,7 +127,7 @@ impl<'a> Checker<'a> {
                 && let Some(trait_sig) = trait_info.methods.get(method_name)
             {
                 ancestors.push((
-                    used.clone(),
+                    used.to_string(),
                     trait_sig.throws.clone().unwrap_or_else(throwable),
                 ));
             }

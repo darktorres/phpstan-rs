@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
                 }
                 let bindings = self.class_template_bindings(owner, &[], &ancestor);
                 if !bindings.is_empty() {
-                    scoped_bindings.push((ancestor, bindings));
+                    scoped_bindings.push((ancestor.to_string(), bindings));
                 }
             }
         }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children};
@@ -17,11 +18,12 @@ use crate::types::{TemplateParam, Type};
 /// by the parser at all, so only the native type hint is available. No
 /// hook, or an implicit `set { ... }` with no parameter list, returns
 /// `None` - the property's type stays the write sink, unchanged.
+#[allow(clippy::type_complexity)]
 pub(crate) fn property_hook_set_type(
     hooks: Option<&PropertyHooks>,
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (Option<Type>, Vec<(String, String)>) {
+) -> (Option<Type>, Vec<(Arc<str>, Arc<str>)>) {
     let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {
         return (None, Vec::new());
     };

@@ -47,7 +47,7 @@ impl Registry {
                 if a != b && !self.is_subclass_of(a, b) {
                     return false;
                 }
-                let Some(info_b) = self.classes.get(b) else {
+                let Some(info_b) = self.classes.get(b.as_str()) else {
                     return true;
                 };
                 // `b` isn't generic at all, so the whole template-binding
@@ -93,7 +93,7 @@ impl Registry {
                     info_b
                         .templates
                         .iter()
-                        .map(|name| bindings.get(name).cloned().unwrap_or(Type::Mixed))
+                        .map(|name| bindings.get(name.as_ref()).cloned().unwrap_or(Type::Mixed))
                         .collect()
                 };
                 for (i, _name) in info_b.templates.iter().enumerate() {
@@ -473,7 +473,9 @@ impl Registry {
             // `false` member, unlike every sibling `assertIs*` narrowing
             // target that isn't itself an `Object`.
             (_, Type::Object(name, _))
-                if name != "object" && name != "resource" && !self.classes.contains_key(name) =>
+                if name != "object"
+                    && name != "resource"
+                    && !self.classes.contains_key(name.as_str()) =>
             {
                 true
             }

@@ -161,7 +161,7 @@ fn resolve_class_ref(
             .classes
             .get(current_class?)
             .and_then(|info| info.extends.first())
-            .cloned(),
+            .map(|s| s.to_string()),
         _ => Some(ctx.resolve(name)),
     }
 }

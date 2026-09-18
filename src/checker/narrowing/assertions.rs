@@ -206,13 +206,15 @@ impl<'a> Checker<'a> {
     ) -> bool {
         match ty {
             Type::Object(class, _) => {
-                self.registry.classes.contains_key(class) && !has_member(class)
+                self.registry.classes.contains_key(class.as_str()) && !has_member(class)
             }
             // A specific enum case is still a real instance of
             // its enum for member-lookup purposes - only its own case
             // identity (narrowing, `->name`/`->value`) cares which case,
             // never whether some *other* method/property exists.
-            Type::EnumCase(fqn, _) => self.registry.classes.contains_key(fqn) && !has_member(fqn),
+            Type::EnumCase(fqn, _) => {
+                self.registry.classes.contains_key(fqn.as_str()) && !has_member(fqn)
+            }
             Type::Union(members) => members
                 .iter()
                 .any(|m| self.member_confirmed_missing(m, has_member)),

@@ -3,6 +3,7 @@
 
 use super::super::*;
 use crate::ast::Stmt;
+use crate::intern::intern;
 use crate::types::{self, Type};
 
 fn ctx_for(namespace: &str) -> NameContext {
@@ -23,8 +24,8 @@ fn collects_a_representative_nested_type_s_own_class_name_refs() {
     assert_eq!(
         out,
         vec![
-            ("Foo".to_string(), "App\\Foo".to_string()),
-            ("Bar".to_string(), "App\\Bar".to_string()),
+            (intern("Foo"), intern("App\\Foo")),
+            (intern("Bar"), intern("App\\Bar")),
         ]
     );
 }
@@ -52,5 +53,5 @@ fn recurses_through_the_dollar_dollar_variance_sentinels_without_collecting_them
     );
     let mut out = Vec::new();
     collect_class_name_case_refs(&ty, &ctx, &mut out);
-    assert_eq!(out, vec![("Foo".to_string(), "App\\Foo".to_string())]);
+    assert_eq!(out, vec![(intern("Foo"), intern("App\\Foo"))]);
 }

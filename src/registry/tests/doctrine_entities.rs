@@ -83,7 +83,7 @@ fn a_many_to_one_association_resolves_its_target_from_the_native_type() {
         .as_ref()
         .unwrap();
     let assoc = entity.associations.get("category").unwrap();
-    assert_eq!(assoc.target, "App\\CategoryEntity");
+    assert_eq!(assoc.target, "App\\CategoryEntity".into());
     assert!(!assoc.is_collection);
 }
 
@@ -116,7 +116,7 @@ fn a_one_to_many_collection_association_resolves_its_target_from_target_entity_a
         .as_ref()
         .unwrap();
     let assoc = entity.associations.get("imageCategories").unwrap();
-    assert_eq!(assoc.target, "App\\ImageCategoryEntity");
+    assert_eq!(assoc.target, "App\\ImageCategoryEntity".into());
     assert!(assoc.is_collection);
 }
 
@@ -188,11 +188,11 @@ fn a_root_entity_records_its_discriminator_map() {
         .as_ref()
         .unwrap();
     assert_eq!(
-        entity.discriminator_map.get("cat").map(String::as_str),
+        entity.discriminator_map.get("cat").map(|s| s.as_ref()),
         Some("App\\CatEntity")
     );
     assert_eq!(
-        entity.discriminator_map.get("dog").map(String::as_str),
+        entity.discriminator_map.get("dog").map(|s| s.as_ref()),
         Some("App\\DogEntity")
     );
 }

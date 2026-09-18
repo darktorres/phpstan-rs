@@ -871,7 +871,7 @@ impl<'a> Checker<'a> {
         // every member's own `@param`/`@return`/`@var`. Silently a no-op
         // outside any class, or one with no `@phpstan-type` tags at all.
         let ty = match &self.current_class {
-            Some(class) => match self.registry.classes.get(class) {
+            Some(class) => match self.registry.classes.get(class.as_str()) {
                 Some(info) if !info.type_aliases.is_empty() => {
                     crate::registry::substitute_type_aliases(ty, &info.type_aliases)
                 }

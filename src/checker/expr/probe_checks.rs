@@ -53,11 +53,11 @@ impl<'a> Checker<'a> {
         }
         self.registry
             .global_constants
-            .get(&primary)
+            .get(primary.as_str())
             .or_else(|| {
                 fallback
                     .as_ref()
-                    .and_then(|f| self.registry.global_constants.get(f))
+                    .and_then(|f| self.registry.global_constants.get(f.as_str()))
             })
             .cloned()
     }
@@ -352,7 +352,7 @@ impl<'a> Checker<'a> {
                 let owner = self
                     .find_property_owner(&base_ty, prop)
                     .map(|(owner, _)| owner)
-                    .unwrap_or_else(|| base_ty.to_string());
+                    .unwrap_or_else(|| base_ty.to_string().into());
                 self.report(
                     label.to_string(),
                     format!(

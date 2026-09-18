@@ -106,7 +106,7 @@ fn a_merged_class_keeps_its_extends_when_the_second_declaration_has_none() {
             class X extends Base { public function fromFirst() {} }
             class X { public function fromSecond() {} }"#,
     );
-    assert_eq!(r.classes["X"].extends, vec!["Base".to_string()]);
+    assert_eq!(r.classes["X"].extends, vec!["Base".to_string().into()]);
     assert!(r.classes["X"].methods.contains_key("fromFirst"));
     assert!(r.classes["X"].methods.contains_key("fromSecond"));
 }
@@ -146,10 +146,14 @@ fn two_unconditional_function_declarations_with_different_arities_merge() {
     );
     let sig = &r.functions["strtr"];
     assert_eq!(sig.params.len(), 3);
-    assert_eq!(sig.params[0].name, "str", "later declaration's name wins");
+    assert_eq!(
+        sig.params[0].name,
+        "str".into(),
+        "later declaration's name wins"
+    );
     assert_eq!(sig.params[0].ty, Type::String);
     assert!(!sig.params[0].has_default);
-    assert_eq!(sig.params[1].name, "replace_pairs");
+    assert_eq!(sig.params[1].name, "replace_pairs".into());
     assert_eq!(
         sig.params[1].ty,
         Type::Union(vec![
@@ -158,7 +162,7 @@ fn two_unconditional_function_declarations_with_different_arities_merge() {
         ])
     );
     assert!(!sig.params[1].has_default);
-    assert_eq!(sig.params[2].name, "to");
+    assert_eq!(sig.params[2].name, "to".into());
     assert_eq!(sig.params[2].ty, Type::String);
     assert!(
         sig.params[2].has_default,
@@ -335,7 +339,10 @@ fn a_stub_slot_is_not_claimed_by_an_arity_mismatched_conditional_declaration() {
         1,
         "the real, arity-matching declaration must still be able to win afterward"
     );
-    assert_eq!(r.functions["grapheme_strrev"].params[0].name, "string");
+    assert_eq!(
+        r.functions["grapheme_strrev"].params[0].name,
+        "string".into()
+    );
 }
 
 // The identical arity-mismatch shape one level down from the two tests
@@ -650,7 +657,7 @@ fn a_conditional_declaration_s_extends_never_leaks_onto_a_built_in_stub() {
     );
     assert_eq!(
         r.classes["PhpToken"].implements,
-        vec!["Stringable".to_string()],
+        vec!["Stringable".to_string().into()],
         "the built-in stub's own implements must survive unchanged"
     );
 }

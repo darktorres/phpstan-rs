@@ -124,13 +124,13 @@ fn a_duplicate_named_parameter_collapses_to_its_last_occurrence_s_type() {
     );
     let sig = &r.functions["pg_query"];
     assert_eq!(sig.params.len(), 2, "the legacy duplicate must be dropped");
-    assert_eq!(sig.params[0].name, "connection");
+    assert_eq!(sig.params[0].name, "connection".into());
     assert_eq!(
         sig.params[0].ty,
         Type::Object("PgSql\\Connection".to_string(), Vec::new()),
         "the surviving type must be the modern (second) occurrence's, not the legacy (first, untyped) one"
     );
-    assert_eq!(sig.params[1].name, "query");
+    assert_eq!(sig.params[1].name, "query".into());
     assert_eq!(sig.params[1].ty, Type::String);
 }
 
@@ -151,9 +151,9 @@ fn two_separate_duplicated_parameter_pairs_both_collapse() {
     );
     let sig = &r.functions["sqlite3_open"];
     assert_eq!(sig.params.len(), 3);
-    assert_eq!(sig.params[1].name, "flags");
+    assert_eq!(sig.params[1].name, "flags".into());
     assert_eq!(sig.params[1].ty, Type::Int);
-    assert_eq!(sig.params[2].name, "encryptionKey");
+    assert_eq!(sig.params[2].name, "encryptionKey".into());
     assert_eq!(sig.params[2].ty, Type::String);
 }
 
@@ -178,7 +178,7 @@ fn a_duplicated_parameter_in_the_middle_of_the_list_doesn_t_shift_later_ones() {
     assert_eq!(
         sig.params
             .iter()
-            .map(|p| p.name.as_str())
+            .map(|p| p.name.as_ref())
             .collect::<Vec<_>>(),
         vec!["hostname", "port", "error_code", "error_message", "timeout"]
     );
@@ -189,8 +189,8 @@ fn a_function_with_no_duplicate_parameters_is_unaffected() {
     let r = build_registry(r#"<?php function f(int $a, string $b) {}"#);
     let sig = &r.functions["f"];
     assert_eq!(sig.params.len(), 2);
-    assert_eq!(sig.params[0].name, "a");
-    assert_eq!(sig.params[1].name, "b");
+    assert_eq!(sig.params[0].name, "a".into());
+    assert_eq!(sig.params[1].name, "b".into());
 }
 
 // A `LanguageLevelTypeAware` parameter override must win over a
@@ -644,7 +644,10 @@ fn an_assert_if_true_tag_naming_a_this_property_resolves() {
     let info = &sig.assert_if_true[0];
     assert!(info.negated);
     assert_eq!(info.ty, Type::Null);
-    assert_eq!(info.target, AssertTarget::ThisProp("bar".to_string()));
+    assert_eq!(
+        info.target,
+        AssertTarget::ThisProp("bar".to_string().into())
+    );
 }
 
 #[test]
@@ -663,7 +666,7 @@ fn an_assert_if_false_tag_resolves() {
     assert_eq!(sig.assert_if_false.len(), 1);
     assert_eq!(
         sig.assert_if_false[0].target,
-        AssertTarget::Param("x".to_string())
+        AssertTarget::Param("x".to_string().into())
     );
 }
 
@@ -681,7 +684,7 @@ fn an_unconditional_assert_tag_on_the_function_s_own_docblock_resolves() {
     assert_eq!(sig.assert[0].ty, Type::String);
     assert_eq!(
         sig.assert[0].target,
-        AssertTarget::Param("actual".to_string())
+        AssertTarget::Param("actual".to_string().into())
     );
 }
 
@@ -716,7 +719,7 @@ fn a_target_naming_a_nonexistent_parameter_classifies_as_not_found() {
     assert_eq!(sig.assert_if_true.len(), 1);
     assert_eq!(
         sig.assert_if_true[0].target,
-        AssertTarget::NotFound("notAnActualParam".to_string())
+        AssertTarget::NotFound("notAnActualParam".to_string().into())
     );
 }
 
@@ -736,7 +739,7 @@ fn a_method_call_target_classifies_as_unknown_not_misclassified() {
     assert_eq!(sig.assert_if_false.len(), 1);
     assert_eq!(
         sig.assert_if_false[0].target,
-        AssertTarget::Unknown("$this->parseError()".to_string())
+        AssertTarget::Unknown("$this->parseError()".to_string().into())
     );
 }
 

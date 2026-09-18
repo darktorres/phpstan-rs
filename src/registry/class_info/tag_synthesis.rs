@@ -1,7 +1,9 @@
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use crate::ast::Visibility;
 use crate::docblock;
+use crate::intern::intern;
 use crate::registry::function_sig::{FunctionSig, ParamSig, mark_template_params};
 use crate::registry::name_context::{
     NameContext, collect_class_name_case_refs, resolve_names_in_type,
@@ -44,7 +46,8 @@ pub(crate) fn method_tag_sig(
     // same mark-then-resolve pipeline every other PHPDoc-typed position
     // uses, so its case refs need the identical
     // `collect_class_name_case_refs` call between the two steps.
-    let resolve = |text: &str| -> (Type, Vec<(String, String)>) {
+    #[allow(clippy::type_complexity)]
+    let resolve = |text: &str| -> (Type, Vec<(Arc<str>, Arc<str>)>) {
         let ty = types::parse_type_string(text);
         let ty = mark_template_params(ty, template_params);
         let mut case_refs = Vec::new();
@@ -65,7 +68,7 @@ pub(crate) fn method_tag_sig(
                     .map(resolve)
                     .unwrap_or((Type::Mixed, Vec::new()));
             ParamSig {
-                name: p.name.clone(),
+                name: intern(&p.name),
                 ty: ty.clone(),
                 ty_native: ty,
                 variadic: p.variadic,

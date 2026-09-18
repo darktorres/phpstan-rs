@@ -327,7 +327,7 @@ impl<'a> Checker<'a> {
                 {
                     return;
                 }
-                if let Some(info) = self.registry.classes.get(name)
+                if let Some(info) = self.registry.classes.get(name.as_str())
                     && info.kind != ClassKind::Trait
                     && !info.templates.is_empty()
                 {

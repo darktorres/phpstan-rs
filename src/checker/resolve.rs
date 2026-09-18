@@ -92,10 +92,11 @@ impl<'a> Checker<'a> {
     /// registry-independent, checker-side pipeline collects them fresh at
     /// check time instead, identically to how every other `resolve_type_
     /// hint` caller already resolves the type itself.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn resolve_type_hint_with_case_refs(
         &self,
         hint: Option<&str>,
-    ) -> (Type, Vec<(String, String)>) {
+    ) -> (Type, Vec<(std::sync::Arc<str>, std::sync::Arc<str>)>) {
         match hint {
             Some(h) => {
                 let ty = types::parse_type_string(h);
@@ -128,7 +129,7 @@ impl<'a> Checker<'a> {
         let Some(class) = &self.current_class else {
             return std::collections::HashMap::new();
         };
-        let Some(info) = self.registry.classes.get(class) else {
+        let Some(info) = self.registry.classes.get(class.as_str()) else {
             return std::collections::HashMap::new();
         };
         info.templates
@@ -142,9 +143,9 @@ impl<'a> Checker<'a> {
                     types::Variance::Invariant
                 };
                 (
-                    name.clone(),
+                    name.to_string(),
                     types::TemplateParam {
-                        name: name.clone(),
+                        name: name.to_string(),
                         bound: Box::new(
                             info.template_bounds
                                 .get(name)
@@ -301,7 +302,7 @@ impl<'a> Checker<'a> {
                 .classes
                 .get(defining_class)
                 .and_then(|info| info.extends.first())
-                .map(|p| Type::Object(p.clone(), Vec::new()))
+                .map(|p| Type::Object(p.to_string(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             Type::Array(key, inner) => Type::Array(
                 Box::new(self.resolve_pseudo(key, defining_class)),
@@ -454,7 +455,7 @@ impl<'a> Checker<'a> {
     /// position of the type token as a whole.
     pub(crate) fn check_type_class_name_case(
         &mut self,
-        case_refs: &[(String, String)],
+        case_refs: &[(std::sync::Arc<str>, std::sync::Arc<str>)],
         label: &str,
         span: Span,
     ) {

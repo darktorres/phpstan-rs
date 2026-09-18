@@ -458,7 +458,7 @@ impl<'a> Checker<'a> {
                 if info.resolved_trait_conflicts.contains(prop_name) {
                     continue;
                 }
-                match seen_props.get(prop_name.as_str()) {
+                match seen_props.get(prop_name.as_ref()) {
                     Some((first_trait, first_sig)) if first_sig.ty != sig.ty => {
                         self.report(fqn.to_string(), format!(
                                 "{first_trait} and {trait_name} define the same property (${prop_name}) with incompatible types in the composition of {fqn}"
@@ -474,7 +474,7 @@ impl<'a> Checker<'a> {
                 if info.resolved_trait_conflicts.contains(method_name) {
                     continue;
                 }
-                match seen_methods.get(method_name.as_str()) {
+                match seen_methods.get(method_name.as_ref()) {
                     Some((first_trait, first_sig)) if !signatures_compatible(first_sig, sig) => {
                         self.report(fqn.to_string(), format!(
                                 "{first_trait} and {trait_name} define the same method ({method_name}) with an incompatible signature in the composition of {fqn}"
@@ -933,14 +933,14 @@ impl<'a> Checker<'a> {
             return;
         }
         let required = self.registry.required_abstract_methods(fqn);
-        let missing: Vec<&String> = required
+        let missing: Vec<&std::sync::Arc<str>> = required
             .iter()
             .filter(|m| !self.registry.has_concrete_implementation(fqn, m))
             .collect();
         if missing.is_empty() {
             return;
         }
-        let shown: Vec<&str> = missing.iter().take(3).map(|s| s.as_str()).collect();
+        let shown: Vec<&str> = missing.iter().take(3).map(|s| s.as_ref()).collect();
         let mut message = format!(
             "class {fqn} does not implement abstract method(s): {}",
             shown.join(", ")
@@ -1201,7 +1201,8 @@ impl<'a> Checker<'a> {
             let Some(parent_info) = self.registry.classes.get(parent_fqn) else {
                 continue;
             };
-            if parent_info.sealed.is_empty() || parent_info.sealed.iter().any(|s| s == fqn) {
+            if parent_info.sealed.is_empty() || parent_info.sealed.iter().any(|s| s.as_ref() == fqn)
+            {
                 continue;
             }
             self.report(

@@ -39,7 +39,7 @@ impl<'a> Checker<'a> {
         // a configured version, `__clone()` is treated like any other
         // non-constructor method, since reassigning on PHP < 8.3 is a
         // real runtime error.
-        let in_clone_reinit = self.current_class.as_deref() == Some(owner.as_str())
+        let in_clone_reinit = self.current_class.as_deref() == Some(owner.as_ref())
             && self.current_method.as_deref() == Some("__clone")
             && self.registry.php_version.is_some_and(|v| {
                 crate::php_version::PhpFeature::ReadonlyPropertyReinitializationOnClone
@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
         // individually `readonly`.
         if (prop_sig.is_readonly || self.registry.class_is_immutable(&owner))
             && !in_clone_reinit
-            && (self.current_class.as_deref() != Some(owner.as_str())
+            && (self.current_class.as_deref() != Some(owner.as_ref())
                 || self.current_method.as_deref() != Some("__construct"))
         {
             self.report_builder(

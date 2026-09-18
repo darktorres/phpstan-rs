@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
                 }
                 match self.registry.lookup_method(name, "__toString") {
                     Some(sig) => Some(sig.return_type.clone()),
-                    None if self.registry.classes.contains_key(name) => None,
+                    None if self.registry.classes.contains_key(name.as_str()) => None,
                     None => Some(Type::String),
                 }
             }

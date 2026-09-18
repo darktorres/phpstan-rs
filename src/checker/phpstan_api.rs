@@ -620,7 +620,12 @@ impl<'a> Walker<'a> {
             "self" | "static" => self.current_class_fqn.clone(),
             "parent" => {
                 let current = self.current_class_fqn.as_deref()?;
-                self.registry.classes.get(current)?.extends.first().cloned()
+                self.registry
+                    .classes
+                    .get(current)?
+                    .extends
+                    .first()
+                    .map(|s| s.to_string())
             }
             _ => Some(ctx.resolve(name)),
         }
@@ -974,7 +979,7 @@ impl<'a> Walker<'a> {
         }
         for used in &c.uses {
             if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
-                && self.registry.classes.contains_key(&ufqn)
+                && self.registry.classes.contains_key(ufqn.as_str())
             {
                 // Real `ApiTraitUseRule` flags trait use
                 // unconditionally - no `@api`/`@api-do-not-implement`
@@ -1023,7 +1028,7 @@ impl<'a> Walker<'a> {
         }
         for used in &e.uses {
             if let Some(ufqn) = self.resolve_if_phpstan(used, ctx)
-                && self.registry.classes.contains_key(&ufqn)
+                && self.registry.classes.contains_key(ufqn.as_str())
             {
                 let action = format!("using trait {ufqn}");
                 self.report_always(&ufqn, &action, e.span, &fqn, "phpstanApi.trait", ctx);
@@ -1289,7 +1294,7 @@ impl<'a> Walker<'a> {
                     self.check_old_php_parser4_class(n, e.span, label);
                     self.check_runtime_reflection_instantiation(n, ctx, e.span, label);
                     if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
-                        && let Some(info) = self.registry.classes.get(&fqn)
+                        && let Some(info) = self.registry.classes.get(fqn.as_str())
                     {
                         // Real PHPStan's own `ApiInstantiationRule`
                         // flags instantiation unconditionally by default - a
@@ -1393,7 +1398,7 @@ impl<'a> Walker<'a> {
                     self.check_instanceof_deprecated(&fqn, e.span, label);
                 }
                 if let Some(fqn) = self.resolve_if_phpstan(n, ctx)
-                    && let Some(info) = self.registry.classes.get(&fqn)
+                    && let Some(info) = self.registry.classes.get(fqn.as_str())
                 {
                     if !info.is_api {
                         let action = format!("instanceof {fqn}");

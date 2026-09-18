@@ -77,8 +77,12 @@ pub(crate) fn collect_anonymous_classes(
         let name = synthetic_name(relative_file, line, line_index);
         names.insert(expr.span, name.clone());
         let info = ClassInfo::from_decl(decl, &ctx);
+        // Not `intern()`: every anonymous class in the whole corpus gets
+        // its own unique md5-hashed name (file+line+index), so there is
+        // no repeated text here to deduplicate - only a permanent,
+        // never-evicted interner-table entry to avoid.
         decls.push(BuiltDecl::Class {
-            name,
+            name: std::sync::Arc::from(name),
             conditional: false,
             info,
         });

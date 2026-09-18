@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
+use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -154,7 +155,7 @@ impl Parser {
             Vec<Span>,
             Vec<Option<Arc<str>>>,
             Vec<TraitAlias>,
-            Vec<String>,
+            Vec<Arc<str>>,
         ),
         ParseError,
     > {
@@ -462,7 +463,7 @@ impl Parser {
     /// registry-wide picture this parser doesn't.
     pub(crate) fn parse_trait_adaptations(
         &mut self,
-    ) -> Result<(Vec<TraitAlias>, Vec<String>), ParseError> {
+    ) -> Result<(Vec<TraitAlias>, Vec<Arc<str>>), ParseError> {
         let mut aliases = Vec::new();
         let mut resolved = Vec::new();
         self.expect(&Token::LBrace)?;
@@ -474,11 +475,12 @@ impl Parser {
             // unqualified-trait or bare-method case identically to a
             // plain `expect_ident`.
             let first = self.parse_qualified_name();
-            let (trait_name, method) = if self.eat(&Token::DoubleColon) {
-                (Some(first), self.expect_ident()?.to_string())
-            } else {
-                (None, first)
-            };
+            let (trait_name, method): (Option<Arc<str>>, Arc<str>) =
+                if self.eat(&Token::DoubleColon) {
+                    (Some(intern(&first)), self.expect_ident()?)
+                } else {
+                    (None, intern(&first))
+                };
             if matches!(self.peek(), Token::Identifier(s) if **s == *"insteadof") {
                 self.skip();
                 self.parse_qualified_name();
@@ -498,7 +500,7 @@ impl Parser {
                     aliases.push(TraitAlias {
                         trait_name,
                         method: method.clone(),
-                        alias: alias.to_string(),
+                        alias,
                     });
                 }
                 resolved.push(method);

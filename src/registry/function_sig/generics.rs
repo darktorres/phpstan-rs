@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::docblock::DocBlock;
+use crate::intern::intern;
 use crate::registry::name_context::{
     NameContext, collect_class_name_case_refs, resolve_names_in_type,
 };
@@ -21,9 +22,11 @@ use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
 /// re-resolving *its own* values further - each entry is inserted once,
 /// already fully resolved, and never touched by `resolve_names_in_type`
 /// again after that.
-pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>) -> Type {
+pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<Arc<str>, Type>) -> Type {
     match ty {
-        Type::Object(name, _) if aliases.contains_key(&name) => aliases[&name].clone(),
+        Type::Object(name, _) if aliases.contains_key(name.as_str()) => {
+            aliases[name.as_str()].clone()
+        }
         Type::Object(name, args) => Type::Object(
             name,
             args.into_iter()
@@ -133,18 +136,18 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<String, Type>)
 /// aliases' own values - a sibling alias reference inside this one's RHS
 /// isn't itself a class-name reference to case-check (it's resolved
 /// separately, when *that* alias's own entry is built).
-pub(crate) type TypeAliasCaseRefs = HashMap<String, Vec<(String, String)>>;
+pub(crate) type TypeAliasCaseRefs = HashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>;
 
 pub(crate) fn build_type_aliases(
     class_doc: Option<&DocBlock>,
     template_params: &HashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (HashMap<String, Type>, TypeAliasCaseRefs) {
+) -> (HashMap<Arc<str>, Type>, TypeAliasCaseRefs) {
     let Some(class_doc) = class_doc else {
         return (HashMap::new(), HashMap::new());
     };
-    let mut case_refs: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    let raw: HashMap<String, Type> = class_doc
+    let mut case_refs: TypeAliasCaseRefs = HashMap::new();
+    let raw: HashMap<Arc<str>, Type> = class_doc
         .type_aliases
         .iter()
         .map(|(name, ty_text)| {
@@ -152,7 +155,7 @@ pub(crate) fn build_type_aliases(
             let ty = mark_template_params(ty, template_params);
             let mut refs = Vec::new();
             collect_class_name_case_refs(&ty, ctx, &mut refs);
-            let resolved_name = ctx.resolve(name);
+            let resolved_name = intern(&ctx.resolve(name));
             case_refs.insert(resolved_name.clone(), refs);
             let ty = resolve_names_in_type(ty, ctx);
             (resolved_name, ty)
