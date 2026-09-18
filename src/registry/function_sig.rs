@@ -346,7 +346,7 @@ impl FunctionSig {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.clone().unwrap_or(Type::Mixed);
+                    let native_only = native_parsed.unwrap_or(Type::Mixed);
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -426,7 +426,7 @@ impl FunctionSig {
         let return_type_native = if return_shared {
             return_type.clone()
         } else {
-            let native_only = native_return_parsed.clone().unwrap_or(Type::Mixed);
+            let native_only = native_return_parsed.unwrap_or(Type::Mixed);
             let t = mark_template_params(native_only, &template_params);
             resolve_names_in_type(t, ctx)
         };
