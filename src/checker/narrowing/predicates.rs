@@ -293,6 +293,14 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     // itself), so riding along here covers all of them uniformly rather
     // than needing its own separate call at each one.
     locals.container_field_facts.remove(key);
+    // Same reasoning for `key`'s own per-discriminant accumulator facts
+    // (see `DiscriminantArrayFactsMap`'s doc comment) - a wholesale
+    // rebind (or an unrecognized by-ref pass) starts `key`'s own value
+    // over from scratch, so any accumulated per-branch history recorded
+    // for it is stale too.
+    locals
+        .discriminant_array_facts
+        .retain(|(container, _, _), _| container != key);
 }
 
 /// Eagerly copies `source_container`'s own recorded per-field facts (see

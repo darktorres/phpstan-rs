@@ -151,6 +151,44 @@ type ContainerFieldFactsMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// `(container variable name, discriminant subject name, branch value) ->
+// the array type this exact (container, branch) pair has accumulated so
+// far`, independent of the *other* branch's own accumulation - fixes a
+// real bug in `write_index_into`'s generic `Type::Union` handling
+// (`checker/assignment.rs`): an append write applied there gets pushed
+// onto *every* member of an already-diverged union uniformly, including
+// a member that came from a *different* loop iteration's *other* branch
+// (confirmed via a minimal repro: `if ($f) { $x[] = 'a'; } else { $x[] =
+// new Obj(); }` inside a loop produces a genuinely-impossible
+// `list<string|Obj>` member after only two passes, not because
+// `merge_scopes` flattens anything - it doesn't, `union_types` never
+// merges two different `Array`/`Intersection` element types together -
+// but because the *next* pass's own append, applied uniformly to
+// *every* member of the prior pass's already-two-member union, widens
+// the "wrong" branch's own member too). Populated *alongside* (never
+// instead of) the ordinary, single-flat-type tracking every other
+// container already gets - see `Checker::active_discriminant`'s own doc
+// comment for the write-side trigger. Consulted only when checking a
+// `return` statement whose declared type is `Type::Conditional` and the
+// ordinary (still-flat, still-corrupted) tracked type would otherwise
+// fail: reconstructing `Union([true-slot, false-slot])` from here and
+// re-checking against the same declared type's own already-flattened
+// fallback union passes through 100% pre-existing `is_assignable`
+// per-member `Union`-vs-`Union` logic, no further mechanism needed.
+// `merge_scopes` *unions* both sides (like `branch_implied_facts`, not
+// like `container_field_facts`'s intersection): a `(container, subject,
+// true)` entry is only ever written inside the `subject`-true branch, so
+// it's naturally absent from the `subject`-false branch's own `Locals`
+// fork - "present in only one side" here means "the other branch simply
+// never had a reason to touch it," not "invalidated," so it must survive
+// the merge, not be dropped.
+type DiscriminantArrayFactsMap = imbl::GenericHashMap<
+    (String, String, bool),
+    Type,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 /// A checked scope's variable-name-to-inferred-type bindings, plus an
 /// opt-in, parallel declaration-span side-channel the LSP's local-variable-
 /// navigation feature reads through `Checker::probe_span`/
@@ -184,6 +222,7 @@ pub(crate) struct Locals {
     pub(crate) branch_implied_facts: BranchImpliedFactsMap,
     pub(crate) query_builder_aliases: QueryBuilderAliasMap,
     pub(crate) container_field_facts: ContainerFieldFactsMap,
+    pub(crate) discriminant_array_facts: DiscriminantArrayFactsMap,
     // Monotonic: set `true` the first time any of `insert`/`declare`/
     // `insert_with_provenance` (the only three places `types` is ever
     // written - see each one's own check below) inserts one of
@@ -356,6 +395,7 @@ impl Locals {
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
             container_field_facts: ContainerFieldFactsMap::default(),
+            discriminant_array_facts: DiscriminantArrayFactsMap::default(),
             may_have_member_narrowing: false,
             track: self.track,
         }
@@ -850,6 +890,21 @@ pub struct Checker<'a> {
     // `Vec`, not a single `Option`, so nested `for` loops over
     // different containers don't clobber each other.
     pub(crate) in_range_index_writes: Vec<(String, String)>,
+    // `(subject variable name, branch value)` for every `if`/`else`
+    // branch currently being checked whose own condition is exactly a
+    // bare boolean `Variable` (`if ($isActionSend) { ... } else { ...
+    // }`) - pushed by `check_if` right before checking `then_branch`
+    // (`true`) or the whole `else_branch` handling (`false`), popped
+    // right after. Consulted by an array-append write
+    // (`checker/assignment.rs`'s `ExprKind::Index` arm, append-only, a
+    // bare `Variable` container) to additionally record that push under
+    // `Locals::discriminant_array_facts`, keyed by which value of the
+    // subject this exact push happened under - see that field's own doc
+    // comment for why this exists and how it's consumed. A `Vec`, not a
+    // single `Option`, so a nested `if` inside a branch (a different
+    // subject) doesn't clobber the outer one - though only the
+    // innermost, most specific entry is ever actually consulted (`.last()`).
+    pub(crate) active_discriminant: Vec<(String, bool)>,
     // Every variable name seen bound via `static $x = ...;` anywhere in
     // the file being checked. A `static` local can carry a value left
     // over from an earlier call - the same "this single forward pass
@@ -1046,6 +1101,7 @@ impl<'a> Checker<'a> {
             loop_continue_states: Vec::new(),
             loop_depth: 0,
             in_range_index_writes: Vec::new(),
+            active_discriminant: Vec::new(),
             static_var_names: HashSet::new(),
             rebind_target_classes: HashSet::new(),
             rebind_escape_all: false,

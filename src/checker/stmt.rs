@@ -2,10 +2,27 @@ use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
-    purge_stale_narrowing_for, unwrap_grouping,
+    purge_stale_narrowing_for, union_types, unwrap_grouping,
 };
 use crate::docblock;
 use crate::types::Type;
+
+/// See `DiscriminantArrayFactsMap`'s own doc comment (`checker.rs`) - `e`
+/// must be exactly a bare `Variable` (the same narrow shape the write side
+/// currently triggers on) for this to find anything at all. `None` when
+/// there's nothing recorded for it, the common case for every function
+/// this mechanism doesn't apply to.
+fn reconstructed_discriminant_return_type(e: &Expr, locals: &Locals) -> Option<Type> {
+    let ExprKind::Variable(name) = &e.kind else {
+        return None;
+    };
+    locals
+        .discriminant_array_facts
+        .iter()
+        .filter(|((container, _, _), _)| container.as_str() == name.as_ref())
+        .map(|(_, ty)| ty.clone())
+        .reduce(union_types)
+}
 
 mod loops;
 mod new_exception_discarded;
@@ -228,13 +245,30 @@ impl<'a> Checker<'a> {
                             .registry
                             .accepts_at_configured_level(&actual, &expected)
                     {
-                        self.report(
-                            label.to_string(),
-                            format!("return type mismatch: expected {expected}, got {actual}"),
-                            e.span,
-                            3,
-                            "return.type",
-                        );
+                        // `DiscriminantArrayFactsMap`'s own doc comment -
+                        // before reporting a real mismatch, retry against
+                        // a *reconstructed* type built from this exact
+                        // returned variable's own per-branch accumulator
+                        // history, when any was recorded. Only ever
+                        // *suppresses* a diagnostic the ordinary,
+                        // still-flat tracked type would otherwise
+                        // produce - never used in place of `actual` for
+                        // anything else, so a function this mechanism
+                        // doesn't apply to (the overwhelming majority)
+                        // sees no change in behavior at all.
+                        let reconstructed = reconstructed_discriminant_return_type(e, locals);
+                        let passes_via_reconstruction = reconstructed.is_some_and(|r| {
+                            self.registry.accepts_at_configured_level(&r, &expected)
+                        });
+                        if !passes_via_reconstruction {
+                            self.report(
+                                label.to_string(),
+                                format!("return type mismatch: expected {expected}, got {actual}"),
+                                e.span,
+                                3,
+                                "return.type",
+                            );
+                        }
                     }
                 }
             }
@@ -780,9 +814,24 @@ impl<'a> Checker<'a> {
         if let Some(pair) = or_disjuncts.clone() {
             self.pending_or_disjunctions.push(pair);
         }
+        // `Checker::active_discriminant`'s own doc comment - a bare
+        // boolean `Variable` condition is this mechanism's only
+        // currently-recognized shape, matching this project's own
+        // "narrow correctly first" precedent for a new fact-tracking
+        // trigger.
+        let discriminant_subject = match &unwrap_grouping(cond).kind {
+            ExprKind::Variable(name) => Some(name.to_string()),
+            _ => None,
+        };
         let mut then_locals = locals.clone();
         self.apply_narrowing(cond, &mut then_locals, true);
+        if let Some(subject) = &discriminant_subject {
+            self.active_discriminant.push((subject.clone(), true));
+        }
         self.check_stmt(then_branch, &mut then_locals, declared_return, label);
+        if discriminant_subject.is_some() {
+            self.active_discriminant.pop();
+        }
         if or_disjuncts.is_some() {
             self.pending_or_disjunctions.pop();
         }
@@ -796,6 +845,9 @@ impl<'a> Checker<'a> {
         // check's own ordinary rebind-invalidation, the same as any
         // other alias.
         self.record_if_body_flag_alias(cond, then_branch, &mut then_locals, &mut else_locals);
+        if let Some(subject) = &discriminant_subject {
+            self.active_discriminant.push((subject.clone(), false));
+        }
         if let Some(e) = else_branch {
             if let StmtKind::If {
                 cond: nested_cond,
@@ -815,6 +867,9 @@ impl<'a> Checker<'a> {
             } else {
                 self.check_stmt(e, &mut else_locals, declared_return, label);
             }
+        }
+        if discriminant_subject.is_some() {
+            self.active_discriminant.pop();
         }
         self.record_branch_implied_facts(cond, locals, &mut else_locals, false);
 

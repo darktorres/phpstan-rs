@@ -4673,3 +4673,93 @@ fn passing_the_container_by_reference_to_an_unrecognized_function_invalidates_it
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
+
+// `DiscriminantArrayFactsMap`/`Checker::active_discriminant` (`checker.rs`)
+// - `write_index_into`'s own generic `Type::Union` handling
+// (`checker/assignment.rs`) applies an append write to *every* member of
+// an already-diverged union uniformly, including a member produced by a
+// *different* loop iteration's *other* `if`/`else` branch - not a
+// `merge_scopes` flattening bug (confirmed by direct trace: `union_types`
+// never merges two different `Array`/`Intersection` element types
+// together on its own). This mechanism separately tracks each branch's
+// own accumulator, consulted only when checking a `return` statement
+// against a `Type::Conditional` declared type that the ordinary
+// (still-corrupted) tracked type would otherwise fail.
+#[test]
+fn a_branch_gated_accumulator_satisfies_its_own_conditional_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            class UserMailNotification {}
+            /**
+             * @param list<UserMailNotification> $dataUsers
+             * @return ($isActionSend is true ? list<string> : list<UserMailNotification>)
+             */
+            function f(array $dataUsers, bool $isActionSend): array {
+                $returnList = [];
+                foreach ($dataUsers as $nbmUser) {
+                    if ($isActionSend) {
+                        $returnList[] = 'checkKey';
+                    } else {
+                        $returnList[] = $nbmUser;
+                    }
+                }
+                return $returnList;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative control: a push that happens *unconditionally* (no recognized
+// `if`/`else` discriminant at all) never populates `discriminant_array_facts`,
+// so a genuine, real mismatch must still be flagged exactly as before -
+// this mechanism only ever *suppresses* a diagnostic when it has real
+// per-branch evidence to do so, never blanket-tolerates a mismatched
+// conditional return.
+#[test]
+fn an_unconditionally_mixed_accumulator_still_fails_its_conditional_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            class UserMailNotification {}
+            /**
+             * @param list<UserMailNotification> $dataUsers
+             * @return ($isActionSend is true ? list<string> : list<UserMailNotification>)
+             */
+            function f(array $dataUsers, bool $isActionSend): array {
+                $returnList = [];
+                foreach ($dataUsers as $nbmUser) {
+                    $returnList[] = 'checkKey';
+                    $returnList[] = $nbmUser;
+                }
+                return $returnList;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "return.type"),
+        "expected a return.type diagnostic, got: {d:?}"
+    );
+}
+
+// `Registry::is_assignable`'s own new `Type::Conditional` arm
+// (`registry/assignability.rs`), independent of the discriminant
+// mechanism above: without it, a plain `non-empty-list<string>`-typed
+// return value (an `Intersection`, decomposed into its own individual
+// `Array`/`Accessory(ArrayList)`/`Accessory(NonEmptyArray)` members by
+// this function's own generic `(Intersection, _) => any(...)` rule
+// *before* `sup`'s own `Conditional` shape is ever inspected) was
+// wrongly rejected even for a function that never touches this
+// mechanism at all - any `Type::Conditional`-returning function with a
+// list-typed return value had this gap.
+#[test]
+fn a_plain_list_typed_return_satisfies_a_conditional_return_type_with_no_discriminant_tracking() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return ($flag is true ? list<string> : list<int>) */
+            function f(bool $flag): array {
+                return ['a', 'b'];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

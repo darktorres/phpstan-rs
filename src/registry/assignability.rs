@@ -238,6 +238,43 @@ impl Registry {
             (Type::TemplateParam(tp), _) => {
                 matches!(*tp.bound, Type::Mixed) || self.is_assignable(&tp.bound, sup)
             }
+            // Mirrors `types::is_subtype`'s own identically-placed
+            // `Type::Conditional` arm exactly (see that arm's own doc
+            // comment) - a real, independent gap this project's own
+            // `Type::Conditional`-returning-function corpus checks were
+            // silently missing: without this, a `sub` that's itself an
+            // `Intersection` (any `list<T>`/`non-empty-array<T>`-typed
+            // value - an extremely common real return type) hits this
+            // function's own generic `(Intersection, _) => any(...)` rule
+            // below *first*, decomposing `sub`'s own members (`Array`,
+            // a bare `Accessory(ArrayList)`, a bare `Accessory(
+            // NonEmptyArray)`) and checking each *in isolation* against
+            // the still-unflattened `Conditional` - none of which,
+            // stripped from its own `Intersection` wrapper, actually
+            // represents "a real list" any more, so a value that
+            // genuinely satisfies one of the two conditional arms was
+            // wrongly rejected. Placed before every arm that could
+            // decompose `sub` first, exactly like `is_subtype`'s own
+            // arm, so `sup`'s real shape is always resolved before
+            // `sub`'s is.
+            (
+                Type::Conditional {
+                    if_true, if_false, ..
+                },
+                _,
+            ) => self.is_assignable(
+                &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
+                sup,
+            ),
+            (
+                _,
+                Type::Conditional {
+                    if_true, if_false, ..
+                },
+            ) => self.is_assignable(
+                sub,
+                &Type::Union(vec![(**if_true).clone(), (**if_false).clone()]),
+            ),
             (Type::Union(members), _) => members.iter().all(|m| self.is_assignable(m, sup)),
             (_, Type::Union(members)) => members.iter().any(|m| self.is_assignable(sub, m)),
             // Mirrors `types::is_subtype`'s own dedicated

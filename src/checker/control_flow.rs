@@ -498,6 +498,33 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // See `DiscriminantArrayFactsMap`'s own doc comment - unions rather
+    // than intersects, like `branch_implied_facts` below: a
+    // `(container, subject, true)` entry only ever gets written inside
+    // the `subject`-true branch, so it's naturally absent from the
+    // `subject`-false branch's own fork - that absence means "the other
+    // branch had no reason to touch it," not "invalidated," so it must
+    // survive the merge. A key present on both sides (the same
+    // container/subject/value slot written independently on each side -
+    // not expected for the single-`if` shape this mechanism currently
+    // triggers on, but possible from nested control flow) is unioned,
+    // never silently overwritten by one side.
+    merged.discriminant_array_facts = then_locals.discriminant_array_facts.clone();
+    for (key, else_ty) in else_locals.discriminant_array_facts.iter() {
+        match merged.discriminant_array_facts.get(key) {
+            Some(then_ty) if types::types_equal_for_union(then_ty, else_ty) => {}
+            Some(then_ty) => {
+                merged
+                    .discriminant_array_facts
+                    .insert(key.clone(), union_types(then_ty.clone(), else_ty.clone()));
+            }
+            None => {
+                merged
+                    .discriminant_array_facts
+                    .insert(key.clone(), else_ty.clone());
+            }
+        }
+    }
     // Unlike `condition_aliases` above, a `branch_implied_facts` entry is
     // a durable structural fact about the code at one exact discriminant
     // (see that field's own doc comment) - true whenever that

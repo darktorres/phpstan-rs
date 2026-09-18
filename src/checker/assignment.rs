@@ -269,6 +269,34 @@ impl<'a> Checker<'a> {
                                     .iter()
                                     .any(|(c, i)| c.as_str() == name.as_ref() && i == idx_name)
                             });
+                        // `Checker::active_discriminant`'s own doc comment
+                        // - a real append (`idx.is_none()`) onto a bare
+                        // variable, checked while inside a recognized
+                        // `if`/`else` branch, also grows that branch's
+                        // own separately-tracked accumulator - computed
+                        // from `discriminant_array_facts`'s own prior
+                        // value for this exact `(container, subject,
+                        // value)` slot (an empty shape the first time),
+                        // *not* from `current` (which already carries the
+                        // *other* branch's own history too, the exact
+                        // cross-contamination this side-channel exists to
+                        // avoid). Recorded *alongside*, never instead of,
+                        // the ordinary write just below.
+                        if idx.is_none()
+                            && let Some((subject, value)) = self.active_discriminant.last().cloned()
+                        {
+                            let key = (name.to_string(), subject, value);
+                            let prior = locals
+                                .discriminant_array_facts
+                                .get(&key)
+                                .cloned()
+                                .unwrap_or_else(|| Type::ArrayShape(vec![]));
+                            if let Some(new_slot_ty) =
+                                write_index_into(&prior, None, None, ty.clone(), false)
+                            {
+                                locals.discriminant_array_facts.insert(key, new_slot_ty);
+                            }
+                        }
                         if let Some(new_ty) = write_index_into(
                             &current,
                             idx.as_deref(),
