@@ -16,11 +16,14 @@ impl<'a> Checker<'a> {
     /// why this recurses through `Union`/`Intersection` instead of using
     /// `MethodCall`'s own simpler "first Object/EnumCase member,
     /// regardless of whether it actually declares the member" shortcut.
+    /// Returns a reference tied to the registry's lifetime, not `&self`'s,
+    /// so holding it doesn't conflict with the `&mut self` calls that
+    /// follow (see `lookup_own_signature`'s identical reasoning).
     pub(crate) fn find_property_owner(
         &self,
         base_ty: &Type,
         prop: &str,
-    ) -> Option<(std::sync::Arc<str>, &PropertySig)> {
+    ) -> Option<(std::sync::Arc<str>, &'a PropertySig)> {
         match base_ty {
             Type::Object(class, _) => self.registry.lookup_property_with_owner(class, prop),
             Type::EnumCase(fqn, _) => self.registry.lookup_property_with_owner(fqn, prop),
@@ -45,12 +48,13 @@ impl<'a> Checker<'a> {
     /// method called through a `Union`/`Intersection` receiver (a value
     /// narrowed via `instanceof` from an unrelated interface) must not
     /// be silently skipped just because the receiver's own type isn't
-    /// literally `Type::Object`.
+    /// literally `Type::Object`. Same registry-tied lifetime as
+    /// `find_property_owner` above, for the same reason.
     pub(crate) fn find_method_owner(
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> Option<(std::sync::Arc<str>, &FunctionSig)> {
+    ) -> Option<(std::sync::Arc<str>, &'a FunctionSig)> {
         match base_ty {
             Type::Object(class, _) => self.registry.lookup_method_with_owner(class, method),
             Type::EnumCase(fqn, _) => self.registry.lookup_method_with_owner(fqn, method),
@@ -74,12 +78,13 @@ impl<'a> Checker<'a> {
     /// return type resolves against, via a plain `lookup_method`, never
     /// `_with_owner`. Must not require the receiver's own type to be
     /// literally `Type::Object` - a `Union`/`Intersection` receiver
-    /// needs the same treatment.
+    /// needs the same treatment. Same registry-tied lifetime as
+    /// `find_property_owner` above, for the same reason.
     pub(crate) fn find_method_receiver_class(
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> (Option<&FunctionSig>, Option<String>) {
+    ) -> (Option<&'a FunctionSig>, Option<String>) {
         match base_ty {
             Type::Object(class, _) => (
                 self.registry.lookup_method(class, method),

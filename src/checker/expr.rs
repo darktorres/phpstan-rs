@@ -2343,23 +2343,21 @@ impl<'a> Checker<'a> {
                 // `find_property_owner` recurses through both `Union` and
                 // `Intersection`, keeping the first member that actually
                 // declares it.
-                let owner_and_sig = self
-                    .find_property_owner(&narrow_type_excluding(&base_ty, &Type::Null), prop)
-                    .map(|(owner, p)| (owner, p.clone()));
-                if let Some((owner, p)) = &owner_and_sig {
-                    let visibility = p.visibility.clone();
+                let owner_and_sig =
+                    self.find_property_owner(&narrow_type_excluding(&base_ty, &Type::Null), prop);
+                if let Some((owner, p)) = owner_and_sig {
                     self.check_member_visibility(MemberVisibilityCheck {
                         kind: "property",
-                        owner,
+                        owner: &owner,
                         member_name: prop,
-                        visibility: &visibility,
+                        visibility: &p.visibility,
                         describe: &format!("property {owner}::${prop}"),
                         span: e.span,
                         label,
                     });
-                    self.check_internal_property_access(owner, prop, p, e.span, label);
-                    self.check_restricted_property_access(owner, prop, false, e.span, label);
-                    self.check_deprecated_property_access(owner, prop, p, e.span, label);
+                    self.check_internal_property_access(&owner, prop, p, e.span, label);
+                    self.check_restricted_property_access(&owner, prop, false, e.span, label);
+                    self.check_deprecated_property_access(&owner, prop, p, e.span, label);
                 }
                 if let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
