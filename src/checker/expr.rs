@@ -631,13 +631,15 @@ impl<'a> Checker<'a> {
                         if !is_bare_statement {
                             self.check_useless_return_value_call(name, args, locals, e.span, label);
                         }
-                    } else if !locals.guarded_functions.contains(
-                        &name
-                            .rsplit('\\')
-                            .next()
-                            .unwrap_or(name)
-                            .to_ascii_lowercase(),
-                    ) {
+                    } else if locals.guarded_functions.is_empty()
+                        || !locals.guarded_functions.contains(
+                            &name
+                                .rsplit('\\')
+                                .next()
+                                .unwrap_or(name)
+                                .to_ascii_lowercase(),
+                        )
+                    {
                         // Since resolve_function_candidates always
                         // produces a definite name (unlike `ExprKind::New`'s
                         // class resolution, which still has a "can't
@@ -1018,13 +1020,14 @@ impl<'a> Checker<'a> {
                     // `apply_narrowing`). Only fires when the receiver is
                     // the exact bare-variable shape the guard was
                     // recorded against.
-                    let method_exists_guarded = matches!(
-                        &unwrap_grouping(recv).kind,
-                        ExprKind::Variable(name)
-                            if locals
-                                .guarded_methods
-                                .contains(&(name.to_string(), method.to_string()))
-                    );
+                    let method_exists_guarded = !locals.guarded_methods.is_empty()
+                        && matches!(
+                            &unwrap_grouping(recv).kind,
+                            ExprKind::Variable(name)
+                                if locals
+                                    .guarded_methods
+                                    .contains(&(name.to_string(), method.to_string()))
+                        );
                     if !method_exists_guarded
                         && self.registry.classes.contains_key(class.as_str())
                         && self.member_confirmed_missing(&recv_ty, |c| {
@@ -2309,13 +2312,14 @@ impl<'a> Checker<'a> {
                 // `PropertyExistsTypeSpecifyingExtension` - the
                 // `property_exists()` mirror of the `method_exists()`
                 // guard on `MethodCall` above.
-                let property_exists_guarded = matches!(
-                    &base.kind,
-                    ExprKind::Variable(name)
-                        if locals
-                            .guarded_properties
-                            .contains(&(name.to_string(), prop.to_string()))
-                );
+                let property_exists_guarded = !locals.guarded_properties.is_empty()
+                    && matches!(
+                        &base.kind,
+                        ExprKind::Variable(name)
+                            if locals
+                                .guarded_properties
+                                .contains(&(name.to_string(), prop.to_string()))
+                    );
                 if !property_exists_guarded
                     && self.member_confirmed_missing(&base_ty, |c| {
                         c == "stdClass"
@@ -3012,12 +3016,16 @@ impl<'a> Checker<'a> {
                                         // Same `function_exists()`-guard
                                         // suppression as the ordinary-call
                                         // site above.
-                                        let bare = primary
-                                            .rsplit('\\')
-                                            .next()
-                                            .unwrap_or(&primary)
-                                            .to_ascii_lowercase();
-                                        if !locals.guarded_functions.contains(&bare) {
+                                        let guarded = !locals.guarded_functions.is_empty()
+                                            && locals.guarded_functions.contains(
+                                                primary
+                                                    .rsplit('\\')
+                                                    .next()
+                                                    .unwrap_or(&primary)
+                                                    .to_ascii_lowercase()
+                                                    .as_str(),
+                                            );
+                                        if !guarded {
                                             self.report(
                                                 label.to_string(),
                                                 format!("call to undefined function {primary}()"),
