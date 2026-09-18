@@ -827,7 +827,7 @@ impl<'a> Checker<'a> {
                             // narrows to int|float|numeric-string.
                             let excluded = [Type::Bool, Type::True, Type::False, Type::Null]
                                 .into_iter()
-                                .fold(current, |acc, excluded| {
+                                .fold(current.into_owned(), |acc, excluded| {
                                     narrow_type_excluding(&acc, &excluded)
                                 });
                             upgrade_string_to_numeric(&excluded)
@@ -837,7 +837,7 @@ impl<'a> Checker<'a> {
                             // one - nothing else can be dropped this way.
                             [Type::Int, Type::Float]
                                 .into_iter()
-                                .fold(current, |acc, excluded| {
+                                .fold(current.into_owned(), |acc, excluded| {
                                     narrow_type_excluding(&acc, &excluded)
                                 })
                         };

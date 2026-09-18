@@ -31,11 +31,27 @@ impl<'a> Checker<'a> {
     /// just reads the same `locals` entry), so every `apply_narrowing`
     /// call site uses this instead of a raw `locals.get(key).unwrap_or
     /// (Type::Mixed)`.
-    pub(crate) fn current_narrowed_type(&self, expr: &Expr, key: &str, locals: &Locals) -> Type {
-        locals
-            .get(key)
-            .cloned()
-            .unwrap_or_else(|| self.infer_expr(narrowing_infer_target(expr), locals))
+    /// `Cow`, not an owned `Type` - every one of this function's ~19 call
+    /// sites in `checker/narrowing.rs` only ever reads the result as
+    /// `&current` afterward (feeding it into `narrow_type_to`/
+    /// `narrow_type_excluding`/`narrow_instanceof_true`/etc, each of which
+    /// already takes `&Type` and produces a fresh owned `Type` of their
+    /// own), never needing ownership of `current` itself. Per this
+    /// function's own doc comment just above, `locals.get(key)` hits on
+    /// the overwhelmingly common bare-variable case (already tracked in
+    /// `locals` by the time a condition narrows it), so it's the `Some`
+    /// branch, not the rarer "first-ever narrowing of a property/index
+    /// chain" `infer_expr` fallback, that this avoids cloning for.
+    pub(crate) fn current_narrowed_type<'l>(
+        &self,
+        expr: &Expr,
+        key: &str,
+        locals: &'l Locals,
+    ) -> std::borrow::Cow<'l, Type> {
+        match locals.get(key) {
+            Some(ty) => std::borrow::Cow::Borrowed(ty),
+            None => std::borrow::Cow::Owned(self.infer_expr(narrowing_infer_target(expr), locals)),
+        }
     }
 
     /// The union of `in_array()`'s own haystack literal values, if every
@@ -143,7 +159,7 @@ impl<'a> Checker<'a> {
         } else if is_known_single_value(&target_ty) {
             narrow_type_excluding(&current, &target_ty)
         } else {
-            current
+            current.into_owned()
         };
         // A same-branch discriminant-variable correlation
         // (`record_branch_implied_facts`'s own doc comment): this exact
@@ -353,14 +369,14 @@ impl<'a> Checker<'a> {
     /// node) - its own "not already narrowed" fallback instead looks the
     /// property's declared type up directly from the receiver's own
     /// resolved class, sidestepping the need to fabricate one.
-    fn assert_target_key_and_current(
+    fn assert_target_key_and_current<'l>(
         &self,
         target: &crate::registry::AssertTarget,
         sig: &crate::registry::FunctionSig,
         recv: Option<&Expr>,
         args: &[Arg],
-        locals: &Locals,
-    ) -> Option<(String, Type)> {
+        locals: &'l Locals,
+    ) -> Option<(String, std::borrow::Cow<'l, Type>)> {
         use crate::registry::AssertTarget;
         match target {
             AssertTarget::Param(name) => {
@@ -384,13 +400,15 @@ impl<'a> Checker<'a> {
                 let base_key = narrowing_key(recv)?;
                 let key = format!("{base_key}->{prop}");
                 let current = match locals.get(&key) {
-                    Some(t) => t.clone(),
+                    Some(t) => std::borrow::Cow::Borrowed(t),
                     // `property_access_type` (`checker/expr.rs`, shared
                     // with `ExprKind::PropertyAccess`) recurses through
                     // `Union`/`Intersection` receivers, so this doesn't
                     // discard the property's real type for a
                     // multi-member receiver.
-                    None => self.property_access_type(&self.infer_expr(recv, locals), prop),
+                    None => std::borrow::Cow::Owned(
+                        self.property_access_type(&self.infer_expr(recv, locals), prop),
+                    ),
                 };
                 Some((key, current))
             }
