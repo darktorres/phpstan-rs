@@ -704,6 +704,68 @@ fn random_int_with_a_non_literal_argument_is_never_flagged() {
     );
 }
 
+// `strtotime()`'s own literal relative-offset narrowing, mirroring real
+// PHPStan's `StrtotimeFunctionReturnTypeExtension` (see the `"strtotime"`
+// arm's own doc comment in `builtin_calls.rs`).
+#[test]
+fn strtotime_with_a_literal_relative_offset_narrows_away_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('int', strtotime('-1 hour'));
+                assertType('int', strtotime('-90 days'));
+                assertType('int', strtotime('+3 weeks ago'));
+                assertType('int', strtotime('2 Days'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn strtotime_with_a_second_argument_still_narrows_from_the_first() {
+    // Real PHPStan's own extension evaluates only the first argument in
+    // isolation, ignoring a second `$now` argument even when one is
+    // passed - the real `PictureControllerTest` corpus shape
+    // (`strtotime('-30 days', (int) strtotime($frozenNow))`).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(int $base): void {
+                assertType('int', strtotime('-30 days', $base));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn strtotime_with_a_non_relative_offset_literal_keeps_int_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                assertType('int|false', strtotime('not a real relative time'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn strtotime_with_a_non_literal_argument_keeps_int_or_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $s): void {
+                assertType('int|false', strtotime($s));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // `filter_var()`'s `FILTER_NULL_ON_FAILURE`/`FILTER_THROW_ON_FAILURE`
 // flag conflict, PHP 8.5+.
 #[test]
