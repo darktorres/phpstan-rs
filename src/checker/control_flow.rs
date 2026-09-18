@@ -478,6 +478,26 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // Same shape as `query_builder_aliases` above, for the identical
+    // reason: a container's own per-field facts (see
+    // `ContainerFieldFactsMap`'s doc comment) can be invalidated on just
+    // *one* branch (a rebind, or a by-ref pass to an unrecognized
+    // function - either purges the container's own entry, see
+    // `purge_stale_narrowing_for`), so a merge must only keep an entry
+    // both sides still carry *unchanged*, never resurrect one only one
+    // side still has - unlike `branch_implied_facts` below, this is not a
+    // durable structural fact safe to union.
+    merged.container_field_facts = then_locals
+        .container_field_facts
+        .iter()
+        .filter(|(k, rc)| {
+            else_locals
+                .container_field_facts
+                .get(*k)
+                .is_some_and(|other_rc| std::rc::Rc::ptr_eq(rc, other_rc))
+        })
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
     // Unlike `condition_aliases` above, a `branch_implied_facts` entry is
     // a durable structural fact about the code at one exact discriminant
     // (see that field's own doc comment) - true whenever that

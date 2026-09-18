@@ -285,6 +285,36 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     for k in stale {
         locals.remove(&k);
     }
+    // `key`'s own per-field container facts (see `ContainerFieldFactsMap`'s
+    // doc comment) are just as stale as a composite `narrowing_key` entry
+    // rooted at `key` the moment `key` itself is genuinely rebound - this
+    // is already called at every real call site that can give a bare
+    // variable a new value outside `Locals::declare` (which purges it
+    // itself), so riding along here covers all of them uniformly rather
+    // than needing its own separate call at each one.
+    locals.container_field_facts.remove(key);
+}
+
+/// Eagerly copies `source_container`'s own recorded per-field facts (see
+/// `ContainerFieldFactsMap`'s doc comment) onto `target_name`'s own
+/// `narrowing_key` synthetic keys, the moment `target_name` is bound from
+/// a dynamic-keyed read of `source_container` (a `foreach` value, or a
+/// plain `$x = $container[$dyn];`) - the two pre-existing `narrowing_key`-
+/// consulting Index-read fast paths (`checker/expr.rs`'s `check_expr`/
+/// `infer_expr`) then pick them up with no further code needed at the
+/// read site itself. A no-op when `source_container` has no recorded
+/// facts (the overwhelmingly common case).
+pub(crate) fn propagate_container_field_facts(
+    locals: &mut Locals,
+    target_name: &str,
+    source_container: &str,
+) {
+    let Some(facts) = locals.container_field_facts.get(source_container).cloned() else {
+        return;
+    };
+    for (field, ty) in facts.iter() {
+        locals.insert(format!("{target_name}[{field}]"), ty.clone());
+    }
 }
 
 pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {

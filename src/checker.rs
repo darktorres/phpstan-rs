@@ -121,6 +121,36 @@ type QueryBuilderAliasMap = imbl::GenericHashMap<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// Container variable name -> a fact about every element of that
+// container's own shape ("field name -> type"), not about one specific
+// key - `narrowing_key` (`checker/narrowing/predicates.rs`) has no
+// "any/every index" form of its own, which is the one thing this map
+// adds. Populated once, at a by-ref `foreach`'s own loop-exit
+// (`checker/stmt/loops.rs`), by harvesting the accepted pass's own
+// `narrowing_key`-format entries for the loop's value variable -
+// `bind_assignment_target` (`checker/assignment.rs`) already keeps those
+// entries in sync on every assignment as a side effect of ordinary
+// checking, so this is a pure harvest, not a second, independent
+// analysis. Consumed by eagerly copying a container's entry onto a
+// *freshly bound* variable's own `narrowing_key` synthetic keys the
+// moment it's bound from that container via a dynamic-keyed read (a
+// `foreach` value, or a plain `$x = $container[$dyn];`) - the two
+// pre-existing `narrowing_key`-consulting Index-read fast paths in
+// `checker/expr.rs` then pick the copied facts up with no further code.
+// `Rc`-wrapped for the same O(1)-clone reason `BranchImpliedFactsMap`'s
+// own `Vec` is. `merge_scopes` *intersects* (keeps only when both sides
+// carry an identical entry), unlike `branch_implied_facts`'s union: this
+// is a fact that can be invalidated on just one branch (a rebind, or a
+// by-ref pass to an unrecognized function), so surviving on only one
+// side of a merge must not resurrect it - either branch might be the one
+// that actually ran.
+type ContainerFieldFactsMap = imbl::GenericHashMap<
+    String,
+    std::rc::Rc<HashMap<String, Type>>,
+    rustc_hash::FxBuildHasher,
+    imbl::shared_ptr::DefaultSharedPtr,
+>;
+
 /// A checked scope's variable-name-to-inferred-type bindings, plus an
 /// opt-in, parallel declaration-span side-channel the LSP's local-variable-
 /// navigation feature reads through `Checker::probe_span`/
@@ -153,6 +183,7 @@ pub(crate) struct Locals {
     pub(crate) condition_aliases: ConditionAliasMap,
     pub(crate) branch_implied_facts: BranchImpliedFactsMap,
     pub(crate) query_builder_aliases: QueryBuilderAliasMap,
+    pub(crate) container_field_facts: ContainerFieldFactsMap,
     // Monotonic: set `true` the first time any of `insert`/`declare`/
     // `insert_with_provenance` (the only three places `types` is ever
     // written - see each one's own check below) inserts one of
@@ -225,6 +256,14 @@ impl Locals {
         }
         self.purge_condition_aliases_targeting(&key);
         self.query_builder_aliases.remove(&key);
+        // A container rebound wholesale invalidates every per-field fact
+        // recorded about its old value - see `ContainerFieldFactsMap`'s
+        // own doc comment. This covers "reassigned wholesale" for every
+        // real rebind site (assignment LHS, `foreach` binding, ...); an
+        // already-defined container passed by-ref to a function goes
+        // through `insert`, not `declare` (see `predefine_byref_or_
+        // unknown_args`), so that call site purges this map itself too.
+        self.container_field_facts.remove(&key);
         if !narrowing::is_real_variable_key(&key) {
             self.may_have_member_narrowing = true;
         }
@@ -316,6 +355,7 @@ impl Locals {
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
+            container_field_facts: ContainerFieldFactsMap::default(),
             may_have_member_narrowing: false,
             track: self.track,
         }
@@ -959,8 +999,8 @@ pub(crate) use missing_typehint::{
 pub(crate) use narrowing::{
     array_value_type_for_key, count_call_operand, is_real_variable_key, is_unsealed_shape,
     narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
-    narrow_type_to, narrowing_key, purge_stale_narrowing_for, resolve_concat_type,
-    string_type_has_accessory,
+    narrow_type_to, narrowing_key, propagate_container_field_facts, purge_stale_narrowing_for,
+    resolve_concat_type, string_type_has_accessory,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,

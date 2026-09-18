@@ -6,8 +6,8 @@ use crate::checker::{
     TemplateBindings, body_contains_yield, collect_goto_targets, expr_contains_yield,
     generator_template_param, is_language_construct, is_real_variable_key, is_superglobal,
     literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
-    purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
-    superglobal_default_type, to_bitwise_not,
+    propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
+    resolve_concat_type, string_type_has_accessory, superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -1530,6 +1530,25 @@ impl<'a> Checker<'a> {
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 self.record_condition_alias(lhs, rhs, locals);
                 self.record_query_builder_alias(lhs, rhs, locals);
+                // See `ContainerFieldFactsMap`'s own doc comment
+                // (`checker.rs`) - `$x = $container[$dynamicKey];` is the
+                // other real-world shape (alongside a `foreach` value
+                // binding, handled in `checker/stmt/loops.rs`) that
+                // transparently rebinds a fresh variable from a
+                // container's own element without a literal key of its
+                // own to narrow through - propagate any already-recorded
+                // per-field facts onto `lhs`'s own synthetic keys the
+                // same way. A *literal*-key read (`literal_string_key(idx)`
+                // is `Some`) already gets its own, more precise answer
+                // from the ordinary `narrowing_key` fast path, so this is
+                // deliberately gated to the dynamic-key case only.
+                if let ExprKind::Variable(target_name) = &lhs.kind
+                    && let ExprKind::Index(base, Some(idx)) = &unwrap_grouping(rhs).kind
+                    && let ExprKind::Variable(container_name) = &unwrap_grouping(base).kind
+                    && literal_string_key(idx).is_none()
+                {
+                    propagate_container_field_facts(locals, target_name, container_name);
+                }
                 rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {

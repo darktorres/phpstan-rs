@@ -4518,3 +4518,158 @@ fn a_property_narrowed_independently_in_both_if_and_else_branches_survives_the_m
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// `container_field_facts` (`checker.rs`) - a by-ref `foreach`'s own
+// per-field writes are now visible after the loop, through *any* later
+// variable bound from the same container, not just the by-ref alias
+// itself. Mirrors the exact `ConfigurationSubController::processSizes`
+// corpus shape: a by-ref foreach writes several fields (some
+// unconditionally, some across both arms of an `if`/`else`), an
+// *intervening*, unrelated loop runs (exercising `merge_scopes`'s own
+// intersection rule for this fact - the real target has exactly this
+// shape), then a *separate*, later, non-by-ref `foreach` reads the
+// fields back through a differently-named value variable.
+#[test]
+fn a_by_ref_foreachs_per_field_writes_are_visible_through_a_later_differently_named_read() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, array<string, string|int|bool|null>> $rows */
+            function f(array $rows): void {
+                foreach ($rows as $type => &$row) {
+                    if ($row['flag_a'] = ($type === 'x' ? true : false)) {
+                        $row['flag_c'] = 1;
+                    } else {
+                        $row['flag_c'] = 2;
+                    }
+                    $row['flag_b'] = true;
+                }
+                unset($row);
+
+                foreach (['a', 'b'] as $t) {
+                    $tmp = 1;
+                }
+
+                foreach ($rows as $t2 => $prow) {
+                    assertType('true|false', $prow['flag_a']);
+                    assertType('true', $prow['flag_b']);
+                    assertType('1|2', $prow['flag_c']);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// The other real-world binding shape: a plain `$x = $container[$dyn];`
+// assignment (not a `foreach` value), mirroring
+// `ConfigurationSubController.php:1076`'s own
+// `$pderivative = $pderivatives[$type];` read.
+#[test]
+fn a_plain_assignment_from_a_dynamic_key_read_also_sees_the_container_field_facts() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, array<string, string|int|bool|null>> $rows */
+            function f(array $rows, string $key): void {
+                foreach ($rows as $type => &$row) {
+                    $row['flag_b'] = true;
+                }
+                unset($row);
+
+                $one = $rows[$key];
+                assertType('true', $one['flag_b']);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Negative test: a field set in only *one* arm of an `if`/`else`, with no
+// corresponding write in the other arm, must not get a false-precision
+// fact - `merge_scopes`'s own existing, already-correct "present in only
+// one branch gets dropped" rule for `types` entries already guarantees
+// this (the harvest only ever reads what's still present in `pass_locals`
+// by the time it runs), but this test exercises that guarantee through
+// this specific mechanism rather than assuming it holds.
+#[test]
+fn a_field_set_in_only_one_branch_does_not_get_a_false_precision_fact() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, array<string, string|int|bool|null>> $rows */
+            function f(array $rows): void {
+                foreach ($rows as $type => &$row) {
+                    if ($type === 'x') {
+                        $row['maybe'] = true;
+                    }
+                }
+                unset($row);
+
+                foreach ($rows as $t2 => $prow) {
+                    assertType('string|int|bool|null', $prow['maybe']);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Invalidation: the container is reassigned wholesale between the by-ref
+// loop and the later read - the stale fact must not survive that rebind.
+#[test]
+fn reassigning_the_container_wholesale_invalidates_its_recorded_field_facts() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array<string, array<string, string|int|bool|null>> $rows
+             * @param array<string, array<string, string|int|bool|null>> $other
+             */
+            function f(array $rows, array $other): void {
+                foreach ($rows as $type => &$row) {
+                    $row['flag_b'] = true;
+                }
+                unset($row);
+
+                $rows = $other;
+
+                foreach ($rows as $t2 => $prow) {
+                    assertType('string|int|bool|null', $prow['flag_b']);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+// Invalidation: the container is passed by reference to an unrecognized
+// function between the by-ref loop and the later read - this goes
+// through `Locals::insert`, not `declare`, so it needs
+// `purge_stale_narrowing_for`'s own call at that by-ref-widening site
+// (`checker/calls.rs`) to correctly drop the stale fact too.
+#[test]
+fn passing_the_container_by_reference_to_an_unrecognized_function_invalidates_its_field_facts() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, array<string, string|int|bool|null>> $rows */
+            function f(array $rows): void {
+                foreach ($rows as $type => &$row) {
+                    $row['flag_b'] = true;
+                }
+                unset($row);
+
+                mutateSomehow($rows);
+
+                foreach ($rows as $t2 => $prow) {
+                    assertType('string|int|bool|null', $prow['flag_b']);
+                }
+            }
+
+            /** @param array<string, array<string, string|int|bool|null>> $rows */
+            function mutateSomehow(array &$rows): void {}
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

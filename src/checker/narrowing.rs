@@ -26,7 +26,8 @@ pub(crate) use array_shape::{
 };
 use predicates::preg_match_condition;
 pub(crate) use predicates::{
-    is_real_variable_key, narrowing_key, narrowing_type_for_predicate, purge_stale_narrowing_for,
+    is_real_variable_key, narrowing_key, narrowing_type_for_predicate,
+    propagate_container_field_facts, purge_stale_narrowing_for,
 };
 use type_ops::narrow_instanceof_true;
 pub(crate) use type_ops::{narrow_type_excluding, narrow_type_to};

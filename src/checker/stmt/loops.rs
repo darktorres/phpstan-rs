@@ -1,8 +1,11 @@
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use crate::ast::*;
 use crate::checker::{
     Checker, Locals, LoopZeroIterations, body_contains_yield, count_call_operand,
-    is_truthy_literal, merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, union_types,
-    unwrap_grouping,
+    is_truthy_literal, merge_scopes, propagate_container_field_facts, stmt_contains_break,
+    stmt_contains_escaping_exit, union_types, unwrap_grouping,
 };
 use crate::types::Type;
 
@@ -688,6 +691,14 @@ impl<'a> Checker<'a> {
         // convergence hasn't been reached yet, so this always ends up
         // holding the value from whichever pass was actually accepted.
         let mut last_value_ty: Option<Type> = None;
+        // See `ContainerFieldFactsMap`'s own doc comment (`checker.rs`) -
+        // harvested from whichever pass is ultimately accepted, the same
+        // way `last_value_ty` above is, and for the identical soundness
+        // reason: a field write that only happened on *some* iterations
+        // already wouldn't survive that iteration's own internal
+        // `merge_scopes` join, so it's correctly absent from `pass_locals`
+        // by the time this reads it.
+        let mut last_field_facts: HashMap<String, Type> = HashMap::new();
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,
@@ -709,9 +720,33 @@ impl<'a> Checker<'a> {
                 // `check_expr` call is needed on top of it.
                 this.check_assignment_target(value, pass_locals, label);
                 this.bind_assignment_target(value, element_ty.clone(), pass_locals);
+                // Eager propagation: `value` was just bound from
+                // `subject`'s own (dynamic-keyed) element - if `subject`
+                // already carries per-field facts from an earlier by-ref
+                // `foreach` over it, copy them onto `value`'s own
+                // `narrowing_key` synthetic keys right now, so the
+                // pre-existing "check the narrowed key first" Index-read
+                // fast path (`checker/expr.rs`) sees them for any read of
+                // `value[literalField]` inside this same loop body -
+                // covers both a by-ref and an ordinary `foreach` binding
+                // uniformly, not just the by-ref-feedback case below.
+                if let ExprKind::Variable(value_name) = &value.kind
+                    && let ExprKind::Variable(subject_name) = &subject.kind
+                {
+                    propagate_container_field_facts(pass_locals, value_name, subject_name);
+                }
                 this.check_stmt(body, pass_locals, declared_return, label);
                 if let ExprKind::Variable(value_name) = &value.kind {
                     last_value_ty = pass_locals.get(value_name).cloned();
+                    let prefix = format!("{value_name}[");
+                    last_field_facts = pass_locals
+                        .iter()
+                        .filter_map(|(k, v)| {
+                            k.strip_prefix(&prefix)
+                                .and_then(|rest| rest.strip_suffix(']'))
+                                .map(|field| (field.to_string(), v.clone()))
+                        })
+                        .collect();
                 }
             },
         );
@@ -736,6 +771,18 @@ impl<'a> Checker<'a> {
             && let Some(current_subject_ty) = locals.get(subject_name).cloned()
         {
             let widened_element_ty = union_types(old_element_ty, final_value_ty);
+            // See `ContainerFieldFactsMap`'s own doc comment - records
+            // (or, for a second by-ref `foreach` over the same
+            // container, overwrites - a disclosed, non-unsound
+            // completeness limitation, not a correctness one) every
+            // per-field fact this loop's own body proved unconditionally
+            // true of every element, keyed by the container's own name
+            // so a later read through a *differently-named* variable
+            // bound from it (a plain `$x = $container[$dyn];`, or a
+            // later, non-by-ref `foreach`) can still find it.
+            locals
+                .container_field_facts
+                .insert(subject_name.to_string(), Rc::new(last_field_facts));
             locals.insert(
                 subject_name.to_string(),
                 replace_array_element_type(&current_subject_ty, &widened_element_ty),
