@@ -1678,7 +1678,8 @@ impl<'a> Checker<'a> {
                         // `narrowing_key`. A bare `return $x['k'];` right
                         // after narrowing `$x['k']` would otherwise see
                         // the un-narrowed type.
-                        if let Some(key) = narrowing_key(e)
+                        if locals.may_have_member_narrowing()
+                            && let Some(key) = narrowing_key(e)
                             && let Some(narrowed) = locals.get(&key)
                         {
                             return narrowed.clone();
@@ -2109,6 +2110,7 @@ impl<'a> Checker<'a> {
                 // locally-narrowed override before the undefined-property
                 // check/registry lookup below.
                 if member.starts_with('$')
+                    && locals.may_have_member_narrowing()
                     && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
                 {
                     return narrowed.clone();
@@ -2359,7 +2361,8 @@ impl<'a> Checker<'a> {
                     self.check_restricted_property_access(&owner, prop, false, e.span, label);
                     self.check_deprecated_property_access(&owner, prop, p, e.span, label);
                 }
-                if let Some(base_key) = narrowing_key(base)
+                if locals.may_have_member_narrowing()
+                    && let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
                 {
                     return narrowed.clone();
@@ -3429,6 +3432,7 @@ impl<'a> Checker<'a> {
                 // for a locally-narrowed override before falling back to
                 // its own declared type.
                 if member.starts_with('$')
+                    && locals.may_have_member_narrowing()
                     && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
                 {
                     return narrowed.clone();
@@ -3479,7 +3483,8 @@ impl<'a> Checker<'a> {
                 .reduce(|acc, part_ty| resolve_concat_type(&acc, &part_ty))
                 .unwrap_or(Type::String),
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
-                if let Some(base_key) = narrowing_key(base)
+                if locals.may_have_member_narrowing()
+                    && let Some(base_key) = narrowing_key(base)
                     && let Some(narrowed) = locals.get(&format!("{base_key}->{prop}"))
                 {
                     return narrowed.clone();
@@ -3510,7 +3515,8 @@ impl<'a> Checker<'a> {
                 // `is_string($info['code'])`), but nothing reads it back:
                 // this arm would re-derive the type from `$info`'s
                 // declared/inferred shape, discarding the narrowing.
-                if let Some(key) = narrowing_key(e)
+                if locals.may_have_member_narrowing()
+                    && let Some(key) = narrowing_key(e)
                     && let Some(narrowed) = locals.get(&key)
                 {
                     return narrowed.clone();

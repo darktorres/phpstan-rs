@@ -153,6 +153,28 @@ pub(crate) struct Locals {
     pub(crate) condition_aliases: ConditionAliasMap,
     pub(crate) branch_implied_facts: BranchImpliedFactsMap,
     pub(crate) query_builder_aliases: QueryBuilderAliasMap,
+    // Monotonic: set `true` the first time any of `insert`/`declare`/
+    // `insert_with_provenance` (the only three places `types` is ever
+    // written - see each one's own check below) inserts one of
+    // `narrowing_key`'s own synthetic property-chain/array-index keys,
+    // never reset back to `false` except by starting a fresh scope. Lets
+    // `check_expr`/`infer_expr`'s own "is this exact property/index/
+    // static-property chain narrowed?" probes (`PropertyAccess`/`Index`/
+    // `StaticAccess`) skip building the synthetic lookup key entirely -
+    // two `String` allocations (`narrowing_key` itself, then the call
+    // site's own `format!`) - in the overwhelmingly common case where
+    // `locals` holds no such entry at all, without needing every one of
+    // `narrowing_key`'s ~30 call sites across `checker/narrowing*.rs`/
+    // `checker/assignment.rs` to individually remember to set a flag (a
+    // single missed site there would silently reintroduce a correctness
+    // bug - a narrowed value never read back - which is worse than the
+    // wasted allocation this exists to avoid). A stale `true` after the
+    // one narrowed entry is later purged just costs one skippable
+    // allocation, not a false negative - `merge_scopes`'s own `types`-
+    // merging loop (`checker/control_flow.rs`) already routes every
+    // surviving key through `insert_with_provenance`, so this needs no
+    // separate per-field merge line to stay correct across branch joins.
+    may_have_member_narrowing: bool,
     // Whether `declare`/`insert_with_provenance` do anything - `false` by
     // default for every ordinary check-project run, `true` only for the
     // LSP's own per-request variable-navigation probe. Carried on `Locals`
@@ -174,11 +196,19 @@ impl Locals {
         self.types.contains_key(key)
     }
 
+    /// See `may_have_member_narrowing`'s own doc comment.
+    pub(crate) fn may_have_member_narrowing(&self) -> bool {
+        self.may_have_member_narrowing
+    }
+
     /// Provenance-preserving update, for narrowing an existing binding
     /// (`instanceof`/null/array-shape checks) or a by-ref call's type
     /// widening (`sort($arr)`, `preg_match(..., $matches)`) - the value's
     /// declaration site doesn't move just because its known type changed.
     pub(crate) fn insert(&mut self, key: String, ty: Type) -> Option<Type> {
+        if !narrowing::is_real_variable_key(&key) {
+            self.may_have_member_narrowing = true;
+        }
         self.types.insert(key, ty)
     }
 
@@ -195,6 +225,9 @@ impl Locals {
         }
         self.purge_condition_aliases_targeting(&key);
         self.query_builder_aliases.remove(&key);
+        if !narrowing::is_real_variable_key(&key) {
+            self.may_have_member_narrowing = true;
+        }
         self.types.insert(key, ty)
     }
 
@@ -250,6 +283,9 @@ impl Locals {
         if self.track && !provenance.is_empty() {
             self.provenance.insert(key.clone(), provenance);
         }
+        if !narrowing::is_real_variable_key(&key) {
+            self.may_have_member_narrowing = true;
+        }
         self.types.insert(key, ty)
     }
 
@@ -280,6 +316,7 @@ impl Locals {
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),
+            may_have_member_narrowing: false,
             track: self.track,
         }
     }

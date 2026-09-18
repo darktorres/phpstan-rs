@@ -4482,3 +4482,39 @@ fn a_flag_set_alongside_another_effect_in_the_same_branch_is_not_aliased() {
         "the flag-only-effect restriction should leave this unimproved: {d:?}"
     );
 }
+
+// Regression test for `Locals::may_have_member_narrowing` (see
+// `check_expr`/`infer_expr`'s `PropertyAccess`/`Index`/`StaticAccess`
+// arms): a property-chain narrowing entry (`narrowing_key`'s own
+// `"a->value"` synthetic key) is written independently inside each side
+// of an `if`/`else` (via each branch's own `is_string(...)`-guarded early
+// return, so the outer `if`/`else` itself doesn't terminate on either
+// side and genuinely goes through `merge_scopes`'s cross-branch join,
+// not just "the surviving branch's own locals"), then read back once
+// past the merge. `may_have_member_narrowing` must still read `true`
+// after the merge - `merge_scopes`'s own `types`-merging loop routes the
+// surviving entry through `Locals::insert_with_provenance`, which is one
+// of the three places that flag gets set - or this would silently regress
+// to the pre-fix behavior of never reading the narrowed type back at all.
+#[test]
+fn a_property_narrowed_independently_in_both_if_and_else_branches_survives_the_merge() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Box { public string|int $value = 0; }
+            function f(Box $a, bool $cond): void {
+                if ($cond) {
+                    if (!is_string($a->value)) {
+                        return;
+                    }
+                } else {
+                    if (!is_string($a->value)) {
+                        return;
+                    }
+                }
+                assertType('string', $a->value);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
