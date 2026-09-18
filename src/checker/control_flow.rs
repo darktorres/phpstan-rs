@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::ast_walk::{any_stmt_child, stmt_children};
 use crate::checker::{Checker, Locals, union_types};
-use crate::types::Type;
+use crate::types::{self, Type};
 
 mod boolean_conditions;
 mod generators;
@@ -295,6 +295,7 @@ impl<'a> Checker<'a> {
     /// below never reflects it), so convergence would wrongly conclude
     /// "nothing changed" after a single pass and keep that pass's own
     /// diagnostics - computed against the stale, pre-reassignment entry.
+    #[hotpath::measure]
     pub(crate) fn converge_loop_body(
         &mut self,
         entry: &Locals,
@@ -405,6 +406,7 @@ impl<'a> Checker<'a> {
 /// provenance-merging here once is what makes every one of those inherit
 /// real reaching-definitions precision, with no further change needed
 /// at any of those call sites.
+#[hotpath::measure]
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = then_locals.fresh_scope();
     // A `function_exists()` guard only survives a merge
@@ -523,11 +525,22 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
             if let Some(else_provenance) = else_locals.get_provenance(name) {
                 provenance.extend(else_provenance.iter().copied());
             }
-            merged.insert_with_provenance(
-                name.clone(),
-                union_types(then_ty.clone(), else_ty.clone()),
-                provenance,
-            );
+            // `union_types` itself already short-circuits to `a` unchanged
+            // when `a`/`b` are equal (`types_equal_for_union`) - but by
+            // then both are already-cloned owned `Type`s, since it takes
+            // its arguments by value. For a variable neither branch
+            // touched (the common case - most locals in scope at a
+            // branch point aren't reassigned by either specific branch),
+            // `then_ty`/`else_ty` are the exact same value, so checking
+            // equality here first avoids ever cloning `else_ty` at all,
+            // rather than cloning it just to have `union_types` discard
+            // it a moment later.
+            let merged_ty = if types::types_equal_for_union(then_ty, else_ty) {
+                then_ty.clone()
+            } else {
+                union_types(then_ty.clone(), else_ty.clone())
+            };
+            merged.insert_with_provenance(name.clone(), merged_ty, provenance);
         }
     }
     merged

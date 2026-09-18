@@ -699,6 +699,7 @@ impl<'a> Checker<'a> {
     /// A bare, non-elseif `If` has no such chain-position concept at all
     /// and is never exempted.
     #[allow(clippy::too_many_arguments)]
+    #[hotpath::measure]
     fn check_if(
         &mut self,
         cond: &Expr,
