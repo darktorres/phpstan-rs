@@ -297,6 +297,41 @@ impl<'a> Checker<'a> {
                                 locals.discriminant_array_facts.insert(key, new_slot_ty);
                             }
                         }
+                        // A dynamic-key write whose index *expression* is
+                        // already known, by its own inferred type, to be
+                        // one or more specific literal keys (`$key =
+                        // 'id'; $row[$key] = ...;`, or a `foreach` over a
+                        // small literal array of key names) is just as
+                        // resolvable per-field as a literal AST token is -
+                        // `narrowing_key(lhs)` at this function's own top
+                        // only recognizes the latter (producing this
+                        // write's own `"row[$key]"` dollar-prefixed
+                        // "current value" marker instead). Each resolved
+                        // literal key's own `narrowing_key`-format entry
+                        // is updated directly here, unioned with whatever
+                        // the read side already had (a `foreach` over
+                        // several literal keys hits this once per key,
+                        // each write needing to survive the others' own
+                        // updates) - real corpus shape:
+                        // `CategoryAvailableListController`'s own
+                        // `foreach (['id', ...] as $key) { $row[$key] =
+                        // ...; }`. Only fires for a genuinely non-literal
+                        // index expression - a literal one (`$row['id']
+                        // = ...`) is already covered by the top-of-
+                        // function `narrowing_key` block above.
+                        if let Some(i) = idx.as_deref()
+                            && literal_string_key(i).is_none()
+                            && let Some(idx_ty) = idx_ty.as_ref()
+                        {
+                            for literal_key in literal_keys_from_type(idx_ty) {
+                                let synthetic_key = format!("{name}[{literal_key}]");
+                                let merged = match locals.get(&synthetic_key) {
+                                    Some(prior) => union_types(prior.clone(), ty.clone()),
+                                    None => ty.clone(),
+                                };
+                                locals.insert(synthetic_key, merged);
+                            }
+                        }
                         if let Some(new_ty) = write_index_into(
                             &current,
                             idx.as_deref(),
@@ -466,6 +501,39 @@ pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
 /// `container_ty` doesn't carry enough shape information to update
 /// precisely - left alone, matching this project's usual "don't guess"
 /// scope.
+/// `literal_string_key`'s own type-based sibling - a non-literal index
+/// *expression* (`$row[$key] = ...`) whose *inferred* type is already a
+/// precise `Type::StringLiteral`/`Type::IntLiteral` (from `$key = 'id';`
+/// alone, or any other narrowing that pins it down, no loop needed) is
+/// just as resolvable against a shape's own field names as a literal AST
+/// token is - `literal_string_key` only ever checks the syntax, never the
+/// type its caller already computed and passed in as `idx_ty`. Kept as a
+/// separate helper (checked only where `write_index_into`'s `ArrayShape`
+/// arm needs it) rather than folded into `literal_string_key` itself, to
+/// avoid changing that function's signature at its other, unrelated call
+/// sites.
+fn literal_key_from_type(idx_ty: Option<&Type>) -> Option<String> {
+    match idx_ty {
+        Some(Type::StringLiteral(s)) => Some(s.to_string()),
+        Some(Type::IntLiteral(n)) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+/// `literal_key_from_type`'s own plural form - every `StringLiteral`/
+/// `IntLiteral` member reachable from `ty`, recursing through a `Union` (a
+/// `foreach` over a small literal array of key names binds its own loop
+/// variable to the union of every element, not one resolved literal per
+/// pass). Empty for anything else, never a guess.
+fn literal_keys_from_type(ty: &Type) -> Vec<String> {
+    match ty {
+        Type::StringLiteral(s) => vec![s.clone()],
+        Type::IntLiteral(n) => vec![n.to_string()],
+        Type::Union(members) => members.iter().flat_map(literal_keys_from_type).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Maps `idx_ty` to a definite array key type for a write - `Type::Int`/
 /// `Type::String` when `idx_ty` is confidently one or the other, otherwise
 /// `unknown_array_key()` rather than a wrong guess.
@@ -494,7 +562,10 @@ fn write_index_into(
         // provably `Null` doesn't sink the whole write via `Union`'s
         // "all or nothing" `?`.
         Type::Null => write_index_into(&Type::ArrayShape(vec![]), idx, idx_ty, value_ty, in_range),
-        Type::ArrayShape(fields) => match idx.and_then(literal_string_key) {
+        Type::ArrayShape(fields) => match idx
+            .and_then(literal_string_key)
+            .or_else(|| literal_key_from_type(idx_ty))
+        {
             Some(key) => {
                 let mut fields = fields.clone();
                 match fields.iter_mut().find(|(k, _, _)| *k == key) {

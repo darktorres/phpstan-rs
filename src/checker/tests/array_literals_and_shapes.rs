@@ -1433,6 +1433,78 @@ fn successive_narrowed_dynamic_key_writes_union_the_container_s_key_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `write_index_into`'s `ArrayShape` arm only resolved a literal key
+// syntactically (`$row['id'] = ...`), never a non-literal index
+// *expression* whose own *inferred* type is already a precise
+// `StringLiteral`/`IntLiteral` - real corpus shape:
+// `CategoryAvailableListController`'s own `foreach (['id', ...] as $key) {
+// $row[$key] = ...; }`. Reduced here to the minimal non-loop shape a
+// literal-typed local already exhibits.
+#[test]
+fn a_dynamic_key_write_whose_index_variable_has_a_literal_type_updates_that_shape_field_precisely()
+{
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{id: int|string} $row */
+            function f(array $row): void {
+                $key = 'id';
+                $row[$key] = 5;
+                assertType('array{id: 5}', $row);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative control: a genuinely non-literal-typed index still degrades
+// the whole shape, proving the fix above is additive (only resolves a key
+// when the index expression's own type is already confidently a literal),
+// not a blanket bypass of `write_index_into`'s existing "can't know which
+// field changed" fallback.
+#[test]
+fn a_dynamic_key_write_whose_index_variable_is_not_a_literal_still_degrades_the_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{id: int|string} $row */
+            function f(array $row, string $key): void {
+                $row[$key] = 5;
+                assertType('array<string, int|string>', $row);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `bind_assignment_target`'s own synthetic-key update for a dynamic-key
+// write whose index *expression* is a non-literal variable but whose own
+// *type* already resolves to one or more specific literal keys - `$row`
+// here is already a generic `array<string, mixed>` (not an `ArrayShape`),
+// so `write_index_into`'s own literal-key resolution (the fix directly
+// above) never even reaches it; this is a separate, complementary
+// mechanism updating `$row['id']`'s own `narrowing_key`-format entry
+// directly. Real corpus shape:
+// `CategoryAvailableListController`'s own `foreach (['id', ...] as $key)
+// { $row[$key] = ...; }`, `$row` sourced from a bare `: array`-returning
+// method with no docblock shape.
+#[test]
+fn a_dynamic_key_write_over_a_small_literal_key_set_updates_each_fields_own_narrowing_entry() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsInt(int $x): void {}
+            /** @param array<string, mixed> $row */
+            function f(array $row): void {
+                foreach (['id', 'name'] as $key) {
+                    $row[$key] = is_numeric($row[$key] ?? null) ? (int) ($row[$key] ?? 0) : 0;
+                }
+                needsInt($row['id']);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // A dynamic-key write inside a `for ($i = 0; $i < count($container);
 // $i++) { $container[$i] = ...; }` loop rewrites an existing element in
 // place - never growing past the end or skipping an index - so real PHP
