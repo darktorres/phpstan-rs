@@ -213,7 +213,15 @@ impl<'a> Lexer<'a> {
     /// want to compare bare tokens without spans getting in the way.
     #[hotpath::measure]
     pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span, Option<String>)> {
-        let mut tokens: Vec<(Token, Span, Option<String>)> = Vec::new();
+        // A real PHP file averages well under one token per 4 source
+        // bytes (identifiers/keywords/string contents are usually several
+        // bytes each, and whitespace/comments between tokens contribute
+        // to `src.len()` without adding a token at all) - this is a
+        // deliberately generous estimate, not a tight one, so the common
+        // case needs zero of `Vec::push`'s own amortized-growth
+        // reallocations instead of the ~log2(n) a bare `Vec::new()` would
+        // pay for a file with thousands of tokens.
+        let mut tokens: Vec<(Token, Span, Option<String>)> = Vec::with_capacity(self.src.len() / 4);
         loop {
             let tok = self.next_token();
             let keyword_raw = self.pending_keyword_raw.take();
