@@ -432,7 +432,7 @@ impl<'a> Lexer<'a> {
         while self.pos < self.src.len() && !self.starts_with("<?php") && !self.starts_with("<?=") {
             self.pos += 1;
         }
-        let html = String::from_utf8_lossy(&self.src[start..self.pos]).into_owned();
+        let html = String::from_utf8_lossy(&self.src[start..self.pos]);
 
         if self.starts_with("<?php") {
             self.pos += 5;
@@ -588,9 +588,9 @@ impl<'a> Lexer<'a> {
         start..self.pos
     }
 
-    fn lex_ident_raw(&mut self) -> String {
+    fn lex_ident_raw(&mut self) -> std::borrow::Cow<'_, str> {
         let span = self.lex_ident_span();
-        String::from_utf8_lossy(&self.src[span]).into_owned()
+        String::from_utf8_lossy(&self.src[span])
     }
 
     fn lex_number(&mut self) -> Token {
