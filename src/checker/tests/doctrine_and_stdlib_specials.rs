@@ -791,6 +791,37 @@ fn pathinfo_with_a_non_literal_flag_keeps_todays_array_or_string() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `token_get_all()`'s stub used to give no per-element shape at all
+// (falling back to a bare `array`), so `$tok[2]` (a token's own line
+// number, PHP's real documented 3-tuple `[id, text, line]`) inferred as
+// `mixed` instead of `int` - the real corpus gap this patch closes
+// (`tests/Arch/StructuralTest.php`'s own `findBareCallSites`).
+#[test]
+fn token_get_all_infers_the_real_per_token_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<array{path: string, line: int}> */
+            function findBareCallSites(string $source): array {
+                $hits = [];
+                $tokens = token_get_all($source);
+                $n = count($tokens);
+                for ($i = 0; $i < $n; $i++) {
+                    $tok = $tokens[$i];
+                    if (! is_array($tok) || $tok[0] !== T_STRING) {
+                        continue;
+                    }
+                    $hits[] = [
+                        'path' => 'x',
+                        'line' => $tok[2],
+                    ];
+                }
+                return $hits;
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn parse_url_with_a_known_component_constant_infers_its_real_type() {
     let d = diagnostics_for(

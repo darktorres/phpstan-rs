@@ -297,6 +297,10 @@ fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionSig)]) {
             ),
         ),
         ("pathinfo", &types::parse_type_string("array|string")),
+        (
+            "token_get_all",
+            &types::parse_type_string("list<array{0: int, 1: string, 2: int}|string>"),
+        ),
     ];
     for (name, sig) in stubs.iter_mut() {
         if let Some((_, shape)) = patches.iter().find(|(n, _)| *n == name.as_ref()) {
