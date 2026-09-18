@@ -242,7 +242,7 @@ impl<'a> Checker<'a> {
                 if self.registry.check_function_name_case
                     && let Some(resolved) = &resolved_name
                     && let Some((canonical, _)) = self.registry.lookup_function_with_name(resolved)
-                    && canonical != resolved
+                    && canonical != resolved.as_ref()
                 {
                     self.report(
                         label.to_string(),
@@ -538,7 +538,7 @@ impl<'a> Checker<'a> {
                         self.check_internal_function_call(name, sig, e.span, label);
                         self.check_restricted_function_call(name, e.span, label);
                         self.check_deprecated_function_call(name, sig, e.span, label);
-                        match name.as_str() {
+                        match name.as_ref() {
                             "array_filter" => {
                                 self.check_array_filter_no_op(args, locals, label, e.span)
                             }
@@ -570,7 +570,7 @@ impl<'a> Checker<'a> {
                         });
                         if !args.iter().any(|a| a.spread)
                             && matches!(
-                                name.as_str(),
+                                name.as_ref(),
                                 "sprintf" | "printf" | "fprintf" | "vsprintf" | "vprintf"
                             )
                         {
@@ -3378,7 +3378,7 @@ impl<'a> Checker<'a> {
                         self.resolve_function_candidates_cached(callee.span, name);
                     self.registry
                         .lookup_function(&primary)
-                        .map(|sig| (primary.as_str(), sig))
+                        .map(|sig| (primary.as_ref(), sig))
                         .or_else(|| {
                             fallback
                                 .as_deref()

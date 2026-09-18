@@ -878,7 +878,8 @@ pub struct Checker<'a> {
     // (`&self`) without threading a new parameter through either's call
     // graph. Scoped to one `Checker` (one file), so it never leaks across
     // files.
-    call_candidate_cache: RefCell<HashMap<Span, (String, Option<String>)>>,
+    #[allow(clippy::type_complexity)]
+    call_candidate_cache: RefCell<HashMap<Span, (Arc<str>, Option<Arc<str>>)>>,
     // Disjunctive-syllogism narrowing: a stack, not a `Locals` field,
     // since it's scoped to the *traversal position* (currently inside
     // an outer `if ($a || $b)`'s own true branch, at any nesting depth)
@@ -1024,11 +1025,23 @@ impl<'a> Checker<'a> {
         &self,
         callee_span: Span,
         name: &str,
-    ) -> (String, Option<String>) {
+    ) -> (Arc<str>, Option<Arc<str>>) {
         if let Some(cached) = self.call_candidate_cache.borrow().get(&callee_span) {
             return cached.clone();
         }
-        let resolved = self.name_ctx.resolve_function_candidates(name);
+        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+        // Interned, not just cached by span: the same resolved name
+        // (e.g. every call to a common function like `strlen`/a locally-
+        // declared helper) recurs across many distinct call sites in a
+        // real file, each its own cache entry by span - interning shares
+        // one allocation across all of them, on top of what the per-span
+        // cache alone already saves for a single call site re-resolved by
+        // both `check_expr` and `infer_expr` (see this field's own doc
+        // comment).
+        let resolved = (
+            crate::intern::intern(&primary),
+            fallback.as_deref().map(crate::intern::intern),
+        );
         self.call_candidate_cache
             .borrow_mut()
             .insert(callee_span, resolved.clone());
