@@ -944,7 +944,9 @@ impl<'a> Checker<'a> {
                 // owned, already-substituted signature straight out of
                 // `receiver`'s tuple, no second clone/substitution here.
                 let receiver = self.find_method_receiver(&recv_ty, method);
-                let sig = receiver.as_ref().map(|(_, _, _, sig)| sig);
+                let sig = receiver
+                    .as_ref()
+                    .map(|(_, _, _, sig)| std::borrow::Borrow::borrow(sig));
                 if let Some((_, _, owner, _)) = &receiver
                     && let Some(s) = sig
                 {

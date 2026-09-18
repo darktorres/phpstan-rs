@@ -206,10 +206,14 @@ impl<'a> Checker<'a> {
     /// return type - all of which need a member that actually declares
     /// the method, in the correct (`Intersection` reversed) order,
     /// exactly like `find_method_owner`/`method_call_return_type`
-    /// already get right. Returns an owned, already-class-template-
-    /// substituted `FunctionSig` (unlike `find_method_owner`'s borrowed
-    /// one) so the caller can freely call further `&mut self` methods
-    /// afterward.
+    /// already get right. Returns an already-class-template-substituted
+    /// `FunctionSig` so the caller can freely call further `&mut self`
+    /// methods afterward - `Cow`, not a plain owned `FunctionSig`, since
+    /// `substitute_class_templates` itself only actually needs to
+    /// allocate a new one when real substitution happened; the
+    /// overwhelmingly common non-generic case borrows straight from the
+    /// registry (tied to `'a`, so it's just as safe to hold across those
+    /// later `&mut self` calls as an owned value would be).
     ///
     /// Substitution happens right here, inline in the leaf arms, rather
     /// than as a separate step the caller applies afterward - a separate
@@ -218,11 +222,17 @@ impl<'a> Checker<'a> {
     /// again, fully discarding the first clone. Mirrors
     /// `method_call_return_type`'s own already-correct "substitute once,
     /// right after the lookup" shape.
+    #[allow(clippy::type_complexity)]
     pub(crate) fn find_method_receiver(
         &self,
         base_ty: &Type,
         method: &str,
-    ) -> Option<(String, Vec<Type>, std::sync::Arc<str>, FunctionSig)> {
+    ) -> Option<(
+        String,
+        Vec<Type>,
+        std::sync::Arc<str>,
+        std::borrow::Cow<'a, FunctionSig>,
+    )> {
         match base_ty {
             Type::Object(class, type_args) => self
                 .registry

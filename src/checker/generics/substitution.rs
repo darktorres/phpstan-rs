@@ -50,11 +50,11 @@ impl<'a> Checker<'a> {
     /// just because they share a name.
     pub(crate) fn substitute_class_templates(
         &self,
-        sig: &FunctionSig,
+        sig: &'a FunctionSig,
         class: &str,
         type_args: &[Type],
         owner: &str,
-    ) -> FunctionSig {
+    ) -> std::borrow::Cow<'a, FunctionSig> {
         // `(scope, bindings)` pairs to try, in order - almost always
         // exactly one (`owner` itself, the overwhelmingly common case of
         // a class directly declaring its own `@template`), occasionally
@@ -130,7 +130,7 @@ impl<'a> Checker<'a> {
         }
 
         if scoped_bindings.is_empty() {
-            return sig.clone();
+            return std::borrow::Cow::Borrowed(sig);
         }
         let subst = |ty: &Type| {
             scoped_bindings
@@ -139,7 +139,7 @@ impl<'a> Checker<'a> {
                     substitute_scoped(&acc, bindings, scope)
                 })
         };
-        FunctionSig {
+        std::borrow::Cow::Owned(FunctionSig {
             params: sig
                 .params
                 .iter()
@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
             is_transitively_pure: sig.is_transitively_pure,
             is_stub: sig.is_stub,
             is_magic: sig.is_magic,
-        }
+        })
     }
 }
 
