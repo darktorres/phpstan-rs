@@ -245,6 +245,25 @@ class) can only be defused once `stub_paths` is correctly populated,
 which every existing `phpstan-rs.toml` predates - flip the default once
 a project's own config migrates its stub-override paths there.
 
+**Anonymous class stable synthetic naming** (commit `701be86`). A
+`new class { ... }` instance is now registered into the registry under a
+real, stable synthetic name (`"AnonymousClass" + md5("{file}:{line}
+[:{line_index}]")`, mirroring real PHPStan's own `AnonymousClassNameHelper`/
+`AnonymousClassVisitor` algorithm exactly, `line_index` present only when
+more than one anonymous class starts on the same line) instead of
+inferring bare `Type::Mixed` - a new `registry::collect_anonymous_classes`
+whole-file walk (descending into function/method/closure bodies, unlike
+`build_declarations`'s top-level-only walk) registers each one's full
+`ClassInfo`, not just an alias to whichever interface it implements (see
+this same real fix's own Reverted-section entry above for why a type-
+inference-only shortcut is unsound). The checker's own inference site
+never recomputes the name - it looks its own expression's span up in a
+`Span -> name` map computed once at parse time, so there's only one
+computation site to keep in sync. Fixes 3 `*MiddlewareTest.php` findings
+(`ApiIdempotencyMiddlewareTest`, `ExceptionHandlerMiddlewareTest`,
+`SentryMiddlewareTest`) where an anonymous-class instance is
+passed/assigned somewhere its declared interface should satisfy.
+
 ## Type system
 
 Generics with call-site substitution, `@extends`/`@implements` chain
@@ -317,18 +336,20 @@ decomposition rule rather than a hand-rolled, coarser check (a real
 corpus false positive caught before landing: a compound `sub`
 straddling both branches piecewise, e.g. `list<string>|list<X>`,
 was wrongly rejected unless it fit entirely inside just one branch).
-Two real, disclosed, pre-existing gaps this newly exercises (both in
+Two real, disclosed, pre-existing gaps this newly exercised (both in
 adjacent-but-separate subsystems, not this resolution mechanism
 itself, confirmed via isolated repros with zero conditional-type
-involvement) rather than fixed here: this project's own return-
-statement type inference doesn't correlate a value accumulated across
-several separate `if`/`else` branches/loops with an outer condition
-made much earlier in the same function (a real corpus find,
-`NotificationByMailSender::sendMailNotifications()`, where the
-returned list's element type depends on the same `$action` a
-conditional return type's own subject also names, but the two aren't
-tracked as related); and ternary/if-else branches don't track a
-`bool`/string literal narrowly enough for a declaration-level
+involvement) at the time: this project's own return-statement type
+inference didn't correlate a value accumulated across several separate
+`if`/`else` branches/loops with an outer condition made much earlier in
+the same function (a real corpus find, `NotificationByMailSender::
+sendMailNotifications()`, where the returned list's element type
+depended on the same `$action` a conditional return type's own subject
+also names) - **now fixed**, see Done's own `discriminant_array_facts`
+entry (a per-branch accumulator side-channel, consulted as a return-
+check fallback, rather than a change to this resolution mechanism
+itself). The second gap remains open: ternary/if-else branches don't
+track a `bool`/string literal narrowly enough for a declaration-level
 conditional-return-type self-check to match precisely (`return $x ===
 [] ;`-shaped code widens to plain `bool` rather than `true`/`false`
 per branch - several real instances across `vendor/php-standard-
@@ -855,6 +876,66 @@ existing arm ordering put a generic `(_, Type::Union(members))` arm
 a new, more specific `(Intersection, Union)` arm ahead of both generic
 ones.
 
+**`BenevolentUnionType` marker** (commit `eee86cb`). A new
+`AccessoryKind::Benevolent`, used the same `Intersection`-wrapper way as
+`ArrayList`/`NonEmptyArray`, mirrors real PHPStan's own
+`TypeNodeResolver::resolveArrayTypeNode`: a bare PHPDoc `Type[]`-shorthand
+array's key type (and the `+` operator's own same-key-type fallback) is
+now benevolent, accepted wherever *any* member matches rather than
+requiring *every* member to. Fixed `BlockManager::apply`,
+`CategoryAvailableListController::__invoke`, `SpecStructureTest`,
+`openapi-generate-input-dto.php`, and (reached via `array_flip()` moving
+the marker from key to value position) all 4 `SiteUpdateSubController`
+`int|string`-vs-`int`/`list<int>` findings.
+
+**`chronologyDate` list-degradation through an in-place index-rewrite
+loop** (commit `ed2ecb7`). `write_index_into`'s dynamic-key-write
+handling now accepts a "this write is a provably in-range index rewrite,
+not a growth" signal - computed by recognizing the syntactic idiom
+`for ($i = 0; $i < count($container); $i++) { $container[$i] = ...; }`
+via a new `Checker::in_range_index_writes` fact - so an existing
+`ArrayList` marker survives instead of being unconditionally dropped on
+every dynamic-key write. Fixes `CalendarRenderer::render` and
+`SectionPopulator`, both rewriting a `list<int|string>` parameter in
+place via this exact loop shape.
+
+**Degraded spread-array-literal list-safety check** (commit `dafaed4`).
+`infer_spread_array_literal_type`'s "degraded" (non-`ArrayShape`) branch
+now keys off the spread source's own key type (`array_key_type`, only a
+possible *string* key breaks list-ness) instead of whether the source
+was already `ArrayList`-marked - real PHP's spread semantics always
+renumber a source's *integer* keys sequentially regardless of whether
+they were already sequential. Fixes `SearchService::
+getQuickSearchResultsNoCache`'s `$params = [...$params, ...$ids]`.
+
+**`reconcile_with_native` native-union-member preservation** (commit
+`8a10fc2`). When the native type is itself a `Union`, `reconcile_with_
+native` now adds back whichever native alternatives the docblock never
+mentioned (a native member with no `kept` subtype covering it survives
+verbatim), mirroring real PHPStan's `TypehintHelper::decideType`'s own
+per-member keep-or-refine logic instead of only ever filtering the
+docblock's own member list down. Fixes `PictureModifyInteractionTest`'s
+own call into `Pest\Browser\Api\Concerns\InteractsWithElements::keys()`,
+whose `@param array<int, string> $keys` narrows only the `array` half of
+a native `array|string` parameter.
+
+**`Registry::is_assignable`'s missing `Type::Conditional` arm** (commit
+`da6df83`). Unlike `types::is_subtype` (which already flattened a
+`Type::Conditional` sup into `Union([if_true, if_false])`),
+`is_assignable` had no arm for it at all, so a `sub` that's itself an
+`Intersection` (any `list<T>`/`non-empty-array<T>` value) hit the
+generic `(Intersection, _) => any(...)` rule first, decomposing `sub`'s
+own members and checking each in isolation - none of which, stripped
+from its `Intersection` wrapper, still represents a real list - before
+`sup`'s own shape was ever inspected. Added both directions (`sub`/`sup`
+being the `Conditional`), placed before every arm that could decompose
+the other side first, mirroring `is_subtype`'s own placement exactly.
+Confirmed via the full unscoped corpus: 21 real false positives
+corrected across the vendored tree (`Composer\Pcre`, Symfony
+`EventDispatcher`/`Messenger`, PHP-CS-Fixer, Doctrine,
+`php-standard-library`, Nette `Utils`), independent of the narrowing
+mechanism below.
+
 ## Narrowing engine
 
 `instanceof`, equality/identity, `isset`/`??`/`??=` (including the
@@ -1067,6 +1148,75 @@ now carried across at closure-construction time, filtered to only the
 facts naming an actually-captured variable (an unfiltered carry-over
 would otherwise mask a real `variable.undefined` on a genuinely-
 uncaptured same-named reference inside the closure).
+
+**By-ref closure-capture callback convergence** (commit `6ecd3f6`). A
+closure literal's body (both `checker/expr.rs`'s own `Closure` arm and
+`closure_context.rs`'s near-duplicate) now routes through `Checker::
+converge_loop_body`/`LoopZeroIterations`, the same zero-to-many-run,
+converge-to-fixed-point treatment an ordinary loop body already gets,
+instead of a single unconditional pass - applies uniformly to every
+closure literal (`preg_replace_callback`/`array_walk`/`usort`/etc. all
+genuinely call their closure zero-to-many times), not gated to one
+builtin. Fixes `SearchService::positionalCondition`'s own
+`arrayValues.list` finding (a by-ref `use (&$values)` capture mutated
+across however many regex matches `preg_replace_callback` finds). One
+honestly-documented residual gap: a by-ref mutation immediately followed
+by `return` inside one branch isn't caught (`check_if`'s own branch-
+discarding for post-if code still hides it from the convergence loop's
+own by-ref read) - verified via `dumpType()` that real PHPStan gives the
+identical answer for that exact shape too.
+
+**If-body-set flag, OR-chain condition** (commit `5f7bebf`). A new
+`record_if_body_flag_alias` correlates a flag set as the *sole*
+statement of an `if` body with that `if`'s own (negated) condition,
+extending the existing `condition_aliases` replay machinery to a new
+trigger site (an `if`-body side effect, not just a direct assignment
+expression). Fixes `ImageDerivativeController`'s own `$derivative_mtime
+= @filemtime(...); if ($derivative_mtime === false or ...) {
+$need_generate = true; }`, later `if (! $need_generate) { ...
+gmdate(..., $derivative_mtime) ... }` - reaching `!$need_generate`
+provably means every disjunct (including `$derivative_mtime === false`)
+is false, now recorded.
+
+**Whole-container per-field facts from a by-ref `foreach`** (commit
+`2d2567e`). `$row['field'] = X` inside `foreach ($rows as $k => &$row)`
+writes into `$rows`'s own storage, but only a single flat per-container
+element type was ever tracked. A new `Locals` field,
+`container_field_facts`, records "every element's own field X is type
+T" (a fact about the container's whole shape, not one key) - harvested
+from `bind_assignment_target`'s own pre-existing `narrowing_key`-format
+entries at the by-ref loop's exit (a pure harvest of already-computed
+state, not a second analysis) and eagerly propagated onto any later
+variable bound from the same container via a dynamic-keyed read (a
+`foreach` value, or a plain `$x = $container[$dyn];`) - the two
+pre-existing `narrowing_key`-consulting Index-read fast paths pick it up
+with no further changes. `merge_scopes` intersects a container's own
+entry across a branch join (a fact invalidated on one branch must not
+survive). Fixes `ConfigurationSubController::processSizes`'s three
+`must_square`/`must_enable`/`enabled` findings - `$pderivatives` is a
+*uniform* `array<string, array<string, ...>>`, not an `ArrayShape`, so
+there was no per-field slot to narrow at all before this.
+
+**Branch-gated array-accumulator tracking** (commit `da6df83`). A new
+`Locals` field, `discriminant_array_facts`, separately tracks each
+`if`/`else` branch's own array-push accumulator (keyed by a bare-
+boolean-variable condition, pushed/popped via a new `Checker::
+active_discriminant` around the branch) - `write_index_into`'s generic
+`Type::Union` handling was applying an append write to *every* member of
+an already-diverged union uniformly, including a member produced by a
+*different* loop iteration's *other* branch (confirmed by a minimal
+repro: `if ($f) { $x[] = 'a'; } else { $x[] = new Obj(); }` inside a
+loop produces a genuinely-impossible `list<string|Obj>` member after
+only two convergence passes - not a `merge_scopes` flattening bug,
+`union_types` never merges two different `Array`/`Intersection` element
+types on its own). Consulted only as a fallback when a `return` against
+a `Type::Conditional` declared type would otherwise fail: reconstructing
+`Union([true-slot, false-slot])` and re-checking passes through the
+`is_assignable` fix above with no per-call-site discriminant resolution
+needed. Fixes `NotificationByMailSender::sendMailNotifications`'s own
+`return $returnList;` (`$returnList` pushed a `string` under
+`$isActionSend` and a `UserMailNotification` otherwise, checked against
+a conditional return type keyed on `$action === 'send'`).
 
 ## Rule catalog (checker)
 
@@ -2408,6 +2558,46 @@ type` for the `@throws`-tag consumer (`DOMException` for `createElement`,
 a plain `\Exception` for `SimpleXMLElement`'s constructor, confirmed
 live against PHP 8.5 - there's no dedicated SimpleXML exception class).
 
+**`reset`/`end`/`next`/`prev` exempted from by-ref argument widening;
+`array_unique` non-emptiness preserved** (commit `06b1769`). `Checker::
+calls`'s generic by-ref-argument-widening loop was unconditionally
+widening these four functions' by-ref argument to its declared param
+type, discarding a precise argument type their own return-type
+computation still needed - they're real native by-ref stubs, but only
+PHP's internal array pointer moves, never the array's own value, so
+widening was always wrong (confirmed against `vendor/phpstorm-stubs` and
+`dumpType()`). Fixing that exposed a second, real, pre-existing bug it
+had been masking: `array_unique()` incorrectly stripped `NonEmptyArray`
+too (real PHPStan preserves non-emptiness through `array_unique()`,
+unlike `array_diff`/`array_intersect`). Fixes `SearchService::
+getRegularSearchResults`'s `reset($imageIdsForFilter)`/`array_map(intval(...),
+$first)` finding - the originally-suspected `ArrayShape`-all-optional-
+fields gap (see this same finding's own former Known-limitations entry)
+was investigated via a scratch probe and confirmed *not* the actual
+cause; that mechanism (an `upgrade_array_to_non_empty` arm for an
+all-optional-but-nonempty-field-list `ArrayShape`) was never built, and
+remains a real, separately-unconfirmed gap if the same symptom
+resurfaces elsewhere for a genuinely different reason.
+
+**`array_splice()`'s missing by-ref effect** (commit `9320a82`). Added to
+`predefine_byref_or_unknown_args`'s by-ref effects table, mirroring the
+existing `array_push`/`array_shift` arms: a provably non-empty literal
+`$replacement` argument alone proves the result non-empty (real PHP
+always clamps the removal count to at most `count($array_before)`
+regardless of `$offset`/`$length`, matching real PHPStan's own
+`ArrayType::spliceArray()`), independent of the array's own prior state.
+Fixes `SearchService::qsearchGetTextTokenSearchSql:1037`'s `return.type`
+finding - `array_splice()` previously fell through to the generic
+declared-param-type widening, discarding `$values`'s own precision down
+to a bare `array`. This finding was originally investigated as a
+genuine cross-variable correlation (`$clauses`/`$fts`'s own mutually-
+exclusive loop growth) needing general formula-memory machinery - that
+story was real but never actually load-bearing for this diagnostic: the
+declared return type uses plain `list<T>` on both tuple slots, never
+`non-empty-list<T>`, so `$clauses`'s non-emptiness was never a real
+proof obligation, and the actual failure was this much narrower,
+already-precedented by-ref-effect gap.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -2947,14 +3137,15 @@ before defaulting to another full revert.
   successfully reattempted once that gap was closed, and is now shipped
   (see **Done**, Phase 36).
 - **Anonymous-class ancestor-aliasing shortcut** (an ad hoc round
-  during the Phase 14.5 corpus-cleanup series). Aliasing an anonymous
-  class's inferred type to whichever single `extends`/`implements`
-  target it names was implemented and corpus-verified, then reverted:
-  unsound for the common "spy" test-double pattern (a class implementing
-  a real interface but also declaring its own extra instrumentation
-  members a test reads directly). A real fix needs registering the
-  anonymous class's own full declaration under some stable synthetic
-  name, not a type-inference tweak.
+  during the Phase 14.5 corpus-cleanup series; superseded - the real fix
+  it called for shipped as commit `701be86`, see Done). Aliasing an
+  anonymous class's inferred type to whichever single `extends`/
+  `implements` target it names was implemented and corpus-verified, then
+  reverted: unsound for the common "spy" test-double pattern (a class
+  implementing a real interface but also declaring its own extra
+  instrumentation members a test reads directly). A real fix needs
+  registering the anonymous class's own full declaration under some
+  stable synthetic name, not a type-inference tweak.
 
 ---
 
@@ -2990,38 +3181,6 @@ section used to carry:
   no attached calling class (a real architectural gap - no concrete
   corpus false positive/negative traced yet; watch for a fluent
   base-class builder method chained through a subclass instance);
-  **corrected** - `BenevolentUnionType` genuinely is needed, this
-  entry's own prior claim was wrong. A Piwigo/real-PHPStan corpus diff
-  round confirmed a real, live gap: real PHPStan's own PHPDoc `Type[]`
-  array-shorthand resolution (`TypeNodeResolver::resolveArrayTypeNode`)
-  keys the result with a `BenevolentUnionType([Integer, String])`, not a
-  plain `Union` - and `RuleLevelHelper::accepts()` treats a Benevolent
-  union specially, skipping the strict per-member check a plain `Union`
-  gets. Verified directly, not assumed: a `@var Item[]` property read
-  via `foreach` and passed to a `string`-typed parameter produces *zero*
-  errors from real PHPStan (`dumpType()` even displays it distinctly,
-  parenthesized - `(int|string)` - vs. a plain-Union `int|string` shown
-  unparenthesized, which *does* get flagged against the same parameter).
-  This project's own `Type::unknown_array_key()` (`Union([Int, String])`,
-  used both for the identical `Type[]`-shorthand parse in `types/
-  parse.rs` and for the array-union `+` operator's own fallback key type)
-  has no such marker, so every one of these sites gets treated as a
-  strict `Union` - a confirmed source of real false positives: `Block
-  Manager::apply`'s `foreach ($this->display_blocks as $id => $block)`
-  (`@var DisplayBlock[]`) passing `$id` to `hideBlock(string $block_id)`;
-  `CategoryAvailableListController::__invoke`'s equivalent `$catId` case;
-  `SpecStructureTest`'s `strtoupper($key)` over an `openApiOperations()`-
-  shaped array; `openapi-generate-input-dto.php`'s `narrowingExpr()` call
-  - all four still open, all four now root-caused (previously listed as
-  an "untriaged `int|string` array-key-type-imprecision cluster" in
-  PHASE_BACKLOG's own Phase 123 O1 trade-off note). Not built this round:
-  a real fix needs a genuine `Type::Union`-adjacent "benevolent" marker
-  (a new variant or accessory) threaded through `Type[]`-shorthand
-  parsing, the array `+` operator's key-type fallback, and every
-  `is_assignable`/`accepts_at_configured_level` call site that should
-  respect it - comparable in size to Phase 84's own already-declined
-  `checkBenevolentUnionTypes` item, and naturally the same future phase
-  that item already reserves, not a new one.
   `class-string<T>`'s own `instanceof`/sealed-hierarchy
   narrowing is unmodeled (no `is_a()`-with-narrowing or sealed-hierarchy
   pattern found in the corpus this round); no general `TypeCombinator`
@@ -3033,76 +3192,8 @@ section used to carry:
   own element type is already a real `ArrayShape` is done** - see Done's
   own entry (`CategoryCatsRenderer::render`'s `$infosOfImage`/`$info
   ['src_image']`). **The `ConfigurationSubController::processSizes`
-  instance below this line remains open, and is now known to be a
-  genuinely different, larger gap than the one just fixed - not simply
-  an unbuilt instance of the same mechanism**, confirmed by direct
-  `\PHPStan\dumpType()` verification rather than assumed: `$pderivatives`
-  carries an explicit `@var array<string, array<string, string|int|bool
-  |null>>` annotation - a *uniform*, unshaped `Array(K, V)`, not an
-  `ArrayShape` with named fields at all. The by-ref-widening fix just
-  shipped structurally cannot help here (there is no per-field slot to
-  narrow in a uniform array type); real PHPStan's own answer for this
-  exact shape - confirmed via `dumpType()` against a faithful minimal
-  reproduction of the loop (`$row['must_square'] = (...)`, then reading
-  `$row['must_square']` back after the loop) - is a precisely-typed
-  `bool`, obtained through a different, more general mechanism entirely:
-  PHPStan's own `ExpressionTypeHolder` (see `vendor/phpstan-src`'s own
-  architecture notes) tracks a flow type keyed by the *exact expression*
-  (`$pderivative['must_square']`), independent of - and able to be
-  strictly narrower than - whatever the container variable's own overall
-  declared/tracked type says. This project has no equivalent: an
-  array-index-fetch expression is only ever resolved through its
-  *container's* own tracked type, never given its own independent,
-  flow-narrowable identity the way a plain variable already has. A real
-  fix needs a new per-offset (not per-variable) entry in `Locals` -
-  keyed by `(container name, literal key)` or similar - consulted by
-  `ExprKind::Index` reads before falling back to the container's own
-  general element type, updated by exactly the same assignment sites
-  that already update a plain variable's own `Locals` entry. Materially
-  bigger than the by-ref-widening fix already shipped: needs its own
-  key-collision/invalidation story (the offset's own cached type must be
-  purged whenever the *container* is reassigned wholesale, aliased, or
-  passed by reference elsewhere) that a plain-variable `Locals` entry
-  never had to solve. Not attempted here.
-- **A real, confirmed bug in `resolve_type`/`reconcile_with_native`: a
-  PHPDoc type that only refines *one member* of a native union type
-  silently discards every other native member instead of keeping it
-  alongside the refinement.** Found investigating a scoped Piwigo corpus
-  false positive (`PictureModifyInteractionTest`'s own `$page->keys
-  ($inputSelector, 'Enter')`, third-party `Pest\Browser\Api\Concerns\
-  InteractsWithElements::keys(string $selector, array|string $keys)`,
-  whose own docblock narrows to `@param array<int, string> $keys` -
-  itself contradicted by that method's own body, `is_array($keys) ?
-  $keys : [$keys]`, which only makes sense if a plain string really is
-  still accepted). Confirmed via `\PHPStan\dumpType()` against the real
-  method: PHPStan's own effective type for `$keys` is `array<int,
-  string>|string` - the `array` alternative refined, the untouched
-  `string` alternative kept verbatim, not dropped. Root-caused directly
-  in `vendor/phpstan-src/src/Type/TypehintHelper.php::decideType`: real
-  PHPStan's own per-native-union-member merge keeps whichever original
-  members the docblock type doesn't disprove, alongside the refined one.
-  `resolve_type`'s own doc comment states the opposite design
-  intentionally ("a docblock type is trusted as the complete picture and
-  otherwise fully replaces the native hint") and `reconcile_with_native`
-  implements exactly that: it only ever *filters down* the docblock
-  type's own member list (dropping a docblock member the native type
-  can't produce), it never adds back a native union member the docblock
-  simply never mentioned at all. For an ordinary single-type native hint
-  (`string`, `?Foo`, ...) this distinction is invisible - there's only
-  one native "member" to reconcile against either way, and the design
-  intent (docblock replaces, doesn't merely refine) is exactly right.
-  It only diverges from real PHPStan for a **native union** where the
-  docblock names a real subtype of *one specific member* while staying
-  silent about the rest - confirmed to matter today because it's exactly
-  the phpstorm-stubs-style pattern this project already special-cases
-  elsewhere (`imagecreatefromstring`'s stale `@return resource|GdImage
-  |false`), just from the opposite direction (docblock *narrower* than
-  native, not *wider*/stale). A real fix: when `native_ty` is a `Union`,
-  `reconcile_with_native` needs to also union in whichever native members
-  `doc_ty` doesn't itself cover (i.e. aren't a subtype of any surviving
-  doc member) - mirroring `decideType`'s own per-member keep-or-refine
-  logic - rather than just filtering the doc type's own member list.
-  Scoped, well-understood, not attempted here.
+  instance (a *uniform*, unshaped `Array(K, V)`, not an `ArrayShape`) is
+  also done** - see Done's own `container_field_facts` entry.
 - **A closure literal's own `Type::Closure`/`Callable` signature uses its
   bare declared return-type hint, not its more precise inferred body
   return type - unlike an ordinary named function/method, which already
@@ -3129,134 +3220,6 @@ section used to carry:
   specific site (closure-literal signature construction). Not attempted
   here - the exact call site(s) building a closure literal's own
   `Type::Closure` weren't inventoried this round.
-- **`$x !== []` already proves a plain `Type::Array`/`Intersection`
-  non-empty (`is_known_single_value`/`narrow_type_excluding` both
-  already special-case an empty `ArrayShape` target, confirmed reading
-  the code directly, superseding this entry's own prior "isn't
-  recognized at all" claim) - the real, narrower gap is one specific
-  shape neither one covers: an `ArrayShape` whose own fields are *all
-  optional*.** Found investigating `SearchService::
-  getRegularSearchResults`'s own `if ($imageIdsForFilter !== []) { if
-  (count($imageIdsForFilter) > 1) { ...; } else { $first = reset(
-  $imageIdsForFilter); $items = array_map(intval(...), $first); } }` -
-  `$imageIdsForFilter` is built via several independently-conditional
-  keyed writes (`$imageIdsForFilter['width'] = ...`, `['tags'] = ...`,
-  `['custom'] = ...`), so its own tracked type is `array{width?:
-  list<int>, tags?: list<int>, custom?: list<int>}` - every field
-  optional, not a plain `Type::Array`. `upgrade_array_to_non_empty`
-  (`checker/narrowing/accessory_range.rs`) only has an arm for a
-  literally *empty* `ArrayShape` (`fields.is_empty()`, collapsing it to
-  `Never`) - an all-optional-but-nonempty-*field-list* shape falls
-  through to its `_ => ty.clone()` catch-all unchanged, so `reset()`
-  still returns `T|false` and cascades into the observed `list<int>|
-  array` mismatch, exactly as this entry's own prior text described,
-  just from a different root cause than claimed. Not a quick fix: "not
-  exactly `array{}`" for an all-optional-fields shape means "at least
-  one of these N fields is present," a genuine disjunctive fact this
-  project's `ArrayShape`/`AccessoryKind` representation has no clean
-  way to carry (unlike a plain non-empty `Array(K, V)`, which needs no
-  disjunction - *some* key exists, full stop). Needs real design work
-  (a new accessory, or unioning every "exactly one field present"
-  combination, which is exponential in field count for anything but a
-  tiny shape) before attempting - not attempted here.
-- **The 4 `SiteUpdateSubController` `int|string`-vs-`int`/`list<int>`
-  findings are not a separate gap - they're another instance of the
-  benevolent-`int|string`-array-key-union item above, reached through
-  `array_flip()` instead of directly.** `$db_fulldirs` starts as
-  `CategoryService::getFulldirs()`'s own `@return string[]` - a `Type[]`-
-  shorthand return, whose *key* type is exactly the "benevolent"
-  `int|string` union the item above already names - then gets
-  `array_flip()`'d, swapping keys and values, so the benevolent marker
-  moves from the *key* position into the *value* position. Confirmed via
-  `\PHPStan\dumpType()` against a faithful reproduction (a `string[]`-
-  returning function, `array_flip()`, then reading a value against an
-  `int`-only parameter): real PHPStan's own dumped type is `array<string,
-  (int|string)>` - the parenthesized benevolent form, same as the item
-  above - and passing that value where `int` is expected produces **zero**
-  errors. `$to_delete[]`/`$category_up[]`/`storageCategoryId: $db_fulldirs
-  [$dirname]` all read values straight out of this same flipped array (or
-  out of `$insert['id_uppercat']`, itself assigned from a value read out
-  of it) - once the benevolent-union marker above is built, it needs to
-  additionally survive `array_flip()`'s own key/value swap (and, more
-  generally, any other place this project moves a key type into a value
-  position or vice versa) for all 4 of these findings to resolve for
-  free, with no separate fix of their own.
-- **A real, confirmed bug in the "degraded" (non-`ArrayShape`) path of a
-  spread array literal (`[...$a, ...$b]`): it uses the wrong test for
-  whether a spread source keeps the result list-shaped.** Found
-  investigating `SearchService::getQuickSearchResultsNoCache`'s own
-  `$params = [...$params, ...$ids]` (`$ids` sourced from `qsearchEval()`'s
-  own `@return array<int, int>`) - flagged `argument.type` against
-  `findImageIdsForRegularSearch`'s `list`-typed parameter. Confirmed via
-  `\PHPStan\dumpType()` against a faithful minimal reproduction (a
-  function declared `@return array<int, int>` - deliberately *not*
-  `list<int>` - spread into an accumulator, once unconditionally and once
-  inside an `if`): real PHPStan reports **zero** errors; swapping the
-  source's own declared type to `@return list<int>` doesn't change the
-  outcome (still zero errors) - but swapping it to `@return array<string,
-  int>` correctly *does* produce the same `argument.type` error phpstan-rs
-  gives today. Root-caused directly in `checker::expr::array_ops::
-  infer_spread_array_literal_type`'s own "degraded" branch: `if !Self::
-  is_list_like(&value_ty) { list_safe = false; }` gates purely on whether
-  the spread *source* already carries the `ArrayList` accessory - but
-  real PHP's own spread semantics (already correctly described in this
-  same function's own doc comment, just not applied to this branch) always
-  renumber a source's *integer* keys sequentially into the result,
-  regardless of whether those keys were already sequential in the source;
-  only *string* keys are ever preserved verbatim (and only a string key
-  can break the result's own list-ness). `is_list_like` answers "is this
-  array itself provably a list" - the right question for most of its
-  other callers, but the wrong one here: the real question a spread needs
-  answered is "does this source have any possible *string* key at all,"
-  which only fails for a plain int-keyed `Type::Array` (`is_list_like`'s
-  own `_ => false` catch-all wrongly answers this the same as a
-  string-keyed one). A real fix: replace (or supplement) the `is_list_
-  like` check in this one branch with one that inspects the source's own
-  key type directly (via `array_key_type`) and only sets `list_safe =
-  false` when that key type could genuinely include `String` - an
-  `ArrayShape` source already takes the separate, non-degraded branch
-  above it and isn't affected either way. Scoped, well-understood, not
-  attempted here.
-- **The opposite mistake, in the same neighborhood: this project is
-  *over*-confident that a by-ref closure capture mutated inside a
-  callback passed to `preg_replace_callback()` is already list-shaped
-  after the call returns - real PHPStan is not.** Found investigating
-  `SearchService::positionalCondition`'s own `arrayValues.list` finding
-  ("call to `array_values()` on `array{}|non-empty-list`, which is
-  already a list, has no effect") - `$values` is captured `use (&$values)`
-  by a closure passed to `preg_replace_callback()`, mutated inside it via
-  both `$values = [...$values, ...$value]` and `$values[] = $value;`
-  across however many regex matches the pattern finds. Confirmed via
-  `\PHPStan\dumpType()` against a faithful minimal reproduction of the
-  exact shape: real PHPStan's own type for `$values` right after the
-  `preg_replace_callback()` call is a bare `array<mixed>` - *not* already
-  a list - meaning the very `array_values($values)` call this project
-  flags as redundant is, per real PHPStan, doing real, needed work. This
-  project's own diagnosis is therefore itself the false positive, not a
-  true one needing verification. Root cause (not yet traced to an exact
-  line, unlike the fixes above): closure-literal checking apparently
-  treats a by-ref `use` capture's own body-local mutations as a single,
-  unconditional pass written straight back into the outer scope, the way
-  an ordinary statement would be - not the "may run zero or many times,
-  each run seeing the *previous* run's own effect as its entry, converge
-  to a fixed point, then merge with *never running at all*" treatment
-  `Checker::converge_loop_body`/`LoopZeroIterations` already gives an
-  ordinary loop body. A real fix likely means routing a by-ref-capturing
-  closure literal passed to `preg_replace_callback`/`array_walk`/
-  `usort`/`uasort`/`uksort` (every real by-ref-callback-accepting builtin,
-  not just this one) through that same convergence machinery instead of
-  a single pass - architecturally similar in shape to work already done
-  for ordinary loops, but needs its own integration at the closure-
-  literal-as-argument checking call site(s). **Traced to the exact
-  site**: `checker/expr.rs`'s `ExprKind::Closure` arm, the `for u in
-  uses { if !u.by_ref { continue; } ... }` loop (currently ~line 2751) -
-  `let original = locals.get(&u.name)...; locals.insert(u.name.clone(),
-  union_types(original, mutated));` is exactly the single-pass "one
-  execution merged with never running" union this entry describes,
-  confirmed by reading the code directly. Not attempted here - the
-  "which builtins call their callback zero-to-many times" classification
-  and the multi-pass convergence loop are both real, unbuilt work, not
-  a small patch to this one call site.
 - `UploadService::addUploadedFile`'s own `$dbnow` - **root-caused, not
   simply "unresolved"**: a bisection of the real file (a temporary,
   immediately-reverted edit confirmed byte-identical via `md5sum` before
@@ -3277,22 +3240,6 @@ section used to carry:
   that real PHPStan's own answer here is a clean `non-falsy-string`, no
   `null` at all. Not a separate, newly-found gap - the same one, just a
   harder-to-spot instance (same variable re-checked, not a proxy flag).
-- `NotificationByMailSender::sendMailNotifications`'s own `return
-  $returnList;` (`return.type` against a conditional return type keyed
-  on `$action === 'send'`) - **confirmed real via `\PHPStan\dumpType()`
-  against a faithful minimal reproduction** (a boolean alias for
-  `$action === 'send'`, an accumulator written down two different
-  branches of that alias inside a loop, a conditional return type keyed
-  on the same discriminant): real PHPStan produces zero errors. This is
-  a genuinely *compound* gap, bigger than the base discriminant-
-  correlation bucket alone (see "Permanent design boundaries" below):
-  it needs that same boolean-alias correlation to survive across much
-  deeper, longer-lived control flow (loops, several nested `if`s, ~230
-  lines) than `condition_alias_shape` currently attempts *and* it needs
-  the resulting correlated union to be checked against a *conditional*
-  return type's own discriminant-keyed arms, rather than the ordinary
-  flat union every return type gets today. Confirmed scoped, not
-  attempted here.
 - **Corrected diagnosis (real-PHPStan-verified, supersedes this bullet's
   own original text below the line).** This was originally attributed to
   a missing feature - dynamic-key narrowing not reaching `isset()`/
@@ -3370,43 +3317,10 @@ section used to carry:
   genuinely harder problem than the single-loop accumulator shape above)
   if the two loops aren't provably iterating the same key set - reassess
   after O1, don't assume it's fully subsumed.
-- A discriminant flag set by an `if`-statement's own body (`if (A or B
-  or C) { $flag = true; }`), later checked as `if (!$flag) { ... }`,
-  doesn't narrow away `A`/`B`/`C`'s own negation at that later check
-  site - a different shape from Phase 171's already-built compound-
-  condition-flag narrowing, which only recognizes a flag set via a
-  *direct* `$flag = A || B;` assignment *expression*, not a flag
-  conditionally set inside an `if`'s own statement body. Confirmed at
-  `ImageDerivativeController`'s own `$derivative_mtime = @filemtime(
-  ...); if ($derivative_mtime === false or $derivative_mtime <
-  $src_mtime or $derivative_mtime < $params->last_mod_time) {
-  $need_generate = true; } ...; if (! $need_generate) { ...
-  gmdate(..., $derivative_mtime) ... }` - reaching `! $need_generate`
-  provably means `$derivative_mtime !== false` (among the other
-  disjuncts), but nothing records that fact. A real fix likely needs
-  `branch_implied_facts` (or an equivalent mechanism) to record, at the
-  point an `if`'s body unconditionally sets a flag from an otherwise-
-  unchanged initial value, that the flag's own later negation implies
-  the condition's own logical negation - a genuinely different
-  mechanism from Phase 171's expression-level OR-chain narrowing
-  (which fires at the *condition* site itself, not at a *later*,
-  separate check of a flag that condition set). Not filed as a
-  numbered phase; scope not fully worked out. Not investigated this
-  round: `StructuralTest::findBareCallSites:903`'s own `return.type`
-  finding may partly be `token_get_all()`'s own generically-`mixed`
-  stub shape rather than purely the already-documented `!== []`-
-  narrowing gap above - not confirmed either way.
-- Two `0e34322` corpus findings flagged but not root-caused, not
-  confirmed as this project's own bug either way:
-  `SearchService::qsearchGetTextTokenSearchSql:1037`'s own `return.type`
-  (a nested-loop `$clauses`/`$values` accumulation combined with a
-  mid-loop `array_splice()` call, producing a far more literal-string-
-  specific union than expected - not traced to an exact mechanism);
-  `tests/Browser/PictureModifyInteractionTest.php:150`'s own
-  `argument.type` against `Pest\Browser\Api\Webpage::keys()` (could be
-  a genuinely too-strict third-party stub, or a real test bug passing
-  `'Enter'` instead of `['Enter']` - the real `pestphp/pest-plugin-
-  browser` package source wasn't checked).
+- Not investigated this round: `StructuralTest::findBareCallSites:903`'s
+  own `return.type` finding may partly be `token_get_all()`'s own
+  generically-`mixed` stub shape rather than purely the already-
+  documented `!== []`-narrowing gap above - not confirmed either way.
 
 ## Permanent design boundaries (not planned, by choice)
 
