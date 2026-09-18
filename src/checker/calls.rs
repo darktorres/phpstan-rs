@@ -206,6 +206,48 @@ impl<'a> Checker<'a> {
                             continue;
                         }
                     }
+                    // `array_splice` always removes at most
+                    // `count($array)` elements (real PHP clamps the
+                    // removal count regardless of `$offset`/`$length`),
+                    // so `count($after) = count(before) - removed +
+                    // count($replacement) >= count($replacement)`
+                    // unconditionally - a provably non-empty literal
+                    // `$replacement` alone proves the result non-empty,
+                    // independent of `$offset`/`$length`/the array's own
+                    // prior state (confirmed against real PHPStan's own
+                    // `ArrayType::spliceArray()`, which uses the
+                    // identical rule). List-ness survives the same way
+                    // `array_push`/`array_shift` already do; the element
+                    // type widens to include the replacement's own.
+                    "array_splice" if Checker::is_list_like(&current) => {
+                        if let Some(elem_ty) = Checker::array_element_type(&current) {
+                            let replacement_ty =
+                                args.get(3).map(|a| self.infer_expr(&a.value, locals));
+                            let (combined_elem, non_empty) = match &replacement_ty {
+                                Some(r) => (
+                                    union_types(
+                                        elem_ty,
+                                        Checker::array_element_type(r).unwrap_or(Type::Mixed),
+                                    ),
+                                    Checker::is_known_non_empty_array(r),
+                                ),
+                                None => (elem_ty, false),
+                            };
+                            let mut members = vec![
+                                Type::Array(
+                                    Box::new(Type::unknown_array_key()),
+                                    Box::new(combined_elem),
+                                ),
+                                Type::Accessory(types::AccessoryKind::ArrayList),
+                            ];
+                            if non_empty {
+                                members.push(Type::Accessory(types::AccessoryKind::NonEmptyArray));
+                            }
+                            purge_stale_narrowing_for(locals, name);
+                            locals.insert(name.to_string(), Type::Intersection(members));
+                            continue;
+                        }
+                    }
                     _ => {}
                 }
             }

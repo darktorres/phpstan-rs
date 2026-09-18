@@ -2387,3 +2387,104 @@ fn a_whole_variable_reassigned_inside_a_foreach_still_keeps_its_null_alternative
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
+
+// `array_splice()`'s own by-ref effect on its first argument - previously
+// unhandled (fell through to the generic declared-param-type widening,
+// discarding list-ness/element-type down to a bare `array`). A provably
+// non-empty literal replacement alone proves the result non-empty,
+// independent of $offset/$length/the array's own prior state - real PHP
+// always clamps the removal count to at most count($array), so
+// count(after) = count(before) - removed + count(replacement) >=
+// count(replacement) unconditionally (confirmed against real PHPStan's
+// own ArrayType::spliceArray(), which uses the identical rule).
+#[test]
+fn array_splice_with_a_non_empty_literal_replacement_yields_a_non_empty_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<string> $x */
+            function f(array $x): void {
+                array_splice($x, 0, 1, ['new']);
+                assertType('non-empty-list<string>', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn array_splice_with_no_replacement_preserves_list_ness_but_drops_non_emptiness() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<string> $x */
+            function f(array $x): void {
+                array_splice($x, 0, 1);
+                assertType('list<string>', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn array_splice_with_an_unknown_typed_replacement_stays_conservative() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param list<string> $x
+             * @param array<mixed> $replacement
+             */
+            function f(array $x, array $replacement): void {
+                array_splice($x, 0, 1, $replacement);
+                assertType('list', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn array_splice_on_a_non_list_argument_does_not_falsely_gain_list_ness() {
+    // Mirrors `array_push_on_a_non_list_argument_does_not_falsely_gain_list_ness`
+    // - a real array_splice on an arbitrary-keyed array doesn't turn it
+    // into a list, so this must fall through to the generic widening
+    // rather than the new special case.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return list<string> */
+            function f(): array {
+                $x = ['a' => 'foo'];
+                array_splice($x, 0, 1, ['bar']);
+                return $x;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("return type mismatch")),
+        "expected a return-type mismatch, got: {d:?}"
+    );
+}
+
+// The exact `SearchService::qsearchGetTextTokenSearchSql` corpus shape:
+// a by-ref `array_splice()` call with a non-empty literal replacement,
+// whose result is then returned against a declared `list<string>` slot
+// of a tuple return type.
+#[test]
+fn array_splice_resolves_the_qsearch_get_text_token_search_sql_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param list<string> $clauses
+             * @param list<string> $values
+             * @return array{0: list<string>, 1: list<string>}
+             */
+            function f(array $clauses, array $values): array {
+                array_splice($values, 0, 0, ['tsv_search @@ to_tsquery(?)']);
+                return [$clauses, $values];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
