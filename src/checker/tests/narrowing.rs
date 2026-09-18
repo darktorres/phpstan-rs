@@ -4096,6 +4096,83 @@ fn a_variable_assigned_a_concrete_object_inside_a_branch_is_a_proxy_discriminant
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// `record_branch_implied_facts`'s own enum-case-proxy subject (the
+// `is_enum_case_proxy` counterpart of the concrete-object-proxy case above)
+// - `AuthService::authKeyLogin`'s own real shape: a variable set to an enum
+// case (never previously introduced as a `subjects` candidate) correlates
+// with another variable set alongside it in the same branch, replayed via
+// an equality comparison several statements later after intervening
+// unrelated code.
+#[test]
+fn a_variable_assigned_an_enum_case_inside_a_branch_is_a_proxy_discriminant() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum ConnectedWith {
+                case AuthKey;
+                case ApiKey;
+            }
+            function f(bool $isApiKey): void {
+                $validKey = null;
+                $secretKey = null;
+                if ($isApiKey) {
+                    $validKey = ConnectedWith::ApiKey;
+                    $secretKey = "s3cr3t";
+                }
+                echo "unrelated code in between";
+                if ($validKey === ConnectedWith::ApiKey) {
+                    assertType("'s3cr3t'", $secretKey);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Real corpus regression from the `is_enum_case_proxy` addition above -
+// `League\Uri\QueryString::composeRecursive`'s own shape: a variable
+// (`$value`) whose own `instanceof`-narrowed type is unrelated to a
+// *different* discriminant (`$mode`) that also happens to become an enum
+// case within the same branch. `$value`'s own name appears directly in
+// this branch's own condition, so it must never become an implied-fact
+// candidate for `$mode`'s discriminant - on a second loop pass, replaying
+// a stale fact here would overwrite `$value`'s freshly re-narrowed
+// `instanceof` type with the first pass's own leftover `array` value,
+// right before the real `get_object_vars()` call that needs the object
+// type.
+#[test]
+fn a_variable_named_in_its_own_branch_condition_is_never_an_implied_fact_for_an_unrelated_discriminant()
+ {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Mode {
+                case Compatible;
+                case Lenient;
+            }
+            interface BackedEnum {}
+            interface UnitEnum {}
+            /** @param list<mixed> $data */
+            function f(Mode $mode, array $data): void {
+                foreach ($data as $value) {
+                    if ($value instanceof BackedEnum) {
+                        if (Mode::Compatible !== $mode) {
+                            continue;
+                        }
+                        $value = get_object_vars($value);
+                    }
+                    if ($value instanceof UnitEnum) {
+                        if (Mode::Lenient === $mode) {
+                            continue;
+                        }
+                        $value = get_object_vars($value);
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // `record_branch_implied_facts`'s own facts surviving into a closure body
 // (Phase 175) - `RateService::rate`'s own real shape: an outer `if
 // ($userAnonymous) { $savedAnonymousId = ...; } else { $savedAnonymousId =

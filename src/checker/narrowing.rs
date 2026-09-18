@@ -169,6 +169,26 @@ pub(super) fn discriminant_canonical_key(subject_key: &str, value: &Type) -> Str
     format!("{subject_key}=={value:?}")
 }
 
+/// Whether `name` (a bare variable, already `is_real_variable_key`-checked
+/// by the one caller) appears anywhere inside `e` as an `ExprKind::
+/// Variable` - `record_branch_implied_facts`'s own guard against recording
+/// a variable whose narrowing this exact branch's own condition already
+/// explains (see its call site's doc comment). A generic recursive walk
+/// via `expr_children` rather than a hand-enumerated set of `ExprKind`
+/// arms - `cond` can be arbitrarily shaped (a call, a chained method,
+/// `instanceof`, a compound `&&`/`||`), and this only needs to answer
+/// "is this name referenced anywhere in it," not narrow/instanceof-specific
+/// shape recognition the way `narrowing_key`/`truthiness_discriminant_subject`
+/// do elsewhere in this module.
+fn cond_references_variable(e: &Expr, name: &str) -> bool {
+    if matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name) {
+        return true;
+    }
+    crate::ast_walk::expr_children(e)
+        .into_iter()
+        .any(|child| cond_references_variable(child, name))
+}
+
 /// The "is this the same propositional atom" identity disjunctive-
 /// syllogism narrowing needs (`Checker::pending_or_disjunctions`) -
 /// deliberately restricted to a bare truthiness atom (a variable, or
@@ -359,7 +379,16 @@ impl<'a> Checker<'a> {
             // object-typed counterpart of the boolean-flag-proxy case
             // above.
             let is_object_proxy = matches!(after_ty, Type::Object(..));
-            if (is_flag_proxy || is_object_proxy)
+            // Same proxy shape as `is_object_proxy` above, for a variable
+            // that became a concrete enum case specifically within this
+            // branch (`AuthService::authKeyLogin`'s own `$valid_key =
+            // ConnectedWith::ApiKey;`) - `Type::EnumCase` is a distinct
+            // variant from `Type::Object`, so it needs its own check here;
+            // the replay side (`apply_equality_narrowing`) is already
+            // generic over the discriminant value's own type and needs no
+            // matching change.
+            let is_enum_case_proxy = matches!(after_ty, Type::EnumCase(..));
+            if (is_flag_proxy || is_object_proxy || is_enum_case_proxy)
                 && before.get(name) != Some(after_ty)
                 && !subjects.iter().any(|(k, _)| k == name)
             {
@@ -372,6 +401,26 @@ impl<'a> Checker<'a> {
         let mut implied: Vec<(String, Type)> = Vec::new();
         for (name, after_ty) in after.iter() {
             if subjects.iter().any(|(k, _)| k == name) {
+                continue;
+            }
+            // A candidate whose own name is tested directly by `cond`
+            // (`if ($value instanceof BackedEnum) { ...; $value =
+            // get_object_vars($value); }`) has its own non-null-ness
+            // already explained by `cond`'s own narrowing, not by whatever
+            // *other* subject this branch also happens to establish -
+            // recording it here would let a later, unrelated re-test of
+            // that other subject replay a type snapshot that's stale the
+            // moment this variable's own narrowing chain (freshly
+            // re-derived every time, e.g. on a later loop pass) disagrees
+            // with it. Real corpus regression this guards against:
+            // `League\Uri\QueryString::composeRecursive`'s `$value`, whose
+            // `instanceof`-narrowed type got overwritten by a stale
+            // `array` fact replayed from `$composeMode`'s own unrelated
+            // enum-case correlation, recorded on an earlier loop pass.
+            // Only a plain variable name is checked here (`is_real_variable_key`) -
+            // a synthetic per-field key (`"row[id]"`) never matches a bare
+            // `ExprKind::Variable` walk and isn't this shape's own hazard.
+            if is_real_variable_key(name) && cond_references_variable(cond, name) {
                 continue;
             }
             if type_definitely_excludes_null(after_ty)
