@@ -36,16 +36,18 @@ use lsp_types::{
 };
 
 use crate::ast::ClassKind;
-use crate::checker::Checker;
+use crate::checker::{self, Checker};
 use crate::project::Project;
 use crate::registry::format_signature;
 use crate::token::Span;
 use crate::types::Type;
+use crate::{baseline, ignore_errors};
 
 mod document_symbol;
 mod navigation;
 mod protocol;
 mod text_split;
+mod workspace_config;
 
 #[cfg(test)]
 use protocol::percent_decode;
@@ -119,6 +121,7 @@ fn resolve_member_owners(
 struct PendingWorkspaceScan {
     root: PathBuf,
     progress_token: Option<lsp_types::ProgressToken>,
+    context: workspace_config::WorkspaceContextPaths,
 }
 
 struct Server {
@@ -141,6 +144,18 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
+    // The workspace root resolved at `"initialize"`, kept around so
+    // `apply_post_filters` can rewrite a diagnostic's path to root-
+    // relative before consulting `ignore_error_entries`/`baseline` -
+    // see `configure_from_workspace`.
+    root: Option<PathBuf>,
+    baseline: Option<crate::baseline::Baseline>,
+    ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
+    // The same `Option<u8>` `Project::set_configured_level` also
+    // received - kept separately here too since `Project`/`Registry`
+    // only use it for type-strictness, not for filtering already-
+    // produced diagnostics before they're published.
+    level_cutoff: Option<u8>,
 }
 
 impl Server {
@@ -156,16 +171,223 @@ impl Server {
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
             pending_workspace_scan: None,
+            root: None,
+            baseline: None,
+            ignore_error_entries: Vec::new(),
+            level_cutoff: None,
         }
     }
 
-    /// Loads every `.php` file under `root` into the project, so the
-    /// cross-file registry and dependency graph this whole phase is
-    /// about are populated from the very first diagnostic, not built up
-    /// one `didOpen` at a time. Invoked from `"initialized"` (not
+    /// Resolves `root`'s own `phpstan-rs.toml` and applies it to
+    /// `self.project`/`self`, so a workspace's config produces the same
+    /// `Project` state (and the same published-diagnostic set) `check-
+    /// project` would build/report for the identical tree. Returns the
+    /// context paths (`vendor`/`scan_paths`/`stub_paths`) `load_workspace`
+    /// needs to load before walking `root` itself.
+    fn configure_from_workspace(&mut self, root: &Path) -> workspace_config::WorkspaceContextPaths {
+        let resolved = workspace_config::resolve(root, None);
+        self.project
+            .set_strict_mixed_arrays(resolved.strict_mixed_arrays);
+        self.project
+            .set_check_uninitialized_properties(resolved.check_uninitialized_properties);
+        self.project
+            .set_check_internal_usage(resolved.check_internal_usage);
+        self.project
+            .set_check_function_name_case(resolved.check_function_name_case);
+        self.project
+            .set_check_deprecated_usage(resolved.check_deprecated_usage);
+        self.project
+            .set_check_empty_method_bodies(resolved.check_empty_method_bodies);
+        self.project
+            .set_check_missing_checked_exceptions(resolved.check_missing_checked_exceptions);
+        self.project.set_check_strict_printf_placeholder_types(
+            resolved.check_strict_printf_placeholder_types,
+        );
+        self.project
+            .set_check_too_wide_throw_type_in_protected_and_public_methods(
+                resolved.check_too_wide_throw_type_in_protected_and_public_methods,
+            );
+        self.project
+            .set_check_too_wide_return_type_in_protected_and_public_methods(
+                resolved.check_too_wide_return_type_in_protected_and_public_methods,
+            );
+        self.project
+            .set_check_method_throw_type_covariance(resolved.check_method_throw_type_covariance);
+        self.project.set_check_duplicate_function_declarations(
+            resolved.check_duplicate_function_declarations,
+        );
+        self.project
+            .set_check_duplicate_class_declarations(resolved.check_duplicate_class_declarations);
+        self.project
+            .set_check_boolean_trap(resolved.check_boolean_trap);
+        self.project
+            .set_check_array_key_cast(resolved.check_array_key_cast);
+        self.project
+            .set_check_parent_constructor_call(resolved.check_parent_constructor_call);
+        self.project
+            .set_check_promoted_property_suggestions(resolved.check_promoted_property_suggestions);
+        self.project
+            .set_check_boolean_conditions(resolved.check_boolean_conditions);
+        self.project
+            .set_check_dynamic_properties(resolved.check_dynamic_properties);
+        self.project
+            .set_check_swapped_arguments(resolved.check_swapped_arguments);
+        self.project
+            .set_check_never_return_suggestions(resolved.check_never_return_suggestions);
+        self.project
+            .set_check_switch_missing_default(resolved.check_switch_missing_default);
+        self.project
+            .set_check_throw_without_message(resolved.check_throw_without_message);
+        self.project
+            .set_check_throw_base_class(resolved.check_throw_base_class);
+        self.project
+            .set_check_new_exception_discarded(resolved.check_new_exception_discarded);
+        self.project.set_configured_level(resolved.configured_level);
+        self.project
+            .set_restricted_symbols(&resolved.restricted_symbol_entries);
+        self.project
+            .set_doctrine_custom_functions(&resolved.doctrine_custom_function_entries);
+        self.project
+            .set_sql_reflection_config(resolved.sql_reflection_config);
+        self.project
+            .set_sql_reflection_schema(resolved.sql_reflection_schema);
+        self.project.set_php_version(resolved.php_version);
+        self.project
+            .set_phpstan_api_check_enabled(resolved.phpstan_api_check_enabled);
+
+        self.root = Some(root.to_path_buf());
+        self.baseline = resolved.baseline;
+        self.ignore_error_entries = resolved.ignore_error_entries;
+        self.level_cutoff = resolved.configured_level;
+
+        workspace_config::WorkspaceContextPaths {
+            vendor: resolved.vendor_context,
+            extra_dirs: resolved.extra_context_dirs,
+        }
+    }
+
+    /// Applies the same severity-level cutoff / `ignore_errors` /
+    /// baseline post-filters `check-project` applies (in that order),
+    /// but scoped to whatever partial result set `update_file`'s own
+    /// transitive-dependents pass just produced. Never surfaces
+    /// `baseline::filter`'s stale-entry report here: its staleness
+    /// detection assumes it's run against the whole project's
+    /// diagnostics at once, and treating every other baselined file as
+    /// "no longer matches" on every keystroke would be a constant
+    /// false-positive warning storm. `ignore_errors`/`baseline` both
+    /// match against a root-relative path string, so results are
+    /// rewritten to root-relative and back around each - a reasonable
+    /// default, not a provable-correct one, for either.
+    fn apply_post_filters(
+        &self,
+        mut results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
+    ) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
+        if let Some(cutoff) = self.level_cutoff {
+            for diagnostics in results.values_mut() {
+                diagnostics.retain(|d| d.level <= cutoff);
+            }
+        }
+        if self.ignore_error_entries.is_empty() && self.baseline.is_none() {
+            return results;
+        }
+        let Some(root) = &self.root else {
+            return results;
+        };
+        let to_relative = |path: PathBuf| -> PathBuf {
+            path.strip_prefix(root)
+                .map(Path::to_path_buf)
+                .unwrap_or(path)
+        };
+        let mut relative: HashMap<PathBuf, Vec<checker::Diagnostic>> = results
+            .into_iter()
+            .map(|(path, diags)| (to_relative(path), diags))
+            .collect();
+        if !self.ignore_error_entries.is_empty() {
+            ignore_errors::filter(&mut relative, &self.ignore_error_entries);
+        }
+        if let Some(baseline) = &self.baseline {
+            let _stale = baseline::filter(&mut relative, baseline);
+        }
+        relative
+            .into_iter()
+            .map(|(path, diags)| (root.join(path), diags))
+            .collect()
+    }
+
+    /// Reads and parses one file, dispatching to `Project::load_file`
+    /// (context: vendor/scan/stub, never analyzed or reported) or
+    /// `Project::load_analyzed_file` (a real, first-party file under
+    /// `root`) based on `analyzed`. A parse failure is logged (both to
+    /// stderr and as a `window/logMessage` notification) and skipped,
+    /// not fatal to the rest of the scan.
+    fn load_one_file(&mut self, path: PathBuf, analyzed: bool, messages: &mut Vec<Message>) {
+        let Ok(bytes) = std::fs::read(&path) else {
+            return;
+        };
+        let source = String::from_utf8_lossy(&bytes).into_owned();
+        let path_for_log = path.clone();
+        let result = if analyzed {
+            self.project.load_analyzed_file(path, &source)
+        } else {
+            self.project.load_file(path, &source)
+        };
+        if let Err(e) = result {
+            eprintln!(
+                "phpstan-rs lsp: skipping {} - failed to parse: {e}",
+                path_for_log.display()
+            );
+            messages.push(log_message_notification(
+                MessageType::WARNING,
+                format!(
+                    "phpstan-rs: skipping {} - failed to parse: {e}",
+                    path_for_log.display()
+                ),
+            ));
+        }
+    }
+
+    /// Loads `context`'s vendor/scan/stub paths first (`analyzed:
+    /// false`), then every `.php` file under `root` (`analyzed: true`,
+    /// skipping any path already loaded as context) - so the cross-file
+    /// registry and dependency graph this whole phase is about are
+    /// populated from the very first diagnostic, not built up one
+    /// `didOpen` at a time. Invoked from `"initialized"` (not
     /// synchronously inside `"initialize"`) via `pending_workspace_scan`
     /// - see `PendingWorkspaceScan`'s own doc comment for why.
-    fn load_workspace(&mut self, root: &Path) -> Vec<Message> {
+    ///
+    /// **Context-before-root load order is a correctness invariant, not
+    /// just a dedup convenience**: `Registry::insert_built_decl`'s
+    /// handling of a second unconditional same-name declaration is
+    /// itself order-sensitive - context-then-analyzed hits the
+    /// `analyzed: true` branch (an outright overwrite, discarding the
+    /// context entry's members), while analyzed-then-context would
+    /// instead hit the `analyzed: false` branch (`existing.merge(...)`,
+    /// folding the vendor info into the first-party entry) - a
+    /// genuinely different `Project` state for the identical tree. A
+    /// future refactor of this method must preserve this order
+    /// explicitly.
+    fn load_workspace(
+        &mut self,
+        root: &Path,
+        context: &workspace_config::WorkspaceContextPaths,
+    ) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let mut loaded: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+
+        let mut context_files = context.vendor.files.clone();
+        for dir in context.vendor.dirs.iter().chain(context.extra_dirs.iter()) {
+            crate::project::collect_php_files(dir, &mut context_files);
+        }
+        context_files.sort();
+        context_files.dedup();
+        for path in context_files {
+            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            if !loaded.insert(canonical) {
+                continue;
+            }
+            self.load_one_file(path, false, &mut messages);
+        }
+
         let mut files = Vec::new();
         crate::project::collect_php_files(root, &mut files);
         // See main.rs's run_check_project for why this matters: a real
@@ -174,8 +396,11 @@ impl Server {
         // unsorted readdir order would make which one wins the
         // registry slot filesystem-dependent.
         files.sort();
-        let mut messages = Vec::new();
         for path in files {
+            let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+            if !loaded.insert(canonical) {
+                continue;
+            }
             // A non-conformant client that sends didOpen/didChange for a
             // path already loaded before "initialized" arrives - this
             // scan must not re-register a file update_file's own caller
@@ -184,30 +409,7 @@ impl Server {
             if self.project.ast(&path).is_some() {
                 continue;
             }
-            let Ok(bytes) = std::fs::read(&path) else {
-                continue;
-            };
-            let source = String::from_utf8_lossy(&bytes).into_owned();
-            // Momentarily-invalid syntax is the normal state while a
-            // file is being edited elsewhere in the workspace, not an
-            // edge case - a single malformed file here must not prevent
-            // the rest of the workspace from loading at all, matching
-            // main.rs's own try_load_file for the equivalent check-
-            // project path.
-            let path_for_log = path.clone();
-            if let Err(e) = self.project.load_file(path, &source) {
-                eprintln!(
-                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
-                    path_for_log.display()
-                );
-                messages.push(log_message_notification(
-                    MessageType::WARNING,
-                    format!(
-                        "phpstan-rs: skipping {} - failed to parse: {e}",
-                        path_for_log.display()
-                    ),
-                ));
-            }
+            self.load_one_file(path, true, &mut messages);
         }
         self.project.finish_loading();
         messages
@@ -240,7 +442,7 @@ impl Server {
                 )];
             }
         };
-        results
+        self.apply_post_filters(results)
             .into_iter()
             .map(|(p, diags)| {
                 // A dependent file re-checked here might not itself be
@@ -719,9 +921,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             // The scan itself runs from "initialized", not here - see
             // PendingWorkspaceScan's own doc comment.
             if let Some(root) = root.as_ref().and_then(uri_to_path) {
+                let context = server.configure_from_workspace(&root);
                 server.pending_workspace_scan = Some(PendingWorkspaceScan {
                     root,
                     progress_token,
+                    context,
                 });
             }
             let result = InitializeResult {
@@ -818,7 +1022,7 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                         ),
                     );
                 }
-                for message in server.load_workspace(&scan.root) {
+                for message in server.load_workspace(&scan.root, &scan.context) {
                     let _ = write_message(writer, &message);
                 }
                 if let Some(token) = scan.progress_token {
