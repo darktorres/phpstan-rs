@@ -26,15 +26,86 @@ use crate::sql_reflection_schema::SchemaCatalog;
 use crate::types::Type;
 
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
-    if let Some(schema) = &registry.sql_reflection_schema
+    let row_type = if let Some(schema) = &registry.sql_reflection_schema
         && let Some(ty) = resolve_from_static_schema(schema, sql)
     {
-        return Some(ty);
+        Some(ty)
+    } else {
+        registry
+            .sql_reflector
+            .get(registry.sql_reflection_config.as_ref())?
+            .reflect(sql)
+    }?;
+    Some(refine_count_columns(sql, row_type))
+}
+
+/// `COUNT(...)` is always `int<0, max>` - real Doctrine's own
+/// `QueryResultTypeWalker::walkAggregateExpression` gives the identical
+/// answer unconditionally, confirmed reading it directly
+/// (`checker::doctrine::result_shape::select_item_type`'s own `AggregateFn
+/// ::Count` arm). Reused here rather than trusting the driver's own
+/// raw reported column type (a real `BIGINT`/`INT` column type, honest
+/// but strictly less precise than the range this project already knows
+/// how to express, and some drivers report a computed column as
+/// nullable at the wire-protocol level even though `COUNT` can never
+/// actually return `NULL` - even a zero-row `COUNT(*)` returns `0`).
+/// Deliberately does *not* attempt the same for `SUM`/`AVG`/`MIN`/`MAX`:
+/// real Doctrine's own DQL-side answer for those four is only ever the
+/// *operand's own PHP-side type*, an approximation this project's own
+/// live/cached SQL reflection doesn't need - a real database's own
+/// `SUM(tinyint_col)` genuinely can widen to a `BIGINT`, so the driver's
+/// own reported type here is already more accurate than force-matching
+/// 168d's simpler DQL heuristic would be.
+fn refine_count_columns(sql: &str, row_type: Type) -> Type {
+    let Type::ArrayShape(mut fields) = row_type else {
+        return row_type;
+    };
+    if let Some(positions) = count_column_positions(sql) {
+        for i in positions {
+            if let Some(field) = fields.get_mut(i) {
+                field.1 = Type::IntRange(Some(0), None);
+            }
+        }
     }
-    registry
-        .sql_reflector
-        .get(registry.sql_reflection_config.as_ref())?
-        .reflect(sql)
+    Type::ArrayShape(fields)
+}
+
+fn count_column_positions(sql: &str) -> Option<Vec<usize>> {
+    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
+        .ok()?
+        .into_iter()
+        .next()?;
+    let Statement::Query(query) = stmt else {
+        return None;
+    };
+    let SetExpr::Select(select) = *query.body else {
+        return None;
+    };
+    Some(
+        select
+            .projection
+            .iter()
+            .enumerate()
+            .filter_map(|(i, item)| {
+                let expr = match item {
+                    SelectItem::UnnamedExpr(e) | SelectItem::ExprWithAlias { expr: e, .. } => e,
+                    _ => return None,
+                };
+                is_count_call(expr).then_some(i)
+            })
+            .collect(),
+    )
+}
+
+fn is_count_call(expr: &Expr) -> bool {
+    match expr {
+        Expr::Function(f) => f
+            .name
+            .0
+            .last()
+            .is_some_and(|part| matches!(part, ObjectNamePart::Identifier(ident) if ident.value.eq_ignore_ascii_case("COUNT"))),
+        _ => false,
+    }
 }
 
 fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type> {

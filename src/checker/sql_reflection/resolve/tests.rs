@@ -114,3 +114,55 @@ fn resolve_sql_row_type_falls_through_to_the_live_reflector_when_static_cannot_a
     registry.sql_reflection_schema = Some(fixture_schema());
     assert!(resolve_sql_row_type(&registry, "SELECT id FROM some_other_table").is_none());
 }
+
+#[test]
+fn count_column_positions_finds_a_bare_count_call() {
+    let positions = count_column_positions("SELECT id, COUNT(*) FROM categories").unwrap();
+    assert_eq!(positions, vec![1]);
+}
+
+#[test]
+fn count_column_positions_finds_an_aliased_count_call() {
+    let positions =
+        count_column_positions("SELECT COUNT(*) AS total, name FROM categories").unwrap();
+    assert_eq!(positions, vec![0]);
+}
+
+#[test]
+fn count_column_positions_is_case_insensitive() {
+    let positions = count_column_positions("SELECT count(*) FROM categories").unwrap();
+    assert_eq!(positions, vec![0]);
+}
+
+#[test]
+fn count_column_positions_does_not_match_sum_or_other_aggregates() {
+    let positions = count_column_positions("SELECT SUM(id), AVG(id) FROM categories").unwrap();
+    assert!(positions.is_empty());
+}
+
+#[test]
+fn refine_count_columns_overwrites_only_the_count_field() {
+    let row_type = Type::ArrayShape(vec![
+        ("id".to_string(), Type::Int, false),
+        ("total".to_string(), Type::String, false),
+    ]);
+    let refined = refine_count_columns("SELECT id, COUNT(*) AS total FROM categories", row_type);
+    let Type::ArrayShape(fields) = refined else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
+    assert_eq!(
+        fields[1],
+        ("total".to_string(), Type::IntRange(Some(0), None), false)
+    );
+}
+
+#[test]
+fn refine_count_columns_leaves_non_count_rows_untouched() {
+    let row_type = Type::ArrayShape(vec![("total".to_string(), Type::String, false)]);
+    let refined = refine_count_columns("SELECT SUM(id) AS total FROM categories", row_type);
+    let Type::ArrayShape(fields) = refined else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0], ("total".to_string(), Type::String, false));
+}
