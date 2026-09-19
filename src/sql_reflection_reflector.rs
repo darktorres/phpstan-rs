@@ -23,6 +23,8 @@ use std::sync::OnceLock;
 
 use mysql::consts::{ColumnFlags, ColumnType};
 use mysql::prelude::Queryable;
+use sqlparser::dialect::GenericDialect;
+use sqlparser::tokenizer::{Token, Tokenizer};
 
 use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
 use crate::sql_reflection_schema::SchemaCatalog;
@@ -35,6 +37,84 @@ use crate::types::Type;
 /// Implementations must never execute `sql`, only prepare it.
 pub trait QueryReflector: Send + Sync {
     fn reflect(&self, sql: &str) -> Option<Type>;
+}
+
+/// Sub-phase B's own `DbalQueryBuilderChain::render()` (and a direct
+/// literal-string argument to `Connection::fetchAssociative()` etc.)
+/// both fold DBAL's own placeholder syntax through unchanged - `?`
+/// (positional) or `:name` (named, real corpus's own dominant form:
+/// confirmed 542 real `setParameter('name', ...)` call sites in Piwigo,
+/// essentially none of the positional-array form). Real DBAL rewrites
+/// these into whatever the target driver's own native PREPARE syntax
+/// needs at execution time; this project bypasses DBAL's own runtime
+/// entirely (no execution, ever), so a live reflector must redo that
+/// same rewrite itself before calling PREPARE - confirmed directly
+/// this is a real, not hypothetical, requirement: MySQL's own native
+/// protocol `PREPARE ... FROM '... WHERE id = :catId'` is a genuine
+/// syntax error ("You have an error in your SQL syntax"), and
+/// Postgres's own native `PREPARE` rejects both `?` and `:name`,
+/// requiring numbered `$1`/`$2`/... instead. Only SQLite accepts
+/// DBAL's own `?`/`:name` syntax unchanged (confirmed directly against
+/// real `rusqlite`) - no rewrite needed for that engine.
+///
+/// `sqlparser`'s own tokenizer has no single `Placeholder` token for
+/// `:name` at all (confirmed reading its source: a bare `:` always
+/// tokenizes as `Token::Colon`, never folded together with the
+/// following identifier) - `:name` is detected here as an adjacent
+/// `Colon` immediately followed by a `Word` in the token stream, not a
+/// single token kind the way `?` (`Token::Placeholder("?")`) already
+/// is.
+fn normalize_placeholders_for_driver(sql: &str, driver: SqlDriver) -> Option<String> {
+    if driver == SqlDriver::Sqlite {
+        return Some(sql.to_string());
+    }
+    let tokens = Tokenizer::new(&GenericDialect {}, sql).tokenize().ok()?;
+    // Postgres reuses the same `$N` for every occurrence of the same
+    // named placeholder (mirroring how DBAL itself dedupes a repeated
+    // `:name` to one bound value) but allocates a fresh number for
+    // every bare `?` occurrence, since positional params have no name
+    // to dedupe by and are always consumed strictly in order.
+    let mut seen_names: Vec<String> = Vec::new();
+    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
+    let mut i = 0;
+    while i < tokens.len() {
+        let is_named =
+            matches!(tokens[i], Token::Colon) && matches!(tokens.get(i + 1), Some(Token::Word(_)));
+        if is_named {
+            let Token::Word(word) = &tokens[i + 1] else {
+                unreachable!()
+            };
+            match driver {
+                SqlDriver::Mysql => out.push("?".to_string()),
+                SqlDriver::Pgsql => {
+                    let idx = match seen_names.iter().position(|n| n == &word.value) {
+                        Some(idx) => idx,
+                        None => {
+                            seen_names.push(word.value.clone());
+                            seen_names.len() - 1
+                        }
+                    };
+                    out.push(format!("${}", idx + 1));
+                }
+                SqlDriver::Sqlite => unreachable!("returned above"),
+            }
+            i += 2;
+            continue;
+        }
+        match &tokens[i] {
+            Token::Placeholder(text) if text == "?" => match driver {
+                SqlDriver::Mysql => out.push("?".to_string()),
+                SqlDriver::Pgsql => {
+                    seen_names.push(String::new());
+                    out.push(format!("${}", seen_names.len()));
+                }
+                SqlDriver::Sqlite => unreachable!("returned above"),
+            },
+            other => out.push(other.to_string()),
+        }
+        i += 1;
+    }
+    Some(out.join(" "))
 }
 
 pub struct MysqlReflector {
@@ -69,8 +149,9 @@ impl MysqlReflector {
     /// unit tests can exercise the enum cross-reference directly
     /// without needing a full `QueryReflector`-consuming call site.
     fn reflect_with_schema(&self, sql: &str, schema: Option<&SchemaCatalog>) -> Option<Type> {
+        let sql = normalize_placeholders_for_driver(sql, SqlDriver::Mysql)?;
         let mut conn = self.pool.get_conn().ok()?;
-        let stmt = conn.prep(sql).ok()?;
+        let stmt = conn.prep(&sql).ok()?;
         let columns = stmt.columns();
         if columns.is_empty() {
             return None;
@@ -196,8 +277,9 @@ impl PostgresReflector {
 
 impl QueryReflector for PostgresReflector {
     fn reflect(&self, sql: &str) -> Option<Type> {
+        let sql = normalize_placeholders_for_driver(sql, SqlDriver::Pgsql)?;
         let mut conn = self.pool.get().ok()?;
-        let stmt = conn.prepare(sql).ok()?;
+        let stmt = conn.prepare(&sql).ok()?;
         let columns = stmt.columns();
         if columns.is_empty() {
             return None;

@@ -534,3 +534,88 @@ fn a_reflector_handle_with_no_path_never_attempts_a_live_sqlite_connection() {
     let handle = SqlReflectorHandle::default();
     assert!(handle.get(Some(&config)).is_none());
 }
+
+#[test]
+fn normalize_placeholders_leaves_sqlite_completely_unchanged() {
+    let sql = "SELECT * FROM t WHERE a = :x AND b = ?";
+    assert_eq!(
+        normalize_placeholders_for_driver(sql, SqlDriver::Sqlite).as_deref(),
+        Some(sql)
+    );
+}
+
+#[test]
+fn normalize_placeholders_rewrites_named_placeholders_to_plain_question_marks_for_mysql() {
+    let out = normalize_placeholders_for_driver(
+        "SELECT * FROM t WHERE a = :x AND b = :y",
+        SqlDriver::Mysql,
+    )
+    .unwrap();
+    assert!(!out.contains(':'), "expected no ':' left, got: {out}");
+    assert_eq!(out.matches('?').count(), 2);
+}
+
+#[test]
+fn normalize_placeholders_leaves_bare_question_marks_alone_for_mysql() {
+    let out =
+        normalize_placeholders_for_driver("SELECT * FROM t WHERE a = ?", SqlDriver::Mysql).unwrap();
+    assert_eq!(out.matches('?').count(), 1);
+}
+
+#[test]
+fn normalize_placeholders_numbers_named_placeholders_for_postgres_and_dedupes_repeats() {
+    let out = normalize_placeholders_for_driver(
+        "SELECT * FROM t WHERE a = :x AND b = :y AND c = :x",
+        SqlDriver::Pgsql,
+    )
+    .unwrap();
+    assert!(out.contains("$1"), "got: {out}");
+    assert!(out.contains("$2"), "got: {out}");
+    // The repeated `:x` reuses `$1`, not a fresh `$3`.
+    assert!(!out.contains("$3"), "got: {out}");
+}
+
+#[test]
+fn normalize_placeholders_numbers_bare_question_marks_sequentially_for_postgres() {
+    let out = normalize_placeholders_for_driver(
+        "SELECT * FROM t WHERE a = ? AND b = ?",
+        SqlDriver::Pgsql,
+    )
+    .unwrap();
+    assert!(out.contains("$1"), "got: {out}");
+    assert!(out.contains("$2"), "got: {out}");
+}
+
+#[test]
+fn a_real_live_named_placeholder_query_prepares_successfully_against_mysql() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    // The exact real shape 542 real Piwigo `setParameter()` call sites
+    // produce once sub-phase B folds the chain - confirmed real MySQL
+    // PREPARE rejects `:id` outright before this fix.
+    let row_type = reflector.reflect("SELECT id, name FROM categories WHERE id = :id");
+    assert!(row_type.is_some(), "expected a resolved row type");
+}
+
+#[test]
+fn a_real_live_named_placeholder_query_prepares_successfully_against_postgres() {
+    let Some(config) = live_postgres_config() else {
+        eprintln!("skipping: PHPSTAN_RS_TEST_PG_* env vars not set");
+        return;
+    };
+    let reflector = PostgresReflector::connect(&config).expect("connect to live Postgres");
+    {
+        let mut conn = reflector.pool.get().expect("get a pooled connection");
+        conn.batch_execute(
+            "DROP TABLE IF EXISTS sql_reflection_placeholder_probe;
+             CREATE TABLE sql_reflection_placeholder_probe (id integer NOT NULL);",
+        )
+        .expect("set up the fixture table");
+    }
+    let row_type =
+        reflector.reflect("SELECT id FROM sql_reflection_placeholder_probe WHERE id = :id");
+    assert!(row_type.is_some(), "expected a resolved row type");
+}
