@@ -1,5 +1,5 @@
 use std::io::{self, BufRead, Write};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use lsp_server::{Message, Notification as LspNotification};
@@ -57,13 +57,78 @@ pub(crate) fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     if uri.scheme()?.as_str() != "file" {
         return None;
     }
-    Some(PathBuf::from(percent_decode(uri.path().as_str())))
+    let decoded = percent_decode(uri.path().as_str());
+    let decoded = match decoded.strip_prefix('/') {
+        Some(rest) if starts_with_drive_letter(rest) => rest,
+        _ => &decoded,
+    };
+    Some(PathBuf::from(decoded))
 }
 
 pub(crate) fn path_to_uri(path: &Path) -> Uri {
-    let encoded = percent_encode_path(&path.display().to_string());
+    let rendered = path_to_uri_path_string(path);
+    let rendered = if starts_with_drive_letter(&rendered) {
+        format!("/{rendered}")
+    } else {
+        rendered
+    };
+    let encoded = percent_encode_path(&rendered);
     Uri::from_str(&format!("file://{encoded}"))
         .expect("a percent-encoded absolute filesystem path is always a valid file:// URI")
+}
+
+/// `true` for a `C:`-style Windows drive letter at the very start of `s`
+/// (single ASCII letter, then `:`) - used both to strip the URI's leading
+/// `/` before such a path (`uri_to_path`) and to re-insert it
+/// (`path_to_uri`), since `file:///C:/...` (leading slash present) is the
+/// real shape every client sends, but a bare `C:/...` path string would
+/// otherwise parse as a URI *authority*, not a path, once prefixed with
+/// `file://`.
+fn starts_with_drive_letter(s: &str) -> bool {
+    let bytes = s.as_bytes();
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
+}
+
+/// Renders `path` as a `/`-separated URI path string, component by
+/// component. Deliberately not
+/// `path.display().to_string().replace('\\', "/")`: that blind replace
+/// corrupts a real Unix filename containing a literal `\` (legal on
+/// Linux, this project's only build target) by silently turning it into
+/// an extra path segment. `std::path::Component` is already
+/// platform-specific internally (it only treats `\` as a separator, and
+/// ever yields `Prefix`, when actually compiled for Windows), so joining
+/// components with `/` gets Windows-correct behavior for free on a
+/// Windows build with no `cfg(windows)` branch of our own, while never
+/// touching a literal `\` inside one `Normal` component on this
+/// project's real (Linux) target.
+fn path_to_uri_path_string(path: &Path) -> String {
+    let mut out = String::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                out.push_str(&prefix.as_os_str().to_string_lossy());
+            }
+            Component::RootDir => {
+                if !out.ends_with('/') {
+                    out.push('/');
+                }
+            }
+            Component::CurDir => push_uri_path_segment(&mut out, "."),
+            Component::ParentDir => push_uri_path_segment(&mut out, ".."),
+            Component::Normal(seg) => push_uri_path_segment(&mut out, &seg.to_string_lossy()),
+        }
+    }
+    out
+}
+
+/// Appends one path segment to `out`, inserting a `/` separator first
+/// unless `out` is empty or already slash-terminated (e.g. right after a
+/// `Component::RootDir`).
+fn push_uri_path_segment(out: &mut String, seg: &str) {
+    if !out.is_empty() && !out.ends_with('/') {
+        out.push('/');
+    }
+    out.push_str(seg);
 }
 
 /// Decodes the small set of percent-escapes a real filesystem path
@@ -97,7 +162,7 @@ fn percent_encode_path(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for byte in s.bytes() {
         match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' => {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' | b'/' | b':' => {
                 out.push(byte as char);
             }
             _ => out.push_str(&format!("%{byte:02X}")),

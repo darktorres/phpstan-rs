@@ -248,6 +248,56 @@ fn uri_to_path_and_path_to_uri_round_trip() {
     assert_eq!(uri_to_path(&not_a_uri), None);
 }
 
+#[test]
+fn uri_to_path_strips_the_leading_slash_before_a_windows_drive_letter() {
+    let uri: Uri = "file:///C:/Users/dev/foo.php".parse().unwrap();
+    let path = uri_to_path(&uri).unwrap();
+    assert_eq!(path, PathBuf::from("C:/Users/dev/foo.php"));
+}
+
+#[test]
+fn path_to_uri_reinserts_the_leading_slash_before_a_windows_drive_letter() {
+    let path = PathBuf::from("C:/Users/dev/foo.php");
+    assert_eq!(
+        path_to_uri(&path).to_string(),
+        "file:///C:/Users/dev/foo.php"
+    );
+}
+
+#[test]
+fn windows_drive_letter_uri_round_trips_through_uri_to_path_and_back() {
+    let uri: Uri = "file:///C:/Users/dev/foo.php".parse().unwrap();
+    let path = uri_to_path(&uri).unwrap();
+    assert_eq!(path_to_uri(&path).to_string(), uri.to_string());
+}
+
+#[test]
+fn uri_to_path_decodes_a_percent_encoded_drive_letter_colon() {
+    let uri: Uri = "file:///C%3A/Users/dev/foo.php".parse().unwrap();
+    assert_eq!(
+        uri_to_path(&uri).unwrap(),
+        PathBuf::from("C:/Users/dev/foo.php")
+    );
+}
+
+#[test]
+fn uri_to_path_leaves_an_ordinary_unix_path_alone() {
+    let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
+    assert_eq!(uri_to_path(&uri).unwrap(), PathBuf::from("/tmp/foo.php"));
+}
+
+#[test]
+fn path_to_uri_preserves_a_literal_backslash_in_a_real_unix_filename() {
+    // Regression guard: a filename that genuinely contains '\' (legal on
+    // Linux, this project's only build target), with no drive-letter
+    // prefix, must round-trip byte-for-byte - not get silently rewritten
+    // to '/' by a blind `Path::display()` string replace.
+    let path = PathBuf::from("/tmp/foo\\bar.php");
+    let uri = path_to_uri(&path);
+    assert_eq!(uri.to_string(), "file:///tmp/foo%5Cbar.php");
+    assert_eq!(uri_to_path(&uri).unwrap(), path);
+}
+
 // A malformed message body (a real Content-Length header, correctly
 // consumed, but invalid JSON) must be skipped, not terminate the whole
 // session; a per-file parser panic during didOpen/didChange/the
