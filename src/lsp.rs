@@ -119,9 +119,8 @@ fn resolve_member_owners(
 /// before the client has acknowledged the `InitializeResult`, so
 /// `initialize`'s own response is never gated on how long it takes.
 struct PendingWorkspaceScan {
-    root: PathBuf,
+    roots: Vec<PathBuf>,
     progress_token: Option<lsp_types::ProgressToken>,
-    context: workspace_config::WorkspaceContextPaths,
 }
 
 struct Server {
@@ -144,10 +143,18 @@ struct Server {
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
     pending_workspace_scan: Option<PendingWorkspaceScan>,
-    // The workspace root resolved at `"initialize"`, kept around so
+    // Every workspace folder root already loaded - `add_workspace_folders`/
+    // `remove_workspace_folders` dedup/filter against this.
+    workspace_roots: Vec<PathBuf>,
+    // The most recently configured workspace root, kept around so
     // `apply_post_filters` can rewrite a diagnostic's path to root-
-    // relative before consulting `ignore_error_entries`/`baseline` -
-    // see `configure_from_workspace`.
+    // relative before consulting `ignore_error_entries`/`baseline` - see
+    // `configure_from_workspace`. With more than one workspace folder,
+    // this (and `baseline`/`ignore_error_entries`/`level_cutoff` below)
+    // are last-root-wins: `Project`/`Registry` have no per-root config
+    // scoping today, matching 1.1's own already-accepted single-
+    // workspace-config limitation, generalized rather than newly
+    // introduced here.
     root: Option<PathBuf>,
     baseline: Option<crate::baseline::Baseline>,
     ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
@@ -171,6 +178,7 @@ impl Server {
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
             pending_workspace_scan: None,
+            workspace_roots: Vec::new(),
             root: None,
             baseline: None,
             ignore_error_entries: Vec::new(),
@@ -348,12 +356,16 @@ impl Server {
 
     /// Loads `context`'s vendor/scan/stub paths first (`analyzed:
     /// false`), then every `.php` file under `root` (`analyzed: true`,
-    /// skipping any path already loaded as context) - so the cross-file
-    /// registry and dependency graph this whole phase is about are
-    /// populated from the very first diagnostic, not built up one
-    /// `didOpen` at a time. Invoked from `"initialized"` (not
-    /// synchronously inside `"initialize"`) via `pending_workspace_scan`
-    /// - see `PendingWorkspaceScan`'s own doc comment for why.
+    /// skipping any path already loaded as context or by an earlier call,
+    /// e.g. a prior workspace folder, or an already-`didOpen`ed file),
+    /// so the cross-file registry and dependency graph this whole phase
+    /// is about are populated from the very first diagnostic, not built
+    /// up one `didOpen` at a time. Deliberately does NOT call
+    /// `Project::finish_loading` itself - `add_workspace_folders` calls
+    /// it once for a whole batch of roots, not once per root here; a
+    /// bare call to this method with no `finish_loading` afterward would
+    /// leave the registry's derived state (trait flattening, ancestor
+    /// names, ...) stale for whatever it just loaded.
     ///
     /// **Context-before-root load order is a correctness invariant, not
     /// just a dedup convenience**: `Registry::insert_built_decl`'s
@@ -366,7 +378,7 @@ impl Server {
     /// genuinely different `Project` state for the identical tree. A
     /// future refactor of this method must preserve this order
     /// explicitly.
-    fn load_workspace(
+    fn load_workspace_files(
         &mut self,
         root: &Path,
         context: &workspace_config::WorkspaceContextPaths,
@@ -415,7 +427,72 @@ impl Server {
             }
             self.load_one_file(path, true, &mut messages);
         }
-        self.project.finish_loading();
+        messages
+    }
+
+    /// Loads every not-yet-tracked root in `roots` (deduped against
+    /// `self.workspace_roots`) via `configure_from_workspace` +
+    /// `load_workspace_files`, then runs `Project::finish_loading` at
+    /// most ONCE for the whole batch - not once per root, which would
+    /// pay N whole-registry recomputes for N roots (each re-scanning
+    /// every previously-loaded root's own files again) instead of one.
+    /// Called from both `"initialized"` (the `pending_workspace_scan`
+    /// roots resolved at `"initialize"`) and
+    /// `"workspace/didChangeWorkspaceFolders"`'s own `added` array -
+    /// every load path goes through this one method, even for a single
+    /// root, so there is exactly one place this batching discipline can
+    /// be violated.
+    fn add_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
+        let mut messages = Vec::new();
+        let mut any_new = false;
+        for root in roots {
+            if self.workspace_roots.contains(root) {
+                continue;
+            }
+            // Config resolution (a workspace's own phpstan-rs.toml,
+            // Composer vendor discovery) is genuinely per-root - but its
+            // *effect* on `self`/`self.project` (opt-in checks, php
+            // version, the post-filter fields `apply_post_filters`
+            // reads) is last-root-wins for now: `Project`/`Registry`
+            // have no per-root config scoping, only one shared instance
+            // for however many folders are open. Matches 1.1's own
+            // already-accepted single-workspace-config limitation,
+            // generalized rather than newly introduced here.
+            let context = self.configure_from_workspace(root);
+            messages.extend(self.load_workspace_files(root, &context));
+            self.workspace_roots.push(root.clone());
+            any_new = true;
+        }
+        if any_new {
+            self.project.finish_loading();
+        }
+        messages
+    }
+
+    /// Batch counterpart to `add_workspace_folders`: drops every loaded
+    /// path under any of `roots` (`Project::remove_files`, one recompute
+    /// for the whole batch) and clears `open_uris`/publishes an empty
+    /// `publishDiagnostics` for any of them that was open in the editor -
+    /// otherwise a document whose backing folder just vanished would
+    /// keep showing stale squiggles indefinitely, since removing a
+    /// workspace folder is not itself a `textDocument/didClose`.
+    fn remove_workspace_folders(&mut self, roots: &[PathBuf]) -> Vec<Message> {
+        self.workspace_roots.retain(|r| !roots.contains(r));
+        let paths: Vec<PathBuf> = self
+            .project
+            .loaded_paths()
+            .filter(|p| roots.iter().any(|root| p.starts_with(root)))
+            .map(Path::to_path_buf)
+            .collect();
+
+        let mut messages: Vec<Message> = paths
+            .iter()
+            .filter_map(|p| self.open_uris.remove(p))
+            .map(|uri| publish_diagnostics_notification(uri, &[]))
+            .collect();
+
+        let results = self.project.remove_files(&paths);
+        messages.extend(self.publish_diagnostics_for(results));
         messages
     }
 
@@ -497,13 +574,23 @@ impl Server {
                 )];
             }
         };
-        self.apply_post_filters(results)
+        self.publish_diagnostics_for(self.apply_post_filters(results))
+    }
+
+    /// Converts a diagnostics-by-path map into `publishDiagnostics`
+    /// messages, resolving each path to whatever URI the client last
+    /// used for it (a re-checked dependent might not itself be open in
+    /// the editor - it still needs a fresh notification, using the
+    /// workspace scan's own synthesized URI if nothing else ever opened
+    /// it). Shared by `handle_open_or_change` and
+    /// `remove_workspace_folders`'s own recheck step.
+    fn publish_diagnostics_for(
+        &self,
+        results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
+    ) -> Vec<Message> {
+        results
             .into_iter()
             .map(|(p, diags)| {
-                // A dependent file re-checked here might not itself be
-                // open in the editor - it still needs a fresh
-                // publishDiagnostics, using whatever URI it was last seen
-                // under (the workspace scan, if nothing else).
                 let dep_uri = self
                     .open_uris
                     .get(&p)
@@ -946,11 +1033,25 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "initialize" => {
             let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
-            let (root, position_encoding, progress_token) = match params {
+            let (roots, position_encoding, progress_token) = match params {
                 Some(params) => {
-                    let root = params
-                        .root_uri
-                        .or_else(|| params.workspace_folders?.into_iter().next().map(|f| f.uri));
+                    // Every real workspace_folders entry, not just the
+                    // first - falling back to the single deprecated
+                    // root_uri only when workspace_folders is absent or
+                    // empty (a client that supports it but opened with
+                    // no folders at all).
+                    let roots: Vec<PathBuf> =
+                        match params.workspace_folders.filter(|f| !f.is_empty()) {
+                            Some(folders) => {
+                                folders.iter().filter_map(|f| uri_to_path(&f.uri)).collect()
+                            }
+                            None => params
+                                .root_uri
+                                .as_ref()
+                                .and_then(uri_to_path)
+                                .into_iter()
+                                .collect(),
+                        };
                     // A real vscode-languageclient is expected to
                     // advertise general.positionEncodings. This server's
                     // own Span already counts UTF-8 characters (see this
@@ -969,18 +1070,17 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         .is_some_and(|encodings| encodings.contains(&PositionEncodingKind::UTF8))
                         .then_some(PositionEncodingKind::UTF8);
                     let progress_token = params.work_done_progress_params.work_done_token;
-                    (root, position_encoding, progress_token)
+                    (roots, position_encoding, progress_token)
                 }
-                None => (None, None, None),
+                None => (Vec::new(), None, None),
             };
-            // The scan itself runs from "initialized", not here - see
-            // PendingWorkspaceScan's own doc comment.
-            if let Some(root) = root.as_ref().and_then(uri_to_path) {
-                let context = server.configure_from_workspace(&root);
+            // The scan itself (config resolution + parsing) runs from
+            // "initialized", not here - see PendingWorkspaceScan's own
+            // doc comment.
+            if !roots.is_empty() {
                 server.pending_workspace_scan = Some(PendingWorkspaceScan {
-                    root,
+                    roots,
                     progress_token,
-                    context,
                 });
             }
             let result = InitializeResult {
@@ -996,6 +1096,13 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     hover_provider: Some(HoverProviderCapability::Simple(true)),
                     definition_provider: Some(OneOf::Left(true)),
                     document_symbol_provider: Some(OneOf::Left(true)),
+                    workspace: Some(lsp_types::WorkspaceServerCapabilities {
+                        workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
+                            supported: Some(true),
+                            change_notifications: Some(OneOf::Left(true)),
+                        }),
+                        ..Default::default()
+                    }),
                     ..Default::default()
                 },
                 server_info: Some(ServerInfo {
@@ -1077,7 +1184,7 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                         ),
                     );
                 }
-                for message in server.load_workspace(&scan.root, &scan.context) {
+                for message in server.add_workspace_folders(&scan.roots) {
                     let _ = write_message(writer, &message);
                 }
                 for message in server.publish_workspace_diagnostics() {
@@ -1091,6 +1198,41 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                             WorkDoneProgress::End(WorkDoneProgressEnd { message: None }),
                         ),
                     );
+                }
+            }
+        }
+        "workspace/didChangeWorkspaceFolders" => {
+            if let Ok(params) =
+                serde_json::from_value::<lsp_types::DidChangeWorkspaceFoldersParams>(not.params)
+            {
+                // Removed before added: a folder simultaneously removed
+                // and re-added in the same event (some clients model a
+                // rename this way) should drop-then-reload, not race a
+                // transient "already tracked" against itself.
+                let removed: Vec<PathBuf> = params
+                    .event
+                    .removed
+                    .iter()
+                    .filter_map(|f| uri_to_path(&f.uri))
+                    .collect();
+                if !removed.is_empty() {
+                    for message in server.remove_workspace_folders(&removed) {
+                        let _ = write_message(writer, &message);
+                    }
+                }
+                let added: Vec<PathBuf> = params
+                    .event
+                    .added
+                    .iter()
+                    .filter_map(|f| uri_to_path(&f.uri))
+                    .collect();
+                if !added.is_empty() {
+                    for message in server.add_workspace_folders(&added) {
+                        let _ = write_message(writer, &message);
+                    }
+                    for message in server.publish_workspace_diagnostics() {
+                        let _ = write_message(writer, &message);
+                    }
                 }
             }
         }

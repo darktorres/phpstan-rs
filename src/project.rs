@@ -611,28 +611,39 @@ impl Project {
     /// dependents re-checked, since they'll now see it as undefined).
     /// Returns every re-checked file's fresh diagnostics, keyed by path -
     /// the changed file is always included, even with zero diagnostics.
+    /// Unwinds `path`'s prior contributions to the shared registry/
+    /// `dependents` - the same undo both `update_file` (before
+    /// re-indexing a new parse) and `remove_files` (permanently) need -
+    /// extending `changed_symbols` with every bare name it owned.
+    /// Returns whether `path` was actually loaded (a no-op, `false`
+    /// return otherwise - both callers treat that as "nothing to undo").
+    fn unindex_file(&mut self, path: &Path, changed_symbols: &mut HashSet<String>) -> bool {
+        let Some(old) = self.files.remove(path) else {
+            return false;
+        };
+        self.registry
+            .remove_declarations(&old.functions, &old.classes);
+        if self.retain_source {
+            self.decl_locations
+                .remove_declarations(&old.functions, &old.classes);
+        }
+        self.duplicate_fn_sites
+            .remove_declarations(path, &old.functions);
+        self.duplicate_class_sites
+            .remove_declarations(path, &old.classes);
+        changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
+        changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
+        unregister_references(&mut self.dependents, path, &old.references);
+        true
+    }
+
     pub fn update_file(
         &mut self,
         path: &Path,
         new_source: &str,
     ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         let mut changed_symbols: HashSet<String> = HashSet::new();
-
-        if let Some(old) = self.files.get(path) {
-            self.registry
-                .remove_declarations(&old.functions, &old.classes);
-            if self.retain_source {
-                self.decl_locations
-                    .remove_declarations(&old.functions, &old.classes);
-            }
-            self.duplicate_fn_sites
-                .remove_declarations(path, &old.functions);
-            self.duplicate_class_sites
-                .remove_declarations(path, &old.classes);
-            changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
-            changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
-            unregister_references(&mut self.dependents, path, &old.references);
-        }
+        self.unindex_file(path, &mut changed_symbols);
 
         let ast = parse(new_source)?;
         let (functions, classes) = declared_names(&ast);
@@ -804,38 +815,34 @@ impl Project {
     /// `publishDiagnostics` payload needed to clear whatever the editor
     /// was last showing for a file that no longer exists.
     pub fn remove_file(&mut self, path: &Path) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        self.remove_files(std::slice::from_ref(&path.to_path_buf()))
+    }
+
+    /// Batch counterpart to `remove_file` - unwinds every one of `paths`
+    /// (each via `unindex_file`) and runs the shared registry recompute
+    /// (`finish_loading`) at most ONCE for the whole batch, not once per
+    /// path - the same "one recompute per batch, not per item" discipline
+    /// `Server::add_workspace_folders` (3.2) needs on the load side.
+    /// Every one of `paths` is always a key in the result (generalizing
+    /// `remove_file`'s own guarantee - `check_file` already returns an
+    /// empty `Vec` for an unloaded/just-removed path, exactly the
+    /// clearing `publishDiagnostics` payload a caller needs for a file
+    /// that no longer exists), even when none of them were actually
+    /// loaded - but the recompute/BFS itself is skipped entirely in that
+    /// case, since there is nothing for it to discover.
+    pub fn remove_files(&mut self, paths: &[PathBuf]) -> HashMap<PathBuf, Vec<Diagnostic>> {
         let mut changed_symbols: HashSet<String> = HashSet::new();
-
-        if let Some(old) = self.files.remove(path) {
-            self.registry
-                .remove_declarations(&old.functions, &old.classes);
-            if self.retain_source {
-                self.decl_locations
-                    .remove_declarations(&old.functions, &old.classes);
-            }
-            self.duplicate_fn_sites
-                .remove_declarations(path, &old.functions);
-            self.duplicate_class_sites
-                .remove_declarations(path, &old.classes);
-            changed_symbols.extend(old.functions.iter().map(|s| bare_name(s).to_string()));
-            changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
-            unregister_references(&mut self.dependents, path, &old.references);
-
-            self.registry.canonicalize_class_name_case();
-            self.registry.flatten_traits();
-            self.registry.resolve_method_tags();
-            self.registry.precompute_member_owners();
-            self.registry.flatten_phpdoc_inheritance();
-            self.registry.resolve_deferred_value_of();
-            self.registry.resolve_deferred_type_imports();
-            self.registry.resolve_deferred_mixins();
-            self.registry.precompute_member_owners();
-            self.registry.resolve_transitive_purity();
-            self.registry.precompute_ancestor_names();
-            self.rebuild_pest_config();
+        let mut any_removed = false;
+        for path in paths {
+            any_removed |= self.unindex_file(path, &mut changed_symbols);
+        }
+        let mut affected: HashSet<PathBuf> = paths.iter().cloned().collect();
+        if any_removed {
+            self.finish_loading();
+            affected.extend(self.transitive_affected_files_from(changed_symbols));
         }
 
-        self.transitive_affected_files(path, changed_symbols)
+        affected
             .into_iter()
             .map(|p| {
                 let diagnostics = self.check_file(&p);
@@ -863,8 +870,17 @@ impl Project {
         changed_file: &Path,
         seed_symbols: HashSet<String>,
     ) -> HashSet<PathBuf> {
-        let mut affected = HashSet::new();
+        let mut affected = self.transitive_affected_files_from(seed_symbols);
         affected.insert(changed_file.to_path_buf());
+        affected
+    }
+
+    /// The pure BFS core of `transitive_affected_files`, without that
+    /// method's own anchor-file insertion - for a caller with no single
+    /// surviving "the file that changed" to seed with (`remove_files`'s
+    /// batch of files that no longer exist to check).
+    fn transitive_affected_files_from(&self, seed_symbols: HashSet<String>) -> HashSet<PathBuf> {
+        let mut affected = HashSet::new();
 
         let mut seen_symbols = HashSet::new();
         let mut frontier: Vec<String> = Vec::new();
@@ -1211,6 +1227,14 @@ impl Project {
 
     pub fn file_count(&self) -> usize {
         self.files.len()
+    }
+
+    /// Every path currently loaded, analyzed or context alike - the
+    /// `Server::remove_workspace_folders` "which of my loaded files are
+    /// under this now-removed root" query needs every one of them, not
+    /// just `analyzed_paths`' first-party subset.
+    pub fn loaded_paths(&self) -> impl Iterator<Item = &Path> {
+        self.files.keys().map(PathBuf::as_path)
     }
 
     /// Every loaded path whose own `analyzed` flag is `true` - a real,

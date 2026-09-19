@@ -118,6 +118,42 @@ pub(super) fn to_message(v: Value) -> Message {
     serde_json::from_value(v).unwrap()
 }
 
+pub(super) fn workspace_folder(dir: &TempDir) -> Value {
+    json!({"uri": dir.uri(), "name": dir.0.file_name().unwrap().to_string_lossy()})
+}
+
+pub(super) fn did_change_workspace_folders(added: Vec<Value>, removed: Vec<Value>) -> Value {
+    notification(
+        "workspace/didChangeWorkspaceFolders",
+        json!({"event": {"added": added, "removed": removed}}),
+    )
+}
+
+/// Same as `run`, but `initialize` sends `workspaceFolders: dirs` instead
+/// of a single `rootUri` - for tests exercising more than one workspace
+/// folder.
+pub(super) fn run_multi(dirs: &[&TempDir], extra: &[Value]) -> Vec<Value> {
+    let folders: Vec<Value> = dirs.iter().map(|d| workspace_folder(d)).collect();
+    let mut input = vec![
+        request(
+            1,
+            "initialize",
+            json!({"workspaceFolders": folders, "capabilities": {}}),
+        ),
+        notification("initialized", json!({})),
+    ];
+    input.extend_from_slice(extra);
+    input.push(notification("exit", json!({})));
+    let bytes = encode(&input);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(bytes);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+    decode_all(&writer)
+}
+
 pub(super) fn hover_request(id: i64, uri: &str, pos: Value) -> Value {
     request(
         id,
