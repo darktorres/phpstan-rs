@@ -58,11 +58,14 @@ Development Host.
 
 - Activation smoke test (`src/test/suite/activation.smoke.test.ts`,
   `@vscode/test-electron` - downloads and launches a real VS Code
-  instance). Not wired into CI (this repo has none yet) - run manually:
+  instance). Wired into CI (`.github/workflows/extension-ci.yml`'s
+  `integration` job, matrixed over Linux/macOS/Windows, `xvfb-run`-wrapped
+  on Linux only) but not yet exercised by a real CI run (this repo has
+  no GitHub remote yet). Run manually:
 
   ```sh
   cargo build --release --manifest-path ../../Cargo.toml
-  PHPSTAN_RS_TEST_BIN="$(pwd)/../../target/debug/phpstan-rs" npm run test:smoke
+  PHPSTAN_RS_TEST_BIN="$(pwd)/../../target/release/phpstan-rs" npm run test:smoke
   ```
 
   Use a **release** build (`--release`, `target/release/phpstan-rs`),
@@ -82,5 +85,16 @@ Development Host.
   ordinary Node outside Electron. This looks specific to nested child-
   process spawning inside this sandbox, not a defect in `extension.ts`'s
   own wiring - the first test case (activation gating, no child process
-  involved) passes reliably, as do all 10 unit tests. See the extended
-  comment directly above that test in `activation.smoke.test.ts`.
+  involved) passes reliably, as do all unit tests. See the extended
+  comment directly above that test in `activation.smoke.test.ts`. Expected
+  to pass on a real desktop VS Code install or an actual CI runner
+  without this sandbox's specific process-spawning restriction.
+
+`activate()` returns `{ getClientState: () => State | undefined }` (from
+`vscode-languageclient`) rather than `void`, specifically so the smoke
+test can distinguish "`activate()` has returned" (VS Code's own
+`isActive`/`exports` signal) from "the `LanguageClient` has actually
+finished spawning and handshaking" (`state === State.Running`) - these
+are two different, non-simultaneous events, since `activate()` awaits
+resolving/validating the server binary but never awaits `client.start()`
+itself.

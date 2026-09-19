@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import * as vscode from "vscode";
+import { State } from "vscode-languageclient/node";
 
 // This item's own `package.json` publisher/name.
 const EXTENSION_ID = "phpstan-rs.phpstan-rs-vscode";
@@ -47,8 +48,13 @@ describe("phpstan-rs activation", function () {
   let workspaceDir: string;
 
   before(async () => {
-    workspaceDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), "phpstan-rs-vscode-smoke-"),
+    // `fs.realpathSync` matters on macOS: `os.tmpdir()` resolves under
+    // `/var/folders/...`, itself a symlink to `/private/var/folders/...`
+    // - VS Code's own workspace-folder identity can fail to string-match
+    // the pre-realpath path this test computed otherwise. A no-op on
+    // Linux/Windows.
+    workspaceDir = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), "phpstan-rs-vscode-smoke-")),
     );
     const config = vscode.workspace.getConfiguration("phpstan-rs");
     await config.update(
@@ -109,6 +115,16 @@ describe("phpstan-rs activation", function () {
     const ext = vscode.extensions.getExtension(EXTENSION_ID);
     assert.ok(ext, `expected extension ${EXTENSION_ID} to be installed`);
     await waitUntil(() => ext!.isActive, 10_000);
+
+    // `isActive` (and `exports`, which becomes visible at the same
+    // instant) only means activate() has returned - NOT that the
+    // LanguageClient it started has finished spawning and handshaking.
+    // Checking `getClientState()` separately, with its own timeout,
+    // means a real spawn failure surfaces here with a precise message
+    // instead of only ever showing up as "no diagnostics arrived" once
+    // the longer timeout below expires.
+    const exports = ext!.exports as { getClientState: () => State | undefined };
+    await waitUntil(() => exports.getClientState() === State.Running, 10_000);
 
     await waitUntil(
       () => vscode.languages.getDiagnostics(doc.uri).length > 0,

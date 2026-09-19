@@ -1,0 +1,93 @@
+name: Extension CI
+
+# Not yet exercised by a real CI run (this repo has no GitHub remote at
+# the time this workflow was authored - same caveat as release.yml).
+# Path filters cover the Rust LSP source too, not just editors/vscode/ -
+# a Rust-side regression in the LSP the extension drives should fail
+# this job just as loudly as a TypeScript-side one.
+on:
+  push:
+    paths:
+      - "editors/vscode/**"
+      - "src/lsp.rs"
+      - "src/lsp/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/extension-ci.yml"
+  pull_request:
+    paths:
+      - "editors/vscode/**"
+      - "src/lsp.rs"
+      - "src/lsp/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/extension-ci.yml"
+
+jobs:
+  unit:
+    # Node-only - no Rust build needed for the pure/settings/download
+    # unit lanes (config.test.ts, serverBinary.test.ts,
+    # serverDownload.test.ts, extension.test.ts all run under plain
+    # node:test with an injected fetch/fs, never a real subprocess).
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npm run compile
+      - run: npm run test:unit
+
+  integration:
+    needs: unit
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build the phpstan-rs release binary
+        run: cargo build --release
+
+      - name: Point the smoke test at the built binary
+        shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          bin="phpstan-rs"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            bin="phpstan-rs.exe"
+          fi
+          echo "PHPSTAN_RS_TEST_BIN=$(pwd)/target/release/$bin" >> "$GITHUB_ENV"
+
+      - working-directory: editors/vscode
+        run: npm ci
+
+      - working-directory: editors/vscode
+        run: npm run compile
+
+      - name: Run the activation smoke test
+        working-directory: editors/vscode
+        shell: bash
+        env:
+          RUNNER_OS: ${{ runner.os }}
+        run: |
+          set -euo pipefail
+          # `@vscode/test-electron` launches a real (headless-incapable)
+          # Electron window - only Linux runners lack a display server by
+          # default; macOS/Windows runner images already have one.
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a npm run test:smoke
+          else
+            npm run test:smoke
+          fi

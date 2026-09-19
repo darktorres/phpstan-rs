@@ -3,6 +3,7 @@ import {
   LanguageClient,
   LanguageClientOptions,
   ServerOptions,
+  State,
   TransportKind,
 } from "vscode-languageclient/node";
 import { getSettings } from "./settings";
@@ -98,7 +99,17 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
   });
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
+export interface ExtensionExports {
+  /** Exposed so an integration test can distinguish "activate() has
+   * returned" (VS Code's own `isActive`/`exports` signal, which fires
+   * the instant `activate()` resolves) from "the LanguageClient has
+   * actually finished spawning and handshaking" - two different, non-
+   * simultaneous events, since `activate()` never awaits `client.start()`
+   * itself. */
+  getClientState: () => State | undefined;
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<ExtensionExports> {
   context.subscriptions.push(
     vscode.commands.registerCommand("phpstan-rs.restartServer", () => startClient(context)),
   );
@@ -131,6 +142,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   await startClient(context);
+
+  return { getClientState: () => client?.state };
 }
 
 export function deactivate(): Thenable<void> | undefined {

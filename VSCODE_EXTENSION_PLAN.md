@@ -333,6 +333,28 @@ or `initializationOptions` once 1.1's server-side plumbing exists to
 consume them. **Effort: small**, but has nothing to control server-side
 until Phase 1 lands.
 
+**Implementation note (post-hoc, added once 4.1/4.2/4.3/TCI actually
+landed):** the extension lives under `editors/vscode/`, not
+`editors/code/` as an early master-synthesis draft of the CI/test item
+(TCI) assumed - `editors/vscode/` was the name every one of 4.1/4.2/4.3's
+own finalized designs used, and TCI's own file paths were adapted to
+match rather than triggering a rename. `phpstan-rs.serverPath` is
+declared and read starting in 4.1 (`resolveServerCommand`, later folded
+into 4.3's more general `serverBinary.ts::resolveServerBinary`), not
+first introduced by 4.2/4.3 as this section's own prose above might
+suggest - 4.2 only adds the download/cache logic that resolves a path
+automatically when `serverPath` is unset, and 4.3 adds the rest of the
+settings surface (`configPath`, `enable`, `trace.server`) plus the
+`phpstan-rs.restartServer` command. The extension's test harness
+(`editors/vscode/src/test/`, `@vscode/test-electron`) and CI wiring
+(`.github/workflows/extension-ci.yml`) were built directly under `src/`
+rather than a sibling top-level `test/` directory, so there is no
+`rootDir`-inference ambiguity between a unit and integration lane to
+resolve - the unit lane uses plain `node:test` (zero extra dependency),
+not CLI Mocha, and only the integration lane (which must run inside a
+real Extension Development Host) uses Mocha, instantiated
+programmatically in `src/test/suite/index.ts`.
+
 ---
 
 ## Suggested sequencing
