@@ -835,8 +835,10 @@ fn a_matching_response_clears_the_pending_entry() {
     };
     assert!(server.pending_requests.outgoing.has_pending());
 
+    let mut writer = Vec::new();
     handle_response(
         &mut server,
+        &mut writer,
         Response::new_ok(req.id.clone(), serde_json::Value::Null),
     );
 
@@ -853,13 +855,16 @@ fn a_second_response_for_an_already_completed_id_is_ignored_without_panicking() 
     ) else {
         panic!("send_request must build a Message::Request");
     };
+    let mut writer = Vec::new();
     handle_response(
         &mut server,
+        &mut writer,
         Response::new_ok(req.id.clone(), serde_json::Value::Null),
     );
 
     handle_response(
         &mut server,
+        &mut writer,
         Response::new_ok(req.id.clone(), serde_json::Value::Null),
     );
 

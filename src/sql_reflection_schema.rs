@@ -67,7 +67,7 @@ pub struct SchemaColumn {
 /// names are kept exactly as declared (MySQL/Postgres/SQLite table
 /// names are all case-sensitive by default on this project's own target
 /// platforms) - no case-folding.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct SchemaCatalog {
     tables: FxHashMap<String, Vec<SchemaColumn>>,
 }

@@ -93,6 +93,7 @@ pub fn generate(path: &Path, results: &HashMap<PathBuf, Vec<Diagnostic>>) -> io:
 
 /// A loaded baseline - opaque outside this module, exposing only
 /// `contains` for filtering.
+#[derive(Clone, PartialEq)]
 pub struct Baseline(HashSet<Entry>);
 
 impl Baseline {

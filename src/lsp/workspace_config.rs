@@ -9,6 +9,11 @@ use crate::composer::ComposerContext;
 
 /// Everything a workspace's `phpstan-rs.toml` (or its absence) resolves
 /// into, applied once per `Server::configure_from_workspace` call.
+/// `PartialEq` backs `Server::reload_configuration`'s no-op fast path -
+/// comparing the real resolved value (not a `Debug`-formatted fingerprint)
+/// so a change to a field a hand-written `Debug` impl deliberately
+/// redacts (`SqlReflectionConfig`'s `password`) is never silently missed.
+#[derive(Clone, PartialEq)]
 pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) configured_level: Option<u8>,
     pub(crate) strict_mixed_arrays: bool,

@@ -46,6 +46,7 @@ use crate::{baseline, ignore_errors};
 mod document_symbol;
 mod navigation;
 mod protocol;
+mod settings;
 mod text_split;
 mod workspace_config;
 
@@ -163,6 +164,37 @@ struct Server {
     // only use it for type-strictness, not for filtering already-
     // produced diagnostics before they're published.
     level_cutoff: Option<u8>,
+    // A `phpstan-rs.configPath` setting override, applied on top of
+    // `root`'s own default `phpstan-rs.toml` lookup by every subsequent
+    // `configure_from_workspace`/`reload_configuration` call. `None`
+    // until a `workspace/didChangeConfiguration` notification sets one.
+    config_path_override: Option<PathBuf>,
+    // `phpstan-rs.enable` - "stop showing squiggles", not "stop the
+    // language server": hover/definition/documentSymbol keep working
+    // while `false`, only `publishDiagnostics` goes empty.
+    enabled: bool,
+    // Captured once at `"initialize"` from
+    // `capabilities.workspace.configuration` - whether this client
+    // supports a server-initiated `workspace/configuration` pull. A real
+    // `vscode-languageclient` client does and needs it: it always sends
+    // `workspace/didChangeConfiguration` with an empty/placeholder
+    // `settings` value, so the pushed-settings path alone would never see
+    // an actual `phpstan-rs.*` value from it.
+    supports_configuration_pull: bool,
+    // The last `ResolvedWorkspaceConfig` actually applied to
+    // `self.project`/`self` - `reload_configuration`'s no-op fast path
+    // compares a freshly resolved value against this via real `PartialEq`
+    // (never a `Debug`-formatted fingerprint - `SqlReflectionConfig`'s own
+    // `Debug` impl always prints its `password` field as a constant
+    // redacted token, which would make a password-only edit invisible to
+    // a string-based comparison).
+    last_applied_config: Option<workspace_config::ResolvedWorkspaceConfig>,
+    // The last resolved config a "this needs a window reload" warning was
+    // already emitted for (see `reload_configuration`'s file-set-affecting
+    // check) - distinct from `last_applied_config` so the warning doesn't
+    // re-fire on every subsequent unrelated settings save while the same
+    // unapplied change sits on disk.
+    last_warned_pending_config: Option<workspace_config::ResolvedWorkspaceConfig>,
 }
 
 impl Server {
@@ -183,6 +215,11 @@ impl Server {
             baseline: None,
             ignore_error_entries: Vec::new(),
             level_cutoff: None,
+            config_path_override: None,
+            enabled: true,
+            supports_configuration_pull: false,
+            last_applied_config: None,
+            last_warned_pending_config: None,
         }
     }
 
@@ -193,7 +230,23 @@ impl Server {
     /// context paths (`vendor`/`scan_paths`/`stub_paths`) `load_workspace`
     /// needs to load before walking `root` itself.
     fn configure_from_workspace(&mut self, root: &Path) -> workspace_config::WorkspaceContextPaths {
-        let resolved = workspace_config::resolve(root, None);
+        let resolved = workspace_config::resolve(root, self.config_path_override.as_deref());
+        self.apply_resolved_config(root, resolved)
+    }
+
+    /// The apply half of `configure_from_workspace`, factored out so
+    /// `reload_configuration` can apply an already-resolved value (its own
+    /// no-op fast path needs the resolved value in hand *before* deciding
+    /// whether to apply it, which `configure_from_workspace`'s
+    /// resolve-then-apply-in-one-call shape doesn't allow). Stores a clone
+    /// of `resolved` into `self.last_applied_config` before any of its
+    /// fields are moved out below.
+    fn apply_resolved_config(
+        &mut self,
+        root: &Path,
+        resolved: workspace_config::ResolvedWorkspaceConfig,
+    ) -> workspace_config::WorkspaceContextPaths {
+        self.last_applied_config = Some(resolved.clone());
         self.project
             .set_strict_mixed_arrays(resolved.strict_mixed_arrays);
         self.project
@@ -496,22 +549,21 @@ impl Server {
         messages
     }
 
-    /// Runs the checker over every analyzed (first-party) file the most
-    /// recent `load_workspace` loaded and publishes a
-    /// `textDocument/publishDiagnostics` notification for each one with
-    /// findings - without this, a freshly opened workspace shows an
-    /// empty Problems panel until each affected file happens to be
-    /// individually opened or edited, which for most files in a real
-    /// project never happens. Runs on a dedicated 64MiB-stack scoped
-    /// thread (mirrors `main/check.rs`'s own `WORKER_STACK_SIZE`
-    /// precedent) since the checker's recursive AST walk needs real
-    /// headroom over the ~2MiB a bare thread gets, and through
-    /// `Project::check_paths_isolating_panics` (not `check_paths`) so
-    /// one file's latent checker bug can't take down the whole push.
-    fn publish_workspace_diagnostics(&self) -> Vec<Message> {
+    /// Runs the checker over every analyzed (first-party) file currently
+    /// loaded, post-filtered the same way any other published diagnostic
+    /// set is. Runs on a dedicated 64MiB-stack scoped thread (mirrors
+    /// `main/check.rs`'s own `WORKER_STACK_SIZE` precedent) since the
+    /// checker's recursive AST walk needs real headroom over the ~2MiB a
+    /// bare thread gets, and through `Project::check_paths_isolating_panics`
+    /// (not `check_paths`) so one file's latent checker bug can't take
+    /// down the whole push. Shared by `publish_workspace_diagnostics`
+    /// (which then drops empty results) and `republish_known_files`
+    /// (which must not, so a file previously flagged and now clean gets
+    /// an explicit clearing notification).
+    fn check_all_analyzed_paths(&self) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
         let mut paths = self.project.analyzed_paths();
         if paths.is_empty() {
-            return Vec::new();
+            return HashMap::new();
         }
         // Deterministic order (matches load_workspace's own `files.sort()`
         // rationale) - HashMap/HashSet iteration order would otherwise
@@ -534,8 +586,49 @@ impl Server {
             );
         }
         self.apply_post_filters(results)
+    }
+
+    /// Publishes a `textDocument/publishDiagnostics` notification for
+    /// every analyzed file with findings - without this, a freshly opened
+    /// workspace shows an empty Problems panel until each affected file
+    /// happens to be individually opened or edited, which for most files
+    /// in a real project never happens. Empty results are dropped: at an
+    /// initial load nothing has been published for these paths yet, so
+    /// there is nothing to clear.
+    fn publish_workspace_diagnostics(&self) -> Vec<Message> {
+        self.check_all_analyzed_paths()
             .into_iter()
             .filter(|(_, diags)| !diags.is_empty())
+            .map(|(p, diags)| {
+                let uri = self
+                    .open_uris
+                    .get(&p)
+                    .cloned()
+                    .unwrap_or_else(|| path_to_uri(&p));
+                publish_diagnostics_notification(uri, &diags)
+            })
+            .collect()
+    }
+
+    /// `reload_configuration`'s own republish step, once it decides
+    /// something actually changed. Unlike `publish_workspace_diagnostics`,
+    /// this never drops an empty result: a file that had diagnostics
+    /// under the old config and none under the new one needs an explicit
+    /// empty `publishDiagnostics` to actually clear them client-side, not
+    /// silence. While `!self.enabled`, skips rechecking entirely and just
+    /// clears every currently-open file - phpstan-rs.enable means "stop
+    /// showing squiggles", not "stop the language server".
+    fn republish_known_files(&self) -> Vec<Message> {
+        if !self.enabled {
+            return self
+                .open_uris
+                .values()
+                .cloned()
+                .map(|uri| publish_diagnostics_notification(uri, &[]))
+                .collect();
+        }
+        self.check_all_analyzed_paths()
+            .into_iter()
             .map(|(p, diags)| {
                 let uri = self
                     .open_uris
@@ -917,7 +1010,6 @@ impl Server {
     /// for later correlation with the client's reply in
     /// `handle_response`. `R` fixes `params` to the shape `R::METHOD`
     /// expects at compile time.
-    #[allow(dead_code)] // no caller until an outbound request is dispatched
     fn send_request<R: lsp_types::request::Request>(&mut self, params: R::Params) -> Message {
         Message::Request(self.pending_requests.outgoing.register(
             R::METHOD.to_string(),
@@ -925,15 +1017,123 @@ impl Server {
             R::METHOD,
         ))
     }
+
+    /// Builds (and registers) a `workspace/configuration` request asking
+    /// for the `"phpstan-rs"` section - `None` if the client never
+    /// advertised `workspace.configuration` support at `"initialize"`, in
+    /// which case there is nothing to send and the caller should fall
+    /// back to re-resolving from disk instead.
+    fn request_configuration_pull(&mut self) -> Option<Message> {
+        if !self.supports_configuration_pull {
+            return None;
+        }
+        Some(
+            self.send_request::<lsp_types::request::WorkspaceConfiguration>(
+                lsp_types::ConfigurationParams {
+                    items: vec![lsp_types::ConfigurationItem {
+                        scope_uri: None,
+                        section: Some("phpstan-rs".to_string()),
+                    }],
+                },
+            ),
+        )
+    }
+
+    /// The `workspace/configuration` response counterpart to
+    /// `request_configuration_pull` - parses `resp`'s single item back
+    /// into `settings::PhpstanRsSettings` and feeds it into
+    /// `reload_configuration`. A malformed or error response is dropped
+    /// (nothing to reload from), not treated as fatal.
+    fn handle_configuration_response(&mut self, resp: Response) -> Vec<Message> {
+        let Ok(value) = resp.response_result else {
+            return Vec::new();
+        };
+        let Ok(items) = serde_json::from_value::<Vec<serde_json::Value>>(value) else {
+            return Vec::new();
+        };
+        match settings::parse_pull_response(&items) {
+            Some(settings) => self.reload_configuration(settings),
+            None => Vec::new(),
+        }
+    }
+
+    /// The actual `workspace/didChangeConfiguration` work, shared by both
+    /// the direct-push and pull-response paths: re-resolves `self.root`'s
+    /// config (honoring `settings.config_path`, resolved against `root`
+    /// when relative) and republishes whatever changed.
+    ///
+    /// A true no-op - the freshly resolved config and `enable` flag both
+    /// match what's already applied - returns `Vec::new()` without
+    /// re-checking anything, since this notification fires for ANY client
+    /// settings save under the registered section, not just a
+    /// `phpstan-rs` one; re-checking every analyzed file on every
+    /// unrelated settings.json save would be a real, common-case cost.
+    ///
+    /// `scan_paths`/`stub_paths`/`no_composer` changes are detected
+    /// separately (via the resolved `vendor_context`/`extra_context_dirs`)
+    /// but not specially skipped: `Project` has no unload/reset primitive,
+    /// so the already-loaded file set simply stays what it was, while
+    /// every other (hot-appliable) field still applies immediately. A
+    /// one-time `window/logMessage` (deduped via `last_warned_pending_config`)
+    /// tells the user the file set itself needs a window reload to catch
+    /// up - it is not silently wrong, just stale until then.
+    fn reload_configuration(&mut self, settings: settings::PhpstanRsSettings) -> Vec<Message> {
+        let Some(root) = self.root.clone() else {
+            return Vec::new();
+        };
+        let was_enabled = self.enabled;
+        let config_path_override = settings.config_path.as_deref().map(|p| {
+            let candidate = PathBuf::from(p);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                root.join(candidate)
+            }
+        });
+        let resolved = workspace_config::resolve(&root, config_path_override.as_deref());
+        if settings.enable == was_enabled && self.last_applied_config.as_ref() == Some(&resolved) {
+            return Vec::new();
+        }
+
+        let file_set_changed = self.last_applied_config.as_ref().is_some_and(|prev| {
+            prev.vendor_context != resolved.vendor_context
+                || prev.extra_context_dirs != resolved.extra_context_dirs
+        });
+
+        self.enabled = settings.enable;
+        self.config_path_override = config_path_override;
+        self.apply_resolved_config(&root, resolved);
+
+        let mut messages = Vec::new();
+        if file_set_changed
+            && self.last_warned_pending_config.as_ref() != self.last_applied_config.as_ref()
+        {
+            self.last_warned_pending_config = self.last_applied_config.clone();
+            messages.push(log_message_notification(
+                MessageType::WARNING,
+                "phpstan-rs: scan_paths/stub_paths/no_composer changed - reload the window to pick up the new file set".to_string(),
+            ));
+        }
+
+        messages.extend(self.republish_known_files());
+        messages
+    }
 }
 
 /// Correlates an inbound `Message::Response` with the outbound request
-/// that caused it, via `Server::pending_requests`. A response for an id
-/// this server never sent (or already handled) is logged and dropped,
-/// not treated as an error.
-fn handle_response(server: &mut Server, resp: Response) {
+/// that caused it, via `Server::pending_requests`, then dispatches by
+/// method - `"workspace/configuration"` is the only outbound request this
+/// server currently sends. A response for an id this server never sent
+/// (or already handled, e.g. a superseded earlier configuration pull) is
+/// logged and dropped, not treated as an error.
+fn handle_response<W: Write>(server: &mut Server, writer: &mut W, resp: Response) {
     let id = resp.id.clone();
     match server.pending_requests.outgoing.complete(id) {
+        Some("workspace/configuration") => {
+            for message in server.handle_configuration_response(resp) {
+                let _ = write_message(writer, &message);
+            }
+        }
         Some(_method) => {}
         None => {
             eprintln!(
@@ -1023,7 +1223,7 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
                 }
                 handle_notification(&mut server, writer, not);
             }
-            Message::Response(resp) => handle_response(&mut server, resp),
+            Message::Response(resp) => handle_response(&mut server, writer, resp),
         }
     }
 }
@@ -1033,47 +1233,68 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "initialize" => {
             let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
-            let (roots, position_encoding, progress_token) = match params {
-                Some(params) => {
-                    // Every real workspace_folders entry, not just the
-                    // first - falling back to the single deprecated
-                    // root_uri only when workspace_folders is absent or
-                    // empty (a client that supports it but opened with
-                    // no folders at all).
-                    let roots: Vec<PathBuf> =
-                        match params.workspace_folders.filter(|f| !f.is_empty()) {
-                            Some(folders) => {
-                                folders.iter().filter_map(|f| uri_to_path(&f.uri)).collect()
-                            }
-                            None => params
-                                .root_uri
-                                .as_ref()
-                                .and_then(uri_to_path)
-                                .into_iter()
-                                .collect(),
-                        };
-                    // A real vscode-languageclient is expected to
-                    // advertise general.positionEncodings. This server's
-                    // own Span already counts UTF-8 characters (see this
-                    // module's top-of-file doc comment), so echoing
-                    // "utf-8" back when the client offers it makes that
-                    // existing counting exactly correct - whenever it's
-                    // offered at all, not only when it's the client's
-                    // top preference, since utf-8 is the only encoding
-                    // this server actually implements. Absent an offer,
-                    // the spec's utf-16 default applies and today's
-                    // approximation is unchanged.
-                    let position_encoding = params
-                        .capabilities
-                        .general
-                        .and_then(|g| g.position_encodings)
-                        .is_some_and(|encodings| encodings.contains(&PositionEncodingKind::UTF8))
-                        .then_some(PositionEncodingKind::UTF8);
-                    let progress_token = params.work_done_progress_params.work_done_token;
-                    (roots, position_encoding, progress_token)
-                }
-                None => (Vec::new(), None, None),
-            };
+            let (roots, position_encoding, progress_token, supports_configuration_pull) =
+                match params {
+                    Some(params) => {
+                        // Every real workspace_folders entry, not just the
+                        // first - falling back to the single deprecated
+                        // root_uri only when workspace_folders is absent or
+                        // empty (a client that supports it but opened with
+                        // no folders at all).
+                        let roots: Vec<PathBuf> =
+                            match params.workspace_folders.filter(|f| !f.is_empty()) {
+                                Some(folders) => {
+                                    folders.iter().filter_map(|f| uri_to_path(&f.uri)).collect()
+                                }
+                                None => params
+                                    .root_uri
+                                    .as_ref()
+                                    .and_then(uri_to_path)
+                                    .into_iter()
+                                    .collect(),
+                            };
+                        // A real vscode-languageclient is expected to
+                        // advertise general.positionEncodings. This server's
+                        // own Span already counts UTF-8 characters (see this
+                        // module's top-of-file doc comment), so echoing
+                        // "utf-8" back when the client offers it makes that
+                        // existing counting exactly correct - whenever it's
+                        // offered at all, not only when it's the client's
+                        // top preference, since utf-8 is the only encoding
+                        // this server actually implements. Absent an offer,
+                        // the spec's utf-16 default applies and today's
+                        // approximation is unchanged.
+                        let position_encoding = params
+                            .capabilities
+                            .general
+                            .and_then(|g| g.position_encodings)
+                            .is_some_and(|encodings| {
+                                encodings.contains(&PositionEncodingKind::UTF8)
+                            })
+                            .then_some(PositionEncodingKind::UTF8);
+                        // A real vscode-languageclient client both supports
+                        // and relies on this: it always sends
+                        // workspace/didChangeConfiguration with an
+                        // empty/placeholder settings value, so this pull is
+                        // the only way this server ever learns the client's
+                        // actual phpstan-rs.* settings from such a client.
+                        let supports_configuration_pull = params
+                            .capabilities
+                            .workspace
+                            .as_ref()
+                            .and_then(|w| w.configuration)
+                            .unwrap_or(false);
+                        let progress_token = params.work_done_progress_params.work_done_token;
+                        (
+                            roots,
+                            position_encoding,
+                            progress_token,
+                            supports_configuration_pull,
+                        )
+                    }
+                    None => (Vec::new(), None, None, false),
+                };
+            server.supports_configuration_pull = supports_configuration_pull;
             // The scan itself (config resolution + parsing) runs from
             // "initialized", not here - see PendingWorkspaceScan's own
             // doc comment.
@@ -1231,6 +1452,38 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                         let _ = write_message(writer, &message);
                     }
                     for message in server.publish_workspace_diagnostics() {
+                        let _ = write_message(writer, &message);
+                    }
+                }
+            }
+        }
+        "workspace/didChangeConfiguration" => {
+            if let Ok(params) =
+                serde_json::from_value::<lsp_types::DidChangeConfigurationParams>(not.params)
+            {
+                if let Some(settings) = settings::extract_pushed_settings(&params.settings) {
+                    for message in server.reload_configuration(settings) {
+                        let _ = write_message(writer, &message);
+                    }
+                } else if let Some(request) = server.request_configuration_pull() {
+                    let _ = write_message(writer, &request);
+                } else {
+                    // No pushed value and no pull support: still worth
+                    // re-resolving from disk (picks up an on-disk
+                    // phpstan-rs.toml edit), just with no way to learn of
+                    // a changed phpstan-rs.enable/configPath client
+                    // setting from this client. Reconstructed from the
+                    // currently-applied values, not defaults, so this
+                    // fallback can't itself reset an override a prior
+                    // reload already applied.
+                    let settings = settings::PhpstanRsSettings {
+                        enable: server.enabled,
+                        config_path: server
+                            .config_path_override
+                            .as_ref()
+                            .map(|p| p.display().to_string()),
+                    };
+                    for message in server.reload_configuration(settings) {
                         let _ = write_message(writer, &message);
                     }
                 }

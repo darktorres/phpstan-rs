@@ -82,11 +82,22 @@ pub(super) fn notification(method: &str, params: Value) -> Value {
 /// scan, then sends `extra` requests/notifications, then `exit`. Returns
 /// every response/notification `run_loop` wrote.
 pub(super) fn run(dir: &TempDir, extra: &[Value]) -> Vec<Value> {
+    run_with_capabilities(dir, json!({}), extra)
+}
+
+/// Same as `run`, but with a caller-supplied `capabilities` object instead
+/// of `{}` - for a test exercising a client capability (e.g.
+/// `workspace.configuration` support) `run` itself never advertises.
+pub(super) fn run_with_capabilities(
+    dir: &TempDir,
+    capabilities: Value,
+    extra: &[Value],
+) -> Vec<Value> {
     let mut input = vec![
         request(
             1,
             "initialize",
-            json!({"rootUri": dir.uri(), "capabilities": {}}),
+            json!({"rootUri": dir.uri(), "capabilities": capabilities}),
         ),
         notification("initialized", json!({})),
     ];
@@ -109,6 +120,13 @@ pub(super) fn run(dir: &TempDir, extra: &[Value]) -> Vec<Value> {
     let mut writer = Vec::new();
     run_loop(&rx, &mut writer);
     decode_all(&writer)
+}
+
+pub(super) fn did_change_configuration(settings: Value) -> Value {
+    notification(
+        "workspace/didChangeConfiguration",
+        json!({"settings": settings}),
+    )
 }
 
 /// Builds a `Message` directly from a JSON `Value`, for a test that

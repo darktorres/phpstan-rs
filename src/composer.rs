@@ -28,7 +28,7 @@ use crate::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, Default, Clone, PartialEq)]
 pub struct ComposerContext {
     /// Exact files to load (classmap/files entries).
     pub files: Vec<PathBuf>,
