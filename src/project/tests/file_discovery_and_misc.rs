@@ -55,6 +55,65 @@ fn check_all_covers_every_loaded_file_not_just_one() {
 }
 
 #[test]
+fn check_paths_restricts_output_but_keeps_whole_project_facts() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("good.php"),
+            "<?php function f(): int { return 1; }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("bad.php"),
+            "<?php function g() { return $undefinedVar; }",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    let result = project.check_paths(&[PathBuf::from("bad.php")]);
+
+    assert_eq!(result.len(), 1, "got: {result:?}");
+    assert!(
+        result[&PathBuf::from("bad.php")]
+            .iter()
+            .any(|d| d.message.contains("undefined variable"))
+    );
+}
+
+#[test]
+fn check_paths_isolating_panics_behaves_like_check_paths_when_nothing_panics() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("good.php"),
+            "<?php function f(): int { return 1; }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("bad.php"),
+            "<?php function g() { return $undefinedVar; }",
+        )
+        .unwrap();
+    project.finish_loading();
+    let paths = vec![PathBuf::from("good.php"), PathBuf::from("bad.php")];
+
+    let expected = project.check_paths(&paths);
+    let (actual, panics) = project.check_paths_isolating_panics(&paths);
+
+    assert!(panics.is_empty(), "got: {panics:?}");
+    assert_eq!(actual.len(), expected.len());
+    for (path, diagnostics) in &expected {
+        assert_eq!(
+            actual[path].iter().map(|d| &d.message).collect::<Vec<_>>(),
+            diagnostics.iter().map(|d| &d.message).collect::<Vec<_>>(),
+            "mismatch for {path:?}"
+        );
+    }
+}
+
+#[test]
 fn cross_file_use_import_and_method_calls_resolve_correctly() {
     // Every other cross-file test in this module uses bare,
     // non-namespaced classes with no `use` import at all - the exact

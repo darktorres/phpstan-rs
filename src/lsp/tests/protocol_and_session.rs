@@ -426,8 +426,14 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
 
     let messages = decode_all(&writer);
     let b_uri = path_to_uri(&b_path).to_string();
+    // The LAST one, not the first: "initialized" now also publishes
+    // b.php's own pre-existing diagnostics (missingType.return) via the
+    // whole-workspace push, before the didOpen-triggered recheck below
+    // adds the now-missing-greet() one - a real client always takes the
+    // latest notification per URI, same as this test should.
     let b_notification = messages
         .iter()
+        .rev()
         .find(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == b_uri);
     let Some(b_notification) = b_notification else {
         panic!("expected a publishDiagnostics notification for b.php, got: {messages:?}");
@@ -877,4 +883,128 @@ fn a_bare_response_message_from_the_client_does_not_crash_the_session() {
     let responses = decode_all(&writer);
     assert_eq!(responses.len(), 1, "got: {responses:?}");
     assert_eq!(responses[0]["id"], json!(1));
+}
+
+#[test]
+fn initialize_publishes_diagnostics_for_unopened_workspace_files_with_findings() {
+    let dir = TempDir::new("publish_on_initialized");
+    let root_src = "<?php function f() { echo $undefinedRoot; }";
+    let root_path = dir.write("root.php", root_src);
+    let nested_src = "<?php function g() { echo $undefinedNested; }";
+    let nested_path = dir.write("nested/dir/deep.php", nested_src);
+    let root_uri = path_to_uri(&root_path).to_string();
+    let nested_uri = path_to_uri(&nested_path).to_string();
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    for uri in [&root_uri, &nested_uri] {
+        let notification = messages.iter().find(|m| {
+            m["method"] == "textDocument/publishDiagnostics" && &m["params"]["uri"] == uri
+        });
+        let Some(notification) = notification else {
+            panic!("expected a publishDiagnostics notification for {uri}, got: {messages:?}");
+        };
+        let diags = notification["params"]["diagnostics"].as_array().unwrap();
+        assert!(
+            diags.iter().any(|d| d["code"] == "variable.undefined"),
+            "got: {diags:?}"
+        );
+    }
+}
+
+#[test]
+fn initialize_does_not_publish_diagnostics_for_clean_workspace_files() {
+    let dir = TempDir::new("no_publish_when_clean");
+    dir.write("a.php", "<?php function helperA(): int { return 1; }");
+
+    let messages = run(&dir, &[]);
+
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m["method"] == "textDocument/publishDiagnostics"),
+        "got: {messages:?}"
+    );
+}
+
+#[test]
+fn initialize_does_not_publish_diagnostics_for_files_under_vendor_directory() {
+    let dir = TempDir::new("no_publish_for_vendor");
+    dir.write("app.php", "<?php function helperA(): int { return 1; }");
+    let vendor_path = dir.write(
+        "vendor/lib/bad.php",
+        "<?php function f() { echo $undefinedInVendor; }",
+    );
+    let vendor_uri = path_to_uri(&vendor_path).to_string();
+
+    let messages = run(&dir, &[]);
+
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m["method"] == "textDocument/publishDiagnostics"
+                && m["params"]["uri"] == vendor_uri),
+        "vendor/ files must never be diagnosed even when loaded as context: got: {messages:?}"
+    );
+}
+
+#[test]
+fn initialize_diagnostics_push_survives_one_workspace_file_failing_to_parse() {
+    let dir = TempDir::new("publish_survives_a_parse_failure");
+    dir.write("bad.php", "<?php function foo(int $x");
+    let good_src = "<?php function f() { echo $undefinedInGood; }";
+    let good_path = dir.write("good.php", good_src);
+    let good_uri = path_to_uri(&good_path).to_string();
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    assert!(
+        messages.iter().any(|m| m["id"] == json!(1)),
+        "the initialize response must still arrive: got: {messages:?}"
+    );
+    let good_notification = messages.iter().find(|m| {
+        m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == good_uri
+    });
+    let Some(good_notification) = good_notification else {
+        panic!(
+            "expected diagnostics for good.php despite bad.php failing to parse, got: {messages:?}"
+        );
+    };
+    let diags = good_notification["params"]["diagnostics"]
+        .as_array()
+        .unwrap();
+    assert!(
+        diags.iter().any(|d| d["code"] == "variable.undefined"),
+        "got: {diags:?}"
+    );
 }

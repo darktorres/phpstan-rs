@@ -125,6 +125,11 @@ pub struct Project {
     duplicate_class_sites: DuplicateClassSites,
 }
 
+/// The result of `Project::check_paths_isolating_panics`: successful
+/// per-file diagnostics, plus every path whose own check panicked
+/// (message, not a diagnostic list) instead of completing.
+pub type CheckPathsIsolatingPanics = (HashMap<PathBuf, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
+
 impl Project {
     pub fn new() -> Self {
         let mut registry = Registry::default();
@@ -1120,6 +1125,77 @@ impl Project {
         merged
     }
 
+    /// Runs the checker over exactly `paths` (which must already be
+    /// loaded) - the two-pass `collect_property_assign_facts`-then-
+    /// `check_file_with_property_assign_facts` architecture `check_all`
+    /// uses, but scoped to a caller-chosen subset rather than every
+    /// loaded file. The facts pass itself still runs over every loaded
+    /// file regardless of `paths` (see `collect_property_assign_facts`'s
+    /// own doc comment for why: a trait-donated property write
+    /// discovered in a file outside `paths` must still reach a host
+    /// inside it). Panic-transparent - a real checker panic propagates
+    /// to the caller, which is what a unit test wants; see
+    /// `check_paths_isolating_panics` for the batch-safe counterpart.
+    pub fn check_paths(&self, paths: &[PathBuf]) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        let facts = Arc::new(self.collect_property_assign_facts());
+        paths
+            .iter()
+            .map(|path| {
+                (
+                    path.clone(),
+                    self.check_file_with_property_assign_facts(path, &facts),
+                )
+            })
+            .collect()
+    }
+
+    /// Same as `check_paths`, but a panic while checking one file (or
+    /// while collecting property-assign facts) is caught and reported
+    /// rather than aborting every other file's result - mirrors
+    /// `main/check_project.rs`'s own catch_unwind-with-silenced-hook
+    /// pattern exactly, for the same reason: a whole-workspace pass runs
+    /// over uncurated code the caller doesn't control, where one file's
+    /// latent checker bug must not take down every other file's
+    /// diagnostics. `Project`/`Registry` have no interior mutability, so
+    /// `&self` is `UnwindSafe` with no `AssertUnwindSafe` wrapper needed.
+    pub fn check_paths_isolating_panics(&self, paths: &[PathBuf]) -> CheckPathsIsolatingPanics {
+        let default_hook = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {}));
+        let facts = Arc::new(
+            std::panic::catch_unwind(|| self.collect_property_assign_facts()).unwrap_or_default(),
+        );
+        let outcomes: Vec<(PathBuf, Result<Vec<Diagnostic>, String>)> = paths
+            .iter()
+            .map(|path| {
+                let outcome = std::panic::catch_unwind(|| {
+                    self.check_file_with_property_assign_facts(path, &facts)
+                })
+                .map_err(|payload| {
+                    payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "unknown panic".to_string())
+                });
+                (path.clone(), outcome)
+            })
+            .collect();
+        std::panic::set_hook(default_hook);
+
+        let mut results = HashMap::new();
+        let mut panics = Vec::new();
+        for (path, outcome) in outcomes {
+            match outcome {
+                Ok(diagnostics) => {
+                    results.insert(path, diagnostics);
+                }
+                Err(msg) => panics.push((path, msg)),
+            }
+        }
+        panics.sort();
+        (results, panics)
+    }
+
     /// Runs the checker over every currently-loaded file, not just one -
     /// the whole-project counterpart to `check_file`. `--check-project`
     /// no longer uses this directly (it needs to check only the files it
@@ -1128,21 +1204,9 @@ impl Project {
     /// tests/tooling that need to see every diagnostic across a real
     /// corpus at once, rather than one file (and its
     /// transitively-affected dependents) at a time the way `update_file`
-    /// does. Two-pass: `collect_property_assign_facts` runs first so a
-    /// trait-donated property write discovered in one file reaches
-    /// `check_too_wide_property_types` in whichever file declares the
-    /// host using it.
+    /// does.
     pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let facts = Arc::new(self.collect_property_assign_facts());
-        self.files
-            .keys()
-            .map(|path| {
-                (
-                    path.clone(),
-                    self.check_file_with_property_assign_facts(path, &facts),
-                )
-            })
-            .collect()
+        self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>())
     }
 
     pub fn file_count(&self) -> usize {

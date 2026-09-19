@@ -419,6 +419,57 @@ impl Server {
         messages
     }
 
+    /// Runs the checker over every analyzed (first-party) file the most
+    /// recent `load_workspace` loaded and publishes a
+    /// `textDocument/publishDiagnostics` notification for each one with
+    /// findings - without this, a freshly opened workspace shows an
+    /// empty Problems panel until each affected file happens to be
+    /// individually opened or edited, which for most files in a real
+    /// project never happens. Runs on a dedicated 64MiB-stack scoped
+    /// thread (mirrors `main/check.rs`'s own `WORKER_STACK_SIZE`
+    /// precedent) since the checker's recursive AST walk needs real
+    /// headroom over the ~2MiB a bare thread gets, and through
+    /// `Project::check_paths_isolating_panics` (not `check_paths`) so
+    /// one file's latent checker bug can't take down the whole push.
+    fn publish_workspace_diagnostics(&self) -> Vec<Message> {
+        let mut paths = self.project.analyzed_paths();
+        if paths.is_empty() {
+            return Vec::new();
+        }
+        // Deterministic order (matches load_workspace's own `files.sort()`
+        // rationale) - HashMap/HashSet iteration order would otherwise
+        // make repeated runs against an unchanged workspace look like a
+        // spurious diff to anyone comparing published-message order.
+        paths.sort();
+        const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
+        let (results, panics) = std::thread::scope(|scope| {
+            std::thread::Builder::new()
+                .stack_size(WORKER_STACK_SIZE)
+                .spawn_scoped(scope, || self.project.check_paths_isolating_panics(&paths))
+                .expect("failed to spawn worker thread")
+                .join()
+                .unwrap_or_default()
+        });
+        for (path, msg) in &panics {
+            eprintln!(
+                "phpstan-rs lsp: checking {} panicked: {msg}",
+                path.display()
+            );
+        }
+        self.apply_post_filters(results)
+            .into_iter()
+            .filter(|(_, diags)| !diags.is_empty())
+            .map(|(p, diags)| {
+                let uri = self
+                    .open_uris
+                    .get(&p)
+                    .cloned()
+                    .unwrap_or_else(|| path_to_uri(&p));
+                publish_diagnostics_notification(uri, &diags)
+            })
+            .collect()
+    }
+
     fn handle_open_or_change(&mut self, uri: &Uri, text: &str) -> Vec<Message> {
         let Some(path) = uri_to_path(uri) else {
             return Vec::new();
@@ -1027,6 +1078,9 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     );
                 }
                 for message in server.load_workspace(&scan.root, &scan.context) {
+                    let _ = write_message(writer, &message);
+                }
+                for message in server.publish_workspace_diagnostics() {
                     let _ = write_message(writer, &message);
                 }
                 if let Some(token) = scan.progress_token {
