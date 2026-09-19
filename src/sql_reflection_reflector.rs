@@ -1,6 +1,6 @@
-//! Sub-phase C (MySQL and Postgres so far - SQLite is a separate
-//! follow-on commit): live SQL query reflection. `PREPARE`s (never
-//! executes) a resolved SQL string against a live connection and reads
+//! Sub-phase C (MySQL, Postgres, and SQLite): live SQL query reflection.
+//! `PREPARE`s (never executes) a resolved SQL string against a live
+//! connection and reads
 //! the prepared statement's own real result-set column metadata,
 //! translating each column into this project's `Type` the way a raw
 //! `Doctrine\DBAL\Connection::fetch*` call actually hands it to PHP -
@@ -307,6 +307,130 @@ fn postgres_column_to_type(pg_type: &postgres::types::Type, nullable: bool) -> T
     }
 }
 
+/// Uses `r2d2_sqlite` for pooling too, not a bare `Connection` - SQLite
+/// connections aren't `Sync` (rusqlite's own type doesn't implement it),
+/// so a single shared handle would need a `Mutex` and serialize every
+/// `rayon` worker, the exact shape this project's own concurrency design
+/// rules out. Multiple independent connections to the same file are
+/// genuinely fine under SQLite's own concurrency model (WAL-mode-style
+/// concurrent readers).
+pub struct SqliteReflector {
+    pool: r2d2::Pool<r2d2_sqlite::SqliteConnectionManager>,
+}
+
+impl SqliteReflector {
+    fn connect(config: &SqlReflectionConfig) -> Result<Self, String> {
+        let path = config
+            .path
+            .as_ref()
+            .ok_or_else(|| "sql_reflection.path is required for the sqlite driver".to_string())?;
+        let manager = r2d2_sqlite::SqliteConnectionManager::file(path);
+        let pool =
+            r2d2::Pool::new(manager).map_err(|e| format!("failed to open SQLite database: {e}"))?;
+        Ok(Self { pool })
+    }
+}
+
+impl QueryReflector for SqliteReflector {
+    fn reflect(&self, sql: &str) -> Option<Type> {
+        let conn = self.pool.get().ok()?;
+        let stmt = conn.prepare(sql).ok()?;
+        let count = stmt.column_count();
+        if count == 0 {
+            return None;
+        }
+        let fields = (0..count)
+            .map(|i| {
+                let name = stmt.column_name(i).unwrap_or_default().to_string();
+                let ty = sqlite_column_to_type(&stmt, i);
+                (name, ty, false)
+            })
+            .collect();
+        Some(Type::ArrayShape(fields))
+    }
+}
+
+/// SQLite's own five type-affinity classes
+/// (<https://sqlite.org/datatype3.html#determination_of_column_affinity>),
+/// determined from a declared type name by real SQLite's own documented
+/// algorithm (implemented faithfully below, not approximated) - SQLite
+/// is dynamically typed, so a declared type is advisory, not enforced:
+/// the affinity only says which storage class SQLite *prefers* for a
+/// value stored in that column, not a guarantee every row's real value
+/// matches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqliteAffinity {
+    Integer,
+    Real,
+    Text,
+    Blob,
+    Numeric,
+}
+
+fn sqlite_affinity(decl_type: &str) -> SqliteAffinity {
+    let upper = decl_type.to_ascii_uppercase();
+    if upper.contains("INT") {
+        SqliteAffinity::Integer
+    } else if upper.contains("CHAR") || upper.contains("CLOB") || upper.contains("TEXT") {
+        SqliteAffinity::Text
+    } else if upper.contains("BLOB") || upper.is_empty() {
+        SqliteAffinity::Blob
+    } else if upper.contains("REAL") || upper.contains("FLOA") || upper.contains("DOUB") {
+        SqliteAffinity::Real
+    } else {
+        SqliteAffinity::Numeric
+    }
+}
+
+/// `nullable` folds in the identical real, live-verified
+/// `PDO::ATTR_STRINGIFY_FETCHES` default this file's MySQL/Postgres
+/// translators already establish (confirmed directly against real
+/// `pdo_sqlite` too: `INTEGER`/`REAL`-affinity columns are native-typed
+/// at PDO's real default). `Numeric` affinity maps to `Union([Int,
+/// Float])` for a genuinely different reason than MySQL/Postgres's own
+/// FLOAT/DOUBLE union correction: this isn't hedging against an
+/// unknowable app setting, it's the honest answer to a real semantic
+/// fact - SQLite's own NUMERIC affinity tries INTEGER storage first and
+/// falls back to REAL, so the *same declared column* can genuinely hold
+/// either type from one row to the next (confirmed live: `NUMERIC`-
+/// declared `3.14` stored and fetched back as PHP `float`).
+fn sqlite_affinity_to_type(affinity: SqliteAffinity, nullable: bool) -> Type {
+    let base = match affinity {
+        SqliteAffinity::Integer => Type::Int,
+        SqliteAffinity::Real => Type::Float,
+        SqliteAffinity::Text | SqliteAffinity::Blob => Type::String,
+        SqliteAffinity::Numeric => Type::Union(vec![Type::Int, Type::Float]),
+    };
+    if nullable {
+        match base {
+            Type::Union(mut members) => {
+                members.push(Type::Null);
+                Type::Union(members)
+            }
+            other => Type::Union(vec![other, Type::Null]),
+        }
+    } else {
+        base
+    }
+}
+
+/// A computed/expression select item (no real backing table column) has
+/// no `column_metadata()` entry at all - degrades to a bare declared
+/// type from `columns()`/`column_decltype()` when SQLite's own query
+/// planner still infers one (real for e.g. `CAST(x AS INTEGER)`), or all
+/// the way to `Type::Mixed` when it can't, rather than guessing.
+fn sqlite_column_to_type(stmt: &rusqlite::Statement<'_>, idx: usize) -> Type {
+    if let Ok(Some((_, _, _, data_type, _, not_null, primary_key, _))) = stmt.column_metadata(idx) {
+        let decl = data_type.and_then(|s| s.to_str().ok()).unwrap_or("");
+        let nullable = !(not_null || primary_key);
+        return sqlite_affinity_to_type(sqlite_affinity(decl), nullable);
+    }
+    match stmt.columns().get(idx).and_then(|c| c.decl_type()) {
+        Some(decl) => sqlite_affinity_to_type(sqlite_affinity(decl), true),
+        None => Type::Mixed,
+    }
+}
+
 type BoxedReflector = Box<dyn QueryReflector>;
 
 /// The `Registry`-held, lazily-constructed live reflector - a plain
@@ -340,13 +464,19 @@ impl SqlReflectorHandle {
     }
 }
 
-/// A live connection is only attempted when the config actually names a
-/// target database - a `schema_file`-only block (A2, no live intent at
-/// all) must never trigger a connection attempt to some default
-/// `127.0.0.1:3306` with no credentials.
 fn build_reflector(config: Option<&SqlReflectionConfig>) -> Option<BoxedReflector> {
     let config = config?;
-    config.database.as_ref()?;
+    // A schema_file-only block (A2, no live intent at all) must never
+    // trigger a live connection attempt - MySQL/Postgres need a real
+    // `database` name for that; SQLite needs a real `path` instead.
+    match config.driver {
+        SqlDriver::Mysql | SqlDriver::Pgsql => {
+            config.database.as_ref()?;
+        }
+        SqlDriver::Sqlite => {
+            config.path.as_ref()?;
+        }
+    }
     match config.driver {
         SqlDriver::Mysql => MysqlReflector::connect(config)
             .ok()
@@ -354,8 +484,9 @@ fn build_reflector(config: Option<&SqlReflectionConfig>) -> Option<BoxedReflecto
         SqlDriver::Pgsql => PostgresReflector::connect(config)
             .ok()
             .map(|r| Box::new(r) as BoxedReflector),
-        // SQLite's own live reflector is a separate follow-on commit.
-        SqlDriver::Sqlite => None,
+        SqlDriver::Sqlite => SqliteReflector::connect(config)
+            .ok()
+            .map(|r| Box::new(r) as BoxedReflector),
     }
 }
 

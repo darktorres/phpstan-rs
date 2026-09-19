@@ -1515,6 +1515,7 @@ dependencies = [
  "proptest",
  "r2d2",
  "r2d2_postgres",
+ "r2d2_sqlite",
  "rayon",
  "regex",
  "roxmltree",
@@ -1739,6 +1740,17 @@ checksum = "efd4b47636dbca581cd057e2f27a5d39be741ea4f85fd3c29e415c55f71c7595"
 dependencies = [
  "postgres",
  "r2d2",
+]
+
+[[package]]
+name = "r2d2_sqlite"
+version = "0.35.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d362d41ad1f9a278dd971842c63c0fc7ae2e01bccbfbbc8c9a4689a46fa7051f"
+dependencies = [
+ "r2d2",
+ "rusqlite",
+ "uuid",
 ]
 
 [[package]]
@@ -2586,7 +2598,9 @@ version = "1.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2ef6dac1e96601b4fb3acccccff2139741fcb757cb9a36089bf5be91cfb285ce"
 dependencies = [
+ "getrandom 0.4.3",
  "js-sys",
+ "rand 0.10.2",
  "wasm-bindgen",
 ]
 

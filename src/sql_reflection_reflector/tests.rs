@@ -333,3 +333,204 @@ fn a_real_live_postgres_prepare_of_an_invalid_query_degrades_to_none_not_a_panic
             .is_none()
     );
 }
+
+#[test]
+fn sqlite_affinity_matches_the_real_documented_algorithm() {
+    // Examples straight from SQLite's own affinity-determination table.
+    assert_eq!(sqlite_affinity("INT"), SqliteAffinity::Integer);
+    assert_eq!(sqlite_affinity("INTEGER"), SqliteAffinity::Integer);
+    assert_eq!(sqlite_affinity("TINYINT"), SqliteAffinity::Integer);
+    assert_eq!(sqlite_affinity("VARCHAR(255)"), SqliteAffinity::Text);
+    assert_eq!(sqlite_affinity("CHARACTER(20)"), SqliteAffinity::Text);
+    assert_eq!(sqlite_affinity("CLOB"), SqliteAffinity::Text);
+    assert_eq!(sqlite_affinity("TEXT"), SqliteAffinity::Text);
+    assert_eq!(sqlite_affinity("BLOB"), SqliteAffinity::Blob);
+    assert_eq!(sqlite_affinity(""), SqliteAffinity::Blob);
+    assert_eq!(sqlite_affinity("REAL"), SqliteAffinity::Real);
+    assert_eq!(sqlite_affinity("DOUBLE"), SqliteAffinity::Real);
+    assert_eq!(sqlite_affinity("FLOAT"), SqliteAffinity::Real);
+    assert_eq!(sqlite_affinity("NUMERIC"), SqliteAffinity::Numeric);
+    assert_eq!(sqlite_affinity("DECIMAL(10,5)"), SqliteAffinity::Numeric);
+    assert_eq!(sqlite_affinity("BOOLEAN"), SqliteAffinity::Numeric);
+    assert_eq!(sqlite_affinity("DATE"), SqliteAffinity::Numeric);
+}
+
+#[test]
+fn sqlite_affinity_to_type_maps_integer_real_text_and_numeric() {
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Integer, false),
+        Type::Int
+    );
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Real, false),
+        Type::Float
+    );
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Text, false),
+        Type::String
+    );
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Blob, false),
+        Type::String
+    );
+    // Numeric affinity is a genuine semantic union (SQLite tries
+    // INTEGER storage first, falls back to REAL) - not hedging against
+    // an unknowable app setting.
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Numeric, false),
+        Type::Union(vec![Type::Int, Type::Float])
+    );
+}
+
+#[test]
+fn sqlite_affinity_to_type_wraps_nullable_correctly_even_for_an_existing_union() {
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Integer, true),
+        Type::Union(vec![Type::Int, Type::Null])
+    );
+    assert_eq!(
+        sqlite_affinity_to_type(SqliteAffinity::Numeric, true),
+        Type::Union(vec![Type::Int, Type::Float, Type::Null])
+    );
+}
+
+fn sqlite_fixture_path(label: &str) -> std::path::PathBuf {
+    std::env::temp_dir().join(format!(
+        "phpstan_rs_sqlite_reflector_test_{label}_{}_{:?}.sqlite",
+        std::process::id(),
+        std::thread::current().id()
+    ))
+}
+
+#[test]
+fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
+    let path = sqlite_fixture_path("basic");
+    let _ = std::fs::remove_file(&path);
+    let config = SqlReflectionConfig {
+        driver: SqlDriver::Sqlite,
+        host: None,
+        port: None,
+        user: None,
+        password: None,
+        password_env: None,
+        database: None,
+        path: Some(path.clone()),
+        schema_file: None,
+    };
+    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
+    {
+        let conn = reflector.pool.get().expect("get a pooled connection");
+        conn.execute_batch(
+            "CREATE TABLE sql_reflection_probe (
+                 id INTEGER NOT NULL,
+                 name TEXT,
+                 price NUMERIC NOT NULL
+             );",
+        )
+        .expect("set up the fixture table");
+    }
+    let row_type = reflector
+        .reflect("SELECT id, name, price FROM sql_reflection_probe WHERE id = ?1")
+        .expect("reflect a real SELECT");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape, got {row_type:?}");
+    };
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
+    assert_eq!(
+        fields[1],
+        (
+            "name".to_string(),
+            Type::Union(vec![Type::String, Type::Null]),
+            false
+        )
+    );
+    assert_eq!(
+        fields[2],
+        (
+            "price".to_string(),
+            Type::Union(vec![Type::Int, Type::Float]),
+            false
+        )
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
+    let path = sqlite_fixture_path("computed");
+    let _ = std::fs::remove_file(&path);
+    let config = SqlReflectionConfig {
+        driver: SqlDriver::Sqlite,
+        host: None,
+        port: None,
+        user: None,
+        password: None,
+        password_env: None,
+        database: None,
+        path: Some(path.clone()),
+        schema_file: None,
+    };
+    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
+    {
+        let conn = reflector.pool.get().expect("get a pooled connection");
+        conn.execute_batch("CREATE TABLE t (id INTEGER NOT NULL);")
+            .expect("set up the fixture table");
+    }
+    let row_type = reflector
+        .reflect("SELECT id, id + 1 AS next_id FROM t")
+        .expect("reflect a real SELECT");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape, got {row_type:?}");
+    };
+    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
+    // `id + 1` has no real backing column - `column_metadata()` returns
+    // `None` for it, and SQLite's own query planner gives a computed
+    // arithmetic expression no declared type either, so this degrades
+    // all the way to `Type::Mixed`, not a guess.
+    assert_eq!(fields[1], ("next_id".to_string(), Type::Mixed, false));
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_real_sqlite_prepare_of_an_invalid_query_degrades_to_none_not_a_panic() {
+    let path = sqlite_fixture_path("invalid_query");
+    let _ = std::fs::remove_file(&path);
+    let config = SqlReflectionConfig {
+        driver: SqlDriver::Sqlite,
+        host: None,
+        port: None,
+        user: None,
+        password: None,
+        password_env: None,
+        database: None,
+        path: Some(path.clone()),
+        schema_file: None,
+    };
+    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
+    assert!(
+        reflector
+            .reflect("SELECT * FROM this_table_does_not_exist")
+            .is_none()
+    );
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn a_reflector_handle_with_no_path_never_attempts_a_live_sqlite_connection() {
+    let config = SqlReflectionConfig {
+        driver: SqlDriver::Sqlite,
+        host: None,
+        port: None,
+        user: None,
+        password: None,
+        password_env: None,
+        database: None,
+        path: None,
+        schema_file: Some(std::path::PathBuf::from(
+            "install/piwigo_structure-sqlite.sql",
+        )),
+    };
+    let handle = SqlReflectorHandle::default();
+    assert!(handle.get(Some(&config)).is_none());
+}
