@@ -8,6 +8,17 @@
 //! *enclosing* span to offer (`Foo::CONST`, `?Foo|Bar`), recovering the
 //! real per-name sub-span via `text_split::split_identifier_spans`.
 //!
+//! Also the traversal `textDocument/documentHighlight` (`lsp::document_
+//! highlight`... no such module - see `Server::document_highlight` in
+//! `lsp.rs`) reuses wholesale via `collect_all`: the same walker, run
+//! with `Anchor::All` instead of `Anchor::Position(pos)`, collects every
+//! `(Span, Resolved)` pair in the file instead of stopping at the single
+//! best match for one cursor position. `resolve_at` and `collect_all`
+//! share one underlying `walk_file` - the only difference between "what
+//! is at this exact position" and "everywhere in this file" is which
+//! `Anchor` variant gates whether a candidate gets recorded, never the
+//! traversal itself.
+//!
 //! Structured after (not sharing code with) `deps.rs`'s own
 //! `collect_stmt`/`collect_expr`/`collect_function`/`collect_class`/
 //! `collect_enum` - the same proven-exhaustive traversal shape (including
@@ -30,11 +41,14 @@
 //! approximation of it - see `Checker::probe_var_provenance`'s own doc
 //! comment in `checker.rs` for the full design.
 
+use std::sync::Arc;
+
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::project::Project;
 use crate::registry::{NameContext, Registry};
 use crate::token::{Position, Span};
+use std::collections::HashSet;
 use std::path::Path;
 
 use super::text_split::{split_identifier_spans, type_hint_identifiers};
@@ -73,12 +87,17 @@ pub(crate) enum Resolved {
     /// (what type does this declaration itself bind? - which genuinely
     /// needs a probe, e.g. a `foreach` binding's type depends on
     /// inferring the iterable), mirroring `VariableRead`'s identical
-    /// fields below.
+    /// fields below. `name`/`var_scope` exist for `document_highlight`'s
+    /// own sake only (which other occurrences are the *same* local -
+    /// see `var_scope`'s own doc comment on `Walker`), unused by hover/
+    /// definition.
     VariableSelf {
         span: Span,
         scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
+        name: Arc<str>,
+        var_scope: u32,
     },
     /// A local variable *read* - resolved via a real, checker-driven
     /// reaching-definitions probe (`Checker::probe_span`/
@@ -93,6 +112,8 @@ pub(crate) enum Resolved {
         scope: ProbeScope,
         is_static: bool,
         class: Option<String>,
+        name: Arc<str>,
+        var_scope: u32,
     },
 }
 
@@ -111,24 +132,63 @@ pub(crate) enum ProbeScope {
     TopLevel(Vec<Stmt>),
 }
 
+/// What a candidate `Span` is checked against - a single cursor position
+/// (`resolve_at`'s own use, `.matches()` degenerating to the original
+/// `contains()` check) or unconditionally everything in the file
+/// (`collect_all`'s use, for `document_highlight` - every candidate the
+/// walker would otherwise gate on cursor proximity is recorded instead).
+pub(crate) enum Anchor {
+    Position(Position),
+    All,
+}
+
+impl Anchor {
+    fn matches(&self, span: Span) -> bool {
+        match self {
+            Anchor::Position(pos) => contains(span, *pos),
+            Anchor::All => true,
+        }
+    }
+}
+
 /// The entry point: what's declared/referenced at `pos` in the file
-/// loaded under `path`, or `None` for nothing resolvable there.
+/// loaded under `path`, or `None` for nothing resolvable there. The
+/// walk order matches `out`'s own push order, so `.last()` is exactly
+/// the old single-`best`-overwritten-on-every-match semantics: the
+/// innermost (visited last) containing match wins.
 pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Option<Resolved> {
+    walk_file(project, path, Anchor::Position(pos))?
+        .into_iter()
+        .map(|(_, r)| r)
+        .next_back()
+}
+
+/// Every `(Span, Resolved)` pair anywhere in the file - `document_
+/// highlight`'s own source list, filtered down to whichever ones are
+/// the same symbol as the target the cursor is actually on.
+pub(crate) fn collect_all(project: &Project, path: &Path) -> Vec<(Span, Resolved)> {
+    walk_file(project, path, Anchor::All).unwrap_or_default()
+}
+
+fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span, Resolved)>> {
     let stmts = project.ast(path)?;
     let source = project.source(path)?;
     let registry = project.registry();
     let mut ctx = NameContext::default();
-    let mut best = None;
+    let mut out = Vec::new();
     let mut w = Walker {
         registry,
         source,
-        pos,
+        anchor,
         top_level_stmts: stmts,
         current_function: None,
         current_is_static: false,
+        next_scope_id: 0,
+        base_scope_id: 0,
+        scope_frames: Vec::new(),
     };
-    w.stmts(stmts, &mut ctx, None, &mut best);
-    best
+    w.stmts(stmts, &mut ctx, None, &mut out);
+    Some(out)
 }
 
 /// 1-indexed, half-open (`span.end` is one past the last real character -
@@ -166,10 +226,31 @@ pub(super) fn resolve_class_ref(
     }
 }
 
+/// A lexically-nested `Closure`/`ArrowFn` scope, pushed on entry and
+/// popped on exit - see `Walker::scope_frames`'s own doc comment for how
+/// `resolve_var_scope` reads this stack.
+enum ScopeFrame {
+    /// A `Closure` variable-shadowing boundary: a name NOT in its own
+    /// `use (...)` list belongs to the closure's own scope (`id`); a
+    /// name that IS in `transparent` is a real capture of an outer
+    /// variable, so resolution keeps walking outward past this frame.
+    Closure {
+        id: u32,
+        transparent: HashSet<Arc<str>>,
+    },
+    /// An arrow function's implicit-capture-by-value boundary: PHP's
+    /// `fn() => ...` auto-captures every outer variable it reads BY
+    /// VALUE, so (unlike `Closure`) there is no explicit capture list to
+    /// consult - only its own declared parameters (`owns`) belong to a
+    /// genuinely new scope; every other name resolves as the SAME
+    /// variable as whatever it refers to outside the arrow function.
+    ArrowFn { id: u32, owns: HashSet<Arc<str>> },
+}
+
 struct Walker<'a> {
     registry: &'a Registry,
     source: &'a str,
-    pos: Position,
+    anchor: Anchor,
     // The whole file's own top-level statement list - `ProbeScope::
     // TopLevel`'s own source when a probe request lands at script scope
     // (`current_function` is `None`), cloned only then (one clone per
@@ -194,9 +275,59 @@ struct Walker<'a> {
     // does.
     current_function: Option<FunctionDecl>,
     current_is_static: bool,
+    // A purely syntactic id source for `document_highlight`'s own same-
+    // variable grouping - unrelated to `ProbeScope`/`Checker::
+    // probe_var_provenance`'s real flow-sensitive scoping (hover/
+    // definition never read `var_scope` at all). Starts at `0` so the
+    // first real nested scope's id (`1`) never collides with
+    // `base_scope_id`'s own default of `0`.
+    next_scope_id: u32,
+    // The scope id a variable resolves to once `scope_frames` is
+    // exhausted (falls off the end) - `0` by default, meaning "top-level
+    // script scope or the current named function/method's own top-level
+    // body," reassigned per-function by `function()`'s own swap. This
+    // default state (0, no frames) IS the top-level-script-scope case
+    // with no special-casing needed: a closure/arrow-fn declared
+    // directly in top-level code still pushes its own frame around
+    // itself exactly as it would inside a named function.
+    base_scope_id: u32,
+    // Innermost-last stack of currently-open `Closure`/`ArrowFn` scopes -
+    // see `resolve_var_scope` for how a name is resolved against it.
+    scope_frames: Vec<ScopeFrame>,
 }
 
 impl<'a> Walker<'a> {
+    fn next_id(&mut self) -> u32 {
+        self.next_scope_id += 1;
+        self.next_scope_id
+    }
+
+    /// Which scope `name` actually belongs to, walking `scope_frames`
+    /// innermost-first: a `Closure` frame claims `name` unless it's one
+    /// of its own explicit `use (...)` captures (in which case resolution
+    /// keeps walking outward looking for where that capture really
+    /// lives); an `ArrowFn` frame claims `name` only if it's one of the
+    /// arrow function's own parameters (everything else is an implicit
+    /// by-value capture of whatever the name already means outside it).
+    /// Falling off the end of the stack resolves to `base_scope_id`.
+    fn resolve_var_scope(&self, name: &Arc<str>) -> u32 {
+        for frame in self.scope_frames.iter().rev() {
+            match frame {
+                ScopeFrame::Closure { id, transparent } => {
+                    if !transparent.contains(name) {
+                        return *id;
+                    }
+                }
+                ScopeFrame::ArrowFn { id, owns } => {
+                    if owns.contains(name) {
+                        return *id;
+                    }
+                }
+            }
+        }
+        self.base_scope_id
+    }
+
     /// The `ProbeScope` for a probe request at the current position - the
     /// enclosing named function/method if there is one, else the whole
     /// file's own top-level statements (real, checkable PHP in its own
@@ -209,9 +340,9 @@ impl<'a> Walker<'a> {
         }
     }
 
-    fn record(&self, best: &mut Option<Resolved>, span: Span, value: Resolved) {
-        if contains(span, self.pos) {
-            *best = Some(value);
+    fn record(&self, out: &mut Vec<(Span, Resolved)>, span: Span, value: Resolved) {
+        if self.anchor.matches(span) {
+            out.push((span, value));
         }
     }
 
@@ -222,18 +353,21 @@ impl<'a> Walker<'a> {
     /// separate probe (see `Resolved::VariableSelf`'s own doc comment).
     fn record_var_self(
         &self,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
         span: Span,
         current_class: Option<&str>,
+        name: &Arc<str>,
     ) {
         self.record(
-            best,
+            out,
             span,
             Resolved::VariableSelf {
                 span,
                 scope: self.probe_scope(),
                 is_static: self.current_is_static,
                 class: current_class.map(str::to_string),
+                name: name.clone(),
+                var_scope: self.resolve_var_scope(name),
             },
         );
     }
@@ -248,19 +382,19 @@ impl<'a> Walker<'a> {
         e: &Expr,
         ctx: &mut NameContext,
         current_class: Option<&str>,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
     ) {
         match &e.kind {
-            ExprKind::Variable(_) => self.record_var_self(best, e.span, current_class),
+            ExprKind::Variable(name) => self.record_var_self(out, e.span, current_class, name),
             ExprKind::ArrayLiteral(items) => {
                 for item in items {
                     if let Some(k) = &item.key {
-                        self.expr(k, ctx, current_class, best);
+                        self.expr(k, ctx, current_class, out);
                     }
-                    self.bind_var(&item.value, ctx, current_class, best);
+                    self.bind_var(&item.value, ctx, current_class, out);
                 }
             }
-            _ => self.expr(e, ctx, current_class, best),
+            _ => self.expr(e, ctx, current_class, out),
         }
     }
 
@@ -268,16 +402,18 @@ impl<'a> Walker<'a> {
     /// whichever single class name inside it the cursor actually lands
     /// on, if any - via `split_identifier_spans` (section 3's text-split)
     /// paired positionally with `type_hint_identifiers`' own ordered
-    /// extraction of the same hint text.
+    /// extraction of the same hint text. Under `Anchor::All`, every
+    /// sub-name of a compound hint gets its own entry, not just the one
+    /// (if any) a single cursor position would have landed on.
     fn record_type_hint(
         &self,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
         hint: &str,
         span: Span,
         current_class: Option<&str>,
         ctx: &NameContext,
     ) {
-        if !contains(span, self.pos) {
+        if !self.anchor.matches(span) {
             return;
         }
         let names = type_hint_identifiers(hint);
@@ -286,10 +422,10 @@ impl<'a> Walker<'a> {
             return;
         };
         for (name, name_span) in names.iter().zip(spans.iter()) {
-            if contains(*name_span, self.pos)
+            if self.anchor.matches(*name_span)
                 && let Some(fqn) = resolve_class_ref(name, current_class, ctx, self.registry)
             {
-                *best = Some(Resolved::Class(fqn));
+                out.push((*name_span, Resolved::Class(fqn)));
             }
         }
     }
@@ -299,10 +435,10 @@ impl<'a> Walker<'a> {
         stmts: &[Stmt],
         ctx: &mut NameContext,
         current_class: Option<&str>,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
     ) {
         for stmt in stmts {
-            self.stmt(stmt, ctx, current_class, best);
+            self.stmt(stmt, ctx, current_class, out);
         }
     }
 
@@ -311,28 +447,28 @@ impl<'a> Walker<'a> {
         stmt: &Stmt,
         ctx: &mut NameContext,
         current_class: Option<&str>,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
     ) {
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
-            StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, ctx, current_class, best),
-            StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, best),
+            StmtKind::Expression(e) | StmtKind::Throw(e) => self.expr(e, ctx, current_class, out),
+            StmtKind::Return(Some(e)) => self.expr(e, ctx, current_class, out),
             StmtKind::Echo(exprs) => {
                 for e in exprs {
-                    self.expr(e, ctx, current_class, best);
+                    self.expr(e, ctx, current_class, out);
                 }
             }
             StmtKind::If { cond, .. }
             | StmtKind::While { cond, .. }
             | StmtKind::DoWhile { cond, .. } => {
-                self.expr(cond, ctx, current_class, best);
+                self.expr(cond, ctx, current_class, out);
             }
             StmtKind::For {
                 init, cond, step, ..
             } => {
                 for e in init.iter().chain(cond).chain(step) {
-                    self.expr(e, ctx, current_class, best);
+                    self.expr(e, ctx, current_class, out);
                 }
             }
             StmtKind::Foreach {
@@ -341,25 +477,25 @@ impl<'a> Walker<'a> {
                 value,
                 ..
             } => {
-                self.expr(subject, ctx, current_class, best);
+                self.expr(subject, ctx, current_class, out);
                 if let Some(k) = key {
-                    self.bind_var(k, ctx, current_class, best);
+                    self.bind_var(k, ctx, current_class, out);
                 }
-                self.bind_var(value, ctx, current_class, best);
+                self.bind_var(value, ctx, current_class, out);
             }
             StmtKind::FunctionDecl(f) => {
                 self.record(
-                    best,
+                    out,
                     f.name_span,
                     Resolved::Function(ctx.declared_name(&f.name)),
                 );
-                self.function(f, &mut ctx.clone(), current_class, false, best);
+                self.function(f, &mut ctx.clone(), current_class, false, out);
             }
-            StmtKind::ClassDecl(c) => self.class(c, ctx, best),
-            StmtKind::EnumDecl(e) => self.enum_decl(e, ctx, best),
+            StmtKind::ClassDecl(c) => self.class(c, ctx, out),
+            StmtKind::EnumDecl(e) => self.enum_decl(e, ctx, out),
             StmtKind::GlobalConst(consts) => {
                 for c in consts {
-                    self.expr(&c.value, ctx, current_class, best);
+                    self.expr(&c.value, ctx, current_class, out);
                 }
             }
             // `global $x;`/`static $x = ...;` have no per-name span of
@@ -367,45 +503,45 @@ impl<'a> Walker<'a> {
             // imprecision `Checker::declare`'s own instrumentation for
             // these two shapes accepts (`checker/stmt.rs`).
             StmtKind::Global(names) => {
-                for _ in names {
-                    self.record_var_self(best, stmt.span, current_class);
+                for name in names {
+                    self.record_var_self(out, stmt.span, current_class, &Arc::from(name.as_str()));
                 }
             }
             StmtKind::StaticVar(vars) => {
-                for (_, d) in vars {
+                for (name, d) in vars {
                     if let Some(e) = d {
-                        self.expr(e, ctx, current_class, best);
+                        self.expr(e, ctx, current_class, out);
                     }
-                    self.record_var_self(best, stmt.span, current_class);
+                    self.record_var_self(out, stmt.span, current_class, name);
                 }
             }
             StmtKind::Switch { subject, cases } => {
-                self.expr(subject, ctx, current_class, best);
+                self.expr(subject, ctx, current_class, out);
                 for case in cases {
                     if let Some(t) = &case.test {
-                        self.expr(t, ctx, current_class, best);
+                        self.expr(t, ctx, current_class, out);
                     }
                 }
             }
             StmtKind::Try { catches, .. } => {
                 for c in catches {
                     for (name, span) in c.types.iter().zip(c.types_spans.iter()) {
-                        if contains(*span, self.pos)
+                        if self.anchor.matches(*span)
                             && let Some(fqn) =
                                 resolve_class_ref(name, current_class, ctx, self.registry)
                         {
-                            *best = Some(Resolved::Class(fqn));
+                            out.push((*span, Resolved::Class(fqn)));
                         }
                     }
-                    if let (Some(_), Some(span)) = (&c.var, c.var_span) {
-                        self.record_var_self(best, span, current_class);
+                    if let (Some(name), Some(span)) = (&c.var, c.var_span) {
+                        self.record_var_self(out, span, current_class, name);
                     }
                 }
             }
             _ => {}
         }
         for child in stmt_children(stmt) {
-            self.stmt(child, ctx, current_class, best);
+            self.stmt(child, ctx, current_class, out);
         }
     }
 
@@ -414,7 +550,7 @@ impl<'a> Walker<'a> {
         expr: &Expr,
         ctx: &mut NameContext,
         current_class: Option<&str>,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
     ) {
         match &expr.kind {
             // `foo()`'s callee - a bare `Name` here is always a function
@@ -427,12 +563,12 @@ impl<'a> Walker<'a> {
                 if let ExprKind::Name(n) = &callee.kind
                     && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
                 {
-                    self.record(best, callee.span, Resolved::Function(fqn));
+                    self.record(out, callee.span, Resolved::Function(fqn));
                 } else {
-                    self.expr(callee, ctx, current_class, best);
+                    self.expr(callee, ctx, current_class, out);
                 }
                 for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
+                    self.expr(&a.value, ctx, current_class, out);
                 }
                 return;
             }
@@ -442,12 +578,12 @@ impl<'a> Walker<'a> {
                 if let ExprKind::Name(n) = &callee.kind
                     && let Some(fqn) = resolve_class_ref(n, current_class, ctx, self.registry)
                 {
-                    self.record(best, callee.span, Resolved::Class(fqn));
+                    self.record(out, callee.span, Resolved::Class(fqn));
                 } else {
-                    self.expr(callee, ctx, current_class, best);
+                    self.expr(callee, ctx, current_class, out);
                 }
                 for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
+                    self.expr(&a.value, ctx, current_class, out);
                 }
                 return;
             }
@@ -463,11 +599,11 @@ impl<'a> Walker<'a> {
                     } else {
                         Resolved::Class(fqn)
                     };
-                    self.record(best, expr.span, resolved);
+                    self.record(out, expr.span, resolved);
                 }
             }
             ExprKind::StaticAccess(class, member) | ExprKind::StaticCall(class, member, _) => {
-                if contains(expr.span, self.pos)
+                if self.anchor.matches(expr.span)
                     && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
                     && let Some(spans) = split_identifier_spans(
                         self.source,
@@ -475,22 +611,27 @@ impl<'a> Walker<'a> {
                         &[class.as_str(), member.as_str()],
                     )
                 {
-                    if contains(spans[0], self.pos) {
-                        *best = Some(Resolved::Class(fqn));
-                    } else if contains(spans[1], self.pos)
-                        && member != "class"
-                        && member != "{dynamic}"
-                    {
+                    // Two independent `if`s, not `if`/`else if`: under
+                    // `Anchor::All` a single expression can contain both
+                    // a class-name occurrence AND a member-name
+                    // occurrence, and both need their own entry.
+                    // `resolve_at`'s own behavior is unaffected - a
+                    // single `Position` can still only ever match one of
+                    // these two disjoint sub-spans.
+                    if self.anchor.matches(spans[0]) {
+                        out.push((spans[0], Resolved::Class(fqn.clone())));
+                    }
+                    if self.anchor.matches(spans[1]) && member != "class" && member != "{dynamic}" {
                         let member = member.strip_prefix('$').unwrap_or(member);
-                        *best = Some(Resolved::Member(fqn, member.to_string()));
+                        out.push((spans[1], Resolved::Member(fqn, member.to_string())));
                     }
                 }
             }
             ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
-                if contains(*span, self.pos)
+                if self.anchor.matches(*span)
                     && let Some(fqn) = resolve_class_ref(name, current_class, ctx, self.registry)
                 {
-                    *best = Some(Resolved::Class(fqn));
+                    out.push((*span, Resolved::Class(fqn)));
                 }
             }
             // A plain variable read (`$this` excluded - it's never a
@@ -502,13 +643,18 @@ impl<'a> Walker<'a> {
             // `probe_scope` covers (a named function/method, or top-level
             // script scope).
             ExprKind::Variable(name) if **name != *"this" => {
-                if contains(expr.span, self.pos) {
-                    *best = Some(Resolved::VariableRead {
-                        span: expr.span,
-                        scope: self.probe_scope(),
-                        is_static: self.current_is_static,
-                        class: current_class.map(str::to_string),
-                    });
+                if self.anchor.matches(expr.span) {
+                    out.push((
+                        expr.span,
+                        Resolved::VariableRead {
+                            span: expr.span,
+                            scope: self.probe_scope(),
+                            is_static: self.current_is_static,
+                            class: current_class.map(str::to_string),
+                            name: name.clone(),
+                            var_scope: self.resolve_var_scope(name),
+                        },
+                    ));
                 }
             }
             // `$this->method()`/`$this->prop` resolve directly (only
@@ -516,40 +662,50 @@ impl<'a> Walker<'a> {
             // receiver needs Stage B's own type-inference probe - this
             // records enough (the receiver's own span, the member name,
             // and the enclosing scope to re-check) for `lsp.rs`'s own
-            // orchestration to run that probe.
+            // orchestration to run that probe. The recorded span is the
+            // member NAME's own sub-span (`spans[0]`), not `expr.span` -
+            // the latter covers the whole `$x->method(...)` call
+            // including its arguments, which would make every
+            // `document_highlight` range for this arm too wide.
             ExprKind::MethodCall(recv, method, _, _)
             | ExprKind::PropertyAccess(recv, method, _) => {
-                self.expr(recv, ctx, current_class, best);
-                if contains(expr.span, self.pos)
+                self.expr(recv, ctx, current_class, out);
+                if self.anchor.matches(expr.span)
                     && let Some(spans) =
                         split_identifier_spans(self.source, expr.span, &[method.as_ref()])
-                    && contains(spans[0], self.pos)
+                    && self.anchor.matches(spans[0])
                 {
                     if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
                         && let Some(owner) = current_class
                     {
-                        *best = Some(Resolved::Member(owner.to_string(), method.to_string()));
+                        out.push((
+                            spans[0],
+                            Resolved::Member(owner.to_string(), method.to_string()),
+                        ));
                     } else {
-                        *best = Some(Resolved::Instance {
-                            receiver_span: recv.span,
-                            member: method.to_string(),
-                            scope: self.probe_scope(),
-                            is_static: self.current_is_static,
-                            class: current_class.map(str::to_string),
-                        });
+                        out.push((
+                            spans[0],
+                            Resolved::Instance {
+                                receiver_span: recv.span,
+                                member: method.to_string(),
+                                scope: self.probe_scope(),
+                                is_static: self.current_is_static,
+                                class: current_class.map(str::to_string),
+                            },
+                        ));
                     }
                 }
                 for a in expr_children(expr) {
                     if !std::ptr::eq(a, recv.as_ref()) {
-                        self.expr(a, ctx, current_class, best);
+                        self.expr(a, ctx, current_class, out);
                     }
                 }
                 return;
             }
             ExprKind::NewAnonymousClass(decl, args) => {
-                self.class(decl, &mut ctx.clone(), best);
+                self.class(decl, &mut ctx.clone(), out);
                 for a in args {
-                    self.expr(&a.value, ctx, current_class, best);
+                    self.expr(&a.value, ctx, current_class, out);
                 }
                 return;
             }
@@ -557,7 +713,7 @@ impl<'a> Walker<'a> {
                 params, uses, body, ..
             } => {
                 for p in params {
-                    self.param(p, ctx, current_class, best);
+                    self.param(p, ctx, current_class, out);
                 }
                 // A `use (&$x)`/`use ($x)` capture is itself a real,
                 // navigable reference to the outer scope's `$x` -
@@ -567,32 +723,51 @@ impl<'a> Walker<'a> {
                 // for a closure literal - see this file's own module doc -
                 // so it still correctly points at the enclosing named
                 // function/top-level scope, not the closure itself).
+                // Each capture's own `var_scope` is resolved BEFORE this
+                // closure's own frame is pushed below, since a `use`
+                // clause names an OUTER variable, not one of the
+                // closure's own locals.
                 for u in uses {
+                    let var_scope = self.resolve_var_scope(&u.name);
                     self.record(
-                        best,
+                        out,
                         u.span,
                         Resolved::VariableRead {
                             span: u.span,
                             scope: self.probe_scope(),
                             is_static: self.current_is_static,
                             class: current_class.map(str::to_string),
+                            name: u.name.clone(),
+                            var_scope,
                         },
                     );
                 }
-                self.stmts(body, &mut ctx.clone(), current_class, best);
+                let id = self.next_id();
+                self.scope_frames.push(ScopeFrame::Closure {
+                    id,
+                    transparent: uses.iter().map(|u| u.name.clone()).collect(),
+                });
+                self.stmts(body, &mut ctx.clone(), current_class, out);
+                self.scope_frames.pop();
                 return;
             }
             ExprKind::ArrowFn { params, body, .. } => {
                 for p in params {
-                    self.param(p, ctx, current_class, best);
+                    self.param(p, ctx, current_class, out);
                 }
-                self.expr(body, &mut ctx.clone(), current_class, best);
+                let id = self.next_id();
+                self.scope_frames.push(ScopeFrame::ArrowFn {
+                    id,
+                    owns: params.iter().map(|p| p.name.clone()).collect(),
+                });
+                self.expr(body, &mut ctx.clone(), current_class, out);
+                self.scope_frames.pop();
                 return;
             }
             _ => {}
         }
         for child in expr_children(expr) {
-            self.expr(child, ctx, current_class, best);
+            self.expr(child, ctx, current_class, out);
         }
     }
 
@@ -601,12 +776,12 @@ impl<'a> Walker<'a> {
         p: &Param,
         ctx: &NameContext,
         current_class: Option<&str>,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
     ) {
         if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
-            self.record_type_hint(best, hint, span, current_class, ctx);
+            self.record_type_hint(out, hint, span, current_class, ctx);
         }
-        self.record_var_self(best, p.name_span, current_class);
+        self.record_var_self(out, p.name_span, current_class, &p.name);
     }
 
     fn function(
@@ -615,120 +790,134 @@ impl<'a> Walker<'a> {
         ctx: &mut NameContext,
         current_class: Option<&str>,
         is_static: bool,
-        best: &mut Option<Resolved>,
+        out: &mut Vec<(Span, Resolved)>,
     ) {
+        // A named function/method (including one nested inside another
+        // function's body - real, legal PHP) is its own fresh top-level
+        // variable scope, independent of (and swapped separately from)
+        // `current_function`/`current_is_static` below, which track the
+        // real `Checker` probe scope, not this purely syntactic same-
+        // variable grouping. Swapped BEFORE the params loop: a
+        // parameter's own `var_scope` must resolve against THIS
+        // function's fresh scope, never whatever enclosing `Closure`/
+        // `ArrowFn` frame happened to be open at the declaration site.
+        let new_base_scope_id = self.next_id();
+        let previous_base_scope_id = std::mem::replace(&mut self.base_scope_id, new_base_scope_id);
+        let previous_scope_frames = std::mem::take(&mut self.scope_frames);
         for p in &f.params {
-            self.param(p, ctx, current_class, best);
+            self.param(p, ctx, current_class, out);
         }
         if let (Some(rt), Some(span)) = (&f.return_type, f.return_type_span) {
-            self.record_type_hint(best, rt, span, current_class, ctx);
+            self.record_type_hint(out, rt, span, current_class, ctx);
         }
         let previous_function = self.current_function.replace(f.clone());
         let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
-        self.stmts(&f.body, ctx, current_class, best);
+        self.stmts(&f.body, ctx, current_class, out);
         self.current_function = previous_function;
         self.current_is_static = previous_is_static;
+        self.scope_frames = previous_scope_frames;
+        self.base_scope_id = previous_base_scope_id;
     }
 
-    fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, best: &mut Option<Resolved>) {
+    fn class(&mut self, c: &ClassDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
         let fqn = ctx.declared_name(&c.name);
-        self.record(best, c.name_span, Resolved::Class(fqn.clone()));
+        self.record(out, c.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in c.extends.iter().zip(c.extends_spans.iter()) {
-            if contains(*span, self.pos)
+            if self.anchor.matches(*span)
                 && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
             {
-                *best = Some(Resolved::Class(target));
+                out.push((*span, Resolved::Class(target)));
             }
         }
         for (name, span) in c.implements.iter().zip(c.implements_spans.iter()) {
-            if contains(*span, self.pos)
+            if self.anchor.matches(*span)
                 && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
             {
-                *best = Some(Resolved::Class(target));
+                out.push((*span, Resolved::Class(target)));
             }
         }
         for (name, span) in c.uses.iter().zip(c.uses_spans.iter()) {
-            if contains(*span, self.pos)
+            if self.anchor.matches(*span)
                 && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
             {
-                *best = Some(Resolved::Class(target));
+                out.push((*span, Resolved::Class(target)));
             }
         }
         for p in &c.properties {
             self.record(
-                best,
+                out,
                 p.name_span,
                 Resolved::Member(fqn.clone(), p.name.to_string()),
             );
             if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
-                self.record_type_hint(best, hint, span, Some(&fqn), ctx);
+                self.record_type_hint(out, hint, span, Some(&fqn), ctx);
             }
             if let Some(d) = &p.default {
-                self.expr(d, &mut ctx.clone(), Some(&fqn), best);
+                self.expr(d, &mut ctx.clone(), Some(&fqn), out);
             }
         }
         for m in &c.methods {
             self.record(
-                best,
+                out,
                 m.function.name_span,
                 Resolved::Member(fqn.clone(), m.function.name.to_string()),
             );
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
+            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, out);
         }
         for cst in &c.consts {
             self.record(
-                best,
+                out,
                 cst.name_span,
                 Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
             if let (Some(hint), Some(span)) = (&cst.type_hint, cst.type_hint_span) {
-                self.record_type_hint(best, hint, span, Some(&fqn), ctx);
+                self.record_type_hint(out, hint, span, Some(&fqn), ctx);
             }
-            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), best);
+            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }
     }
 
-    fn enum_decl(&mut self, e: &EnumDecl, ctx: &mut NameContext, best: &mut Option<Resolved>) {
+    fn enum_decl(&mut self, e: &EnumDecl, ctx: &mut NameContext, out: &mut Vec<(Span, Resolved)>) {
         let fqn = ctx.declared_name(&e.name);
-        self.record(best, e.name_span, Resolved::Class(fqn.clone()));
+        self.record(out, e.name_span, Resolved::Class(fqn.clone()));
         for (name, span) in e.implements.iter().zip(e.implements_spans.iter()) {
-            if contains(*span, self.pos)
+            if self.anchor.matches(*span)
                 && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
             {
-                *best = Some(Resolved::Class(target));
+                out.push((*span, Resolved::Class(target)));
             }
         }
         for (name, span) in e.uses.iter().zip(e.uses_spans.iter()) {
-            if contains(*span, self.pos)
+            if self.anchor.matches(*span)
                 && let Some(target) = resolve_class_ref(name, Some(&fqn), ctx, self.registry)
             {
-                *best = Some(Resolved::Class(target));
+                out.push((*span, Resolved::Class(target)));
             }
         }
         for m in &e.methods {
             self.record(
-                best,
+                out,
                 m.function.name_span,
                 Resolved::Member(fqn.clone(), m.function.name.to_string()),
             );
-            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, best);
+            self.function(&m.function, &mut ctx.clone(), Some(&fqn), m.is_static, out);
         }
         for cst in &e.consts {
             self.record(
-                best,
+                out,
                 cst.name_span,
                 Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
-            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), best);
+            self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }
         for case in &e.cases {
             self.record(
-                best,
+                out,
                 case.name_span,
                 Resolved::Member(fqn.clone(), case.name.to_string()),
             );
             if let Some(v) = &case.value {
-                self.expr(v, &mut ctx.clone(), Some(&fqn), best);
+                self.expr(v, &mut ctx.clone(), Some(&fqn), out);
             }
         }
     }

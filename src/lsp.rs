@@ -33,14 +33,15 @@ use lsp_server::{
 use lsp_types::{
     CancelParams, CodeActionKind, CodeActionOptions, CodeActionParams,
     CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
-    CompletionResponse, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
-    Hover, HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    Location, MarkedString, MessageType, OneOf, ParameterInformation, ParameterLabel,
-    Position as LspPosition, PositionEncodingKind, Range as LspRange, ServerCapabilities,
-    ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
-    SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgress,
-    WorkDoneProgressBegin, WorkDoneProgressEnd, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    CompletionResponse, DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentHighlight,
+    DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, Location, MarkedString, MessageType, OneOf,
+    ParameterInformation, ParameterLabel, Position as LspPosition, PositionEncodingKind,
+    Range as LspRange, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SignatureInformation, SymbolInformation, TextDocumentSyncCapability,
+    TextDocumentSyncKind, Uri, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 
 use crate::ast::ClassKind;
@@ -125,6 +126,18 @@ fn resolve_member_owners(
         }
     }
     owners
+}
+
+/// The member name a `Member`/`Instance` `Resolved` carries, or `None`
+/// for every other variant - `Server::same_symbol`'s own quick pre-
+/// filter before the more expensive owner-normalization/probe work in
+/// `member_owners_of`.
+fn member_name_hint(r: &navigation::Resolved) -> Option<&str> {
+    match r {
+        navigation::Resolved::Member(_, name) => Some(name.as_str()),
+        navigation::Resolved::Instance { member, .. } => Some(member.as_str()),
+        _ => None,
+    }
 }
 
 /// Captured at `"initialize"`, consumed exactly once at `"initialized"` -
@@ -906,12 +919,14 @@ impl Server {
                 scope,
                 is_static,
                 class,
+                ..
             }
             | navigation::Resolved::VariableRead {
                 span,
                 scope,
                 is_static,
                 class,
+                ..
             } => {
                 let ty = self.probe_receiver_type(*span, scope, *is_static, class.as_deref())?;
                 Some(ty.to_string())
@@ -1057,6 +1072,7 @@ impl Server {
                 scope,
                 is_static,
                 class,
+                ..
             } => {
                 let locs: Vec<Location> = self
                     .probe_variable_provenance(*span, scope, *is_static, class.as_deref())
@@ -1140,6 +1156,142 @@ impl Server {
         Some(DocumentSymbolResponse::Nested(
             document_symbol::document_symbols(stmts),
         ))
+    }
+
+    /// Every same-file occurrence of the symbol under the cursor -
+    /// `navigation::collect_all` runs the identical resolution walk
+    /// `resolve_at` uses for hover/definition, just against every span in
+    /// the file instead of stopping at the first cursor-containing match,
+    /// then `same_symbol` filters it down. Deduped and sorted since a
+    /// `MethodCall`/`PropertyAccess` on `$this` can independently resolve
+    /// to the same `(owner, member)` `Resolved::Member` as a sibling
+    /// method's own declaration, and `Instance`'s owner-normalization can
+    /// likewise coincide with more than one syntactically-distinct
+    /// candidate.
+    fn document_highlight(
+        &self,
+        uri: &Uri,
+        position: LspPosition,
+    ) -> Option<Vec<DocumentHighlight>> {
+        let path = uri_to_path(uri)?;
+        let target = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let mut spans: Vec<Span> = navigation::collect_all(&self.project, &path)
+            .into_iter()
+            .filter(|(_, r)| self.same_symbol(&target, r))
+            .map(|(span, _)| span)
+            .collect();
+        spans.sort_by_key(|s| (s.start.line, s.start.col, s.end.line, s.end.col));
+        spans.dedup();
+        let highlights: Vec<DocumentHighlight> = spans
+            .into_iter()
+            .map(|span| DocumentHighlight {
+                range: to_lsp_range(span),
+                kind: None,
+            })
+            .collect();
+        (!highlights.is_empty()).then_some(highlights)
+    }
+
+    /// Whether `target` and `candidate` refer to the same real symbol -
+    /// exact FQN equality for `Class`/`Function`, name-plus-syntactic-
+    /// scope equality for a local variable (see `Resolved::VariableSelf`/
+    /// `VariableRead`'s own `var_scope` doc comment), and declaring-owner
+    /// equality (normalized via `member_owners_of`, since a `Member`'s
+    /// own `owner` field is the syntactic reference site's class, not
+    /// necessarily the one that actually declares it) for a member/
+    /// instance access - checked by name first as a cheap pre-filter
+    /// before the owner-normalizing work, which for `Instance` includes a
+    /// real checker probe.
+    fn same_symbol(&self, target: &navigation::Resolved, candidate: &navigation::Resolved) -> bool {
+        use navigation::Resolved::{Class, Function, Instance, Member, VariableRead, VariableSelf};
+        match (target, candidate) {
+            (Class(a), Class(b)) => a == b,
+            (Function(a), Function(b)) => a == b,
+            (
+                VariableSelf {
+                    name: a,
+                    var_scope: sa,
+                    ..
+                }
+                | VariableRead {
+                    name: a,
+                    var_scope: sa,
+                    ..
+                },
+                VariableSelf {
+                    name: b,
+                    var_scope: sb,
+                    ..
+                }
+                | VariableRead {
+                    name: b,
+                    var_scope: sb,
+                    ..
+                },
+            ) => a == b && sa == sb,
+            (Member(..) | Instance { .. }, Member(..) | Instance { .. }) => {
+                if member_name_hint(target) != member_name_hint(candidate) {
+                    return false;
+                }
+                let Some((owners_a, _)) = self.member_owners_of(target) else {
+                    return false;
+                };
+                let Some((owners_b, _)) = self.member_owners_of(candidate) else {
+                    return false;
+                };
+                owners_a.iter().any(|o| owners_b.contains(o))
+            }
+            _ => false,
+        }
+    }
+
+    /// Normalizes a `Member`/`Instance` down to every real declaring
+    /// owner (plural only for `Instance` on a `Union`/`Intersection`
+    /// receiver) plus the member name - `Member`'s own `owner` field is
+    /// whatever class the reference was syntactically written against
+    /// (`self`/a literal name/`$this`'s own `current_class`), not
+    /// necessarily the one that actually declares the member (an
+    /// inherited method/property/const), so this re-resolves it through
+    /// the same `lookup_*_with_owner` calls `format_member_hover` already
+    /// uses - without this, a call on a subclass and the same method's
+    /// own declaration on its parent would compare as different owners
+    /// and never highlight together.
+    fn member_owners_of<'a>(&self, r: &'a navigation::Resolved) -> Option<(Vec<String>, &'a str)> {
+        let registry = self.project.registry();
+        match r {
+            navigation::Resolved::Member(owner, name) => {
+                let normalized = registry
+                    .lookup_method_with_owner(owner, name)
+                    .map(|(o, _)| o.to_string())
+                    .or_else(|| {
+                        registry
+                            .lookup_property_with_owner(owner, name)
+                            .map(|(o, _)| o.to_string())
+                    })
+                    .or_else(|| {
+                        registry
+                            .lookup_const_with_owner(owner, name)
+                            .map(|(o, _)| o.to_string())
+                    })
+                    .unwrap_or_else(|| owner.clone());
+                Some((vec![normalized], name.as_str()))
+            }
+            navigation::Resolved::Instance {
+                receiver_span,
+                member,
+                scope,
+                is_static,
+                class,
+            } => {
+                let ty =
+                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
+                Some((
+                    resolve_member_owners(registry, &ty, member),
+                    member.as_str(),
+                ))
+            }
+            _ => None,
+        }
     }
 
     /// Project-wide fuzzy symbol search - see `workspace_symbol::
@@ -1744,6 +1896,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
                         ..Default::default()
                     }),
+                    document_highlight_provider: Some(OneOf::Left(true)),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -1852,6 +2005,19 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .ok()
                 .and_then(|params| {
                     server.signature_help(
+                        &params.text_document_position_params.text_document.uri,
+                        params.text_document_position_params.position,
+                    )
+                })
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/documentHighlight" => {
+            let result = serde_json::from_value::<DocumentHighlightParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.document_highlight(
                         &params.text_document_position_params.text_document.uri,
                         params.text_document_position_params.position,
                     )

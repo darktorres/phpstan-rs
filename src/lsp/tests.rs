@@ -1,6 +1,7 @@
 mod code_action;
 mod completion;
 mod configuration;
+mod document_highlight;
 mod helpers;
 mod navigation;
 mod protocol_and_session;
