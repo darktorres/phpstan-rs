@@ -166,3 +166,10 @@ fn refine_count_columns_leaves_non_count_rows_untouched() {
     };
     assert_eq!(fields[0], ("total".to_string(), Type::String, false));
 }
+
+#[test]
+fn count_column_positions_finds_a_window_function_count_over() {
+    let positions =
+        count_column_positions("SELECT id, COUNT(*) OVER() AS total FROM categories").unwrap();
+    assert_eq!(positions, vec![1]);
+}

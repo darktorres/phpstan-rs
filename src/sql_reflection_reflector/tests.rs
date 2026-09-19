@@ -619,3 +619,75 @@ fn a_real_live_named_placeholder_query_prepares_successfully_against_postgres() 
         reflector.reflect("SELECT id FROM sql_reflection_placeholder_probe WHERE id = :id");
     assert!(row_type.is_some(), "expected a resolved row type");
 }
+
+#[test]
+fn a_real_live_count_star_with_a_named_placeholder_prepares_successfully_against_postgres() {
+    let Some(config) = live_postgres_config() else {
+        eprintln!("skipping: PHPSTAN_RS_TEST_PG_* env vars not set");
+        return;
+    };
+    let reflector = PostgresReflector::connect(&config).expect("connect to live Postgres");
+    {
+        let mut conn = reflector.pool.get().expect("get a pooled connection");
+        conn.batch_execute(
+            "DROP TABLE IF EXISTS sql_reflection_count_star_probe;
+             CREATE TABLE sql_reflection_count_star_probe (id integer NOT NULL);",
+        )
+        .expect("set up the fixture table");
+    }
+    let row_type =
+        reflector.reflect("SELECT COUNT(*) FROM sql_reflection_count_star_probe WHERE id = :id");
+    assert!(row_type.is_some(), "expected a resolved row type");
+}
+
+#[test]
+fn a_real_live_window_function_query_prepares_successfully_and_reflects_column_types() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    let row_type = reflector
+        .reflect("SELECT id, COUNT(*) OVER() AS total FROM categories")
+        .expect("reflect a real window-function SELECT");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape, got {row_type:?}");
+    };
+    assert_eq!(fields.len(), 2);
+    assert_eq!(fields[0].0, "id");
+    assert_eq!(fields[1].0, "total");
+}
+
+#[test]
+fn normalize_placeholders_preserves_count_star_spacing_when_a_placeholder_is_also_rewritten() {
+    // Real, live-confirmed MySQL quirk: `COUNT (*)` (a space before the
+    // paren) is a genuine syntax error, unlike `COUNT(*)` - a naive
+    // tokenize-then-rejoin-with-spaces reconstruction broke this the
+    // moment the same query also needed a placeholder rewritten.
+    let out = normalize_placeholders_for_driver(
+        "SELECT COUNT(*) FROM categories WHERE id = ?",
+        SqlDriver::Mysql,
+    )
+    .unwrap();
+    assert_eq!(out, "SELECT COUNT(*) FROM categories WHERE id = ?");
+}
+
+#[test]
+fn normalize_placeholders_preserves_original_spacing_around_a_named_placeholder() {
+    let out = normalize_placeholders_for_driver(
+        "SELECT COUNT(*) FROM categories WHERE id = :catId",
+        SqlDriver::Mysql,
+    )
+    .unwrap();
+    assert_eq!(out, "SELECT COUNT(*) FROM categories WHERE id = ?");
+}
+
+#[test]
+fn normalize_placeholders_preserves_count_star_spacing_for_postgres_too() {
+    let out = normalize_placeholders_for_driver(
+        "SELECT COUNT(*) FROM categories WHERE id = :catId",
+        SqlDriver::Pgsql,
+    )
+    .unwrap();
+    assert_eq!(out, "SELECT COUNT(*) FROM categories WHERE id = $1");
+}

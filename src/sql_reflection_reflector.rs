@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 use mysql::consts::{ColumnFlags, ColumnType};
 use mysql::prelude::Queryable;
 use sqlparser::dialect::GenericDialect;
-use sqlparser::tokenizer::{Token, Tokenizer};
+use sqlparser::tokenizer::{Location, Token, Tokenizer};
 
 use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
 use crate::sql_reflection_schema::SchemaCatalog;
@@ -64,28 +64,67 @@ pub trait QueryReflector: Send + Sync {
 /// `Colon` immediately followed by a `Word` in the token stream, not a
 /// single token kind the way `?` (`Token::Placeholder("?")`) already
 /// is.
+/// 1-based `line`/`column` (sqlparser's own convention, confirmed
+/// reading `tokenizer.rs`'s `State::next`/`location` - `column` counts
+/// *characters*, incremented once per `char` off a `Peekable<Chars>`,
+/// not bytes) to a byte offset into `sql` - needed because a `&str`
+/// slice/splice only accepts byte indices. Real, not hypothetical: a
+/// genuinely multi-byte-per-character SQL string (a UTF-8 comment or
+/// string literal) would silently miscount under a byte-per-character
+/// assumption.
+fn location_to_byte_offset(sql: &str, loc: Location) -> usize {
+    let mut offset = 0usize;
+    for (i, line) in sql.split('\n').enumerate() {
+        if (i as u64) + 1 == loc.line {
+            return offset
+                + line
+                    .chars()
+                    .take((loc.column - 1) as usize)
+                    .map(char::len_utf8)
+                    .sum::<usize>();
+        }
+        offset += line.len() + 1; // +1 for the `\n` `split` consumed
+    }
+    offset
+}
+
+/// Rewrites only the real placeholder spans, copying every other byte
+/// of `sql` through completely unchanged - deliberately *not* a full
+/// tokenize-then-rejoin-with-spaces reconstruction, which is lossy: a
+/// real, live-confirmed MySQL quirk is that a space inserted between a
+/// function name and its own `(` changes meaning for a handful of
+/// forms (`COUNT(*)` is valid, `COUNT (*)` is a real syntax error - the
+/// literal query this project's own `refine_count_columns` needs to
+/// reflect through this exact function). A naive rejoin broke every
+/// `COUNT(*)`/window-function query the moment it also needed a
+/// placeholder rewritten, silently degrading real, common queries to
+/// `None` - found live, not by inspection.
 fn normalize_placeholders_for_driver(sql: &str, driver: SqlDriver) -> Option<String> {
     if driver == SqlDriver::Sqlite {
         return Some(sql.to_string());
     }
-    let tokens = Tokenizer::new(&GenericDialect {}, sql).tokenize().ok()?;
+    let tokens = Tokenizer::new(&GenericDialect {}, sql)
+        .tokenize_with_location()
+        .ok()?;
     // Postgres reuses the same `$N` for every occurrence of the same
     // named placeholder (mirroring how DBAL itself dedupes a repeated
     // `:name` to one bound value) but allocates a fresh number for
     // every bare `?` occurrence, since positional params have no name
     // to dedupe by and are always consumed strictly in order.
     let mut seen_names: Vec<String> = Vec::new();
-    let mut out: Vec<String> = Vec::with_capacity(tokens.len());
+    // (byte_start, byte_end, replacement) - `byte_end` exclusive, spans
+    // are non-overlapping since each token is consumed at most once.
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
     let mut i = 0;
     while i < tokens.len() {
-        let is_named =
-            matches!(tokens[i], Token::Colon) && matches!(tokens.get(i + 1), Some(Token::Word(_)));
+        let is_named = matches!(tokens[i].token, Token::Colon)
+            && matches!(tokens.get(i + 1).map(|t| &t.token), Some(Token::Word(_)));
         if is_named {
-            let Token::Word(word) = &tokens[i + 1] else {
+            let Token::Word(word) = &tokens[i + 1].token else {
                 unreachable!()
             };
-            match driver {
-                SqlDriver::Mysql => out.push("?".to_string()),
+            let replacement = match driver {
+                SqlDriver::Mysql => "?".to_string(),
                 SqlDriver::Pgsql => {
                     let idx = match seen_names.iter().position(|n| n == &word.value) {
                         Some(idx) => idx,
@@ -94,27 +133,42 @@ fn normalize_placeholders_for_driver(sql: &str, driver: SqlDriver) -> Option<Str
                             seen_names.len() - 1
                         }
                     };
-                    out.push(format!("${}", idx + 1));
+                    format!("${}", idx + 1)
                 }
                 SqlDriver::Sqlite => unreachable!("returned above"),
-            }
+            };
+            let start = location_to_byte_offset(sql, tokens[i].span.start);
+            let end = location_to_byte_offset(sql, tokens[i + 1].span.end);
+            edits.push((start, end, replacement));
             i += 2;
             continue;
         }
-        match &tokens[i] {
-            Token::Placeholder(text) if text == "?" => match driver {
-                SqlDriver::Mysql => out.push("?".to_string()),
+        if let Token::Placeholder(text) = &tokens[i].token
+            && text == "?"
+        {
+            let replacement = match driver {
+                SqlDriver::Mysql => "?".to_string(),
                 SqlDriver::Pgsql => {
                     seen_names.push(String::new());
-                    out.push(format!("${}", seen_names.len()));
+                    format!("${}", seen_names.len())
                 }
                 SqlDriver::Sqlite => unreachable!("returned above"),
-            },
-            other => out.push(other.to_string()),
+            };
+            let start = location_to_byte_offset(sql, tokens[i].span.start);
+            let end = location_to_byte_offset(sql, tokens[i].span.end);
+            edits.push((start, end, replacement));
         }
         i += 1;
     }
-    Some(out.join(" "))
+    let mut out = String::with_capacity(sql.len());
+    let mut cursor = 0;
+    for (start, end, replacement) in edits {
+        out.push_str(&sql[cursor..start]);
+        out.push_str(&replacement);
+        cursor = end;
+    }
+    out.push_str(&sql[cursor..]);
+    Some(out)
 }
 
 pub struct MysqlReflector {
