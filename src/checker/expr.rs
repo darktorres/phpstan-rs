@@ -259,6 +259,7 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
+                self.maybe_record_param_name_hints(sig, args);
                 // `array_pop`/`array_shift`'s by-ref first argument gets
                 // widened right below (`predefine_byref_or_unknown_args`'s
                 // dedicated arm for these two - correctly dropping any
@@ -967,6 +968,7 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
+                self.maybe_record_param_name_hints(sig, args);
                 self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
                 for (i, a) in args.iter().enumerate() {
                     let closure_this = sig
@@ -1760,6 +1762,7 @@ impl<'a> Checker<'a> {
                 let resolved = ctor_sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
+                self.maybe_record_param_name_hints(ctor_sig, args);
                 self.predefine_byref_or_unknown_args(None, ctor_sig, args, &resolved, locals);
                 for (i, a) in args.iter().enumerate() {
                     let closure_this = ctor_sig
@@ -1960,6 +1963,7 @@ impl<'a> Checker<'a> {
                 let resolved = sig
                     .map(|s| resolve_call_args(args, &s.params))
                     .unwrap_or_default();
+                self.maybe_record_param_name_hints(sig, args);
                 self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
                 // `Closure::bind($closure, $newThis, $scope)` makes
                 // `$this` (and, for private/protected access, the

@@ -217,6 +217,23 @@ pub(super) fn document_highlight_request(id: i64, uri: &str, pos: Value) -> Valu
     )
 }
 
+pub(super) fn inlay_hint_request(id: i64, uri: &str, range: Value) -> Value {
+    request(
+        id,
+        "textDocument/inlayHint",
+        json!({"textDocument": {"uri": uri}, "range": range}),
+    )
+}
+
+/// A `lsp_types::Range` covering the whole file, wide enough that no
+/// realistic fixture's hints get filtered out by it.
+pub(super) fn whole_file_range() -> Value {
+    json!({
+        "start": {"line": 0, "character": 0},
+        "end": {"line": 9999, "character": 0},
+    })
+}
+
 pub(super) fn workspace_symbol_request(id: i64, query: &str) -> Value {
     request(id, "workspace/symbol", json!({"query": query}))
 }

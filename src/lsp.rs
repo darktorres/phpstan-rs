@@ -36,8 +36,8 @@ use lsp_types::{
     CompletionResponse, DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentHighlight,
     DocumentHighlightParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, MarkedString, MessageType, OneOf,
-    ParameterInformation, ParameterLabel, Position as LspPosition, PositionEncodingKind,
+    InitializeParams, InitializeResult, InlayHintParams, Location, MarkedString, MessageType,
+    OneOf, ParameterInformation, ParameterLabel, Position as LspPosition, PositionEncodingKind,
     Range as LspRange, ServerCapabilities, ServerInfo, SignatureHelp, SignatureHelpOptions,
     SignatureHelpParams, SignatureInformation, SymbolInformation, TextDocumentSyncCapability,
     TextDocumentSyncKind, Uri, WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
@@ -54,6 +54,7 @@ use crate::{baseline, ignore_errors};
 
 mod completion;
 mod document_symbol;
+mod inlay_hints;
 mod navigation;
 mod protocol;
 mod settings;
@@ -273,6 +274,19 @@ struct Server {
     // mechanism, so unlike `hover_provider`/etc. this can't be
     // advertised in `"initialize"`'s own response.
     supports_watched_files: bool,
+    // Bumped by `handle_open_or_change` on every `didOpen`/`didChange` for
+    // a path - `inlay_hints`'s cache-invalidation key. A path never opened/
+    // changed this session (only ever seen via the workspace scan) has an
+    // implicit version of 0, consistent with its first request computing
+    // and caching at that same version.
+    file_versions: HashMap<PathBuf, u64>,
+    // `textDocument/inlayHint`'s version-keyed whole-file hint cache - see
+    // `inlay_hints`'s own doc comment for why a cache is needed at all
+    // (VS Code re-pulls inlay hints on edits, not just scroll/viewport
+    // changes, so serving a request against an unchanged document from
+    // cache is what actually saves a repeated `check_program` pass).
+    #[allow(clippy::type_complexity)]
+    inlay_hint_cache: HashMap<PathBuf, (u64, Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)>,
 }
 
 impl Server {
@@ -308,6 +322,8 @@ impl Server {
             last_applied_config: None,
             last_warned_pending_config: None,
             supports_watched_files: false,
+            file_versions: HashMap::new(),
+            inlay_hint_cache: HashMap::new(),
         }
     }
 
@@ -749,6 +765,7 @@ impl Server {
         let Some(path) = uri_to_path(uri) else {
             return Vec::new();
         };
+        *self.file_versions.entry(path.clone()).or_insert(0) += 1;
         self.open_uris.insert(path.clone(), (uri.clone(), version));
         self.latest_text.insert(path.clone(), text.to_string());
         // Same graceful-degradation as load_workspace, and more exposed
@@ -1292,6 +1309,29 @@ impl Server {
             }
             _ => None,
         }
+    }
+
+    /// `textDocument/inlayHint` - serves `inlay_hint_cache` when `path`'s
+    /// current `file_versions` entry matches the cached one, recomputing
+    /// via `inlay_hints::collect` (one `check_program` pass) on a miss.
+    /// See `inlay_hints`'s own module doc comment for why the cache
+    /// exists at all.
+    fn inlay_hints(&mut self, uri: &Uri, range: LspRange) -> Option<Vec<lsp_types::InlayHint>> {
+        let path = uri_to_path(uri)?;
+        let version = *self.file_versions.get(&path).unwrap_or(&0);
+        let cached = match self.inlay_hint_cache.get(&path) {
+            Some((cached_version, params, locals)) if *cached_version == version => {
+                (params.clone(), locals.clone())
+            }
+            _ => {
+                let (params, locals) = inlay_hints::collect(&self.project, &path)?;
+                self.inlay_hint_cache
+                    .insert(path.clone(), (version, params.clone(), locals.clone()));
+                (params, locals)
+            }
+        };
+        let hints = inlay_hints::filter_to_range(&cached.0, &cached.1, range);
+        (!hints.is_empty()).then_some(hints)
     }
 
     /// Project-wide fuzzy symbol search - see `workspace_symbol::
@@ -1897,6 +1937,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         ..Default::default()
                     }),
                     document_highlight_provider: Some(OneOf::Left(true)),
+                    inlay_hint_provider: Some(OneOf::Left(true)),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -2022,6 +2063,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         params.text_document_position_params.position,
                     )
                 })
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/inlayHint" => {
+            let result = serde_json::from_value::<InlayHintParams>(req.params)
+                .ok()
+                .and_then(|params| server.inlay_hints(&params.text_document.uri, params.range))
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Message::Response(Response::new_ok(id.clone(), result))

@@ -962,6 +962,23 @@ impl Project {
         self.check_file_impl(path, Some(facts))
     }
 
+    /// A bare, un-run `Checker` for `path` plus its AST, for an LSP
+    /// feature that needs to drive `check_program` itself with extra
+    /// collection flags set first (e.g. `textDocument/inlayHint`'s
+    /// `collect_inlay_hints`) rather than through `check_file_impl`'s own
+    /// fixed diagnostic pipeline. Mirrors `check_file_impl`'s Pest/
+    /// anonymous-class setup exactly, minus the cross-file property-
+    /// assign-facts wiring (an LSP one-off request has no batch-wide
+    /// facts pass to plug in).
+    pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, &[Stmt])> {
+        let file = self.files.get(path)?;
+        let mut checker = Checker::new(&self.registry);
+        checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
+        checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
+        checker.set_anonymous_class_names(file.anonymous_class_names.clone());
+        Some((checker, &file.ast))
+    }
+
     fn check_file_impl(
         &self,
         path: &Path,

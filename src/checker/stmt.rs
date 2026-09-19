@@ -94,7 +94,17 @@ impl<'a> Checker<'a> {
         match &stmt.kind {
             StmtKind::Expression(e) => {
                 self.in_bare_statement_position = true;
-                self.check_expr(e, locals, label);
+                let ty = self.check_expr(e, locals, label);
+                if self.collect_inlay_hints
+                    && let ExprKind::Assign(lhs, _) = &e.kind
+                    && let ExprKind::Variable(name) = &lhs.kind
+                    && ty != Type::Mixed
+                    && !inline_var
+                        .as_ref()
+                        .is_some_and(|(n, _)| n.as_str() == name.as_ref())
+                {
+                    self.inlay_local_type_hints.push((lhs.span, ty.clone()));
+                }
                 self.check_no_discard_statement(e, locals, label);
                 self.check_new_exception_discarded(e, locals, label);
                 // NoopRule's own supported slice - see `checker::noop`'s

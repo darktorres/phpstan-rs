@@ -279,14 +279,18 @@ pub(crate) fn level_to_severity(level: u8) -> DiagnosticSeverity {
 /// doc comment) is made exactly once.
 pub(crate) fn to_lsp_range(span: Span) -> LspRange {
     LspRange {
-        start: LspPosition {
-            line: span.start.line.saturating_sub(1),
-            character: span.start.col.saturating_sub(1),
-        },
-        end: LspPosition {
-            line: span.end.line.saturating_sub(1),
-            character: span.end.col.saturating_sub(1),
-        },
+        start: to_lsp_position(span.start),
+        end: to_lsp_position(span.end),
+    }
+}
+
+/// The single-position half of `to_lsp_range` - see its own doc comment
+/// for the 1-indexed-vs-0-indexed/UTF-8-vs-UTF-16 caveats, which apply
+/// identically here.
+pub(crate) fn to_lsp_position(pos: Position) -> LspPosition {
+    LspPosition {
+        line: pos.line.saturating_sub(1),
+        character: pos.col.saturating_sub(1),
     }
 }
 

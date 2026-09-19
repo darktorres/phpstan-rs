@@ -961,6 +961,14 @@ pub struct Checker<'a> {
     // doc comment for why declaration tracking itself is also gated off
     // whenever no probe is active.
     pub(crate) probe_var_provenance: RefCell<Option<HashSet<Span>>>,
+    // The LSP's `textDocument/inlayHint` collection mode. `false` (every
+    // ordinary check) is a complete no-op; `Checker::checker_for` is the
+    // only place that sets it. Populated by `maybe_record_param_name_hints`
+    // (call-argument parameter names) and `check_stmt`'s Expression arm
+    // (inferred local-variable types), then drained by `lsp::inlay_hints`.
+    pub(crate) collect_inlay_hints: bool,
+    pub(crate) inlay_param_name_hints: Vec<(Span, Arc<str>)>,
+    pub(crate) inlay_local_type_hints: Vec<(Span, Type)>,
     // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
     // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
     // `infer_expr`'s separate `Call` arm both independently re-derive this
@@ -1109,6 +1117,9 @@ impl<'a> Checker<'a> {
             probe_span: Cell::new(None),
             probe_hit: RefCell::new(None),
             probe_var_provenance: RefCell::new(None),
+            collect_inlay_hints: false,
+            inlay_param_name_hints: Vec::new(),
+            inlay_local_type_hints: Vec::new(),
             call_candidate_cache: RefCell::new(HashMap::new()),
             pending_or_disjunctions: Vec::new(),
         }

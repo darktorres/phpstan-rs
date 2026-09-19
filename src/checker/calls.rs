@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use crate::ast::*;
 use crate::checker::expr::is_canonical_int_key;
@@ -36,6 +37,27 @@ pub(crate) struct CheckArgsCall<'a> {
 }
 
 impl<'a> Checker<'a> {
+    /// No-op unless `collect_inlay_hints` is set (the LSP's
+    /// `textDocument/inlayHint` collection mode) - every ordinary check
+    /// pays only this one boolean test. `sig` is `None` for an
+    /// unresolvable callee (dynamic, unknown function/method, or an
+    /// unresolvable `call_user_func(_array)` callable), in which case
+    /// there's nothing to hint.
+    pub(crate) fn maybe_record_param_name_hints(
+        &mut self,
+        sig: Option<&FunctionSig>,
+        args: &[Arg],
+    ) {
+        if !self.collect_inlay_hints {
+            return;
+        }
+        let Some(sig) = sig else {
+            return;
+        };
+        self.inlay_param_name_hints
+            .extend(call_arg_param_name_hints(args, &sig.params));
+    }
+
     /// A bare-variable argument that isn't defined yet is either a real bug
     /// or PHP's by-reference "output parameter" idiom
     /// (`preg_match($pattern, $subject, $matches)` defines `$matches` as a
@@ -1060,6 +1082,7 @@ impl<'a> Checker<'a> {
             let sig = sig.clone();
             let callee_args = &args[1..];
             let resolved = resolve_call_args(callee_args, &sig.params);
+            self.maybe_record_param_name_hints(Some(&sig), callee_args);
             self.check_args(CheckArgsCall {
                 callee_label: "callable passed to call_user_func()",
                 sig: &sig,
@@ -1093,6 +1116,7 @@ impl<'a> Checker<'a> {
                 })
                 .collect();
             let resolved = resolve_call_args(&synthesized, &sig.params);
+            self.maybe_record_param_name_hints(Some(&sig), &synthesized);
             self.check_args(CheckArgsCall {
                 callee_label: "callable passed to call_user_func_array()",
                 sig: &sig,
@@ -1207,6 +1231,42 @@ pub(crate) fn resolve_call_args<'a>(args: &'a [Arg], params: &[ParamSig]) -> Vec
         positional_index += 1;
     }
     resolved
+}
+
+/// One `(span, param_name)` pair per positional call argument, for
+/// `textDocument/inlayHint`'s parameter-name hints - a named argument
+/// already spells the parameter name in the source, so it's skipped; a
+/// spread's contents aren't statically known to line up with any one
+/// parameter, so it's skipped too. A positional argument past
+/// `params.len()` is only hinted when the last parameter is variadic
+/// (mirroring `resolve_call_args`'s own variadic-overflow handling),
+/// reusing that same declared name for every overflow argument.
+pub(crate) fn call_arg_param_name_hints(
+    args: &[Arg],
+    params: &[ParamSig],
+) -> Vec<(Span, Arc<str>)> {
+    let mut hints = Vec::new();
+    let mut positional_index = 0usize;
+    let mut spread_seen = false;
+    for arg in args {
+        if arg.spread {
+            spread_seen = true;
+            continue;
+        }
+        if arg.name.is_some() {
+            continue;
+        }
+        if spread_seen {
+            continue;
+        }
+        if let Some(param) = params.get(positional_index) {
+            hints.push((arg.value.span, param.name.clone()));
+        } else if let Some(param) = params.last().filter(|p| p.variadic) {
+            hints.push((arg.value.span, param.name.clone()));
+        }
+        positional_index += 1;
+    }
+    hints
 }
 
 /// The positional index `resolve_call_args` would have reached at the

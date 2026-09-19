@@ -3,6 +3,7 @@ mod completion;
 mod configuration;
 mod document_highlight;
 mod helpers;
+mod inlay_hints;
 mod navigation;
 mod protocol_and_session;
 mod signature_help;
