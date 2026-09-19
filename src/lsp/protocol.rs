@@ -3,7 +3,7 @@ use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
 use crossbeam_channel::Sender;
-use lsp_server::{Message, Notification as LspNotification};
+use lsp_server::{Message, Notification as LspNotification, RequestId};
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, LogMessageParams, MessageType, NumberOrString,
     Position as LspPosition, ProgressParams, ProgressParamsValue, ProgressToken,
@@ -337,4 +337,15 @@ pub(crate) fn log_message_notification(typ: MessageType, message: String) -> Mes
         "window/logMessage".to_string(),
         LogMessageParams { typ, message },
     ))
+}
+
+/// Converts `$/cancelRequest`'s wire-level `NumberOrString` id into the
+/// `lsp_server::RequestId` every pending-request map is keyed by -
+/// infallible, since `RequestId` has a direct `From` impl for both
+/// `i32` and `String`.
+pub(crate) fn to_request_id(id: NumberOrString) -> RequestId {
+    match id {
+        NumberOrString::Number(n) => RequestId::from(n),
+        NumberOrString::String(s) => RequestId::from(s),
+    }
 }

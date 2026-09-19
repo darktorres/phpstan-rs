@@ -907,6 +907,137 @@ fn send_request_allocates_sequential_ids_and_the_right_method() {
 }
 
 #[test]
+fn handle_request_registers_and_clears_its_own_pending_entry_on_a_normal_response() {
+    let mut server = Server::new();
+    let mut writer = Vec::new();
+    handle_request(
+        &mut server,
+        &mut writer,
+        Request::new(RequestId::from(1), "shutdown".to_string(), json!({})),
+    );
+
+    assert!(!server.pending_incoming_requests.has_pending());
+    let messages = decode_all(&writer);
+    assert_eq!(messages[0]["result"], Value::Null);
+}
+
+#[test]
+fn a_cancel_notification_sets_the_flag_and_answers_with_request_canceled() {
+    let mut server = Server::new();
+    let mut writer = Vec::new();
+    let id = RequestId::from(1);
+    let flag = Arc::new(AtomicBool::new(false));
+    server
+        .pending_incoming_requests
+        .register(id.clone(), Arc::clone(&flag));
+
+    handle_notification(
+        &mut server,
+        &mut writer,
+        LspNotification::new("$/cancelRequest".to_string(), json!({"id": 1})),
+    );
+
+    assert!(flag.load(Ordering::Relaxed));
+    assert!(!server.pending_incoming_requests.has_pending());
+    let messages = decode_all(&writer);
+    assert_eq!(
+        messages[0]["error"]["code"],
+        ErrorCode::RequestCanceled as i32
+    );
+}
+
+#[test]
+fn a_cancel_notification_matches_a_string_request_id_too() {
+    let mut server = Server::new();
+    let mut writer = Vec::new();
+    let id = RequestId::from("abc".to_string());
+    let flag = Arc::new(AtomicBool::new(false));
+    server
+        .pending_incoming_requests
+        .register(id.clone(), Arc::clone(&flag));
+
+    handle_notification(
+        &mut server,
+        &mut writer,
+        LspNotification::new("$/cancelRequest".to_string(), json!({"id": "abc"})),
+    );
+
+    assert!(flag.load(Ordering::Relaxed));
+    let messages = decode_all(&writer);
+    assert_eq!(
+        messages[0]["error"]["code"],
+        ErrorCode::RequestCanceled as i32
+    );
+}
+
+#[test]
+fn a_cancel_notification_for_an_already_answered_id_writes_nothing() {
+    let mut server = Server::new();
+    let mut writer = Vec::new();
+    let id = RequestId::from(1);
+    server
+        .pending_incoming_requests
+        .register(id.clone(), Arc::new(AtomicBool::new(false)));
+    // Simulates the id having already been answered normally, before
+    // the cancel below arrives.
+    server.pending_incoming_requests.complete(&id);
+
+    handle_notification(
+        &mut server,
+        &mut writer,
+        LspNotification::new("$/cancelRequest".to_string(), json!({"id": 1})),
+    );
+
+    assert!(decode_all(&writer).is_empty());
+}
+
+#[test]
+fn respond_unless_canceled_drops_a_late_response_for_an_already_canceled_id() {
+    let mut server = Server::new();
+    let mut writer = Vec::new();
+    let id = RequestId::from(1);
+    server
+        .pending_incoming_requests
+        .register(id.clone(), Arc::new(AtomicBool::new(false)));
+    // Simulates a "$/cancelRequest" having already completed this id
+    // (and written its own RequestCanceled response) before the real
+    // handler's late answer tries to write here.
+    server.pending_incoming_requests.complete(&id);
+
+    respond_unless_canceled(
+        &mut server,
+        &mut writer,
+        &id,
+        Message::Response(Response::new_ok(id.clone(), json!("late"))),
+    );
+
+    assert!(
+        decode_all(&writer).is_empty(),
+        "a response for an already-completed id must never be written"
+    );
+}
+
+#[test]
+fn a_cancel_request_for_an_unknown_id_does_not_disrupt_the_session() {
+    let input = encode(&[
+        notification("$/cancelRequest", json!({"id": 999})),
+        request(1, "shutdown", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx);
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    assert_eq!(messages.len(), 1, "got: {messages:?}");
+    assert_eq!(messages[0]["id"], json!(1));
+    assert_eq!(messages[0]["result"], Value::Null);
+}
+
+#[test]
 fn a_matching_response_clears_the_pending_entry() {
     let mut server = Server::new();
     let Message::Request(req) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(

@@ -22,12 +22,16 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
-use lsp_server::{ErrorCode, Message, Notification as LspNotification, Request, Response};
+use lsp_server::{
+    ErrorCode, Message, Notification as LspNotification, Request, RequestId, Response,
+};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
+    CancelParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
     DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
     MarkedString, MessageType, OneOf, Position as LspPosition, PositionEncodingKind,
@@ -54,7 +58,8 @@ mod workspace_config;
 use protocol::percent_decode;
 use protocol::{
     from_lsp_position, log_message_notification, path_to_uri, progress_notification,
-    publish_diagnostics_notification, pump_messages, to_lsp_range, uri_to_path, write_message,
+    publish_diagnostics_notification, pump_messages, to_lsp_range, to_request_id, uri_to_path,
+    write_message,
 };
 
 /// Every `Object` class name reachable from a `Checker::probe_hit`
@@ -142,9 +147,27 @@ struct Server {
     shutdown_received: bool,
     // Ids/methods of requests this server has sent to the client and is
     // still waiting on a reply for - `Incoming`'s `I` is unused (`()`,
-    // nothing here tracks inbound requests), `Outgoing`'s `O` stores just
-    // the method name for diagnostics.
+    // nothing here tracks inbound requests through this field; see
+    // `pending_incoming_requests` below for that), `Outgoing`'s `O`
+    // stores just the method name for diagnostics.
     pending_requests: lsp_server::ReqQueue<(), &'static str>,
+    // Client-assigned ids of requests THIS server is still answering,
+    // each paired with a cancellation flag - separate from
+    // `pending_requests` above (that one tracks the opposite direction,
+    // server-initiated requests) since `ReqQueue<I, O>` fixes one `I`
+    // type for both halves and `pending_requests` already commits that
+    // slot to `()`. Populated by `handle_request` at the top of every
+    // request and drained by either a normal response
+    // (`respond_unless_canceled`) or a `"$/cancelRequest"` notification -
+    // whichever reaches a given id first. No handler reads the flag yet
+    // (every request today is synchronous and sub-millisecond); it
+    // exists so a future long-running request handler could poll it,
+    // contingent on one actually being added - the roadmap's currently
+    // identified slow operations (the workspace scan, debounced
+    // rechecks) are notifications/background work reported via
+    // `$/progress`, not a cancellable request, so that consumer is not
+    // guaranteed to ever materialize.
+    pending_incoming_requests: lsp_server::Incoming<Arc<AtomicBool>>,
     // Set by `"initialize"`, taken and acted on by `"initialized"` - see
     // `PendingWorkspaceScan`'s own doc comment for why the scan itself
     // can't just run inline in `"initialize"`.
@@ -222,6 +245,13 @@ impl Server {
             open_uris: HashMap::new(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
+            // `Incoming<I>` has no public constructor or `Default` impl
+            // of its own (its one field is private to `lsp-server`; only
+            // `ReqQueue`'s manual `Default` impl can see it) - built via
+            // a throwaway `ReqQueue` whose `.outgoing` half (typed `()`,
+            // never touched) is immediately dropped.
+            pending_incoming_requests: lsp_server::ReqQueue::<Arc<AtomicBool>, ()>::default()
+                .incoming,
             pending_workspace_scan: None,
             workspace_roots: Vec::new(),
             root: None,
@@ -1344,8 +1374,20 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
     }
 }
 
+/// Registers `req.id` (with a fresh cancellation flag) before dispatch
+/// and writes the resulting response through `respond_unless_canceled`,
+/// so a `"$/cancelRequest"` arriving mid-dispatch (impossible today,
+/// under the fully synchronous `run_loop` - see this module's own notes
+/// on `pending_incoming_requests` - but the shape a future concurrent
+/// handler would need) can suppress the real answer instead of racing it.
 fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
-    match req.method.as_str() {
+    let id = req.id.clone();
+    let cancel_flag = Arc::new(AtomicBool::new(false));
+    server
+        .pending_incoming_requests
+        .register(id.clone(), Arc::clone(&cancel_flag));
+
+    let response = match req.method.as_str() {
         "initialize" => {
             let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
@@ -1466,14 +1508,11 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     version: Some(env!("CARGO_PKG_VERSION").to_string()),
                 }),
             };
-            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+            Message::Response(Response::new_ok(id.clone(), result))
         }
         "shutdown" => {
             server.shutdown_received = true;
-            let _ = write_message(
-                writer,
-                &Message::Response(Response::new_ok(req.id, serde_json::Value::Null)),
-            );
+            Message::Response(Response::new_ok(id.clone(), serde_json::Value::Null))
         }
         "textDocument/hover" => {
             let result = serde_json::from_value::<HoverParams>(req.params)
@@ -1486,7 +1525,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|hover| serde_json::to_value(hover).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+            Message::Response(Response::new_ok(id.clone(), result))
         }
         "textDocument/definition" => {
             let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
@@ -1499,7 +1538,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 })
                 .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+            Message::Response(Response::new_ok(id.clone(), result))
         }
         "textDocument/documentSymbol" => {
             let result = serde_json::from_value::<DocumentSymbolParams>(req.params)
@@ -1507,18 +1546,29 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .and_then(|params| server.document_symbol(&params.text_document.uri))
                 .map(|symbols| serde_json::to_value(symbols).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
-            let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+            Message::Response(Response::new_ok(id.clone(), result))
         }
-        other => {
-            let _ = write_message(
-                writer,
-                &Message::Response(Response::new_err(
-                    req.id,
-                    ErrorCode::MethodNotFound as i32,
-                    format!("method not found: {other}"),
-                )),
-            );
-        }
+        other => Message::Response(Response::new_err(
+            id.clone(),
+            ErrorCode::MethodNotFound as i32,
+            format!("method not found: {other}"),
+        )),
+    };
+    respond_unless_canceled(server, writer, &id, response);
+}
+
+/// Writes `response` only if `id` hasn't already been answered by a
+/// `"$/cancelRequest"`'s own `RequestCanceled` error - `Incoming::complete`
+/// both looks up and removes the pending entry in one step, so this and a
+/// cancellation can never both write a response for the same id.
+fn respond_unless_canceled<W: Write>(
+    server: &mut Server,
+    writer: &mut W,
+    id: &RequestId,
+    response: Message,
+) {
+    if server.pending_incoming_requests.complete(id).is_some() {
+        let _ = write_message(writer, &response);
     }
 }
 
@@ -1558,6 +1608,30 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
             }
             if let Some(request) = server.request_watched_files_registration() {
                 let _ = write_message(writer, &request);
+            }
+        }
+        "$/cancelRequest" => {
+            if let Ok(params) = serde_json::from_value::<CancelParams>(not.params) {
+                let id = to_request_id(params.id);
+                // `Incoming::cancel(id)` discards the registered flag
+                // (its own body is `let _data = self.complete(&id)?;`),
+                // so it can't be used here - `complete` directly, then
+                // set the flag and hand-build the identical error
+                // response ourselves.
+                if let Some(flag) = server.pending_incoming_requests.complete(&id) {
+                    flag.store(true, Ordering::Relaxed);
+                    let _ = write_message(
+                        writer,
+                        &Message::Response(Response::new_err(
+                            id,
+                            ErrorCode::RequestCanceled as i32,
+                            "canceled by client".to_string(),
+                        )),
+                    );
+                }
+                // No pending entry: already answered, or a stray cancel
+                // for an id this server never saw - both are normal,
+                // silent no-ops per the LSP spec.
             }
         }
         "workspace/didChangeWorkspaceFolders" => {
