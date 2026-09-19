@@ -389,7 +389,11 @@ impl Server {
         }
 
         let mut files = Vec::new();
-        crate::project::collect_php_files(root, &mut files);
+        crate::project::collect_php_files_excluding(
+            root,
+            crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
+            &mut files,
+        );
         // See main.rs's run_check_project for why this matters: a real
         // workspace can genuinely declare the same fully-qualified class
         // twice (duplicate vendored copies of a library), and

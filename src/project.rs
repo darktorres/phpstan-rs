@@ -51,6 +51,12 @@ struct FileState {
     // `None` for every ordinary `check-project` batch run, which never
     // needs it again once this file's own diagnostics are computed.
     source: Option<String>,
+    // Same meaning as `load_analyzed_file`'s own `analyzed` parameter -
+    // `true` for a real, first-party file being checked, `false` for
+    // context (vendor/scan/stub, never analyzed or reported). Recorded
+    // per-file so `Project::is_analyzed`/`analyzed_paths` can answer
+    // without threading extra state through every caller.
+    analyzed: bool,
 }
 
 /// A multi-file PHP project: every loaded file's own parse tree, one
@@ -556,6 +562,7 @@ impl Project {
                 ignore_identifiers,
                 anonymous_class_names,
                 source: self.retain_source.then_some(source),
+                analyzed,
             },
         );
     }
@@ -639,13 +646,26 @@ impl Project {
         changed_symbols.extend(functions.iter().map(|s| bare_name(s).to_string()));
         changed_symbols.extend(classes.iter().map(|s| bare_name(s).to_string()));
 
-        // `true`: `update_file` only ever re-indexes a file already known
-        // to the project (an edit to it), so it's a first-party/analyzed
-        // file by construction - see `load_analyzed_file`'s own doc
-        // comment. Mostly inert in practice, since the removal above
-        // already clears any prior unconditional entry this file itself
-        // owned before this re-index runs.
-        self.registry.index(&ast, true);
+        // A file `update_file` has already seen keeps its own recorded
+        // `analyzed` flag (an edit doesn't change what kind of file it
+        // is). A never-before-seen path - reachable via `textDocument/
+        // didOpen` for ANY URI the editor opens, including one
+        // `discover_vendor_context`/`load_workspace`'s own excluded-
+        // dir walk never touched (a vendor file outside any discovered
+        // autoload entry, or with no composer.json at all) - defaults
+        // to context (`analyzed: false`) when it's under a directory
+        // name `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` lists, matching
+        // `load_workspace`'s own walk; otherwise `true`, the same "a
+        // brand-new first-party file is analyzed by default" behavior
+        // this had before this distinction existed. Without this, a
+        // same-name collision (`insert_built_decl`'s own doc comment)
+        // would let an opened-but-never-discovered vendor file outright
+        // overwrite a real declaration instead of merging into it.
+        let analyzed = match self.files.get(path) {
+            Some(existing) => existing.analyzed,
+            None => !path_under_excluded_dir(path, DEFAULT_SCAN_EXCLUDED_DIR_NAMES),
+        };
+        self.registry.index(&ast, analyzed);
         // Best-effort, not full incremental invalidation: a prior version
         // of this file's own anonymous-class entries (registered under
         // synthetic names keyed by `path:line[:index]`) aren't removed
@@ -659,7 +679,7 @@ impl Project {
         let (anonymous_class_decls, anonymous_class_names) =
             crate::registry::collect_anonymous_classes(&ast, &path.display().to_string());
         for decl in anonymous_class_decls {
-            self.registry.insert_built_decl(decl, true);
+            self.registry.insert_built_decl(decl, analyzed);
         }
         for name in &classes {
             self.registry.record_phpstan_class_file(name, path);
@@ -715,6 +735,7 @@ impl Project {
                 ignore_identifiers,
                 anonymous_class_names,
                 source: self.retain_source.then(|| new_source.to_string()),
+                analyzed,
             },
         );
         self.rebuild_pest_config();
@@ -1127,6 +1148,22 @@ impl Project {
     pub fn file_count(&self) -> usize {
         self.files.len()
     }
+
+    /// Every loaded path whose own `analyzed` flag is `true` - a real,
+    /// first-party file, as opposed to context (vendor/scan/stub).
+    pub fn analyzed_paths(&self) -> Vec<PathBuf> {
+        self.files
+            .iter()
+            .filter(|(_, state)| state.analyzed)
+            .map(|(path, _)| path.clone())
+            .collect()
+    }
+
+    /// `true` if `path` is loaded and analyzed; `false` for an unloaded
+    /// path or one loaded only as context.
+    pub fn is_analyzed(&self, path: &Path) -> bool {
+        self.files.get(path).is_some_and(|state| state.analyzed)
+    }
 }
 
 impl Default for Project {
@@ -1248,12 +1285,50 @@ pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile
 /// top-level scan in one non-recursive, correctly-measured call instead -
 /// see that function's own doc comment for the real number this found.
 pub fn collect_php_files(path: &Path, out: &mut Vec<PathBuf>) {
+    collect_php_files_excluding(path, &[], out);
+}
+
+/// Directory names a workspace-wide scan skips by default when no real
+/// config (1.1's own `phpstan-rs.toml` `paths`) says otherwise - a
+/// hardcoded floor, not a substitute for real exclusion config. Matches
+/// exactly one path component, not a prefix (`vendor-utils/` is
+/// unaffected).
+pub const DEFAULT_SCAN_EXCLUDED_DIR_NAMES: &[&str] = &["vendor", ".git", "node_modules"];
+
+/// `true` if any component of `path` is named exactly one of
+/// `excluded_dir_names` - a pure name check, no filesystem access. Used
+/// both to prune `collect_php_files_excluding`'s own walk and, in
+/// `Project::update_file`, as a never-before-seen path's default
+/// `analyzed` classification (see that call site's own doc comment).
+pub fn path_under_excluded_dir(path: &Path, excluded_dir_names: &[&str]) -> bool {
+    path.components().any(|c| {
+        c.as_os_str()
+            .to_str()
+            .is_some_and(|s| excluded_dir_names.contains(&s))
+    })
+}
+
+/// Same as `collect_php_files`, but prunes any directory whose name
+/// appears in `excluded_dir_names` before recursing into it - see
+/// `DEFAULT_SCAN_EXCLUDED_DIR_NAMES`.
+pub fn collect_php_files_excluding(
+    path: &Path,
+    excluded_dir_names: &[&str],
+    out: &mut Vec<PathBuf>,
+) {
     if path.is_dir() {
+        if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| excluded_dir_names.contains(&n))
+        {
+            return;
+        }
         let Ok(entries) = fs::read_dir(path) else {
             return;
         };
         for entry in entries.flatten() {
-            collect_php_files(&entry.path(), out);
+            collect_php_files_excluding(&entry.path(), excluded_dir_names, out);
         }
     } else if path.extension().is_some_and(|e| e == "php") {
         out.push(path.to_path_buf());

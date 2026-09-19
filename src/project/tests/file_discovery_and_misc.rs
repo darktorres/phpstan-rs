@@ -162,3 +162,49 @@ fn deferred_registry_passes_all_run_through_the_real_project_path() {
         "got: {consumer_diagnostics:?}"
     );
 }
+
+#[test]
+fn analyzed_paths_and_is_analyzed_reflect_how_each_file_was_loaded() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("vendor/lib.php"),
+            "<?php function libHelper(): int { return 1; }",
+        )
+        .unwrap();
+    project
+        .load_analyzed_file(
+            PathBuf::from("src/app.php"),
+            "<?php function appHelper(): int { return 1; }",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    assert!(!project.is_analyzed(&PathBuf::from("vendor/lib.php")));
+    assert!(project.is_analyzed(&PathBuf::from("src/app.php")));
+    assert!(!project.is_analyzed(&PathBuf::from("never/loaded.php")));
+
+    let analyzed = project.analyzed_paths();
+    assert_eq!(analyzed, vec![PathBuf::from("src/app.php")]);
+}
+
+#[test]
+fn update_file_defaults_a_never_before_seen_path_by_its_excluded_dir_status() {
+    let mut project = Project::new();
+
+    project
+        .update_file(&PathBuf::from("vendor/acme/Foo.php"), "<?php class Foo {}")
+        .unwrap();
+    assert!(
+        !project.is_analyzed(&PathBuf::from("vendor/acme/Foo.php")),
+        "a never-before-seen path under vendor/ must default to context, not analyzed"
+    );
+
+    project
+        .update_file(&PathBuf::from("src/Foo.php"), "<?php class Bar {}")
+        .unwrap();
+    assert!(
+        project.is_analyzed(&PathBuf::from("src/Foo.php")),
+        "a never-before-seen path outside any excluded dir must default to analyzed"
+    );
+}

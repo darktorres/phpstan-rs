@@ -3,3 +3,4 @@ mod navigation;
 mod protocol_and_session;
 mod variable_definitions;
 mod workspace_config;
+mod workspace_scan;
