@@ -19,7 +19,7 @@ mod incremental_bench;
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 #[derive(ClapParser)]
-#[command(subcommand_required = true, arg_required_else_help = true)]
+#[command(subcommand_required = true, arg_required_else_help = true, version)]
 struct Cli {
     #[command(subcommand)]
     command: Command,

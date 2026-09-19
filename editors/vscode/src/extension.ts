@@ -6,32 +6,34 @@ import {
   TransportKind,
 } from "vscode-languageclient/node";
 import { resolveServerCommand, findPhpstanRsOnPath } from "./serverResolution";
+import { resolveServerPath } from "./serverDownload";
 
-export { resolveServerCommand, findPhpstanRsOnPath };
+export { resolveServerCommand, findPhpstanRsOnPath, resolveServerPath };
 
 let client: LanguageClient | undefined;
-// Gates the "no server binary found" message to once per extension-host
-// session, not once per opened .php file - `activate()` can in principle
-// run again within the same session across certain reload scenarios, in
-// which case this resets; accepted for this item's scope.
-let missingServerWarningShown = false;
 
-export function activate(context: vscode.ExtensionContext): void {
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
   const config = vscode.workspace.getConfiguration("phpstan-rs");
   const configuredPath = config.get<string>("serverPath");
-  const command = resolveServerCommand(configuredPath, () =>
-    findPhpstanRsOnPath(),
-  );
 
+  // `resolveServerCommand`/`findPhpstanRsOnPath` (4.1) win first when a
+  // phpstan-rs is already reachable - an explicit setting or an existing
+  // PATH install (e.g. `cargo install`, a distro package) - so a user's
+  // own choice of binary is never silently shadowed by an auto-download.
+  // Only once both come up empty does `resolveServerPath` (4.2) take
+  // over: it re-checks `configuredPath` itself (a no-op here, since it
+  // already failed above) and then falls through to its own cached-
+  // binary/download pipeline.
+  let command = resolveServerCommand(configuredPath, () => findPhpstanRsOnPath());
   if (!command) {
-    if (!missingServerWarningShown) {
-      missingServerWarningShown = true;
+    try {
+      command = await resolveServerPath(undefined, context.globalStorageUri.fsPath);
+    } catch (err: unknown) {
       void vscode.window.showErrorMessage(
-        "phpstan-rs: no server binary found. Set phpstan-rs.serverPath in your settings, " +
-          "or make sure a phpstan-rs executable is on your PATH.",
+        `phpstan-rs: ${err instanceof Error ? err.message : String(err)}`,
       );
+      return;
     }
-    return;
   }
 
   // `["lsp"]` - the real subcommand `Command::Lsp => lsp::run()`

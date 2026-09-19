@@ -16,4 +16,6 @@ tsconfig.json
 # itself, but never the compiled unit/smoke test files alongside it.
 out/extension.test.js
 out/extension.test.js.map
+out/serverDownload.test.js
+out/serverDownload.test.js.map
 out/test/**

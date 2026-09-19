@@ -31,7 +31,7 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
-    "test:unit": "npm run compile && node --test out/extension.test.js",
+    "test:unit": "npm run compile && node --test out/extension.test.js out/serverDownload.test.js",
     "pretest": "npm run compile",
     "test:smoke": "node ./out/test/runTest.js"
   },

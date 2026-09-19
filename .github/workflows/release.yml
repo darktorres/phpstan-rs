@@ -1,0 +1,143 @@
+name: Release
+
+# Triggered by a `v*` tag push for a real release, plus `workflow_dispatch`
+# for a manual dry run against any branch (no tag needed) - recommended
+# for validating all 5 matrix legs before ever wiring this to a real tag,
+# since none of the cross-compile/toolchain assumptions below have been
+# verified by an actual CI run yet (this repo has no GitHub remote at the
+# time this workflow was authored - see VSCODE_EXTENSION_PLAN.md's own
+# open-risks note on item 4.2).
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Two Linux legs on an EXPLICITLY PINNED older Ubuntu LTS image
+          # (not `ubuntu-latest`) - this is what actually addresses glibc
+          # symbol-versioning skew against an end user's own, possibly
+          # older distro. `ubuntu-24.04` was the current actively-
+          # supported LTS at the time this workflow was authored;
+          # `ubuntu-22.04` had just entered its own deprecation window
+          # (GitHub deprecates runner images on a rolling schedule) - if
+          # this image is itself later deprecated, re-pin to whatever
+          # GitHub's current oldest-supported LTS is at that time, and
+          # update the minimum-glibc claim in README.md's own
+          # "Installing a pre-built binary" section to match.
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            native: true
+          - os: ubuntu-24.04
+            target: aarch64-unknown-linux-gnu
+            native: false
+          # macOS and Windows need native/first-party runners regardless
+          # of this crate's own dependencies - a generic Linux cross
+          # image carries neither Apple's proprietary SDK nor the MSVC
+          # toolchain. `pcre2-sys` (this crate's own optional, on-by-
+          # default `pcre-validate` feature) is the ADDITIONAL, separate
+          # reason the two Linux legs need their own C cross-toolchain
+          # setup below - it vendors and compiles real PCRE2 C source via
+          # `cc-rs` whenever no system libpcre2/pkg-config match exists.
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            native: true
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            native: false
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            native: true
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Runner images ship rustup already - this only adds the
+      # non-native target; the native one and the pinned 1.98.0 toolchain
+      # itself come from the checked-in rust-toolchain.toml, which every
+      # `cargo`/`rustup` invocation below picks up automatically.
+      - name: Add the cross-compilation target
+        if: ${{ !matrix.native }}
+        run: rustup target add ${{ matrix.target }}
+
+      - name: Install an aarch64 cross C toolchain (Linux only)
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Point pcre2-sys's C build and the linker at the cross toolchain
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: |
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+        # If the aarch64 cross C toolchain above ever proves flaky/
+        # unavailable on the pinned runner image, `--no-default-features`
+        # is a documented fallback HERE ONLY (dropping just the
+        # regexp.pattern PCRE2-backed diagnostic) - it does NOT address
+        # the separate glibc-skew concern the runner-image pin above
+        # already handles, and must not be reached for by reflex if this
+        # step ever fails for an unrelated reason.
+
+      - name: Package the binary
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bin_name="phpstan-rs"
+          if [[ "$TARGET" == *windows* ]]; then
+            bin_name="phpstan-rs.exe"
+          fi
+          src="target/$TARGET/release/$bin_name"
+          dest="phpstan-rs-$TARGET"
+          if [[ "$TARGET" == *windows* ]]; then
+            dest="$dest.exe"
+          fi
+          cp "$src" "$dest"
+          gzip -k "$dest"
+          sha256sum "$dest.gz" > "$dest.gz.sha256"
+
+      - name: Smoke-check the native-arch binary
+        if: matrix.native
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bin_name="phpstan-rs"
+          if [[ "$TARGET" == *windows* ]]; then
+            bin_name="phpstan-rs.exe"
+          fi
+          version_output="$("./target/$TARGET/release/$bin_name" --version)"
+          echo "$version_output"
+          echo "$version_output" | grep -Eq '^phpstan-rs [0-9]+\.[0-9]+\.[0-9]+$'
+
+      - name: Upload the release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET: ${{ matrix.target }}
+          REF_NAME: ${{ github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin_name="phpstan-rs-$TARGET"
+          if [[ "$TARGET" == *windows* ]]; then
+            bin_name="$bin_name.exe"
+          fi
+          gh release upload "$REF_NAME" "$bin_name.gz" "$bin_name.gz.sha256" \
+            --repo "$REPOSITORY" --clobber
+        # A `workflow_dispatch` dry run (no real tag) has no matching
+        # release to upload to - this step is expected to fail harmlessly
+        # in that mode; the point of a dry run is validating the build/
+        # smoke-check steps above, not the upload itself.
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
