@@ -274,12 +274,60 @@ fn shutdown_returns_a_null_result_and_exit_ends_the_loop() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&rx, &mut writer);
+    let exit_code = run_loop(&rx, &mut writer);
+    assert_eq!(exit_code, 0, "shutdown before exit must exit cleanly");
 
     let responses = decode_all(&writer);
     assert_eq!(responses.len(), 1, "exit must stop the loop: {responses:?}");
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(responses[0]["result"], Value::Null);
+}
+
+#[test]
+fn exit_without_a_prior_shutdown_exits_with_code_1() {
+    let input = encode(&[notification("exit", json!({}))]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    let exit_code = run_loop(&rx, &mut writer);
+    assert_eq!(
+        exit_code, 1,
+        "exit with no prior shutdown is a protocol violation"
+    );
+}
+
+#[test]
+fn eof_after_shutdown_without_exit_still_exits_cleanly() {
+    // Locks in that a clean transport ending's exit code is NOT derived
+    // from `shutdown_received` - only the `exit` notification's own arm
+    // is judged by that contract.
+    let input = encode(&[request(1, "shutdown", json!({}))]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    let exit_code = run_loop(&rx, &mut writer);
+    assert_eq!(exit_code, 0);
+}
+
+#[test]
+fn a_transport_read_failure_ends_the_loop_cleanly_too() {
+    // Exercises `RecvTimeoutError::Disconnected` via a genuine I/O
+    // failure (not a clean EOF) - mechanically distinct from the EOF
+    // case above, and previously untested by either.
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = FailingReader;
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    let exit_code = run_loop(&rx, &mut writer);
+    assert_eq!(
+        exit_code, 0,
+        "a genuine transport failure is not judged by the shutdown contract either"
+    );
 }
 
 #[test]
@@ -334,7 +382,11 @@ fn eof_with_no_exit_message_ends_the_loop_cleanly() {
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&rx, &mut writer);
+    let exit_code = run_loop(&rx, &mut writer);
+    assert_eq!(
+        exit_code, 0,
+        "EOF without exit is not judged by the shutdown contract"
+    );
     assert_eq!(decode_all(&writer).len(), 1);
 }
 

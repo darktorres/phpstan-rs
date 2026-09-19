@@ -163,3 +163,20 @@ impl Drop for TempDir {
         let _ = std::fs::remove_dir_all(&self.0);
     }
 }
+
+/// A `BufRead` that always fails with a non-`InvalidData` I/O error -
+/// drives `ReadOutcome::Disconnected` specifically, which a `Cursor`
+/// alone can never produce (only `Eof`, or `MalformedBody`/`InvalidData`
+/// via malformed bytes).
+pub(super) struct FailingReader;
+impl std::io::Read for FailingReader {
+    fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+        Err(std::io::Error::other("simulated transport failure"))
+    }
+}
+impl std::io::BufRead for FailingReader {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        Err(std::io::Error::other("simulated transport failure"))
+    }
+    fn consume(&mut self, _amt: usize) {}
+}

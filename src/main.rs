@@ -389,7 +389,18 @@ fn main() {
         Command::IncrementalBench { dir, file_to_touch } => {
             incremental_bench::run_incremental_bench(&dir, file_to_touch.as_deref())
         }
-        Command::Lsp => lsp::run(),
+        Command::Lsp => {
+            let exit_code = lsp::run();
+            // 0 falls through to main's own normal return (so the
+            // dhat-heap profiler's, and a --features hotpath build's
+            // HotpathGuard's, Drop still flushes) - only the spec-
+            // mandated nonzero (protocol-violation: exit with no prior
+            // shutdown) path short-circuits via process::exit, the same
+            // way run_check_project's own error paths already do.
+            if exit_code != 0 {
+                std::process::exit(exit_code);
+            }
+        }
         Command::Demo { file } => demo::run_demo(file.as_deref()),
     }
 }

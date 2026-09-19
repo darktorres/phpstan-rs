@@ -118,6 +118,10 @@ struct Server {
     // path->diagnostics story instead of the workspace scan being
     // invisible to later incremental updates.
     open_uris: HashMap<PathBuf, Uri>,
+    // Set once a real `shutdown` request has been handled - `run_loop`'s
+    // own `exit` arm consults this to pick the LSP spec's mandated
+    // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
+    shutdown_received: bool,
 }
 
 impl Server {
@@ -130,6 +134,7 @@ impl Server {
         Server {
             project,
             open_uris: HashMap::new(),
+            shutdown_received: false,
         }
     }
 
@@ -541,7 +546,10 @@ impl Server {
 /// to `recv_timeout` on a channel a background thread feeds instead.
 const RUN_LOOP_TICK: Duration = Duration::from_millis(50);
 
-pub fn run() {
+/// Returns the process exit code `main.rs` should exit with (per the LSP
+/// spec's `exit`-notification contract - see `run_loop`'s own doc
+/// comment).
+pub fn run() -> i32 {
     // `bounded`, not `unbounded`: backpressures a fast/misbehaving
     // client (blocks the reader thread, and so the OS pipe) instead of
     // buffering unboundedly.
@@ -556,7 +564,7 @@ pub fn run() {
         .expect("spawning the LSP reader thread");
     let stdout = io::stdout();
     let mut writer = stdout.lock();
-    run_loop(&rx, &mut writer);
+    run_loop(&rx, &mut writer)
     // Not joined: once run_loop exits the process is ending anyway; the
     // reader thread, possibly still blocked in a real Message::read on
     // stdin with nothing left reading its sender, is simply abandoned -
@@ -571,21 +579,31 @@ pub fn run() {
 /// called synchronously first in a test) is what actually calls
 /// `read_message`, so this loop can `recv_timeout` and never block
 /// indefinitely inside a blocking read syscall.
-fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) {
+///
+/// Returns the process exit code the LSP spec's `exit` notification
+/// mandates: 0 if a `shutdown` request preceded it, 1 otherwise. A
+/// transport ending (clean EOF or a real I/O disconnection - both
+/// collapse to the same `RecvTimeoutError::Disconnected` here, since
+/// `pump_messages` already logs which one it actually was) is this
+/// server's existing "no incident" end-of-session path and always
+/// returns 0 regardless of `shutdown_received` - the spec's exit-code
+/// contract binds the `exit` notification specifically, not every way a
+/// session can end.
+fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
     let mut server = Server::new();
 
     loop {
         let message = match receiver.recv_timeout(RUN_LOOP_TICK) {
             Ok(m) => m,
             Err(RecvTimeoutError::Timeout) => continue,
-            Err(RecvTimeoutError::Disconnected) => break,
+            Err(RecvTimeoutError::Disconnected) => return 0,
         };
 
         match message {
             Message::Request(req) => handle_request(&mut server, writer, req),
             Message::Notification(not) => {
                 if not.method == "exit" {
-                    break;
+                    return if server.shutdown_received { 0 } else { 1 };
                 }
                 // `pump_messages` (the reader thread) forwards its own
                 // recoverable-failure reports as a `window/logMessage`
@@ -647,6 +665,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             }
         }
         "shutdown" => {
+            server.shutdown_received = true;
             let _ = write_message(
                 writer,
                 &Message::Response(Response::new_ok(req.id, serde_json::Value::Null)),
