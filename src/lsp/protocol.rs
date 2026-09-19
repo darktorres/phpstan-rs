@@ -5,8 +5,8 @@ use std::str::FromStr;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, Notification as LspNotification};
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticSeverity, NumberOrString, Position as LspPosition,
-    PublishDiagnosticsParams, Range as LspRange, Uri,
+    Diagnostic as LspDiagnostic, DiagnosticSeverity, LogMessageParams, MessageType, NumberOrString,
+    Position as LspPosition, PublishDiagnosticsParams, Range as LspRange, Uri,
 };
 
 use crate::checker::Diagnostic;
@@ -76,10 +76,24 @@ pub(crate) fn pump_messages<R: BufRead>(reader: &mut R, sender: &Sender<Message>
             ReadOutcome::Eof => return,
             ReadOutcome::Disconnected(e) => {
                 eprintln!("phpstan-rs lsp: failed to read message: {e}");
+                // Best-effort: `run_loop` (which owns the writer) picks
+                // this up as an ordinary message off the same channel -
+                // see its `Message::Notification` arm's own
+                // `window/logMessage` passthrough. If `run_loop`'s own
+                // receiver is already gone the `send` just fails
+                // silently, same as the real message case above.
+                let _ = sender.send(log_message_notification(
+                    MessageType::ERROR,
+                    format!("phpstan-rs: failed to read message: {e}"),
+                ));
                 return;
             }
             ReadOutcome::MalformedBody(e) => {
                 eprintln!("phpstan-rs lsp: skipping malformed message: {e}");
+                let _ = sender.send(log_message_notification(
+                    MessageType::WARNING,
+                    format!("phpstan-rs: skipping malformed message: {e}"),
+                ));
                 continue;
             }
         }
@@ -292,5 +306,16 @@ pub(crate) fn publish_diagnostics_notification(uri: Uri, diagnostics: &[Diagnost
             diagnostics: diagnostics.iter().map(to_lsp_diagnostic).collect(),
             version: None,
         },
+    ))
+}
+
+/// A `window/logMessage` notification - surfaces a recoverable failure
+/// (a workspace file that failed to parse, a real transport I/O error)
+/// to the editor's Output channel, not just this process's own stderr,
+/// which a real editor session never shows the user by default.
+pub(crate) fn log_message_notification(typ: MessageType, message: String) -> Message {
+    Message::Notification(LspNotification::new(
+        "window/logMessage".to_string(),
+        LogMessageParams { typ, message },
     ))
 }

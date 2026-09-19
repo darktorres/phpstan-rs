@@ -30,7 +30,7 @@ use lsp_types::{
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
     DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
-    MarkedString, OneOf, Position as LspPosition, ServerCapabilities, ServerInfo,
+    MarkedString, MessageType, OneOf, Position as LspPosition, ServerCapabilities, ServerInfo,
     TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
@@ -49,8 +49,8 @@ mod text_split;
 #[cfg(test)]
 use protocol::percent_decode;
 use protocol::{
-    from_lsp_position, path_to_uri, publish_diagnostics_notification, pump_messages, to_lsp_range,
-    uri_to_path, write_message,
+    from_lsp_position, log_message_notification, path_to_uri, publish_diagnostics_notification,
+    pump_messages, to_lsp_range, uri_to_path, write_message,
 };
 
 /// Every `Object` class name reachable from a `Checker::probe_hit`
@@ -137,7 +137,7 @@ impl Server {
     /// the cross-file registry and dependency graph this whole phase is
     /// about are populated from the very first diagnostic, not built up
     /// one `didOpen` at a time.
-    fn load_workspace(&mut self, root: &Path) {
+    fn load_workspace(&mut self, root: &Path) -> Vec<Message> {
         let mut files = Vec::new();
         crate::project::collect_php_files(root, &mut files);
         // See main.rs's run_check_project for why this matters: a real
@@ -146,6 +146,7 @@ impl Server {
         // unsorted readdir order would make which one wins the
         // registry slot filesystem-dependent.
         files.sort();
+        let mut messages = Vec::new();
         for path in files {
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
@@ -163,9 +164,17 @@ impl Server {
                     "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                     path_for_log.display()
                 );
+                messages.push(log_message_notification(
+                    MessageType::WARNING,
+                    format!(
+                        "phpstan-rs: skipping {} - failed to parse: {e}",
+                        path_for_log.display()
+                    ),
+                ));
             }
         }
         self.project.finish_loading();
+        messages
     }
 
     fn handle_open_or_change(&mut self, uri: &Uri, text: &str) -> Vec<Message> {
@@ -186,7 +195,13 @@ impl Server {
                     "phpstan-rs lsp: skipping {} - failed to parse: {e}",
                     path.display()
                 );
-                HashMap::new()
+                return vec![log_message_notification(
+                    MessageType::WARNING,
+                    format!(
+                        "phpstan-rs: skipping {} - failed to parse: {e}",
+                        path.display()
+                    ),
+                )];
             }
         };
         results
@@ -572,6 +587,17 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) {
                 if not.method == "exit" {
                     break;
                 }
+                // `pump_messages` (the reader thread) forwards its own
+                // recoverable-failure reports as a `window/logMessage`
+                // notification on this same channel, since it has no
+                // writer of its own - this loop is the only thing that
+                // does, so it just writes it straight through rather
+                // than routing it into `handle_notification`, which only
+                // ever expects a real client-originated notification.
+                if not.method == "window/logMessage" {
+                    let _ = write_message(writer, &Message::Notification(not));
+                    continue;
+                }
                 handle_notification(&mut server, writer, not);
             }
             // This server never sends a request of its own, so it never
@@ -592,8 +618,9 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         .root_uri
                         .or_else(|| params.workspace_folders?.into_iter().next().map(|f| f.uri))
                 });
+            let mut startup_messages = Vec::new();
             if let Some(root) = root.as_ref().and_then(uri_to_path) {
-                server.load_workspace(&root);
+                startup_messages = server.load_workspace(&root);
             }
             let result = InitializeResult {
                 capabilities: ServerCapabilities {
@@ -615,6 +642,9 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 }),
             };
             let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
+            for message in startup_messages {
+                let _ = write_message(writer, &message);
+            }
         }
         "shutdown" => {
             let _ = write_message(

@@ -121,6 +121,57 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
 }
 
 #[test]
+fn initialize_logs_a_workspace_file_that_fails_to_parse() {
+    let dir = TempDir::new("init_bad_file");
+    dir.write("ok.php", "<?php function helperOk(): int { return 1; }");
+    // Momentarily-invalid syntax, the normal state while a file is being
+    // edited elsewhere in the workspace - written to disk so the
+    // workspace scan itself picks it up, not sent via didOpen.
+    dir.write("bad.php", "<?php function foo(int $x");
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    let response = messages
+        .iter()
+        .find(|m| m["id"] == json!(1))
+        .unwrap_or_else(|| panic!("expected the initialize response, got: {messages:?}"));
+    assert!(
+        response["result"]["capabilities"].is_object(),
+        "the response itself must not be displaced or dropped: {response:?}"
+    );
+    let log_notification = messages
+        .iter()
+        .find(|m| {
+            m["method"] == "window/logMessage"
+                && m["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("bad.php")
+        })
+        .unwrap_or_else(|| {
+            panic!("expected a window/logMessage notification for bad.php, got: {messages:?}")
+        });
+    assert_eq!(
+        log_notification["params"]["type"], 2,
+        "expected WARNING severity"
+    );
+}
+
+#[test]
 fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
     // A real cross-file scenario: a.php declares Greeter, b.php calls
     // a method on it. Opening a.php with a version that drops that
@@ -294,6 +345,15 @@ fn percent_decode_handles_the_common_uri_escapes() {
 }
 
 #[test]
+fn log_message_notification_has_the_expected_wire_shape() {
+    let message = log_message_notification(MessageType::ERROR, "oh no".to_string());
+    let value = serde_json::to_value(&message).unwrap();
+    assert_eq!(value["method"], "window/logMessage");
+    assert_eq!(value["params"]["type"], 1);
+    assert_eq!(value["params"]["message"], "oh no");
+}
+
+#[test]
 fn uri_to_path_and_path_to_uri_round_trip() {
     let uri: Uri = "file:///tmp/foo.php".parse().unwrap();
     let path = uri_to_path(&uri).unwrap();
@@ -380,9 +440,26 @@ fn a_malformed_message_body_is_skipped_without_terminating_the_session() {
     let mut writer = Vec::new();
     run_loop(&rx, &mut writer);
 
-    let responses = decode_all(&writer);
-    assert_eq!(responses.len(), 1, "got: {responses:?}");
-    assert_eq!(responses[0]["id"], json!(1));
+    // The malformed body is the very first thing in the stream, skipped
+    // by `pump_messages` before it ever reads the `initialize` request
+    // that follows - the resulting `window/logMessage` notification is
+    // therefore written BEFORE the initialize response, not after, so
+    // this looks messages up by content, never by position.
+    let messages = decode_all(&writer);
+    assert_eq!(messages.len(), 2, "got: {messages:?}");
+    let response = messages
+        .iter()
+        .find(|m| m["id"] == json!(1))
+        .unwrap_or_else(|| panic!("expected the initialize response, got: {messages:?}"));
+    assert_eq!(response["result"]["capabilities"]["textDocumentSync"], 1);
+    let log_notification = messages
+        .iter()
+        .find(|m| m["method"] == "window/logMessage")
+        .unwrap_or_else(|| panic!("expected a window/logMessage notification, got: {messages:?}"));
+    assert_eq!(
+        log_notification["params"]["type"], 2,
+        "expected WARNING severity"
+    );
 }
 
 #[test]
@@ -421,6 +498,30 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
     let mut writer = Vec::new();
     run_loop(&rx, &mut writer);
 
-    let responses = decode_all(&writer);
-    assert_eq!(responses.len(), 1, "session should survive: {responses:?}");
+    let messages = decode_all(&writer);
+    assert_eq!(
+        messages.len(),
+        2,
+        "expected the initialize response plus one logMessage notification for bad.php, session should survive: {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|m| m["id"] == json!(1)),
+        "session should survive and still answer initialize: {messages:?}"
+    );
+    let log_notification = messages
+        .iter()
+        .find(|m| {
+            m["method"] == "window/logMessage"
+                && m["params"]["message"]
+                    .as_str()
+                    .unwrap_or("")
+                    .contains("bad.php")
+        })
+        .unwrap_or_else(|| {
+            panic!("expected a window/logMessage notification for bad.php, got: {messages:?}")
+        });
+    assert_eq!(
+        log_notification["params"]["type"], 2,
+        "expected WARNING severity"
+    );
 }
