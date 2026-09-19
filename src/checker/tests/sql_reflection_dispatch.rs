@@ -255,6 +255,24 @@ fn no_schema_configured_at_all_falls_back_to_todays_plain_stub_type() {
 }
 
 #[test]
+fn a_pure_literal_query_resolves_with_no_schema_or_live_connection_configured_at_all() {
+    let d = diagnostics_with_dbal_no_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $row = $c->fetchAssociative('SELECT 1, COUNT(*)');
+            assertType("array{1: int, 'COUNT(*)': int<0, max>}|false", $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn execute_statement_is_unaffected_still_a_plain_int_or_string() {
     let d = diagnostics_with_dbal_schema(
         r#"

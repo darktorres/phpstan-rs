@@ -173,3 +173,121 @@ fn count_column_positions_finds_a_window_function_count_over() {
         count_column_positions("SELECT id, COUNT(*) OVER() AS total FROM categories").unwrap();
     assert_eq!(positions, vec![1]);
 }
+
+#[test]
+fn resolve_pure_ast_resolves_integer_and_string_literals_with_no_driver_at_all() {
+    let ty = resolve_pure_ast("SELECT 1, 'x'", None).unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0], ("1".to_string(), Type::Int, false));
+    assert_eq!(fields[1], ("x".to_string(), Type::String, false));
+}
+
+#[test]
+fn resolve_pure_ast_resolves_null_and_a_negative_integer() {
+    let ty = resolve_pure_ast("SELECT NULL, -1", None).unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0], ("NULL".to_string(), Type::Null, false));
+    assert_eq!(fields[1], ("-1".to_string(), Type::Int, false));
+}
+
+#[test]
+fn resolve_pure_ast_uses_an_alias_over_the_source_text_when_present() {
+    let ty = resolve_pure_ast("SELECT 1 AS one", None).unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0], ("one".to_string(), Type::Int, false));
+}
+
+#[test]
+fn resolve_pure_ast_resolves_a_bare_count_star_with_no_from_at_all() {
+    let ty = resolve_pure_ast("SELECT COUNT(*)", None).unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0].0, "COUNT(*)");
+    assert_eq!(fields[0].1, Type::Int);
+}
+
+#[test]
+fn resolve_pure_ast_bails_on_a_decimal_literal_with_no_driver_known() {
+    assert!(resolve_pure_ast("SELECT 1.5", None).is_none());
+}
+
+#[test]
+fn resolve_pure_ast_resolves_a_decimal_literal_as_string_for_mysql() {
+    let ty = resolve_pure_ast("SELECT 1.5", Some(SqlDriver::Mysql)).unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0].1, Type::String);
+}
+
+#[test]
+fn resolve_pure_ast_resolves_a_decimal_literal_as_float_for_sqlite() {
+    let ty = resolve_pure_ast("SELECT 1.5", Some(SqlDriver::Sqlite)).unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0].1, Type::Float);
+}
+
+#[test]
+fn resolve_pure_ast_bails_on_a_boolean_literal_with_no_driver_known() {
+    assert!(resolve_pure_ast("SELECT true", None).is_none());
+}
+
+#[test]
+fn resolve_pure_ast_resolves_a_boolean_literal_as_bool_for_postgres_but_int_for_mysql() {
+    let pg = resolve_pure_ast("SELECT true", Some(SqlDriver::Pgsql)).unwrap();
+    let Type::ArrayShape(pg_fields) = pg else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(pg_fields[0].1, Type::Bool);
+
+    let mysql = resolve_pure_ast("SELECT true", Some(SqlDriver::Mysql)).unwrap();
+    let Type::ArrayShape(mysql_fields) = mysql else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(mysql_fields[0].1, Type::Int);
+}
+
+#[test]
+fn resolve_pure_ast_bails_when_any_select_item_references_a_column() {
+    assert!(resolve_pure_ast("SELECT 1, name FROM categories", None).is_none());
+}
+
+#[test]
+fn resolve_sql_row_type_answers_a_pure_literal_query_with_nothing_configured_at_all() {
+    let registry = Registry::default();
+    let ty = resolve_sql_row_type(&registry, "SELECT 1, 'x'").unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields[0].1, Type::Int);
+    assert_eq!(fields[1].1, Type::String);
+}
+
+#[test]
+fn resolve_sql_row_type_caches_an_undecidable_answer_by_sql_text() {
+    let mut registry = Registry::default();
+    registry.sql_reflection_schema = Some(fixture_schema());
+    let sql = "SELECT nope FROM categories";
+    assert!(resolve_sql_row_type(&registry, sql).is_none());
+    assert!(
+        registry
+            .sql_reflection_cache
+            .lock()
+            .unwrap()
+            .contains_key(sql),
+        "expected the undecidable result to be cached"
+    );
+    // A second call must stay `None`, served from the cache rather than
+    // re-deriving (observably identical either way, but exercises the
+    // cache-hit path without panicking).
+    assert!(resolve_sql_row_type(&registry, sql).is_none());
+}

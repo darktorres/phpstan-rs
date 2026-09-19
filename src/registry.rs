@@ -262,6 +262,19 @@ pub struct Registry {
     // real use from `sql_reflection_config` - see
     // `sql_reflection_reflector::SqlReflectorHandle`'s own doc comment.
     pub sql_reflector: crate::sql_reflection_reflector::SqlReflectorHandle,
+    // Resolution-order step 2 (`checker::sql_reflection::resolve`):
+    // caches a resolved-or-undecidable answer by the literal SQL text
+    // alone, not also a schema/config-identity hash - this project
+    // supports exactly one schema source and one connection for the
+    // whole analysis run (a deliberate design constraint, not an
+    // oversight), so that identity is invariant for the run's own
+    // lifetime and needs no separate cache-key component. Shared,
+    // in-memory, single-run only (never persisted to disk) - avoids a
+    // repeated live `PREPARE` round-trip for the same query text
+    // appearing at multiple call sites, `rayon::par_iter`-safe via the
+    // `Mutex` (mirrors the real, confirmed concurrency hazard
+    // `sql_reflector` above already accounts for).
+    pub sql_reflection_cache: std::sync::Mutex<FxHashMap<String, Option<Type>>>,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
     // treat as "nothing to check yet." See `crate::php_version::PhpFeature`

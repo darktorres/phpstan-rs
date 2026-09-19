@@ -1,13 +1,12 @@
 //! Sub-phase C's own resolution orchestration - the single entry point
-//! sub-phase D's real call sites consult. Implements resolution-order
-//! step 3 (the static schema catalog, A2) directly here, then falls
-//! through to step 4 (the live/cached reflector, `sql_reflection_
-//! reflector`). Steps 1 (a pure-AST answer needing no schema at all,
-//! e.g. `SELECT 1`) and 2 (a resolved-answer cache) are not built yet -
-//! every call re-parses and, when the static path can't answer, re-
-//! prepares live - a real, disclosed performance gap, not a
-//! correctness one, left for a later pass once real corpus usage shows
-//! it matters.
+//! sub-phase D's real call sites consult. Implements all 4 steps of the
+//! plan's own resolution order: 1 (`resolve_pure_ast` - a select list of
+//! only literals/a bare `COUNT`, needing no schema/connection at all),
+//! 2 (`Registry::sql_reflection_cache` - a resolved-or-undecidable
+//! answer by SQL text, avoiding a repeated live `PREPARE` for the same
+//! query text across multiple call sites in one run), 3 (the static
+//! schema catalog, A2), and 4 (the live/cached reflector,
+//! `sql_reflection_reflector`).
 //!
 //! The static path is scoped to the dominant real shape only: a single-
 //! table `SELECT`, no `JOIN`, a `*`/bare-or-qualified-column/aliased-
@@ -17,15 +16,25 @@
 //! is a disclosed, separate follow-on (the plan's own "virtual
 //! relations" section).
 
-use sqlparser::ast::{Expr, ObjectNamePart, Select, SelectItem, SetExpr, Statement, TableFactor};
+use sqlparser::ast::{
+    Expr, ObjectNamePart, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator, Value,
+};
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
 use crate::registry::Registry;
+use crate::sql_reflection_config::SqlDriver;
 use crate::sql_reflection_schema::SchemaCatalog;
 use crate::types::Type;
 
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
+    let driver = registry.sql_reflection_config.as_ref().map(|c| c.driver);
+    if let Some(ty) = resolve_pure_ast(sql, driver) {
+        return Some(refine_count_columns(sql, ty));
+    }
+    if let Some(cached) = registry.sql_reflection_cache.lock().unwrap().get(sql) {
+        return cached.clone();
+    }
     let row_type = if let Some(schema) = &registry.sql_reflection_schema
         && let Some(ty) = resolve_from_static_schema(schema, sql)
     {
@@ -33,10 +42,172 @@ pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Typ
     } else {
         registry
             .sql_reflector
-            .get(registry.sql_reflection_config.as_ref())?
-            .reflect(sql)
-    }?;
-    Some(refine_count_columns(sql, row_type))
+            .get(registry.sql_reflection_config.as_ref())
+            .and_then(|r| r.reflect(sql))
+    };
+    let result = row_type.map(|ty| refine_count_columns(sql, ty));
+    registry
+        .sql_reflection_cache
+        .lock()
+        .unwrap()
+        .insert(sql.to_string(), result.clone());
+    result
+}
+
+/// Resolution-order step 1: a select list of only literals and/or a
+/// bare `COUNT(...)` call needs no schema/connection at all - real,
+/// live-confirmed against all 3 engines (a throwaway probe against real
+/// MySQL/Postgres/SQLite, not assumed): an integer literal, a string
+/// literal, and `NULL` all report the identical driver-native type
+/// across every engine, so those three are answered here unconditionally.
+/// A decimal-literal (`1.5`) or boolean-literal (`TRUE`) select item
+/// *genuinely diverges* by engine (MySQL/Postgres report a bare decimal
+/// literal as `NEWDECIMAL`/`numeric` - this project's own already-
+/// established "decimal is string" rule - while SQLite's own literal
+/// storage class is unambiguously `REAL`/`Float`; Postgres has a native
+/// `bool` while MySQL/SQLite report a bare `TRUE`/`FALSE` literal as
+/// plain `int`), so those two are only answered when a driver is
+/// actually configured to disambiguate - with no driver configured at
+/// all, bailing (falling through to the next step, which will also find
+/// nothing to connect to) is safer than guessing one engine's answer for
+/// an unknown target.
+fn resolve_pure_ast(sql: &str, driver: Option<SqlDriver>) -> Option<Type> {
+    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
+        .ok()?
+        .into_iter()
+        .next()?;
+    let Statement::Query(query) = stmt else {
+        return None;
+    };
+    let SetExpr::Select(select) = *query.body else {
+        return None;
+    };
+    let mut fields = Vec::new();
+    for item in &select.projection {
+        let (expr, alias) = match item {
+            SelectItem::UnnamedExpr(e) => (e, None),
+            SelectItem::ExprWithAlias { expr, alias } => (expr, Some(alias.value.clone())),
+            _ => return None,
+        };
+        let (default_name, ty) = pure_ast_expr(expr, driver)?;
+        fields.push((alias.unwrap_or(default_name), ty, false));
+    }
+    if fields.is_empty() {
+        return None;
+    }
+    Some(Type::ArrayShape(fields))
+}
+
+/// Resolves both the unaliased column name real driver metadata reports
+/// *and* the type together, structurally - deliberately not by slicing
+/// the original SQL text at `Expr::span()`, which turned out to be
+/// unreliable for exactly the shapes this needs (confirmed reading
+/// `sqlparser`'s own `Spanned` impls): `Expr::UnaryOp`'s span is only
+/// ever its *operand's* span, silently dropping the operator token
+/// (`-1` would slice back out as just `"1"`), and `COUNT(*)`'s own
+/// `Function` span drops the `(*)` entirely (`FunctionArgExpr::Wildcard`
+/// carries no span of its own), leaving just `"COUNT"` - the same
+/// "spans aren't a substitute for knowing the real shape" lesson this
+/// module already learned once for `normalize_placeholders_for_driver`.
+fn pure_ast_expr(expr: &Expr, driver: Option<SqlDriver>) -> Option<(String, Type)> {
+    match expr {
+        Expr::Value(v) => Some((
+            literal_name(&v.value)?,
+            literal_value_type(&v.value, driver)?,
+        )),
+        Expr::UnaryOp {
+            op: UnaryOperator::Minus,
+            expr: inner,
+        } => {
+            let (inner_name, ty) = pure_ast_expr(inner, driver)?;
+            Some((format!("-{inner_name}"), ty))
+        }
+        Expr::UnaryOp {
+            op: UnaryOperator::Plus,
+            expr: inner,
+        } => pure_ast_expr(inner, driver),
+        Expr::Nested(inner) => pure_ast_expr(inner, driver),
+        // `COUNT(...)`'s own base type is unanimous across every engine
+        // (a plain integer count) regardless of driver - `resolve_sql_
+        // row_type`'s own `refine_count_columns` post-processing refines
+        // this further to `int<0, max>` afterward, the same as any other
+        // resolution step's raw answer.
+        Expr::Function(f) => {
+            let is_count = f.name.0.last().is_some_and(|part| {
+                matches!(part, ObjectNamePart::Identifier(ident) if ident.value.eq_ignore_ascii_case("COUNT"))
+            });
+            if !is_count {
+                return None;
+            }
+            let arg_name = count_argument_name(f, driver)?;
+            Some((format!("COUNT({arg_name})"), Type::Int))
+        }
+        _ => None,
+    }
+}
+
+/// `COUNT(*)` or `COUNT(<a literal this module already knows how to
+/// name>)` only - anything else (a column reference, `DISTINCT`, a
+/// second argument, ...) isn't a "needs no schema at all" shape, so
+/// bails rather than guess.
+fn count_argument_name(f: &sqlparser::ast::Function, driver: Option<SqlDriver>) -> Option<String> {
+    let sqlparser::ast::FunctionArguments::List(list) = &f.args else {
+        return None;
+    };
+    let [arg] = list.args.as_slice() else {
+        return None;
+    };
+    match arg {
+        sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Wildcard) => {
+            Some("*".to_string())
+        }
+        sqlparser::ast::FunctionArg::Unnamed(sqlparser::ast::FunctionArgExpr::Expr(e)) => {
+            Some(pure_ast_expr(e, driver)?.0)
+        }
+        _ => None,
+    }
+}
+
+/// The unaliased column name real driver metadata reports for a bare
+/// literal select item - confirmed live against real MySQL (`SELECT 1`
+/// -> `"1"`, `SELECT 'x'` -> `"x"` (the string's own *content*, not its
+/// quoted source form), `SELECT true` -> `"true"`, `SELECT NULL` ->
+/// `"NULL"`). `Value::Null`/`Value::Boolean` carry no original-casing
+/// text of their own to reproduce exactly (a real, disclosed, cosmetic-
+/// only precision gap for an already-corpus-confirmed-hypothetical query
+/// shape) - a fixed canonical casing is used instead of guessing.
+fn literal_name(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(text, _) => Some(text.clone()),
+        Value::SingleQuotedString(s) | Value::DoubleQuotedString(s) => Some(s.clone()),
+        Value::Boolean(b) => Some(if *b { "true" } else { "false" }.to_string()),
+        Value::Null => Some("NULL".to_string()),
+        _ => None,
+    }
+}
+
+fn literal_value_type(value: &Value, driver: Option<SqlDriver>) -> Option<Type> {
+    match value {
+        Value::Number(text, _) => {
+            if text.contains(['.', 'e', 'E']) {
+                match driver {
+                    Some(SqlDriver::Mysql | SqlDriver::Pgsql) => Some(Type::String),
+                    Some(SqlDriver::Sqlite) => Some(Type::Float),
+                    None => None,
+                }
+            } else {
+                Some(Type::Int)
+            }
+        }
+        Value::SingleQuotedString(_) | Value::DoubleQuotedString(_) => Some(Type::String),
+        Value::Boolean(_) => match driver {
+            Some(SqlDriver::Pgsql) => Some(Type::Bool),
+            Some(SqlDriver::Mysql | SqlDriver::Sqlite) => Some(Type::Int),
+            None => None,
+        },
+        Value::Null => Some(Type::Null),
+        _ => None,
+    }
 }
 
 /// `COUNT(...)` is always `int<0, max>` - real Doctrine's own
