@@ -1,13 +1,16 @@
 //! Sub-phase E of the live SQL query reflection phase (see
 //! `delegated-tumbling-dongarra.md`) - end-to-end coverage of
-//! `checker::sql_reflection::parameter_validation`'s two diagnostics
-//! (`sqlReflection.missingParameter`/`sqlReflection.invalidParameterType`),
-//! through the same minimal DBAL class hierarchy
-//! `sql_reflection_dispatch.rs` already declares (real DBAL isn't
-//! vendored as a stub here either). No live database or static schema
-//! catalog is needed for any of these - this check only ever compares
-//! the resolved SQL text's own placeholders against the PHP-side
-//! bindings, never a column type.
+//! `checker::sql_reflection::parameter_validation`'s diagnostics
+//! (`sqlReflection.missingParameter`/`sqlReflection.invalidParameterType`,
+//! the latter covering both the array-without-`ArrayParameterType::*`
+//! shape and the `ParameterType`/`Types::INTEGER`-declared-but-bound-a-
+//! non-numeric-string shape), through the same minimal DBAL class
+//! hierarchy `sql_reflection_dispatch.rs` already declares (real DBAL
+//! isn't vendored as a stub here either). No live database or static
+//! schema catalog is needed for any of these - this check only ever
+//! compares the resolved SQL text's own placeholders, and the call
+//! site's own explicit type declarations, against the PHP-side
+//! bindings, never a live/static column type.
 
 use super::helpers::*;
 
@@ -17,11 +20,23 @@ const STUBS: &str = r#"
             case INTEGER;
             case STRING;
         }
+        enum ParameterType {
+            case INTEGER;
+            case STRING;
+        }
         class Connection {
             public function fetchAssociative(string $query, array $params = [], array $types = []): array|false {}
             public function executeQuery(string $sql, array $params = [], array $types = []): mixed {}
             public function executeStatement(string $sql, array $params = [], array $types = []): int|string {}
             public function createQueryBuilder(): Query\QueryBuilder {}
+        }
+    }
+    namespace Doctrine\DBAL\Types {
+        class Types {
+            const INTEGER = 'integer';
+            const SMALLINT = 'smallint';
+            const BIGINT = 'bigint';
+            const STRING = 'string';
         }
     }
     namespace Doctrine\DBAL\Query {
@@ -205,6 +220,119 @@ fn a_params_argument_that_is_a_plain_variable_not_a_literal_array_is_undecidable
 
         function f(Connection $c, array $ids): void {
             $c->executeStatement('DELETE FROM images WHERE id IN (?, ?)', $ids);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn set_parameter_with_a_non_numeric_string_declared_as_parameter_type_integer_is_flagged() {
+    let d = diagnostics_with_dbal_stubs(
+        r#"
+        namespace App;
+
+        use Doctrine\DBAL\Connection;
+        use Doctrine\DBAL\ParameterType;
+
+        function f(Connection $c): void {
+            $c->createQueryBuilder()
+                ->select('id')
+                ->from('categories')
+                ->where('id = :id')
+                ->setParameter('id', 'not-a-number', ParameterType::INTEGER)
+                ->fetchAssociative();
+        }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "sqlReflection.invalidParameterType"),
+        "expected an invalidParameterType diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn set_parameter_with_a_numeric_string_declared_as_parameter_type_integer_is_not_flagged() {
+    let d = diagnostics_with_dbal_stubs(
+        r#"
+        namespace App;
+
+        use Doctrine\DBAL\Connection;
+        use Doctrine\DBAL\ParameterType;
+
+        function f(Connection $c): void {
+            $c->createQueryBuilder()
+                ->select('id')
+                ->from('categories')
+                ->where('id = :id')
+                ->setParameter('id', '42', ParameterType::INTEGER)
+                ->fetchAssociative();
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn connections_own_types_argument_with_types_integer_and_a_non_numeric_string_is_flagged() {
+    let d = diagnostics_with_dbal_stubs(
+        r#"
+        namespace App;
+
+        use Doctrine\DBAL\Connection;
+        use Doctrine\DBAL\Types\Types;
+
+        function f(Connection $c): void {
+            $c->fetchAssociative(
+                'SELECT * FROM categories WHERE id = ?',
+                ['not-a-number'],
+                [Types::INTEGER]
+            );
+        }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "sqlReflection.invalidParameterType"),
+        "expected an invalidParameterType diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_numeric_string_bound_with_no_declared_type_at_all_is_not_flagged() {
+    let d = diagnostics_with_dbal_stubs(
+        r#"
+        namespace App;
+
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $c->fetchAssociative(
+                'SELECT * FROM categories WHERE name = ?',
+                ['not-a-number']
+            );
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_non_numeric_string_bound_with_parameter_type_string_is_not_flagged() {
+    let d = diagnostics_with_dbal_stubs(
+        r#"
+        namespace App;
+
+        use Doctrine\DBAL\Connection;
+        use Doctrine\DBAL\ParameterType;
+
+        function f(Connection $c): void {
+            $c->fetchAssociative(
+                'SELECT * FROM categories WHERE name = ?',
+                ['not-a-number'],
+                [ParameterType::STRING]
+            );
         }
         "#,
     );

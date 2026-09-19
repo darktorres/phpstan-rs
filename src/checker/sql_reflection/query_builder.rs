@@ -130,6 +130,18 @@ pub(crate) struct ParamBinding {
     /// hypothetical: 53+ real Piwigo `setParameter('ids', $ids,
     /// ArrayParameterType::INTEGER)` call sites alone.
     pub(crate) expects_array: bool,
+    /// Real DBAL: `setParameter($key, $value, ParameterType::INTEGER)`
+    /// (or the equivalent `Doctrine\DBAL\Types\Types::INTEGER`/
+    /// `SMALLINT`/`BIGINT` type-name constant) - a connection-independent
+    /// source of parameter-type truth, real and present in this exact
+    /// corpus (`PermissionRepository.php`'s own `setParameter('level',
+    /// ..., ParameterType::INTEGER)`). Deliberately not extended to
+    /// `STRING`/`BOOLEAN`/etc - PHP/SQL's own scalar coercion makes
+    /// almost every value validly bindable as those, the same zero-
+    /// coercion-risk bar `parameter_validation.rs`'s own module doc
+    /// already sets; `INTEGER` is the one family with a real, always-
+    /// wrong value shape to check for (a literal, non-numeric string).
+    pub(crate) expects_integer: bool,
 }
 
 impl DbalQueryBuilderChain {
@@ -523,11 +535,15 @@ impl<'a> Checker<'a> {
                 let expects_array = args
                     .get(2)
                     .is_some_and(|a| is_array_parameter_type(self, &a.value));
+                let expects_integer = args
+                    .get(2)
+                    .is_some_and(|a| is_integer_parameter_type(self, &a.value));
                 chain.params.retain(|p| p.key != key);
                 chain.params.push(ParamBinding {
                     key,
                     value_ty,
                     expects_array,
+                    expects_integer,
                 });
             }
             "setParameters" => {
@@ -537,22 +553,27 @@ impl<'a> Checker<'a> {
                 // The parallel `$types` array (real signature:
                 // `setParameters(array $params, array $types = [])`) is
                 // keyed the same way as `$params` - only consulted for
-                // the `ArrayParameterType::*` exemption, same as
-                // `setParameter`'s own third argument.
-                let types_by_key: Vec<(ParamKey, bool)> = match args.get(1).map(|a| &a.value.kind) {
-                    Some(ExprKind::ArrayLiteral(type_items)) => type_items
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(position, item)| {
-                            let key = match &item.key {
-                                Some(k) => param_key_from_expr(self, k, locals)?,
-                                None => ParamKey::Positional(position as i64),
-                            };
-                            Some((key, is_array_parameter_type(self, &item.value)))
-                        })
-                        .collect(),
-                    _ => Vec::new(),
-                };
+                // the `ArrayParameterType::*`/`ParameterType::INTEGER`
+                // exemptions, same as `setParameter`'s own third argument.
+                let types_by_key: Vec<(ParamKey, bool, bool)> =
+                    match args.get(1).map(|a| &a.value.kind) {
+                        Some(ExprKind::ArrayLiteral(type_items)) => type_items
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(position, item)| {
+                                let key = match &item.key {
+                                    Some(k) => param_key_from_expr(self, k, locals)?,
+                                    None => ParamKey::Positional(position as i64),
+                                };
+                                Some((
+                                    key,
+                                    is_array_parameter_type(self, &item.value),
+                                    is_integer_parameter_type(self, &item.value),
+                                ))
+                            })
+                            .collect(),
+                        _ => Vec::new(),
+                    };
                 let mut params = Vec::new();
                 for (position, item) in items.iter().enumerate() {
                     let key = match &item.key {
@@ -562,11 +583,15 @@ impl<'a> Checker<'a> {
                     let value_ty = self.infer_expr(&item.value, locals);
                     let expects_array = types_by_key
                         .iter()
-                        .any(|(k, expects_array)| *k == key && *expects_array);
+                        .any(|(k, expects_array, _)| *k == key && *expects_array);
+                    let expects_integer = types_by_key
+                        .iter()
+                        .any(|(k, _, expects_integer)| *k == key && *expects_integer);
                     params.push(ParamBinding {
                         key,
                         value_ty,
                         expects_array,
+                        expects_integer,
                     });
                 }
                 chain.params = params;
@@ -719,6 +744,50 @@ pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
             .ends_with("ArrayParameterType"),
         _ => false,
     }
+}
+
+/// `Doctrine\DBAL\ParameterType::INTEGER` or the equivalent `Doctrine\
+/// DBAL\Types\Types::INTEGER`/`SMALLINT`/`BIGINT` type-name constant -
+/// real DBAL's own two distinct places an integer parameter type is
+/// declared (`ParameterType` binds a driver-level PDO type; `Types` is
+/// Doctrine's own richer type-mapping system, but both are real,
+/// confirmed-present ways this corpus declares "this placeholder is an
+/// integer"). Matched by resolved class name *and* member, unlike
+/// `is_array_parameter_type` - every `ArrayParameterType` case means the
+/// same thing for that check, but `ParameterType`/`Types` have several
+/// other cases (`STRING`/`BOOLEAN`/...) this project deliberately
+/// doesn't treat as integer.
+pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::StaticAccess(class_name, member) => {
+            let resolved = checker.name_ctx.resolve(class_name);
+            let short_name = resolved.rsplit('\\').next().unwrap_or(&resolved);
+            match short_name {
+                "ParameterType" => member == "INTEGER",
+                "Types" => matches!(member.as_str(), "INTEGER" | "SMALLINT" | "BIGINT"),
+                _ => false,
+            }
+        }
+        _ => false,
+    }
+}
+
+/// A literal PHP value that can never validly represent a real DBAL
+/// `Types::INTEGER`/`ParameterType::INTEGER`-declared placeholder -
+/// scoped deliberately narrow (a non-numeric string literal only, real
+/// PHP's own `is_numeric()` grammar) to stay inside this whole feature's
+/// zero-coercion-risk bar: a numeric *string* (`'42'`) is completely
+/// normal, safe, everyday DBAL usage for an integer column, not a
+/// mismatch.
+pub(crate) fn value_is_confidently_not_an_integer(value_ty: &Type) -> bool {
+    match value_ty {
+        Type::StringLiteral(s) => !is_php_numeric_string(s),
+        _ => false,
+    }
+}
+
+fn is_php_numeric_string(s: &str) -> bool {
+    s.trim().parse::<f64>().is_ok()
 }
 
 fn param_key_from_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<ParamKey> {

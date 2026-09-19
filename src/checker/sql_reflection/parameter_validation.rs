@@ -11,7 +11,7 @@
 //! of which one happens to dominate any one corpus - this project
 //! targets general Doctrine/DBAL usage, not just Piwigo's own.
 //!
-//! Two checks, both zero-coercion-risk (PHP/SQL's own loose scalar
+//! Three checks, all zero-coercion-risk (PHP/SQL's own loose scalar
 //! type-juggling is real and this project doesn't try to out-guess it -
 //! see `sql_reflection_reflector`'s own `STRINGIFY_FETCHES` research for
 //! why that caution matters):
@@ -21,20 +21,30 @@
 //! - `sqlReflection.invalidParameterType`: a bound value is a real PHP
 //!   array, but the placeholder isn't declared with `ArrayParameterType::*`
 //!   (real DBAL's own supported way to bind an array as one `IN (...)`
-//!   list) - a plain SQL placeholder can never validly hold an array.
+//!   list) - a plain SQL placeholder can never validly hold an array. The
+//!   same identifier also covers a second, narrower source of truth: a
+//!   placeholder explicitly declared `ParameterType::INTEGER`/`Types::
+//!   INTEGER`/`SMALLINT`/`BIGINT` (real DBAL, a connection-independent
+//!   fact already present in the call site's own PHP source - no live/
+//!   static schema needed) bound to a literal, non-numeric string, which
+//!   can never be a valid integer regardless of what any database says.
 //!
 //! Deliberately not built: comparing a bound value's own type against
-//! the prepared statement's own live-reported expected type. SQL/PHP's
+//! the *prepared statement's own live-reported* expected type. SQL/PHP's
 //! own scalar coercion is genuinely loose (a numeric string into an INT
 //! column is completely normal, safe, everyday usage) - a real, risk-
-//! based scope limit, not a corpus-popularity one.
+//! based scope limit, not a corpus-popularity one. The `ParameterType`/
+//! `Types::INTEGER`-style check above is different in kind, not degree:
+//! it never consults a database at all, only the call site's own two
+//! arguments contradicting each other.
 
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::{Token, Tokenizer};
 
 use crate::ast::{Arg, Expr, ExprKind};
 use crate::checker::sql_reflection::query_builder::{
-    ParamBinding, ParamKey, is_array_parameter_type, param_key_from_expr,
+    ParamBinding, ParamKey, is_array_parameter_type, is_integer_parameter_type,
+    param_key_from_expr, value_is_confidently_not_an_integer,
 };
 use crate::checker::{Checker, Locals};
 use crate::token::Span;
@@ -100,7 +110,7 @@ fn connection_params_from_args(
         Some(ExprKind::ArrayLiteral(items)) => items,
         Some(_) => return None,
     };
-    let types_by_key: Vec<(ParamKey, bool)> = match args.get(2).map(|a| &a.value.kind) {
+    let types_by_key: Vec<(ParamKey, bool, bool)> = match args.get(2).map(|a| &a.value.kind) {
         Some(ExprKind::ArrayLiteral(type_items)) => type_items
             .iter()
             .enumerate()
@@ -109,7 +119,11 @@ fn connection_params_from_args(
                     Some(k) => param_key_from_expr(checker, k, locals)?,
                     None => ParamKey::Positional(position as i64),
                 };
-                Some((key, is_array_parameter_type(checker, &item.value)))
+                Some((
+                    key,
+                    is_array_parameter_type(checker, &item.value),
+                    is_integer_parameter_type(checker, &item.value),
+                ))
             })
             .collect(),
         _ => Vec::new(),
@@ -128,11 +142,15 @@ fn connection_params_from_args(
         let value_ty = checker.infer_expr(&item.value, locals);
         let expects_array = types_by_key
             .iter()
-            .any(|(k, expects_array)| *k == key && *expects_array);
+            .any(|(k, expects_array, _)| *k == key && *expects_array);
+        let expects_integer = types_by_key
+            .iter()
+            .any(|(k, _, expects_integer)| *k == key && *expects_integer);
         params.push(ParamBinding {
             key,
             value_ty,
             expects_array,
+            expects_integer,
         });
     }
     Some(params)
@@ -243,6 +261,21 @@ impl<'a> Checker<'a> {
                     label.to_string(),
                     format!(
                         "{class}::{method}() binds an array to parameter {} without ArrayParameterType::*, which every plain SQL placeholder rejects at runtime",
+                        describe_key(&binding.key)
+                    ),
+                    span,
+                    0,
+                    "sqlReflection.invalidParameterType",
+                );
+            }
+            if binding.expects_integer
+                && placeholder_keys.contains(&binding.key)
+                && value_is_confidently_not_an_integer(&binding.value_ty)
+            {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{class}::{method}() binds a non-numeric string to parameter {} declared as an integer type",
                         describe_key(&binding.key)
                     ),
                     span,
