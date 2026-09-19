@@ -53,6 +53,95 @@ fn an_entity_records_its_id_field_scalar_fields_and_repository_class() {
 }
 
 #[test]
+fn a_table_attribute_with_an_explicit_name_is_recorded() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            #[ORM\Table(name: 'tags')]
+            class TagEntity
+            {
+                #[ORM\Id]
+                #[ORM\Column]
+                public int $id;
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\TagEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert_eq!(entity.table_name.as_deref(), Some("tags"));
+}
+
+#[test]
+fn no_table_attribute_at_all_leaves_table_name_none() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            class TagEntity
+            {
+                #[ORM\Id]
+                #[ORM\Column]
+                public int $id;
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\TagEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert!(entity.table_name.is_none());
+}
+
+#[test]
+fn a_column_name_argument_overrides_the_property_name() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            use Doctrine\ORM\Mapping as ORM;
+
+            #[ORM\Entity]
+            #[ORM\Table(name: 'tags')]
+            class TagEntity
+            {
+                #[ORM\Id]
+                #[ORM\Column]
+                public int $id;
+
+                public function __construct(
+                    #[ORM\Column(name: 'display_name')]
+                    public string $name,
+                ) {}
+            }
+            "#,
+    );
+    let entity = r
+        .classes
+        .get("App\\TagEntity")
+        .unwrap()
+        .doctrine_entity
+        .as_ref()
+        .unwrap();
+    assert_eq!(entity.column_names.get("id").map(|s| &**s), Some("id"));
+    assert_eq!(
+        entity.column_names.get("name").map(|s| &**s),
+        Some("display_name")
+    );
+}
+
+#[test]
 fn a_many_to_one_association_resolves_its_target_from_the_native_type() {
     let r = build_registry(
         r#"<?php

@@ -30,7 +30,8 @@ use crate::types::Type;
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
     let driver = registry.sql_reflection_config.as_ref().map(|c| c.driver);
     if let Some(ty) = resolve_pure_ast(sql, driver) {
-        return Some(refine_count_columns(sql, ty));
+        let ty = refine_count_columns(sql, ty);
+        return Some(cross_reference_entity_fields(registry, sql, ty));
     }
     if let Some(cached) = registry.sql_reflection_cache.lock().unwrap().get(sql) {
         return cached.clone();
@@ -45,13 +46,85 @@ pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Typ
             .get(registry.sql_reflection_config.as_ref())
             .and_then(|r| r.reflect(sql))
     };
-    let result = row_type.map(|ty| refine_count_columns(sql, ty));
+    let result = row_type
+        .map(|ty| refine_count_columns(sql, ty))
+        .map(|ty| cross_reference_entity_fields(registry, sql, ty));
     registry
         .sql_reflection_cache
         .lock()
         .unwrap()
         .insert(sql.to_string(), result.clone());
     result
+}
+
+/// Gap #9: a raw SQL query against a table a `DoctrineEntity` already
+/// maps should prefer that entity's own already-resolved PHP property
+/// type over a freshly-derived DB-column-type translation, for any
+/// column that's also a mapped scalar field - the entity's own mapped
+/// type can be strictly more precise (a narrower non-null guarantee the
+/// app enforces above the DB's own nullability, a value-object wrapper,
+/// ...). Only ever *narrows*: `is_subtype(entity_ty, column_ty)` must
+/// hold, so a genuine disagreement (the entity's own type is wider, or
+/// simply incompatible) keeps the column-derived answer rather than
+/// silently trusting possibly-stale entity metadata over a live/static
+/// schema fact. Scoped to the same single-table, no-`JOIN` shape every
+/// other step in this module already restricts itself to.
+fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type) -> Type {
+    let Type::ArrayShape(fields) = &row_type else {
+        return row_type;
+    };
+    let Some(table) = single_table_name(sql) else {
+        return row_type;
+    };
+    let Some(entity) = registry.doctrine_entity_for_table(&table) else {
+        return row_type;
+    };
+    let refined = fields
+        .iter()
+        .map(|(name, ty, optional)| {
+            let property = entity
+                .column_names
+                .iter()
+                .find(|(_, column)| column.as_ref() == name)
+                .map(|(property, _)| property);
+            let entity_ty = property.and_then(|p| entity.fields.get(p));
+            match entity_ty {
+                Some(entity_ty) if crate::types::is_subtype(entity_ty, ty) => {
+                    (name.clone(), entity_ty.clone(), *optional)
+                }
+                _ => (name.clone(), ty.clone(), *optional),
+            }
+        })
+        .collect();
+    Type::ArrayShape(refined)
+}
+
+/// The exact `single-table, no JOIN` scope `resolve_select_from_static_
+/// schema` already restricts itself to, extracted here as its own
+/// standalone parse since this needs the table name independent of
+/// *which* resolution step actually answered the query (pure-AST,
+/// static, or live all funnel through here identically).
+fn single_table_name(sql: &str) -> Option<String> {
+    let stmt = Parser::parse_sql(&GenericDialect {}, sql)
+        .ok()?
+        .into_iter()
+        .next()?;
+    let Statement::Query(query) = stmt else {
+        return None;
+    };
+    let SetExpr::Select(select) = *query.body else {
+        return None;
+    };
+    if select.from.len() != 1 || !select.from[0].joins.is_empty() {
+        return None;
+    }
+    let TableFactor::Table { name, .. } = &select.from[0].relation else {
+        return None;
+    };
+    name.0.last().and_then(|part| match part {
+        ObjectNamePart::Identifier(ident) => Some(ident.value.clone()),
+        ObjectNamePart::Function(_) => None,
+    })
 }
 
 /// Resolution-order step 1: a select list of only literals and/or a

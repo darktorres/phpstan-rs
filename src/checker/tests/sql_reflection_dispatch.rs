@@ -584,3 +584,103 @@ fn a_plain_literal_string_held_in_a_variable_is_still_folded() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_mapped_entitys_non_nullable_native_property_type_narrows_a_nullable_db_column() {
+    // `categories.name` is genuinely nullable in the DB, but the app's
+    // own mapped entity declares a non-nullable native `string $name` -
+    // a real, common Doctrine pattern (a column allows NULL only for
+    // legacy/migration reasons, but the app enforces it's always
+    // populated). The mapped entity's own type should win.
+    let d = diagnostics_for_with(
+        &format!(
+            "<?php\n{STUBS}\n{}\n{}",
+            ORM_MAPPING_STUBS,
+            r#"
+            namespace App;
+
+            use Doctrine\ORM\Mapping as ORM;
+            use function PHPStan\Testing\assertType;
+            use Doctrine\DBAL\Connection;
+
+            #[ORM\Entity]
+            #[ORM\Table(name: 'categories')]
+            class CategoryEntity
+            {
+                #[ORM\Column]
+                public string $name;
+            }
+
+            function f(Connection $c): void {
+                $row = $c->fetchAssociative('SELECT name FROM categories');
+                assertType('array{name: string}|false', $row);
+            }
+            "#
+        ),
+        |registry| {
+            registry.sql_reflection_schema = Some(crate::sql_reflection_schema::parse_ddl(
+                "CREATE TABLE categories (name varchar(255));",
+                crate::sql_reflection_config::SqlDriver::Mysql,
+            ));
+        },
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+const ORM_MAPPING_STUBS: &str = r#"
+    namespace Doctrine\ORM\Mapping {
+        #[\Attribute]
+        class Entity {
+            public function __construct(public ?string $repositoryClass = null) {}
+        }
+        #[\Attribute]
+        class Table {
+            public function __construct(public ?string $name = null) {}
+        }
+        #[\Attribute]
+        class Column {
+            public function __construct(public ?string $name = null, public ?string $type = null) {}
+        }
+    }
+"#;
+
+#[test]
+fn an_entity_field_whose_type_disagrees_incompatibly_does_not_override_the_column_type() {
+    // The entity's own native type here (`int`) is not a subtype of the
+    // column's own real type (`string`) - a genuine disagreement, not a
+    // narrowing, so the column-derived answer must win rather than
+    // silently trust the (here, wrong) entity metadata.
+    let d = diagnostics_for_with(
+        &format!(
+            "<?php\n{STUBS}\n{}\n{}",
+            ORM_MAPPING_STUBS,
+            r#"
+            namespace App;
+
+            use Doctrine\ORM\Mapping as ORM;
+            use function PHPStan\Testing\assertType;
+            use Doctrine\DBAL\Connection;
+
+            #[ORM\Entity]
+            #[ORM\Table(name: 'categories')]
+            class CategoryEntity
+            {
+                #[ORM\Column]
+                public int $name;
+            }
+
+            function f(Connection $c): void {
+                $row = $c->fetchAssociative('SELECT name FROM categories');
+                assertType('array{name: string}|false', $row);
+            }
+            "#
+        ),
+        |registry| {
+            registry.sql_reflection_schema = Some(crate::sql_reflection_schema::parse_ddl(
+                "CREATE TABLE categories (name varchar(255) NOT NULL);",
+                crate::sql_reflection_config::SqlDriver::Mysql,
+            ));
+        },
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

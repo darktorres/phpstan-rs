@@ -291,3 +291,28 @@ fn resolve_sql_row_type_caches_an_undecidable_answer_by_sql_text() {
     // cache-hit path without panicking).
     assert!(resolve_sql_row_type(&registry, sql).is_none());
 }
+
+#[test]
+fn single_table_name_extracts_the_bare_table_name() {
+    assert_eq!(
+        single_table_name("SELECT id FROM categories"),
+        Some("categories".to_string())
+    );
+}
+
+#[test]
+fn single_table_name_returns_none_for_a_join() {
+    assert!(
+        single_table_name("SELECT id FROM categories JOIN images ON images.id = categories.id")
+            .is_none()
+    );
+}
+
+#[test]
+fn cross_reference_entity_fields_is_a_no_op_with_no_matching_entity() {
+    let registry = Registry::default();
+    let row_type = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let result =
+        cross_reference_entity_fields(&registry, "SELECT name FROM categories", row_type.clone());
+    assert_eq!(result, row_type);
+}

@@ -275,6 +275,20 @@ pub struct Registry {
     // `Mutex` (mirrors the real, confirmed concurrency hazard
     // `sql_reflector` above already accounts for).
     pub sql_reflection_cache: std::sync::Mutex<FxHashMap<String, Option<Type>>>,
+    // Real DB table name -> the one mapped `DoctrineEntity`'s own class
+    // name (`checker::sql_reflection::resolve`'s own entity cross-
+    // reference, gap #9 of the live SQL reflection phase) - lazily
+    // built once from `classes` on first real use, mirroring `sql_
+    // reflector`'s own `OnceLock` shape, since it's a whole-program
+    // computation (every class must already be indexed) rather than
+    // something computable per-class as `classes` itself fills in.
+    // Two entities mapped to the same real table name is a genuine,
+    // if unusual, Doctrine possibility (e.g. a `readOnly` reporting
+    // entity mapped onto another entity's own table) - the first
+    // one found wins rather than picking arbitrarily on every lookup,
+    // since this project has no real corpus case to verify a "which
+    // one wins" rule against.
+    doctrine_entity_table_index: std::sync::OnceLock<FxHashMap<Arc<str>, Arc<str>>>,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
     // treat as "nothing to check yet." See `crate::php_version::PhpFeature`
@@ -382,6 +396,31 @@ impl Registry {
         registry.precompute_ancestor_names();
         registry.precompute_member_owners();
         registry
+    }
+
+    /// The one `DoctrineEntity`-mapped class whose own `#[ORM\Table(name:
+    /// ...)]` matches `table` exactly, if any - see `doctrine_entity_
+    /// table_index`'s own doc comment for why this is lazily built
+    /// rather than maintained incrementally.
+    pub fn doctrine_entity_for_table(
+        &self,
+        table: &str,
+    ) -> Option<&crate::registry::class_info::DoctrineEntity> {
+        let index = self.doctrine_entity_table_index.get_or_init(|| {
+            let mut index = FxHashMap::default();
+            for (class_name, info) in &self.classes {
+                if let Some(entity) = &info.doctrine_entity
+                    && let Some(table_name) = &entity.table_name
+                {
+                    index
+                        .entry(table_name.clone())
+                        .or_insert_with(|| class_name.clone());
+                }
+            }
+            index
+        });
+        let class_name = index.get(table)?;
+        self.classes.get(class_name)?.doctrine_entity.as_ref()
     }
 }
 

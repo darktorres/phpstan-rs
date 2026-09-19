@@ -60,6 +60,26 @@ pub struct DoctrineEntity {
     /// consulted only via `associations` below in practice).
     pub fields: HashMap<Arc<str>, Type>,
     pub associations: HashMap<Arc<str>, DoctrineAssociation>,
+    /// `#[ORM\Table(name: '...')]`'s own argument - `None` when absent
+    /// (real Doctrine would then fall back to its own default naming
+    /// strategy, generally the bare class name, which this project
+    /// doesn't attempt to replicate - every real corpus entity checked
+    /// declares this explicitly). Raw SQL query reflection's own table-
+    /// name cross-reference (`checker::sql_reflection::resolve`) is the
+    /// only consumer - Phase 168's own DQL-side machinery never needed
+    /// a real DB table/column name at all, since DQL resolves through
+    /// property names.
+    pub table_name: Option<Arc<str>>,
+    /// Property name -> its own real DB column name
+    /// (`#[ORM\Column(name: '...')]`'s argument, or the property's own
+    /// name unchanged when absent - real Doctrine's own default naming
+    /// strategy, confirmed: every corpus `#[ORM\Column]` with no `name:`
+    /// argument maps a property whose name is already identical to its
+    /// real DB column). Only scalar `fields` are present here, not
+    /// `associations` - a raw SQL column is never itself another
+    /// entity's own object identity, so there's nothing this cross-
+    /// reference would need an association's own column name for.
+    pub column_names: HashMap<Arc<str>, Arc<str>>,
     /// `#[ORM\Entity(repositoryClass: ...)]`'s own argument, if present -
     /// resolved to a fully-qualified class name.
     pub repository_class: Option<Arc<str>>,
@@ -102,6 +122,25 @@ fn class_const_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
             return None;
         }
         class_name_of_class_const(&arg.value)
+    })
+}
+
+/// A named argument's own value, when it's a plain string literal
+/// (`#[ORM\Table(name: 'categories')]`/`#[ORM\Column(name: '...')]`'s
+/// only real corpus shape) - deliberately separate from `checker::
+/// assignment::literal_string_value` rather than reusing it: `registry`
+/// has zero existing references to `checker::` types (`checker`
+/// depends on `registry`, never the reverse), so a shared helper here
+/// would invert that direction.
+fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
+    attr.args.iter().find_map(|arg| {
+        if arg.name.as_deref() != Some(name) {
+            return None;
+        }
+        match &arg.value.kind {
+            ExprKind::Literal(Literal::String(s)) => Some(s.as_ref()),
+            _ => None,
+        }
     })
 }
 
@@ -175,6 +214,9 @@ pub(crate) fn compute_doctrine_entity(
     let entity_attr = find_orm_attribute(ctx, &c.attrs, "Entity")?;
     let repository_class =
         class_const_arg(entity_attr, "repositoryClass").map(|name| intern(&ctx.resolve(name)));
+    let table_name = find_orm_attribute(ctx, &c.attrs, "Table")
+        .and_then(|attr| string_arg(attr, "name"))
+        .map(intern);
     let discriminator_map = find_orm_attribute(ctx, &c.attrs, "DiscriminatorMap")
         .map(|attr| discriminator_map_arg(ctx, attr))
         .unwrap_or_default();
@@ -202,12 +244,17 @@ pub(crate) fn compute_doctrine_entity(
 
     let mut id_fields: Vec<Arc<str>> = Vec::new();
     let mut fields: HashMap<Arc<str>, Type> = HashMap::new();
+    let mut column_names: HashMap<Arc<str>, Arc<str>> = HashMap::new();
     let mut associations: HashMap<Arc<str>, DoctrineAssociation> = HashMap::new();
     for (name, attrs) in &attrs_by_property {
         let Some(sig) = properties.get(*name) else {
             continue;
         };
         fields.insert(intern(name), sig.ty_native.clone());
+        if let Some(column_attr) = find_orm_attribute(ctx, attrs, "Column") {
+            let column_name = string_arg(column_attr, "name").unwrap_or(name);
+            column_names.insert(intern(name), intern(column_name));
+        }
         if find_orm_attribute(ctx, attrs, "Id").is_some() {
             id_fields.push(intern(name));
         }
@@ -258,6 +305,8 @@ pub(crate) fn compute_doctrine_entity(
         },
         fields,
         associations,
+        table_name,
+        column_names,
         repository_class,
         discriminator_map,
     })
