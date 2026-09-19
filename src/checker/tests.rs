@@ -69,6 +69,7 @@ mod require_and_sealed;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
 mod see_tag;
+mod sql_reflection_dispatch;
 mod string_functions;
 mod swapped_arguments;
 mod switch_missing_default;

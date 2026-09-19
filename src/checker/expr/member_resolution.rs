@@ -684,23 +684,126 @@ impl<'a> Checker<'a> {
                     Type::Union(vec![Type::String, Type::False])
                 }
             }
-            Type::Object(class, type_args) => self
-                .registry
-                .lookup_method_with_owner(class, method)
-                .map(|(owner, sig)| {
-                    // Class-level substitution (Collection<User>'s own
-                    // `T`, or an inherited method's owner-level `T` via
-                    // does) runs first, then infer_call_return_
-                    // type's existing per-call-argument binding handles
-                    // any template the *method itself* separately
-                    // declares - the two are independent parameter scopes
-                    // that can both appear on the same signature.
-                    let sig = self.substitute_class_templates(sig, class, type_args, &owner);
-                    let resolved_args = resolve_call_args(args, &sig.params);
-                    let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
-                    self.resolve_pseudo(&resolved, class)
-                })
-                .unwrap_or(Type::Mixed),
+            // Sub-phase D of the live SQL query reflection phase (see
+            // delegated-tumbling-dongarra.md): `Doctrine\DBAL\Result`'s
+            // own no-argument terminal methods - the second hop of the
+            // `executeQuery()` -> `Result` propagation just below reads
+            // the row type back from `type_args[0]`, the same
+            // synthesized-generic-slot convention 168e already
+            // established for `Doctrine\ORM\Query` (`Result` isn't a
+            // real templated class either - this project smuggles the
+            // row type through the same way).
+            Type::Object(class, type_args)
+                if matches!(
+                    method,
+                    "fetchAssociative" | "fetchAllAssociative" | "fetchOne" | "fetchFirstColumn"
+                ) && self
+                    .registry
+                    .is_subclass_of(class, "Doctrine\\DBAL\\Result") =>
+            {
+                match (method, type_args.first().cloned()) {
+                    ("fetchAssociative", Some(row_type)) => {
+                        Type::Union(vec![row_type, Type::False])
+                    }
+                    ("fetchAllAssociative", Some(row_type)) => {
+                        crate::checker::expr::doctrine_query_result_list_type_of(row_type)
+                    }
+                    ("fetchOne", Some(Type::ArrayShape(mut fields))) if !fields.is_empty() => {
+                        Type::Union(vec![fields.remove(0).1, Type::False])
+                    }
+                    ("fetchFirstColumn", Some(Type::ArrayShape(mut fields)))
+                        if !fields.is_empty() =>
+                    {
+                        crate::checker::expr::doctrine_query_result_list_type_of(fields.remove(0).1)
+                    }
+                    _ => self
+                        .generic_object_method_return_type(class, type_args, method, args, locals),
+                }
+            }
+            // `Doctrine\DBAL\Connection`'s own directly-SQL-taking
+            // fetch* methods, and `Doctrine\DBAL\Query\QueryBuilder`'s
+            // own no-argument convenience aliases for the same four
+            // (real DBAL: `QueryBuilder::fetchAssociative()` etc. are
+            // pure sugar for `$this->executeQuery()->fetchAssociative()`)
+            // - `resolve_dbal_sql_from_call` picks the right SQL source
+            // per receiver kind. `fetchOne`/`fetchFirstColumn` read the
+            // *first* selected column's own type (real DBAL semantics:
+            // the value of the first column of the first/every row),
+            // not the whole row shape.
+            Type::Object(class, type_args)
+                if matches!(
+                    method,
+                    "fetchAssociative" | "fetchAllAssociative" | "fetchOne" | "fetchFirstColumn"
+                ) && (self
+                    .registry
+                    .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
+                    || self
+                        .registry
+                        .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")) =>
+            {
+                let row_type = self
+                    .resolve_dbal_sql_from_call(recv, class, args, locals)
+                    .and_then(|sql| {
+                        crate::checker::sql_reflection::resolve::resolve_sql_row_type(
+                            self.registry,
+                            &sql,
+                        )
+                    });
+                match (method, row_type) {
+                    ("fetchAssociative", Some(row_type)) => {
+                        Type::Union(vec![row_type, Type::False])
+                    }
+                    ("fetchAllAssociative", Some(row_type)) => {
+                        crate::checker::expr::doctrine_query_result_list_type_of(row_type)
+                    }
+                    ("fetchOne", Some(Type::ArrayShape(mut fields))) if !fields.is_empty() => {
+                        Type::Union(vec![fields.remove(0).1, Type::False])
+                    }
+                    ("fetchFirstColumn", Some(Type::ArrayShape(mut fields)))
+                        if !fields.is_empty() =>
+                    {
+                        crate::checker::expr::doctrine_query_result_list_type_of(fields.remove(0).1)
+                    }
+                    _ => self
+                        .generic_object_method_return_type(class, type_args, method, args, locals),
+                }
+            }
+            // `executeQuery()` - the first hop of the two-hop
+            // propagation above: carries the resolved row type forward
+            // as `Doctrine\DBAL\Result`'s own synthesized generic slot,
+            // read back by the `Result`-method dispatch above rather
+            // than re-resolving the SQL from scratch at that call site.
+            // `executeStatement()` needs no such transform at all (a
+            // plain `int|string` affected-row count, already correct via
+            // `generic_object_method_return_type`'s own ordinary
+            // resolution) - not handled here.
+            Type::Object(class, _)
+                if method == "executeQuery"
+                    && (self
+                        .registry
+                        .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
+                        || self
+                            .registry
+                            .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")) =>
+            {
+                let row_type = self
+                    .resolve_dbal_sql_from_call(recv, class, args, locals)
+                    .and_then(|sql| {
+                        crate::checker::sql_reflection::resolve::resolve_sql_row_type(
+                            self.registry,
+                            &sql,
+                        )
+                    });
+                match row_type {
+                    Some(row_type) => {
+                        Type::Object("Doctrine\\DBAL\\Result".to_string(), vec![row_type])
+                    }
+                    None => Type::Object("Doctrine\\DBAL\\Result".to_string(), Vec::new()),
+                }
+            }
+            Type::Object(class, type_args) => {
+                self.generic_object_method_return_type(class, type_args, method, args, locals)
+            }
             // An enum case is a real instance of its enum for
             // method-call purposes (see `member_confirmed_missing`'s
             // identical `EnumCase` arm) - no real template-args list to
@@ -736,6 +839,58 @@ impl<'a> Checker<'a> {
                 .reduce(union_types)
                 .unwrap_or(Type::Mixed),
             _ => Type::Mixed,
+        }
+    }
+
+    /// The ordinary, no-special-casing method-call resolution: look up
+    /// the method's own real signature (from real vendored source or a
+    /// hand-written stub, whichever indexed it) and infer its return
+    /// type the normal way. Every special-cased arm above that can fail
+    /// to resolve a more precise answer (an unfoldable SQL string, an
+    /// undecidable chain, ...) falls back to calling this directly,
+    /// rather than returning `Type::Mixed` and silently discarding a
+    /// real declared return type the ordinary path would have found.
+    fn generic_object_method_return_type(
+        &self,
+        class: &str,
+        type_args: &[Type],
+        method: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Type {
+        self.registry
+            .lookup_method_with_owner(class, method)
+            .map(|(owner, sig)| {
+                let sig = self.substitute_class_templates(sig, class, type_args, &owner);
+                let resolved_args = resolve_call_args(args, &sig.params);
+                let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
+                self.resolve_pseudo(&resolved, class)
+            })
+            .unwrap_or(Type::Mixed)
+    }
+
+    /// The SQL text a DBAL fetch*/`executeQuery` call actually runs -
+    /// `QueryBuilder`'s own no-argument convenience methods get their
+    /// SQL from the fluent chain itself (sub-phase B); `Connection`'s
+    /// own methods take it as a literal/constant-foldable first
+    /// argument instead. `None` for anything undecidable either way -
+    /// callers fall back to `generic_object_method_return_type`, never
+    /// a guess.
+    fn resolve_dbal_sql_from_call(
+        &self,
+        recv: &Expr,
+        class: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<String> {
+        if self
+            .registry
+            .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")
+        {
+            self.resolve_dbal_query_builder_sql(recv, locals)
+        } else {
+            args.first()
+                .and_then(|arg| self.foldable_sql_string(&arg.value, locals))
         }
     }
 }
