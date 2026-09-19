@@ -6,6 +6,7 @@ mod helpers;
 mod inlay_hints;
 mod navigation;
 mod protocol_and_session;
+mod references_and_rename;
 mod semantic_tokens;
 mod signature_help;
 mod variable_definitions;

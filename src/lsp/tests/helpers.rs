@@ -234,6 +234,31 @@ pub(super) fn whole_file_range() -> Value {
     })
 }
 
+pub(super) fn references_request(
+    id: i64,
+    uri: &str,
+    pos: Value,
+    include_declaration: bool,
+) -> Value {
+    request(
+        id,
+        "textDocument/references",
+        json!({
+            "textDocument": {"uri": uri},
+            "position": pos,
+            "context": {"includeDeclaration": include_declaration},
+        }),
+    )
+}
+
+pub(super) fn rename_request(id: i64, uri: &str, pos: Value, new_name: &str) -> Value {
+    request(
+        id,
+        "textDocument/rename",
+        json!({"textDocument": {"uri": uri}, "position": pos, "newName": new_name}),
+    )
+}
+
 pub(super) fn semantic_tokens_request(id: i64, uri: &str) -> Value {
     request(
         id,

@@ -47,6 +47,7 @@ use lsp_types::{
 use crate::ast::ClassKind;
 use crate::checker::{self, Checker};
 use crate::project::Project;
+use crate::project::use_sites;
 use crate::registry::{FunctionSig, format_signature, param_label};
 use crate::token::Span;
 use crate::types::Type;
@@ -1192,6 +1193,156 @@ impl Server {
         ))
     }
 
+    /// Maps a resolved symbol to every `use_sites::RefTarget` it answers
+    /// for - more than one exactly for a `Union`/`Intersection` receiver
+    /// (`Instance`), which can have more than one real declaring owner,
+    /// mirroring `definition()`'s own `GotoDefinitionResponse::Array`
+    /// handling of the identical case. A local variable
+    /// (`VariableSelf`/`VariableRead`) answers for nothing - local-
+    /// variable references/rename are out of this item's own v1 scope.
+    fn ref_targets_for(&self, resolved: &navigation::Resolved) -> Vec<use_sites::RefTarget> {
+        match resolved {
+            navigation::Resolved::Class(fqn) => vec![use_sites::RefTarget::Class(fqn.clone())],
+            navigation::Resolved::Function(fqn) => {
+                vec![use_sites::RefTarget::Function(fqn.clone())]
+            }
+            navigation::Resolved::Member(owner, name) => {
+                vec![use_sites::RefTarget::Member(owner.clone(), name.clone())]
+            }
+            navigation::Resolved::Instance {
+                receiver_span,
+                member,
+                scope,
+                is_static,
+                class,
+            } => {
+                let Some(ty) =
+                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())
+                else {
+                    return Vec::new();
+                };
+                resolve_member_owners(self.project.registry(), &ty, member)
+                    .into_iter()
+                    .map(|owner| use_sites::RefTarget::Member(owner, member.clone()))
+                    .collect()
+            }
+            navigation::Resolved::VariableSelf { .. }
+            | navigation::Resolved::VariableRead { .. } => Vec::new(),
+        }
+    }
+
+    /// `textDocument/references` - unions every `use_sites` site across
+    /// every real target `ref_targets_for` resolves to, plus (when
+    /// `include_declaration` is set) each target's own declaration site
+    /// from `decl_locations` (already built for hover/definition, so no
+    /// extra work). `ensure_member_index_built` runs unconditionally,
+    /// even for a Class/Function-only query - see its own doc comment:
+    /// the FIRST references/rename request of any kind pays this cost
+    /// once, not just a member-targeted one.
+    fn references(
+        &mut self,
+        uri: &Uri,
+        position: LspPosition,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        let path = uri_to_path(uri)?;
+        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let targets = self.ref_targets_for(&resolved);
+        if targets.is_empty() {
+            return None;
+        }
+        self.project.ensure_member_index_built();
+        let mut locations: Vec<Location> = Vec::new();
+        for target in &targets {
+            for (p, span) in self.project.use_sites().references(target) {
+                locations.push(self.location(p, *span));
+            }
+        }
+        if include_declaration {
+            let decl_locations = self.project.decl_locations();
+            for target in &targets {
+                let decl = match target {
+                    use_sites::RefTarget::Class(fqn) => decl_locations.classes.get(fqn),
+                    use_sites::RefTarget::Function(fqn) => decl_locations.functions.get(fqn),
+                    use_sites::RefTarget::Member(owner, name) => {
+                        decl_locations.members.get(&(owner.clone(), name.clone()))
+                    }
+                };
+                if let Some((p, span)) = decl {
+                    locations.push(self.location(p, *span));
+                }
+            }
+        }
+        (!locations.is_empty()).then_some(locations)
+    }
+
+    /// `textDocument/rename` - Class/Function targets only in v1 (see
+    /// this item's own edge-case notes: member and local-variable rename
+    /// are out of scope; a `Member` target's own `use_sites` spans cover
+    /// a whole `e.span`-sized expression, not the member name's own
+    /// precise sub-span, which a text-replacing rename can't safely use).
+    /// Always includes the declaration site - unlike `references`, a
+    /// rename must rewrite it regardless of any `includeDeclaration`-
+    /// style flag (there is none in the LSP rename request).
+    #[allow(clippy::mutable_key_type)]
+    fn rename(
+        &mut self,
+        uri: &Uri,
+        position: LspPosition,
+        new_name: &str,
+    ) -> Option<lsp_types::WorkspaceEdit> {
+        let path = uri_to_path(uri)?;
+        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let (target, decl) = match &resolved {
+            navigation::Resolved::Class(fqn) => (
+                use_sites::RefTarget::Class(fqn.clone()),
+                self.project
+                    .decl_locations()
+                    .classes
+                    .get(fqn)
+                    .map(|(p, s)| (p.clone(), *s)),
+            ),
+            navigation::Resolved::Function(fqn) => (
+                use_sites::RefTarget::Function(fqn.clone()),
+                self.project
+                    .decl_locations()
+                    .functions
+                    .get(fqn)
+                    .map(|(p, s)| (p.clone(), *s)),
+            ),
+            _ => return None,
+        };
+        self.project.ensure_member_index_built();
+        let mut changes: HashMap<Uri, Vec<lsp_types::TextEdit>> = HashMap::new();
+        for (p, span) in self.project.use_sites().references(&target) {
+            let (edit_uri, _) = self.uri_and_version_for(p);
+            changes
+                .entry(edit_uri)
+                .or_default()
+                .push(lsp_types::TextEdit {
+                    range: to_lsp_range(*span),
+                    new_text: new_name.to_string(),
+                });
+        }
+        if let Some((p, span)) = decl {
+            let (edit_uri, _) = self.uri_and_version_for(&p);
+            changes
+                .entry(edit_uri)
+                .or_default()
+                .push(lsp_types::TextEdit {
+                    range: to_lsp_range(span),
+                    new_text: new_name.to_string(),
+                });
+        }
+        if changes.is_empty() {
+            return None;
+        }
+        Some(lsp_types::WorkspaceEdit {
+            changes: Some(changes),
+            ..Default::default()
+        })
+    }
+
     /// Every same-file occurrence of the symbol under the cursor -
     /// `navigation::collect_all` runs the identical resolution walk
     /// `resolve_at` uses for hover/definition, just against every span in
@@ -1955,6 +2106,8 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     }),
                     document_highlight_provider: Some(OneOf::Left(true)),
                     inlay_hint_provider: Some(OneOf::Left(true)),
+                    references_provider: Some(OneOf::Left(true)),
+                    rename_provider: Some(OneOf::Left(true)),
                     semantic_tokens_provider: Some(
                         lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
                             lsp_types::SemanticTokensOptions {
@@ -2106,6 +2259,34 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
             let result = serde_json::from_value::<InlayHintParams>(req.params)
                 .ok()
                 .and_then(|params| server.inlay_hints(&params.text_document.uri, params.range))
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/references" => {
+            let result = serde_json::from_value::<lsp_types::ReferenceParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.references(
+                        &params.text_document_position.text_document.uri,
+                        params.text_document_position.position,
+                        params.context.include_declaration,
+                    )
+                })
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/rename" => {
+            let result = serde_json::from_value::<lsp_types::RenameParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.rename(
+                        &params.text_document_position.text_document.uri,
+                        params.text_document_position.position,
+                        &params.new_name,
+                    )
+                })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Message::Response(Response::new_ok(id.clone(), result))
