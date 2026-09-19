@@ -8,13 +8,32 @@
 //! schema catalog, A2), and 4 (the live/cached reflector,
 //! `sql_reflection_reflector`).
 //!
-//! The static path is scoped to the dominant real shape only: a single-
-//! table `SELECT`, no `JOIN`, a `*`/bare-or-qualified-column/aliased-
-//! column projection. Anything else (a join, a computed/aggregate
-//! select item, a subquery, a view/CTE) falls through to the live path
-//! instead of guessing - full multi-table/virtual-relation resolution
-//! is a disclosed, separate follow-on (the plan's own "virtual
-//! relations" section).
+//! The static path is scoped to the dominant real shape: a single-
+//! table (or derived-table/non-recursive-CTE) `SELECT`, no `JOIN`, a
+//! `*`/bare-or-qualified-column/aliased-column projection. A join or a
+//! computed/aggregate select item falls through to the live path
+//! instead of guessing.
+//!
+//! **Virtual relations** (the plan's own section by that name - views,
+//! CTEs, derived tables, `UNION`): live-verified across all 3 engines
+//! that the *live* reflector (step 4) needs no dedicated resolution
+//! logic for any of these at all - `reflect()` hands the whole query
+//! text to the real engine's own `PREPARE`, which already resolves
+//! every one of these as part of its own real query planning
+//! (`sql_reflection_reflector`'s own tests cover this directly). The
+//! *static* path here handles derived tables and non-recursive CTEs
+//! (`resolve_ctes_from_static_schema`/`TableFactor::Derived`) through
+//! the same column-list primitive a real table's own schema entry
+//! already uses - but deliberately not `UNION`'s own per-engine
+//! numeric/string coercion rules, `CREATE VIEW` parsing (A2's DDL
+//! parser only extracts `CREATE TABLE`), or `WITH RECURSIVE` (which
+//! compounds both): each needs real per-engine behavior this project
+//! only ever trusts once verified live, which a schema-file-only
+//! configuration (the only case where this gap could matter at all -
+//! any configured live connection already answers all of it) has no
+//! way to verify against. A real, disclosed gap, not a decline.
+
+use std::collections::HashMap;
 
 use sqlparser::ast::{
     Expr, ObjectNamePart, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator, Value,
@@ -24,7 +43,7 @@ use sqlparser::parser::Parser;
 
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
-use crate::sql_reflection_schema::SchemaCatalog;
+use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
 use crate::types::Type;
 
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
@@ -360,47 +379,119 @@ fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type>
     let Statement::Query(query) = stmt else {
         return None;
     };
+    let ctes = resolve_ctes_from_static_schema(schema, &query)?;
     let SetExpr::Select(select) = *query.body else {
         return None;
     };
-    resolve_select_from_static_schema(schema, &select)
+    let fields = resolve_select_from_static_schema(schema, &select, &ctes)?;
+    Some(Type::ArrayShape(fields))
 }
 
-fn resolve_select_from_static_schema(schema: &SchemaCatalog, select: &Select) -> Option<Type> {
+/// A non-recursive `WITH cte AS (<query>) ...`'s own defining queries,
+/// resolved up front (in declaration order, so a later CTE referencing
+/// an earlier one already has it available) into the same column-list
+/// shape a real table's own schema entry has - from that point on, a
+/// `FROM cte` reference is indistinguishable from a real table
+/// reference to `resolve_select_from_static_schema`. `WITH RECURSIVE`
+/// bails rather than guess: real per-engine anchor/recursive-term
+/// coercion rules (confirmed live for the *live* reflector path -
+/// `sql_reflection_reflector`'s own tests - to need real per-engine
+/// verification, not a guessed rule) aren't something a schema-file-
+/// only configuration (no live connection to verify against) can
+/// responsibly compute at all.
+fn resolve_ctes_from_static_schema(
+    schema: &SchemaCatalog,
+    query: &sqlparser::ast::Query,
+) -> Option<HashMap<String, Vec<SchemaColumn>>> {
+    let mut ctes = HashMap::new();
+    if let Some(with) = &query.with {
+        if with.recursive {
+            return None;
+        }
+        for cte in &with.cte_tables {
+            let SetExpr::Select(inner) = &*cte.query.body else {
+                return None;
+            };
+            let fields = resolve_select_from_static_schema(schema, inner, &ctes)?;
+            let columns = fields
+                .into_iter()
+                .map(|(name, ty, _)| SchemaColumn {
+                    name,
+                    ty,
+                    nullable: false,
+                })
+                .collect();
+            ctes.insert(cte.alias.name.value.clone(), columns);
+        }
+    }
+    Some(ctes)
+}
+
+fn resolve_select_from_static_schema(
+    schema: &SchemaCatalog,
+    select: &Select,
+    ctes: &HashMap<String, Vec<SchemaColumn>>,
+) -> Option<Vec<(String, Type, bool)>> {
     if select.from.len() != 1 || !select.from[0].joins.is_empty() {
         return None;
     }
-    let TableFactor::Table { name, .. } = &select.from[0].relation else {
-        return None;
+    let columns: Vec<SchemaColumn> = match &select.from[0].relation {
+        TableFactor::Table { name, .. } => {
+            let table_name = name.0.last().and_then(|part| match part {
+                ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
+                ObjectNamePart::Function(_) => None,
+            })?;
+            match ctes.get(table_name) {
+                Some(cte_columns) => cte_columns.clone(),
+                None => schema.table(table_name)?.to_vec(),
+            }
+        }
+        // `SELECT ... FROM (<subquery>) AS t` - resolved via the exact
+        // same primitive a real table's own column list already goes
+        // through, so a derived table is indistinguishable from a real
+        // one from this point on (mirroring the plan's own "one shared
+        // mechanism, not one-off ones" framing for virtual relations).
+        TableFactor::Derived { subquery, .. } => {
+            let SetExpr::Select(inner) = &*subquery.body else {
+                return None;
+            };
+            let inner_ctes = resolve_ctes_from_static_schema(schema, subquery)?;
+            let mut merged = ctes.clone();
+            merged.extend(inner_ctes);
+            resolve_select_from_static_schema(schema, inner, &merged)?
+                .into_iter()
+                .map(|(name, ty, _)| SchemaColumn {
+                    name,
+                    ty,
+                    nullable: false,
+                })
+                .collect()
+        }
+        _ => return None,
     };
-    let table_name = name.0.last().and_then(|part| match part {
-        ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
-        ObjectNamePart::Function(_) => None,
-    })?;
-    let columns = schema.table(table_name)?;
 
     let mut fields = Vec::new();
     for item in &select.projection {
         match item {
             SelectItem::Wildcard(_) => {
-                for col in columns {
+                for col in &columns {
                     fields.push((col.name.clone(), col.ty.clone(), false));
                 }
             }
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
-                let col = schema.column(table_name, &ident.value)?;
+                let col = columns.iter().find(|c| c.name == ident.value)?;
                 fields.push((ident.value.clone(), col.ty.clone(), false));
             }
             SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts)) => {
                 let col_name = &parts.last()?.value;
-                let col = schema.column(table_name, col_name)?;
+                let col = columns.iter().find(|c| &c.name == col_name)?;
                 fields.push((col_name.clone(), col.ty.clone(), false));
             }
             SelectItem::ExprWithAlias {
                 expr: Expr::Identifier(ident),
                 alias,
             } => {
-                let col = schema.column(table_name, &ident.value)?;
+                let col = columns.iter().find(|c| c.name == ident.value)?;
                 fields.push((alias.value.clone(), col.ty.clone(), false));
             }
             SelectItem::ExprWithAlias {
@@ -408,7 +499,7 @@ fn resolve_select_from_static_schema(schema: &SchemaCatalog, select: &Select) ->
                 alias,
             } => {
                 let col_name = &parts.last()?.value;
-                let col = schema.column(table_name, col_name)?;
+                let col = columns.iter().find(|c| &c.name == col_name)?;
                 fields.push((alias.value.clone(), col.ty.clone(), false));
             }
             // A computed/aggregate select item, a qualified wildcard, or
@@ -421,7 +512,7 @@ fn resolve_select_from_static_schema(schema: &SchemaCatalog, select: &Select) ->
     if fields.is_empty() {
         return None;
     }
-    Some(Type::ArrayShape(fields))
+    Some(fields)
 }
 
 #[cfg(test)]

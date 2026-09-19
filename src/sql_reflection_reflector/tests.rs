@@ -773,3 +773,184 @@ fn postgres_session_init_sql_runs_before_every_reflect_call() {
         "expected session_init_sql to have created the temp table before this query prepared"
     );
 }
+
+/// Gap #7 of the live SQL query reflection phase ("virtual relations").
+/// Live-verified across all 3 engines that the *live* reflection path
+/// needs no dedicated view/CTE/derived-table/UNION resolution logic of
+/// its own at all: `reflect()` hands the whole query text to the real
+/// engine's own `PREPARE`, and that engine already resolves every one
+/// of these constructs as part of its own real query planning - the
+/// same real column metadata comes back whether the query is a plain
+/// `SELECT` or a view/CTE/derived-table/UNION wrapped around one.
+/// `UNION`'s own per-branch coercion (`int UNION varchar` -> the whole
+/// column reported as `string`, not a PHP-level `Type::Union`) is a
+/// real engine behavior these tests confirm directly, not a rule this
+/// project computes itself. Only the *static*-schema-only path
+/// (`checker::sql_reflection::resolve`, no live connection at all)
+/// needed real new code - see its own `resolve_ctes_from_static_schema`/
+/// `TableFactor::Derived` handling.
+#[test]
+fn a_real_live_derived_table_prepares_and_reflects_via_mysql() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    let row_type = reflector
+        .reflect("SELECT t.id FROM (SELECT id FROM categories) AS t")
+        .expect("reflect a derived table");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+}
+
+#[test]
+fn a_real_live_non_recursive_cte_prepares_and_reflects_via_mysql() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    let row_type = reflector
+        .reflect("WITH t AS (SELECT id FROM categories) SELECT id FROM t")
+        .expect("reflect a CTE");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+}
+
+#[test]
+fn a_real_live_union_of_matching_types_stays_that_type_via_mysql() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    let row_type = reflector
+        .reflect("SELECT id FROM categories UNION SELECT id FROM images")
+        .expect("reflect a UNION");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+}
+
+#[test]
+fn a_real_live_union_of_mismatched_types_coerces_to_a_single_string_column_via_mysql() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    let row_type = reflector
+        .reflect("SELECT id FROM categories UNION SELECT name FROM categories")
+        .expect("reflect a UNION of mismatched types");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape");
+    };
+    // Real MySQL: a UNION's result set has one column definition, not
+    // one per branch - `int UNION varchar` reports the whole column as
+    // `string`, never a per-row `Type::Union`.
+    assert_eq!(fields, vec![("id".to_string(), Type::String, false)]);
+}
+
+#[test]
+fn a_real_live_view_prepares_and_reflects_the_underlying_columns_via_mysql() {
+    let Some(config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    {
+        let mut conn = reflector.pool.get_conn().expect("get a pooled connection");
+        conn.query_drop(
+            "CREATE OR REPLACE VIEW sql_reflection_virtual_relation_probe AS
+             SELECT id, name FROM categories",
+        )
+        .expect("set up the fixture view");
+    }
+    let row_type = reflector
+        .reflect("SELECT id, name FROM sql_reflection_virtual_relation_probe")
+        .expect("reflect a view");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(
+        fields,
+        vec![
+            ("id".to_string(), Type::Int, false),
+            ("name".to_string(), Type::String, false),
+        ]
+    );
+}
+
+#[test]
+fn a_real_live_derived_table_cte_and_view_prepare_and_reflect_via_postgres() {
+    let Some(config) = live_postgres_config() else {
+        eprintln!("skipping: PHPSTAN_RS_TEST_PG_* env vars not set");
+        return;
+    };
+    let reflector = PostgresReflector::connect(&config).expect("connect to live Postgres");
+    {
+        let mut conn = reflector.pool.get().expect("get a pooled connection");
+        conn.batch_execute(
+            "DROP TABLE IF EXISTS sql_reflection_vr_probe CASCADE;
+             CREATE TABLE sql_reflection_vr_probe (id integer NOT NULL);
+             CREATE OR REPLACE VIEW sql_reflection_vr_probe_view AS
+                 SELECT id FROM sql_reflection_vr_probe;",
+        )
+        .expect("set up the fixture table and view");
+    }
+    for sql in [
+        "SELECT t.id FROM (SELECT id FROM sql_reflection_vr_probe) AS t",
+        "WITH t AS (SELECT id FROM sql_reflection_vr_probe) SELECT id FROM t",
+        "SELECT id FROM sql_reflection_vr_probe UNION SELECT id FROM sql_reflection_vr_probe",
+        "SELECT id FROM sql_reflection_vr_probe_view",
+    ] {
+        assert!(
+            reflector.reflect(sql).is_some(),
+            "expected a resolved row type for: {sql}"
+        );
+    }
+}
+
+#[test]
+fn a_real_live_derived_table_cte_and_view_prepare_and_reflect_via_sqlite() {
+    let path = sqlite_fixture_path("virtual_relations");
+    let _ = std::fs::remove_file(&path);
+    let config = SqlReflectionConfig {
+        driver: SqlDriver::Sqlite,
+        host: None,
+        port: None,
+        user: None,
+        password: None,
+        password_env: None,
+        database: None,
+        path: Some(path.clone()),
+        schema_file: None,
+        session_init_sql: None,
+    };
+    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
+    {
+        let conn = reflector.pool.get().expect("get a pooled connection");
+        conn.execute_batch(
+            "CREATE TABLE vr_probe (id INTEGER NOT NULL, name TEXT);
+             CREATE VIEW vr_probe_view AS SELECT id, name FROM vr_probe;",
+        )
+        .expect("set up the fixture");
+    }
+    for sql in [
+        "SELECT t.id FROM (SELECT id FROM vr_probe) AS t",
+        "WITH t AS (SELECT id FROM vr_probe) SELECT id FROM t",
+        "SELECT id FROM vr_probe UNION SELECT id FROM vr_probe",
+        "SELECT id, name FROM vr_probe_view",
+    ] {
+        assert!(
+            reflector.reflect(sql).is_some(),
+            "expected a resolved row type for: {sql}"
+        );
+    }
+    let _ = std::fs::remove_file(&path);
+}

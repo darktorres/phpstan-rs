@@ -316,3 +316,55 @@ fn cross_reference_entity_fields_is_a_no_op_with_no_matching_entity() {
         cross_reference_entity_fields(&registry, "SELECT name FROM categories", row_type.clone());
     assert_eq!(result, row_type);
 }
+
+#[test]
+fn a_derived_table_resolves_through_the_same_static_schema_lookup() {
+    let schema = fixture_schema();
+    let ty = resolve_from_static_schema(
+        &schema,
+        "SELECT t.id FROM (SELECT id, name FROM categories) AS t",
+    )
+    .unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
+}
+
+#[test]
+fn a_non_recursive_cte_resolves_through_the_same_static_schema_lookup() {
+    let schema = fixture_schema();
+    let ty = resolve_from_static_schema(
+        &schema,
+        "WITH t AS (SELECT id, name FROM categories) SELECT name FROM t",
+    )
+    .unwrap();
+    let Type::ArrayShape(fields) = ty else {
+        panic!("expected an ArrayShape");
+    };
+    assert_eq!(fields, vec![("name".to_string(), Type::String, false)]);
+}
+
+#[test]
+fn a_recursive_cte_falls_through_rather_than_guessing() {
+    let schema = fixture_schema();
+    assert!(
+        resolve_from_static_schema(
+            &schema,
+            "WITH RECURSIVE t AS (SELECT id, name FROM categories) SELECT name FROM t"
+        )
+        .is_none()
+    );
+}
+
+#[test]
+fn a_derived_table_over_an_unresolvable_inner_query_falls_through() {
+    let schema = fixture_schema();
+    assert!(
+        resolve_from_static_schema(
+            &schema,
+            "SELECT t.x FROM (SELECT COUNT(*) AS x FROM categories) AS t"
+        )
+        .is_none()
+    );
+}
