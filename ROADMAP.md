@@ -2419,8 +2419,9 @@ expression, which a `createQuery()`-produced `Query` value doesn't have
 corpus need.
 
 **Custom DQL function return types** (PHASE_BACKLOG Phase 168's 168h,
-the last buildable sub-item of the phase - 168i is a genuine, permanent
-boundary; 168j/168k remain real, disclosed, sequenced-later work).
+the last buildable sub-item of the phase at the time - 168i was then a
+genuine, permanent boundary (see the correction below); 168j/168k
+remain real, disclosed, sequenced-later work).
 `doctrine_functions::DoctrineCustomFunctionEntry`
 (`[[doctrine_custom_functions]]`, config-file-only, no CLI flag, same
 shape as this project's existing `ignore_errors`/`restricted_symbols`) -
@@ -2446,12 +2447,101 @@ checkable against real `phpstan-doctrine`'s own `dumpType()` output;
 168f's four beyond it, transcribed from Doctrine's own hydrator source),
 fed by either a `QueryBuilder` fluent chain (168b) or a literal DQL
 string (168g), with a config surface for what neither this project nor
-real PHPStan can infer on its own (168h). Only 168i (DBAL raw
-`fetchAssociative()`, a genuine live-schema-dependent boundary real
-PHPStan shares) stays permanently out of scope; 168j (entity
-inheritance) and 168k (a scalar subquery nested inside a select item)
-remain real, scoped, disclosed follow-on work with no known real-corpus
-instance to build or verify against yet.
+real PHPStan can infer on its own (168h). 168j (entity inheritance) and
+168k (a scalar subquery nested inside a select item) remain real,
+scoped, disclosed follow-on work with no known real-corpus instance to
+build or verify against yet.
+
+**168i's own "permanent boundary" framing is superseded, not just
+narrowed** - see the live SQL query reflection phase below (originally
+`delegated-tumbling-dongarra.md`): reevaluated once a genuinely new
+mechanism became available (a live database connection or a static DDL
+schema catalog, neither of which existed when 168i was first disclosed),
+`fetchAssociative()`/`fetchAllAssociative()`/`fetchOne()`/
+`fetchFirstColumn()`/`executeQuery()` (both `Connection`'s own literal-
+SQL form and `QueryBuilder`'s own chain-based aliases) all now get real,
+schema-derived row shapes when `[sql_reflection]` is configured -
+`array<string,mixed>|false` remains the honest, correct fallback only
+when it isn't.
+
+**Live SQL query reflection** (originally planned in
+`delegated-tumbling-dongarra.md`, sub-phases A-E all now built; F -
+`EXPLAIN`-based query-plan analysis and general SQL style linting -
+stays explicitly out of scope). A new, always-on `[sql_reflection]`
+config block (`sql_reflection_config::SqlReflectionConfig`, config-file-
+only, same shape as `restricted_symbols`) names either a live database
+connection (MySQL/Postgres/SQLite, each via a real driver crate -
+`mysql`/`postgres`+`r2d2_postgres`/`rusqlite`+`r2d2_sqlite`) or a static
+per-engine DDL dump to parse (`sql_reflection_schema`, using the new
+`sqlparser` dependency), or both for a cross-check. Absent entirely,
+every raw-SQL call site keeps today's exact fallback - confirmed via a
+byte-identical corpus diff with no block configured, at every sub-phase.
+
+A `Doctrine\DBAL\Query\QueryBuilder` fluent chain (`checker::sql_
+reflection::query_builder`) folds into one literal SQL string mirroring
+real `QueryBuilder::getSQL()`'s own clause order, reusing 168b's own
+`Locals::query_builder_aliases` map. `checker::sql_reflection::resolve`
+answers from the static schema catalog first (scoped to the dominant
+single-table/no-JOIN shape), falling through to a live, lazily-
+connected, `Registry`-held `OnceLock` reflector (`sql_reflection_
+reflector` - deliberately a real connection pool per engine, not a
+`Mutex<Connection>`, so `rayon`'s own parallel check phase never
+serializes on it) that `PREPARE`s (never executes) the resolved SQL and
+reads the real result-set column metadata. Column-type translation is
+hand-kept-consistent (not code-shared - the inputs are shape-
+incompatible) between the static and live paths, covering the real
+per-engine type variety surveyed directly against Piwigo's own DDL dump
+(`ENUM` -> a real literal-string union, cross-referenced from the
+static catalog even on the live path since wire-protocol metadata alone
+never carries an enum's permitted values; `JSON`/`DECIMAL`/timestamp
+family -> `String`; `TINYINT(1)` -> `Int`, never `Bool`; SQLite's own
+`NUMERIC` affinity -> a genuine `Union([Int, Float])`, a real semantic
+fact about SQLite's own storage-class fallback, not a hedge). Wired into
+real dispatch (`checker::expr::member_resolution`) for `Connection`'s
+own directly-SQL-taking `fetchAssociative`/`fetchAllAssociative`/
+`fetchOne`/`fetchFirstColumn`, `QueryBuilder`'s own no-argument aliases
+for the same four, and the `executeQuery()` -> synthesized `Doctrine\
+DBAL\Result` generic-slot two-hop propagation (mirroring 168e's own
+`Doctrine\ORM\Query` convention) - `executeStatement()` needed no
+override, already a correct `int|string` via ordinary signature
+resolution. A separate check (`checker::sql_reflection::
+parameter_validation`) cross-references every real placeholder the
+resolved SQL references against the actual bound values from either
+`setParameter`/`setParameters` (the corpus-dominant real mechanism -
+542 real call sites) or `Connection`'s own `$params`/`$types` arguments
+(built as a real, general capability regardless of which one a given
+corpus favors), flagging a real unbound placeholder or an array bound
+without the real, documented `ArrayParameterType::*` exemption (load-
+bearing, not an edge case - 53+ real call sites use exactly that
+pattern for `IN (...)`-list binding).
+
+Two real, previously-invisible gaps surfaced and fixed entirely by this
+phase's own live corpus/live-database verification, not by inspection:
+(1) DBAL-resolved SQL text carries DBAL's own `?`/`:name` placeholder
+syntax unchanged, but every live reflector bypasses DBAL's own runtime
+entirely - nothing was rewriting that into each engine's real native
+`PREPARE` syntax (confirmed directly: real MySQL rejects `:name`
+outright, real Postgres rejects both `?` and `:name`, requiring
+numbered `$1`/`$2`/... instead), silently failing to reflect any real
+named-placeholder query (the dominant real shape) before the fix; (2)
+the parameter-validation check's first cut collapsed "undecidable" (a
+plain PHP variable passed as `$params`, not a literal array) into "zero
+bindings," flagging every real placeholder in real Piwigo code as
+missing - caught by the very same corpus regression check this whole
+phase's own discipline required at every step, not shipped silently.
+Real corpus payoff, confirmed live against a real MySQL instance: the
+scoped corpus's own `NotificationByMailSenderTest.php:148` finding -
+168i's own original motivating example - resolves once a live
+connection or static schema is configured, with zero new false
+positives across the full unscoped corpus (including `vendor/`'s own
+internal DBAL usage of its own APIs).
+
+Explicitly left as disclosed, narrower gaps, not built in this pass:
+resolution-order steps 1-2 (a pure-AST answer needing no schema at all,
+and a resolved-answer cache - a real, known performance cost, not a
+correctness one), virtual relations (views/CTEs/derived tables), window
+functions, and the zero-real-corpus-usage `iterate*`/`rowCount`/
+`columnCount`/`executeCacheQuery` methods.
 
 **Entity inheritance mapping (single-table/joined-table)**
 (PHASE_BACKLOG Phase 168's 168j - the first of the two previously-
@@ -3515,16 +3605,6 @@ section used to carry:
     when a nullsafe chain is proven non-null. Once it exists as a
     direct-condition rule, `condition_aliases`' replay picks it up for
     free the same way. Filed as PHASE_BACKLOG Phase 172.
-- DBAL's own `Connection::fetchAssociative()` (raw, unmapped row fetch)
-  is natively `array<string, mixed>|false`, no per-column typing at all -
-  confirmed at `NotificationByMailSenderTest::setUp`'s own
-  `$this->conn->fetchAssociative(...)` result assigned into a precisely
-  `array{check_key: string, ...}`-shaped property. Per-column typing
-  needs the actual live SQL/schema; real PHPStan doesn't solve this
-  generically either (PHASE_BACKLOG Phase 168's own 168i) - a genuine,
-  permanent boundary, unlike its sibling `QueryBuilder`/
-  `AbstractQuery::getResult()` gap immediately below, which is being
-  actively built.
 - `token_get_all()` returns bare `array` - confirmed *not* a gap versus
   real PHPStan specifically (no dynamic-return-type extension for it
   exists in `vendor/phpstan-src` either, unlike the several functions

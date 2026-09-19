@@ -2137,10 +2137,14 @@ from-scratch Doctrine mapping-metadata resolver.
   real `DateTime` object, regardless of a function's own semantic
   category. Config-file-only, no CLI flag, same shape and reasoning as
   this project's existing `ignore_errors`/`restricted_symbols`.
-- **168i (small, permanent boundary).** DBAL raw `fetchAssociative()`/
-  `fetchAllAssociative()`/etc. - per-column typing needs the actual live
-  SQL/schema; real PHPStan doesn't solve this generically either. Stays
-  `array<string, mixed>|false`.
+- **168i (small, superseded, not a permanent boundary).** DBAL raw
+  `fetchAssociative()`/`fetchAllAssociative()`/etc. - per-column typing
+  needs the actual live SQL/schema; real PHPStan doesn't solve this
+  generically either, so this was originally disclosed as staying
+  `array<string, mixed>|false` permanently. Reevaluated once a genuinely
+  new mechanism became available (a live database connection or a
+  static DDL schema catalog) - see Phase 176, which supersedes this
+  item entirely rather than narrowing it.
 - **168j (medium, DONE).** Entity inheritance mapping (single-table/
   joined-table) - `DoctrineEntity::discriminator_map` (`#[ORM\
   DiscriminatorMap([...])]`'s own value -> concrete-subclass map, parsed
@@ -2164,9 +2168,113 @@ from-scratch Doctrine mapping-metadata resolver.
   outer alias falls through to the ordinary "undecidable" outcome, the
   same as any other unrecognized construct. Zero corpus usage - unit-
   tested only. With this, every item PHASE_BACKLOG originally disclosed
-  for Phase 168 is now built; only 168i (DBAL raw `fetchAssociative()`,
-  a genuine live-schema-dependent boundary real PHPStan shares) remains
-  permanently out of scope.
+  for Phase 168 is now built, including 168i once Phase 176 superseded
+  its own "permanent boundary" framing.
+
+## Phase 176 — Live SQL query reflection for raw DBAL/PDO result types
+
+Reevaluated out of Phase 168's own 168i ("a genuine live-schema-dependent
+boundary real PHPStan shares") once a genuinely new mechanism became
+available that didn't exist when 168i was first disclosed: a live
+database connection (confirmed reachable on this machine, with the real
+Piwigo schema already loaded) and a static per-engine DDL dump
+(`install/piwigo_structure-{mysql,mariadb,pgsql,sqlite}.sql`, confirmed
+real and CI-drift-guarded against `src/Piwigo/Migrations/`). Mirrors the
+real, established `staabm/phpstan-dba` package's own approach - `PREPARE`
+a resolved SQL string against a live connection (never execute it) and
+read the prepared statement's own real result-set column metadata -
+rather than a from-scratch schema-inference scheme.
+
+- **176A (small, DONE).** `[sql_reflection]` config block
+  (`sql_reflection_config::SqlReflectionConfig`) - driver/host/port/user/
+  password (or `password_env`, preferred for a committed config)/
+  database/path/schema_file, config-file-only, same shape as
+  `restricted_symbols`. Absent entirely: zero behavior change, confirmed
+  via a byte-identical corpus diff.
+- **176A2 (medium, DONE).** Static schema catalog
+  (`sql_reflection_schema`, new `sqlparser` dependency) - parses a
+  configured `schema_file` into a `table -> [(column, Type, nullable)]`
+  catalog. Real, confirmed parsing risk: naively feeding a whole dump to
+  `sqlparser` fails on 3 of 4 engines (MySQL's own `/*!VERSION ...*/`
+  hint-comment syntax gets tokenized, not stripped, surfacing a real gap
+  in `sqlparser`'s own `FULLTEXT ... WITH PARSER` grammar; Postgres's
+  inline-sequence `IDENTITY` syntax and SQLite's `CREATE VIRTUAL TABLE
+  ... USING fts5(...)` both fail outright) - fixed by stripping MySQL's
+  own hint-comment spans before parsing and splitting the file into
+  independent per-statement token chunks so one unneeded statement
+  failing to parse never aborts the whole file. Column-type translation
+  covers the real per-engine variety surveyed directly against the real
+  DDL dump (`ENUM` -> a real literal-string union; `JSON`/`DECIMAL`/
+  timestamp family -> `String`; `TINYINT(1)` -> `Int`, never `Bool`;
+  `FLOAT`/`DOUBLE` -> the native type - confirmed live that PDO's own
+  real `STRINGIFY_FETCHES` default is `false` and neither Doctrine DBAL
+  nor this corpus ever overrides it, so this is decidable, not an
+  honestly-undecided union). Lives top-level
+  (`crate::sql_reflection_schema`), not under `checker/` - it's compiled
+  state stored directly on `Registry`, the same shape
+  `restricted_symbols`/`doctrine_functions` already established, not
+  per-call-site `Checker`-consulting logic.
+- **176B (medium, DONE).** `Doctrine\DBAL\Query\QueryBuilder` fluent-
+  chain folding (`checker::sql_reflection::query_builder`) into one
+  literal SQL string, same backward-walk architecture as 168b (reusing
+  its own `Locals::query_builder_aliases` map), but folding `where`/
+  `having`/etc. too (unlike 168b's own DQL folder) since this class has
+  no ORM metadata at all - the goal is a syntactically valid `PREPARE`
+  target, not a semantically faithful `QueryBuilder::getSQL()` replica.
+  Clause order read directly from `vendor/doctrine/dbal`'s own source as
+  ground truth.
+- **176C (large, DONE for MySQL/Postgres/SQLite).** Live reflectors
+  (`sql_reflection_reflector`, new `mysql`/`postgres`+`r2d2_postgres`/
+  `rusqlite`+`r2d2_sqlite` dependencies - `rusqlite`'s own `bundled`
+  feature is this project's first *always-on* C build dependency,
+  unlike `pcre2-sys`'s existing opt-in one) - `PREPARE`s and reads real
+  column metadata per engine, plus `checker::sql_reflection::resolve`
+  (the static catalog first, live second, scoped to the dominant
+  single-table/no-JOIN shape). `Registry`-held, lazily-connected
+  `OnceLock`, using a real connection pool per engine (never a
+  `Mutex<Connection>`, which would serialize `rayon`'s own parallel
+  check phase). Real, unplanned fix: DBAL-resolved SQL text carries
+  DBAL's own `?`/`:name` placeholder syntax unchanged, but every live
+  reflector bypasses DBAL's own runtime entirely - confirmed directly
+  that real MySQL/Postgres `PREPARE` both reject that syntax outright,
+  requiring a per-engine rewrite before every live `PREPARE` call.
+- **176D (medium, DONE for the real high-value methods).** Wired
+  `fetchAssociative`/`fetchAllAssociative`/`fetchOne`/`fetchFirstColumn`
+  (both `Connection`'s own SQL-argument form and `QueryBuilder`'s own
+  chain-folded aliases) and `executeQuery()`'s own two-hop propagation
+  into a synthesized `Doctrine\DBAL\Result` generic slot (mirroring
+  168e's identical `Doctrine\ORM\Query` convention) into real
+  `checker::expr::member_resolution` dispatch. `executeStatement()`
+  needed no override (already correct via ordinary signature
+  resolution). `iterate*`/`rowCount`/`columnCount`/`executeCacheQuery`
+  are zero real corpus usage - not built. Real corpus payoff, confirmed
+  live: resolves 168i's own original motivating example
+  (`NotificationByMailSenderTest.php:148`) once a live connection or
+  static schema is configured, zero new false positives across the full
+  unscoped corpus.
+- **176E (medium, DONE).** Placeholder/bound-parameter validation
+  (`checker::sql_reflection::parameter_validation`) - both real DBAL
+  parameter-binding mechanisms built as general capabilities regardless
+  of which one this corpus happens to favor (`setParameter`/
+  `setParameters` - the corpus-dominant real mechanism at 542 real call
+  sites - and `Connection`'s own `$params`/`$types` array arguments).
+  Two checks: a real placeholder with no bound value at all, and an
+  array bound without the real, documented `ArrayParameterType::*`
+  exemption DBAL itself supports for `IN (...)`-list binding (load-
+  bearing, not an edge case - 53+ real call sites use exactly that
+  pattern). Deliberately doesn't compare a bound value's type against
+  the prepared statement's own live-reported expected type - real SQL/
+  PHP scalar coercion is genuinely loose, a risk-based scope limit, not
+  a corpus-popularity one.
+
+Explicitly out of scope (176F): `EXPLAIN`-based query-plan analysis and
+general SQL style linting beyond what a prepare-time parse error
+naturally catches - each needs its own distinct mechanism, genuinely
+orthogonal to type inference. Also disclosed, not built in this pass:
+resolution-order steps 1-2 (a pure-AST answer needing no schema at all,
+and a resolved-answer cache - a real performance cost, not a
+correctness one), virtual relations (views/CTEs/derived tables), and
+window functions.
 
 ## Phase 173 — Same-function parallel dynamically-keyed array correlation
 
