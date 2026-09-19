@@ -956,6 +956,28 @@ exactly, which evaluates only the first argument in isolation. Fixes 3
 `AdminShellTest`/`PictureControllerTest` findings and, incidentally, one
 in `node_modules/plupload`.
 
+**A dynamic-key write's unconfident key type is now Benevolent-marked**
+(commit `23f1243`). `dynamic_write_key_type`'s own fallback for a write
+whose key expression can't be confidently proven `int` or `string` now
+returns `Type::benevolent_array_key()` (Fix 1's own existing marker, two
+rounds ago) instead of a plain `int|string` union - mirrors real
+PHPStan's `MixedType`/`UnionType::toArrayKey()` exactly (confirmed
+reading `vendor/phpstan-src` directly), which returns a
+`BenevolentUnionType` for the identical "I don't know" case.
+`Registry::is_assignable`'s own Benevolent leniency (also from Fix 1)
+already did the right thing once a value actually carries the marker -
+no change needed there. A narrower, safer fix than first drafted:
+changing the far more widely-used `Type::unknown_array_key()` itself (83
+call sites across 18 files) was the original proposal, but reusing the
+already-existing, already-proven `Type::benevolent_array_key()` at this
+one canonical fallback site achieves the identical result with a
+fraction of the blast radius. Fixes `openapi-generate-input-dto.php`'s
+own two-loop dynamic-key chain (`array_keys()` → `foreach` → another
+dynamic-key write → another `foreach`) and, confirmed via the full
+unscoped corpus (zero new finding locations, 23 disappeared), the
+identical false-positive class across Symfony, Doctrine, Rector, and
+PHP-CS-Fixer.
+
 ## Narrowing engine
 
 `instanceof`, equality/identity, `isset`/`??`/`??=` (including the
