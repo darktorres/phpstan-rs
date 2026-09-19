@@ -1,9 +1,9 @@
-//! `Project::use_sites()`'s Tier-1 (class/function reference) index -
-//! eager, syntactic, gated on `retain_source` exactly like
-//! `decl_locations`. Tier 2 (member references, `ensure_member_index_
-//! built`) is exercised alongside the LSP wiring in
-//! `lsp::tests::references_and_rename` instead, once the checker
-//! plumbing lands.
+//! `Project::use_sites()`'s two-tier index: Tier 1 (class/function
+//! reference sites) - eager, syntactic, gated on `retain_source` exactly
+//! like `decl_locations` - and Tier 2 (member reference sites) - lazy,
+//! checker-driven, built once by `ensure_member_index_built`. The LSP
+//! wiring itself (`textDocument/references`/`textDocument/rename`) is
+//! exercised separately in `lsp::tests::references_and_rename`.
 
 use super::super::use_sites::RefTarget;
 use super::super::*;
@@ -198,5 +198,122 @@ fn property_default_value_reference_is_indexed() {
         refs.len(),
         1,
         "expected the property default's Def::class reference, got: {refs:?}"
+    );
+}
+
+#[test]
+fn untyped_class_constant_value_reference_is_indexed() {
+    // Deliberately UNTYPED - `check_typed_class_constant_values` (the
+    // existing infer_expr call this item's own design traced) skips a
+    // class whose consts are all untyped entirely, so this reference is
+    // only ever found by the new `collect_default_and_const_value_
+    // member_refs` enumeration, never by the pre-existing call.
+    let mut project = project_with_retained_source();
+    project
+        .load_file(
+            PathBuf::from("a.php"),
+            "<?php class LogLevel { const INFO = 1; }\nclass Foo { const LEVEL = LogLevel::INFO; }\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    project.ensure_member_index_built();
+
+    let refs = project.use_sites().references(&RefTarget::Member(
+        "LogLevel".to_string(),
+        "INFO".to_string(),
+    ));
+    assert_eq!(refs.len(), 1, "got: {refs:?}");
+}
+
+#[test]
+fn typed_class_constant_value_reference_is_indexed_and_not_duplicated() {
+    // TYPED this time - both `check_typed_class_constant_values`'s own
+    // pre-existing `infer_expr` call AND the new enumeration pass visit
+    // this exact same `LogLevel::INFO` expression - the HashSet-based
+    // dedup in `Checker::member_ref_sites` must collapse the two
+    // independent visits into exactly one recorded site, not two.
+    let mut project = project_with_retained_source();
+    project
+        .load_file(
+            PathBuf::from("a.php"),
+            "<?php class LogLevel { const INFO = 1; }\nclass Foo { const int LEVEL = LogLevel::INFO; }\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    project.ensure_member_index_built();
+
+    let refs = project.use_sites().references(&RefTarget::Member(
+        "LogLevel".to_string(),
+        "INFO".to_string(),
+    ));
+    assert_eq!(
+        refs.len(),
+        1,
+        "expected exactly one entry, not two, got: {refs:?}"
+    );
+}
+
+#[test]
+fn parameter_default_value_member_reference_is_indexed() {
+    // No existing Checker path visits a parameter's own default value at
+    // all (confirmed by direct trace) - this is a real gap only
+    // `collect_default_and_const_value_member_refs` closes.
+    let mut project = project_with_retained_source();
+    project
+        .load_file(
+            PathBuf::from("a.php"),
+            "<?php class SomeClass { const DEFAULT_VALUE = 1; }\nfunction f($x = SomeClass::DEFAULT_VALUE) {}\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    project.ensure_member_index_built();
+
+    let refs = project.use_sites().references(&RefTarget::Member(
+        "SomeClass".to_string(),
+        "DEFAULT_VALUE".to_string(),
+    ));
+    assert_eq!(refs.len(), 1, "got: {refs:?}");
+}
+
+#[test]
+fn property_default_value_member_reference_is_indexed() {
+    let mut project = project_with_retained_source();
+    project
+        .load_file(
+            PathBuf::from("a.php"),
+            "<?php class Bar { const BAZ = 1; }\nclass Foo { public $x = Bar::BAZ; }\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    project.ensure_member_index_built();
+
+    let refs = project
+        .use_sites()
+        .references(&RefTarget::Member("Bar".to_string(), "BAZ".to_string()));
+    assert_eq!(refs.len(), 1, "got: {refs:?}");
+}
+
+#[test]
+fn member_reference_index_is_not_built_until_first_requested() {
+    let mut project = project_with_retained_source();
+    project
+        .load_file(
+            PathBuf::from("a.php"),
+            "<?php class Bar { const BAZ = 1; }\nclass Foo { public $x = Bar::BAZ; }\n",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    let target = RefTarget::Member("Bar".to_string(), "BAZ".to_string());
+    assert_eq!(
+        project.use_sites().references(&target).len(),
+        0,
+        "Tier 2 must not exist before the first ensure_member_index_built call"
+    );
+    project.ensure_member_index_built();
+    assert_eq!(
+        project.use_sites().references(&target).len(),
+        1,
+        "expected the reference to appear once the index is actually built"
     );
 }

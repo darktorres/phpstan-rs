@@ -1074,6 +1074,7 @@ impl<'a> Checker<'a> {
                             sig.is_internal,
                             e.span,
                         );
+                        self.record_member_ref(e.span, owner, method);
                         self.check_call_site_method_name_case(class, method, e.span, label);
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
@@ -2068,6 +2069,7 @@ impl<'a> Checker<'a> {
                                 sig.is_internal,
                                 e.span,
                             );
+                            self.record_member_ref(e.span, owner, method);
                             // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
                             // late-static-binding unsafety as the
@@ -2238,6 +2240,7 @@ impl<'a> Checker<'a> {
                             sig.is_internal,
                             e.span,
                         );
+                        self.record_member_ref(e.span, owner, prop_name);
                         // A static property shares the exact same
                         // visibility rules as an instance one ("Cannot
                         // access private property" is a real fatal error
@@ -2288,6 +2291,7 @@ impl<'a> Checker<'a> {
                             cs.is_internal,
                             e.span,
                         );
+                        self.record_member_ref(e.span, owner, member);
                         self.check_member_visibility(MemberVisibilityCheck {
                             kind: "classConstant",
                             owner,
@@ -2429,6 +2433,7 @@ impl<'a> Checker<'a> {
                         p.is_internal,
                         e.span,
                     );
+                    self.record_member_ref(e.span, &owner, prop);
                 }
                 if locals.may_have_member_narrowing()
                     && let Some(base_key) = narrowing_key(base)
@@ -3496,18 +3501,25 @@ impl<'a> Checker<'a> {
                     result
                 }
             }
-            ExprKind::StaticCall(class_name, method, args) => self
-                .resolve_static_class_name(class_name)
-                .and_then(|class| {
-                    self.registry.lookup_method(&class, method).map(|sig| {
-                        let resolved_args = resolve_call_args(args, &sig.params);
-                        let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
-                        let resolved =
-                            self.narrow_enum_from_call(&class, method, args, resolved, locals);
-                        self.resolve_pseudo(&resolved, &class)
+            ExprKind::StaticCall(class_name, method, args) => {
+                if self.collect_member_refs
+                    && let Some(class) = self.resolve_static_class_name(class_name)
+                    && let Some((owner, _)) = self.registry.lookup_method_with_owner(&class, method)
+                {
+                    self.record_member_ref(e.span, &owner, method);
+                }
+                self.resolve_static_class_name(class_name)
+                    .and_then(|class| {
+                        self.registry.lookup_method(&class, method).map(|sig| {
+                            let resolved_args = resolve_call_args(args, &sig.params);
+                            let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
+                            let resolved =
+                                self.narrow_enum_from_call(&class, method, args, resolved, locals);
+                            self.resolve_pseudo(&resolved, &class)
+                        })
                     })
-                })
-                .unwrap_or(Type::Mixed),
+                    .unwrap_or(Type::Mixed)
+            }
             ExprKind::StaticAccess(class_name, member) => {
                 if member == "class" {
                     return match self.resolve_static_class_name(class_name) {
@@ -3524,6 +3536,26 @@ impl<'a> Checker<'a> {
                     && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
                 {
                     return narrowed.clone();
+                }
+                if self.collect_member_refs
+                    && let Some(class) = self.resolve_static_class_name(class_name)
+                {
+                    match member.strip_prefix('$') {
+                        Some(prop_name) => {
+                            if let Some((owner, _)) =
+                                self.registry.lookup_property_with_owner(&class, prop_name)
+                            {
+                                self.record_member_ref(e.span, &owner, prop_name);
+                            }
+                        }
+                        None => {
+                            if let Some((owner, _)) =
+                                self.registry.lookup_const_with_owner(&class, member)
+                            {
+                                self.record_member_ref(e.span, &owner, member);
+                            }
+                        }
+                    }
                 }
                 self.resolve_static_class_name(class_name)
                     .and_then(|class| match member.strip_prefix('$') {
@@ -3787,6 +3819,12 @@ impl<'a> Checker<'a> {
                     ExprKind::StaticCall(class_name, method, _) => {
                         match self.resolve_static_class_name(class_name) {
                             Some(class) => {
+                                if self.collect_member_refs
+                                    && let Some((owner, _)) =
+                                        self.registry.lookup_method_with_owner(&class, method)
+                                {
+                                    self.record_member_ref(callback.span, &owner, method);
+                                }
                                 let sig = self.registry.lookup_method(&class, method);
                                 (sig, Some(class))
                             }
@@ -3795,7 +3833,15 @@ impl<'a> Checker<'a> {
                     }
                     ExprKind::MethodCall(recv, method, _, _) => {
                         let recv_ty = self.infer_expr(recv, locals);
-                        self.find_method_receiver_class(&recv_ty, method)
+                        let result = self.find_method_receiver_class(&recv_ty, method);
+                        if self.collect_member_refs
+                            && let Some(class) = &result.1
+                            && let Some((owner, _)) =
+                                self.registry.lookup_method_with_owner(class, method)
+                        {
+                            self.record_member_ref(callback.span, &owner, method);
+                        }
+                        result
                     }
                     _ => (None, None),
                 };
@@ -3815,6 +3861,83 @@ impl<'a> Checker<'a> {
                 })
             }
             _ => None,
+        }
+    }
+
+    /// `textDocument/references`/`textDocument/rename`'s Tier-2 own
+    /// dedicated collection pass, run once per file alongside
+    /// `check_program` when `collect_member_refs` is on - NOT folded into
+    /// `check_program`'s own ordinary statement walk, and never called
+    /// for an ordinary diagnostic-only check. A parameter/property
+    /// default value and a class/interface/trait/enum constant's value
+    /// are never visited by `check_expr`'s own top-to-bottom statement
+    /// walk at all (confirmed by direct trace: the only other `.default`
+    /// consumers in this crate are unrelated unused-variable/`@api`-usage
+    /// walkers, none of which resolve a true declaring owner) - each
+    /// found expression is fed through `infer_expr` purely to trigger its
+    /// own now-hooked `StaticAccess`/`StaticCall` arms; the returned
+    /// `Type` is discarded, only the `record_member_ref` side effect
+    /// matters. `check_typed_class_constant_values` already runs
+    /// `infer_expr` on a *typed* constant's own value independently -
+    /// re-visiting it here too is harmless, since `member_ref_sites` is a
+    /// `HashSet`.
+    ///
+    /// Recurses into every function/method's own body to reach a nested
+    /// (conditionally-declared) function/class/enum - real, legal PHP.
+    /// Deliberately does NOT chase into a `Closure`/`ArrowFn` literal's
+    /// own parameter defaults - a real, narrower residual than the
+    /// top-level/method-parameter gap this method's own trace found,
+    /// disclosed rather than silently dropped (see this item's own
+    /// PROGRESS notes).
+    pub(crate) fn collect_default_and_const_value_member_refs(&mut self, program: &[Stmt]) {
+        for stmt in program {
+            self.collect_member_ref_defaults_stmt(stmt);
+        }
+    }
+
+    fn collect_member_ref_defaults_params(&mut self, params: &[Param]) {
+        for p in params {
+            if let Some(d) = &p.default {
+                self.infer_expr(d, &Locals::default());
+            }
+        }
+    }
+
+    fn collect_member_ref_defaults_function(&mut self, f: &FunctionDecl) {
+        self.collect_member_ref_defaults_params(&f.params);
+        for s in f.body.iter() {
+            self.collect_member_ref_defaults_stmt(s);
+        }
+    }
+
+    fn collect_member_ref_defaults_stmt(&mut self, stmt: &Stmt) {
+        match &stmt.kind {
+            StmtKind::FunctionDecl(f) => self.collect_member_ref_defaults_function(f),
+            StmtKind::ClassDecl(c) => {
+                for p in &c.properties {
+                    if let Some(d) = &p.default {
+                        self.infer_expr(d, &Locals::default());
+                    }
+                }
+                for cst in &c.consts {
+                    self.infer_expr(&cst.value, &Locals::default());
+                }
+                for m in &c.methods {
+                    self.collect_member_ref_defaults_function(&m.function);
+                }
+            }
+            StmtKind::EnumDecl(e) => {
+                for cst in &e.consts {
+                    self.infer_expr(&cst.value, &Locals::default());
+                }
+                for m in &e.methods {
+                    self.collect_member_ref_defaults_function(&m.function);
+                }
+            }
+            _ => {}
+        }
+        for child in crate::ast_walk::stmt_children(stmt) {
+            self.collect_member_ref_defaults_stmt(child);
         }
     }
 

@@ -980,6 +980,25 @@ pub struct Checker<'a> {
     pub(crate) collect_inlay_hints: bool,
     pub(crate) inlay_param_name_hints: Vec<(Span, Arc<str>)>,
     pub(crate) inlay_local_type_hints: Vec<(Span, Type)>,
+    // `textDocument/references`/`textDocument/rename`'s Tier-2 (member
+    // reference) collection mode - see `project::use_sites`'s own module
+    // doc comment for the two-tier split. `false` (every ordinary check,
+    // including every diagnostic-only batch run) is a complete no-op.
+    // `RefCell<HashSet<...>>`, not a plain `Vec` field: populated from
+    // both `check_expr` (`&mut self`) and `infer_expr`/
+    // `infer_closure_return_with_param_overrides` (`&self`) without
+    // threading a new parameter through either's call graph - the same
+    // interior-mutability reasoning `probe_hit`/`call_candidate_cache`
+    // already use. A `HashSet`, not a `Vec`: the same real site can
+    // legitimately be visited more than once (e.g. a condition
+    // re-inferred via `infer_expr` for flow-narrowing after `check_expr`'s
+    // own primary arm already recorded the identical span) - every
+    // insert is a structural no-op on a repeat `(span, owner, member)`
+    // triple, regardless of how many call paths independently re-derive
+    // the same site.
+    pub(crate) collect_member_refs: bool,
+    #[allow(clippy::type_complexity)]
+    member_ref_sites: RefCell<HashSet<(Span, String, String)>>,
     // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
     // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
     // `infer_expr`'s separate `Call` arm both independently re-derive this
@@ -1133,6 +1152,8 @@ impl<'a> Checker<'a> {
             collect_inlay_hints: false,
             inlay_param_name_hints: Vec::new(),
             inlay_local_type_hints: Vec::new(),
+            collect_member_refs: false,
+            member_ref_sites: RefCell::new(HashSet::new()),
             semantic_tokens: Vec::new(),
             call_candidate_cache: RefCell::new(HashMap::new()),
             pending_or_disjunctions: Vec::new(),
@@ -1237,6 +1258,34 @@ impl<'a> Checker<'a> {
     /// `semantic_tokens` field's own doc comment.
     pub(crate) fn take_semantic_tokens(&mut self) -> Vec<semantic_tokens::UsageSemanticToken> {
         std::mem::take(&mut self.semantic_tokens)
+    }
+
+    pub(crate) fn set_collect_member_refs(&mut self, enabled: bool) {
+        self.collect_member_refs = enabled;
+    }
+
+    /// No-op unless `collect_member_refs` is set. `&self`, not `&mut
+    /// self` - see `member_ref_sites`'s own doc comment for why. `member`
+    /// is normalized the same way `lsp::navigation`'s own StaticAccess
+    /// arm is: a leading `$` (a static property's own syntax,
+    /// `self::$prop`) stripped, and `"class"`/`"{dynamic}"` (not a real
+    /// member at all) excluded by every caller before this is reached.
+    pub(crate) fn record_member_ref(&self, span: Span, owner: &str, member: &str) {
+        if !self.collect_member_refs {
+            return;
+        }
+        self.member_ref_sites.borrow_mut().insert((
+            span,
+            owner.to_string(),
+            member.trim_start_matches('$').to_string(),
+        ));
+    }
+
+    /// Drains `member_ref_sites` into an owned `Vec` - the same
+    /// `mem::take`-then-collect shape `take_semantic_tokens` uses one
+    /// field up.
+    pub(crate) fn take_member_ref_sites(&mut self) -> Vec<(Span, String, String)> {
+        self.member_ref_sites.take().into_iter().collect()
     }
 
     /// The declaration-site counterpart of the read-site probe hook inline

@@ -13,6 +13,7 @@ use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
+use crate::token::Span;
 
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
@@ -676,21 +677,63 @@ impl Project {
     /// class-name-case canonicalization) even though its own source text
     /// didn't, so re-deriving Tier 1 only for the edited file itself
     /// would let a dependent's index silently go stale.
-    fn reindex_tier1_for_file(&mut self, path: &Path) {
+    /// `member_refs`: `None` before `ensure_member_index_built` has ever
+    /// been called (nothing to reindex for Tier 2 yet, since no path has
+    /// any Member entry to begin with), `Some(refs)` (`refs` freshly
+    /// recomputed by the caller's own `check_file_and_member_refs` call)
+    /// once it has. A single `use_sites.remove_file` covers both tiers at
+    /// once - Tier 1 and Tier 2 entries share the same underlying
+    /// `by_file`/`by_target` maps, so clearing and rebuilding them
+    /// separately (as two independent remove-then-insert calls) would
+    /// have each tier's own rebuild silently wipe out the other's
+    /// freshly-inserted entries for the same path.
+    fn reindex_use_sites_for_file(
+        &mut self,
+        path: &Path,
+        member_refs: Option<Vec<(Span, String, String)>>,
+    ) {
         self.use_sites.remove_file(path);
-        if !self.retain_source {
+        if self.retain_source
+            && let Some(file) = self.files.get(path)
+            && let Some(source) = &file.source
+        {
+            for (span, target) in use_sites::index_class_fn_refs(&file.ast, source) {
+                self.use_sites.insert(path, target, span);
+            }
+        }
+        if let Some(member_refs) = member_refs {
+            for (span, owner, member) in member_refs {
+                self.use_sites
+                    .insert(path, use_sites::RefTarget::Member(owner, member), span);
+            }
+        }
+    }
+
+    /// Builds Tier 2 (member-reference) of `use_sites` for every
+    /// currently-loaded file, exactly once - idempotent, a no-op on every
+    /// call after the first. Deliberately NOT run as part of
+    /// `finish_loading`/`load_workspace`: unlike Tier 1 (purely
+    /// syntactic, no `Checker` needed), Tier 2 needs one real `Checker`
+    /// pass per file, which would make every workspace open pay a cost
+    /// only `textDocument/references`/`textDocument/rename` actually
+    /// need. `Server::references`/`Server::rename` call this first; every
+    /// other request path (hover, definition, diagnostics, ...) never
+    /// triggers it at all. The FIRST call after a workspace loads is
+    /// therefore the one place this cost is paid, synchronously, on
+    /// whatever thread calls it - see this item's own open-risks note.
+    pub(crate) fn ensure_member_index_built(&mut self) {
+        if self.member_index_built {
             return;
         }
-        let Some(file) = self.files.get(path) else {
-            return;
-        };
-        let Some(source) = &file.source else {
-            return;
-        };
-        let refs = use_sites::index_class_fn_refs(&file.ast, source);
-        for (span, target) in refs {
-            self.use_sites.insert(path, target, span);
+        let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
+        for path in paths {
+            let (_, member_refs) = self.check_file_and_member_refs(&path);
+            for (span, owner, member) in member_refs {
+                self.use_sites
+                    .insert(&path, use_sites::RefTarget::Member(owner, member), span);
+            }
         }
+        self.member_index_built = true;
     }
 
     pub fn update_file(
@@ -831,8 +874,13 @@ impl Project {
             .transitive_affected_files(path, changed_symbols)
             .into_iter()
             .map(|p| {
-                let diagnostics = self.check_file(&p);
-                self.reindex_tier1_for_file(&p);
+                let (diagnostics, member_refs) = if self.member_index_built {
+                    let (d, m) = self.check_file_and_member_refs(&p);
+                    (d, Some(m))
+                } else {
+                    (self.check_file(&p), None)
+                };
+                self.reindex_use_sites_for_file(&p, member_refs);
                 (p, diagnostics)
             })
             .collect())
@@ -917,8 +965,13 @@ impl Project {
         affected
             .into_iter()
             .map(|p| {
-                let diagnostics = self.check_file(&p);
-                self.reindex_tier1_for_file(&p);
+                let (diagnostics, member_refs) = if self.member_index_built {
+                    let (d, m) = self.check_file_and_member_refs(&p);
+                    (d, Some(m))
+                } else {
+                    (self.check_file(&p), None)
+                };
+                self.reindex_use_sites_for_file(&p, member_refs);
                 (p, diagnostics)
             })
             .collect()
@@ -1003,7 +1056,23 @@ impl Project {
     /// is the batch counterpart that does.
     #[hotpath::measure]
     pub fn check_file(&self, path: &Path) -> Vec<Diagnostic> {
-        self.check_file_impl(path, None)
+        self.check_file_impl(path, None, false).0
+    }
+
+    /// The Tier-2 (member-reference) counterpart of `check_file` - the
+    /// SAME `Checker`/`check_program` pass already used for diagnostics
+    /// also collects member-reference sites, rather than paying for a
+    /// second, independent `Checker` pass over the same file. Only
+    /// `update_file`'s own affected-file loop calls this, and only once
+    /// `member_index_built` is true - see `ensure_member_index_built`'s
+    /// own doc comment for why a file's own use-sites have no cross-file
+    /// ordering dependency the way `property_assign_facts` does, so no
+    /// separate first pass is needed here the way it is there.
+    pub(crate) fn check_file_and_member_refs(
+        &self,
+        path: &Path,
+    ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
+        self.check_file_impl(path, None, true)
     }
 
     /// The two-pass counterpart of `check_file` - `facts` is the whole-
@@ -1017,7 +1086,7 @@ impl Project {
         path: &Path,
         facts: &Arc<PropertyAssignFacts>,
     ) -> Vec<Diagnostic> {
-        self.check_file_impl(path, Some(facts))
+        self.check_file_impl(path, Some(facts), false).0
     }
 
     /// A bare, un-run `Checker` for `path` plus its AST, for an LSP
@@ -1056,9 +1125,10 @@ impl Project {
         &self,
         path: &Path,
         cross_file_property_assign_facts: Option<&Arc<PropertyAssignFacts>>,
-    ) -> Vec<Diagnostic> {
+        collect_member_refs: bool,
+    ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
         let Some(file) = self.files.get(path) else {
-            return Vec::new();
+            return (Vec::new(), Vec::new());
         };
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
@@ -1067,7 +1137,12 @@ impl Project {
         if let Some(facts) = cross_file_property_assign_facts {
             checker.set_cross_file_property_assign_facts(Arc::clone(facts));
         }
+        checker.set_collect_member_refs(collect_member_refs);
         checker.check_program(&file.ast);
+        if collect_member_refs {
+            checker.collect_default_and_const_value_member_refs(&file.ast);
+        }
+        let member_refs = checker.take_member_ref_sites();
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
             diagnostics.extend(
@@ -1123,7 +1198,7 @@ impl Project {
                         .is_some_and(|ids| ids.iter().any(|id| id == &d.identifier))
             });
         }
-        diagnostics
+        (diagnostics, member_refs)
     }
 
     pub fn registry(&self) -> &Registry {
