@@ -77,12 +77,21 @@ fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
     )
 }
 
-fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
-    let kind = match c.kind {
+/// Shared with `workspace_symbol::workspace_symbols`, which needs the
+/// same mapping for a registry-sourced `ClassInfo.kind` (the AST-level
+/// `ClassDecl.kind` this function itself uses is the same
+/// `crate::ast::ClassKind` type the registry reuses directly, not a
+/// separate registry-local enum).
+pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
+    match kind {
         ClassKind::Class | ClassKind::Trait => SymbolKind::CLASS,
         ClassKind::Interface => SymbolKind::INTERFACE,
         ClassKind::Enum => SymbolKind::ENUM,
-    };
+    }
+}
+
+fn class_symbol(c: &ClassDecl) -> DocumentSymbol {
+    let kind = class_kind_symbol_kind(c.kind);
     let mut children: Vec<DocumentSymbol> = c.consts.iter().map(const_symbol).collect();
     children.extend(c.properties.iter().map(|p| {
         symbol(

@@ -201,6 +201,10 @@ pub(super) fn definition_request(id: i64, uri: &str, pos: Value) -> Value {
     )
 }
 
+pub(super) fn workspace_symbol_request(id: i64, query: &str) -> Value {
+    request(id, "workspace/symbol", json!({"query": query}))
+}
+
 pub(super) fn response_result(messages: &[Value], id: i64) -> Value {
     messages
         .iter()

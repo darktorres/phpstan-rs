@@ -37,8 +37,9 @@ use lsp_types::{
     GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
     InitializeParams, InitializeResult, Location, MarkedString, MessageType, OneOf,
     Position as LspPosition, PositionEncodingKind, Range as LspRange, ServerCapabilities,
-    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgress,
-    WorkDoneProgressBegin, WorkDoneProgressEnd,
+    ServerInfo, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd, WorkspaceSymbolParams,
+    WorkspaceSymbolResponse,
 };
 
 use crate::ast::ClassKind;
@@ -55,6 +56,7 @@ mod protocol;
 mod settings;
 mod text_split;
 mod workspace_config;
+mod workspace_symbol;
 
 #[cfg(test)]
 use protocol::percent_decode;
@@ -1123,6 +1125,24 @@ impl Server {
         ))
     }
 
+    /// Project-wide fuzzy symbol search - see `workspace_symbol::
+    /// workspace_symbols`'s own doc comment for ranking/scope details
+    /// and its documented member-collision limitation.
+    #[allow(deprecated)] // SymbolInformation::deprecated: no replacement field exists yet
+    fn workspace_symbol(&self, query: &str) -> Vec<SymbolInformation> {
+        workspace_symbol::workspace_symbols(&self.project, query)
+            .into_iter()
+            .map(|m| SymbolInformation {
+                name: m.name,
+                kind: m.kind,
+                tags: None,
+                deprecated: None,
+                location: self.location(m.path, m.span),
+                container_name: m.container_name,
+            })
+            .collect()
+    }
+
     /// Quick fixes for whatever diagnostics in `path` overlap `range` and
     /// carry a `DiagnosticFix`. Reads `self.last_diagnostics` rather than
     /// re-running the checker - see that field's own doc comment for why.
@@ -1549,6 +1569,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                             ..Default::default()
                         },
                     )),
+                    workspace_symbol_provider: Some(OneOf::Left(true)),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -1625,6 +1646,17 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     server.code_actions(&params.text_document.uri, params.range)
                 })
                 .map(|actions| serde_json::to_value(actions).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "workspace/symbol" => {
+            let result = serde_json::from_value::<WorkspaceSymbolParams>(req.params)
+                .ok()
+                .map(|params| server.workspace_symbol(&params.query))
+                .map(|symbols| {
+                    serde_json::to_value(WorkspaceSymbolResponse::Flat(symbols))
+                        .unwrap_or(serde_json::Value::Null)
+                })
                 .unwrap_or(serde_json::Value::Null);
             Message::Response(Response::new_ok(id.clone(), result))
         }

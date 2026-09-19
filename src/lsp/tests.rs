@@ -8,3 +8,4 @@ mod watched_files;
 mod workspace_config;
 mod workspace_folders;
 mod workspace_scan;
+mod workspace_symbol;
