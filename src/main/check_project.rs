@@ -346,17 +346,29 @@ fn run_check_project(
     // collect_property_assign_facts`'s own doc comment). Run before the
     // real, diagnostic-producing pass below, which consumes the merge via
     // `check_file_with_property_assign_facts` instead of `check_file`.
+    // `Registry.sql_reflector`'s only interior mutability is a plain
+    // `OnceLock` - if its own lazy-init closure panics mid-connection-
+    // attempt, the cell is left simply uninitialized (not corrupted;
+    // `OnceLock::get_or_init`'s own contract), so a later observer
+    // (including a `catch_unwind` recovering from an unrelated panic
+    // elsewhere in the same closure) sees either "not yet initialized"
+    // or a real, valid reflector - never a torn/partial one. Asserting
+    // `UnwindSafe` here is that specific, checked claim, not a blanket
+    // "trust me."
     let property_assign_facts = Arc::new(
-        std::panic::catch_unwind(|| project.collect_property_assign_facts()).unwrap_or_default(),
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            project.collect_property_assign_facts()
+        }))
+        .unwrap_or_default(),
     );
     let checked_results: Vec<(PathBuf, Result<Vec<checker::Diagnostic>, String>)> =
         pool.install(|| {
             analyze_files_by_size
                 .par_iter()
                 .map(|path| {
-                    let outcome = std::panic::catch_unwind(|| {
+                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                         project.check_file_with_property_assign_facts(path, &property_assign_facts)
-                    });
+                    }));
                     let outcome = outcome.map_err(|payload| {
                         payload
                             .downcast_ref::<String>()

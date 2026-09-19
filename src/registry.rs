@@ -258,6 +258,10 @@ pub struct Registry {
     // once at startup (`Project::set_sql_reflection_schema`) - `None`
     // when no `schema_file` is configured.
     pub sql_reflection_schema: Option<crate::sql_reflection_schema::SchemaCatalog>,
+    // The live SQL reflector (sub-phase C), lazily constructed on first
+    // real use from `sql_reflection_config` - see
+    // `sql_reflection_reflector::SqlReflectorHandle`'s own doc comment.
+    pub sql_reflector: crate::sql_reflection_reflector::SqlReflectorHandle,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
     // treat as "nothing to check yet." See `crate::php_version::PhpFeature`

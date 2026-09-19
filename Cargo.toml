@@ -20,6 +20,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.8"
 sqlparser = "0.63.0"
+mysql = { version = "28.0.2", default-features = false, features = ["rustls-tls", "minimal-rust"] }
+postgres = "0.19.14"
+rusqlite = { version = "0.40.2", features = ["bundled", "column_decltype", "column_metadata"] }
 
 [features]
 default = ["pcre-validate"]
@@ -27,10 +30,14 @@ hotpath = ["hotpath/hotpath"]
 hotpath-alloc = ["hotpath/hotpath-alloc"]
 # Phase 46: `regexp.pattern` validation calls real PCRE2 (via the
 # low-level `pcre2-sys` FFI, not the higher-level `pcre2` crate - see
-# `src/pcre_validate.rs`'s own doc comment for why) - the one place this
-# project links a C dependency at all. `cargo build --no-default-features`
-# keeps the rest of the crate 100% pure Rust, at the cost of only this
-# one diagnostic.
+# `src/pcre_validate.rs`'s own doc comment for why) - this project's one
+# *optional* C dependency. `cargo build --no-default-features` keeps the
+# rest of the crate 100% pure Rust, at the cost of only this one
+# diagnostic. `rusqlite`'s own `bundled` feature (live SQL query
+# reflection, sub-phase C of `delegated-tumbling-dongarra.md`) is a
+# second, always-on C dependency (vendors and compiles SQLite's real C
+# source at build time) - deliberately not gated behind a feature flag,
+# per the user's own explicit choice recorded in that plan.
 pcre-validate = ["dep:pcre2-sys"]
 # Phase 19 Part A: `Token`/`Keyword`/`StringPart`/`Position` gain a real
 # `arbitrary::Arbitrary` derive under this feature only - the fuzz
