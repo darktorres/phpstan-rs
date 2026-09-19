@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -5,9 +6,10 @@ use std::str::FromStr;
 use crossbeam_channel::Sender;
 use lsp_server::{Message, Notification as LspNotification, RequestId};
 use lsp_types::{
-    Diagnostic as LspDiagnostic, DiagnosticSeverity, LogMessageParams, MessageType, NumberOrString,
-    Position as LspPosition, ProgressParams, ProgressParamsValue, ProgressToken,
-    PublishDiagnosticsParams, Range as LspRange, Uri, WorkDoneProgress,
+    CodeAction, CodeActionKind, CodeActionOrCommand, Diagnostic as LspDiagnostic,
+    DiagnosticSeverity, LogMessageParams, MessageType, NumberOrString, Position as LspPosition,
+    ProgressParams, ProgressParamsValue, ProgressToken, PublishDiagnosticsParams,
+    Range as LspRange, TextEdit, Uri, WorkDoneProgress, WorkspaceEdit,
 };
 
 use crate::checker::Diagnostic;
@@ -286,6 +288,47 @@ pub(crate) fn to_lsp_range(span: Span) -> LspRange {
             character: span.end.col.saturating_sub(1),
         },
     }
+}
+
+/// Whether `a` and `b` overlap, including merely touching at a point (a
+/// zero-width `a` - a bare cursor, no selection - still overlaps a
+/// diagnostic span it sits inside or right at the edge of). Compares
+/// `Position` endpoints directly: `Position` derives `Ord`/`PartialOrd`
+/// (lexicographic on line-then-character, matching field declaration
+/// order) in lsp_types 0.97.0, but `Range` itself does not - there is no
+/// whole-`Range` comparison to make here, only this one.
+pub(crate) fn ranges_overlap(a: LspRange, b: LspRange) -> bool {
+    a.start <= b.end && b.start <= a.end
+}
+
+/// Converts a diagnostic's suggested `DiagnosticFix` into a `quickfix`
+/// `CodeAction` - `None` when `d` has no fix to offer. `DiagnosticFix`
+/// has no path field of its own (every fix is implicitly same-file), so
+/// this takes the request's own `uri` rather than deriving one from the
+/// diagnostic - correct today, forecloses a future cross-file fix
+/// without a schema change.
+pub(crate) fn diagnostic_fix_to_code_action(
+    uri: &Uri,
+    d: &Diagnostic,
+) -> Option<CodeActionOrCommand> {
+    let fix = d.fix.as_ref()?;
+    Some(CodeActionOrCommand::CodeAction(CodeAction {
+        title: fix.description.clone(),
+        kind: Some(CodeActionKind::QUICKFIX),
+        diagnostics: Some(vec![to_lsp_diagnostic(d)]),
+        edit: Some(WorkspaceEdit {
+            changes: Some(HashMap::from([(
+                uri.clone(),
+                vec![TextEdit {
+                    range: to_lsp_range(fix.span),
+                    new_text: fix.replacement.clone(),
+                }],
+            )])),
+            ..Default::default()
+        }),
+        is_preferred: Some(true),
+        ..Default::default()
+    }))
 }
 
 /// The inverse of `to_lsp_range`'s own position half - a request's cursor

@@ -31,12 +31,14 @@ use lsp_server::{
     ErrorCode, Message, Notification as LspNotification, Request, RequestId, Response,
 };
 use lsp_types::{
-    CancelParams, DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
-    DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
-    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
-    MarkedString, MessageType, OneOf, Position as LspPosition, PositionEncodingKind,
-    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
+    CancelParams, CodeActionKind, CodeActionOptions, CodeActionParams,
+    CodeActionProviderCapability, CodeActionResponse, DidChangeTextDocumentParams,
+    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
+    InitializeParams, InitializeResult, Location, MarkedString, MessageType, OneOf,
+    Position as LspPosition, PositionEncodingKind, Range as LspRange, ServerCapabilities,
+    ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgress,
+    WorkDoneProgressBegin, WorkDoneProgressEnd,
 };
 
 use crate::ast::ClassKind;
@@ -57,9 +59,9 @@ mod workspace_config;
 #[cfg(test)]
 use protocol::percent_decode;
 use protocol::{
-    from_lsp_position, log_message_notification, path_to_uri, progress_notification,
-    publish_diagnostics_notification, pump_messages, to_lsp_range, to_request_id, uri_to_path,
-    write_message,
+    diagnostic_fix_to_code_action, from_lsp_position, log_message_notification, path_to_uri,
+    progress_notification, publish_diagnostics_notification, pump_messages, ranges_overlap,
+    to_lsp_range, to_request_id, uri_to_path, write_message,
 };
 
 /// Every `Object` class name reachable from a `Checker::probe_hit`
@@ -141,6 +143,19 @@ struct Server {
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
     open_uris: HashMap<PathBuf, (Uri, Option<i32>)>,
+    // The last-computed, post-`apply_post_filters` diagnostic set for
+    // every path this server has ever checked - `code_actions` reads
+    // this instead of re-running a whole-file checker pass per request
+    // (a real editor's lightbulb fires `textDocument/codeAction` far
+    // more often than actual edits, e.g. on cursor movement). Kept in
+    // sync by every diagnostic-producing path (`check_all_analyzed_paths`,
+    // `publish_diagnostics_for`), cleared for a path `remove_workspace_folders`/
+    // `handle_watched_files_changed`'s Deleted branch drop. Safe under
+    // today's fully synchronous, one-message-at-a-time `run_loop`: a
+    // `codeAction` request can only ever see whatever the most recently
+    // processed `didChange`/scan already committed, never a torn or
+    // stale-relative-to-an-earlier-unprocessed-edit state.
+    last_diagnostics: HashMap<PathBuf, Vec<checker::Diagnostic>>,
     // Set once a real `shutdown` request has been handled - `run_loop`'s
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
@@ -243,6 +258,7 @@ impl Server {
         Server {
             project,
             open_uris: HashMap::new(),
+            last_diagnostics: HashMap::new(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
             // `Incoming<I>` has no public constructor or `Default` impl
@@ -587,6 +603,9 @@ impl Server {
             .filter_map(|p| self.open_uris.remove(p))
             .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[]))
             .collect();
+        for p in &paths {
+            self.last_diagnostics.remove(p);
+        }
 
         let results = self.project.remove_files(&paths);
         messages.extend(self.publish_diagnostics_for(results));
@@ -604,7 +623,7 @@ impl Server {
     /// (which then drops empty results) and `republish_known_files`
     /// (which must not, so a file previously flagged and now clean gets
     /// an explicit clearing notification).
-    fn check_all_analyzed_paths(&self) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
+    fn check_all_analyzed_paths(&mut self) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
         let mut paths = self.project.analyzed_paths();
         if paths.is_empty() {
             return HashMap::new();
@@ -629,7 +648,10 @@ impl Server {
                 path.display()
             );
         }
-        self.apply_post_filters(results)
+        let results = self.apply_post_filters(results);
+        self.last_diagnostics
+            .extend(results.iter().map(|(p, diags)| (p.clone(), diags.clone())));
+        results
     }
 
     /// Looks up the last known `(Uri, document version)` for `path` -
@@ -652,7 +674,7 @@ impl Server {
     /// in a real project never happens. Empty results are dropped: at an
     /// initial load nothing has been published for these paths yet, so
     /// there is nothing to clear.
-    fn publish_workspace_diagnostics(&self) -> Vec<Message> {
+    fn publish_workspace_diagnostics(&mut self) -> Vec<Message> {
         self.check_all_analyzed_paths()
             .into_iter()
             .filter(|(_, diags)| !diags.is_empty())
@@ -671,7 +693,7 @@ impl Server {
     /// silence. While `!self.enabled`, skips rechecking entirely and just
     /// clears every currently-open file - phpstan-rs.enable means "stop
     /// showing squiggles", not "stop the language server".
-    fn republish_known_files(&self) -> Vec<Message> {
+    fn republish_known_files(&mut self) -> Vec<Message> {
         if !self.enabled {
             return self
                 .open_uris
@@ -746,6 +768,7 @@ impl Server {
         for (path, (uri, typ)) in last_by_path {
             if typ == lsp_types::FileChangeType::DELETED {
                 self.open_uris.remove(&path);
+                self.last_diagnostics.remove(&path);
                 let results = self.project.remove_file(&path);
                 messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
                 continue;
@@ -787,13 +810,14 @@ impl Server {
     /// it). Shared by `handle_open_or_change` and
     /// `remove_workspace_folders`'s own recheck step.
     fn publish_diagnostics_for(
-        &self,
+        &mut self,
         results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
     ) -> Vec<Message> {
         results
             .into_iter()
             .map(|(p, diags)| {
                 let (dep_uri, dep_version) = self.uri_and_version_for(&p);
+                self.last_diagnostics.insert(p, diags.clone());
                 publish_diagnostics_notification(dep_uri, dep_version, &diags)
             })
             .collect()
@@ -1097,6 +1121,31 @@ impl Server {
         Some(DocumentSymbolResponse::Nested(
             document_symbol::document_symbols(stmts),
         ))
+    }
+
+    /// Quick fixes for whatever diagnostics in `path` overlap `range` and
+    /// carry a `DiagnosticFix`. Reads `self.last_diagnostics` rather than
+    /// re-running the checker - see that field's own doc comment for why.
+    /// A cache miss (a workspace file requested before any `didOpen`/
+    /// `didChange`/scan ever populated it) is a one-time, self-healing
+    /// fallback: computed once via `Project::check_file`, post-filtered
+    /// the same way every other diagnostic set is, then cached.
+    fn code_actions(&mut self, uri: &Uri, range: LspRange) -> Option<CodeActionResponse> {
+        let path = uri_to_path(uri)?;
+        if !self.last_diagnostics.contains_key(&path) {
+            let raw = self.project.check_file(&path);
+            let filtered = self.apply_post_filters(HashMap::from([(path.clone(), raw)]));
+            let diags = filtered.into_values().next().unwrap_or_default();
+            self.last_diagnostics.insert(path.clone(), diags);
+        }
+        let diagnostics = self.last_diagnostics.get(&path)?;
+        Some(
+            diagnostics
+                .iter()
+                .filter(|d| d.fix.is_some() && ranges_overlap(to_lsp_range(d.span), range))
+                .filter_map(|d| diagnostic_fix_to_code_action(uri, d))
+                .collect(),
+        )
     }
 
     fn location(&self, target_path: &Path, span: Span) -> Location {
@@ -1494,6 +1543,12 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     hover_provider: Some(HoverProviderCapability::Simple(true)),
                     definition_provider: Some(OneOf::Left(true)),
                     document_symbol_provider: Some(OneOf::Left(true)),
+                    code_action_provider: Some(CodeActionProviderCapability::Options(
+                        CodeActionOptions {
+                            code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
+                            ..Default::default()
+                        },
+                    )),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -1545,6 +1600,31 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .ok()
                 .and_then(|params| server.document_symbol(&params.text_document.uri))
                 .map(|symbols| serde_json::to_value(symbols).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/codeAction" => {
+            let result = serde_json::from_value::<CodeActionParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    // A client-requested kind `R` matches a server-
+                    // produced kind `K` when `K == R` or `K` specializes
+                    // `R` (`K` starts with `R + "."`) - never the other
+                    // way around. This server only ever emits the bare
+                    // `quickfix` kind (no `.`-suffix), so it can only
+                    // ever satisfy a request for exactly `quickfix`; a
+                    // request for a narrower kind like `quickfix.remove`
+                    // has nothing here to offer and short-circuits.
+                    let offers_quickfix = match &params.context.only {
+                        Some(only) => only.contains(&CodeActionKind::QUICKFIX),
+                        None => true,
+                    };
+                    if !offers_quickfix {
+                        return Some(CodeActionResponse::new());
+                    }
+                    server.code_actions(&params.text_document.uri, params.range)
+                })
+                .map(|actions| serde_json::to_value(actions).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Message::Response(Response::new_ok(id.clone(), result))
         }
