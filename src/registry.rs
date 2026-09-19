@@ -254,6 +254,10 @@ pub struct Registry {
     // set_sql_reflection_config`) - `None` when unconfigured, which every
     // raw-SQL call site must treat as "keep today's fallback."
     pub sql_reflection_config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
+    // A project's own configured `schema_file` (sub-phase A2), parsed
+    // once at startup (`Project::set_sql_reflection_schema`) - `None`
+    // when no `schema_file` is configured.
+    pub sql_reflection_schema: Option<crate::sql_reflection_schema::SchemaCatalog>,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
     // treat as "nothing to check yet." See `crate::php_version::PhpFeature`

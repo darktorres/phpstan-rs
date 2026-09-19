@@ -220,6 +220,16 @@ impl Project {
         self.registry.sql_reflection_config = config;
     }
 
+    /// Stores a project's own parsed `schema_file` catalog (sub-phase
+    /// A2), inert until sub-phase C's reflector consults it. `None`
+    /// when no `schema_file` is configured.
+    pub fn set_sql_reflection_schema(
+        &mut self,
+        schema: Option<crate::sql_reflection_schema::SchemaCatalog>,
+    ) {
+        self.registry.sql_reflection_schema = schema;
+    }
+
     /// Opts the whole project's checking into `use function`'s own
     /// `function.nameCase` check - see `registry::Registry::
     /// check_function_name_case`'s own doc comment for why this defaults

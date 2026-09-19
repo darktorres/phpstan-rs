@@ -32,6 +32,7 @@ pub mod regex_groups;
 pub mod registry;
 pub mod restricted_symbols;
 pub mod sql_reflection_config;
+pub mod sql_reflection_schema;
 pub mod token;
 pub mod types;
 

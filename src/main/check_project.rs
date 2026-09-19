@@ -6,7 +6,7 @@ use std::sync::Arc;
 use output::OutputFormat;
 use phpstan_rs::{
     baseline, checker, composer, config, doctrine_functions, ignore_errors, output, php_version,
-    project, restricted_symbols, sql_reflection_config,
+    project, restricted_symbols, sql_reflection_config, sql_reflection_schema,
 };
 use rayon::prelude::*;
 
@@ -142,6 +142,7 @@ fn run_check_project(
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
     doctrine_custom_function_entries: &[doctrine_functions::DoctrineCustomFunctionEntry],
     sql_reflection_config: Option<sql_reflection_config::SqlReflectionConfig>,
+    sql_reflection_schema: Option<sql_reflection_schema::SchemaCatalog>,
     phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
@@ -197,6 +198,7 @@ fn run_check_project(
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
     project.set_sql_reflection_config(sql_reflection_config);
+    project.set_sql_reflection_schema(sql_reflection_schema);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -626,6 +628,27 @@ pub(crate) fn run_check_project_command(
     let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
     let doctrine_custom_function_entries = config.doctrine_custom_functions.unwrap_or_default();
     let sql_reflection_config = config.sql_reflection;
+    // A configured `schema_file` is a real, reachable-or-not schema
+    // source the same way a live connection would be - unreadable or
+    // unparseable-into-any-table is a hard error at startup, not a
+    // silent fall-through to today's fallback (the same fail-fast
+    // precedent a malformed `restricted_symbols` entry already has).
+    let sql_reflection_schema = match sql_reflection_config
+        .as_ref()
+        .and_then(|c| c.schema_file.as_ref().map(|f| (f.clone(), c.driver)))
+    {
+        Some((path, driver)) => {
+            let path = resolve_against_config(path);
+            match sql_reflection_schema::parse_ddl_file(&path, driver) {
+                Ok(catalog) => Some(catalog),
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        None => None,
+    };
 
     let mut scan_dirs = if !scan_dirs.is_empty() {
         scan_dirs
@@ -714,6 +737,7 @@ pub(crate) fn run_check_project_command(
         &restricted_symbol_entries,
         &doctrine_custom_function_entries,
         sql_reflection_config,
+        sql_reflection_schema,
         phpstan_api_check_enabled,
         format.unwrap_or_default(),
     )
