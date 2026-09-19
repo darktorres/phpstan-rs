@@ -536,8 +536,13 @@ fn literal_keys_from_type(ty: &Type) -> Vec<String> {
 
 /// Maps `idx_ty` to a definite array key type for a write - `Type::Int`/
 /// `Type::String` when `idx_ty` is confidently one or the other, otherwise
-/// `unknown_array_key()` rather than a wrong guess.
-fn dynamic_write_key_type(idx_ty: &Type) -> Type {
+/// `unknown_array_key()` rather than a wrong guess. Also reused by
+/// `checker::sql_reflection`'s own `fetchAllKeyValue`/
+/// `fetchAllAssociativeIndexed` dispatch (sub-phase D) - the identical
+/// "what does this uncertain-typed value become as a real PHP array
+/// key" question, just asked about a fetched column's own value instead
+/// of a write's own index expression.
+pub(crate) fn dynamic_write_key_type(idx_ty: &Type) -> Type {
     if is_subtype(idx_ty, &Type::Int) {
         Type::Int
     } else if is_subtype(idx_ty, &Type::String) {

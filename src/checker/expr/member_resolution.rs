@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checker::assignment::dynamic_write_key_type;
 use crate::checker::expr::builtin_calls::{
     date_format_return_type, date_interval_format_return_type,
 };
@@ -696,44 +697,58 @@ impl<'a> Checker<'a> {
             Type::Object(class, type_args)
                 if matches!(
                     method,
-                    "fetchAssociative" | "fetchAllAssociative" | "fetchOne" | "fetchFirstColumn"
+                    "fetchAssociative"
+                        | "fetchAllAssociative"
+                        | "fetchOne"
+                        | "fetchFirstColumn"
+                        | "fetchNumeric"
+                        | "fetchAllNumeric"
+                        | "fetchAllKeyValue"
+                        | "fetchAllAssociativeIndexed"
+                        | "iterateAssociative"
+                        | "iterateNumeric"
+                        | "iterateKeyValue"
+                        | "iterateAssociativeIndexed"
+                        | "iterateColumn"
                 ) && self
                     .registry
                     .is_subclass_of(class, "Doctrine\\DBAL\\Result") =>
             {
-                match (method, type_args.first().cloned()) {
-                    ("fetchAssociative", Some(row_type)) => {
-                        Type::Union(vec![row_type, Type::False])
-                    }
-                    ("fetchAllAssociative", Some(row_type)) => {
-                        crate::checker::expr::doctrine_query_result_list_type_of(row_type)
-                    }
-                    ("fetchOne", Some(Type::ArrayShape(mut fields))) if !fields.is_empty() => {
-                        Type::Union(vec![fields.remove(0).1, Type::False])
-                    }
-                    ("fetchFirstColumn", Some(Type::ArrayShape(mut fields)))
-                        if !fields.is_empty() =>
-                    {
-                        crate::checker::expr::doctrine_query_result_list_type_of(fields.remove(0).1)
-                    }
-                    _ => self
-                        .generic_object_method_return_type(class, type_args, method, args, locals),
-                }
+                dbal_row_method_return_type(method, type_args.first().cloned()).unwrap_or_else(
+                    || {
+                        self.generic_object_method_return_type(
+                            class, type_args, method, args, locals,
+                        )
+                    },
+                )
             }
             // `Doctrine\DBAL\Connection`'s own directly-SQL-taking
-            // fetch* methods, and `Doctrine\DBAL\Query\QueryBuilder`'s
-            // own no-argument convenience aliases for the same four
-            // (real DBAL: `QueryBuilder::fetchAssociative()` etc. are
-            // pure sugar for `$this->executeQuery()->fetchAssociative()`)
-            // - `resolve_dbal_sql_from_call` picks the right SQL source
-            // per receiver kind. `fetchOne`/`fetchFirstColumn` read the
-            // *first* selected column's own type (real DBAL semantics:
-            // the value of the first column of the first/every row),
-            // not the whole row shape.
+            // fetch*/iterate* methods, and `Doctrine\DBAL\Query\
+            // QueryBuilder`'s own no-argument convenience aliases for
+            // the same ones (real DBAL: `QueryBuilder::
+            // fetchAssociative()` etc. are pure sugar for
+            // `$this->executeQuery()->fetchAssociative()` -
+            // `QueryBuilder` itself has no `iterate*`/`fetchNumeric`-
+            // family aliases at all, confirmed against its real source,
+            // so those methods only ever reach this arm via
+            // `Connection`) - `resolve_dbal_sql_from_call` picks the
+            // right SQL source per receiver kind.
             Type::Object(class, type_args)
                 if matches!(
                     method,
-                    "fetchAssociative" | "fetchAllAssociative" | "fetchOne" | "fetchFirstColumn"
+                    "fetchAssociative"
+                        | "fetchAllAssociative"
+                        | "fetchOne"
+                        | "fetchFirstColumn"
+                        | "fetchNumeric"
+                        | "fetchAllNumeric"
+                        | "fetchAllKeyValue"
+                        | "fetchAllAssociativeIndexed"
+                        | "iterateAssociative"
+                        | "iterateNumeric"
+                        | "iterateKeyValue"
+                        | "iterateAssociativeIndexed"
+                        | "iterateColumn"
                 ) && (self
                     .registry
                     .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
@@ -749,42 +764,33 @@ impl<'a> Checker<'a> {
                             &sql,
                         )
                     });
-                match (method, row_type) {
-                    ("fetchAssociative", Some(row_type)) => {
-                        Type::Union(vec![row_type, Type::False])
-                    }
-                    ("fetchAllAssociative", Some(row_type)) => {
-                        crate::checker::expr::doctrine_query_result_list_type_of(row_type)
-                    }
-                    ("fetchOne", Some(Type::ArrayShape(mut fields))) if !fields.is_empty() => {
-                        Type::Union(vec![fields.remove(0).1, Type::False])
-                    }
-                    ("fetchFirstColumn", Some(Type::ArrayShape(mut fields)))
-                        if !fields.is_empty() =>
-                    {
-                        crate::checker::expr::doctrine_query_result_list_type_of(fields.remove(0).1)
-                    }
-                    _ => self
-                        .generic_object_method_return_type(class, type_args, method, args, locals),
-                }
+                dbal_row_method_return_type(method, row_type).unwrap_or_else(|| {
+                    self.generic_object_method_return_type(class, type_args, method, args, locals)
+                })
             }
-            // `executeQuery()` - the first hop of the two-hop
-            // propagation above: carries the resolved row type forward
-            // as `Doctrine\DBAL\Result`'s own synthesized generic slot,
-            // read back by the `Result`-method dispatch above rather
-            // than re-resolving the SQL from scratch at that call site.
-            // `executeStatement()` needs no such transform at all (a
-            // plain `int|string` affected-row count, already correct via
-            // `generic_object_method_return_type`'s own ordinary
-            // resolution) - not handled here.
+            // `executeQuery()`/`executeCacheQuery()` - the first hop of
+            // the two-hop propagation above: carries the resolved row
+            // type forward as `Doctrine\DBAL\Result`'s own synthesized
+            // generic slot, read back by the `Result`-method dispatch
+            // above rather than re-resolving the SQL from scratch at
+            // that call site. `executeCacheQuery()` is `Connection`-only
+            // (confirmed against its real source - `QueryBuilder` has
+            // no such method). `executeStatement()` needs no such
+            // transform at all (a plain `int|string` affected-row
+            // count, already correct via `generic_object_method_return_
+            // type`'s own ordinary resolution) - not handled here.
             Type::Object(class, _)
-                if method == "executeQuery"
+                if (method == "executeQuery"
                     && (self
                         .registry
                         .is_subclass_of(class, "Doctrine\\DBAL\\Connection")
                         || self
                             .registry
-                            .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")) =>
+                            .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder")))
+                    || (method == "executeCacheQuery"
+                        && self
+                            .registry
+                            .is_subclass_of(class, "Doctrine\\DBAL\\Connection")) =>
             {
                 let row_type = self
                     .resolve_dbal_sql_from_call(recv, class, args, locals)
@@ -892,6 +898,87 @@ impl<'a> Checker<'a> {
             args.first()
                 .and_then(|arg| self.foldable_sql_string(&arg.value, locals))
         }
+    }
+}
+
+/// Sub-phase D's own "one row type, N per-method transforms" table -
+/// shared between `Doctrine\DBAL\Result`'s own no-argument terminal
+/// methods and `Connection`/`QueryBuilder`'s own directly-resolved
+/// forms, which otherwise duplicate this exact dispatch. `row_type` is
+/// always `Some(Type::ArrayShape(_))` when it's `Some` at all (every
+/// `resolve_sql_row_type`-producing path already guarantees this) -
+/// anything else degrades to `None`, the same "don't guess" leniency as
+/// an unresolvable chain.
+///
+/// Real per-method shapes read directly from `vendor/doctrine/dbal/src/
+/// Result.php`'s own real implementations/docblocks, not guessed:
+/// `fetchNumeric`/`fetchAllNumeric`/`iterateNumeric` re-key the row by
+/// position (`0`, `1`, ...) instead of column name; `fetchAllKeyValue`/
+/// `iterateKeyValue` use the *first* column's own value as the array
+/// key and the *second* column's value as the value (real DBAL asserts
+/// at least 2 columns); `fetchAllAssociativeIndexed`/
+/// `iterateAssociativeIndexed` use the first column's value as the key
+/// and the *rest* of the row (first column removed) as the value.
+/// `iterateNumeric`/`iterateAssociative`/`iterateColumn`'s own
+/// `Traversable` key is always plain `int` (the generator's own
+/// sequential index - confirmed via `Result.php`'s own `@return
+/// Traversable<int, ...>` docblocks), never derived from a column;
+/// `iterateKeyValue`/`iterateAssociativeIndexed`'s own key *is* a real
+/// column value (`Traversable<mixed, ...>` in the same docblocks),
+/// coerced through `dynamic_write_key_type` the same way an ordinary
+/// dynamic array-key write already is elsewhere in this project - the
+/// identical "what does this uncertain-typed value become as a real PHP
+/// array key" question.
+fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<Type> {
+    let Some(Type::ArrayShape(fields)) = row_type else {
+        return None;
+    };
+    let numeric_shape = || {
+        Type::ArrayShape(
+            fields
+                .iter()
+                .enumerate()
+                .map(|(i, (_, ty, opt))| (i.to_string(), ty.clone(), *opt))
+                .collect(),
+        )
+    };
+    let traversable_of =
+        |key: Type, value: Type| Type::Object("Traversable".to_string(), vec![key, value]);
+    match method {
+        "fetchAssociative" => Some(Type::Union(vec![Type::ArrayShape(fields), Type::False])),
+        "fetchAllAssociative" => Some(doctrine_query_result_list_type_of(Type::ArrayShape(fields))),
+        "iterateAssociative" => Some(traversable_of(Type::Int, Type::ArrayShape(fields))),
+        "fetchNumeric" => Some(Type::Union(vec![numeric_shape(), Type::False])),
+        "fetchAllNumeric" => Some(doctrine_query_result_list_type_of(numeric_shape())),
+        "iterateNumeric" => Some(traversable_of(Type::Int, numeric_shape())),
+        "fetchOne" if !fields.is_empty() => {
+            Some(Type::Union(vec![fields[0].1.clone(), Type::False]))
+        }
+        "fetchFirstColumn" if !fields.is_empty() => {
+            Some(doctrine_query_result_list_type_of(fields[0].1.clone()))
+        }
+        "iterateColumn" if !fields.is_empty() => {
+            Some(traversable_of(Type::Int, fields[0].1.clone()))
+        }
+        "fetchAllKeyValue" if fields.len() >= 2 => {
+            let key_ty = dynamic_write_key_type(&fields[0].1);
+            Some(Type::Array(Box::new(key_ty), Box::new(fields[1].1.clone())))
+        }
+        "iterateKeyValue" if fields.len() >= 2 => {
+            let key_ty = dynamic_write_key_type(&fields[0].1);
+            Some(traversable_of(key_ty, fields[1].1.clone()))
+        }
+        "fetchAllAssociativeIndexed" if !fields.is_empty() => {
+            let key_ty = dynamic_write_key_type(&fields[0].1);
+            let rest = Type::ArrayShape(fields[1..].to_vec());
+            Some(Type::Array(Box::new(key_ty), Box::new(rest)))
+        }
+        "iterateAssociativeIndexed" if !fields.is_empty() => {
+            let key_ty = dynamic_write_key_type(&fields[0].1);
+            let rest = Type::ArrayShape(fields[1..].to_vec());
+            Some(traversable_of(key_ty, rest))
+        }
+        _ => None,
     }
 }
 
