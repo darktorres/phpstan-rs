@@ -103,13 +103,13 @@ fn mysql_column_to_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> 
         | ColumnType::MYSQL_TYPE_NEWDATE => Type::String,
         // mysqlnd returns DECIMAL/NEWDECIMAL as a string unconditionally
         // - confirmed live, see `sql_reflection_schema`'s own doc
-        // comment for the full verification note. FLOAT/DOUBLE instead
-        // switch on `PDO::ATTR_STRINGIFY_FETCHES`, which this reflector
-        // has no way to see - honestly undecided, not guessed.
+        // comment for the full verification note. FLOAT/DOUBLE are the
+        // native type - PDO's own real `ATTR_STRINGIFY_FETCHES` default
+        // is `false`, and neither Doctrine DBAL nor this corpus's own
+        // code ever sets it (see `sql_reflection_schema`'s own doc
+        // comment for the full correction/verification note).
         ColumnType::MYSQL_TYPE_DECIMAL | ColumnType::MYSQL_TYPE_NEWDECIMAL => Type::String,
-        ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => {
-            Type::Union(vec![Type::Float, Type::String])
-        }
+        ColumnType::MYSQL_TYPE_FLOAT | ColumnType::MYSQL_TYPE_DOUBLE => Type::Float,
         // `TINYINT(1)` is deliberately still `Int`, not `Bool` -
         // confirmed live against real PDO in both
         // `PDO::ATTR_EMULATE_PREPARES` settings (see

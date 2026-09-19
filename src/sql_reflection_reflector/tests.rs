@@ -36,18 +36,18 @@ fn integer_family_is_always_int_never_bool_even_for_tinyint_one() {
 }
 
 #[test]
-fn decimal_is_string_but_float_double_are_honestly_undecided() {
+fn decimal_is_string_but_float_double_are_the_native_type() {
     assert_eq!(
         mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_NEWDECIMAL), None),
         Type::String
     );
     assert_eq!(
         mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_FLOAT), None),
-        Type::Union(vec![Type::Float, Type::String])
+        Type::Float
     );
     assert_eq!(
         mysql_column_to_type(&not_null(ColumnType::MYSQL_TYPE_DOUBLE), None),
-        Type::Union(vec![Type::Float, Type::String])
+        Type::Float
     );
 }
 

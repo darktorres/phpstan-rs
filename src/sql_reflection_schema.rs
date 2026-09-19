@@ -256,10 +256,22 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::BigDecimal(_)
         | DataType::Dec(_)
         | DataType::DecUnsigned(_) => Type::String,
-        // FLOAT/DOUBLE instead switch on `PDO::ATTR_STRINGIFY_FETCHES`
-        // (string when true, native `float` when false) - an app-level
-        // connection setting a static DDL dump has no way to see, so
-        // this stays honestly undecided rather than guessing one.
+        // FLOAT/DOUBLE (and, below, Postgres `boolean`) switch on
+        // `PDO::ATTR_STRINGIFY_FETCHES` (string when true, native type
+        // when false) - **correction, verified live**: PDO's own real
+        // default for this attribute is `false` (confirmed directly:
+        // `(new PDO(...))->getAttribute(PDO::ATTR_STRINGIFY_FETCHES)`
+        // returns `false` with nothing else set), and neither Doctrine
+        // DBAL nor this corpus's own application code ever sets it
+        // anywhere (confirmed: zero matches for `ATTR_STRINGIFY_FETCHES`
+        // across `vendor/doctrine/dbal/src` and this corpus's own `src`/
+        // `config`/`tests`) - so the real, unmodified, in-practice
+        // answer for this project's actual target is the native type,
+        // not an honestly-undecided union. This is a real, checked
+        // assumption about this specific stack, not a blind default -
+        // see the plan's own "detect/match the app's own real setting"
+        // framing, which a from-scratch project without this exact
+        // grep-confirmed non-interference would need to earn separately.
         DataType::Float(_)
         | DataType::FloatUnsigned(_)
         | DataType::Float4
@@ -271,7 +283,7 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         | DataType::Double(_)
         | DataType::DoubleUnsigned(_)
         | DataType::DoublePrecision
-        | DataType::DoublePrecisionUnsigned => Type::Union(vec![Type::Float, Type::String]),
+        | DataType::DoublePrecisionUnsigned => Type::Float,
         DataType::Bool | DataType::Boolean => Type::Bool,
         DataType::TinyInt(_)
         | DataType::TinyIntUnsigned(_)

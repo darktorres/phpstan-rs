@@ -69,16 +69,13 @@ fn timestamp_and_datetime_columns_are_string_not_a_datetime_object() {
 }
 
 #[test]
-fn decimal_columns_are_string_but_float_columns_are_left_honestly_undecided() {
+fn decimal_columns_are_string_but_float_columns_are_the_native_type() {
     let catalog = parse_ddl(
         "CREATE TABLE t (price decimal(10,2), ratio float);",
         SqlDriver::Mysql,
     );
     assert_eq!(catalog.column("t", "price").unwrap().ty, Type::String);
-    assert_eq!(
-        catalog.column("t", "ratio").unwrap().ty,
-        Type::Union(vec![Type::Float, Type::String])
-    );
+    assert_eq!(catalog.column("t", "ratio").unwrap().ty, Type::Float);
 }
 
 #[test]
