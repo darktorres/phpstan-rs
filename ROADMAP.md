@@ -2536,12 +2536,118 @@ connection or static schema is configured, with zero new false
 positives across the full unscoped corpus (including `vendor/`'s own
 internal DBAL usage of its own APIs).
 
-Explicitly left as disclosed, narrower gaps, not built in this pass:
-resolution-order steps 1-2 (a pure-AST answer needing no schema at all,
-and a resolved-answer cache - a real, known performance cost, not a
-correctness one), virtual relations (views/CTEs/derived tables), window
-functions, and the zero-real-corpus-usage `iterate*`/`rowCount`/
-`columnCount`/`executeCacheQuery` methods.
+**Remediation pass - every gap the first pass above disclosed is now
+closed**, triggered by a direct "check if everything was completed"
+re-read of the original plan against shipped code (never trust one's
+own completion summary over the plan's own text): the
+zero-real-corpus-usage `fetchNumeric`/`fetchAllNumeric`/
+`fetchAllKeyValue`/`fetchAllAssociativeIndexed`/`iterate*` ×5/
+`rowCount`/`columnCount`/`executeCacheQuery` methods are wired into
+real dispatch (`checker::expr::member_resolution`'s own
+`dbal_row_method_return_type`, 13 methods total across `Result`'s own
+no-argument form and `Connection`'s SQL-argument form, plus the
+`executeCacheQuery()` two-hop propagation).
+
+`COUNT(...)` (bare or windowed - `COUNT(*) OVER()`) is refined from
+whatever the static/live path reports to `int<0, max>` unconditionally,
+matching Phase 168's own DQL-side aggregate-type answer
+(`resolve_sql_row_type`'s own `refine_count_columns`, re-parsing the
+resolved SQL's own SELECT list to find the aggregate's projection
+position) - deliberately not extended to `SUM`/`AVG`/`MIN`/`MAX`,
+where the driver's own live-reflected type is already more precise
+than 168's DQL-side approximation (real aggregation can widen a type,
+e.g. `SUM(tinyint_col)` -> `BIGINT`).
+
+`foldable_sql_string` now also folds a heredoc/double-quoted string
+whose every interpolated part is itself foldable, and a `sprintf()`
+call whose format string and every value argument fold to a literal
+(scoped to `%s`/`%d`/`%u`/`%%` only - no flags/width/precision/
+positional `$`, where real PHP's own padding/sign/base-conversion
+rules would need reproducing just to fold a SQL string) - both scoped
+to this module alone rather than changing `check_expr`'s own general
+`Interpolated` narrowing, which deliberately stays plain `Type::String`
+for its own implicit-`__toString()` diagnostics.
+
+A second, connection-independent source of parameter-type truth beyond
+`ArrayParameterType::*`: `ParameterType::INTEGER`/`Types::INTEGER`/
+`SMALLINT`/`BIGINT` (real DBAL, already present in the call site's own
+PHP source, no live/static schema needed) bound to a literal, non-
+numeric string is flagged under `sqlReflection.invalidParameterType`
+too - deliberately narrow to `INTEGER` and literal strings only, since
+`STRING`/`BOOLEAN`-declared types stay unchecked (almost any scalar
+coerces to those safely).
+
+Resolution-order steps 1 (`resolve_pure_ast` - a select list of only
+literals and/or a bare `COUNT`, needing no schema/connection at all,
+live-confirmed identical across all 3 engines for integer/string/
+`NULL` literals, driver-dependent for decimal/boolean literals where
+engines genuinely diverge) and 2 (`Registry::sql_reflection_cache`, an
+in-memory single-run cache by SQL text alone - this project supports
+exactly one schema source/connection per run, so that identity is
+invariant and needs no separate cache-key component) are now built.
+
+**Virtual relations - live-verified to need no dedicated resolution
+logic on the live path at all**: views, CTEs, derived tables, and
+`UNION` (including its own per-column numeric/string coercion, e.g.
+`int UNION varchar` reporting as a single `string` column, never a
+PHP-level `Type::Union`) all resolve correctly through the exact same
+`reflect()`/`PREPARE` call already used for a plain `SELECT`, confirmed
+directly against real MySQL, Postgres, and SQLite - the live engine's
+own query planner already does this work. The static-schema-only path
+(no live connection at all) genuinely needed new code, since it has no
+engine to delegate to: `resolve_from_static_schema` now resolves a
+derived table or a non-recursive CTE through the same column-list
+primitive a real table's own schema entry uses. `UNION` coercion rules,
+`CREATE VIEW` parsing, and `WITH RECURSIVE` stay a disclosed gap in
+this static-only path specifically - each needs real per-engine
+behavior this project only trusts once verified live, which a schema-
+file-only configuration has no database to verify against.
+
+**Window functions** turned out to already resolve correctly once a
+real, unrelated bug was fixed: `normalize_placeholders_for_driver`
+rebuilt the whole SQL string by tokenizing and rejoining every token
+with a single space, which is lossy - real, live-confirmed MySQL
+rejects a space between a function name and its own opening paren
+specifically when the argument is `*` (`COUNT(*)` is valid, `COUNT (*)`
+is a genuine syntax error), so any query with `COUNT(*)` or a window
+function silently failed to `PREPARE` the moment it also needed a
+placeholder rewritten (unconditional on every MySQL/Postgres
+`reflect()` call, regardless of whether the SQL even had a
+placeholder). Fixed by rewriting only the real placeholder spans via
+`tokenize_with_location()`, copying every other byte of the original
+SQL through unchanged.
+
+**Session-variable parity**: a new optional `session_init_sql` config
+field runs real SQL once on every new physical reflection connection,
+mirroring an app's own real session-init mechanism (e.g. `MYSQLI_
+INIT_COMMAND`'s `SET SESSION sql_mode=...`) - live-verified this
+actually matters (a weaker session default can silently accept a query
+at `PREPARE` time that the app's own real, more strictly configured
+connection would reject).
+
+**Schema drift check**: when both a `schema_file` and a live-connection
+config are configured together, each table the static catalog knows
+about is compared against its own live-reflected column list once at
+startup, warning on a real mismatch - reuses the existing `reflect()`
+interface (`SELECT * FROM <table>`) rather than writing new per-engine
+`information_schema`/`PRAGMA` queries by hand. Verified end to end
+against the real, full DDL dump and the real live `piwigo_test`
+database - zero false positives across all 38 real tables.
+
+**Doctrine ORM entity metadata cross-reference** (PHASE_BACKLOG Phase
+168's own entity-metadata extraction never needed a real DB table/
+column name at all, since DQL resolves through property names - new
+capability, not a reuse): `DoctrineEntity` now also carries `table_name`
+(`#[ORM\Table(name: ...)]`) and `column_names` (`#[ORM\Column(name:
+...)]`, falling back to the property's own name when absent, matching
+real Doctrine's own default naming strategy). A raw SQL query against a
+table a `DoctrineEntity` maps prefers that entity's own already-resolved
+native PHP property type over a freshly-derived DB-column-type
+translation, for any column that's also a mapped scalar field, only
+when the entity's type is a genuine narrowing (`is_subtype(entity_ty,
+column_ty)` - e.g. a column nullable in the DB whose mapped property is
+declared non-nullable because the app enforces it); a disagreement that
+isn't a narrowing keeps the column-derived answer.
 
 **Entity inheritance mapping (single-table/joined-table)**
 (PHASE_BACKLOG Phase 168's 168j - the first of the two previously-

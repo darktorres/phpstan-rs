@@ -2238,7 +2238,7 @@ rather than a from-scratch schema-inference scheme.
   reflector bypasses DBAL's own runtime entirely - confirmed directly
   that real MySQL/Postgres `PREPARE` both reject that syntax outright,
   requiring a per-engine rewrite before every live `PREPARE` call.
-- **176D (medium, DONE for the real high-value methods).** Wired
+- **176D (medium, DONE).** Wired
   `fetchAssociative`/`fetchAllAssociative`/`fetchOne`/`fetchFirstColumn`
   (both `Connection`'s own SQL-argument form and `QueryBuilder`'s own
   chain-folded aliases) and `executeQuery()`'s own two-hop propagation
@@ -2246,12 +2246,15 @@ rather than a from-scratch schema-inference scheme.
   168e's identical `Doctrine\ORM\Query` convention) into real
   `checker::expr::member_resolution` dispatch. `executeStatement()`
   needed no override (already correct via ordinary signature
-  resolution). `iterate*`/`rowCount`/`columnCount`/`executeCacheQuery`
-  are zero real corpus usage - not built. Real corpus payoff, confirmed
-  live: resolves 168i's own original motivating example
-  (`NotificationByMailSenderTest.php:148`) once a live connection or
-  static schema is configured, zero new false positives across the full
-  unscoped corpus.
+  resolution). Real corpus payoff, confirmed live: resolves 168i's own
+  original motivating example (`NotificationByMailSenderTest.php:148`)
+  once a live connection or static schema is configured, zero new false
+  positives across the full unscoped corpus. `fetchNumeric`/
+  `fetchAllNumeric`/`fetchAllKeyValue`/`fetchAllAssociativeIndexed`/
+  `iterate*` ×5/`rowCount`/`columnCount`/`executeCacheQuery` were
+  initially skipped for zero real corpus usage, then wired in during
+  the remediation pass below - corpus incidence affects verification
+  sequencing, never whether a real, documented DBAL method gets built.
 - **176E (medium, DONE).** Placeholder/bound-parameter validation
   (`checker::sql_reflection::parameter_validation`) - both real DBAL
   parameter-binding mechanisms built as general capabilities regardless
@@ -2265,16 +2268,44 @@ rather than a from-scratch schema-inference scheme.
   pattern). Deliberately doesn't compare a bound value's type against
   the prepared statement's own live-reported expected type - real SQL/
   PHP scalar coercion is genuinely loose, a risk-based scope limit, not
-  a corpus-popularity one.
+  a corpus-popularity one. Extended in the remediation pass below with a
+  second, connection-independent check: `ParameterType::INTEGER`/
+  `Types::INTEGER`/`SMALLINT`/`BIGINT` bound to a literal non-numeric
+  string.
+- **176 remediation (large, DONE).** A direct "check if everything was
+  completed" re-read of the original plan against shipped code (not
+  the completion summary) surfaced 13 real, itemized gaps across
+  176B-176E - all closed: `COUNT(...)` refinement to `int<0, max>`
+  (bare or windowed); `foldable_sql_string` folding a heredoc/sprintf()
+  argument; the `ParameterType::INTEGER` check above; resolution-order
+  steps 1 (`resolve_pure_ast`) and 2 (`Registry::sql_reflection_cache`);
+  the schema drift check; a new `session_init_sql` config field for
+  real connection-setup parity (live-verified to matter: a weaker
+  session default can silently accept a query at `PREPARE` time the
+  app's own real connection would reject); Doctrine ORM entity metadata
+  cross-reference (`DoctrineEntity` extended with `table_name`/
+  `column_names`, neither tracked by 168a since DQL never needed a real
+  DB name); and virtual relations, which turned out to need no
+  dedicated resolution logic on the live path at all (live-verified
+  across all 3 engines - the real engine's own query planner already
+  resolves views/CTEs/derived tables/`UNION` through the same
+  `PREPARE` call a plain `SELECT` already uses) once a real, unplanned
+  bug was fixed: `normalize_placeholders_for_driver` rebuilt SQL by
+  rejoining tokens with a single space, which broke `COUNT(*)`/window
+  functions specifically (real MySQL rejects the resulting `COUNT (*)`
+  - a space before the paren - whenever the same query also needed a
+  placeholder rewritten) - fixed by rewriting only the real placeholder
+  spans via `tokenize_with_location()` instead. The static-schema-only
+  path (no live connection) separately gained derived-table/non-
+  recursive-CTE support; `UNION` coercion/`CREATE VIEW` parsing/`WITH
+  RECURSIVE` remain a disclosed gap there specifically, since each
+  needs real per-engine behavior only verifiable live, which a schema-
+  file-only configuration has no database to verify against.
 
 Explicitly out of scope (176F): `EXPLAIN`-based query-plan analysis and
 general SQL style linting beyond what a prepare-time parse error
 naturally catches - each needs its own distinct mechanism, genuinely
-orthogonal to type inference. Also disclosed, not built in this pass:
-resolution-order steps 1-2 (a pure-AST answer needing no schema at all,
-and a resolved-answer cache - a real performance cost, not a
-correctness one), virtual relations (views/CTEs/derived tables), and
-window functions.
+orthogonal to type inference.
 
 ## Phase 173 — Same-function parallel dynamically-keyed array correlation
 
