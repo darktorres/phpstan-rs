@@ -6,7 +6,8 @@ use crossbeam_channel::Sender;
 use lsp_server::{Message, Notification as LspNotification};
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, LogMessageParams, MessageType, NumberOrString,
-    Position as LspPosition, PublishDiagnosticsParams, Range as LspRange, Uri,
+    Position as LspPosition, ProgressParams, ProgressParamsValue, ProgressToken,
+    PublishDiagnosticsParams, Range as LspRange, Uri, WorkDoneProgress,
 };
 
 use crate::checker::Diagnostic;
@@ -305,6 +306,20 @@ pub(crate) fn publish_diagnostics_notification(uri: Uri, diagnostics: &[Diagnost
             uri,
             diagnostics: diagnostics.iter().map(to_lsp_diagnostic).collect(),
             version: None,
+        },
+    ))
+}
+
+/// A `$/progress` notification carrying one `WorkDoneProgress` value
+/// (`Begin`/`Report`/`End`) for `token` - a client-supplied
+/// `workDoneToken` from `initialize`, or one this server requested via
+/// `window/workDoneProgress/create`.
+pub(crate) fn progress_notification(token: ProgressToken, value: WorkDoneProgress) -> Message {
+    Message::Notification(LspNotification::new(
+        "$/progress".to_string(),
+        ProgressParams {
+            token,
+            value: ProgressParamsValue::WorkDone(value),
         },
     ))
 }

@@ -98,6 +98,7 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
             "initialize",
             json!({"rootUri": dir.uri(), "capabilities": {}}),
         ),
+        notification("initialized", json!({})),
         notification("exit", json!({})),
     ]);
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -179,6 +180,161 @@ fn initialize_offers_utf8_position_encoding_regardless_of_its_position_in_the_cl
 }
 
 #[test]
+fn initialize_response_does_not_depend_on_initialized_ever_arriving() {
+    // Deliberately no "initialized" notification: proves the scan
+    // genuinely moved out of "initialize" - this would fail against the
+    // old code, where b.php would already be indexed by the time exit
+    // is processed.
+    let dir = TempDir::new("no_initialized");
+    dir.write(
+        "a.php",
+        "<?php class Greeter { public function greet(): string { return 'hi'; } }",
+    );
+    dir.write(
+        "b.php",
+        "<?php function useGreeter(Greeter $g) { return $g->greet(); }",
+    );
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification(
+            "textDocument/didOpen",
+            json!({"textDocument": {"uri": format!("{}/a.php", dir.uri()), "languageId": "php", "version": 1, "text": "<?php class Greeter {}"}}),
+        ),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    assert!(
+        messages
+            .iter()
+            .any(|m| m["id"] == json!(1) && m["result"]["capabilities"].is_object()),
+        "the initialize response must not be blocked on initialized ever arriving: {messages:?}"
+    );
+    assert!(
+        !messages
+            .iter()
+            .any(|m| m["method"] == "textDocument/publishDiagnostics"
+                && m["params"]["uri"].as_str().unwrap_or("").ends_with("b.php")),
+        "b.php was never scanned (no initialized notification was sent), so it must not appear: {messages:?}"
+    );
+}
+
+#[test]
+fn initialized_reports_progress_when_the_client_supplies_a_token() {
+    let dir = TempDir::new("progress_with_token");
+    dir.write("a.php", "<?php function helperA(): int { return 1; }");
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}, "workDoneToken": "scan-1"}),
+        ),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    let progress: Vec<&Value> = messages
+        .iter()
+        .filter(|m| m["method"] == "$/progress")
+        .collect();
+    assert_eq!(progress.len(), 2, "got: {messages:?}");
+    assert_eq!(progress[0]["params"]["token"], "scan-1");
+    assert_eq!(progress[0]["params"]["value"]["kind"], "begin");
+    assert_eq!(progress[1]["params"]["token"], "scan-1");
+    assert_eq!(progress[1]["params"]["value"]["kind"], "end");
+}
+
+#[test]
+fn no_progress_token_means_no_progress_notifications() {
+    let dir = TempDir::new("progress_without_token");
+    dir.write("a.php", "<?php function helperA(): int { return 1; }");
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let messages = decode_all(&writer);
+    assert!(!messages.iter().any(|m| m["method"] == "$/progress"));
+}
+
+#[test]
+fn initialized_is_a_noop_with_no_workspace_root() {
+    let input = encode(&[
+        request(1, "initialize", json!({"capabilities": {}})),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let responses = decode_all(&writer);
+    assert_eq!(responses.len(), 1, "got: {responses:?}");
+    assert_eq!(responses[0]["id"], 1);
+}
+
+#[test]
+fn a_second_initialized_notification_is_a_noop() {
+    let dir = TempDir::new("double_initialized");
+    dir.write("a.php", "<?php function helperA(): int { return 1; }");
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification("initialized", json!({})),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let responses = decode_all(&writer);
+    assert_eq!(responses.len(), 1, "got: {responses:?}");
+    assert!(responses[0]["result"]["capabilities"].is_object());
+}
+
+#[test]
 fn initialize_logs_a_workspace_file_that_fails_to_parse() {
     let dir = TempDir::new("init_bad_file");
     dir.write("ok.php", "<?php function helperOk(): int { return 1; }");
@@ -193,6 +349,7 @@ fn initialize_logs_a_workspace_file_that_fails_to_parse() {
             "initialize",
             json!({"rootUri": dir.uri(), "capabilities": {}}),
         ),
+        notification("initialized", json!({})),
         notification("exit", json!({})),
     ]);
     let (tx, rx) = crossbeam_channel::unbounded();
@@ -253,6 +410,7 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
             "initialize",
             json!({"rootUri": dir.uri(), "capabilities": {}}),
         ),
+        notification("initialized", json!({})),
         notification(
             "textDocument/didOpen",
             json!({"textDocument": {"uri": a_uri, "languageId": "php", "version": 1, "text": "<?php class Greeter {}"}}),
@@ -583,6 +741,7 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
             "initialize",
             json!({"rootUri": dir.uri(), "capabilities": {}}),
         ),
+        notification("initialized", json!({})),
         notification(
             "textDocument/didOpen",
             json!({

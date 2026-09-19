@@ -78,15 +78,18 @@ pub(super) fn notification(method: &str, params: Value) -> Value {
 }
 
 /// Loads `files` (each `(name, contents)`) into a fresh workspace via
-/// `initialize`'s own `rootUri` scan, then sends `extra` requests/
-/// notifications, then `exit`. Returns every response/notification
-/// `run_loop` wrote.
+/// the `initialize`+`initialized` handshake's own deferred `rootUri`
+/// scan, then sends `extra` requests/notifications, then `exit`. Returns
+/// every response/notification `run_loop` wrote.
 pub(super) fn run(dir: &TempDir, extra: &[Value]) -> Vec<Value> {
-    let mut input = vec![request(
-        1,
-        "initialize",
-        json!({"rootUri": dir.uri(), "capabilities": {}}),
-    )];
+    let mut input = vec![
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": {}}),
+        ),
+        notification("initialized", json!({})),
+    ];
     input.extend_from_slice(extra);
     input.push(notification("exit", json!({})));
     let bytes = encode(&input);

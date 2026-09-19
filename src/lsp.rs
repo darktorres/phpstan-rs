@@ -32,6 +32,7 @@ use lsp_types::{
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
     MarkedString, MessageType, OneOf, Position as LspPosition, PositionEncodingKind,
     ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd,
 };
 
 use crate::ast::ClassKind;
@@ -49,8 +50,8 @@ mod text_split;
 #[cfg(test)]
 use protocol::percent_decode;
 use protocol::{
-    from_lsp_position, log_message_notification, path_to_uri, publish_diagnostics_notification,
-    pump_messages, to_lsp_range, uri_to_path, write_message,
+    from_lsp_position, log_message_notification, path_to_uri, progress_notification,
+    publish_diagnostics_notification, pump_messages, to_lsp_range, uri_to_path, write_message,
 };
 
 /// Every `Object` class name reachable from a `Checker::probe_hit`
@@ -111,11 +112,20 @@ fn resolve_member_owners(
     owners
 }
 
+/// Captured at `"initialize"`, consumed exactly once at `"initialized"` -
+/// the scan (and its optional `$/progress` announcement) must never run
+/// before the client has acknowledged the `InitializeResult`, so
+/// `initialize`'s own response is never gated on how long it takes.
+struct PendingWorkspaceScan {
+    root: PathBuf,
+    progress_token: Option<lsp_types::ProgressToken>,
+}
+
 struct Server {
     project: Project,
     // Every URI the client currently has open or has otherwise seen, so
-    // `initialize`'s workspace scan and `didOpen`/`didChange` share one
-    // path->diagnostics story instead of the workspace scan being
+    // the (now-deferred) workspace scan and `didOpen`/`didChange` share
+    // one path->diagnostics story instead of the workspace scan being
     // invisible to later incremental updates.
     open_uris: HashMap<PathBuf, Uri>,
     // Set once a real `shutdown` request has been handled - `run_loop`'s
@@ -127,6 +137,10 @@ struct Server {
     // nothing here tracks inbound requests), `Outgoing`'s `O` stores just
     // the method name for diagnostics.
     pending_requests: lsp_server::ReqQueue<(), &'static str>,
+    // Set by `"initialize"`, taken and acted on by `"initialized"` - see
+    // `PendingWorkspaceScan`'s own doc comment for why the scan itself
+    // can't just run inline in `"initialize"`.
+    pending_workspace_scan: Option<PendingWorkspaceScan>,
 }
 
 impl Server {
@@ -141,13 +155,16 @@ impl Server {
             open_uris: HashMap::new(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
+            pending_workspace_scan: None,
         }
     }
 
-    /// Loads every `.php` file under `root` into the project up front, so
-    /// the cross-file registry and dependency graph this whole phase is
+    /// Loads every `.php` file under `root` into the project, so the
+    /// cross-file registry and dependency graph this whole phase is
     /// about are populated from the very first diagnostic, not built up
-    /// one `didOpen` at a time.
+    /// one `didOpen` at a time. Invoked from `"initialized"` (not
+    /// synchronously inside `"initialize"`) via `pending_workspace_scan`
+    /// - see `PendingWorkspaceScan`'s own doc comment for why.
     fn load_workspace(&mut self, root: &Path) -> Vec<Message> {
         let mut files = Vec::new();
         crate::project::collect_php_files(root, &mut files);
@@ -159,6 +176,14 @@ impl Server {
         files.sort();
         let mut messages = Vec::new();
         for path in files {
+            // A non-conformant client that sends didOpen/didChange for a
+            // path already loaded before "initialized" arrives - this
+            // scan must not re-register a file update_file's own caller
+            // already indexed, since load_file has no idempotency guard
+            // of its own.
+            if self.project.ast(&path).is_some() {
+                continue;
+            }
             let Ok(bytes) = std::fs::read(&path) else {
                 continue;
             };
@@ -664,7 +689,7 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "initialize" => {
             let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
-            let (root, position_encoding) = match params {
+            let (root, position_encoding, progress_token) = match params {
                 Some(params) => {
                     let root = params
                         .root_uri
@@ -686,13 +711,18 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         .and_then(|g| g.position_encodings)
                         .is_some_and(|encodings| encodings.contains(&PositionEncodingKind::UTF8))
                         .then_some(PositionEncodingKind::UTF8);
-                    (root, position_encoding)
+                    let progress_token = params.work_done_progress_params.work_done_token;
+                    (root, position_encoding, progress_token)
                 }
-                None => (None, None),
+                None => (None, None, None),
             };
-            let mut startup_messages = Vec::new();
+            // The scan itself runs from "initialized", not here - see
+            // PendingWorkspaceScan's own doc comment.
             if let Some(root) = root.as_ref().and_then(uri_to_path) {
-                startup_messages = server.load_workspace(&root);
+                server.pending_workspace_scan = Some(PendingWorkspaceScan {
+                    root,
+                    progress_token,
+                });
             }
             let result = InitializeResult {
                 capabilities: ServerCapabilities {
@@ -715,9 +745,6 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 }),
             };
             let _ = write_message(writer, &Message::Response(Response::new_ok(req.id, result)));
-            for message in startup_messages {
-                let _ = write_message(writer, &message);
-            }
         }
         "shutdown" => {
             server.shutdown_received = true;
@@ -775,7 +802,36 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
 
 fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNotification) {
     match not.method.as_str() {
-        "initialized" => {} // nothing to do yet
+        "initialized" => {
+            if let Some(scan) = server.pending_workspace_scan.take() {
+                if let Some(token) = &scan.progress_token {
+                    let _ = write_message(
+                        writer,
+                        &progress_notification(
+                            token.clone(),
+                            WorkDoneProgress::Begin(WorkDoneProgressBegin {
+                                title: "phpstan-rs: scanning workspace".to_string(),
+                                cancellable: Some(false),
+                                message: None,
+                                percentage: None,
+                            }),
+                        ),
+                    );
+                }
+                for message in server.load_workspace(&scan.root) {
+                    let _ = write_message(writer, &message);
+                }
+                if let Some(token) = scan.progress_token {
+                    let _ = write_message(
+                        writer,
+                        &progress_notification(
+                            token,
+                            WorkDoneProgress::End(WorkDoneProgressEnd { message: None }),
+                        ),
+                    );
+                }
+            }
+        }
         "textDocument/didOpen" => {
             if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(not.params) {
                 let uri = params.text_document.uri;
