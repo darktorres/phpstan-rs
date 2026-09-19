@@ -115,7 +115,10 @@ fn percent_encode_path(s: &str) -> String {
 /// "quick fix"/problem-matcher tooling expects a stable per-diagnostic-
 /// kind string in. `tip`, when present, is appended to the message text
 /// the same way `location` already is - LSP has no separate field for a
-/// secondary hint either.
+/// secondary hint either. `severity` comes from `level_to_severity` - see
+/// `Diagnostic::level`'s own doc comment (checker.rs) for the tier
+/// semantics this mirrors (low number = more certain/severe, not a
+/// per-finding confidence score).
 pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
     let message = match &d.tip {
         Some(tip) => format!("{}: {}\n💡 {tip}", d.location, d.message),
@@ -123,11 +126,29 @@ pub(crate) fn to_lsp_diagnostic(d: &Diagnostic) -> LspDiagnostic {
     };
     LspDiagnostic {
         range: to_lsp_range(d.span),
-        severity: Some(DiagnosticSeverity::ERROR),
+        severity: Some(level_to_severity(d.level)),
         code: Some(NumberOrString::String(d.identifier.clone())),
         source: Some("phpstan-rs".to_string()),
         message,
         ..Default::default()
+    }
+}
+
+/// Maps `Diagnostic::level` (0 lowest/laxest - see that field's own doc
+/// comment) to an LSP severity tier. Level 0 ("definitely broken":
+/// undefined symbol/arity) is the only bucket that unambiguously means
+/// the code cannot be right, so it's the only `ERROR`; level 6 is the
+/// only bucket this project's own doc comments single out as a
+/// speculative, no-real-PHPStan-equivalent invention, so it's the only
+/// `HINT`. `_` (not a literal `6`) catches any future level above 6,
+/// since `level` is a plain unconstrained `u8` with no type-level upper
+/// bound - degrading to the least-alarming tier is safer than panicking
+/// or miscategorizing it as `ERROR`/`WARNING`.
+pub(crate) fn level_to_severity(level: u8) -> DiagnosticSeverity {
+    match level {
+        0 => DiagnosticSeverity::ERROR,
+        1..=5 => DiagnosticSeverity::WARNING,
+        _ => DiagnosticSeverity::HINT,
     }
 }
 

@@ -3,9 +3,89 @@
 //! resilience to malformed input or per-file failures.
 
 use super::super::*;
+use super::helpers::run;
 use super::helpers::*;
 use serde_json::{Value, json};
 use std::io::Cursor;
+
+#[test]
+fn diagnostic_severity_reflects_diagnostic_level() {
+    let dir = TempDir::new("severity_by_level");
+    // level 0 (class.notFound) + level 6 (missingType.parameter, $x untyped)
+    let level0_src =
+        "<?php function f($x) { if ($x instanceof NotAClass) { return true; } return false; }";
+    // level 1 (parameter.unused, $unused never read in the ctor body)
+    let level1_src =
+        "<?php class Greeter { public function __construct(int $unused) { echo \"hi\"; } }";
+    // level 5 (argument.type, string literal passed where int is declared)
+    let level5_src = "<?php function needsInt(int $n): void {} needsInt(\"nope\");";
+    let a = dir.write("a.php", level0_src);
+    let b = dir.write("b.php", level1_src);
+    let c = dir.write("c.php", level5_src);
+    let (a_uri, b_uri, c_uri) = (
+        path_to_uri(&a).to_string(),
+        path_to_uri(&b).to_string(),
+        path_to_uri(&c).to_string(),
+    );
+
+    let messages = run(
+        &dir,
+        &[
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": a_uri, "languageId": "php", "version": 1, "text": level0_src}}),
+            ),
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": b_uri, "languageId": "php", "version": 1, "text": level1_src}}),
+            ),
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": c_uri, "languageId": "php", "version": 1, "text": level5_src}}),
+            ),
+        ],
+    );
+
+    let diags_for = |uri: &str| -> Vec<Value> {
+        messages
+            .iter()
+            .filter(|m| {
+                m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri
+            })
+            .flat_map(|m| m["params"]["diagnostics"].as_array().unwrap().clone())
+            .collect()
+    };
+
+    let a_diags = diags_for(&a_uri);
+    let class_not_found = a_diags
+        .iter()
+        .find(|d| d["code"] == "class.notFound")
+        .unwrap_or_else(|| panic!("expected class.notFound in {a_diags:?}"));
+    assert_eq!(class_not_found["severity"], 1, "level 0 must map to ERROR");
+
+    let missing_type = a_diags
+        .iter()
+        .find(|d| d["code"] == "missingType.parameter")
+        .unwrap_or_else(|| panic!("expected missingType.parameter in {a_diags:?}"));
+    assert_eq!(missing_type["severity"], 4, "level 6 must map to HINT");
+
+    let b_diags = diags_for(&b_uri);
+    let unused_param = b_diags
+        .iter()
+        .find(|d| d["code"] == "parameter.unused")
+        .unwrap_or_else(|| panic!("expected parameter.unused in {b_diags:?}"));
+    assert_eq!(unused_param["severity"], 2, "level 1 must map to WARNING");
+
+    let c_diags = diags_for(&c_uri);
+    let arg_type = c_diags
+        .iter()
+        .find(|d| d["code"] == "argument.type")
+        .unwrap_or_else(|| panic!("expected argument.type in {c_diags:?}"));
+    assert_eq!(
+        arg_type["severity"], 2,
+        "level 5 must map to WARNING (upper boundary)"
+    );
+}
 
 #[test]
 fn initialize_loads_the_workspace_and_returns_server_capabilities() {
