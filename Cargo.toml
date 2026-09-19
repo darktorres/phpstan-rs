@@ -23,6 +23,8 @@ sqlparser = "0.63.0"
 mysql = { version = "28.0.2", default-features = false, features = ["rustls-tls", "minimal-rust"] }
 postgres = "0.19.14"
 rusqlite = { version = "0.40.2", features = ["bundled", "column_decltype", "column_metadata"] }
+r2d2 = "0.8.10"
+r2d2_postgres = "0.18.2"
 
 [features]
 default = ["pcre-validate"]

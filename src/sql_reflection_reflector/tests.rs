@@ -214,3 +214,122 @@ fn a_reflector_handle_lazily_builds_a_real_live_reflector_end_to_end() {
     let reflector = handle.get(Some(&config)).expect("a live reflector");
     assert!(reflector.reflect("SELECT id FROM categories").is_some());
 }
+
+#[test]
+fn postgres_bool_int_float_are_native_but_numeric_is_string() {
+    use postgres::types::Type as PgType;
+    assert_eq!(postgres_column_to_type(&PgType::BOOL, false), Type::Bool);
+    assert_eq!(postgres_column_to_type(&PgType::INT4, false), Type::Int);
+    assert_eq!(postgres_column_to_type(&PgType::INT8, false), Type::Int);
+    assert_eq!(postgres_column_to_type(&PgType::FLOAT4, false), Type::Float);
+    assert_eq!(postgres_column_to_type(&PgType::FLOAT8, false), Type::Float);
+    assert_eq!(
+        postgres_column_to_type(&PgType::NUMERIC, false),
+        Type::String
+    );
+}
+
+#[test]
+fn postgres_json_and_date_time_family_are_string() {
+    use postgres::types::Type as PgType;
+    for ty in [PgType::JSON, PgType::JSONB] {
+        assert_eq!(postgres_column_to_type(&ty, false), Type::String);
+    }
+    for ty in [
+        PgType::DATE,
+        PgType::TIME,
+        PgType::TIMETZ,
+        PgType::TIMESTAMP,
+        PgType::TIMESTAMPTZ,
+    ] {
+        assert_eq!(postgres_column_to_type(&ty, false), Type::String);
+    }
+}
+
+#[test]
+fn postgres_a_nullable_column_wraps_the_base_type_in_a_union_with_null() {
+    assert_eq!(
+        postgres_column_to_type(&postgres::types::Type::INT4, true),
+        Type::Union(vec![Type::Int, Type::Null])
+    );
+}
+
+#[test]
+fn postgres_an_unrecognized_type_degrades_to_mixed() {
+    assert_eq!(
+        postgres_column_to_type(&postgres::types::Type::INT4_ARRAY, false),
+        Type::Mixed
+    );
+}
+
+/// A dedicated, throwaway Postgres role+database (`phpstan_rs_test`) -
+/// this project's own, not Piwigo's - Postgres has no live corpus-
+/// schema target the way MySQL's `piwigo_test` does (confirmed: no
+/// `piwigo_test`-equivalent Postgres database exists), so this env-var
+/// set is separate from `PIWIGO_DB_*` and names this project's own
+/// fixture instead.
+fn live_postgres_config() -> Option<SqlReflectionConfig> {
+    Some(SqlReflectionConfig {
+        driver: SqlDriver::Pgsql,
+        host: Some(std::env::var("PHPSTAN_RS_TEST_PG_HOST").ok()?),
+        port: std::env::var("PHPSTAN_RS_TEST_PG_PORT").ok()?.parse().ok(),
+        user: Some(std::env::var("PHPSTAN_RS_TEST_PG_USER").ok()?),
+        password: Some(std::env::var("PHPSTAN_RS_TEST_PG_PASSWORD").ok()?),
+        password_env: None,
+        database: Some(std::env::var("PHPSTAN_RS_TEST_PG_DATABASE").ok()?),
+        path: None,
+        schema_file: None,
+    })
+}
+
+#[test]
+fn a_real_live_postgres_query_reflects_the_real_column_types_and_nullability() {
+    let Some(config) = live_postgres_config() else {
+        eprintln!("skipping: PHPSTAN_RS_TEST_PG_* env vars not set");
+        return;
+    };
+    let reflector = PostgresReflector::connect(&config).expect("connect to live Postgres");
+    {
+        let mut conn = reflector.pool.get().expect("get a pooled connection");
+        conn.batch_execute(
+            "DROP TABLE IF EXISTS sql_reflection_probe;
+             CREATE TABLE sql_reflection_probe (
+                 id integer NOT NULL,
+                 name text,
+                 price numeric(10,2) NOT NULL
+             );",
+        )
+        .expect("set up the fixture table");
+    }
+    let row_type = reflector
+        .reflect("SELECT id, name, price FROM sql_reflection_probe WHERE id = $1")
+        .expect("reflect a real SELECT");
+    let Type::ArrayShape(fields) = row_type else {
+        panic!("expected an ArrayShape, got {row_type:?}");
+    };
+    assert_eq!(fields.len(), 3);
+    assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
+    assert_eq!(
+        fields[1],
+        (
+            "name".to_string(),
+            Type::Union(vec![Type::String, Type::Null]),
+            false
+        )
+    );
+    assert_eq!(fields[2], ("price".to_string(), Type::String, false));
+}
+
+#[test]
+fn a_real_live_postgres_prepare_of_an_invalid_query_degrades_to_none_not_a_panic() {
+    let Some(config) = live_postgres_config() else {
+        eprintln!("skipping: PHPSTAN_RS_TEST_PG_* env vars not set");
+        return;
+    };
+    let reflector = PostgresReflector::connect(&config).expect("connect to live Postgres");
+    assert!(
+        reflector
+            .reflect("SELECT * FROM this_table_does_not_exist")
+            .is_none()
+    );
+}
