@@ -45,6 +45,10 @@ pub(super) fn request(id: i64, method: &str, params: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})
 }
 
+pub(super) fn response(id: i64, result: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": id, "result": result})
+}
+
 /// The 0-indexed LSP `{line, character}` of `needle`'s first occurrence
 /// in `src` - lets a hover/definition test point at "the `bar` in
 /// `$x->bar()`" by the substring itself rather than a hand-counted

@@ -122,6 +122,11 @@ struct Server {
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
     shutdown_received: bool,
+    // Ids/methods of requests this server has sent to the client and is
+    // still waiting on a reply for - `Incoming`'s `I` is unused (`()`,
+    // nothing here tracks inbound requests), `Outgoing`'s `O` stores just
+    // the method name for diagnostics.
+    pending_requests: lsp_server::ReqQueue<(), &'static str>,
 }
 
 impl Server {
@@ -135,6 +140,7 @@ impl Server {
             project,
             open_uris: HashMap::new(),
             shutdown_received: false,
+            pending_requests: lsp_server::ReqQueue::default(),
         }
     }
 
@@ -537,6 +543,36 @@ impl Server {
             range: to_lsp_range(span),
         }
     }
+
+    /// Sends a server-initiated JSON-RPC request and registers its id
+    /// for later correlation with the client's reply in
+    /// `handle_response`. `R` fixes `params` to the shape `R::METHOD`
+    /// expects at compile time.
+    #[allow(dead_code)] // no caller until an outbound request is dispatched
+    fn send_request<R: lsp_types::request::Request>(&mut self, params: R::Params) -> Message {
+        Message::Request(self.pending_requests.outgoing.register(
+            R::METHOD.to_string(),
+            params,
+            R::METHOD,
+        ))
+    }
+}
+
+/// Correlates an inbound `Message::Response` with the outbound request
+/// that caused it, via `Server::pending_requests`. A response for an id
+/// this server never sent (or already handled) is logged and dropped,
+/// not treated as an error.
+fn handle_response(server: &mut Server, resp: Response) {
+    let id = resp.id.clone();
+    match server.pending_requests.outgoing.complete(id) {
+        Some(_method) => {}
+        None => {
+            eprintln!(
+                "phpstan-rs lsp: response for an unknown or already-handled request id {:?}",
+                resp.id
+            );
+        }
+    }
 }
 
 /// No logic consumes the timeout tick yet - a future debounce mechanism
@@ -618,9 +654,7 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
                 }
                 handle_notification(&mut server, writer, not);
             }
-            // This server never sends a request of its own, so it never
-            // expects a response back from the client either.
-            Message::Response(_) => {}
+            Message::Response(resp) => handle_response(&mut server, resp),
         }
     }
 }

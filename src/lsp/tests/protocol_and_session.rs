@@ -577,3 +577,87 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
         "expected WARNING severity"
     );
 }
+
+#[test]
+fn send_request_allocates_sequential_ids_and_the_right_method() {
+    let mut server = Server::new();
+    let Message::Request(req1) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(
+        lsp_types::WorkDoneProgressCreateParams {
+            token: lsp_types::NumberOrString::Number(1),
+        },
+    ) else {
+        panic!("send_request must build a Message::Request");
+    };
+    let Message::Request(req2) = server.send_request::<lsp_types::request::RegisterCapability>(
+        lsp_types::RegistrationParams {
+            registrations: vec![],
+        },
+    ) else {
+        panic!("send_request must build a Message::Request");
+    };
+    assert_eq!(req1.method, "window/workDoneProgress/create");
+    assert_eq!(req2.method, "client/registerCapability");
+    assert_ne!(req1.id, req2.id);
+}
+
+#[test]
+fn a_matching_response_clears_the_pending_entry() {
+    let mut server = Server::new();
+    let Message::Request(req) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(
+        lsp_types::WorkDoneProgressCreateParams {
+            token: lsp_types::NumberOrString::Number(1),
+        },
+    ) else {
+        panic!("send_request must build a Message::Request");
+    };
+    assert!(server.pending_requests.outgoing.has_pending());
+
+    handle_response(
+        &mut server,
+        Response::new_ok(req.id.clone(), serde_json::Value::Null),
+    );
+
+    assert!(!server.pending_requests.outgoing.has_pending());
+}
+
+#[test]
+fn a_second_response_for_an_already_completed_id_is_ignored_without_panicking() {
+    let mut server = Server::new();
+    let Message::Request(req) = server.send_request::<lsp_types::request::WorkDoneProgressCreate>(
+        lsp_types::WorkDoneProgressCreateParams {
+            token: lsp_types::NumberOrString::Number(1),
+        },
+    ) else {
+        panic!("send_request must build a Message::Request");
+    };
+    handle_response(
+        &mut server,
+        Response::new_ok(req.id.clone(), serde_json::Value::Null),
+    );
+
+    handle_response(
+        &mut server,
+        Response::new_ok(req.id.clone(), serde_json::Value::Null),
+    );
+
+    assert!(!server.pending_requests.outgoing.has_pending());
+}
+
+#[test]
+fn a_bare_response_message_from_the_client_does_not_crash_the_session() {
+    let input = encode(&[
+        response(7, json!(null)),
+        request(1, "initialize", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+
+    let responses = decode_all(&writer);
+    assert_eq!(responses.len(), 1, "got: {responses:?}");
+    assert_eq!(responses[0]["id"], json!(1));
+}
