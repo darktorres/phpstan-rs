@@ -117,9 +117,75 @@ pub(super) fn run_with_capabilities(
     // would make `run_loop` spin on `RecvTimeoutError::Timeout` forever
     // for any fixture that omits a trailing `exit` notification.
     drop(tx);
-    let mut writer = Vec::new();
-    run_loop(&rx, &mut writer);
-    decode_all(&writer)
+    let writer = Arc::new(Mutex::new(Vec::new()));
+    run_loop(&rx, Arc::clone(&writer));
+    let bytes = writer.lock().unwrap().clone();
+    decode_all(&bytes)
+}
+
+/// Like `run`, but for a test whose `after` messages depend on a
+/// `textDocument/didChange` in `before` having actually landed first -
+/// VSCode plan item 2.2 made `didChange` genuinely asynchronous
+/// (debounced on a separate worker thread), so `run`'s own single-batch-
+/// then-`exit` shape no longer guarantees a `didChange` immediately
+/// preceding a request in the same batch has been applied by the time
+/// that request is answered (only that it's been applied by the time the
+/// WHOLE session ends, via the shutdown-flush's own forced `drain_all`).
+/// Runs `run_loop` on a real background thread. A `thread::sleep` timed
+/// from when `before` was merely SENT is not reliable here - the
+/// `run_loop`-hosting thread's own OS scheduling can start arbitrarily
+/// late (observed directly: multiple real seconds under this sandbox's
+/// own memory pressure) independent of anything this test does, so a
+/// fixed sleep can elapse entirely before `run_loop` has even begun
+/// reading its first message. Instead, a harmless sentinel request is
+/// sent right after `before` and its own response is polled for - proof
+/// that everything before it has already been fully, synchronously
+/// processed - before sleeping a real margin past `DEFAULT_DEBOUNCE`
+/// (now measured from a confirmed starting point) and sending `after`.
+pub(super) fn run_across_debounce(dir: &TempDir, before: &[Value], after: &[Value]) -> Vec<Value> {
+    const SENTINEL_ID: i64 = 999_999;
+
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let writer = Arc::new(Mutex::new(Vec::new()));
+    let worker_writer = Arc::clone(&writer);
+    let handle = std::thread::spawn(move || {
+        run_loop(&rx, worker_writer);
+    });
+
+    tx.send(to_message(request(
+        1,
+        "initialize",
+        json!({"rootUri": dir.uri(), "capabilities": {}}),
+    )))
+    .unwrap();
+    tx.send(to_message(notification("initialized", json!({}))))
+        .unwrap();
+    for m in before {
+        tx.send(to_message(m.clone())).unwrap();
+    }
+    tx.send(to_message(hover_request(
+        SENTINEL_ID,
+        "file:///__debounce_sentinel__.php",
+        json!({"line": 0, "character": 0}),
+    )))
+    .unwrap();
+    while !decode_all(&writer.lock().unwrap())
+        .iter()
+        .any(|m| m["id"] == json!(SENTINEL_ID))
+    {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+
+    std::thread::sleep(Duration::from_millis(500));
+    for m in after {
+        tx.send(to_message(m.clone())).unwrap();
+    }
+    tx.send(to_message(notification("exit", json!({}))))
+        .unwrap();
+    drop(tx);
+
+    handle.join().unwrap();
+    decode_all(&writer.lock().unwrap())
 }
 
 pub(super) fn did_change_configuration(settings: Value) -> Value {
@@ -180,9 +246,10 @@ pub(super) fn run_multi(dirs: &[&TempDir], extra: &[Value]) -> Vec<Value> {
     let mut reader = Cursor::new(bytes);
     pump_messages(&mut reader, &tx);
     drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
-    let mut writer = Vec::new();
-    run_loop(&rx, &mut writer);
-    decode_all(&writer)
+    let writer = Arc::new(Mutex::new(Vec::new()));
+    run_loop(&rx, Arc::clone(&writer));
+    let bytes = writer.lock().unwrap().clone();
+    decode_all(&bytes)
 }
 
 pub(super) fn hover_request(id: i64, uri: &str, pos: Value) -> Value {

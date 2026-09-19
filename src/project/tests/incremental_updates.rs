@@ -394,3 +394,81 @@ fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
         "the last-good registry entry must survive a failed reparse too"
     );
 }
+
+/// VSCode plan item 2.2's own load-bearing regression test: proves
+/// `update_file_cancellable`'s `should_abort` closure can observe a
+/// generation bump made by a genuinely different, concurrently-running
+/// thread strictly between two per-file checks of the SAME in-flight
+/// cascade - the property a single-threaded caller (and therefore every
+/// other test in this file) can never exercise, since nothing else could
+/// possibly run between two of its own sequential closure calls.
+#[test]
+fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation_bump() {
+    use std::sync::mpsc;
+    use std::sync::{Arc, Mutex};
+    use std::thread;
+
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("base.php"),
+            "<?php function base(): int { return 1; }",
+        )
+        .unwrap();
+    for i in 1..=3 {
+        project
+            .load_file(
+                PathBuf::from(format!("dep{i}.php")),
+                &format!("<?php function dep{i}(): int {{ return base(); }}"),
+            )
+            .unwrap();
+    }
+    project.finish_loading();
+
+    let project = Arc::new(Mutex::new(project));
+    let generation = Arc::new(Mutex::new(1u64));
+    let (checked_tx, checked_rx) = mpsc::channel::<()>();
+    let (bump_tx, bump_rx) = mpsc::channel::<()>();
+
+    let worker_project = Arc::clone(&project);
+    let worker_generation = Arc::clone(&generation);
+    let handle = thread::spawn(move || {
+        let mut call_count = 0;
+        let should_abort = move || {
+            call_count += 1;
+            // Rendezvous right before the SECOND per-file check - proves
+            // at least one file was already processed before the
+            // concurrent bump takes effect, not just "aborts before
+            // doing any work at all."
+            if call_count == 2 {
+                checked_tx.send(()).unwrap();
+                bump_rx.recv().unwrap();
+            }
+            *worker_generation.lock().unwrap() != 1
+        };
+        worker_project
+            .lock()
+            .unwrap()
+            .update_file_cancellable(
+                &PathBuf::from("base.php"),
+                "<?php function base(): int { return 2; }",
+                should_abort,
+            )
+            .unwrap()
+    });
+
+    // Block until the worker has made its second should_abort check (i.e.
+    // has already processed exactly one file), then bump the generation
+    // from THIS thread - never touched by the worker itself - and release
+    // it.
+    checked_rx.recv().unwrap();
+    *generation.lock().unwrap() = 2;
+    bump_tx.send(()).unwrap();
+
+    let result = handle.join().unwrap();
+    assert_eq!(
+        result.len(),
+        1,
+        "expected the cascade to abort after exactly one file, got: {result:?}"
+    );
+}

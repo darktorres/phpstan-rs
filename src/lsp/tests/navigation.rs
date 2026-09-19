@@ -202,18 +202,20 @@ fn definition_repopulates_after_a_did_change_moves_the_declaration() {
     // stale line-1 location load_workspace originally indexed.
     let new_a_src = "<?php\nclass Widget {}";
     let pos = lsp_pos(b_src, "Widget $w");
-    let messages = run(
+    // `didChange` is debounced (VSCode plan item 2.2) - the definition
+    // request must run only after the worker's own timer has actually
+    // applied the edit, so this uses `run_across_debounce` rather than a
+    // single synchronous batch.
+    let messages = run_across_debounce(
         &dir,
-        &[
-            notification(
-                "textDocument/didChange",
-                json!({
-                    "textDocument": {"uri": a_uri, "version": 2},
-                    "contentChanges": [{"text": new_a_src}],
-                }),
-            ),
-            definition_request(2, &b_uri, pos),
-        ],
+        &[notification(
+            "textDocument/didChange",
+            json!({
+                "textDocument": {"uri": a_uri, "version": 2},
+                "contentChanges": [{"text": new_a_src}],
+            }),
+        )],
+        &[definition_request(2, &b_uri, pos)],
     );
     let result = response_result(&messages, 2);
     assert_eq!(result["uri"], a_uri);

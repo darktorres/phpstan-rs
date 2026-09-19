@@ -736,10 +736,30 @@ impl Project {
         self.member_index_built = true;
     }
 
+    /// The always-run-to-completion convenience wrapper every existing
+    /// caller uses - `update_file_cancellable` with a `should_abort`
+    /// that never fires.
     pub fn update_file(
         &mut self,
         path: &Path,
         new_source: &str,
+    ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+        self.update_file_cancellable(path, new_source, || false)
+    }
+
+    /// The debounce worker's own entry point (VSCode plan item 2.2) -
+    /// identical to `update_file` except its final affected-files loop
+    /// checks `should_abort()` once per file, breaking (not erroring)
+    /// before the next `check_file` the moment it returns `true`, so a
+    /// generation bump made by a concurrently-running reader thread
+    /// (recorded via `lsp::debounce::DebounceQueue::record_edit`) can
+    /// stop an in-flight cascade partway through rather than only ever
+    /// being observable *between* separate `update_file` calls.
+    pub fn update_file_cancellable(
+        &mut self,
+        path: &Path,
+        new_source: &str,
+        mut should_abort: impl FnMut() -> bool,
     ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
         // normal, common state while a file is mid-edit, not an edge
@@ -870,20 +890,21 @@ impl Project {
         );
         self.rebuild_pest_config();
 
-        Ok(self
-            .transitive_affected_files(path, changed_symbols)
-            .into_iter()
-            .map(|p| {
-                let (diagnostics, member_refs) = if self.member_index_built {
-                    let (d, m) = self.check_file_and_member_refs(&p);
-                    (d, Some(m))
-                } else {
-                    (self.check_file(&p), None)
-                };
-                self.reindex_use_sites_for_file(&p, member_refs);
-                (p, diagnostics)
-            })
-            .collect())
+        let mut results = HashMap::new();
+        for p in self.transitive_affected_files(path, changed_symbols) {
+            if should_abort() {
+                break;
+            }
+            let (diagnostics, member_refs) = if self.member_index_built {
+                let (d, m) = self.check_file_and_member_refs(&p);
+                (d, Some(m))
+            } else {
+                (self.check_file(&p), None)
+            };
+            self.reindex_use_sites_for_file(&p, member_refs);
+            results.insert(p, diagnostics);
+        }
+        Ok(results)
     }
 
     /// Unwinds `path`'s prior contributions to the shared registry/

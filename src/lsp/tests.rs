@@ -1,6 +1,7 @@
 mod code_action;
 mod completion;
 mod configuration;
+mod debounce_integration;
 mod document_highlight;
 mod helpers;
 mod inlay_hints;

@@ -236,14 +236,18 @@ fn inlay_hint_reflects_a_new_call_added_after_a_didchange_edit() {
     let path = dir.write("a.php", initial_src);
     let uri = path_to_uri(&path).to_string();
 
-    let messages = run(
+    // `didChange` is debounced (VSCode plan item 2.2) - the second
+    // request must run only after the worker's own timer has actually
+    // applied the edit, not just after it's been queued, so this uses
+    // `run_across_debounce` rather than a single synchronous batch.
+    let messages = run_across_debounce(
         &dir,
         &[
             did_open(&uri, initial_src),
             inlay_hint_request(2, &uri, whole_file_range()),
             did_change(&uri, 2, edited_src),
-            inlay_hint_request(3, &uri, whole_file_range()),
         ],
+        &[inlay_hint_request(3, &uri, whole_file_range())],
     );
 
     let first = hints(&response_result(&messages, 2)).len();

@@ -46,6 +46,25 @@ fn run_edit(
     run(dir, &messages)
 }
 
+/// Same as `run_edit`, but for a test whose own probe specifically needs
+/// `Server::latest_text` to already reflect `edited_src` - `didChange` is
+/// debounced (VSCode plan item 2.2), so `run_edit`'s own single-batch
+/// shape no longer guarantees that by the time `extra`'s own request
+/// runs. See `helpers::run_across_debounce`'s own doc comment.
+fn run_edit_debounced(
+    dir: &TempDir,
+    uri: &str,
+    valid_src: &str,
+    edited_src: &str,
+    extra: &[Value],
+) -> Vec<Value> {
+    run_across_debounce(
+        dir,
+        &[did_open(uri, valid_src), did_change(uri, 2, edited_src)],
+        extra,
+    )
+}
+
 fn labels(result: &Value) -> Vec<&str> {
     result
         .as_array()
@@ -197,7 +216,7 @@ fn member_completion_truncates_a_stale_mid_edit_statement_instead_of_doubling_it
     let path = dir.write("a.php", valid_src);
     let uri = path_to_uri(&path).to_string();
 
-    let messages = run_edit(
+    let messages = run_edit_debounced(
         &dir,
         &uri,
         valid_src,
@@ -229,7 +248,7 @@ fn member_completion_finds_the_enclosing_function_by_name_despite_lines_shifting
     let path = dir.write("a.php", valid_src);
     let uri = path_to_uri(&path).to_string();
 
-    let messages = run_edit(
+    let messages = run_edit_debounced(
         &dir,
         &uri,
         valid_src,

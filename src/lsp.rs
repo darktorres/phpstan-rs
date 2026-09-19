@@ -22,9 +22,10 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Duration;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use crossbeam_channel::{Receiver, RecvTimeoutError};
 use lsp_server::{
@@ -54,6 +55,7 @@ use crate::types::Type;
 use crate::{baseline, ignore_errors};
 
 mod completion;
+mod debounce;
 mod document_symbol;
 mod inlay_hints;
 mod navigation;
@@ -776,6 +778,49 @@ impl Server {
         // recoverable `Err` rather than unwinding and taking down the
         // whole LSP server process.
         let results = match self.project.update_file(&path, text) {
+            Ok(results) => results,
+            Err(e) => {
+                eprintln!(
+                    "phpstan-rs lsp: skipping {} - failed to parse: {e}",
+                    path.display()
+                );
+                return vec![log_message_notification(
+                    MessageType::WARNING,
+                    format!(
+                        "phpstan-rs: skipping {} - failed to parse: {e}",
+                        path.display()
+                    ),
+                )];
+            }
+        };
+        self.publish_diagnostics_for(self.apply_post_filters(results))
+    }
+
+    /// The debounce worker's own counterpart to `handle_open_or_change`
+    /// (VSCode plan item 2.2) - identical except it drives `Project::
+    /// update_file_cancellable` with a real `should_abort` closure
+    /// instead of `update_file`, and takes an already-resolved `path`
+    /// (the worker already has it as the `DebounceQueue` entry's own
+    /// key) rather than re-deriving it from `uri`. `version` is a plain
+    /// `i32`, not `Option<i32>` - a debounced edit always came from a
+    /// real `didChange`, which always carries one.
+    fn handle_debounced_change(
+        &mut self,
+        path: &Path,
+        uri: &Uri,
+        text: &str,
+        version: i32,
+        should_abort: impl FnMut() -> bool,
+    ) -> Vec<Message> {
+        *self.file_versions.entry(path.to_path_buf()).or_insert(0) += 1;
+        self.open_uris
+            .insert(path.to_path_buf(), (uri.clone(), Some(version)));
+        self.latest_text
+            .insert(path.to_path_buf(), text.to_string());
+        let results = match self
+            .project
+            .update_file_cancellable(path, text, should_abort)
+        {
             Ok(results) => results,
             Err(e) => {
                 eprintln!(
@@ -1885,12 +1930,61 @@ fn handle_response<W: Write>(server: &mut Server, writer: &mut W, resp: Response
     }
 }
 
-/// No logic consumes the timeout tick yet - a future debounce mechanism
-/// flushes any pending recheck here. Exists so `run_loop` is never
-/// parked in a blocking read - the literal capability this gives up by
-/// switching from `read_message` (a blocking call on the reader itself)
-/// to `recv_timeout` on a channel a background thread feeds instead.
+/// No logic consumes the timeout tick beyond checking for a new message -
+/// the debounce worker (VSCode plan item 2.2) owns its own independent
+/// timer on a separate thread rather than piggybacking on this one, so a
+/// slow debounced recheck can never delay this loop noticing a real
+/// incoming request/notification. Exists so `run_loop` is never parked in
+/// a blocking read - the literal capability this gives up by switching
+/// from `read_message` (a blocking call on the reader itself) to
+/// `recv_timeout` on a channel a background thread feeds instead.
 const RUN_LOOP_TICK: Duration = Duration::from_millis(50);
+
+/// `textDocument/didChange`'s own debounce window - coalesces a rapid
+/// burst of keystrokes into one recheck instead of one per edit.
+const DEFAULT_DEBOUNCE: Duration = Duration::from_millis(200);
+
+/// The debounce worker's own wait cap when nothing is pending at all -
+/// just frequent enough that a `shutdown` signal (which has no dedicated
+/// wake of its own beyond `Condvar::notify_all`) is never noticed more
+/// than this long after the main loop sets it, without busy-polling.
+const DEBOUNCE_IDLE_WAIT: Duration = Duration::from_millis(200);
+
+/// The shared, mutex-guarded coalescing queue `queue_change` (called
+/// from the reader/main thread, via a `textDocument/didChange`
+/// notification) and the debounce worker thread (which owns the timer
+/// and drains it) both hold a reference to. Lock ordering is a single,
+/// cycle-free chain: the worker is the only role that ever holds both
+/// this and `Server`'s own lock at once, always in the order Server
+/// (held for the whole recheck) then this one (acquired-and-released
+/// once per file, inside `should_abort`, and once more afterward to
+/// confirm the generation still matches before publishing); the reader
+/// thread only ever holds one of the two at a time, never nested. No
+/// path exists for a deadlock.
+struct DebounceHandle {
+    queue: Mutex<debounce::DebounceQueue>,
+    cv: Condvar,
+}
+
+/// Records `path`'s new edit and wakes the debounce worker - a handful
+/// of instructions guarded by a briefly-held, uncontended lock, never
+/// blocked by anything `Project`-related. This is the reader thread's
+/// entire involvement in a `didChange` - no channel message is needed
+/// for it, unlike every other request/notification.
+fn queue_change(
+    debounce: &Arc<DebounceHandle>,
+    path: PathBuf,
+    uri: Uri,
+    text: String,
+    version: i32,
+) {
+    debounce
+        .queue
+        .lock()
+        .unwrap()
+        .record_edit(path, uri, text, version, Instant::now());
+    debounce.cv.notify_one();
+}
 
 /// Returns the process exit code `main.rs` should exit with (per the LSP
 /// spec's `exit`-notification contract - see `run_loop`'s own doc
@@ -1908,14 +2002,18 @@ pub fn run() -> i32 {
             pump_messages(&mut reader, &tx);
         })
         .expect("spawning the LSP reader thread");
-    let stdout = io::stdout();
-    let mut writer = stdout.lock();
-    run_loop(&rx, &mut writer)
+    // `io::Stdout` already does its own internal per-write locking - this
+    // outer `Mutex` exists only so the debounce worker thread can share
+    // the exact same `Write` handle `run_loop`'s own dispatch uses,
+    // matching `writer`'s own new `Arc<Mutex<W>>` shape everywhere else.
+    let writer = Arc::new(Mutex::new(io::stdout()));
+    run_loop(&rx, writer)
     // Not joined: once run_loop exits the process is ending anyway; the
     // reader thread, possibly still blocked in a real Message::read on
     // stdin with nothing left reading its sender, is simply abandoned -
     // same as today's single-threaded run() already does with any
-    // buffered-but-unread trailing input.
+    // buffered-but-unread trailing input. The debounce worker IS joined,
+    // inside run_loop itself, before it returns.
 }
 
 /// The actual message loop, generic over its writer so tests can drive
@@ -1926,6 +2024,19 @@ pub fn run() -> i32 {
 /// `read_message`, so this loop can `recv_timeout` and never block
 /// indefinitely inside a blocking read syscall.
 ///
+/// `writer` is `Arc<Mutex<W>>`, taken by value, and `Server` itself is
+/// now built and held behind its own `Arc<Mutex<_>>` internally - both
+/// shared with the debounce worker thread this function spawns (VSCode
+/// plan item 2.2), so a `didChange` burst can be coalesced and its
+/// eventual recheck genuinely canceled mid-cascade by a newer edit
+/// arriving while it's still running, rather than only ever observable
+/// between two already-sequential `update_file` calls on one thread.
+/// `handle_request`/`handle_notification`/`handle_response`'s own
+/// signatures are unchanged (`&mut Server`/`&mut W`) - this loop (and the
+/// worker) lock both, dispatch, and release, rather than propagating the
+/// `Arc<Mutex<_>>` types into every call site and test that already
+/// calls them directly.
+///
 /// Returns the process exit code the LSP spec's `exit` notification
 /// mandates: 0 if a `shutdown` request preceded it, 1 otherwise. A
 /// transport ending (clean EOF or a real I/O disconnection - both
@@ -1935,9 +2046,47 @@ pub fn run() -> i32 {
 /// returns 0 regardless of `shutdown_received` - the spec's exit-code
 /// contract binds the `exit` notification specifically, not every way a
 /// session can end.
-fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
-    let mut server = Server::new();
+fn run_loop<W: Write + Send + 'static>(receiver: &Receiver<Message>, writer: Arc<Mutex<W>>) -> i32 {
+    let server = Arc::new(Mutex::new(Server::new()));
+    let debounce = Arc::new(DebounceHandle {
+        queue: Mutex::new(debounce::DebounceQueue::new(DEFAULT_DEBOUNCE)),
+        cv: Condvar::new(),
+    });
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let worker = spawn_debounce_worker(
+        Arc::clone(&server),
+        Arc::clone(&debounce),
+        Arc::clone(&writer),
+        Arc::clone(&shutdown),
+    );
 
+    let exit_code = run_dispatch_loop(receiver, &server, &writer, &debounce);
+
+    // Shutdown handshake: wake the worker (a plain `store` alone would
+    // never be noticed until its own next timeout/edit-driven wake),
+    // then join it - a real drain point, not an assumption. The worker's
+    // own shutdown branch flushes every still-pending edit
+    // (`DebounceQueue::drain_all`) before returning, so this `join`
+    // returns only once that final publish (if any) has gone through the
+    // shared writer.
+    shutdown.store(true, Ordering::Release);
+    debounce.cv.notify_all();
+    worker
+        .join()
+        .expect("joining the LSP debounce worker thread");
+
+    exit_code
+}
+
+/// The main dispatch loop itself, split out of `run_loop` only so the
+/// latter reads as "set up shared state, run the loop, tear down shared
+/// state" - not a reusable entry point of its own.
+fn run_dispatch_loop<W: Write>(
+    receiver: &Receiver<Message>,
+    server: &Arc<Mutex<Server>>,
+    writer: &Arc<Mutex<W>>,
+    debounce: &Arc<DebounceHandle>,
+) -> i32 {
     loop {
         let message = match receiver.recv_timeout(RUN_LOOP_TICK) {
             Ok(m) => m,
@@ -1946,10 +2095,18 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
         };
 
         match message {
-            Message::Request(req) => handle_request(&mut server, writer, req),
+            Message::Request(req) => handle_request(
+                &mut server.lock().unwrap(),
+                &mut *writer.lock().unwrap(),
+                req,
+            ),
             Message::Notification(not) => {
                 if not.method == "exit" {
-                    return if server.shutdown_received { 0 } else { 1 };
+                    return if server.lock().unwrap().shutdown_received {
+                        0
+                    } else {
+                        1
+                    };
                 }
                 // `pump_messages` (the reader thread) forwards its own
                 // recoverable-failure reports as a `window/logMessage`
@@ -1959,12 +2116,162 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
                 // than routing it into `handle_notification`, which only
                 // ever expects a real client-originated notification.
                 if not.method == "window/logMessage" {
-                    let _ = write_message(writer, &Message::Notification(not));
+                    let _ =
+                        write_message(&mut *writer.lock().unwrap(), &Message::Notification(not));
                     continue;
                 }
-                handle_notification(&mut server, writer, not);
+                // `didChange` is diverted here, before `handle_notification`
+                // ever sees it: queuing it is the reader/main thread's
+                // entire involvement (see `queue_change`'s own doc
+                // comment) - the debounce worker thread runs the actual
+                // recheck once the edit's own debounce window elapses (or
+                // is coalesced by a newer one first).
+                if not.method == "textDocument/didChange" {
+                    if let Ok(params) =
+                        serde_json::from_value::<DidChangeTextDocumentParams>(not.params)
+                        && let Some(path) = uri_to_path(&params.text_document.uri)
+                        && let Some(change) = params.content_changes.into_iter().next()
+                    {
+                        queue_change(
+                            debounce,
+                            path,
+                            params.text_document.uri,
+                            change.text,
+                            params.text_document.version,
+                        );
+                    }
+                    continue;
+                }
+                // A pending or in-flight debounced edit for a now-closed
+                // file must not fire/publish - `cancel` drops both its
+                // pending entry and its generation, so an in-flight
+                // recheck's own `should_abort` (capturing a generation
+                // `>= 1`) aborts the moment it next checks, since
+                // `current_generation` for an absent path reads `0`.
+                if not.method == "textDocument/didClose"
+                    && let Ok(params) = serde_json::from_value::<
+                        lsp_types::DidCloseTextDocumentParams,
+                    >(not.params.clone())
+                    && let Some(path) = uri_to_path(&params.text_document.uri)
+                {
+                    debounce.queue.lock().unwrap().cancel(&path);
+                }
+                handle_notification(
+                    &mut server.lock().unwrap(),
+                    &mut *writer.lock().unwrap(),
+                    not,
+                );
             }
-            Message::Response(resp) => handle_response(&mut server, writer, resp),
+            Message::Response(resp) => handle_response(
+                &mut server.lock().unwrap(),
+                &mut *writer.lock().unwrap(),
+                resp,
+            ),
+        }
+    }
+}
+
+/// Runs on its own dedicated thread, owning the debounce timer -
+/// `queue_change` (the reader thread) only ever touches
+/// `debounce.queue` briefly to record an edit and wake this thread via
+/// `notify_one`; this is the only role that ever locks `Server` for a
+/// recheck. A proper `Condvar` wait, not a busy-poll: it sleeps until
+/// either the earliest pending deadline elapses or a new edit wakes it
+/// early (which may push that deadline further out, or pull it closer
+/// via a still-later-recorded generation - either way the loop just
+/// recomputes and waits again).
+fn spawn_debounce_worker<W: Write + Send + 'static>(
+    server: Arc<Mutex<Server>>,
+    debounce: Arc<DebounceHandle>,
+    writer: Arc<Mutex<W>>,
+    shutdown: Arc<AtomicBool>,
+) -> thread::JoinHandle<()> {
+    thread::Builder::new()
+        .name("phpstan-rs-lsp-debounce".to_string())
+        .spawn(move || {
+            loop {
+                let guard = debounce.queue.lock().unwrap();
+                if shutdown.load(Ordering::Acquire) {
+                    return flush_and_publish_all(&server, &debounce, &writer, guard);
+                }
+                let now = Instant::now();
+                let wait = match guard.next_deadline() {
+                    Some(deadline) => deadline.saturating_duration_since(now),
+                    None => DEBOUNCE_IDLE_WAIT,
+                };
+                let (mut guard, _timed_out) = debounce.cv.wait_timeout(guard, wait).unwrap();
+                if shutdown.load(Ordering::Acquire) {
+                    return flush_and_publish_all(&server, &debounce, &writer, guard);
+                }
+                let expired = guard.drain_expired(Instant::now());
+                drop(guard);
+                if !expired.is_empty() {
+                    run_pending_edits(&server, &debounce, &writer, expired);
+                }
+            }
+        })
+        .expect("spawning the LSP debounce worker thread")
+}
+
+/// The shutdown path's own forced flush - ignores every remaining
+/// deadline (a session ending mid-debounce-window must not silently drop
+/// that edit) and runs every one of them before this function (and so
+/// the worker thread, and so `run_loop`'s own `join`) returns.
+fn flush_and_publish_all<W: Write>(
+    server: &Arc<Mutex<Server>>,
+    debounce: &Arc<DebounceHandle>,
+    writer: &Arc<Mutex<W>>,
+    mut guard: std::sync::MutexGuard<'_, debounce::DebounceQueue>,
+) {
+    let flushed = guard.drain_all();
+    drop(guard);
+    if !flushed.is_empty() {
+        run_pending_edits(server, debounce, writer, flushed);
+    }
+}
+
+/// Runs each drained edit's own recheck (holding `server`'s lock for the
+/// whole cascade - see `DebounceHandle`'s own doc comment on the accepted
+/// "hover/definition block behind a slow recheck" tradeoff), then
+/// re-confirms against `debounce.queue` that this edit is STILL the
+/// freshest one recorded for its path before publishing - covers the
+/// small window between the cascade's own last per-file `should_abort`
+/// check and its actual return. A `should_abort` closure captures the
+/// edit's own generation and re-locks `debounce.queue` (never `server`)
+/// on each per-file check - the single point where this worker thread
+/// nests both locks, always in the same Server-then-Debounce order.
+fn run_pending_edits<W: Write>(
+    server: &Arc<Mutex<Server>>,
+    debounce: &Arc<DebounceHandle>,
+    writer: &Arc<Mutex<W>>,
+    edits: Vec<(PathBuf, debounce::PendingEdit)>,
+) {
+    for (path, pending) in edits {
+        let my_generation = pending.generation;
+        let abort_debounce = Arc::clone(debounce);
+        let abort_path = path.clone();
+        let should_abort = move || {
+            abort_debounce
+                .queue
+                .lock()
+                .unwrap()
+                .current_generation(&abort_path)
+                != my_generation
+        };
+        let messages = server.lock().unwrap().handle_debounced_change(
+            &path,
+            &pending.uri,
+            &pending.text,
+            pending.version,
+            should_abort,
+        );
+        let still_current =
+            debounce.queue.lock().unwrap().current_generation(&path) == my_generation;
+        if still_current {
+            let mut w = writer.lock().unwrap();
+            for message in messages {
+                let _ = write_message(&mut *w, &message);
+            }
         }
     }
 }
@@ -2464,20 +2771,13 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                 }
             }
         }
-        "textDocument/didChange" => {
-            if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(not.params) {
-                let version = params.text_document.version;
-                let uri = params.text_document.uri;
-                // Full sync (see the `textDocumentSync: FULL` capability
-                // above) guarantees exactly one entry whose `text` is the
-                // complete new document.
-                if let Some(change) = params.content_changes.into_iter().next() {
-                    for message in server.handle_open_or_change(&uri, &change.text, Some(version)) {
-                        let _ = write_message(writer, &message);
-                    }
-                }
-            }
-        }
+        // `textDocument/didChange` is deliberately NOT handled here -
+        // `run_dispatch_loop` diverts it to `queue_change` before
+        // `handle_notification` is ever called at all (VSCode plan item
+        // 2.2's own debounce/coalesce mechanism). A direct test call to
+        // `handle_notification` with a didChange notification is
+        // therefore a no-op, matching this arm's own absence rather than
+        // silently double-applying the edit through two different paths.
         "textDocument/didClose" => {
             // Deliberately a no-op: the file stays in the project (its
             // registry entries and dependency edges are still real and
