@@ -618,6 +618,17 @@ pub(crate) type PropertyAssignFacts = HashMap<Arc<str>, HashMap<Arc<str>, Vec<Ty
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
     pub(crate) diagnostics: Vec<Diagnostic>,
+    // `textDocument/semanticTokens/full`'s own accumulator - every
+    // `@deprecated`/`@internal` usage site flagged regardless of whether
+    // `check_deprecated_usage`/the internal-usage extension is even
+    // enabled, so a client gets push-highlighting for both independent
+    // of this project's own opt-in diagnostic gates. See
+    // `checker::semantic_tokens`'s own module doc comment for why each
+    // `record_*_usage_token` entry point re-derives the identical
+    // namespace/scope gating the corresponding diagnostic check applies,
+    // rather than firing off the raw `is_internal`/`deprecated.is_some()`
+    // booleans alone.
+    pub(crate) semantic_tokens: Vec<semantic_tokens::UsageSemanticToken>,
     // Namespace + `use`-import map, built once per file. Needed because
     // almost all real code refers to an imported class/function by its
     // short name, not a fully-qualified path - without resolving it here
@@ -1029,6 +1040,7 @@ mod property_type_too_wide;
 mod resolve;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
+pub(crate) mod semantic_tokens;
 pub(crate) mod sql_reflection;
 mod stmt;
 pub(crate) mod suggest;
@@ -1070,6 +1082,7 @@ pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,
     ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER, ATTRIBUTE_TARGET_PROPERTY,
 };
+pub(crate) use semantic_tokens::UsageTokenKind;
 pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
 #[cfg(test)]
 pub(crate) use type_union::generalize_by_key_set;
@@ -1120,6 +1133,7 @@ impl<'a> Checker<'a> {
             collect_inlay_hints: false,
             inlay_param_name_hints: Vec::new(),
             inlay_local_type_hints: Vec::new(),
+            semantic_tokens: Vec::new(),
             call_candidate_cache: RefCell::new(HashMap::new()),
             pending_or_disjunctions: Vec::new(),
         }
@@ -1217,6 +1231,12 @@ impl<'a> Checker<'a> {
     /// facts`.
     pub fn take_property_assign_facts(&mut self) -> PropertyAssignFacts {
         std::mem::take(&mut self.property_assign_facts)
+    }
+
+    /// `textDocument/semanticTokens/full`'s own collection - see
+    /// `semantic_tokens` field's own doc comment.
+    pub(crate) fn take_semantic_tokens(&mut self) -> Vec<semantic_tokens::UsageSemanticToken> {
+        std::mem::take(&mut self.semantic_tokens)
     }
 
     /// The declaration-site counterpart of the read-site probe hook inline

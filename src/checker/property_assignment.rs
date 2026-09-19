@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck};
+use crate::checker::{Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, UsageTokenKind};
 use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
@@ -72,6 +72,13 @@ impl<'a> Checker<'a> {
         self.check_internal_property_access(&owner, prop, prop_sig, lhs.span, label);
         self.check_restricted_property_access(&owner, prop, false, lhs.span, label);
         self.check_deprecated_property_access(&owner, prop, prop_sig, lhs.span, label);
+        self.record_member_usage_token(
+            UsageTokenKind::Property,
+            &owner,
+            prop_sig.deprecated.is_some(),
+            prop_sig.is_internal,
+            lhs.span,
+        );
         // Checked against `write_visibility`, not `visibility` - PHP 8.4
         // asymmetric visibility (`public private(set) string $x;`) means a
         // write can be legal/illegal at a strictly narrower scope than a

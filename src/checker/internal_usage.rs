@@ -59,7 +59,7 @@ impl<'a> Checker<'a> {
     /// shouldBeReported` - `target_fqn` is whichever symbol's own name
     /// governs the namespace comparison (the accessed class/function
     /// itself, or the declaring class for a member access).
-    fn should_report_internal_usage(&self, target_fqn: &str) -> bool {
+    pub(crate) fn should_report_internal_usage(&self, target_fqn: &str) -> bool {
         let current_ns = self.name_ctx.namespace();
         if current_ns.is_empty() {
             // No enclosing namespace at all: real PHP has no notion of

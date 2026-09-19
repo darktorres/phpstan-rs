@@ -3,10 +3,10 @@ use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
-    TemplateBindings, body_contains_yield, collect_goto_targets, expr_contains_yield,
-    generator_template_param, is_language_construct, is_real_variable_key, is_superglobal,
-    literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding, narrowing_key,
-    propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
+    TemplateBindings, UsageTokenKind, body_contains_yield, collect_goto_targets,
+    expr_contains_yield, generator_template_param, is_language_construct, is_real_variable_key,
+    is_superglobal, literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding,
+    narrowing_key, propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
     resolve_concat_type, string_type_has_accessory, superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
@@ -539,6 +539,7 @@ impl<'a> Checker<'a> {
                         self.check_internal_function_call(name, sig, e.span, label);
                         self.check_restricted_function_call(name, e.span, label);
                         self.check_deprecated_function_call(name, sig, e.span, label);
+                        self.record_function_usage_token(name, sig, callee.span);
                         match name.as_ref() {
                             "array_filter" => {
                                 self.check_array_filter_no_op(args, locals, label, e.span)
@@ -1066,6 +1067,13 @@ impl<'a> Checker<'a> {
                         self.check_internal_method_call(owner, method, sig, false, e.span, label);
                         self.check_restricted_method_call(owner, method, false, e.span, label);
                         self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
+                        self.record_member_usage_token(
+                            UsageTokenKind::Method,
+                            owner,
+                            sig.deprecated.is_some(),
+                            sig.is_internal,
+                            e.span,
+                        );
                         self.check_call_site_method_name_case(class, method, e.span, label);
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
@@ -1814,6 +1822,7 @@ impl<'a> Checker<'a> {
                         label,
                     );
                     self.check_deprecated_instantiation(class, e.span, label);
+                    self.record_instantiation_usage_token(class, class_expr.span);
                     // `DateInterval`'s duration-string constructor
                     // validation - independent of whether the class is
                     // otherwise instantiable, so this runs unconditionally
@@ -2052,6 +2061,13 @@ impl<'a> Checker<'a> {
                             self.check_deprecated_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
+                            self.record_member_usage_token(
+                                UsageTokenKind::Method,
+                                owner,
+                                sig.deprecated.is_some(),
+                                sig.is_internal,
+                                e.span,
+                            );
                             // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
                             // late-static-binding unsafety as the
@@ -2215,6 +2231,13 @@ impl<'a> Checker<'a> {
                             owner, prop_name, true, e.span, label,
                         );
                         self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
+                        self.record_member_usage_token(
+                            UsageTokenKind::Property,
+                            owner,
+                            sig.deprecated.is_some(),
+                            sig.is_internal,
+                            e.span,
+                        );
                         // A static property shares the exact same
                         // visibility rules as an instance one ("Cannot
                         // access private property" is a real fatal error
@@ -2257,6 +2280,13 @@ impl<'a> Checker<'a> {
                         self.check_restricted_class_constant_access(owner, member, e.span, label);
                         self.check_deprecated_class_constant_access(
                             owner, member, cs, e.span, label,
+                        );
+                        self.record_member_usage_token(
+                            UsageTokenKind::ClassConstant,
+                            owner,
+                            cs.deprecated.is_some(),
+                            cs.is_internal,
+                            e.span,
                         );
                         self.check_member_visibility(MemberVisibilityCheck {
                             kind: "classConstant",
@@ -2392,6 +2422,13 @@ impl<'a> Checker<'a> {
                     self.check_internal_property_access(&owner, prop, p, e.span, label);
                     self.check_restricted_property_access(&owner, prop, false, e.span, label);
                     self.check_deprecated_property_access(&owner, prop, p, e.span, label);
+                    self.record_member_usage_token(
+                        UsageTokenKind::Property,
+                        &owner,
+                        p.deprecated.is_some(),
+                        p.is_internal,
+                        e.span,
+                    );
                 }
                 if locals.may_have_member_narrowing()
                     && let Some(base_key) = narrowing_key(base)
@@ -3038,6 +3075,11 @@ impl<'a> Checker<'a> {
                                             e.span,
                                             label,
                                         );
+                                        self.record_function_usage_token(
+                                            &resolved_name,
+                                            sig,
+                                            callee.span,
+                                        );
                                     }
                                     None => {
                                         // Same `function_exists()`-guard
@@ -3122,6 +3164,13 @@ impl<'a> Checker<'a> {
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, false, e.span, label,
                                 );
+                                self.record_member_usage_token(
+                                    UsageTokenKind::Method,
+                                    &owner,
+                                    sig.deprecated.is_some(),
+                                    sig.is_internal,
+                                    e.span,
+                                );
                                 self.check_call_site_method_name_case(class, method, e.span, label);
                             }
                         }
@@ -3164,6 +3213,13 @@ impl<'a> Checker<'a> {
                                 );
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, true, e.span, label,
+                                );
+                                self.record_member_usage_token(
+                                    UsageTokenKind::Method,
+                                    &owner,
+                                    sig.deprecated.is_some(),
+                                    sig.is_internal,
+                                    e.span,
                                 );
                                 if class_name == "static" && sig.visibility == Visibility::Private {
                                     self.check_static_private_method_access(

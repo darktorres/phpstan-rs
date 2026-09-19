@@ -234,6 +234,14 @@ pub(super) fn whole_file_range() -> Value {
     })
 }
 
+pub(super) fn semantic_tokens_request(id: i64, uri: &str) -> Value {
+    request(
+        id,
+        "textDocument/semanticTokens/full",
+        json!({"textDocument": {"uri": uri}}),
+    )
+}
+
 pub(super) fn workspace_symbol_request(id: i64, query: &str) -> Value {
     request(id, "workspace/symbol", json!({"query": query}))
 }

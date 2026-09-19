@@ -57,6 +57,7 @@ mod document_symbol;
 mod inlay_hints;
 mod navigation;
 mod protocol;
+mod semantic_tokens;
 mod settings;
 mod signature_help;
 mod text_split;
@@ -1175,6 +1176,23 @@ impl Server {
         ))
     }
 
+    /// `textDocument/semanticTokens/full` - push-highlighting for every
+    /// `@deprecated`/`@internal` usage site, independent of whether this
+    /// project's own diagnostic gates for either are enabled. Always
+    /// `Some` (even for zero flagged sites - `{data: []}`, never `null`,
+    /// which the LSP spec treats as a different signal), matching
+    /// `semantic_tokens_full`'s own always-return-Tokens contract.
+    fn semantic_tokens_full(&self, uri: &Uri) -> Option<lsp_types::SemanticTokensResult> {
+        let path = uri_to_path(uri)?;
+        let tokens = self.project.semantic_tokens_for_file(&path);
+        Some(lsp_types::SemanticTokensResult::Tokens(
+            lsp_types::SemanticTokens {
+                result_id: None,
+                data: semantic_tokens::encode(tokens),
+            },
+        ))
+    }
+
     /// Every same-file occurrence of the symbol under the cursor -
     /// `navigation::collect_all` runs the identical resolution walk
     /// `resolve_at` uses for hover/definition, just against every span in
@@ -1938,6 +1956,16 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     }),
                     document_highlight_provider: Some(OneOf::Left(true)),
                     inlay_hint_provider: Some(OneOf::Left(true)),
+                    semantic_tokens_provider: Some(
+                        lsp_types::SemanticTokensServerCapabilities::SemanticTokensOptions(
+                            lsp_types::SemanticTokensOptions {
+                                legend: semantic_tokens::legend(),
+                                range: None,
+                                full: Some(lsp_types::SemanticTokensFullOptions::Bool(true)),
+                                ..Default::default()
+                            },
+                        ),
+                    ),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -2063,6 +2091,14 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         params.text_document_position_params.position,
                     )
                 })
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/semanticTokens/full" => {
+            let result = serde_json::from_value::<lsp_types::SemanticTokensParams>(req.params)
+                .ok()
+                .and_then(|params| server.semantic_tokens_full(&params.text_document.uri))
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Message::Response(Response::new_ok(id.clone(), result))

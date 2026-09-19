@@ -979,6 +979,21 @@ impl Project {
         Some((checker, &file.ast))
     }
 
+    /// `textDocument/semanticTokens/full`'s own independent re-walk of
+    /// `path` - no cache, no shared pass with `check_file`/`update_file`'s
+    /// own diagnostics walk (see this item's own open-risks note on that
+    /// cost). Built on `checker_for` exactly like `inlay_hints::collect`.
+    pub(crate) fn semantic_tokens_for_file(
+        &self,
+        path: &Path,
+    ) -> Vec<checker::semantic_tokens::UsageSemanticToken> {
+        let Some((mut checker, ast)) = self.checker_for(path) else {
+            return Vec::new();
+        };
+        checker.check_program(ast);
+        checker.take_semantic_tokens()
+    }
+
     fn check_file_impl(
         &self,
         path: &Path,
