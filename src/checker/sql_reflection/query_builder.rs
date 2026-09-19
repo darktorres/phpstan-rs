@@ -604,8 +604,103 @@ fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<S
     if let Some(s) = literal_string_value(expr) {
         return Some(s.into_owned());
     }
+    match &expr.kind {
+        // A double-quoted/heredoc string with every interpolated part
+        // itself foldable (a literal text chunk, or a variable narrowed
+        // to a literal) - `check_expr`'s own `Interpolated` arm
+        // deliberately widens this to plain `Type::String` unconditionally
+        // (it exists to run the real `encapsedStringPart.nonString`/
+        // implicit-`__toString()` diagnostics, not to preserve a literal
+        // type), so `infer_expr`'s separate literal-fold arm below is
+        // never actually reachable for this case - folded here directly
+        // instead, scoped to this module only, rather than changing
+        // `check_expr`'s general narrowing behavior for every caller.
+        ExprKind::Interpolated(parts) => {
+            let mut out = String::new();
+            for part in parts {
+                out.push_str(&fold_string_expr(checker, part, locals)?);
+            }
+            return Some(out);
+        }
+        ExprKind::Call(callee, args) => {
+            if let ExprKind::Name(name) = &callee.kind
+                && name
+                    .rsplit('\\')
+                    .next_back()
+                    .is_some_and(|n| n.eq_ignore_ascii_case("sprintf"))
+                && !args.iter().any(|a| a.spread)
+            {
+                return fold_sprintf_call(checker, args, locals);
+            }
+        }
+        _ => {}
+    }
     match checker.infer_expr(expr, locals) {
         Type::StringLiteral(s) => Some(s),
+        _ => None,
+    }
+}
+
+/// A real `sprintf()` call whose format string and every value argument
+/// fold to a literal - scoped deliberately to the common, unambiguous
+/// specifier shapes only (`%s`, `%d`, `%u`, `%%`, no flags/width/
+/// precision/positional `$` form): those need real PHP's own padding/
+/// sign/base-conversion rules faithfully reproduced to fold correctly,
+/// which this module has no need to build just to resolve a SQL string -
+/// bails to `None` (falls through to the live/undecided path) rather
+/// than risk folding a subtly wrong SQL string. Mirrors this module's
+/// own repeated "only a confidently-understood shape is folded, anything
+/// else falls through rather than guesses" precedent (see `resolve.rs`'s
+/// static-schema JOIN/aggregate bail-outs).
+fn fold_sprintf_call(checker: &Checker, args: &[Arg], locals: &Locals) -> Option<String> {
+    let fmt = fold_string_expr(checker, &args.first()?.value, locals)?;
+    let mut values = args[1..].iter();
+    let mut out = String::new();
+    let mut chars = fmt.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        match chars.next()? {
+            '%' => out.push('%'),
+            's' => out.push_str(&fold_sprintf_string_arg(checker, values.next()?, locals)?),
+            'd' => {
+                let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
+                out.push_str(&n.to_string());
+            }
+            'u' => {
+                let n = fold_sprintf_int_arg(checker, values.next()?, locals)?;
+                if n < 0 {
+                    return None;
+                }
+                out.push_str(&n.to_string());
+            }
+            _ => return None,
+        }
+    }
+    // Real `sprintf()` throws `ValueError` on a count mismatch - folding
+    // a call that would itself fail at runtime is unsafe/pointless, so
+    // bail rather than fold a text that could never actually be produced.
+    if values.next().is_some() {
+        return None;
+    }
+    Some(out)
+}
+
+fn fold_sprintf_string_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<String> {
+    if let Some(s) = fold_string_expr(checker, &arg.value, locals) {
+        return Some(s);
+    }
+    match checker.infer_expr(&arg.value, locals) {
+        Type::IntLiteral(n) => Some(n.to_string()),
+        _ => None,
+    }
+}
+
+fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<i64> {
+    match checker.infer_expr(&arg.value, locals) {
+        Type::IntLiteral(n) => Some(n),
         _ => None,
     }
 }

@@ -418,6 +418,118 @@ fn execute_cache_query_then_result_fetch_associative_resolves_via_the_two_hop_pr
 }
 
 #[test]
+fn a_heredoc_with_only_literal_interpolated_parts_is_constant_folded() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $table = 'categories';
+            $row = $c->fetchAssociative(<<<SQL
+            SELECT id, name FROM $table
+            SQL);
+            assertType('array{id: int, name: string}|false', $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_double_quoted_string_with_only_literal_interpolated_parts_is_constant_folded() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $table = 'categories';
+            $row = $c->fetchAssociative("SELECT id, name FROM $table");
+            assertType('array{id: int, name: string}|false', $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_sprintf_call_with_all_literal_arguments_is_constant_folded() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $row = $c->fetchAssociative(sprintf('SELECT id, name FROM %s', 'categories'));
+            assertType('array{id: int, name: string}|false', $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_sprintf_call_folds_a_literal_int_argument_with_percent_d() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $row = $c->fetchAssociative(sprintf('SELECT id, name FROM categories LIMIT %d', 1));
+            assertType('array{id: int, name: string}|false', $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_sprintf_call_with_a_non_literal_argument_is_not_folded() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c, string $table): void {
+            $row = $c->fetchAssociative(sprintf('SELECT id, name FROM %s', $table));
+            assertType('array|false', $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_sprintf_call_with_an_unsupported_specifier_is_not_folded() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $row = $c->fetchAssociative(sprintf('SELECT id, name FROM %5s', 'categories'));
+            assertType('array|false', $row);
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn result_row_count_and_column_count_are_unaffected_by_this_phase() {
     let d = diagnostics_with_dbal_schema(
         r#"
@@ -430,6 +542,25 @@ fn result_row_count_and_column_count_are_unaffected_by_this_phase() {
             $result = $c->executeQuery('SELECT id, name FROM categories');
             assertType('int|string', $result->rowCount());
             assertType('int', $result->columnCount());
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_plain_literal_string_held_in_a_variable_is_still_folded() {
+    let d = diagnostics_with_dbal_schema(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\DBAL\Connection;
+
+        function f(Connection $c): void {
+            $sql = 'SELECT id, name FROM categories';
+            $row = $c->fetchAssociative($sql);
+            assertType('array{id: int, name: string}|false', $row);
         }
         "#,
     );
