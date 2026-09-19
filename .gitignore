@@ -3,3 +3,11 @@
 # per commit hash, so a before/after diff never needs rebuilding an old
 # commit just to re-run it. See .corpus-runs/README.md.
 /.corpus-runs/*/*.txt
+
+# VSCode extension client (editors/vscode/) - a separate Node/TypeScript
+# toolchain, kept out of the Cargo workspace; its own build artifacts
+# must never get tracked alongside /target.
+/editors/vscode/node_modules
+/editors/vscode/out
+/editors/vscode/*.vsix
+/editors/vscode/.vscode-test

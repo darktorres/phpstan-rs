@@ -1,4 +1,4 @@
-//! A minimal Language Server Protocol server, run via `phpstan-rs --lsp`.
+//! A minimal Language Server Protocol server, run via `phpstan-rs lsp`.
 //! Communicates over stdio using LSP's standard JSON-RPC-over-`Content-
 //! Length`-framed-messages transport, via the `lsp-server`/`lsp-types`
 //! crates (protocol framing/message shapes and typed request/notification

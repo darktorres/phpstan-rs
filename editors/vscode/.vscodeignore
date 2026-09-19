@@ -1,0 +1,19 @@
+.vscode/**
+.gitignore
+.vscode-test/**
+src/**
+tsconfig.json
+*.vsix
+
+# NOT excluded: node_modules/** - `vsce` itself already omits every
+# devDependency (typescript, @types/*, mocha, @vscode/test-electron,
+# @vscode/vsce) via its own production-dependency-tree analysis; the one
+# real runtime dependency, vscode-languageclient, must ship inside the
+# packaged .vsix since this item deliberately defers bundling (see this
+# item's own scope-corrections note).
+
+# Compiled test output - the packaged .vsix ships out/extension.js
+# itself, but never the compiled unit/smoke test files alongside it.
+out/extension.test.js
+out/extension.test.js.map
+out/test/**

@@ -1,0 +1,51 @@
+{
+  "name": "phpstan-rs-vscode",
+  "displayName": "phpstan-rs",
+  "description": "Language Server Protocol client for phpstan-rs, a Rust reimplementation of PHPStan's static analysis engine.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "phpstan-rs",
+  "engines": {
+    "vscode": "^1.138.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "activationEvents": [
+    "onLanguage:php"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "phpstan-rs",
+      "properties": {
+        "phpstan-rs.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the phpstan-rs binary. Leave empty to search PATH for a phpstan-rs executable."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "test:unit": "npm run compile && node --test out/extension.test.js",
+    "pretest": "npm run compile",
+    "test:smoke": "node ./out/test/runTest.js"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^10.1.1"
+  },
+  "devDependencies": {
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^26.6.2",
+    "@types/vscode": "^1.138.0",
+    "@vscode/test-electron": "^3.1.0",
+    "@vscode/vsce": "^4.0.0",
+    "glob": "^13.0.6",
+    "mocha": "^12.0.2",
+    "typescript": "^7.0.2"
+  }
+}

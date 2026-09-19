@@ -297,8 +297,11 @@ at the compiled entry point, `engines.vscode`, `dependencies:
 command: <resolved binary path>, args: ["lsp"], transport:
 TransportKind.stdio }` (note: `src/lsp.rs`'s own top-of-file doc comment
 says "run via `phpstan-rs --lsp`" but the actual clap wiring is a `lsp`
-subcommand, `src/main.rs:136,184` - `phpstan-rs lsp`, not a flag; fix
-that stale comment while touching this area), `ClientOptions = {
+subcommand - the `Lsp,` variant and its `Command::Lsp => lsp::run()`
+dispatch arm in `src/main.rs` (line numbers drift as the file grows;
+match on the subcommand name/dispatch pattern, not a specific line) -
+`phpstan-rs lsp`, not a flag; fix that stale comment while touching this
+area), `ClientOptions = {
 documentSelector: [{scheme: "file", language: "php"}] }`, construct and
 `.start()` a `LanguageClient` in `activate()`, `.stop()` in
 `deactivate()`. **Effort: small**, standard `vscode-languageclient`
