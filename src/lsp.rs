@@ -60,7 +60,6 @@ mod protocol;
 mod semantic_tokens;
 mod settings;
 mod signature_help;
-mod text_split;
 mod workspace_config;
 mod workspace_symbol;
 

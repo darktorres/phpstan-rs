@@ -53,7 +53,7 @@ use crate::types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::to_lsp_range;
-use super::text_split::slice_span;
+use crate::text_split::slice_span;
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.

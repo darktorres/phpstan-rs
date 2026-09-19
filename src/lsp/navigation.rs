@@ -51,7 +51,7 @@ use crate::token::{Position, Span};
 use std::collections::HashSet;
 use std::path::Path;
 
-use super::text_split::{split_identifier_spans, type_hint_identifiers};
+use crate::text_split::{split_identifier_spans, type_hint_identifiers};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {

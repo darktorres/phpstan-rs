@@ -48,7 +48,7 @@ use crate::registry::{NameContext, Registry};
 use crate::token::{Position, Span};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
-use super::text_split::split_identifier_spans;
+use crate::text_split::split_identifier_spans;
 
 /// What a resolved signature-help target needs to look its own
 /// `FunctionSig` up (or, for `Instance`, to run the same checker probe

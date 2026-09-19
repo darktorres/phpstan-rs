@@ -17,10 +17,12 @@ use crate::registry::{NameContext, Registry};
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
 pub(crate) mod duplicate_fn_sites;
+pub(crate) mod use_sites;
 
 use decl_locations::DeclLocations;
 use duplicate_class_sites::DuplicateClassSites;
 use duplicate_fn_sites::DuplicateFunctionSites;
+use use_sites::UseSiteIndex;
 
 /// One file's parsed state, kept around so `Project::update_file` can undo
 /// exactly what that file previously contributed - both to the shared
@@ -123,6 +125,22 @@ pub struct Project {
     // not a missing one it might later want turned on incrementally).
     // See `DuplicateClassSites`'s own doc comment.
     duplicate_class_sites: DuplicateClassSites,
+    // `textDocument/references`/`textDocument/rename`'s own whole-project
+    // use-site index - see `use_sites`'s own module doc comment for the
+    // two-tier split. Tier 1 (class/function references) is indexed
+    // eagerly here, gated behind `retain_source` exactly like
+    // `decl_locations` above, for the identical "only the LSP needs
+    // this" reasoning. Tier 2 (member references) is NOT populated by
+    // ordinary indexing at all - see `member_index_built`.
+    use_sites: UseSiteIndex,
+    // Whether Tier 2 (member references) of `use_sites` has ever been
+    // built for this project - `false` until the first
+    // `ensure_member_index_built` call. Deliberately NOT built as part
+    // of `finish_loading`/`load_file`: Tier 2 needs one real `Checker`
+    // pass per file, which would make every workspace load pay a cost
+    // only `textDocument/references`/`textDocument/rename` actually
+    // need - see `ensure_member_index_built`'s own doc comment.
+    member_index_built: bool,
 }
 
 /// The result of `Project::check_paths_isolating_panics`: successful
@@ -146,7 +164,13 @@ impl Project {
             decl_locations: DeclLocations::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
             duplicate_class_sites: DuplicateClassSites::default(),
+            use_sites: UseSiteIndex::default(),
+            member_index_built: false,
         }
+    }
+
+    pub(crate) fn use_sites(&self) -> &UseSiteIndex {
+        &self.use_sites
     }
 
     /// Rebuilds `pest_config` from every currently-loaded `Pest.php` file
@@ -545,6 +569,9 @@ impl Project {
         if self.retain_source {
             self.decl_locations
                 .index(&ast, &mut NameContext::default(), &path);
+            for (span, target) in use_sites::index_class_fn_refs(&ast, &source) {
+                self.use_sites.insert(&path, target, span);
+            }
         }
         // `record_phpstan_class_file` no-ops unless
         // `phpstan_api_check_enabled` and the name is `PHPStan\*`-
@@ -627,6 +654,7 @@ impl Project {
             self.decl_locations
                 .remove_declarations(&old.functions, &old.classes);
         }
+        self.use_sites.remove_file(path);
         self.duplicate_fn_sites
             .remove_declarations(path, &old.functions);
         self.duplicate_class_sites
@@ -635,6 +663,34 @@ impl Project {
         changed_symbols.extend(old.classes.iter().map(|s| bare_name(s).to_string()));
         unregister_references(&mut self.dependents, path, &old.references);
         true
+    }
+
+    /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
+    /// currently-loaded `FileState`, replacing whatever was previously
+    /// indexed for it - a no-op past the initial `use_sites.remove_file`
+    /// when `retain_source` is off (matching `decl_locations`' identical
+    /// gate) or `path` isn't currently loaded at all. Called for EVERY
+    /// file `update_file`'s own affected-file loop re-checks, not just
+    /// the one that was directly edited: a dependent file's own bare-
+    /// `Name`/`StaticAccess` resolution can change (e.g. registry-wide
+    /// class-name-case canonicalization) even though its own source text
+    /// didn't, so re-deriving Tier 1 only for the edited file itself
+    /// would let a dependent's index silently go stale.
+    fn reindex_tier1_for_file(&mut self, path: &Path) {
+        self.use_sites.remove_file(path);
+        if !self.retain_source {
+            return;
+        }
+        let Some(file) = self.files.get(path) else {
+            return;
+        };
+        let Some(source) = &file.source else {
+            return;
+        };
+        let refs = use_sites::index_class_fn_refs(&file.ast, source);
+        for (span, target) in refs {
+            self.use_sites.insert(path, target, span);
+        }
     }
 
     pub fn update_file(
@@ -776,6 +832,7 @@ impl Project {
             .into_iter()
             .map(|p| {
                 let diagnostics = self.check_file(&p);
+                self.reindex_tier1_for_file(&p);
                 (p, diagnostics)
             })
             .collect())
@@ -861,6 +918,7 @@ impl Project {
             .into_iter()
             .map(|p| {
                 let diagnostics = self.check_file(&p);
+                self.reindex_tier1_for_file(&p);
                 (p, diagnostics)
             })
             .collect()

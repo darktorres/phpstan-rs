@@ -12,3 +12,4 @@ mod php_version_setter;
 mod phpstan_api_gating;
 mod property_assign_facts;
 mod reflection_rule;
+mod use_site_index;
