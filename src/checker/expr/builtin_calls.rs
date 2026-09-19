@@ -753,14 +753,21 @@ impl<'a> Checker<'a> {
                     return Self::array_pointer_result(&arr_ty, key_ty, Type::Null, false);
                 }
             }
-            // Merging only list-like arguments stays a list (a literal,
+            // Merging only list-safe arguments stays a list (a literal,
             // non-empty argument makes it a non-empty-list); merging in
-            // even one plain, unproven `array<T>` degrades list-ness for
-            // the whole result, same as a spread array literal's degrade
-            // rule - but the element-type union is still tracked
-            // precisely either way. General key-aware shape merging
-            // (`array_merge($shape, ...)`) is real PHPStan's much richer
-            // behavior and deliberately not attempted here.
+            // even one argument whose key type could genuinely include a
+            // `String` degrades list-ness for the whole result, same as a
+            // spread array literal's degrade rule (real PHP's own
+            // `array_merge` always renumbers every argument's *integer*
+            // keys sequentially and discards their original values,
+            // regardless of whether an argument was already list-shaped
+            // itself - only a possible *string* key actually survives
+            // into the output unrenumbered, confirmed directly against
+            // the real vendored `phpstan.phar` via `assertType()`) - but
+            // the element-type union is still tracked precisely either
+            // way. General key-aware shape merging (`array_merge($shape,
+            // ...)`) is real PHPStan's much richer behavior and
+            // deliberately not attempted here.
             "array_merge" if !args.is_empty() => {
                 let arg_types: Vec<Type> = args
                     .iter()
@@ -875,7 +882,7 @@ impl<'a> Checker<'a> {
                         // number of arrays, of unknown emptiness).
                         match Checker::array_element_type(arg_ty) {
                             Some(inner_ty) => {
-                                if !Self::is_list_like(&inner_ty) {
+                                if !Self::is_list_safe_array_merge_argument(&inner_ty) {
                                     all_list = false;
                                 }
                                 match Checker::array_element_type(&inner_ty) {
@@ -886,7 +893,7 @@ impl<'a> Checker<'a> {
                             None => all_known_array_like = false,
                         }
                     } else if Self::is_array_like(arg_ty) {
-                        if !Self::is_list_like(arg_ty) {
+                        if !Self::is_list_safe_array_merge_argument(arg_ty) {
                             all_list = false;
                         }
                         if Self::is_known_non_empty_array(arg_ty) {

@@ -257,10 +257,7 @@ impl<'a> Checker<'a> {
                     // representation, never by the boxed key type) - a
                     // key-type-only check would wrongly call such a
                     // source *not* list-safe.
-                    let list_safe_for_this_source = Self::is_list_like(&value_ty)
-                        || Self::array_key_type(&value_ty)
-                            .is_some_and(|k| !Self::key_type_could_be_string(&k));
-                    if !list_safe_for_this_source {
+                    if !Self::is_list_safe_array_merge_argument(&value_ty) {
                         list_safe = false;
                     }
                     if Self::is_known_non_empty_array(&value_ty) {
@@ -850,13 +847,16 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// `infer_spread_array_literal_type`'s own degraded-branch list-safety
-    /// check: whether a key type could genuinely include a `String`
-    /// member - the only thing that actually breaks a spread source's own
-    /// list-ness (real PHP always renumbers *integer* keys sequentially).
+    /// Whether a key type could genuinely include a `String` member - the
+    /// only thing that actually breaks list-ness for a real PHP operation
+    /// that renumbers integer keys sequentially and discards their
+    /// original values (a spread array literal, and `array_merge()`,
+    /// which applies the identical renumbering rule to its own plain-
+    /// array arguments - shared by both `infer_spread_array_literal_
+    /// type`'s own degraded branch and `array_merge`'s below).
     /// Conservative (`true`) for anything not provably int-only, matching
     /// this project's "don't know, don't guess" leniency elsewhere.
-    fn key_type_could_be_string(ty: &Type) -> bool {
+    pub(crate) fn key_type_could_be_string(ty: &Type) -> bool {
         match ty {
             Type::String | Type::StringLiteral(_) => true,
             Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => false,
@@ -865,6 +865,16 @@ impl<'a> Checker<'a> {
             }
             _ => true,
         }
+    }
+
+    /// `array_merge`'s own per-argument list-safety check - the same
+    /// "already proven list, or at least provably not string-keyed" OR
+    /// `infer_spread_array_literal_type`'s degraded branch already uses,
+    /// factored out since both apply the identical real-PHP renumbering
+    /// rule to their own plain-array arguments/spread sources.
+    pub(crate) fn is_list_safe_array_merge_argument(ty: &Type) -> bool {
+        Self::is_list_like(ty)
+            || Self::array_key_type(ty).is_some_and(|k| !Self::key_type_could_be_string(&k))
     }
 
     /// Whether `ty` is array-shaped at all - for sites that

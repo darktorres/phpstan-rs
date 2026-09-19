@@ -1620,6 +1620,36 @@ fn array_merge_of_a_list_and_a_plain_array_degrades_to_a_plain_array_not_a_list(
     );
 }
 
+// Real, previously-live false positive found while reviewing a raw
+// corpus scoped-run finding (SearchService.php/SectionPopulator.php,
+// both going through array_merge with a plain, gapped-but-int-keyed
+// array feeding a `list`-typed parameter elsewhere): the *old* check
+// here (`is_list_like` alone) wrongly treated an unmarked int-keyed
+// argument (`array<int, string>`, list-ness never proven, only never
+// disproven) as breaking list-ness. Real PHP's own `array_merge`
+// always renumbers every argument's *integer* keys sequentially and
+// discards their original values - only a possible *string* key
+// actually survives unrenumbered - so the merged result genuinely is
+// a list here regardless of whether `$a` itself was already list-
+// shaped. Verified against the real vendored `phpstan.phar`: identical
+// `list<string>` answer (not `non-empty-list` - `$b` isn't provably
+// non-empty either).
+#[test]
+fn array_merge_of_an_int_keyed_non_list_array_and_a_list_is_a_list() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<int, string> $a
+             *  @param list<string> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('list<string>', array_merge($a, $b));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn array_merge_with_a_literal_array_argument_produces_a_non_empty_list() {
     let d = diagnostics_for(
