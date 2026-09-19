@@ -15,3 +15,4 @@
 //! established that shape for exactly this kind of Registry-held data).
 
 pub(crate) mod query_builder;
+pub(crate) mod resolve;
