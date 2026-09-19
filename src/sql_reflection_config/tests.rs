@@ -11,6 +11,7 @@ fn base_config() -> SqlReflectionConfig {
         database: Some("piwigo_test".to_string()),
         path: None,
         schema_file: None,
+        session_init_sql: None,
     }
 }
 

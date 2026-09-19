@@ -23,6 +23,7 @@
 //! # sqlite: `path` instead of host/port/user/password/database
 //! # either engine: `schema_file` names a static DDL dump to parse instead
 //! # of (or alongside, for a cross-check) a live connection.
+//! # session_init_sql = "SET SESSION sql_mode='STRICT_TRANS_TABLES'" # optional
 //! ```
 
 use std::path::PathBuf;
@@ -66,6 +67,17 @@ pub struct SqlReflectionConfig {
     /// parse into a schema catalog, used instead of (or alongside, for a
     /// cross-check) a live connection.
     pub schema_file: Option<PathBuf>,
+    /// Real SQL run once on every new physical reflection connection,
+    /// mirroring the app's own real session-init setup (e.g. `MYSQLI_
+    /// INIT_COMMAND`'s `SET SESSION sql_mode=...`) - session state that
+    /// widens/narrows what a query is even valid *to prepare* (verified
+    /// live: a weaker session default can silently accept a query the
+    /// app's own real, more strictly configured connection would reject
+    /// at prepare time) can otherwise diverge from the app's real
+    /// runtime connection, which this project has no way to discover on
+    /// its own - deliberately app-specific text the user supplies, not
+    /// a hardcoded guess at any one app's convention.
+    pub session_init_sql: Option<String>,
 }
 
 impl SqlReflectionConfig {
@@ -102,6 +114,7 @@ impl std::fmt::Debug for SqlReflectionConfig {
             .field("database", &self.database)
             .field("path", &self.path)
             .field("schema_file", &self.schema_file)
+            .field("session_init_sql", &self.session_init_sql)
             .finish()
     }
 }

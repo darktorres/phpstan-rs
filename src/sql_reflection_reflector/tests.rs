@@ -141,6 +141,7 @@ fn a_reflector_handle_with_a_schema_file_only_config_never_attempts_a_live_conne
         schema_file: Some(std::path::PathBuf::from(
             "install/piwigo_structure-mysql.sql",
         )),
+        session_init_sql: None,
     };
     let handle = SqlReflectorHandle::default();
     assert!(handle.get(Some(&config)).is_none());
@@ -164,6 +165,7 @@ fn live_mysql_config() -> Option<SqlReflectionConfig> {
         database: Some(std::env::var("PIWIGO_DB_BASE").ok()?),
         path: None,
         schema_file: None,
+        session_init_sql: None,
     })
 }
 
@@ -279,6 +281,7 @@ fn live_postgres_config() -> Option<SqlReflectionConfig> {
         database: Some(std::env::var("PHPSTAN_RS_TEST_PG_DATABASE").ok()?),
         path: None,
         schema_file: None,
+        session_init_sql: None,
     })
 }
 
@@ -416,6 +419,7 @@ fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
         database: None,
         path: Some(path.clone()),
         schema_file: None,
+        session_init_sql: None,
     };
     let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
     {
@@ -470,6 +474,7 @@ fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
         database: None,
         path: Some(path.clone()),
         schema_file: None,
+        session_init_sql: None,
     };
     let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
     {
@@ -506,6 +511,7 @@ fn a_real_sqlite_prepare_of_an_invalid_query_degrades_to_none_not_a_panic() {
         database: None,
         path: Some(path.clone()),
         schema_file: None,
+        session_init_sql: None,
     };
     let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
     assert!(
@@ -530,6 +536,7 @@ fn a_reflector_handle_with_no_path_never_attempts_a_live_sqlite_connection() {
         schema_file: Some(std::path::PathBuf::from(
             "install/piwigo_structure-sqlite.sql",
         )),
+        session_init_sql: None,
     };
     let handle = SqlReflectorHandle::default();
     assert!(handle.get(Some(&config)).is_none());
@@ -690,4 +697,79 @@ fn normalize_placeholders_preserves_count_star_spacing_for_postgres_too() {
     )
     .unwrap();
     assert_eq!(out, "SELECT COUNT(*) FROM categories WHERE id = $1");
+}
+
+#[test]
+fn without_session_init_sql_a_group_by_violating_only_full_group_by_fails_to_prepare() {
+    let Some(mut config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    config.session_init_sql = None;
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    assert!(
+        reflector
+            .reflect("SELECT id, name FROM categories GROUP BY id_uppercat")
+            .is_none()
+    );
+}
+
+#[test]
+fn session_init_sql_runs_on_every_new_connection_and_can_relax_sql_mode() {
+    let Some(mut config) = live_mysql_config() else {
+        eprintln!("skipping: PIWIGO_DB_* env vars not set");
+        return;
+    };
+    config.session_init_sql = Some("SET SESSION sql_mode=''".to_string());
+    let reflector = MysqlReflector::connect(&config).expect("connect to live MySQL");
+    assert!(
+        reflector
+            .reflect("SELECT id, name FROM categories GROUP BY id_uppercat")
+            .is_some(),
+        "expected the relaxed sql_mode to let this GROUP BY prepare successfully"
+    );
+}
+
+#[test]
+fn sqlite_session_init_sql_runs_on_every_new_connection() {
+    let path = sqlite_fixture_path("session_init");
+    let _ = std::fs::remove_file(&path);
+    let config = SqlReflectionConfig {
+        driver: SqlDriver::Sqlite,
+        host: None,
+        port: None,
+        user: None,
+        password: None,
+        password_env: None,
+        database: None,
+        path: Some(path.clone()),
+        schema_file: None,
+        session_init_sql: Some(
+            "CREATE TABLE IF NOT EXISTS session_init_probe (id INTEGER NOT NULL);".to_string(),
+        ),
+    };
+    let reflector = SqliteReflector::connect(&config).expect("open the sqlite fixture");
+    let row_type = reflector.reflect("SELECT id FROM session_init_probe");
+    let _ = std::fs::remove_file(&path);
+    assert!(
+        row_type.is_some(),
+        "expected session_init_sql to have created the table before this query prepared"
+    );
+}
+
+#[test]
+fn postgres_session_init_sql_runs_before_every_reflect_call() {
+    let Some(mut config) = live_postgres_config() else {
+        eprintln!("skipping: PHPSTAN_RS_TEST_PG_* env vars not set");
+        return;
+    };
+    config.session_init_sql = Some(
+        "CREATE TEMP TABLE IF NOT EXISTS session_init_probe (id integer NOT NULL);".to_string(),
+    );
+    let reflector = PostgresReflector::connect(&config).expect("connect to live Postgres");
+    let row_type = reflector.reflect("SELECT id FROM session_init_probe");
+    assert!(
+        row_type.is_some(),
+        "expected session_init_sql to have created the temp table before this query prepared"
+    );
 }

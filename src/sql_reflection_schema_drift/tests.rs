@@ -80,6 +80,7 @@ fn live_mysql_config() -> Option<crate::sql_reflection_config::SqlReflectionConf
         database: Some(std::env::var("PIWIGO_DB_BASE").ok()?),
         path: None,
         schema_file: None,
+        session_init_sql: None,
     })
 }
 

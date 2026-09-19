@@ -178,12 +178,20 @@ pub struct MysqlReflector {
 impl MysqlReflector {
     fn connect(config: &SqlReflectionConfig) -> Result<Self, String> {
         let password = config.resolved_password()?;
-        let opts = mysql::OptsBuilder::new()
+        let mut opts = mysql::OptsBuilder::new()
             .ip_or_hostname(config.host.clone())
             .tcp_port(config.port.unwrap_or(3306))
             .user(config.user.clone())
             .pass(password)
             .db_name(config.database.clone());
+        // Real session state (e.g. a pinned `sql_mode`) can widen or
+        // narrow what a query is even valid to `PREPARE` - `init()`
+        // (real `mysql` crate API, mirrors `MYSQLI_INIT_COMMAND`'s own
+        // "every (re)connect" role) runs it on every new physical
+        // connection the pool opens, not just the first.
+        if let Some(sql) = &config.session_init_sql {
+            opts = opts.init(vec![sql.clone()]);
+        }
         let pool =
             mysql::Pool::new(opts).map_err(|e| format!("failed to connect to MySQL: {e}"))?;
         Ok(Self { pool })
@@ -303,6 +311,13 @@ fn enum_literal_union(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> Ty
 /// plan's own stated expectation for this engine.
 pub struct PostgresReflector {
     pool: r2d2::Pool<r2d2_postgres::PostgresConnectionManager<postgres::NoTls>>,
+    // Unlike `mysql`'s own `init()`/`r2d2_sqlite`'s own `with_init()`,
+    // `r2d2_postgres` has no "run this on every new physical connection"
+    // hook at all - run right before every `PREPARE` instead (a plain
+    // `SET`/session command is idempotent, so re-running it against an
+    // already-initialized, pool-reused connection is wasteful but never
+    // wrong).
+    session_init_sql: Option<String>,
 }
 
 impl PostgresReflector {
@@ -325,7 +340,10 @@ impl PostgresReflector {
         let manager = r2d2_postgres::PostgresConnectionManager::new(pg_config, postgres::NoTls);
         let pool =
             r2d2::Pool::new(manager).map_err(|e| format!("failed to connect to Postgres: {e}"))?;
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            session_init_sql: config.session_init_sql.clone(),
+        })
     }
 }
 
@@ -333,6 +351,9 @@ impl QueryReflector for PostgresReflector {
     fn reflect(&self, sql: &str) -> Option<Type> {
         let sql = normalize_placeholders_for_driver(sql, SqlDriver::Pgsql)?;
         let mut conn = self.pool.get().ok()?;
+        if let Some(init_sql) = &self.session_init_sql {
+            conn.batch_execute(init_sql).ok()?;
+        }
         let stmt = conn.prepare(&sql).ok()?;
         let columns = stmt.columns();
         if columns.is_empty() {
@@ -460,7 +481,10 @@ impl SqliteReflector {
             .path
             .as_ref()
             .ok_or_else(|| "sql_reflection.path is required for the sqlite driver".to_string())?;
-        let manager = r2d2_sqlite::SqliteConnectionManager::file(path);
+        let mut manager = r2d2_sqlite::SqliteConnectionManager::file(path);
+        if let Some(sql) = config.session_init_sql.clone() {
+            manager = manager.with_init(move |conn| conn.execute_batch(&sql));
+        }
         let pool =
             r2d2::Pool::new(manager).map_err(|e| format!("failed to open SQLite database: {e}"))?;
         Ok(Self { pool })
