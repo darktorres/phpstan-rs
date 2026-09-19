@@ -1,0 +1,258 @@
+//! Sub-phase E: placeholder/bound-parameter validation. Once a SQL
+//! string is resolved (sub-phase B's own chain-fold, or a literal/
+//! foldable argument), every real placeholder it references (`?`
+//! positional, `:name` named) is cross-referenced against the actual
+//! bound values a real call site provides - `Doctrine\DBAL\Query\
+//! QueryBuilder::setParameter`/`setParameters` for the fluent-chain
+//! shape (the corpus-dominant real pattern - confirmed 542 real Piwigo
+//! `setParameter('name', ...)` call sites), or `Connection`'s own
+//! `$params`/`$types` array arguments for the literal-SQL-string shape.
+//! Both mechanisms are built as real, general capabilities regardless
+//! of which one happens to dominate any one corpus - this project
+//! targets general Doctrine/DBAL usage, not just Piwigo's own.
+//!
+//! Two checks, both zero-coercion-risk (PHP/SQL's own loose scalar
+//! type-juggling is real and this project doesn't try to out-guess it -
+//! see `sql_reflection_reflector`'s own `STRINGIFY_FETCHES` research for
+//! why that caution matters):
+//! - `sqlReflection.missingParameter`: a placeholder the SQL text itself
+//!   references has no bound value at all - unambiguous, always a real
+//!   `SQLSTATE`-shaped runtime error, no coercion involved.
+//! - `sqlReflection.invalidParameterType`: a bound value is a real PHP
+//!   array, but the placeholder isn't declared with `ArrayParameterType::*`
+//!   (real DBAL's own supported way to bind an array as one `IN (...)`
+//!   list) - a plain SQL placeholder can never validly hold an array.
+//!
+//! Deliberately not built: comparing a bound value's own type against
+//! the prepared statement's own live-reported expected type. SQL/PHP's
+//! own scalar coercion is genuinely loose (a numeric string into an INT
+//! column is completely normal, safe, everyday usage) - a real, risk-
+//! based scope limit, not a corpus-popularity one.
+
+use sqlparser::dialect::GenericDialect;
+use sqlparser::tokenizer::{Token, Tokenizer};
+
+use crate::ast::{Arg, Expr, ExprKind};
+use crate::checker::sql_reflection::query_builder::{
+    ParamBinding, ParamKey, is_array_parameter_type, param_key_from_expr,
+};
+use crate::checker::{Checker, Locals};
+use crate::token::Span;
+use crate::types::Type;
+
+/// Every placeholder the SQL text itself references, in first-occurrence
+/// order, deduplicated by key (a repeated `:name` is the same real bound
+/// value referenced twice). `None` only on a real tokenize failure -
+/// mirrors `sql_reflection_reflector::normalize_placeholders_for_driver`'s
+/// own identical `:name`-detection mechanism (an adjacent `Colon` then
+/// `Word`, since `sqlparser` has no single token for it), a separate,
+/// purpose-built scan rather than a forced shared function - one rewrites
+/// text, the other only collects keys.
+fn sql_placeholder_keys(sql: &str) -> Option<Vec<ParamKey>> {
+    let tokens = Tokenizer::new(&GenericDialect {}, sql).tokenize().ok()?;
+    let mut keys: Vec<ParamKey> = Vec::new();
+    let mut positional_index = 0i64;
+    let mut i = 0;
+    while i < tokens.len() {
+        let is_named =
+            matches!(tokens[i], Token::Colon) && matches!(tokens.get(i + 1), Some(Token::Word(_)));
+        if is_named {
+            let Token::Word(word) = &tokens[i + 1] else {
+                unreachable!()
+            };
+            let key = ParamKey::Named(word.value.clone());
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+            i += 2;
+            continue;
+        }
+        if let Token::Placeholder(text) = &tokens[i]
+            && text == "?"
+        {
+            keys.push(ParamKey::Positional(positional_index));
+            positional_index += 1;
+        }
+        i += 1;
+    }
+    Some(keys)
+}
+
+/// `Connection::fetchAssociative($sql, $params, $types)` etc.'s own
+/// `$params`/`$types` array arguments - the same shape `setParameters`
+/// already handles for the `QueryBuilder` side, extracted here
+/// independently since there's no chain to fold through for this call
+/// shape at all. `None` means "undecidable, skip the whole check" (a
+/// real, common, valid shape: `$params` is a plain variable, e.g.
+/// `executeStatement($sql, $newIds)` - confirmed a real false positive
+/// this exact distinction fixes: treating that as "zero bindings"
+/// instead of "unknown bindings" flagged every one of that call's real
+/// placeholders as missing). A genuinely *absent* argument (no second
+/// argument at all) is the real "zero bindings" case, kept distinct -
+/// `Some(vec![])`, not `None`.
+fn connection_params_from_args(
+    checker: &Checker,
+    args: &[Arg],
+    locals: &Locals,
+) -> Option<Vec<ParamBinding>> {
+    let items = match args.get(1).map(|a| &a.value.kind) {
+        None => return Some(Vec::new()),
+        Some(ExprKind::ArrayLiteral(items)) => items,
+        Some(_) => return None,
+    };
+    let types_by_key: Vec<(ParamKey, bool)> = match args.get(2).map(|a| &a.value.kind) {
+        Some(ExprKind::ArrayLiteral(type_items)) => type_items
+            .iter()
+            .enumerate()
+            .filter_map(|(position, item)| {
+                let key = match &item.key {
+                    Some(k) => param_key_from_expr(checker, k, locals)?,
+                    None => ParamKey::Positional(position as i64),
+                };
+                Some((key, is_array_parameter_type(checker, &item.value)))
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    let mut params = Vec::new();
+    for (position, item) in items.iter().enumerate() {
+        let Some(key) = (match &item.key {
+            Some(k) => param_key_from_expr(checker, k, locals),
+            None => Some(ParamKey::Positional(position as i64)),
+        }) else {
+            // An undecidable key makes only *that* binding unusable for
+            // cross-referencing - the rest of the array is still real,
+            // known information, not discarded wholesale.
+            continue;
+        };
+        let value_ty = checker.infer_expr(&item.value, locals);
+        let expects_array = types_by_key
+            .iter()
+            .any(|(k, expects_array)| *k == key && *expects_array);
+        params.push(ParamBinding {
+            key,
+            value_ty,
+            expects_array,
+        });
+    }
+    Some(params)
+}
+
+fn describe_key(key: &ParamKey) -> String {
+    match key {
+        ParamKey::Named(name) => format!(":{name}"),
+        ParamKey::Positional(index) => format!("?#{index}"),
+    }
+}
+
+fn value_is_definitely_array(ty: &Type) -> bool {
+    matches!(ty, Type::Array(..) | Type::ArrayShape(_))
+}
+
+impl<'a> Checker<'a> {
+    /// `Doctrine\DBAL\Connection`/`Query\QueryBuilder`'s own
+    /// SQL-executing methods - validates every real placeholder the
+    /// resolved SQL text references has a bound value, and that no
+    /// bound value is a real array where the placeholder isn't declared
+    /// `ArrayParameterType::*`. Silently does nothing whenever any part
+    /// of the resolution is undecidable (unfoldable SQL, no chain/array
+    /// found) - the same "don't guess" leniency every other sub-phase
+    /// of this feature already has.
+    // Every argument here is already its own independently-meaningful
+    // piece of the one real call site (`checker/expr.rs`'s own
+    // `MethodCall` arm) that needs it - mirrors this project's own
+    // `run_check_project`-style precedent for a single-call-site wiring
+    // function, not a blanket suppression.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn check_dbal_parameter_binding(
+        &mut self,
+        class: &str,
+        method: &str,
+        recv: &Expr,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
+        if !matches!(
+            method,
+            "fetchAssociative"
+                | "fetchAllAssociative"
+                | "fetchOne"
+                | "fetchFirstColumn"
+                | "executeQuery"
+                | "executeStatement"
+        ) {
+            return;
+        }
+        let is_connection = self
+            .registry
+            .is_subclass_of(class, "Doctrine\\DBAL\\Connection");
+        let is_query_builder = self
+            .registry
+            .is_subclass_of(class, "Doctrine\\DBAL\\Query\\QueryBuilder");
+        if !is_connection && !is_query_builder {
+            return;
+        }
+
+        let (sql, bindings) = if is_query_builder {
+            let Some(chain) = self.resolve_dbal_query_builder_chain(recv, locals) else {
+                return;
+            };
+            let Some(sql) = chain.render() else {
+                return;
+            };
+            (sql, chain.params)
+        } else {
+            let Some(sql) = self.foldable_sql_string(&args[0].value, locals) else {
+                return;
+            };
+            let Some(bindings) = connection_params_from_args(self, args, locals) else {
+                return;
+            };
+            (sql, bindings)
+        };
+
+        let Some(placeholder_keys) = sql_placeholder_keys(&sql) else {
+            return;
+        };
+        if placeholder_keys.is_empty() {
+            return;
+        }
+
+        for key in &placeholder_keys {
+            if !bindings.iter().any(|b| b.key == *key) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{class}::{method}() call's own SQL references parameter {} with no bound value",
+                        describe_key(key)
+                    ),
+                    span,
+                    0,
+                    "sqlReflection.missingParameter",
+                );
+            }
+        }
+        for binding in &bindings {
+            if !binding.expects_array
+                && placeholder_keys.contains(&binding.key)
+                && value_is_definitely_array(&binding.value_ty)
+            {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{class}::{method}() binds an array to parameter {} without ArrayParameterType::*, which every plain SQL placeholder rejects at runtime",
+                        describe_key(&binding.key)
+                    ),
+                    span,
+                    0,
+                    "sqlReflection.invalidParameterType",
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

@@ -14,5 +14,6 @@
 //! and this project's `restricted_symbols`/`doctrine_functions` already
 //! established that shape for exactly this kind of Registry-held data).
 
+pub(crate) mod parameter_validation;
 pub(crate) mod query_builder;
 pub(crate) mod resolve;

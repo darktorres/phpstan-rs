@@ -1069,6 +1069,13 @@ impl<'a> Checker<'a> {
                         // validation - independent of the internal/
                         // deprecated checks above.
                         self.check_dom_create_element(class, method, args, e.span, label);
+                        // Sub-phase E of the live SQL query reflection
+                        // phase (see delegated-tumbling-dongarra.md) -
+                        // independent of the internal/deprecated checks
+                        // above too.
+                        self.check_dbal_parameter_binding(
+                            class, method, recv, args, locals, e.span, label,
+                        );
                         // See the identical comment on the plain-function
                         // Call arm above - `check_args` is spread-aware,
                         // so it's always worth calling.

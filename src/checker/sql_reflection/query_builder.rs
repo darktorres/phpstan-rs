@@ -63,6 +63,16 @@ struct JoinClause {
     condition: Option<String>,
 }
 
+/// Real DBAL: `setParameter(int|string $key, ...)` - a positional key or
+/// a bare name (no leading `:`, matching `SELECT ... WHERE x = :name`'s
+/// own `where()`-string convention - `setParameter('name', ...)` binds
+/// `:name`, not `:'name'` or `::name`).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum ParamKey {
+    Positional(i64),
+    Named(String),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Dml {
     Insert {
@@ -83,8 +93,8 @@ enum Dml {
 /// undecidable SQL (mirrors real `QueryBuilder::getSQLForSelect()`'s own
 /// `throw` on an empty `select`), not this module's own failure to look
 /// hard enough.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct DbalQueryBuilderChain {
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct DbalQueryBuilderChain {
     distinct: bool,
     select: Vec<String>,
     from: Vec<FromClause>,
@@ -96,6 +106,30 @@ struct DbalQueryBuilderChain {
     limit: Option<i64>,
     offset: Option<i64>,
     dml: Option<Dml>,
+    /// Every `setParameter`/`setParameters` binding collected along the
+    /// chain, in call order - `setParameters` replaces the whole list
+    /// (matching real DBAL: `$this->params = $params;`, not a merge),
+    /// `setParameter` appends/overwrites one key. Sub-phase E's own
+    /// concern (`checker::sql_reflection::parameter_validation`), not
+    /// consulted by `render()` at all - a placeholder's own bound value
+    /// never changes the SQL *text*.
+    pub(crate) params: Vec<ParamBinding>,
+}
+
+/// One collected `setParameter`/`setParameters` binding.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ParamBinding {
+    pub(crate) key: ParamKey,
+    pub(crate) value_ty: Type,
+    /// Real DBAL: `setParameter($key, $arrayValue, ArrayParameterType::
+    /// INTEGER)` is the standard, common way to bind a real PHP array
+    /// as a single placeholder (DBAL expands it into a real `IN (...)`
+    /// list internally, e.g. `WHERE id IN (:ids)`) - a genuinely
+    /// different, valid shape from every other placeholder, not a
+    /// parameter-type mistake. Confirmed real and dominant, not
+    /// hypothetical: 53+ real Piwigo `setParameter('ids', $ids,
+    /// ArrayParameterType::INTEGER)` call sites alone.
+    pub(crate) expects_array: bool,
 }
 
 impl DbalQueryBuilderChain {
@@ -104,7 +138,7 @@ impl DbalQueryBuilderChain {
     /// `None` only for a `SELECT`-shaped chain with no `select`/`from`
     /// at all (an empty chain, e.g. a bare `createQueryBuilder()` never
     /// built on further - real DBAL throws at this exact point too).
-    fn render(&self) -> Option<String> {
+    pub(crate) fn render(&self) -> Option<String> {
         if let Some(dml) = &self.dml {
             return Some(match dml {
                 Dml::Insert { table, values } => {
@@ -260,6 +294,22 @@ impl<'a> Checker<'a> {
         recv: &Expr,
         locals: &Locals,
     ) -> Option<String> {
+        self.resolve_dbal_query_builder_chain(recv, locals)?
+            .render()
+    }
+
+    /// Same backward-walk as `resolve_dbal_query_builder_sql`, but
+    /// returns the whole resolved chain (including every collected
+    /// `setParameter`/`setParameters` binding) instead of just its own
+    /// rendered SQL text - sub-phase E's own entry point
+    /// (`checker::sql_reflection::parameter_validation`), which needs
+    /// both the text (to find real placeholders) and the bindings (to
+    /// cross-reference against them).
+    pub(crate) fn resolve_dbal_query_builder_chain(
+        &self,
+        recv: &Expr,
+        locals: &Locals,
+    ) -> Option<DbalQueryBuilderChain> {
         if !looks_like_dbal_query_builder_chain(recv) {
             return None;
         }
@@ -291,7 +341,7 @@ impl<'a> Checker<'a> {
         for call in &calls {
             self.apply_dbal_chain_call(&mut chain, &call.method, &call.args, locals)?;
         }
-        chain.render()
+        Some(chain)
     }
 
     /// A directly-passed SQL argument (`fetchAssociative($sql, ...)`) -
@@ -458,12 +508,71 @@ impl<'a> Checker<'a> {
                     _ => return None,
                 }
             }
-            // `setParameter`/`setParameters`/parameter-related methods
-            // never change the SQL text itself (they bind a value to an
-            // already-written `?`/`:name` placeholder) - sub-phase E's
-            // own concern, not this fold. Any other unrecognized method
-            // is likewise simply ignored, matching Phase 168's own
-            // `apply_chain_call` precedent.
+            // Never change the SQL text itself (they bind a value to an
+            // already-written `?`/`:name` placeholder) - collected for
+            // sub-phase E's own cross-reference against the resolved
+            // SQL's real placeholders, not consulted by `render()`.
+            "setParameter" => {
+                let key = args
+                    .first()
+                    .and_then(|a| param_key_from_arg(self, a, locals))?;
+                let value_ty = args
+                    .get(1)
+                    .map(|a| self.infer_expr(&a.value, locals))
+                    .unwrap_or(Type::Mixed);
+                let expects_array = args
+                    .get(2)
+                    .is_some_and(|a| is_array_parameter_type(self, &a.value));
+                chain.params.retain(|p| p.key != key);
+                chain.params.push(ParamBinding {
+                    key,
+                    value_ty,
+                    expects_array,
+                });
+            }
+            "setParameters" => {
+                let ExprKind::ArrayLiteral(items) = &args.first()?.value.kind else {
+                    return None;
+                };
+                // The parallel `$types` array (real signature:
+                // `setParameters(array $params, array $types = [])`) is
+                // keyed the same way as `$params` - only consulted for
+                // the `ArrayParameterType::*` exemption, same as
+                // `setParameter`'s own third argument.
+                let types_by_key: Vec<(ParamKey, bool)> = match args.get(1).map(|a| &a.value.kind) {
+                    Some(ExprKind::ArrayLiteral(type_items)) => type_items
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(position, item)| {
+                            let key = match &item.key {
+                                Some(k) => param_key_from_expr(self, k, locals)?,
+                                None => ParamKey::Positional(position as i64),
+                            };
+                            Some((key, is_array_parameter_type(self, &item.value)))
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                let mut params = Vec::new();
+                for (position, item) in items.iter().enumerate() {
+                    let key = match &item.key {
+                        Some(k) => param_key_from_expr(self, k, locals)?,
+                        None => ParamKey::Positional(position as i64),
+                    };
+                    let value_ty = self.infer_expr(&item.value, locals);
+                    let expects_array = types_by_key
+                        .iter()
+                        .any(|(k, expects_array)| *k == key && *expects_array);
+                    params.push(ParamBinding {
+                        key,
+                        value_ty,
+                        expects_array,
+                    });
+                }
+                chain.params = params;
+            }
+            // Any other unrecognized method is simply ignored, matching
+            // Phase 168's own `apply_chain_call` precedent.
             _ => {}
         }
         Some(())
@@ -497,6 +606,45 @@ fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<S
     }
     match checker.infer_expr(expr, locals) {
         Type::StringLiteral(s) => Some(s),
+        _ => None,
+    }
+}
+
+/// `ArrayParameterType::INTEGER`/`STRING`/`ASCII`/`BINARY` (real DBAL
+/// enum, `vendor/doctrine/dbal/src/ArrayParameterType.php`) - matched by
+/// resolved class name only (any member/case), not the specific case,
+/// since every case means the same thing for this check's own purposes
+/// ("this placeholder expects an array, expand it into an `IN (...)`
+/// list").
+pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
+    match &expr.kind {
+        ExprKind::StaticAccess(class_name, _member) => checker
+            .name_ctx
+            .resolve(class_name)
+            .ends_with("ArrayParameterType"),
+        _ => false,
+    }
+}
+
+fn param_key_from_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option<ParamKey> {
+    param_key_from_expr(checker, &arg.value, locals)
+}
+
+/// Real `setParameter(int|string $key, ...)` - a literal/foldable
+/// string becomes a named key, a literal/foldable int becomes a
+/// positional one. An undecidable key (a dynamic variable) makes the
+/// whole chain undecidable for parameter-validation purposes, the same
+/// "don't guess" leniency every other chain call already has.
+pub(crate) fn param_key_from_expr(
+    checker: &Checker,
+    expr: &Expr,
+    locals: &Locals,
+) -> Option<ParamKey> {
+    if let Some(s) = fold_string_expr(checker, expr, locals) {
+        return Some(ParamKey::Named(s));
+    }
+    match checker.infer_expr(expr, locals) {
+        Type::IntLiteral(n) => Some(ParamKey::Positional(n)),
         _ => None,
     }
 }
