@@ -205,6 +205,25 @@ pub(super) fn workspace_symbol_request(id: i64, query: &str) -> Value {
     request(id, "workspace/symbol", json!({"query": query}))
 }
 
+pub(super) fn completion_request(id: i64, uri: &str, pos: Value) -> Value {
+    request(
+        id,
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri}, "position": pos}),
+    )
+}
+
+/// `needle`'s position PLUS its own length - the position right AFTER
+/// it, e.g. `pos_after(src, "->")` for a trigger test where completion
+/// fires right after typing the arrow itself, not at its start.
+pub(super) fn pos_after(src: &str, needle: &str) -> Value {
+    let start = lsp_pos(src, needle);
+    json!({
+        "line": start["line"],
+        "character": start["character"].as_u64().unwrap() + needle.chars().count() as u64,
+    })
+}
+
 pub(super) fn response_result(messages: &[Value], id: i64) -> Value {
     messages
         .iter()

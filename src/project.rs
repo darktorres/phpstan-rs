@@ -642,10 +642,25 @@ impl Project {
         path: &Path,
         new_source: &str,
     ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+        // Parse BEFORE unindexing anything - on a parse failure (the
+        // normal, common state while a file is mid-edit, not an edge
+        // case), this must leave every existing registry/decl_locations/
+        // `self.files` entry for `path` completely untouched, not
+        // half-torn-down. `unindex_file` used to run first unconditionally,
+        // which meant any edit that failed to parse permanently discarded
+        // the file's own last-good `FileState` (AST + retained source)
+        // the moment this method returned `Err` - `Project::ast`/
+        // `Project::source` read straight from `self.files`, with no
+        // other place a "last known good" version could still be found.
+        // That silently broke every last-good-AST-dependent LSP feature
+        // (hover/definition/documentSymbol, and `lsp::completion`'s own
+        // member-completion probe, which specifically needs the AST from
+        // *before* the very edit that introduced its own trigger) for as
+        // long as the file kept failing to parse, not just for the one
+        // request that happened to race a genuinely-invalid save.
+        let ast = parse(new_source)?;
         let mut changed_symbols: HashSet<String> = HashSet::new();
         self.unindex_file(path, &mut changed_symbols);
-
-        let ast = parse(new_source)?;
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
         let ignore_lines = ignore_comments::ignored_lines(new_source);
@@ -1445,7 +1460,7 @@ fn bare_name(fqn: &str) -> &str {
 /// mutated-in-place `NameContext` tracking - see that function's own doc
 /// comment on why a namespace can't just be computed once up front for
 /// the whole file) for exactly that reason.
-fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
+pub(crate) fn declared_names(stmts: &[Stmt]) -> (Vec<String>, Vec<String>) {
     let mut ctx = NameContext::default();
     declared_names_with_context(stmts, &mut ctx)
 }

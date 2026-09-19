@@ -399,6 +399,25 @@ impl Registry {
             .flat_map(|m| m.keys().map(|s| s.as_ref()))
     }
 
+    /// `all_method_names`'s own property counterpart, for
+    /// `textDocument/completion`'s member-completion candidate list.
+    pub(crate) fn all_property_names(&self, class: &str) -> impl Iterator<Item = &str> {
+        self.property_owner_by_class
+            .get(class)
+            .into_iter()
+            .flat_map(|m| m.keys().map(|s| s.as_ref()))
+    }
+
+    /// `all_method_names`'s own const counterpart (an enum's cases are
+    /// folded into this same map - see `ClassInfo::consts`'s own doc
+    /// comment).
+    pub(crate) fn all_const_names(&self, class: &str) -> impl Iterator<Item = &str> {
+        self.const_owner_by_class
+            .get(class)
+            .into_iter()
+            .flat_map(|m| m.keys().map(|s| s.as_ref()))
+    }
+
     /// `method_owner_by_class[class]` is keyed by exact declared
     /// spelling, so two case-insensitively-equal but distinctly-spelled
     /// names both survive as separate keys - reading that back out here

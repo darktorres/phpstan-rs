@@ -1,4 +1,5 @@
 mod code_action;
+mod completion;
 mod configuration;
 mod helpers;
 mod navigation;

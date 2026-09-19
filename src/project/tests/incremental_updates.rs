@@ -356,3 +356,41 @@ fn unrelated_files_are_not_swept_into_transitive_invalidation() {
 
     assert!(!result.contains_key(&PathBuf::from("unrelated.php")));
 }
+
+#[test]
+fn a_failed_reparse_keeps_the_files_last_good_ast_and_registry_entries() {
+    // `update_file` used to unindex a file's own last-good `FileState`
+    // (removing it from `self.files`, which `Project::ast`/`Project::
+    // source` read straight from) BEFORE attempting the new parse -
+    // meaning any edit that failed to parse permanently discarded the
+    // last-good AST the moment this call returned `Err`, not just for
+    // that one call. This is the exact state an LSP `didChange` full-
+    // sync update sends on essentially every keystroke while a
+    // statement is mid-edit (e.g. typing `$x->` has no valid member
+    // name yet), so every feature reading `Project::ast` for that path
+    // (hover, definition, documentSymbol, `lsp::completion`'s own
+    // member-completion probe) would see nothing at all until the file
+    // parsed cleanly again.
+    let mut project = Project::new();
+    project.set_retain_source(true);
+    let path = PathBuf::from("a.php");
+    project
+        .load_file(path.clone(), "<?php function helperA(): int { return 1; }")
+        .unwrap();
+    project.finish_loading();
+
+    let err = project.update_file(&path, "<?php function helperA(): int {");
+    assert!(
+        err.is_err(),
+        "expected the truncated source to fail to parse"
+    );
+
+    assert!(
+        project.ast(&path).is_some(),
+        "the last-good AST must survive a failed reparse"
+    );
+    assert!(
+        project.registry().functions.contains_key("helperA"),
+        "the last-good registry entry must survive a failed reparse too"
+    );
+}

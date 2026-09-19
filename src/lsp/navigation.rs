@@ -148,7 +148,7 @@ fn contains(span: Span, pos: Position) -> bool {
 /// `resolve_pseudo` provide together, minus the `Type`-wrapping and
 /// union/template recursion neither of those own extra cases apply to a
 /// bare class-name site.
-fn resolve_class_ref(
+pub(super) fn resolve_class_ref(
     name: &str,
     current_class: Option<&str>,
     ctx: &NameContext,

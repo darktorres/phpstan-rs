@@ -32,14 +32,14 @@ use lsp_server::{
 };
 use lsp_types::{
     CancelParams, CodeActionKind, CodeActionOptions, CodeActionParams,
-    CodeActionProviderCapability, CodeActionResponse, DidChangeTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverContents, HoverParams, HoverProviderCapability,
-    InitializeParams, InitializeResult, Location, MarkedString, MessageType, OneOf,
-    Position as LspPosition, PositionEncodingKind, Range as LspRange, ServerCapabilities,
-    ServerInfo, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
-    WorkDoneProgress, WorkDoneProgressBegin, WorkDoneProgressEnd, WorkspaceSymbolParams,
-    WorkspaceSymbolResponse,
+    CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
+    CompletionResponse, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
+    DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
+    Hover, HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    Location, MarkedString, MessageType, OneOf, Position as LspPosition, PositionEncodingKind,
+    Range as LspRange, ServerCapabilities, ServerInfo, SymbolInformation,
+    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgress, WorkDoneProgressBegin,
+    WorkDoneProgressEnd, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 
 use crate::ast::ClassKind;
@@ -50,6 +50,7 @@ use crate::token::Span;
 use crate::types::Type;
 use crate::{baseline, ignore_errors};
 
+mod completion;
 mod document_symbol;
 mod navigation;
 mod protocol;
@@ -158,6 +159,15 @@ struct Server {
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
     last_diagnostics: HashMap<PathBuf, Vec<checker::Diagnostic>>,
+    // The exact current text `didOpen`/`didChange` last sent for a path,
+    // regardless of whether it parses - `Project::source`/`Project::ast`
+    // only ever reflect the last *successfully parsed* version, but
+    // `textDocument/completion`'s member-completion path needs the LIVE
+    // (very often mid-edit and unparseable - `$x->` alone is a syntax
+    // error) buffer text to tokenize and to extract a receiver
+    // expression's own text from. See `completion`'s own module doc
+    // comment for the full mechanism this feeds.
+    latest_text: HashMap<PathBuf, String>,
     // Set once a real `shutdown` request has been handled - `run_loop`'s
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
@@ -261,6 +271,7 @@ impl Server {
             project,
             open_uris: HashMap::new(),
             last_diagnostics: HashMap::new(),
+            latest_text: HashMap::new(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
             // `Incoming<I>` has no public constructor or `Default` impl
@@ -607,6 +618,7 @@ impl Server {
             .collect();
         for p in &paths {
             self.last_diagnostics.remove(p);
+            self.latest_text.remove(p);
         }
 
         let results = self.project.remove_files(&paths);
@@ -723,6 +735,7 @@ impl Server {
             return Vec::new();
         };
         self.open_uris.insert(path.clone(), (uri.clone(), version));
+        self.latest_text.insert(path.clone(), text.to_string());
         // Same graceful-degradation as load_workspace, and more exposed
         // in practice here: momentarily-invalid syntax is the normal
         // state while a file is being typed, not an edge case.
@@ -771,6 +784,7 @@ impl Server {
             if typ == lsp_types::FileChangeType::DELETED {
                 self.open_uris.remove(&path);
                 self.last_diagnostics.remove(&path);
+                self.latest_text.remove(&path);
                 let results = self.project.remove_file(&path);
                 messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
                 continue;
@@ -789,6 +803,7 @@ impl Server {
             // change (there is no didOpen/didChange behind it) - `None`
             // matches load_workspace's own "never opened" default.
             self.open_uris.insert(path.clone(), (uri, None));
+            self.latest_text.insert(path.clone(), text.clone());
             match self.project.update_file(&path, &text) {
                 Ok(results) => {
                     messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
@@ -1141,6 +1156,65 @@ impl Server {
                 container_name: m.container_name,
             })
             .collect()
+    }
+
+    /// See `completion`'s own module doc comment for the two mechanisms
+    /// this dispatches between. `latest_text` (falling back to
+    /// `Project::source` for a workspace file never `didOpen`ed) is the
+    /// LIVE buffer text - `Project::ast`'s last-good AST is used both as
+    /// the member-completion probe's own scope source and, for a bare
+    /// trigger, as the import-resolution context `enumerate_bare` needs;
+    /// using the stale AST for that (rather than re-deriving a `use`
+    /// context from the live, possibly-unparseable buffer) is the same
+    /// "last-good AST" precedent this whole request already leans on.
+    fn completion(&self, uri: &Uri, position: LspPosition) -> Option<CompletionResponse> {
+        let path = uri_to_path(uri)?;
+        let text = self
+            .latest_text
+            .get(&path)
+            .cloned()
+            .or_else(|| self.project.source(&path).map(str::to_string))?;
+        let stmts = self.project.ast(&path)?;
+        let tokens = completion::tokenize(&text);
+        let cursor = from_lsp_position(position);
+        match completion::build_member_probe(&text, &tokens, cursor, stmts, self.project.registry())
+        {
+            Some(completion::MemberProbe::Resolved {
+                ty,
+                is_static,
+                class,
+            }) => Some(CompletionResponse::Array(completion::enumerate_members(
+                self.project.registry(),
+                &ty,
+                is_static,
+                class.as_deref(),
+            ))),
+            Some(completion::MemberProbe::NeedsProbe {
+                scope,
+                scope_is_static,
+                class,
+                probe_span,
+                is_static,
+            }) => {
+                let ty = self.probe_receiver_type(
+                    probe_span,
+                    &scope,
+                    scope_is_static,
+                    class.as_deref(),
+                )?;
+                Some(CompletionResponse::Array(completion::enumerate_members(
+                    self.project.registry(),
+                    &ty,
+                    is_static,
+                    class.as_deref(),
+                )))
+            }
+            None => Some(CompletionResponse::Array(completion::enumerate_bare(
+                &self.project,
+                &path,
+                stmts,
+            ))),
+        }
     }
 
     /// Quick fixes for whatever diagnostics in `path` overlap `range` and
@@ -1570,6 +1644,10 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         },
                     )),
                     workspace_symbol_provider: Some(OneOf::Left(true)),
+                    completion_provider: Some(CompletionOptions {
+                        trigger_characters: Some(vec![">".to_string(), ":".to_string()]),
+                        ..Default::default()
+                    }),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -1657,6 +1735,19 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     serde_json::to_value(WorkspaceSymbolResponse::Flat(symbols))
                         .unwrap_or(serde_json::Value::Null)
                 })
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/completion" => {
+            let result = serde_json::from_value::<CompletionParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.completion(
+                        &params.text_document_position.text_document.uri,
+                        params.text_document_position.position,
+                    )
+                })
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
                 .unwrap_or(serde_json::Value::Null);
             Message::Response(Response::new_ok(id.clone(), result))
         }

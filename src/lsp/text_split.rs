@@ -101,7 +101,7 @@ pub(crate) fn type_hint_identifiers(hint: &str) -> Vec<String> {
 /// `source`'s own substring covered by `span` - `Position`'s own doc
 /// comment: 1-indexed, `col` counts UTF-8 *characters*, not bytes, the
 /// same convention every span in this project already uses.
-fn slice_span(source: &str, span: Span) -> Option<String> {
+pub(super) fn slice_span(source: &str, span: Span) -> Option<String> {
     let lines: Vec<&str> = source.lines().collect();
     let start_line = (span.start.line as usize).checked_sub(1)?;
     let end_line = (span.end.line as usize).checked_sub(1)?;
