@@ -14,6 +14,10 @@ mod demo;
 #[path = "main/incremental_bench.rs"]
 mod incremental_bench;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 #[derive(ClapParser)]
 #[command(subcommand_required = true, arg_required_else_help = true)]
 struct Cli {
@@ -299,6 +303,13 @@ enum Command {
 
 #[hotpath::main]
 fn main() {
+    // Held for the whole run; its `Drop` writes `dhat-heap.json` on
+    // clean exit (every `check-project` error path below that matters
+    // for a profiling run falls through to a normal return, not
+    // `process::exit`, so this always flushes).
+    #[cfg(feature = "dhat-heap")]
+    let _profiler = dhat::Profiler::new_heap();
+
     let cli = Cli::parse();
     match cli.command {
         Command::Check { paths } => check::run_check(&paths),

@@ -7,6 +7,7 @@ edition = "2024"
 arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
+dhat = { version = "0.3", optional = true }
 hotpath = "0.24"
 imbl = "7.0.1"
 lsp-server = "0.10.0"
@@ -32,6 +33,12 @@ r2d2_sqlite = { version = "0.35.0", features = ["bundled"] }
 default = ["pcre-validate"]
 hotpath = ["hotpath/hotpath"]
 hotpath-alloc = ["hotpath/hotpath-alloc"]
+# One-shot heap profiler (https://docs.rs/dhat): swaps in `dhat::Alloc` as
+# the global allocator and dumps a `dhat-heap.json` on clean exit, showing
+# which call sites hold live bytes at peak (not just alloc/dealloc churn,
+# which `hotpath-alloc` already covers) - use `--profile dhat` (see that
+# profile below) to keep symbols for a readable dh_view.html call stack.
+dhat-heap = ["dep:dhat"]
 # Phase 46: `regexp.pattern` validation calls real PCRE2 (via the
 # low-level `pcre2-sys` FFI, not the higher-level `pcre2` crate - see
 # `src/pcre_validate.rs`'s own doc comment for why) - this project's one
@@ -58,6 +65,12 @@ proptest = "1.11.0"
 [[bench]]
 name = "vendored_corpus"
 harness = false
+
+# Release-speed build that keeps debug info, so `dhat-heap`'s output can
+# symbolicate call stacks - `cargo build --profile dhat --features dhat-heap`.
+[profile.dhat]
+inherits = "release"
+debug = 1
 
 # `third_party/hotpath` - a vendored, patched `hotpath` 0.24.0 (bumps its
 # hardcoded hotpath-alloc frame-depth limit; see
