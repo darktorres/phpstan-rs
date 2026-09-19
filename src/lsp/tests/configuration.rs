@@ -296,6 +296,7 @@ fn resolved_config_equality_is_not_fooled_by_sql_reflection_password_redaction()
         database: None,
         path: None,
         schema_file: None,
+        session_init_sql: None,
     };
     let with_password_a = SqlReflectionConfig {
         password: Some("a".to_string()),

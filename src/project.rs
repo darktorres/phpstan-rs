@@ -1373,20 +1373,29 @@ impl Project {
     /// pattern exactly, for the same reason: a whole-workspace pass runs
     /// over uncurated code the caller doesn't control, where one file's
     /// latent checker bug must not take down every other file's
-    /// diagnostics. `Project`/`Registry` have no interior mutability, so
-    /// `&self` is `UnwindSafe` with no `AssertUnwindSafe` wrapper needed.
+    /// diagnostics. `Registry.sql_reflector`'s only interior mutability is
+    /// a plain `OnceLock` - if its lazy-init closure panics mid-connection
+    /// attempt, the cell is left simply uninitialized (not corrupted;
+    /// `OnceLock::get_or_init`'s own contract), so a later observer sees
+    /// either "not yet initialized" or a real, valid reflector - never a
+    /// torn/partial one. `AssertUnwindSafe` here is that specific, checked
+    /// claim, not a blanket "trust me" (matches `check_project.rs`'s own
+    /// identical reasoning).
     pub fn check_paths_isolating_panics(&self, paths: &[PathBuf]) -> CheckPathsIsolatingPanics {
         let default_hook = std::panic::take_hook();
         std::panic::set_hook(Box::new(|_| {}));
         let facts = Arc::new(
-            std::panic::catch_unwind(|| self.collect_property_assign_facts()).unwrap_or_default(),
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                self.collect_property_assign_facts()
+            }))
+            .unwrap_or_default(),
         );
         let outcomes: Vec<(PathBuf, Result<Vec<Diagnostic>, String>)> = paths
             .iter()
             .map(|path| {
-                let outcome = std::panic::catch_unwind(|| {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     self.check_file_with_property_assign_facts(path, &facts)
-                })
+                }))
                 .map_err(|payload| {
                     payload
                         .downcast_ref::<String>()
