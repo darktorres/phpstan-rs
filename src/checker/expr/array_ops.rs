@@ -898,6 +898,24 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `key_type_could_be_string`'s own inverse-shaped sibling - whether a
+    /// key type could genuinely include an `Int` member. `array_merge`'s
+    /// own coarse-fallback key-type computation uses this (alongside
+    /// `key_type_could_be_string`) to decide whether an argument's real
+    /// keys could ever get real PHP's int-key-renumbering treatment,
+    /// rather than always widening the merged key type to `int|string`
+    /// regardless of what the arguments actually prove.
+    pub(crate) fn key_type_could_be_int(ty: &Type) -> bool {
+        match ty {
+            Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => true,
+            Type::String | Type::StringLiteral(_) => false,
+            Type::Union(members) | Type::Intersection(members) => {
+                members.iter().any(Self::key_type_could_be_int)
+            }
+            _ => true,
+        }
+    }
+
     /// `array_merge`'s own per-argument list-safety check - the same
     /// "already proven list, or at least provably not string-keyed" OR
     /// `infer_spread_array_literal_type`'s degraded branch already uses,

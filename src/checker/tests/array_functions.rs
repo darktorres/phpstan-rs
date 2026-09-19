@@ -1773,6 +1773,135 @@ fn array_merge_of_a_shape_and_a_plain_array_with_an_unknown_key_type_is_unaffect
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// The coarse fallback (neither argument a shape, nor carrying real
+// `hasOffsetValue` precision) used to hardcode the merged key type to
+// `int|string` unconditionally. Real PHP's own `array_merge` semantics
+// only ever renumber an argument's *int* keys - a genuinely, provably
+// string-keyed argument's own keys are preserved verbatim - so two
+// plain `array<string, V>` arguments should merge to a plain
+// `array<string, V>` result, not an unnecessarily widened one.
+#[test]
+fn array_merge_of_two_plain_string_keyed_arrays_keeps_the_string_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, int> $a
+             *  @param array<string, int> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('array<string, int>', array_merge($a, $b));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative/no-regression control for the fix above: an argument whose
+// key type genuinely could include `int` still widens the merged key
+// type to `int|string` (`Type::unknown_array_key()`) - the fix is
+// additive precision, not a blanket narrowing. Displays as bare
+// `array<int>` rather than showing the key explicitly - `Type::Array`'s
+// own `Display` never shows a key that's exactly
+// `Type::unknown_array_key()`, the same convention
+// `array_merge_of_an_int_keyed_shape_and_a_plain_array_is_unaffected`
+// above already relies on.
+#[test]
+fn array_merge_of_a_string_keyed_array_and_a_genuinely_int_keyed_array_still_widens_the_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, int> $a
+             *  @param array<int, int> $b
+             */
+            function f(array $a, array $b): void {
+                assertType('array<int>', array_merge($a, $b));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Spread-argument counterpart of the fix above: a spread source whose
+// elements are all provably string-keyed also infers the plain
+// `string` key on the merged result, not `int|string`.
+#[test]
+fn array_merge_of_a_spread_argument_with_string_keyed_elements_keeps_the_string_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param list<array<string, int>> $byGroup */
+            function f(array $byGroup): void {
+                assertType('array<string, int>', array_merge(...$byGroup));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A `hasOffsetValue`-tracked plain argument (a `@var array<string,
+// mixed>` local built up via several literal-key writes -
+// `checker::assignment::write_literal_key_aware`'s own construction,
+// confirmed against the vendored `phpstan.phar`) now contributes its
+// own tracked keys as real fields in the merged shape, instead of being
+// flattened into the generic `"..."` unsealed marker like an
+// unproven plain array - closing the gap `array_merge`'s own doc
+// comment used to flag as "needs a `HasOffsetType`-equivalent accessory
+// layer this project doesn't have." No real `ArrayShape` argument is
+// present at all here - the *other* argument's own genuine `array{...}`
+// return is what makes this eligible for the precise path in the first
+// place, exactly the real corpus shape (`SectionPopulator::populate()`'s
+// own `$page = array_merge($page, ...)`).
+#[test]
+fn array_merge_promotes_a_has_offset_value_tracked_key_into_a_real_merged_field() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @return array{b?: string}
+             */
+            function parseIt(): array {
+                return [];
+            }
+            function f(): void {
+                /** @var array<string, mixed> */
+                $page = [];
+                $page['a'] = 1;
+                $page = array_merge($page, parseIt());
+                assertType("array{..., a: 1, b?: string}", $page);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A *later* argument's own write to the same key a `hasOffsetValue`-
+// tracked earlier argument already promoted into a real field still
+// correctly overwrites it, matching real PHP's merge semantics exactly
+// (via the same shared `merge_shape_field` an `ArrayShape` argument's
+// own fields already use).
+#[test]
+fn array_merge_lets_a_later_argument_overwrite_an_earlier_has_offset_value_tracked_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @return array{a: string}
+             */
+            function parseIt(): array {
+                return ['a' => 'x'];
+            }
+            function f(): void {
+                /** @var array<string, mixed> */
+                $page = [];
+                $page['a'] = 1;
+                $page = array_merge($page, parseIt());
+                assertType("array{..., a: string}", $page);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // `array_element_type`/`is_array_like`/`is_list_like`/
 // `is_known_non_empty_array` need a `Type::Union` arm - the single most
 // common way a real variable's type actually arrives here: a
@@ -2517,6 +2646,100 @@ fn array_splice_resolves_the_qsearch_get_text_token_search_sql_shape() {
             function f(array $clauses, array $values): array {
                 array_splice($values, 0, 0, ['tsv_search @@ to_tsquery(?)']);
                 return [$clauses, $values];
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Step 4/5's own measured risk, now fixed by `merge_array_shape_pair`
+// (`checker::type_union`): once `array_merge`'s own shape-merge path
+// promotes a `hasOffsetValue`-tracked argument's keys into real merged-
+// shape fields, the merged result becomes a real `Type::ArrayShape`
+// earlier and more often than before. Written across several
+// independent, non-mutually-exclusive branches, that shape used to
+// reproduce the exact same `MAX_UNION_MEMBERS`-overflow-to-`Mixed`
+// collapse `merge_has_offset_value_pair` already fixed once for
+// `hasOffsetValue` unions, just one layer up on bare `ArrayShape`
+// unions instead (confirmed via a dedicated probe before this fix was
+// written) - each independent `if`'s own key is a strict superset of
+// the pre-`if` shape, so `merge_array_shape_pair`'s subset-based merge
+// rule converges it back to one shape with that key now optional,
+// instead of growing a `Union` member per branch.
+#[test]
+fn array_shape_writes_across_several_independent_branches_converge_instead_of_blowing_up() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @return array{seed?: int}
+             */
+            function parseIt(): array {
+                return [];
+            }
+            function f(bool $a, bool $b, bool $c, bool $d, bool $e, bool $g, bool $h): void {
+                /** @var array<string, mixed> */
+                $x = [];
+                $x = array_merge($x, parseIt());
+                if ($a) { $x['a'] = 1; }
+                if ($b) { $x['b'] = 2; }
+                if ($c) { $x['c'] = 3; }
+                if ($d) { $x['d'] = 4; }
+                if ($e) { $x['e'] = 5; }
+                if ($g) { $x['g'] = 6; }
+                if ($h) { $x['h'] = 7; }
+                assertType(
+                    "array{seed?: int, a?: 1, b?: 2, c?: 3, d?: 4, e?: 5, g?: 6, h?: 7, ...}",
+                    $x
+                );
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The precise subset rule `merge_array_shape_pair` relies on: two
+// shapes with genuinely incomparable key sets (neither a subset of the
+// other) stay a real `Type::Union`, not one over-generalized shape -
+// confirmed against the vendored `phpstan.phar` directly
+// (`$cond ? $shapeA : $shapeB` for two unrelated, disjoint parameter
+// shapes stays `array{a: int}|array{b: string}`, never merging into
+// `array{a?: int, b?: string}`).
+#[test]
+fn two_shapes_with_incomparable_key_sets_stay_a_real_union_not_one_merged_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array{a: int} $shapeA
+             * @param array{b: string} $shapeB
+             */
+            function f(array $shapeA, array $shapeB, bool $cond): void {
+                $x = $cond ? $shapeA : $shapeB;
+                assertType('array{a: int}|array{b: string}', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The subset case via a ternary too (not just an `if` without `else`) -
+// confirmed against the vendored `phpstan.phar`: a shape merged with a
+// strict superset of itself collapses into one shape, the extra key
+// marked optional, regardless of whether the merge came from a
+// branching statement or an expression.
+#[test]
+fn a_shape_merged_with_a_strict_superset_of_itself_collapses_with_the_extra_key_optional() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array{a: int, b: string} $shapeAB
+             * @param array{a: int} $shapeA
+             */
+            function f(array $shapeAB, array $shapeA, bool $cond): void {
+                $x = $cond ? $shapeAB : $shapeA;
+                assertType('array{a: int, b?: string}', $x);
             }
         "#,
     );

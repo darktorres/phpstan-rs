@@ -16,6 +16,27 @@ const MAX_UNION_MEMBERS: usize = 12;
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
 pub(crate) fn union_types(a: Type, b: Type) -> Type {
+    union_types_impl(a, b, true)
+}
+
+/// `union_types`'s own escape hatch for a caller that must keep several
+/// `Type::ArrayShape` variants discrete even when one's key set happens
+/// to be a subset of another's, skipping only `merge_array_shape_pair`'s
+/// own subset-collapse rule below (every other `union_types` behavior -
+/// the `hasOffsetValue` merge, `Mixed` absorption, the union member cap,
+/// ... - stays identical). `checker::expr::preg_shapes`'s own regex-
+/// alternation `$matches` shape construction is the one real user: each
+/// variant there represents a distinct, mutually exclusive branch meant
+/// to be told apart *later* by `array_key_exists`-based narrowing, not
+/// one variable's own value narrowed across a plain conditional (which
+/// is what `merge_array_shape_pair`'s subset rule is actually verified
+/// against - see its own doc comment) - collapsing them the same way
+/// would destroy the very discriminant that narrowing depends on.
+pub(crate) fn union_types_keep_shapes_distinct(a: Type, b: Type) -> Type {
+    union_types_impl(a, b, false)
+}
+
+fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     if types::types_equal_for_union(&a, &b) {
         return a;
     }
@@ -23,6 +44,9 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
         return Type::Mixed;
     }
     if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
+        return merged;
+    }
+    if merge_shapes && let Some(merged) = merge_array_shape_pair(&a, &b) {
         return merged;
     }
     let mut members = Vec::new();
@@ -245,8 +269,12 @@ fn literal_base_type(t: &Type) -> Option<Type> {
 /// intersection, a list/`non-empty-array`-marked one, ...) - this is
 /// deliberately narrow, matching only the one shape
 /// `write_literal_key_aware` ever produces, not "any intersection that
-/// happens to contain an `Array` member."
-fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(String, Type)>)> {
+/// happens to contain an `Array` member." Also reused directly by
+/// `array_merge`'s own shape-merge path (`checker::expr::builtin_calls`)
+/// to promote a `hasOffsetValue`-carrying argument's own tracked keys
+/// into real merged-shape fields, not just this module's own pairwise
+/// union merge below.
+pub(crate) fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(String, Type)>)> {
     match t {
         Type::Array(..) => Some((t.clone(), Vec::new())),
         Type::Intersection(members)
@@ -328,4 +356,89 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
             .map(|(k, v)| Type::HasOffsetValue(k, Box::new(v))),
     );
     Some(Type::Intersection(members))
+}
+
+/// A pairwise `Type::ArrayShape`-vs-`Type::ArrayShape` merge at a
+/// scope-merge join point, mirroring real PHPStan's own observed
+/// behavior exactly (confirmed via `assertType()`/`dumpType()` against
+/// the vendored phar, not guessed): the two shapes only merge into one
+/// when one side's own real (non-`"..."`) key set is a *subset* of the
+/// other's - the common shape a branch join actually produces (an `if`
+/// without an `else` merges the pre-branch shape with a strict extension
+/// of itself; a ternary between a shape and one of its own supersets
+/// does too). A key present on both sides keeps its required-ness only
+/// if required on *both*, with its value types unioned; a key present on
+/// only one side becomes *optional* (not dropped - the value type it had
+/// on the one side that wrote it is still real, precise information)
+/// with that side's own value type kept as-is.
+///
+/// Two shapes with genuinely incomparable key sets (neither a subset of
+/// the other - e.g. two unrelated parameter shapes merged in a ternary)
+/// are deliberately left unmerged (`None`, falling back to
+/// `union_types`' own generic "stay a real `Union`" handling) - real
+/// PHPStan keeps those as a literal `array{a: int}|array{b: string}`
+/// too, confirmed the same way, rather than ever collapsing them into
+/// one over-general `array{a?: int, b?: string}`.
+///
+/// Without this, promoting a `hasOffsetValue`-tracked argument's own
+/// keys into real merged-shape fields (`array_merge`'s own shape-merge
+/// path, `checker::expr::builtin_calls`) made a variable become a real
+/// `ArrayShape` earlier and more often than before - and without this
+/// merge rule, that shape then written across several independent,
+/// non-mutually-exclusive branches reproduced the exact same
+/// `MAX_UNION_MEMBERS`-overflow-to-`Mixed` collapse
+/// `merge_has_offset_value_pair` above already fixed once for
+/// `hasOffsetValue`, just one layer up on bare `ArrayShape` unions
+/// instead - a real, measured regression (confirmed via a dedicated
+/// probe test before this fix was written), not a hypothetical one.
+fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
+    let (Type::ArrayShape(fa), Type::ArrayShape(fb)) = (a, b) else {
+        return None;
+    };
+    fn field<'a>(
+        fields: &'a [(String, Type, bool)],
+        name: &str,
+    ) -> Option<&'a (String, Type, bool)> {
+        fields.iter().find(|(k, _, _)| k == name)
+    }
+    fn real_names(fields: &[(String, Type, bool)]) -> Vec<&str> {
+        fields
+            .iter()
+            .filter(|(k, _, _)| k != "...")
+            .map(|(k, _, _)| k.as_str())
+            .collect()
+    }
+    let (names_a, names_b) = (real_names(fa), real_names(fb));
+    let is_subset = |xs: &[&str], ys: &[&str]| xs.iter().all(|x| ys.contains(x));
+    if !(is_subset(&names_a, &names_b) || is_subset(&names_b, &names_a)) {
+        return None;
+    }
+    let has_dotdotdot =
+        fa.iter().any(|(k, _, _)| k == "...") || fb.iter().any(|(k, _, _)| k == "...");
+    let mut all_names: Vec<&str> = names_a.clone();
+    for n in &names_b {
+        if !all_names.contains(n) {
+            all_names.push(n);
+        }
+    }
+    let mut merged: Vec<(String, Type, bool)> = Vec::new();
+    for name in all_names {
+        match (field(fa, name), field(fb, name)) {
+            (Some((_, ta, oa)), Some((_, tb, ob))) => {
+                merged.push((
+                    name.to_string(),
+                    union_types(ta.clone(), tb.clone()),
+                    *oa || *ob,
+                ));
+            }
+            (Some((_, ta, _)), None) | (None, Some((_, ta, _))) => {
+                merged.push((name.to_string(), ta.clone(), true));
+            }
+            (None, None) => unreachable!("name came from one of the two lists"),
+        }
+    }
+    if has_dotdotdot {
+        merged.push(("...".to_string(), Type::Mixed, false));
+    }
+    Some(Type::ArrayShape(merged))
 }

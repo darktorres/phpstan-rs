@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::type_union::union_types;
+use crate::checker::type_union::{union_types, union_types_keep_shapes_distinct};
 use crate::regex_groups;
 use crate::types::{AccessoryKind, Type};
 
@@ -198,7 +198,15 @@ pub(crate) fn build_matched_shape(
         // the qualifying gate requires *exactly one* top-level group, so
         // any other group in the pattern must be nested inside it - if
         // it didn't run, nothing nested inside it could have either.
-        return union_types(
+        // `union_types_keep_shapes_distinct` - see its own doc comment
+        // and the identical reasoning a few lines below for the
+        // alternation-branches case: the "without" variant's own key
+        // set is a subset of the "with" variant's, and `union_types`'s
+        // own subset-collapse rule would otherwise merge them into one
+        // shape with field 1/2 merely optional, destroying the
+        // `array_key_exists`-based discriminant the doc comment above
+        // relies on.
+        return union_types_keep_shapes_distinct(
             preg_match_matches_shape(&with_group, leaf, unmatched_as_null),
             preg_match_matches_shape(&[], leaf, unmatched_as_null),
         );
@@ -299,9 +307,19 @@ pub(crate) fn build_matched_shape(
         {
             variants.push(preg_match_matches_shape(&[], leaf, unmatched_as_null));
         }
+        // `union_types_keep_shapes_distinct` - each variant here is a
+        // distinct, mutually exclusive alternation branch meant to be
+        // told apart *later* by `array_key_exists`-based narrowing
+        // (`checker::narrowing`), not a single value narrowed across an
+        // ordinary conditional; letting `union_types`'s own subset-
+        // collapse rule fire here would merge two variants whenever one
+        // branch's own key set happens to be a subset of another's
+        // (common - a zero-group or earlier-in-the-alternation branch
+        // naturally has fewer fields), destroying the very discriminant
+        // that narrowing depends on.
         return variants
             .into_iter()
-            .reduce(union_types)
+            .reduce(union_types_keep_shapes_distinct)
             .expect("branches is non-empty: at least one top-level group exists");
     }
 

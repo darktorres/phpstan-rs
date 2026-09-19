@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::type_union::union_types;
+use crate::checker::type_union::{has_offset_value_parts, union_types};
 use crate::checker::{
     Checker, Locals, literal_string_key, literal_string_value, narrow_type_excluding,
     narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, string_type_has_accessory,
@@ -785,28 +785,44 @@ impl<'a> Checker<'a> {
                 // array-of-arrays itself - never eligible for the
                 // fixed-arity precise shape merge below.
                 let has_spread = args.iter().any(|a| a.spread);
-                // Merging a known shape with one or more plain, unproven
-                // arrays (e.g. `array_merge($defaults, $options)`) needs a
-                // `HasOffsetType`-equivalent accessory layer this project
-                // doesn't have to fully replicate real PHPStan's mixed-
-                // input algorithm - deliberately not attempted. Instead,
-                // cover the common config/options-array merge idiom by
-                // staying eligible only when no argument could contribute
-                // a canonical int key, sidestepping real PHP's int-key-
-                // renumbering semantics entirely.
+                // Covers the common config/options-array merge idiom
+                // (`array_merge($defaults, $options)`) by staying
+                // eligible only when no argument could contribute a
+                // canonical int key, sidestepping real PHP's int-key-
+                // renumbering semantics entirely (a genuinely int-keyed
+                // argument still falls through to the coarse path
+                // below). Eligible either when a real `Type::ArrayShape`
+                // argument exists, or when a plain array already carries
+                // its own `hasOffsetValue(...)` precision
+                // (`has_offset_value_parts` - `checker::assignment::
+                // write_literal_key_aware`'s own construction, e.g. a
+                // `@var array<string, mixed>` local built up via several
+                // literal-key writes) - either kind of argument has real,
+                // per-key precision worth preserving via the merge loop
+                // below, which now promotes a tracked plain argument's
+                // own keys into real fields too, not just a bare
+                // `ArrayShape`'s.
                 let all_string_keyed_or_shape = !has_spread
-                    && arg_types.iter().any(|t| matches!(t, Type::ArrayShape(_)))
+                    && arg_types.iter().any(|t| {
+                        matches!(t, Type::ArrayShape(_))
+                            || has_offset_value_parts(t).is_some_and(|(_, pairs)| !pairs.is_empty())
+                    })
                     && arg_types.iter().all(|t| match t {
                         Type::ArrayShape(fields) => fields
                             .iter()
                             .all(|(k, _, _)| k == "..." || !is_canonical_int_key(k)),
-                        // A plain array is only eligible when its own key
-                        // type is definitely `string` - an `int`/
-                        // `unknown_array_key()`-keyed plain array could
-                        // still contribute int keys that need real PHP's
-                        // renumbering semantics, which this restricted
-                        // path deliberately doesn't attempt.
-                        _ => Self::array_key_type(t).is_some_and(|k| matches!(k, Type::String)),
+                        // A plain array (`hasOffsetValue`-tracked or not)
+                        // is only eligible when its own key type is
+                        // confidently *not* int - one that could
+                        // genuinely include an int key would need real
+                        // PHP's renumbering semantics, which this
+                        // restricted path deliberately doesn't attempt.
+                        // Loosened from an exact `Type::String` match: any
+                        // key type that provably excludes `Int` is just
+                        // as safe here, not only the bare `Type::String`
+                        // variant.
+                        _ => Self::array_key_type(t)
+                            .is_some_and(|k| !Self::key_type_could_be_int(&k)),
                     });
                 if all_string_keyed_or_shape {
                     let mut fields: Vec<(String, Type, bool)> = Vec::new();
@@ -823,6 +839,24 @@ impl<'a> Checker<'a> {
                                             t.clone(),
                                             *opt,
                                         );
+                                    } else if !fields.iter().any(|(fk, _, _)| fk == "...") {
+                                        // An unsealed argument's own
+                                        // `"..."` must still propagate
+                                        // into the merged result - this
+                                        // argument's own real, but
+                                        // untracked keys could still be
+                                        // present in the merge too. Only
+                                        // newly reachable once an
+                                        // argument can itself be an
+                                        // unsealed shape (e.g. promoted
+                                        // via a `hasOffsetValue`-tracked
+                                        // plain argument's own "..."
+                                        // widening, just below) - before
+                                        // that, every `ArrayShape`
+                                        // argument reaching this branch
+                                        // was already sealed, so this
+                                        // never fired.
+                                        fields.push(("...".to_string(), Type::Mixed, false));
                                     }
                                 }
                             }
@@ -844,6 +878,31 @@ impl<'a> Checker<'a> {
                                 // contribute keys this shape never had.
                                 if !fields.iter().any(|(k, _, _)| k == "...") {
                                     fields.push(("...".to_string(), Type::Mixed, false));
+                                }
+                                // On top of the coarse widening above, a
+                                // `hasOffsetValue`-tracked key gets
+                                // promoted to a real, precise field via
+                                // the same real-PHP-overwrite rule an
+                                // `ArrayShape` argument's own fields use
+                                // above - closing the gap this arm used to
+                                // leave (a tracked plain argument's own
+                                // known keys were previously discarded
+                                // into the generic "..." widening just
+                                // like any other unknown key). A bare
+                                // `Type::Array` (no tracked keys at all)
+                                // gets an empty `pairs`, so this is a
+                                // strict no-op for that already-covered
+                                // case.
+                                if let Some((_, pairs)) = has_offset_value_parts(arg_ty) {
+                                    for (k, v) in pairs {
+                                        Self::merge_shape_field(
+                                            &mut fields,
+                                            &mut next_index,
+                                            &k,
+                                            v,
+                                            false,
+                                        );
+                                    }
                                 }
                             }
                         }
@@ -872,12 +931,37 @@ impl<'a> Checker<'a> {
                 let mut all_list = true;
                 let mut any_non_empty = false;
                 let mut all_known_array_like = true;
+                // Real PHP's own `array_merge` key semantics: an
+                // argument that could contribute an int key has that key
+                // *renumbered* (never preserving the argument's own int
+                // values), while a string key is always preserved
+                // verbatim - so the merged key type is `Int` and/or
+                // `String` depending on which kinds are actually
+                // *possible* across every argument, not an unconditional
+                // `unknown_array_key()`. Both start `false` and only ever
+                // turn `true` (`||=`), matching `all_list`/`any_non_empty`'s
+                // own accumulate-across-arguments shape just below.
+                let mut key_could_be_int = false;
+                let mut key_could_be_string = false;
+                // An argument whose own key type can't be determined at
+                // all keeps today's existing safe default (both kinds
+                // possible) rather than guessing narrower than known.
+                let mut note_key_type = |k: Option<Type>| match k {
+                    Some(k) => {
+                        key_could_be_int |= Self::key_type_could_be_int(&k);
+                        key_could_be_string |= Self::key_type_could_be_string(&k);
+                    }
+                    None => {
+                        key_could_be_int = true;
+                        key_could_be_string = true;
+                    }
+                };
                 for (arg, arg_ty) in args.iter().zip(&arg_types) {
                     if arg.spread {
                         // Each element of the spread source is one of the
                         // arrays actually being merged - its own element
-                        // type is one level further down than the spread
-                        // source's own element type. List-ness/non-
+                        // (and key) type is one level further down than
+                        // the spread source's own. List-ness/non-
                         // emptiness aren't provable this way (an unknown
                         // number of arrays, of unknown emptiness).
                         match Checker::array_element_type(arg_ty) {
@@ -885,6 +969,7 @@ impl<'a> Checker<'a> {
                                 if !Self::is_list_safe_array_merge_argument(&inner_ty) {
                                     all_list = false;
                                 }
+                                note_key_type(Self::array_key_type(&inner_ty));
                                 match Checker::array_element_type(&inner_ty) {
                                     Some(t) => elem_types.push(t),
                                     None => all_known_array_like = false,
@@ -899,6 +984,7 @@ impl<'a> Checker<'a> {
                         if Self::is_known_non_empty_array(arg_ty) {
                             any_non_empty = true;
                         }
+                        note_key_type(Self::array_key_type(arg_ty));
                         if let Some(t) = Checker::array_element_type(arg_ty) {
                             elem_types.push(t);
                         }
@@ -911,10 +997,15 @@ impl<'a> Checker<'a> {
                         .into_iter()
                         .reduce(union_types)
                         .unwrap_or(Type::Mixed);
-                    let mut members = vec![Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(elem_ty),
-                    )];
+                    let key_ty = match (key_could_be_int, key_could_be_string) {
+                        (true, false) => Type::Int,
+                        (false, true) => Type::String,
+                        // Both possible, or (shouldn't happen given the
+                        // `None` fallback above) neither resolved -
+                        // today's existing safe default.
+                        _ => Type::unknown_array_key(),
+                    };
+                    let mut members = vec![Type::Array(Box::new(key_ty), Box::new(elem_ty))];
                     if all_list {
                         members.push(Type::Accessory(AccessoryKind::ArrayList));
                     }
