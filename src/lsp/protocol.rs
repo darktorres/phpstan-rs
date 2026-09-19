@@ -299,13 +299,17 @@ pub(crate) fn from_lsp_position(pos: LspPosition) -> Position {
     }
 }
 
-pub(crate) fn publish_diagnostics_notification(uri: Uri, diagnostics: &[Diagnostic]) -> Message {
+pub(crate) fn publish_diagnostics_notification(
+    uri: Uri,
+    version: Option<i32>,
+    diagnostics: &[Diagnostic],
+) -> Message {
     Message::Notification(LspNotification::new(
         "textDocument/publishDiagnostics".to_string(),
         PublishDiagnosticsParams {
             uri,
             diagnostics: diagnostics.iter().map(to_lsp_diagnostic).collect(),
-            version: None,
+            version,
         },
     ))
 }

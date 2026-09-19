@@ -209,6 +209,23 @@ pub(super) fn response_result(messages: &[Value], id: i64) -> Value {
         .clone()
 }
 
+/// The LAST `textDocument/publishDiagnostics` notification for `uri` in
+/// `messages` - never the first. `Project::update_file` unconditionally
+/// seeds `changed_symbols` from both a file's old and new declared names
+/// regardless of whether they actually differ, so ANY `didOpen`/
+/// `didChange` of a file already known to the project republishes every
+/// direct dependent, even ones whose diagnostics didn't change - a uri
+/// can legitimately appear in more than one `publishDiagnostics`
+/// notification within a single test's message stream, and only the
+/// last one reflects the state under test (e.g. the version it should be
+/// stamped with).
+pub(super) fn last_publish_diagnostics_for<'a>(messages: &'a [Value], uri: &str) -> &'a Value {
+    messages
+        .iter()
+        .rfind(|m| m["method"] == "textDocument/publishDiagnostics" && m["params"]["uri"] == uri)
+        .unwrap_or_else(|| panic!("no publishDiagnostics for {uri} in {messages:?}"))
+}
+
 /// A fresh, unique scratch directory per test - real files on disk,
 /// since `load_workspace` walks the real filesystem via
 /// `collect_php_files`/`std::fs::read`, not something worth faking.

@@ -462,6 +462,89 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
         greet_diagnostic["range"],
         json!({"start": {"line": 0, "character": 47}, "end": {"line": 0, "character": 58}})
     );
+    // b.php was never opened, only ever seen via the workspace scan and
+    // as a re-checked dependent - neither carries a document version, so
+    // the wire field is omitted entirely (`skip_serializing_if`), which
+    // `serde_json::Value` surfaces as `Value::Null` for the missing key.
+    assert_eq!(b_notification["params"]["version"], Value::Null);
+}
+
+#[test]
+fn did_change_publishes_diagnostics_stamped_with_the_new_document_version() {
+    let dir = TempDir::new("version_stamp_didchange");
+    let path = dir.write(
+        "a.php",
+        "<?php class Foo { public function bar(): int { return 1; } }",
+    );
+    let uri = path_to_uri(&path).to_string();
+
+    let messages = run(
+        &dir,
+        &[
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": uri, "languageId": "php", "version": 1, "text": "<?php class Foo { public function bar(): int { return 1; } }"}}),
+            ),
+            notification(
+                "textDocument/didChange",
+                json!({
+                    "textDocument": {"uri": uri, "version": 7},
+                    "contentChanges": [{"text": "<?php class Foo { public function bar(): int { return $this->missing(); } }"}],
+                }),
+            ),
+        ],
+    );
+
+    // NOT .find(): a.php's own didOpen already produced an earlier,
+    // version-1 publish for this same uri before the didChange below.
+    let last = last_publish_diagnostics_for(&messages, &uri);
+    assert_eq!(last["params"]["version"], json!(7), "got: {last:?}");
+}
+
+#[test]
+fn a_dependent_files_diagnostics_keep_its_own_last_known_version_not_the_editors() {
+    let dir = TempDir::new("version_stamp_dependent");
+    let a_src = "<?php class Greeter { public function greet(): string { return 'hi'; } }";
+    let a_path = dir.write("a.php", a_src);
+    let a_uri = path_to_uri(&a_path).to_string();
+    let b_src = "<?php function useGreeter(Greeter $g): void { $g->greet(); }";
+    let b_path = dir.write("b.php", b_src);
+    let b_uri = path_to_uri(&b_path).to_string();
+
+    let messages = run(
+        &dir,
+        &[
+            // Opened with content identical to what's already on disk -
+            // Project::update_file unconditionally re-seeds
+            // changed_symbols from a.php's own declared names regardless
+            // of whether they changed, so this alone already fans out an
+            // earlier, version-None publish for b.php that the final
+            // assertion below must not mistake for the one under test.
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": a_uri, "languageId": "php", "version": 5, "text": a_src}}),
+            ),
+            notification(
+                "textDocument/didOpen",
+                json!({"textDocument": {"uri": b_uri, "languageId": "php", "version": 3, "text": b_src}}),
+            ),
+            notification(
+                "textDocument/didChange",
+                json!({
+                    "textDocument": {"uri": a_uri, "version": 9},
+                    "contentChanges": [{"text": "<?php class Greeter {}"}],
+                }),
+            ),
+        ],
+    );
+
+    let last_a = last_publish_diagnostics_for(&messages, &a_uri);
+    assert_eq!(last_a["params"]["version"], json!(9), "got: {last_a:?}");
+    // b.php is a dependent, not the file being edited - its own last
+    // known (didOpen) version, not a.php's version 9, must be stamped on
+    // the diagnostics this didChange fans out to it.
+    let last_b = last_publish_diagnostics_for(&messages, &b_uri);
+    assert_eq!(last_b["params"]["version"], json!(3), "got: {last_b:?}");
 }
 
 #[test]

@@ -129,8 +129,13 @@ struct Server {
     // Every URI the client currently has open or has otherwise seen, so
     // the (now-deferred) workspace scan and `didOpen`/`didChange` share
     // one path->diagnostics story instead of the workspace scan being
-    // invisible to later incremental updates.
-    open_uris: HashMap<PathBuf, Uri>,
+    // invisible to later incremental updates. Also carries the last
+    // known LSP document version for that path (`None` if only ever seen
+    // via the workspace scan or a `workspace/didChangeWatchedFiles`
+    // event - neither carries a document version, only `didOpen`/
+    // `didChange` do), so `publishDiagnostics` can be stamped with it -
+    // see `uri_and_version_for`.
+    open_uris: HashMap<PathBuf, (Uri, Option<i32>)>,
     // Set once a real `shutdown` request has been handled - `run_loop`'s
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
@@ -550,7 +555,7 @@ impl Server {
         let mut messages: Vec<Message> = paths
             .iter()
             .filter_map(|p| self.open_uris.remove(p))
-            .map(|uri| publish_diagnostics_notification(uri, &[]))
+            .map(|(uri, _version)| publish_diagnostics_notification(uri, None, &[]))
             .collect();
 
         let results = self.project.remove_files(&paths);
@@ -597,6 +602,19 @@ impl Server {
         self.apply_post_filters(results)
     }
 
+    /// Looks up the last known `(Uri, document version)` for `path` -
+    /// falling back to a synthesized `Uri` and `None` when `path` was
+    /// never seen via `didOpen`/`didChange` (e.g. a workspace-scanned-
+    /// but-never-opened dependent, or one only ever touched via
+    /// `workspace/didChangeWatchedFiles`, which carries no document
+    /// version at all).
+    fn uri_and_version_for(&self, path: &Path) -> (Uri, Option<i32>) {
+        self.open_uris
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| (path_to_uri(path), None))
+    }
+
     /// Publishes a `textDocument/publishDiagnostics` notification for
     /// every analyzed file with findings - without this, a freshly opened
     /// workspace shows an empty Problems panel until each affected file
@@ -609,12 +627,8 @@ impl Server {
             .into_iter()
             .filter(|(_, diags)| !diags.is_empty())
             .map(|(p, diags)| {
-                let uri = self
-                    .open_uris
-                    .get(&p)
-                    .cloned()
-                    .unwrap_or_else(|| path_to_uri(&p));
-                publish_diagnostics_notification(uri, &diags)
+                let (uri, version) = self.uri_and_version_for(&p);
+                publish_diagnostics_notification(uri, version, &diags)
             })
             .collect()
     }
@@ -633,27 +647,28 @@ impl Server {
                 .open_uris
                 .values()
                 .cloned()
-                .map(|uri| publish_diagnostics_notification(uri, &[]))
+                .map(|(uri, version)| publish_diagnostics_notification(uri, version, &[]))
                 .collect();
         }
         self.check_all_analyzed_paths()
             .into_iter()
             .map(|(p, diags)| {
-                let uri = self
-                    .open_uris
-                    .get(&p)
-                    .cloned()
-                    .unwrap_or_else(|| path_to_uri(&p));
-                publish_diagnostics_notification(uri, &diags)
+                let (uri, version) = self.uri_and_version_for(&p);
+                publish_diagnostics_notification(uri, version, &diags)
             })
             .collect()
     }
 
-    fn handle_open_or_change(&mut self, uri: &Uri, text: &str) -> Vec<Message> {
+    fn handle_open_or_change(
+        &mut self,
+        uri: &Uri,
+        text: &str,
+        version: Option<i32>,
+    ) -> Vec<Message> {
         let Some(path) = uri_to_path(uri) else {
             return Vec::new();
         };
-        self.open_uris.insert(path.clone(), uri.clone());
+        self.open_uris.insert(path.clone(), (uri.clone(), version));
         // Same graceful-degradation as load_workspace, and more exposed
         // in practice here: momentarily-invalid syntax is the normal
         // state while a file is being typed, not an edge case.
@@ -715,7 +730,10 @@ impl Server {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            self.open_uris.insert(path.clone(), uri);
+            // No document version exists for an externally-observed
+            // change (there is no didOpen/didChange behind it) - `None`
+            // matches load_workspace's own "never opened" default.
+            self.open_uris.insert(path.clone(), (uri, None));
             match self.project.update_file(&path, &text) {
                 Ok(results) => {
                     messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
@@ -745,12 +763,8 @@ impl Server {
         results
             .into_iter()
             .map(|(p, diags)| {
-                let dep_uri = self
-                    .open_uris
-                    .get(&p)
-                    .cloned()
-                    .unwrap_or_else(|| path_to_uri(&p));
-                publish_diagnostics_notification(dep_uri, &diags)
+                let (dep_uri, dep_version) = self.uri_and_version_for(&p);
+                publish_diagnostics_notification(dep_uri, dep_version, &diags)
             })
             .collect()
     }
@@ -1056,11 +1070,7 @@ impl Server {
     }
 
     fn location(&self, target_path: &Path, span: Span) -> Location {
-        let target_uri = self
-            .open_uris
-            .get(target_path)
-            .cloned()
-            .unwrap_or_else(|| path_to_uri(target_path));
+        let (target_uri, _version) = self.uri_and_version_for(target_path);
         Location {
             uri: target_uri,
             range: to_lsp_range(span),
@@ -1628,20 +1638,24 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
         }
         "textDocument/didOpen" => {
             if let Ok(params) = serde_json::from_value::<DidOpenTextDocumentParams>(not.params) {
+                let version = params.text_document.version;
                 let uri = params.text_document.uri;
-                for message in server.handle_open_or_change(&uri, &params.text_document.text) {
+                for message in
+                    server.handle_open_or_change(&uri, &params.text_document.text, Some(version))
+                {
                     let _ = write_message(writer, &message);
                 }
             }
         }
         "textDocument/didChange" => {
             if let Ok(params) = serde_json::from_value::<DidChangeTextDocumentParams>(not.params) {
+                let version = params.text_document.version;
                 let uri = params.text_document.uri;
                 // Full sync (see the `textDocumentSync: FULL` capability
                 // above) guarantees exactly one entry whose `text` is the
                 // complete new document.
                 if let Some(change) = params.content_changes.into_iter().next() {
-                    for message in server.handle_open_or_change(&uri, &change.text) {
+                    for message in server.handle_open_or_change(&uri, &change.text, Some(version)) {
                         let _ = write_message(writer, &message);
                     }
                 }
