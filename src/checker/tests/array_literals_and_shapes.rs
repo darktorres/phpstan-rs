@@ -1371,13 +1371,16 @@ fn a_dynamic_key_write_narrowed_by_a_preceding_is_string_guard_infers_a_string_k
 }
 
 // Negative control: without a narrowing guard, a dynamic-key write still
-// falls back to the unknown-int-or-string key default, proving the fix
-// above is additive (only narrows when the key expression's own type is
-// already confidently known), not a blanket assumption. A key exactly
-// equal to `unknown_array_key()` (`int|string`) displays in its own
-// single-type-param shorthand (`array<V>`, not `array<int|string, V>`) -
-// `types/display.rs`'s own established convention for the "any legal
-// key" default, unrelated to this fix.
+// falls back to a benevolent int-or-string key default (`dynamic_write_
+// key_type`'s own fallback, mirroring real PHPStan's `MixedType::
+// toArrayKey()`/`UnionType::toArrayKey()`), proving the fix above is
+// additive (only narrows when the key expression's own type is already
+// confidently known), not a blanket assumption. Displays the same way
+// `int[]`'s own already-established `Type::benevolent_array_key()`
+// shorthand parsing does (`array<(int|string), V>`, parenthesized to
+// mark it benevolent) - not a display change from this fix, the same
+// pre-existing convention `Type::benevolent_array_key()` has had since
+// Fix 1.
 #[test]
 fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
     let d = diagnostics_for(
@@ -1387,7 +1390,7 @@ fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
             function f(array $row, string $val): void {
                 $arr = [];
                 $arr[$row['id']] = $val;
-                assertType('array<string>', $arr);
+                assertType('array<(int|string), string>', $arr);
             }
         "#,
     );
@@ -1503,6 +1506,67 @@ fn a_dynamic_key_write_over_a_small_literal_key_set_updates_each_fields_own_narr
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// `dynamic_write_key_type`'s own fallback for a write whose key can't be
+// confidently proven `int` or `string` mirrors real PHPStan's own
+// `MixedType`/`UnionType::toArrayKey()` (confirmed reading `vendor/
+// phpstan-src` directly): a *benevolent* `int|string`, not a plain one -
+// accepted later wherever either member would independently satisfy the
+// target. Real corpus shape: `openapi-generate-input-dto.php`'s own
+// `foreach (array_keys($properties) as $fieldName) { $fields[$fieldName]
+// = ...; }` then `foreach ($fields as $fieldName => $field) {
+// narrowingExpr($x, $field, $fieldName); }` - `$fieldName` from
+// `array_keys()` on a non-shape array is `mixed`, so the write into
+// `$fields` can't confidently narrow its own key either.
+#[test]
+fn a_dynamic_key_write_keyed_by_an_unconfident_mixed_expression_is_benevolently_typed() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsString(string $s): void {}
+            /** @param array<mixed> $raw */
+            function f(array $raw): void {
+                $fields = [];
+                foreach (array_keys($raw) as $fieldName) {
+                    $fields[$fieldName] = 1;
+                }
+                foreach ($fields as $fieldName => $value) {
+                    needsString($fieldName);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative control: the benevolent leniency above is scoped to the *key*
+// type alone - a genuinely wrong *value* written through the same kind of
+// unconfident dynamic-key write must still be flagged normally, proving
+// this isn't a blanket bypass of argument-type checking for anything
+// merely touched by a dynamic-key write.
+#[test]
+fn a_dynamic_key_write_s_benevolent_key_type_does_not_mask_a_real_value_type_mismatch() {
+    let d = diagnostics_for(
+        r#"<?php
+            function needsString(string $s): void {}
+            /** @param array<mixed> $raw */
+            function f(array $raw): void {
+                $fields = [];
+                foreach (array_keys($raw) as $fieldName) {
+                    $fields[$fieldName] = 1;
+                }
+                foreach ($fields as $fieldName => $value) {
+                    needsString($value);
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "argument.type"
+                && x.message.contains("expects string, 1 given")),
+        "expected the value-type mismatch to still be caught, got: {d:?}"
+    );
 }
 
 // A dynamic-key write inside a `for ($i = 0; $i < count($container);

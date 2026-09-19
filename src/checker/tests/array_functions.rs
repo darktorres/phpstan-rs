@@ -2299,8 +2299,12 @@ fn array_values_after_a_byref_closure_mutated_across_multiple_preg_replace_callb
 // members into one - a dynamic-key index-assignment inside a loop's
 // `if`-branch, then `continue`, plus its own fall-through path
 // assigning a different value type to the same array, must produce one
-// precise `array<Foo|false>`, not four separate, redundant `array<...>`
-// union members.
+// precise `array<(int|string), Foo|false>`, not four separate,
+// redundant `array<...>` union members. The key displays as `(int|string)`
+// (parenthesized, benevolent) rather than the bare unknown-key shorthand
+// since `$key`'s own type here isn't confidently `int` or `string` -
+// `dynamic_write_key_type`'s own fallback, mirroring real PHPStan's
+// `MixedType`/`UnionType::toArrayKey()`.
 //
 // `$items` here is a plain `array` parameter with no non-emptiness
 // guarantee, so the loop may genuinely run zero times - `$result`'s own
@@ -2308,11 +2312,11 @@ fn array_values_after_a_byref_closure_mutated_across_multiple_preg_replace_callb
 // real PHPStan's own `ForeachHandler::processStmt` merging it back in
 // whenever `isIterableAtLeastOnce()` isn't a definite "yes" - but that
 // merged-in `array{}` must not survive as its own visible union member
-// once a general `Array(key, val)` member (`array<false|Foo>` here) is
-// also present: it's a redundant subtype (an empty array vacuously
-// satisfies "every key/value is `key`/`val`-typed" for any `key`/
-// `val`), and `union_types` drops it the same way real PHPStan's own
-// `TypeCombinator::union()` does - confirmed via `\PHPStan\dumpType()`
+// once a general `Array(key, val)` member (`array<(int|string), false|Foo>`
+// here) is also present: it's a redundant subtype (an empty array
+// vacuously satisfies "every key/value is `key`/`val`-typed" for any
+// `key`/`val`), and `union_types` drops it the same way real PHPStan's
+// own `TypeCombinator::union()` does - confirmed via `\PHPStan\dumpType()`
 // against the real `phpstan/phpstan` phar for this identical shape
 // (`$counter = []; foreach (...) { $counter[$k] = ...; }`'s own
 // post-loop type is the unqualified `array<...>`, no `array{}`
@@ -2332,7 +2336,7 @@ fn dynamic_key_writes_across_an_if_continue_branch_and_its_fallthrough_merge_int
                     }
                     $result[$key] = false;
                 }
-                assertType('array<false|Foo>', $result);
+                assertType('array<(int|string), false|Foo>', $result);
             }
         "#,
     );

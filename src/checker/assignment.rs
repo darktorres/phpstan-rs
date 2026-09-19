@@ -543,7 +543,19 @@ fn dynamic_write_key_type(idx_ty: &Type) -> Type {
     } else if is_subtype(idx_ty, &Type::String) {
         Type::String
     } else {
-        Type::unknown_array_key()
+        // Mirrors real PHPStan's own `MixedType::toArrayKey()`/
+        // `UnionType::toArrayKey()` (confirmed reading `vendor/
+        // phpstan-src` directly): the fallback for a dynamic write whose
+        // own key expression can't be confidently proven `int` or
+        // `string` is a *benevolent* union, not a plain one - accepted
+        // later wherever *either* member would independently satisfy the
+        // target (`Registry::is_assignable`'s existing Benevolent
+        // handling, from Fix 1, already does the right thing once a
+        // value's type actually carries the marker). Real corpus false
+        // positive this fixes: a dynamic-key write keyed by a `Type::
+        // Mixed` foreach variable, later read back and passed to a
+        // `string`-typed parameter - real PHPStan doesn't flag it either.
+        Type::benevolent_array_key()
     }
 }
 
