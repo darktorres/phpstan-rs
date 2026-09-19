@@ -26,14 +26,31 @@ Development Host.
 
 ## Configuration
 
-- `phpstan-rs.serverPath` - absolute path to a `phpstan-rs` binary.
-  Left empty, the extension searches `PATH` for a `phpstan-rs`
-  executable (`.exe`/`.cmd` first on Windows).
+- `phpstan-rs.enable` (default `true`) - master on/off switch. Disabling
+  stops the language server and clears its published diagnostics.
+- `phpstan-rs.configPath` (default `null`, per-folder) - path to a
+  `phpstan-rs.toml` override, resolved relative to that workspace
+  folder's root if not absolute.
+- `phpstan-rs.serverPath` (default `null`) - absolute path to a
+  `phpstan-rs` binary, validated (exists + executable) before use. Left
+  unset, the extension searches `PATH` for a `phpstan-rs` executable
+  (`.exe`/`.cmd` first on Windows), then falls back to an automatically
+  downloaded and cached binary (see the root `README.md`'s own
+  distribution notes).
+- `phpstan-rs.trace.server` (`off`/`messages`/`verbose`, default `off`) -
+  traces the client/server JSON-RPC traffic in its own output channel;
+  needs no extension code, `vscode-languageclient` binds it automatically.
+- **`phpstan-rs: Restart Server`** command - re-reads the settings above
+  and restarts the language server, applying a changed `configPath`/
+  `serverPath`/`enable` without a full "Developer: Reload Window". VS
+  Code also offers this automatically (as a notification prompt) after
+  changing any of those three settings.
 
 ## Tests
 
-- Unit tests (`src/extension.test.ts`, plain `node:test`, no VS Code
-  host needed):
+- Unit tests (`src/extension.test.ts`, `src/config.test.ts`,
+  `src/serverBinary.test.ts`, `src/serverDownload.test.ts` - plain
+  `node:test`, no VS Code host needed):
 
   ```sh
   npm run test:unit

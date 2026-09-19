@@ -3,7 +3,7 @@ import * as assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveServerCommand, findPhpstanRsOnPath } from "./serverResolution";
+import { findPhpstanRsOnPath } from "./serverResolution";
 
 /** A fresh temp directory containing a real, executable file named
  * `name` - lets `findPhpstanRsOnPath` tests exercise the real
@@ -15,26 +15,6 @@ function withExecutable(name: string): { dir: string; cleanup: () => void } {
   fs.chmodSync(path.join(dir, name), 0o755);
   return { dir, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
-
-test("a configured serverPath is returned as-is even when a PATH lookup would also succeed", () => {
-  const result = resolveServerCommand("/opt/phpstan-rs/phpstan-rs", () => "/usr/bin/phpstan-rs");
-  assert.equal(result, "/opt/phpstan-rs/phpstan-rs");
-});
-
-test("an unset serverPath falls back to a successful PATH lookup", () => {
-  const result = resolveServerCommand(undefined, () => "/usr/local/bin/phpstan-rs");
-  assert.equal(result, "/usr/local/bin/phpstan-rs");
-});
-
-test("an empty-string serverPath is treated the same as unset", () => {
-  const result = resolveServerCommand("   ", () => "/usr/local/bin/phpstan-rs");
-  assert.equal(result, "/usr/local/bin/phpstan-rs");
-});
-
-test("neither a configured path nor a PATH lookup resolves to undefined", () => {
-  const result = resolveServerCommand(undefined, () => undefined);
-  assert.equal(result, undefined);
-});
 
 test("findPhpstanRsOnPath prefers phpstan-rs.exe over a same-directory bare name on win32", () => {
   // Both a bare `phpstan-rs` and a `phpstan-rs.exe` exist in the same

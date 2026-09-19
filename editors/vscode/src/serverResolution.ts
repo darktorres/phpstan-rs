@@ -1,31 +1,10 @@
 // Deliberately imports no `vscode` module at all - this is what lets
-// `extension.test.ts` unit-test `resolveServerCommand`/
-// `findPhpstanRsOnPath` with plain `node:test`, no VS Code host needed.
-// `extension.ts` (which DOES import `vscode`, and so can only run
-// inside a real extension host) imports these from here.
+// `extension.test.ts` unit-test `findPhpstanRsOnPath` with plain
+// `node:test`, no VS Code host needed. `serverBinary.ts` (4.3) is this
+// module's only remaining caller.
 
 import * as fs from "fs";
 import * as path from "path";
-
-/**
- * Resolves the command to launch the language server with - a pure,
- * host-agnostic function so it can be unit tested without a VS Code
- * host. `configuredPath` wins whenever set, even if a PATH lookup would
- * also succeed; otherwise falls back to `lookupOnPath()`. Returns
- * `undefined` when neither resolves anything, which `activate()` treats
- * as "no server available" rather than a hard dependency on a bundled/
- * downloaded binary (see this item's own edge-case notes on not
- * blocking on item 4.2's distribution work).
- */
-export function resolveServerCommand(
-  configuredPath: string | undefined,
-  lookupOnPath: () => string | undefined,
-): string | undefined {
-  if (configuredPath && configuredPath.trim().length > 0) {
-    return configuredPath;
-  }
-  return lookupOnPath();
-}
 
 function isExecutableFile(candidate: string): boolean {
   try {

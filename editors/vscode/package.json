@@ -20,18 +20,44 @@
     "configuration": {
       "title": "phpstan-rs",
       "properties": {
+        "phpstan-rs.enable": {
+          "type": "boolean",
+          "default": true,
+          "scope": "window",
+          "description": "Enable the phpstan-rs language server. Disabling stops the server and clears its diagnostics."
+        },
+        "phpstan-rs.configPath": {
+          "type": ["string", "null"],
+          "default": null,
+          "scope": "resource",
+          "description": "Path to a phpstan-rs.toml override, resolved relative to the workspace folder's root if not absolute."
+        },
         "phpstan-rs.serverPath": {
+          "type": ["string", "null"],
+          "default": null,
+          "scope": "window",
+          "description": "Absolute path to the phpstan-rs binary. Leave unset to search PATH, then fall back to an automatically downloaded and cached binary."
+        },
+        "phpstan-rs.trace.server": {
           "type": "string",
-          "default": "",
-          "description": "Absolute path to the phpstan-rs binary. Leave empty to search PATH for a phpstan-rs executable."
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "scope": "window",
+          "description": "Traces the communication between VS Code and the phpstan-rs language server."
         }
       }
-    }
+    },
+    "commands": [
+      {
+        "command": "phpstan-rs.restartServer",
+        "title": "phpstan-rs: Restart Server"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -w -p ./",
-    "test:unit": "npm run compile && node --test out/extension.test.js out/serverDownload.test.js",
+    "test:unit": "npm run compile && node --test out/extension.test.js out/serverDownload.test.js out/config.test.js out/serverBinary.test.js",
     "pretest": "npm run compile",
     "test:smoke": "node ./out/test/runTest.js"
   },

@@ -5,40 +5,56 @@ import {
   ServerOptions,
   TransportKind,
 } from "vscode-languageclient/node";
-import { resolveServerCommand, findPhpstanRsOnPath } from "./serverResolution";
-import { resolveServerPath } from "./serverDownload";
-
-export { resolveServerCommand, findPhpstanRsOnPath, resolveServerPath };
+import { getSettings } from "./settings";
+import { buildInitializationOptions } from "./config";
+import { resolveServerBinary } from "./serverBinary";
 
 let client: LanguageClient | undefined;
 
-export async function activate(context: vscode.ExtensionContext): Promise<void> {
-  const config = vscode.workspace.getConfiguration("phpstan-rs");
-  const configuredPath = config.get<string>("serverPath");
+function firstFolderPath(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
 
-  // `resolveServerCommand`/`findPhpstanRsOnPath` (4.1) win first when a
-  // phpstan-rs is already reachable - an explicit setting or an existing
-  // PATH install (e.g. `cargo install`, a distro package) - so a user's
-  // own choice of binary is never silently shadowed by an auto-download.
-  // Only once both come up empty does `resolveServerPath` (4.2) take
-  // over: it re-checks `configuredPath` itself (a no-op here, since it
-  // already failed above) and then falls through to its own cached-
-  // binary/download pipeline.
-  let command = resolveServerCommand(configuredPath, () => findPhpstanRsOnPath());
-  if (!command) {
-    try {
-      command = await resolveServerPath(undefined, context.globalStorageUri.fsPath);
-    } catch (err: unknown) {
-      void vscode.window.showErrorMessage(
-        `phpstan-rs: ${err instanceof Error ? err.message : String(err)}`,
-      );
-      return;
-    }
+/**
+ * (Re)builds and starts a fresh `LanguageClient` from a current settings
+ * snapshot, stopping any previously running client first. Used by both
+ * `activate()` and `phpstan-rs.restartServer` - the restart command is
+ * the practical way a user applies a changed `configPath`/`serverPath`/
+ * `enable` before 3.3 gives the server itself a live-reload path;
+ * without it, only VS Code's own "Developer: Reload Window" recovers.
+ */
+async function startClient(context: vscode.ExtensionContext): Promise<void> {
+  if (client) {
+    await client.stop();
+    client = undefined;
+  }
+
+  const settings = getSettings();
+  if (!settings.enable) {
+    return;
+  }
+
+  let command: string;
+  try {
+    command = await resolveServerBinary(settings, context.globalStorageUri.fsPath);
+  } catch (err: unknown) {
+    void vscode.window.showErrorMessage(
+      `phpstan-rs: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  const { options: initializationOptions, warning } = buildInitializationOptions(
+    settings,
+    firstFolderPath(),
+  );
+  if (warning) {
+    void vscode.window.showWarningMessage(`phpstan-rs: ${warning}`);
   }
 
   // `["lsp"]` - the real subcommand `Command::Lsp => lsp::run()`
   // dispatches on (src/main.rs), not a `--lsp` flag (see the doc-comment
-  // fix at src/lsp.rs:1 this item's own Rust-side change makes).
+  // fix at src/lsp.rs:1 item 4.2's Rust-side change made).
   const serverOptions: ServerOptions = {
     command,
     args: ["lsp"],
@@ -49,11 +65,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // requires a `LogOutputChannel` specifically (`window.
   // createOutputChannel` alone returns the older, plain `OutputChannel`
   // type); letting the client create and own its own named channel is
-  // the simpler, version-correct way to get one - this is what 4.3's
-  // own `trace.server` setting will control.
+  // the simpler, version-correct way to get one. `trace.server` binds
+  // itself automatically off the client id below ("phpstan-rs") -
+  // no code needed for that setting at all.
+  // `synchronize.configurationSection` makes the client send
+  // `workspace/didChangeConfiguration` on any `phpstan-rs.*` change;
+  // the server's `handle_notification` has a catch-all `_ => {}` arm,
+  // so this is inert (not an error) until 3.3 gives it a real listener -
+  // wiring the client half now costs nothing.
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "php" }],
     outputChannelName: "phpstan-rs Language Server",
+    initializationOptions,
+    synchronize: { configurationSection: "phpstan-rs" },
   };
 
   client = new LanguageClient(
@@ -72,6 +96,41 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       `phpstan-rs: failed to start the language server (${command}): ${String(err)}`,
     );
   });
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<void> {
+  context.subscriptions.push(
+    vscode.commands.registerCommand("phpstan-rs.restartServer", () => startClient(context)),
+  );
+
+  // Only these three settings change the spawned process or its args -
+  // a plain `configurationSection` push can't apply them, since the
+  // process is already running with different args than the new
+  // settings call for. `trace.server` self-applies (no prompt needed);
+  // a `configPath` file-content edit (not the *setting*) is 3.3's own
+  // scope once it exists. A settings change landing between
+  // `initialize` and this handler being wired up is not handled
+  // specially - low risk given VS Code's own event-ordering guarantees.
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      const affected =
+        event.affectsConfiguration("phpstan-rs.enable") ||
+        event.affectsConfiguration("phpstan-rs.serverPath") ||
+        event.affectsConfiguration("phpstan-rs.configPath");
+      if (!affected) {
+        return;
+      }
+      void vscode.window
+        .showInformationMessage("phpstan-rs settings changed", "Restart Server")
+        .then((choice) => {
+          if (choice === "Restart Server") {
+            void startClient(context);
+          }
+        });
+    }),
+  );
+
+  await startClient(context);
 }
 
 export function deactivate(): Thenable<void> | undefined {

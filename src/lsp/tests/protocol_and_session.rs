@@ -121,6 +121,51 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
     );
 }
 
+#[test]
+fn initialize_tolerates_unrecognized_initialization_options() {
+    // Forward-compatibility guard for the VS Code extension's settings
+    // (VSCODE_EXTENSION_PLAN.md item 4.3): configPath/enable are sent
+    // via initializationOptions today even though nothing server-side
+    // reads them yet (that's 1.1) - InitializeParams.initialization_options
+    // is already Option<Value> in lsp-types and is simply dropped, so
+    // this must keep working rather than start erroring once someone
+    // adds real fields to look for.
+    let dir = TempDir::new("init_options");
+    dir.write("a.php", "<?php function helperA(): int { return 1; }");
+
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({
+                "rootUri": dir.uri(),
+                "capabilities": {},
+                "initializationOptions": {"configPath": "/does/not/exist.toml", "enable": true},
+            }),
+        ),
+        notification("initialized", json!({})),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx);
+    let writer = Arc::new(Mutex::new(Vec::new()));
+    run_loop(&rx, Arc::clone(&writer));
+
+    let responses = decode_all(&writer.lock().unwrap());
+    assert_eq!(
+        responses.len(),
+        1,
+        "expected exactly one response: {responses:?}"
+    );
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(
+        responses[0]["result"]["capabilities"]["textDocumentSync"],
+        1
+    );
+}
+
 fn initialize_with_capabilities(capabilities: Value) -> Vec<Value> {
     let dir = TempDir::new("init_position_encoding");
     let input = encode(&[
