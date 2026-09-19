@@ -103,6 +103,83 @@ fn loads_every_ignore_error_field_combination() {
 }
 
 #[test]
+fn absent_sql_reflection_block_parses_as_none() {
+    let path = temp_path("sql_reflection_absent");
+    std::fs::write(&path, "level = 5\n").unwrap();
+
+    let config = Config::load(&path).unwrap();
+    assert_eq!(config.sql_reflection, None);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn loads_a_live_connection_sql_reflection_block() {
+    let path = temp_path("sql_reflection_live");
+    std::fs::write(
+        &path,
+        r#"
+        [sql_reflection]
+        driver = "mysql"
+        host = "127.0.0.1"
+        port = 3306
+        user = "piwigo_test"
+        password_env = "PIWIGO_DB_PASSWORD"
+        database = "piwigo_test"
+        "#,
+    )
+    .unwrap();
+
+    let config = Config::load(&path).unwrap();
+    let sql_reflection = config.sql_reflection.expect("sql_reflection present");
+    assert_eq!(
+        sql_reflection.driver,
+        crate::sql_reflection_config::SqlDriver::Mysql
+    );
+    assert_eq!(sql_reflection.host.as_deref(), Some("127.0.0.1"));
+    assert_eq!(sql_reflection.port, Some(3306));
+    assert_eq!(sql_reflection.user.as_deref(), Some("piwigo_test"));
+    assert_eq!(
+        sql_reflection.password_env.as_deref(),
+        Some("PIWIGO_DB_PASSWORD")
+    );
+    assert_eq!(sql_reflection.password, None);
+    assert_eq!(sql_reflection.database.as_deref(), Some("piwigo_test"));
+    assert_eq!(sql_reflection.path, None);
+    assert_eq!(sql_reflection.schema_file, None);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn loads_a_static_schema_only_sql_reflection_block() {
+    let path = temp_path("sql_reflection_static");
+    std::fs::write(
+        &path,
+        r#"
+        [sql_reflection]
+        driver = "sqlite"
+        schema_file = "install/piwigo_structure-sqlite.sql"
+        "#,
+    )
+    .unwrap();
+
+    let config = Config::load(&path).unwrap();
+    let sql_reflection = config.sql_reflection.expect("sql_reflection present");
+    assert_eq!(
+        sql_reflection.driver,
+        crate::sql_reflection_config::SqlDriver::Sqlite
+    );
+    assert_eq!(
+        sql_reflection.schema_file,
+        Some(PathBuf::from("install/piwigo_structure-sqlite.sql"))
+    );
+    assert_eq!(sql_reflection.host, None);
+
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
 fn every_field_is_optional() {
     let path = temp_path("empty");
     std::fs::write(&path, "").unwrap();

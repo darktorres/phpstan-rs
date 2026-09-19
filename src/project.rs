@@ -208,6 +208,18 @@ impl Project {
             .collect();
     }
 
+    /// Stores a project's own configured `[sql_reflection]` block on the
+    /// `Registry`, inert until the live SQL query reflection feature
+    /// (`checker::sql_reflection`) is built on top of it. `None` (no
+    /// block configured) is the default and keeps every raw-SQL call
+    /// site on today's fallback behavior, unchanged.
+    pub fn set_sql_reflection_config(
+        &mut self,
+        config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
+    ) {
+        self.registry.sql_reflection_config = config;
+    }
+
     /// Opts the whole project's checking into `use function`'s own
     /// `function.nameCase` check - see `registry::Registry::
     /// check_function_name_case`'s own doc comment for why this defaults

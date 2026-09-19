@@ -250,6 +250,10 @@ pub struct Registry {
     // case-insensitive function-name lookup) -> declared category.
     pub doctrine_custom_functions:
         FxHashMap<String, crate::doctrine_functions::DoctrineFunctionKind>,
+    // A project's own configured `[sql_reflection]` block (`Project::
+    // set_sql_reflection_config`) - `None` when unconfigured, which every
+    // raw-SQL call site must treat as "keep today's fallback."
+    pub sql_reflection_config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
     // The project's configured target PHP version, if any - `None`
     // means "not configured," which every version-gated rule should
     // treat as "nothing to check yet." See `crate::php_version::PhpFeature`

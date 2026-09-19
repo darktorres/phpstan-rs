@@ -124,6 +124,20 @@ pub struct Config {
     /// ```
     pub doctrine_custom_functions:
         Option<Vec<crate::doctrine_functions::DoctrineCustomFunctionEntry>>,
+    /// A project's own live-SQL-reflection connection/schema-source
+    /// config - see `sql_reflection_config::SqlReflectionConfig`.
+    /// Config-file-only, no CLI flag, the same reasoning as
+    /// `restricted_symbols`. Absent: no connection is ever attempted and
+    /// every raw-SQL call site keeps today's fallback, unchanged.
+    ///
+    /// ```toml
+    /// [sql_reflection]
+    /// driver = "mysql"
+    /// host = "127.0.0.1"
+    /// password_env = "PIWIGO_DB_PASSWORD"
+    /// database = "piwigo_test"
+    /// ```
+    pub sql_reflection: Option<crate::sql_reflection_config::SqlReflectionConfig>,
     /// Extra directories/files whose class-like declarations are
     /// designated overrides (e.g. a vendored `Imagick.stub.php`) rather
     /// than a genuine accidental duplicate - mirrors `scan_paths`'s

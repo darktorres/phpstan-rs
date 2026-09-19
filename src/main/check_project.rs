@@ -6,7 +6,7 @@ use std::sync::Arc;
 use output::OutputFormat;
 use phpstan_rs::{
     baseline, checker, composer, config, doctrine_functions, ignore_errors, output, php_version,
-    project, restricted_symbols,
+    project, restricted_symbols, sql_reflection_config,
 };
 use rayon::prelude::*;
 
@@ -141,6 +141,7 @@ fn run_check_project(
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
     doctrine_custom_function_entries: &[doctrine_functions::DoctrineCustomFunctionEntry],
+    sql_reflection_config: Option<sql_reflection_config::SqlReflectionConfig>,
     phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
@@ -195,6 +196,7 @@ fn run_check_project(
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
+    project.set_sql_reflection_config(sql_reflection_config);
     project.set_php_version(php_version);
     project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
 
@@ -623,6 +625,7 @@ pub(crate) fn run_check_project_command(
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
     let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
     let doctrine_custom_function_entries = config.doctrine_custom_functions.unwrap_or_default();
+    let sql_reflection_config = config.sql_reflection;
 
     let mut scan_dirs = if !scan_dirs.is_empty() {
         scan_dirs
@@ -710,6 +713,7 @@ pub(crate) fn run_check_project_command(
         &ignore_error_entries,
         &restricted_symbol_entries,
         &doctrine_custom_function_entries,
+        sql_reflection_config,
         phpstan_api_check_enabled,
         format.unwrap_or_default(),
     )
