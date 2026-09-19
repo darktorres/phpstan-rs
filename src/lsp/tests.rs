@@ -3,6 +3,7 @@ mod helpers;
 mod navigation;
 mod protocol_and_session;
 mod variable_definitions;
+mod watched_files;
 mod workspace_config;
 mod workspace_folders;
 mod workspace_scan;

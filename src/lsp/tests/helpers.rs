@@ -129,6 +129,19 @@ pub(super) fn did_change_configuration(settings: Value) -> Value {
     )
 }
 
+/// A `lsp_types::FileEvent` in its wire shape - `typ` is `FileChangeType`'s
+/// raw wire value (1 = Created, 2 = Changed, 3 = Deleted).
+pub(super) fn file_event(uri: &str, typ: i64) -> Value {
+    json!({"uri": uri, "type": typ})
+}
+
+pub(super) fn did_change_watched_files(changes: Vec<Value>) -> Value {
+    notification(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes": changes}),
+    )
+}
+
 /// Builds a `Message` directly from a JSON `Value`, for a test that
 /// sends messages straight onto a channel rather than through
 /// `encode`/`pump_messages`'s byte-framing round trip.

@@ -195,6 +195,14 @@ struct Server {
     // re-fire on every subsequent unrelated settings save while the same
     // unapplied change sits on disk.
     last_warned_pending_config: Option<workspace_config::ResolvedWorkspaceConfig>,
+    // Captured once at `"initialize"` from
+    // `capabilities.workspace.didChangeWatchedFiles.dynamicRegistration` -
+    // whether this client can even be asked to watch files for this
+    // server. LSP has no static `ServerCapabilities` field for file
+    // watching, only this dynamic-registration request/response
+    // mechanism, so unlike `hover_provider`/etc. this can't be
+    // advertised in `"initialize"`'s own response.
+    supports_watched_files: bool,
 }
 
 impl Server {
@@ -220,6 +228,7 @@ impl Server {
             supports_configuration_pull: false,
             last_applied_config: None,
             last_warned_pending_config: None,
+            supports_watched_files: false,
         }
     }
 
@@ -670,6 +679,58 @@ impl Server {
         self.publish_diagnostics_for(self.apply_post_filters(results))
     }
 
+    /// Routes a `workspace/didChangeWatchedFiles` batch through the same
+    /// `update_file`/`remove_file` machinery `didOpen`/`didChange` and
+    /// workspace-folder removal already use - an externally created,
+    /// changed, or deleted file needs exactly the same recheck-and-
+    /// republish treatment. Coalesces to the last event per path first: a
+    /// client-side batch can legally carry e.g. Changed-then-Deleted for
+    /// one path in a single notification, and only the final state
+    /// matters (this is intra-batch coalescing only, not a cross-
+    /// notification debounce - see this item's own doc comment).
+    fn handle_watched_files_changed(&mut self, changes: Vec<lsp_types::FileEvent>) -> Vec<Message> {
+        let mut last_by_path: HashMap<PathBuf, (Uri, lsp_types::FileChangeType)> = HashMap::new();
+        for change in changes {
+            let Some(path) = uri_to_path(&change.uri) else {
+                continue;
+            };
+            last_by_path.insert(path, (change.uri, change.typ));
+        }
+
+        let mut messages = Vec::new();
+        for (path, (uri, typ)) in last_by_path {
+            if typ == lsp_types::FileChangeType::DELETED {
+                self.open_uris.remove(&path);
+                let results = self.project.remove_file(&path);
+                messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+                continue;
+            }
+            // Created and Changed both just need the path's current
+            // on-disk content reflected - `update_file` already tolerates
+            // a path with no prior entry (a brand-new file), so there is
+            // no separate load-vs-update branch to make here. A read
+            // failure (raced with a subsequent delete before this ran, a
+            // transient permission error, ...) is skipped silently: a
+            // later Deleted event, if any, cleans it up properly.
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            self.open_uris.insert(path.clone(), uri);
+            match self.project.update_file(&path, &text) {
+                Ok(results) => {
+                    messages.extend(self.publish_diagnostics_for(self.apply_post_filters(results)));
+                }
+                Err(e) => {
+                    eprintln!(
+                        "phpstan-rs lsp: skipping {} - failed to parse: {e}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        messages
+    }
+
     /// Converts a diagnostics-by-path map into `publishDiagnostics`
     /// messages, resolving each path to whatever URI the client last
     /// used for it (a re-checked dependent might not itself be open in
@@ -1039,6 +1100,42 @@ impl Server {
         )
     }
 
+    /// Builds (and registers) a `client/registerCapability` request
+    /// asking the client to watch every `.php` file and report changes
+    /// via `workspace/didChangeWatchedFiles` - `None` if the client never
+    /// advertised `workspace.didChangeWatchedFiles.dynamicRegistration`
+    /// support at `"initialize"`. Scoped to `**/*.php` only, not also
+    /// `composer.{json,lock}`: LSP mode has no composer-aware reload path
+    /// to route those through yet, so watching them today would just
+    /// misroute them into `update_file` as invalid PHP source for no
+    /// benefit.
+    fn request_watched_files_registration(&mut self) -> Option<Message> {
+        if !self.supports_watched_files {
+            return None;
+        }
+        Some(self.send_request::<lsp_types::request::RegisterCapability>(
+            lsp_types::RegistrationParams {
+                registrations: vec![lsp_types::Registration {
+                        id: "phpstan-rs/watchedFiles".to_string(),
+                        method: "workspace/didChangeWatchedFiles".to_string(),
+                        register_options: Some(
+                            serde_json::to_value(
+                                lsp_types::DidChangeWatchedFilesRegistrationOptions {
+                                    watchers: vec![lsp_types::FileSystemWatcher {
+                                        glob_pattern: lsp_types::GlobPattern::String(
+                                            "**/*.php".to_string(),
+                                        ),
+                                        kind: None,
+                                    }],
+                                },
+                            )
+                            .unwrap(),
+                        ),
+                    }],
+            },
+        ))
+    }
+
     /// The `workspace/configuration` response counterpart to
     /// `request_configuration_pull` - parses `resp`'s single item back
     /// into `settings::PhpstanRsSettings` and feeds it into
@@ -1122,16 +1219,25 @@ impl Server {
 
 /// Correlates an inbound `Message::Response` with the outbound request
 /// that caused it, via `Server::pending_requests`, then dispatches by
-/// method - `"workspace/configuration"` is the only outbound request this
-/// server currently sends. A response for an id this server never sent
-/// (or already handled, e.g. a superseded earlier configuration pull) is
-/// logged and dropped, not treated as an error.
+/// method. A response for an id this server never sent (or already
+/// handled, e.g. a superseded earlier configuration pull) is logged and
+/// dropped, not treated as an error.
 fn handle_response<W: Write>(server: &mut Server, writer: &mut W, resp: Response) {
     let id = resp.id.clone();
     match server.pending_requests.outgoing.complete(id) {
         Some("workspace/configuration") => {
             for message in server.handle_configuration_response(resp) {
                 let _ = write_message(writer, &message);
+            }
+        }
+        Some("client/registerCapability") => {
+            // A successful ack (`Result = ()`) needs no follow-up; an
+            // error just gets logged - no client-facing error channel
+            // exists, and file-watching simply stays inactive for this
+            // session, same as a client that never advertised the
+            // capability at all.
+            if let Err(e) = resp.response_result {
+                eprintln!("phpstan-rs lsp: client/registerCapability failed: {e:?}");
             }
         }
         Some(_method) => {}
@@ -1233,68 +1339,87 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
         "initialize" => {
             let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
-            let (roots, position_encoding, progress_token, supports_configuration_pull) =
-                match params {
-                    Some(params) => {
-                        // Every real workspace_folders entry, not just the
-                        // first - falling back to the single deprecated
-                        // root_uri only when workspace_folders is absent or
-                        // empty (a client that supports it but opened with
-                        // no folders at all).
-                        let roots: Vec<PathBuf> =
-                            match params.workspace_folders.filter(|f| !f.is_empty()) {
-                                Some(folders) => {
-                                    folders.iter().filter_map(|f| uri_to_path(&f.uri)).collect()
-                                }
-                                None => params
-                                    .root_uri
-                                    .as_ref()
-                                    .and_then(uri_to_path)
-                                    .into_iter()
-                                    .collect(),
-                            };
-                        // A real vscode-languageclient is expected to
-                        // advertise general.positionEncodings. This server's
-                        // own Span already counts UTF-8 characters (see this
-                        // module's top-of-file doc comment), so echoing
-                        // "utf-8" back when the client offers it makes that
-                        // existing counting exactly correct - whenever it's
-                        // offered at all, not only when it's the client's
-                        // top preference, since utf-8 is the only encoding
-                        // this server actually implements. Absent an offer,
-                        // the spec's utf-16 default applies and today's
-                        // approximation is unchanged.
-                        let position_encoding = params
-                            .capabilities
-                            .general
-                            .and_then(|g| g.position_encodings)
-                            .is_some_and(|encodings| {
-                                encodings.contains(&PositionEncodingKind::UTF8)
-                            })
-                            .then_some(PositionEncodingKind::UTF8);
-                        // A real vscode-languageclient client both supports
-                        // and relies on this: it always sends
-                        // workspace/didChangeConfiguration with an
-                        // empty/placeholder settings value, so this pull is
-                        // the only way this server ever learns the client's
-                        // actual phpstan-rs.* settings from such a client.
-                        let supports_configuration_pull = params
-                            .capabilities
-                            .workspace
-                            .as_ref()
-                            .and_then(|w| w.configuration)
-                            .unwrap_or(false);
-                        let progress_token = params.work_done_progress_params.work_done_token;
-                        (
-                            roots,
-                            position_encoding,
-                            progress_token,
-                            supports_configuration_pull,
-                        )
-                    }
-                    None => (Vec::new(), None, None, false),
-                };
+            let (
+                roots,
+                position_encoding,
+                progress_token,
+                supports_configuration_pull,
+                supports_watched_files,
+            ) = match params {
+                Some(params) => {
+                    // Every real workspace_folders entry, not just the
+                    // first - falling back to the single deprecated
+                    // root_uri only when workspace_folders is absent or
+                    // empty (a client that supports it but opened with
+                    // no folders at all).
+                    let roots: Vec<PathBuf> =
+                        match params.workspace_folders.filter(|f| !f.is_empty()) {
+                            Some(folders) => {
+                                folders.iter().filter_map(|f| uri_to_path(&f.uri)).collect()
+                            }
+                            None => params
+                                .root_uri
+                                .as_ref()
+                                .and_then(uri_to_path)
+                                .into_iter()
+                                .collect(),
+                        };
+                    // A real vscode-languageclient is expected to
+                    // advertise general.positionEncodings. This server's
+                    // own Span already counts UTF-8 characters (see this
+                    // module's top-of-file doc comment), so echoing
+                    // "utf-8" back when the client offers it makes that
+                    // existing counting exactly correct - whenever it's
+                    // offered at all, not only when it's the client's
+                    // top preference, since utf-8 is the only encoding
+                    // this server actually implements. Absent an offer,
+                    // the spec's utf-16 default applies and today's
+                    // approximation is unchanged.
+                    let position_encoding = params
+                        .capabilities
+                        .general
+                        .and_then(|g| g.position_encodings)
+                        .is_some_and(|encodings| encodings.contains(&PositionEncodingKind::UTF8))
+                        .then_some(PositionEncodingKind::UTF8);
+                    // A real vscode-languageclient client both supports
+                    // and relies on this: it always sends
+                    // workspace/didChangeConfiguration with an
+                    // empty/placeholder settings value, so this pull is
+                    // the only way this server ever learns the client's
+                    // actual phpstan-rs.* settings from such a client.
+                    let supports_configuration_pull = params
+                        .capabilities
+                        .workspace
+                        .as_ref()
+                        .and_then(|w| w.configuration)
+                        .unwrap_or(false);
+                    // Dynamic registration is the only mechanism LSP
+                    // offers for workspace/didChangeWatchedFiles -
+                    // there is no static "serverCapabilities" field
+                    // for it, so this must be sent as a
+                    // client/registerCapability request once
+                    // "initialized" arrives (see "initialized"'s own
+                    // handling below), never advertised here.
+                    let supports_watched_files = params
+                        .capabilities
+                        .workspace
+                        .as_ref()
+                        .and_then(|w| w.did_change_watched_files.as_ref())
+                        .and_then(|d| d.dynamic_registration)
+                        .unwrap_or(false);
+                    let progress_token = params.work_done_progress_params.work_done_token;
+                    (
+                        roots,
+                        position_encoding,
+                        progress_token,
+                        supports_configuration_pull,
+                        supports_watched_files,
+                    )
+                }
+                None => (Vec::new(), None, None, false, false),
+            };
             server.supports_configuration_pull = supports_configuration_pull;
+            server.supports_watched_files = supports_watched_files;
             // The scan itself (config resolution + parsing) runs from
             // "initialized", not here - see PendingWorkspaceScan's own
             // doc comment.
@@ -1421,6 +1546,9 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     );
                 }
             }
+            if let Some(request) = server.request_watched_files_registration() {
+                let _ = write_message(writer, &request);
+            }
         }
         "workspace/didChangeWorkspaceFolders" => {
             if let Ok(params) =
@@ -1486,6 +1614,15 @@ fn handle_notification<W: Write>(server: &mut Server, writer: &mut W, not: LspNo
                     for message in server.reload_configuration(settings) {
                         let _ = write_message(writer, &message);
                     }
+                }
+            }
+        }
+        "workspace/didChangeWatchedFiles" => {
+            if let Ok(params) =
+                serde_json::from_value::<lsp_types::DidChangeWatchedFilesParams>(not.params)
+            {
+                for message in server.handle_watched_files_changed(params.changes) {
+                    let _ = write_message(writer, &message);
                 }
             }
         }
