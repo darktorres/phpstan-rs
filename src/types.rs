@@ -84,6 +84,24 @@ pub enum Type {
     // Only ever a member of a `Type::Intersection` alongside its own base
     // type (`String` or `Array(_)`).
     Accessory(AccessoryKind),
+    // Mirrors real PHPStan's `HasOffsetValueType` - only ever a member of
+    // a `Type::Intersection` alongside its own coarse `Type::Array(K, V)`
+    // base, tracking one specific literal key's own precise value type
+    // (`key`, `value`) without converting the whole container into an
+    // `ArrayShape`. Confirmed directly against the vendored real
+    // `phpstan.phar` via `assertType()`: writing a literal key onto an
+    // already-coarse array keeps this precision (`non-empty-array<string,
+    // mixed>&hasOffsetValue('a', array{1, 2, 3})`), and a second
+    // literal-key write accumulates a further, separate
+    // `Type::HasOffsetValue` member rather than replacing the first (see
+    // `checker::assignment::write_literal_key_aware`, this project's own
+    // construction site). A dynamic (non-literal) key write, or one
+    // inside a loop body currently under analysis, never produces this -
+    // real PHPStan doesn't either, confirmed the same way: a loop
+    // variable narrowed to a literal during one simulated pass still
+    // generalizes away before the merge that produces the loop's own
+    // exit type.
+    HasOffsetValue(String, Box<Type>),
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real
     // call-site argument type for `subject` is known

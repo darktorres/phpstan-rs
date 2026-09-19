@@ -122,6 +122,17 @@ impl fmt::Display for Type {
             ),
             Type::FloatLiteral(n) => write!(f, "{n}"),
             Type::Accessory(kind) => write!(f, "{}", accessory_kind_name(*kind)),
+            // Mirrors real PHPStan's own `HasOffsetValueType::describe()`
+            // format exactly (confirmed via `assertType()` against the
+            // vendored phar) - never intercepted by
+            // `describe_accessory_intersection`'s own known-shape fast
+            // paths above (none of them match a `HasOffsetValue` member),
+            // so this always reaches the generic `&`-joined
+            // `Type::Intersection` fallback alongside its own base
+            // `Type::Array`.
+            Type::HasOffsetValue(key, value) => {
+                write!(f, "hasOffsetValue('{key}', {value})")
+            }
             Type::Conditional {
                 subject,
                 target,

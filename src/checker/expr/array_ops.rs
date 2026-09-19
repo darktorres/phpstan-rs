@@ -843,6 +843,37 @@ impl<'a> Checker<'a> {
                 key => Some(key),
             },
             Type::Intersection(members) => members.iter().find_map(Self::array_key_type),
+            // A `Union` of array-like branches (the same control-flow-
+            // merge shape `array_element_type`'s own `Union` arm above
+            // handles) has no sensible key type unless every non-empty
+            // member does - without this arm, a container whose type
+            // happened to be a real `Union` (e.g. from an earlier
+            // branch-merge where each branch's own literal-key write
+            // produced a distinctly different `hasOffsetValue(...)`-
+            // carrying type) silently answered "don't know" here even
+            // though every member plainly agreed on the same key type,
+            // which broke `array_merge`'s own `all_string_keyed_or_shape`
+            // eligibility check for such a container - a real corpus
+            // false negative (`SectionPopulator::populate()`'s own
+            // `$page = array_merge($page, ...)`, where `$page`'s
+            // genuinely string-keyed `Union` wrongly disqualified the
+            // *other* argument's own precise `ArrayShape` from being
+            // merged precisely at all).
+            Type::Union(members) => {
+                let mut key_types = Vec::new();
+                for m in members {
+                    if matches!(m, Type::ArrayShape(fields) if fields.is_empty()) {
+                        continue;
+                    }
+                    key_types.push(Self::array_key_type(m)?);
+                }
+                Some(
+                    key_types
+                        .into_iter()
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed),
+                )
+            }
             _ => None,
         }
     }

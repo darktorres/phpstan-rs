@@ -291,9 +291,14 @@ impl<'a> Checker<'a> {
                                 .get(&key)
                                 .cloned()
                                 .unwrap_or_else(|| Type::ArrayShape(vec![]));
-                            if let Some(new_slot_ty) =
-                                write_index_into(&prior, None, None, ty.clone(), false)
-                            {
+                            if let Some(new_slot_ty) = write_index_into(
+                                &prior,
+                                None,
+                                None,
+                                ty.clone(),
+                                false,
+                                self.loop_depth > 0,
+                            ) {
                                 locals.discriminant_array_facts.insert(key, new_slot_ty);
                             }
                         }
@@ -338,6 +343,7 @@ impl<'a> Checker<'a> {
                             idx_ty.as_ref(),
                             ty,
                             in_range,
+                            self.loop_depth > 0,
                         ) {
                             if was_defined || is_superglobal(name) {
                                 locals.insert(name.to_string(), new_ty);
@@ -358,6 +364,7 @@ impl<'a> Checker<'a> {
                             idx_ty.as_ref(),
                             ty,
                             false,
+                            self.loop_depth > 0,
                         ) {
                             self.bind_assignment_target(base, new_base_ty, locals);
                         }
@@ -570,6 +577,7 @@ fn write_index_into(
     idx_ty: Option<&Type>,
     value_ty: Type,
     in_range: bool,
+    in_loop: bool,
 ) -> Option<Type> {
     match container_ty {
         // `Null` is the same "not really an array yet" case a top-level
@@ -578,7 +586,14 @@ fn write_index_into(
         // too) - delegate rather than bail, so a `Union` member that's
         // provably `Null` doesn't sink the whole write via `Union`'s
         // "all or nothing" `?`.
-        Type::Null => write_index_into(&Type::ArrayShape(vec![]), idx, idx_ty, value_ty, in_range),
+        Type::Null => write_index_into(
+            &Type::ArrayShape(vec![]),
+            idx,
+            idx_ty,
+            value_ty,
+            in_range,
+            in_loop,
+        ),
         Type::ArrayShape(fields) => match idx
             .and_then(literal_string_key)
             .or_else(|| literal_key_from_type(idx_ty))
@@ -617,22 +632,20 @@ fn write_index_into(
             }
         },
         // Already widened past a literal shape - no single key to grow
-        // precisely anymore, so a write at any key merges into the
-        // shared element type instead of being ignored. The container's
-        // existing key type is unioned with a confidently-narrowed
-        // dynamic key's type rather than kept unconditionally unchanged;
-        // `union_types(existing_key, unknown_array_key())` collapses
-        // back to `unknown_array_key()` when there's nothing to narrow.
-        Type::Array(key, inner) => {
-            let key_ty = match idx.and(idx_ty).map(dynamic_write_key_type) {
-                Some(new_key_ty) => union_types((**key).clone(), new_key_ty),
-                None => (**key).clone(),
-            };
-            Some(Type::Array(
-                Box::new(key_ty),
-                Box::new(union_types(value_ty, (**inner).clone())),
-            ))
-        }
+        // precisely anymore. A genuinely literal key still gets a real
+        // `hasOffsetValue(...)` intersection member layered on top (see
+        // `write_literal_key_aware`'s own doc comment) - the container's
+        // shared element type still widens via `union_types` exactly as
+        // before regardless, so a later dynamic-key read stays sound.
+        Type::Array(key, inner) => Some(write_literal_key_aware(
+            key,
+            inner,
+            idx,
+            idx_ty,
+            value_ty,
+            in_loop,
+            &[],
+        )),
         // A container typed as a `Union` (e.g. differently-shaped
         // `ArrayShape`s merged across an `if`/`else`) must update every
         // member the same way, bailing via `?` if any one can't be -
@@ -647,6 +660,7 @@ fn write_index_into(
                     idx_ty,
                     value_ty.clone(),
                     in_range,
+                    in_loop,
                 )?);
             }
             Some(
@@ -674,6 +688,33 @@ fn write_index_into(
         // doesn't change whether the container was already empty, so it
         // only carries `NonEmptyArray` forward when the container already
         // had it, never adds it fresh.
+        //
+        // A container that instead already carries one or more
+        // `hasOffsetValue(...)` members (from an earlier literal-key
+        // write this same function produced) is a completely separate
+        // case from the list-marker one above - dispatched first, before
+        // any list-specific handling, since the two never co-occur (a
+        // list's keys are always sequential ints, so a literal-key write
+        // onto one is a dynamic-key write in this function's own terms,
+        // which the list arm below already drops the marker for).
+        Type::Intersection(members)
+            if members
+                .iter()
+                .any(|m| matches!(m, Type::HasOffsetValue(..))) =>
+        {
+            let (key, inner) = members.iter().find_map(|m| match m {
+                Type::Array(k, v) => Some((k.as_ref(), v.as_ref())),
+                _ => None,
+            })?;
+            let existing: Vec<Type> = members
+                .iter()
+                .filter(|m| matches!(m, Type::HasOffsetValue(..)))
+                .cloned()
+                .collect();
+            Some(write_literal_key_aware(
+                key, inner, idx, idx_ty, value_ty, in_loop, &existing,
+            ))
+        }
         Type::Intersection(members) => {
             let inner = members.iter().find_map(Checker::array_element_type)?;
             let widened = union_types(value_ty, inner);
@@ -698,6 +739,75 @@ fn write_index_into(
             }
         }
         _ => None,
+    }
+}
+
+/// Builds `Array(key, inner)[literal-or-dynamic key] = value_ty`'s result,
+/// layering a `hasOffsetValue(...)` intersection member on top whenever
+/// the write's own key resolves to a genuine compile-time literal and
+/// this write isn't inside a loop body currently under analysis - shared
+/// by `write_index_into`'s own `Type::Array` arm (`existing_has_offset_
+/// values` empty, no prior tracked keys) and its `Type::Intersection`
+/// arm for a container that already carries one or more from an earlier
+/// literal-key write (accumulated here, replacing any entry for the same
+/// key rather than duplicating it - real PHPStan does the same, confirmed
+/// via `assertType()`: two straight-line literal-key writes to different
+/// keys keep both as separate `hasOffsetValue(...)` members).
+///
+/// The `in_loop` guard mirrors real PHPStan's own observed behavior
+/// exactly (confirmed via `assertType()`, not guessed): a loop variable
+/// narrowed to a literal during one simulated iteration still generalizes
+/// away before the merge that produces the loop's own exit type, so a
+/// `for ($i = 0; ...) { $x[$i] = ...; }`-shaped write never produces
+/// `hasOffsetValue` there either. This project's own multi-pass
+/// fixed-point loop convergence (`converge_loop_body`) has no such
+/// generalization step, so without this guard it would instead compose a
+/// fresh, differently-keyed `hasOffsetValue` on almost every pass - which
+/// doesn't collapse safely across passes the way plain union-widening
+/// always has. Confirmed as a real, broad corpus regression (6 new false
+/// positives, 0 fixes) before this guard was added; `self.loop_depth ==
+/// 0` is this project's own established idiom for exactly this class of
+/// "only sound on a single, non-looping pass" soundness issue (see
+/// `ExprKind::MethodCall`'s nullsafe-on-non-nullable check in
+/// `checker::expr` for the identical reasoning).
+fn write_literal_key_aware(
+    key: &Type,
+    inner: &Type,
+    idx: Option<&Expr>,
+    idx_ty: Option<&Type>,
+    value_ty: Type,
+    in_loop: bool,
+    existing_has_offset_values: &[Type],
+) -> Type {
+    let key_ty = match idx.and(idx_ty).map(dynamic_write_key_type) {
+        Some(new_key_ty) => union_types(key.clone(), new_key_ty),
+        None => key.clone(),
+    };
+    let base = Type::Array(
+        Box::new(key_ty),
+        Box::new(union_types(value_ty.clone(), inner.clone())),
+    );
+    let literal_key = idx
+        .and_then(literal_string_key)
+        .or_else(|| literal_key_from_type(idx_ty));
+    match literal_key {
+        Some(key) if !in_loop => {
+            let mut members: Vec<Type> = existing_has_offset_values
+                .iter()
+                .filter(|m| !matches!(m, Type::HasOffsetValue(k, _) if *k == key))
+                .cloned()
+                .collect();
+            members.push(Type::HasOffsetValue(key, Box::new(value_ty)));
+            members.insert(0, base);
+            Type::Intersection(members)
+        }
+        // A dynamic key, or a write now happening inside a loop, can't
+        // extend the tracked-keys set precisely - same "give up
+        // precision" fallback the plain `Type::Array` arm always took,
+        // dropping every existing `hasOffsetValue` member too since none
+        // of them can be trusted to still hold once an arbitrary key may
+        // have overwritten them.
+        _ => base,
     }
 }
 

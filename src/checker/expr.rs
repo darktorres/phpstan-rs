@@ -4353,10 +4353,30 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
         // `Intersection([Array(T), Accessory(_)])`, not plain
         // `Array(T)` - without this, indexing into one (`$listArg[0]`)
         // would fall to `Mixed`.
-        Type::Intersection(members) => members
-            .into_iter()
-            .find_map(|m| Checker::array_element_type(&m))
-            .unwrap_or(Type::Mixed),
+        //
+        // A container that also carries a `hasOffsetValue(key, value)`
+        // member for this exact literal key (`write_literal_key_aware`'s
+        // own doc comment - `checker::assignment`'s construction site)
+        // must resolve to that tracked precise `value` instead of the
+        // base `Array`'s own coarse element type - mirrors real
+        // PHPStan's identical read-side resolution, confirmed via
+        // `assertType()`. Checked before the generic `array_element_type`
+        // fallback below, which has no way to single out one specific
+        // key at all.
+        Type::Intersection(members) => {
+            let has_offset_value = key.and_then(|k| {
+                members.iter().find_map(|m| match m {
+                    Type::HasOffsetValue(mk, v) if mk == k => Some((**v).clone()),
+                    _ => None,
+                })
+            });
+            has_offset_value.unwrap_or_else(|| {
+                members
+                    .into_iter()
+                    .find_map(|m| Checker::array_element_type(&m))
+                    .unwrap_or(Type::Mixed)
+            })
+        }
         _ => Type::Mixed,
     }
 }

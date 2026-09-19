@@ -22,6 +22,9 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
     if a == Type::Mixed || b == Type::Mixed {
         return Type::Mixed;
     }
+    if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
+        return merged;
+    }
     let mut members = Vec::new();
     match a {
         Type::Union(m) => members.extend(m),
@@ -232,4 +235,97 @@ fn literal_base_type(t: &Type) -> Option<Type> {
         }
         _ => None,
     }
+}
+
+/// Splits a plain `Type::Array` or a "pure" `hasOffsetValue(...)`-carrying
+/// `Type::Intersection` (`write_literal_key_aware`'s own construction
+/// shape - an `Array` member plus zero or more `HasOffsetValue` members,
+/// nothing else) into its base `Array` and its own tracked
+/// `(key, value)` pairs. `None` for anything else (a real class
+/// intersection, a list/`non-empty-array`-marked one, ...) - this is
+/// deliberately narrow, matching only the one shape
+/// `write_literal_key_aware` ever produces, not "any intersection that
+/// happens to contain an `Array` member."
+fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(String, Type)>)> {
+    match t {
+        Type::Array(..) => Some((t.clone(), Vec::new())),
+        Type::Intersection(members)
+            if members
+                .iter()
+                .all(|m| matches!(m, Type::Array(..) | Type::HasOffsetValue(..))) =>
+        {
+            let base = members
+                .iter()
+                .find(|m| matches!(m, Type::Array(..)))?
+                .clone();
+            let pairs = members
+                .iter()
+                .filter_map(|m| match m {
+                    Type::HasOffsetValue(k, v) => Some((k.clone(), (**v).clone())),
+                    _ => None,
+                })
+                .collect();
+            Some((base, pairs))
+        }
+        _ => None,
+    }
+}
+
+/// Merges two `write_literal_key_aware`-shaped operands (see
+/// `has_offset_value_parts`) at a scope-merge join point, mirroring real
+/// PHPStan's own observed behavior exactly (`assertType()`-confirmed): a
+/// key tracked on *both* sides survives with its value types unioned; a
+/// key tracked on only one side is dropped, generalizing back to the
+/// shared base rather than staying precise for a path that might not
+/// have taken this write at all. Without this, a variable written across
+/// several independent, non-mutually-exclusive branches (`if ($a) {
+/// $x['a'] = ...; } if ($b) { $x['b'] = ...; } ...`) would grow one
+/// extra `Type::Union` member per branch instead of converging back to a
+/// single type the way real PHPStan's own merge does - a real corpus
+/// regression this fixes (`ActivityService::record()`'s own
+/// `$details['method'] = ...`/`$details['script'] = ...`/... sequence:
+/// each independent `if` on its own doubled `$details`'s own union
+/// member count, hitting `MAX_UNION_MEMBERS` and collapsing the *whole*
+/// variable to `Mixed` a few branches in).
+///
+/// Returns `None` (falling back to `union_types`' own generic handling)
+/// unless *both* operands are one of the two eligible shapes - a
+/// genuinely unrelated type on either side (an object, a shape, ...)
+/// never reaches this merge at all.
+fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
+    let (base_a, pairs_a) = has_offset_value_parts(a)?;
+    let (base_b, pairs_b) = has_offset_value_parts(b)?;
+    // Neither side tracked anything - the plain `Array`/`Array` case
+    // `union_types`' own generic "merge multiple Array members" step
+    // already handles just as well; leave it to that instead of
+    // duplicating it here.
+    if pairs_a.is_empty() && pairs_b.is_empty() {
+        return None;
+    }
+    let merged_base = match (base_a, base_b) {
+        (Type::Array(ka, va), Type::Array(kb, vb)) => Type::Array(
+            Box::new(union_types(*ka, *kb)),
+            Box::new(union_types(*va, *vb)),
+        ),
+        // Unreachable given `has_offset_value_parts`'s own contract
+        // (its `base` is always a `Type::Array`), kept as a safe
+        // fallback rather than an `unreachable!()`.
+        (base_a, _) => base_a,
+    };
+    let mut merged_pairs: Vec<(String, Type)> = Vec::new();
+    for (k, va) in &pairs_a {
+        if let Some((_, vb)) = pairs_b.iter().find(|(kb, _)| kb == k) {
+            merged_pairs.push((k.clone(), union_types(va.clone(), vb.clone())));
+        }
+    }
+    if merged_pairs.is_empty() {
+        return Some(merged_base);
+    }
+    let mut members = vec![merged_base];
+    members.extend(
+        merged_pairs
+            .into_iter()
+            .map(|(k, v)| Type::HasOffsetValue(k, Box::new(v))),
+    );
+    Some(Type::Intersection(members))
 }

@@ -1397,6 +1397,101 @@ fn an_unguarded_dynamic_key_write_still_infers_an_unknown_key_type() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// A literal-key write onto an already-coarse `array<string, mixed>`
+// keeps that one key's own precise value type via a real
+// `hasOffsetValue(...)` intersection member (mirrors real PHPStan's
+// `HasOffsetValueType`, confirmed via `assertType()` against the
+// vendored phar) - the exact `SectionPopulator.php:679`-shaped real
+// corpus finding this covers: a `@var array<string, mixed>`-annotated
+// container's per-key precision no longer collapses to `mixed` the
+// moment any key is written.
+#[test]
+fn a_literal_key_write_onto_a_coarse_array_keeps_that_keys_precise_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $x */
+            function f(array $x): void {
+                $x['a'] = [1, 2, 3];
+                assertType("array<string, mixed>&hasOffsetValue('a', array{0: 1, 1: 2, 2: 3})", $x);
+                $y = $x['a'];
+                assertType('array{0: 1, 1: 2, 2: 3}', $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Two sequential literal-key writes to different keys accumulate as two
+// separate `hasOffsetValue(...)` members rather than the second
+// replacing the first - confirmed as real PHPStan's own behavior too.
+#[test]
+fn two_sequential_literal_key_writes_accumulate_separate_has_offset_values() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $x */
+            function f(array $x): void {
+                $x['a'] = [1, 2, 3];
+                $x['b'] = 'hi';
+                $a = $x['a'];
+                $b = $x['b'];
+                assertType('array{0: 1, 1: 2, 2: 3}', $a);
+                assertType("'hi'", $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A second write to the SAME literal key replaces the tracked value
+// rather than unioning with the stale one.
+#[test]
+fn a_second_write_to_the_same_literal_key_replaces_the_tracked_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $x */
+            function f(array $x): void {
+                $x['a'] = 'first';
+                $x['a'] = 'second';
+                $a = $x['a'];
+                assertType("'second'", $a);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Negative control, and the reason this feature needed a `loop_depth`
+// guard at all: a loop-bound key never gets `hasOffsetValue`, even
+// though it's narrowed to a specific literal during any one simulated
+// fixed-point pass - confirmed as real PHPStan's own behavior too (a
+// loop variable generalizes away before the merge that produces the
+// loop's own exit type). Without this guard, this project's own
+// multi-pass loop convergence produced a real, broad corpus regression.
+// `array<int, 0|1|2|3|4|5>` (rather than real PHPStan's own tighter
+// `array<int<0, max>, int<0, max>>`) is this project's own pre-existing,
+// separate loop-widening imprecision - confirmed byte-for-byte identical
+// against the last commit before this feature existed, so asserted here
+// as a known baseline, not something this fix changes either way.
+#[test]
+fn a_loop_bound_literal_key_write_does_not_get_has_offset_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $x = [];
+                for ($i = 0; $i < 3; $i++) {
+                    $x[$i] = $i;
+                }
+                assertType('array<int, 0|1|2|3|4|5>', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 // Two successive narrowed dynamic-key writes (once with a confidently
 // `int` key, once with a confidently `string` key) union into
 // `array<int|string, V>` on the already-widened `Type::Array` path -
@@ -1674,4 +1769,104 @@ fn an_index_write_bounded_by_a_captured_count_variable_does_not_stay_a_list() {
         1,
         "a captured count() variable should not get the list-preserving treatment: {d:?}"
     );
+}
+
+// A container whose type is a real `Type::Union` (e.g. from an earlier
+// branch-merge where each branch's own literal-key writes produced a
+// distinctly different `hasOffsetValue(...)`-carrying type - see
+// `write_literal_key_aware`'s own doc comment) must still be recognized
+// as string-keyed by `array_merge`'s own precise shape-merge eligibility
+// check (`Checker::array_key_type`'s own doc comment) - without a
+// `Type::Union` arm there, merging it with a second, genuinely precise
+// `ArrayShape` argument silently discarded *both* arguments' own
+// precision down to a bare `non-empty-array`. Real corpus shape:
+// `SectionPopulator::populate()`'s own `$page = array_merge($page,
+// $this->urlService->parseWellKnownParamsUrl(...));`.
+#[test]
+fn array_merge_preserves_a_shape_argument_when_the_other_argument_is_a_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @return array{chronology_date?: list<string>, other?: string}
+             */
+            function parseIt(): array {
+                return [];
+            }
+            function f(): void {
+                /** @var array<string, mixed> */
+                $page = [];
+                if (rand(0, 1) === 1) {
+                    $page['flat'] = true;
+                } else {
+                    $page['section'] = 'cats';
+                }
+                $page = array_merge($page, parseIt());
+                if (isset($page['chronology_field'])) {
+                    $calendar_date = is_array($page['chronology_date'] ?? null) ? $page['chronology_date'] : [];
+                    assertType('list<string>|array{}', $calendar_date);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A variable written across several independent, non-mutually-exclusive
+// branches converges back to its plain base type instead of growing one
+// extra `Type::Union` member per branch - each branch's own tracked key
+// is dropped at that branch's own merge point since the "didn't take
+// this branch" side never had it (`merge_has_offset_value_pair`'s own
+// doc comment). Real corpus shape this fixes:
+// `ActivityService::record()`'s own `$details['method'] = ...`/
+// `$details['script'] = ...`/... sequence of independent `if`s, which
+// used to blow straight past `MAX_UNION_MEMBERS` and collapse `$details`
+// to bare `mixed` a few branches in.
+#[test]
+fn writes_across_several_independent_branches_converge_instead_of_blowing_up() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(bool $a, bool $b, bool $c, bool $d, bool $e, bool $g, bool $h): void {
+                /** @var array<string, mixed> */
+                $x = [];
+                if ($a) { $x['a'] = 1; }
+                if ($b) { $x['b'] = 2; }
+                if ($c) { $x['c'] = 3; }
+                if ($d) { $x['d'] = 4; }
+                if ($e) { $x['e'] = 5; }
+                if ($g) { $x['g'] = 6; }
+                if ($h) { $x['h'] = 7; }
+                assertType('array<string, mixed>', $x);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// The same-key counterpart: when every branch of a merge *does* track
+// the same literal key, that key survives with its value types unioned
+// instead of being dropped - matches real PHPStan's own observed
+// behavior exactly (confirmed via `assertType()` against the vendored
+// phar: `if ($cond) { $x['a'] = [1,2,3]; } else { $x['a'] = 'str'; }`
+// merges into one `hasOffsetValue('a', 'str'|array{...})`, not a
+// `Type::Union` of two separately-tracked intersections).
+#[test]
+fn writes_to_the_same_literal_key_across_both_branches_of_an_if_else_union_their_values() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $x */
+            function f(array $x, bool $cond): void {
+                if ($cond) {
+                    $x['a'] = [1, 2, 3];
+                } else {
+                    $x['a'] = 'str';
+                }
+                $a = $x['a'];
+                assertType("array{0: 1, 1: 2, 2: 3}|'str'", $a);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
