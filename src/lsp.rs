@@ -30,8 +30,8 @@ use lsp_types::{
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
     DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverContents,
     HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, Location,
-    MarkedString, MessageType, OneOf, Position as LspPosition, ServerCapabilities, ServerInfo,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
+    MarkedString, MessageType, OneOf, Position as LspPosition, PositionEncodingKind,
+    ServerCapabilities, ServerInfo, TextDocumentSyncCapability, TextDocumentSyncKind, Uri,
 };
 
 use crate::ast::ClassKind;
@@ -662,20 +662,41 @@ fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) -> i32 {
 fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
     match req.method.as_str() {
         "initialize" => {
+            let params: Option<InitializeParams> = serde_json::from_value(req.params).ok();
             #[allow(deprecated)] // root_uri: no other way to reach it pre-workspace_folders
-            let root = serde_json::from_value::<InitializeParams>(req.params)
-                .ok()
-                .and_then(|params| {
-                    params
+            let (root, position_encoding) = match params {
+                Some(params) => {
+                    let root = params
                         .root_uri
-                        .or_else(|| params.workspace_folders?.into_iter().next().map(|f| f.uri))
-                });
+                        .or_else(|| params.workspace_folders?.into_iter().next().map(|f| f.uri));
+                    // A real vscode-languageclient is expected to
+                    // advertise general.positionEncodings. This server's
+                    // own Span already counts UTF-8 characters (see this
+                    // module's top-of-file doc comment), so echoing
+                    // "utf-8" back when the client offers it makes that
+                    // existing counting exactly correct - whenever it's
+                    // offered at all, not only when it's the client's
+                    // top preference, since utf-8 is the only encoding
+                    // this server actually implements. Absent an offer,
+                    // the spec's utf-16 default applies and today's
+                    // approximation is unchanged.
+                    let position_encoding = params
+                        .capabilities
+                        .general
+                        .and_then(|g| g.position_encodings)
+                        .is_some_and(|encodings| encodings.contains(&PositionEncodingKind::UTF8))
+                        .then_some(PositionEncodingKind::UTF8);
+                    (root, position_encoding)
+                }
+                None => (None, None),
+            };
             let mut startup_messages = Vec::new();
             if let Some(root) = root.as_ref().and_then(uri_to_path) {
                 startup_messages = server.load_workspace(&root);
             }
             let result = InitializeResult {
                 capabilities: ServerCapabilities {
+                    position_encoding,
                     // Full sync: didChange always carries the whole new
                     // document text, not incremental ranges - simplest
                     // correct choice, and update_file already takes a

@@ -120,6 +120,64 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
     );
 }
 
+fn initialize_with_capabilities(capabilities: Value) -> Vec<Value> {
+    let dir = TempDir::new("init_position_encoding");
+    let input = encode(&[
+        request(
+            1,
+            "initialize",
+            json!({"rootUri": dir.uri(), "capabilities": capabilities}),
+        ),
+        notification("exit", json!({})),
+    ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
+    let mut writer = Vec::new();
+    run_loop(&rx, &mut writer);
+    decode_all(&writer)
+}
+
+#[test]
+fn initialize_echoes_utf8_position_encoding_when_the_client_offers_it() {
+    let responses =
+        initialize_with_capabilities(json!({"general": {"positionEncodings": ["utf-8"]}}));
+    assert_eq!(
+        responses[0]["result"]["capabilities"]["positionEncoding"],
+        "utf-8"
+    );
+}
+
+#[test]
+fn initialize_omits_position_encoding_when_the_client_does_not_offer_utf8() {
+    let no_general = initialize_with_capabilities(json!({}));
+    assert!(
+        no_general[0]["result"]["capabilities"]
+            .get("positionEncoding")
+            .is_none()
+    );
+
+    let utf16_only =
+        initialize_with_capabilities(json!({"general": {"positionEncodings": ["utf-16"]}}));
+    assert!(
+        utf16_only[0]["result"]["capabilities"]
+            .get("positionEncoding")
+            .is_none()
+    );
+}
+
+#[test]
+fn initialize_offers_utf8_position_encoding_regardless_of_its_position_in_the_clients_list() {
+    let responses = initialize_with_capabilities(
+        json!({"general": {"positionEncodings": ["utf-16", "utf-8"]}}),
+    );
+    assert_eq!(
+        responses[0]["result"]["capabilities"]["positionEncoding"],
+        "utf-8"
+    );
+}
+
 #[test]
 fn initialize_logs_a_workspace_file_that_fails_to_parse() {
     let dir = TempDir::new("init_bad_file");
