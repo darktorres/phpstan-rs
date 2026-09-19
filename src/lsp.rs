@@ -20,9 +20,11 @@
 //! blocking on.
 
 use std::collections::HashMap;
-use std::io::{self, BufRead, Write};
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
+use crossbeam_channel::{Receiver, RecvTimeoutError};
 use lsp_server::{ErrorCode, Message, Notification as LspNotification, Request, Response};
 use lsp_types::{
     DidChangeTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams,
@@ -47,8 +49,8 @@ mod text_split;
 #[cfg(test)]
 use protocol::percent_decode;
 use protocol::{
-    ReadOutcome, from_lsp_position, path_to_uri, publish_diagnostics_notification, read_message,
-    to_lsp_range, uri_to_path, write_message,
+    from_lsp_position, path_to_uri, publish_diagnostics_notification, pump_messages, to_lsp_range,
+    uri_to_path, write_message,
 };
 
 /// Every `Object` class name reachable from a `Checker::probe_hit`
@@ -517,38 +519,51 @@ impl Server {
     }
 }
 
+/// No logic consumes the timeout tick yet - a future debounce mechanism
+/// flushes any pending recheck here. Exists so `run_loop` is never
+/// parked in a blocking read - the literal capability this gives up by
+/// switching from `read_message` (a blocking call on the reader itself)
+/// to `recv_timeout` on a channel a background thread feeds instead.
+const RUN_LOOP_TICK: Duration = Duration::from_millis(50);
+
 pub fn run() {
-    let stdin = io::stdin();
+    // `bounded`, not `unbounded`: backpressures a fast/misbehaving
+    // client (blocks the reader thread, and so the OS pipe) instead of
+    // buffering unboundedly.
+    let (tx, rx) = crossbeam_channel::bounded(64);
+    std::thread::Builder::new()
+        .name("phpstan-rs-lsp-reader".to_string())
+        .spawn(move || {
+            let stdin = io::stdin();
+            let mut reader = stdin.lock();
+            pump_messages(&mut reader, &tx);
+        })
+        .expect("spawning the LSP reader thread");
     let stdout = io::stdout();
-    let mut reader = stdin.lock();
     let mut writer = stdout.lock();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
+    // Not joined: once run_loop exits the process is ending anyway; the
+    // reader thread, possibly still blocked in a real Message::read on
+    // stdin with nothing left reading its sender, is simply abandoned -
+    // same as today's single-threaded run() already does with any
+    // buffered-but-unread trailing input.
 }
 
-/// The actual message loop, generic over its I/O so tests can drive it
-/// with an in-memory `Cursor`/`Vec<u8>` instead of a real process's
-/// stdin/stdout - `run` is just this plus the real handles.
-fn run_loop<R: BufRead, W: Write>(reader: &mut R, writer: &mut W) {
+/// The actual message loop, generic over its writer so tests can drive
+/// it with an in-memory `Vec<u8>` instead of a real process's stdout.
+/// Reads come off `receiver` instead of directly from an I/O reader -
+/// `pump_messages` (on a background thread, in `run`'s real path, or
+/// called synchronously first in a test) is what actually calls
+/// `read_message`, so this loop can `recv_timeout` and never block
+/// indefinitely inside a blocking read syscall.
+fn run_loop<W: Write>(receiver: &Receiver<Message>, writer: &mut W) {
     let mut server = Server::new();
 
     loop {
-        let message = match read_message(reader) {
-            ReadOutcome::Message(m) => m,
-            ReadOutcome::Eof => break,
-            ReadOutcome::Disconnected(e) => {
-                eprintln!("phpstan-rs lsp: failed to read message: {e}");
-                break;
-            }
-            // A malformed message body (invalid JSON, but a known
-            // Content-Length correctly consumed) doesn't tear down the
-            // rest of the session - a single non-conformant message from
-            // a client (an editor-extension bug, a dropped byte over a
-            // flaky transport, ...) shouldn't take the whole language
-            // server down for the rest of the editing session.
-            ReadOutcome::MalformedBody(e) => {
-                eprintln!("phpstan-rs lsp: skipping malformed message: {e}");
-                continue;
-            }
+        let message = match receiver.recv_timeout(RUN_LOOP_TICK) {
+            Ok(m) => m,
+            Err(RecvTimeoutError::Timeout) => continue,
+            Err(RecvTimeoutError::Disconnected) => break,
         };
 
         match message {

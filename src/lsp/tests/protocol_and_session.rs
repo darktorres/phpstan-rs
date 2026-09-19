@@ -100,9 +100,12 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
         ),
         notification("exit", json!({})),
     ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
 
     let responses = decode_all(&writer);
     assert_eq!(
@@ -147,9 +150,12 @@ fn did_open_with_a_workspace_loaded_publishes_diagnostics_for_dependents_too() {
         ),
         notification("exit", json!({})),
     ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
 
     let messages = decode_all(&writer);
     let b_uri = path_to_uri(&b_path).to_string();
@@ -191,9 +197,12 @@ fn an_unrecognized_method_gets_a_method_not_found_error_response() {
         request(1, "totally/madeUp", json!({})),
         notification("exit", json!({})),
     ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
 
     let responses = decode_all(&writer);
     assert_eq!(responses.len(), 1);
@@ -209,12 +218,50 @@ fn shutdown_returns_a_null_result_and_exit_ends_the_loop() {
         // has to break immediately on it, not keep reading.
         request(2, "totally/madeUp", json!({})),
     ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
 
     let responses = decode_all(&writer);
     assert_eq!(responses.len(), 1, "exit must stop the loop: {responses:?}");
+    assert_eq!(responses[0]["id"], 1);
+    assert_eq!(responses[0]["result"], Value::Null);
+}
+
+#[test]
+fn run_loop_wakes_on_an_idle_timeout_instead_of_blocking_forever() {
+    // Real-thread/real-time, unlike this file's other tests: proves
+    // `run_loop` is actually driven by `recv_timeout` (not a plain
+    // blocking `recv`) by letting several idle ticks elapse with zero
+    // messages sent before sending anything at all - a plain blocking
+    // `recv` would still pass this test by coincidence (it'd just sit
+    // there until the first send), but a loop that busy-looped or
+    // panicked on a bare timeout would fail it.
+    let (tx, rx) = crossbeam_channel::unbounded();
+    let handle = std::thread::spawn(move || {
+        let mut writer = Vec::new();
+        run_loop(&rx, &mut writer);
+        writer
+    });
+
+    std::thread::sleep(RUN_LOOP_TICK * 3);
+
+    tx.send(to_message(request(1, "shutdown", json!({}))))
+        .unwrap();
+    tx.send(to_message(notification("exit", json!({}))))
+        .unwrap();
+    drop(tx);
+
+    let writer = handle.join().unwrap();
+    let responses = decode_all(&writer);
+    assert_eq!(
+        responses.len(),
+        1,
+        "expected exactly one response: {responses:?}"
+    );
     assert_eq!(responses[0]["id"], 1);
     assert_eq!(responses[0]["result"], Value::Null);
 }
@@ -224,11 +271,19 @@ fn eof_with_no_exit_message_ends_the_loop_cleanly() {
     // Real clients occasionally close the pipe without ever sending
     // `exit` - read_message's own doc comment already documents this
     // as an expected case; this proves run_loop itself degrades to a
-    // clean return rather than an error or a hang.
+    // clean return rather than an error or a hang. This is also the one
+    // test in this file that actually exercises the `drop(tx)` step
+    // below: since no `exit` ever arrives, `pump_messages` returns via
+    // `ReadOutcome::Eof`, not a forwarded `exit` - without dropping
+    // `tx`, `recv_timeout` would never see `Disconnected` and this test
+    // would hang instead of completing.
     let input = encode(&[request(1, "initialize", json!({}))]);
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
     assert_eq!(decode_all(&writer).len(), 1);
 }
 
@@ -302,7 +357,10 @@ fn path_to_uri_preserves_a_literal_backslash_in_a_real_unix_filename() {
 // consumed, but invalid JSON) must be skipped, not terminate the whole
 // session; a per-file parser panic during didOpen/didChange/the
 // initial workspace scan must fail to analyze that one file, not crash
-// the whole server process.
+// the whole server process. The skip itself now happens inside
+// `pump_messages` (on the reader thread, in real usage) rather than
+// inline in `run_loop` - this test's own assertion is unchanged and is
+// the regression check for that move.
 
 #[test]
 fn a_malformed_message_body_is_skipped_without_terminating_the_session() {
@@ -315,9 +373,12 @@ fn a_malformed_message_body_is_skipped_without_terminating_the_session() {
         notification("exit", json!({})),
     ]));
 
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
 
     let responses = decode_all(&writer);
     assert_eq!(responses.len(), 1, "got: {responses:?}");
@@ -353,9 +414,12 @@ fn a_file_that_crashes_the_parser_does_not_take_down_the_lsp_session() {
         ),
         notification("exit", json!({})),
     ]);
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(input);
+    pump_messages(&mut reader, &tx);
+    drop(tx); // required: recv_timeout never sees Disconnected while any Sender is alive
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
 
     let responses = decode_all(&writer);
     assert_eq!(responses.len(), 1, "session should survive: {responses:?}");

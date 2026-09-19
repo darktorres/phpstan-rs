@@ -1,3 +1,4 @@
+use super::super::protocol::{ReadOutcome, read_message};
 use super::super::*;
 use serde_json::{Value, json};
 use std::io::Cursor;
@@ -85,10 +86,29 @@ pub(super) fn run(dir: &TempDir, extra: &[Value]) -> Vec<Value> {
     input.extend_from_slice(extra);
     input.push(notification("exit", json!({})));
     let bytes = encode(&input);
+    // `unbounded`, not production's `bounded(64)`: nothing drains
+    // concurrently while `pump_messages` runs synchronously below, so a
+    // bounded channel would deadlock inside `sender.send()` on a fixture
+    // queuing more messages than its capacity, before `run_loop` ever
+    // gets to run at all.
+    let (tx, rx) = crossbeam_channel::unbounded();
     let mut reader = Cursor::new(bytes);
+    pump_messages(&mut reader, &tx);
+    // Required: `Receiver::recv_timeout` only ever reports `Disconnected`
+    // once every `Sender` clone is dropped - keeping `tx` alive here
+    // would make `run_loop` spin on `RecvTimeoutError::Timeout` forever
+    // for any fixture that omits a trailing `exit` notification.
+    drop(tx);
     let mut writer = Vec::new();
-    run_loop(&mut reader, &mut writer);
+    run_loop(&rx, &mut writer);
     decode_all(&writer)
+}
+
+/// Builds a `Message` directly from a JSON `Value`, for a test that
+/// sends messages straight onto a channel rather than through
+/// `encode`/`pump_messages`'s byte-framing round trip.
+pub(super) fn to_message(v: Value) -> Message {
+    serde_json::from_value(v).unwrap()
 }
 
 pub(super) fn hover_request(id: i64, uri: &str, pos: Value) -> Value {

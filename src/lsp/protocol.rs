@@ -2,6 +2,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
 
+use crossbeam_channel::Sender;
 use lsp_server::{Message, Notification as LspNotification};
 use lsp_types::{
     Diagnostic as LspDiagnostic, DiagnosticSeverity, NumberOrString, Position as LspPosition,
@@ -46,6 +47,43 @@ pub(crate) fn read_message<R: BufRead>(reader: &mut R) -> ReadOutcome {
 
 pub(crate) fn write_message<W: Write>(writer: &mut W, message: &Message) -> io::Result<()> {
     message.write(writer)
+}
+
+/// Reads framed messages from `reader` until EOF/disconnection or an
+/// `exit` notification, forwarding each successfully parsed one onto
+/// `sender`. A malformed body is skipped (logged, not fatal) - the same
+/// tolerance `ReadOutcome::MalformedBody` already documents, just running
+/// on its own thread now instead of inline in `run_loop`. A real I/O
+/// failure (`Disconnected`) is still logged before returning, preserving
+/// the exact operator-visible diagnostic `run_loop` used to print itself
+/// before this function took over the actual `read_message` call.
+/// Generic over `R: BufRead`, not tied to stdin, so it's directly
+/// unit-testable with an in-memory `Cursor` with no real thread needed -
+/// `lsp::run()` is the only caller that hands it real stdin, from a
+/// dedicated OS thread.
+pub(crate) fn pump_messages<R: BufRead>(reader: &mut R, sender: &Sender<Message>) {
+    loop {
+        match read_message(reader) {
+            ReadOutcome::Message(m) => {
+                let is_exit = matches!(&m, Message::Notification(n) if n.method == "exit");
+                if sender.send(m).is_err() {
+                    return; // run_loop's receiver was dropped; nothing left to forward to
+                }
+                if is_exit {
+                    return;
+                }
+            }
+            ReadOutcome::Eof => return,
+            ReadOutcome::Disconnected(e) => {
+                eprintln!("phpstan-rs lsp: failed to read message: {e}");
+                return;
+            }
+            ReadOutcome::MalformedBody(e) => {
+                eprintln!("phpstan-rs lsp: skipping malformed message: {e}");
+                continue;
+            }
+        }
+    }
 }
 
 /// `file://`-scheme only - this server has no use for any other URI

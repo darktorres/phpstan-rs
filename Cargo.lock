@@ -1504,6 +1504,7 @@ dependencies = [
  "arbitrary",
  "clap",
  "criterion",
+ "crossbeam-channel",
  "hotpath",
  "imbl",
  "lsp-server",

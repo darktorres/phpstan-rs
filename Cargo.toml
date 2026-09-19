@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
 clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
 hotpath = "0.24"
 imbl = "7.0.1"
 lsp-server = "0.10.0"
