@@ -134,7 +134,7 @@ pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Optio
 /// 1-indexed, half-open (`span.end` is one past the last real character -
 /// confirmed against the lexer's own token-span construction) containment
 /// check.
-fn contains(span: Span, pos: Position) -> bool {
+pub(super) fn contains(span: Span, pos: Position) -> bool {
     let after_start =
         span.start.line < pos.line || (span.start.line == pos.line && span.start.col <= pos.col);
     let before_end =

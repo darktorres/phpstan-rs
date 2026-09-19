@@ -4,6 +4,7 @@ mod configuration;
 mod helpers;
 mod navigation;
 mod protocol_and_session;
+mod signature_help;
 mod variable_definitions;
 mod watched_files;
 mod workspace_config;

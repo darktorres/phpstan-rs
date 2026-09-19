@@ -36,16 +36,17 @@ use lsp_types::{
     CompletionResponse, DidChangeTextDocumentParams, DidOpenTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams, GotoDefinitionResponse,
     Hover, HoverContents, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
-    Location, MarkedString, MessageType, OneOf, Position as LspPosition, PositionEncodingKind,
-    Range as LspRange, ServerCapabilities, ServerInfo, SymbolInformation,
-    TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgress, WorkDoneProgressBegin,
-    WorkDoneProgressEnd, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    Location, MarkedString, MessageType, OneOf, ParameterInformation, ParameterLabel,
+    Position as LspPosition, PositionEncodingKind, Range as LspRange, ServerCapabilities,
+    ServerInfo, SignatureHelp, SignatureHelpOptions, SignatureHelpParams, SignatureInformation,
+    SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind, Uri, WorkDoneProgress,
+    WorkDoneProgressBegin, WorkDoneProgressEnd, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 
 use crate::ast::ClassKind;
 use crate::checker::{self, Checker};
 use crate::project::Project;
-use crate::registry::format_signature;
+use crate::registry::{FunctionSig, format_signature, param_label};
 use crate::token::Span;
 use crate::types::Type;
 use crate::{baseline, ignore_errors};
@@ -55,6 +56,7 @@ mod document_symbol;
 mod navigation;
 mod protocol;
 mod settings;
+mod signature_help;
 mod text_split;
 mod workspace_config;
 mod workspace_symbol;
@@ -1158,6 +1160,96 @@ impl Server {
             .collect()
     }
 
+    /// An active-parameter tooltip for the call the cursor is currently
+    /// inside the parens of - see `signature_help::resolve_at`'s own
+    /// module doc comment for the claim-and-clear walker this reads.
+    fn signature_help(&self, uri: &Uri, position: LspPosition) -> Option<SignatureHelp> {
+        let path = uri_to_path(uri)?;
+        let pos = from_lsp_position(position);
+        let help = signature_help::resolve_at(&self.project, &path, pos)?;
+        self.build_signature_help(help)
+    }
+
+    /// Resolves `help.target` into one or more real `FunctionSig`s (more
+    /// than one only for `Instance` on a `Union`/`Intersection`
+    /// receiver, the same multi-owner case `format_member_hover_multi`
+    /// already handles for hover) and builds the LSP response.
+    /// `activeParameter` is set on every returned `SignatureInformation`
+    /// (not just the top-level `SignatureHelp.activeParameter`, which
+    /// only ever describes signature 0) so a client honors it correctly
+    /// regardless of which signature it's currently displaying.
+    fn build_signature_help(&self, help: signature_help::SigHelp) -> Option<SignatureHelp> {
+        let registry = self.project.registry();
+        let signatures: Vec<(String, &FunctionSig)> = match &help.target {
+            signature_help::Target::Function(fqn) => {
+                vec![(fqn.clone(), registry.lookup_function(fqn)?)]
+            }
+            signature_help::Target::Constructor(class) => {
+                let (owner, sig) = registry.lookup_method_with_owner(class, "__construct")?;
+                vec![(format!("{owner}::__construct"), sig)]
+            }
+            signature_help::Target::Member(owner, name) => {
+                let (real_owner, sig) = registry.lookup_method_with_owner(owner, name)?;
+                vec![(format!("{real_owner}::{name}"), sig)]
+            }
+            signature_help::Target::Instance {
+                receiver_span,
+                member,
+                scope,
+                is_static,
+                class,
+            } => {
+                let ty =
+                    self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?;
+                let owners = resolve_member_owners(registry, &ty, member);
+                let sigs: Vec<(String, &FunctionSig)> = owners
+                    .iter()
+                    .filter_map(|owner| {
+                        registry
+                            .lookup_method_with_owner(owner, member)
+                            .map(|(real_owner, sig)| (format!("{real_owner}::{member}"), sig))
+                    })
+                    .collect();
+                if sigs.is_empty() {
+                    return None;
+                }
+                sigs
+            }
+        };
+
+        let signature_infos: Vec<SignatureInformation> = signatures
+            .into_iter()
+            .map(|(name, sig)| {
+                let active_parameter = if sig.params.is_empty() {
+                    None
+                } else {
+                    Some(help.active_parameter.min(sig.params.len() - 1) as u32)
+                };
+                SignatureInformation {
+                    label: format_signature(&name, sig),
+                    documentation: None,
+                    parameters: Some(
+                        sig.params
+                            .iter()
+                            .map(|p| ParameterInformation {
+                                label: ParameterLabel::Simple(param_label(p)),
+                                documentation: None,
+                            })
+                            .collect(),
+                    ),
+                    active_parameter,
+                }
+            })
+            .collect();
+
+        let active_parameter = signature_infos.first().and_then(|s| s.active_parameter);
+        Some(SignatureHelp {
+            signatures: signature_infos,
+            active_signature: Some(0),
+            active_parameter,
+        })
+    }
+
     /// See `completion`'s own module doc comment for the two mechanisms
     /// this dispatches between. `latest_text` (falling back to
     /// `Project::source` for a workspace file never `didOpen`ed) is the
@@ -1648,6 +1740,10 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                         trigger_characters: Some(vec![">".to_string(), ":".to_string()]),
                         ..Default::default()
                     }),
+                    signature_help_provider: Some(SignatureHelpOptions {
+                        trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                        ..Default::default()
+                    }),
                     workspace: Some(lsp_types::WorkspaceServerCapabilities {
                         workspace_folders: Some(lsp_types::WorkspaceFoldersServerCapabilities {
                             supported: Some(true),
@@ -1745,6 +1841,19 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     server.completion(
                         &params.text_document_position.text_document.uri,
                         params.text_document_position.position,
+                    )
+                })
+                .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/signatureHelp" => {
+            let result = serde_json::from_value::<SignatureHelpParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.signature_help(
+                        &params.text_document_position_params.text_document.uri,
+                        params.text_document_position_params.position,
                     )
                 })
                 .map(|response| serde_json::to_value(response).unwrap_or(serde_json::Value::Null))

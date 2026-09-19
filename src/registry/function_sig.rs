@@ -686,14 +686,16 @@ fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
 /// Renders `sig` as a real PHP-looking signature (`strlen(string $string):
 /// int<0, max>`) - shared between the `demo` subcommand's own output and
 /// the LSP's hover text, so the two never drift apart.
+/// One parameter's own display label (`"int ...$xs"`, `"string $s"`) -
+/// shared by `format_signature` and `signature_help`'s own per-parameter
+/// `ParameterInformation` list, so the two never drift apart on how a
+/// parameter is rendered.
+pub(crate) fn param_label(p: &ParamSig) -> String {
+    let dots = if p.variadic { "..." } else { "" };
+    format!("{} {dots}${}", p.ty, p.name)
+}
+
 pub fn format_signature(name: &str, sig: &FunctionSig) -> String {
-    let params: Vec<String> = sig
-        .params
-        .iter()
-        .map(|p| {
-            let dots = if p.variadic { "..." } else { "" };
-            format!("{} {dots}${}", p.ty, p.name)
-        })
-        .collect();
+    let params: Vec<String> = sig.params.iter().map(param_label).collect();
     format!("{name}({}): {}", params.join(", "), sig.return_type)
 }

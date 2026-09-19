@@ -201,6 +201,14 @@ pub(super) fn definition_request(id: i64, uri: &str, pos: Value) -> Value {
     )
 }
 
+pub(super) fn signature_help_request(id: i64, uri: &str, pos: Value) -> Value {
+    request(
+        id,
+        "textDocument/signatureHelp",
+        json!({"textDocument": {"uri": uri}, "position": pos}),
+    )
+}
+
 pub(super) fn workspace_symbol_request(id: i64, query: &str) -> Value {
     request(id, "workspace/symbol", json!({"query": query}))
 }
