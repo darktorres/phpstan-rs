@@ -1873,23 +1873,29 @@ like these).
 
 ## F. Single-cursor request/response capabilities
 
-### F1. Live, flow-narrowed hover type for local variables (currently wired to `None`)
+### F1. Live, flow-narrowed hover type for local variables (already implemented)
 
-`Checker::probe_span`/`probe_hit` (`src/checker.rs:758-776`) already stash
-a matched span's inferred type during an ordinary `check_expr` pass for
-`MethodCall`/`PropertyAccess` receivers, and the identical span-match
-pattern already fires for `ExprKind::Variable` (`src/checker/expr.rs:
-1223-1245`) to populate `probe_var_provenance` - but that same call site
-computes the variable's live `Type` right there (`locals.get(name)`,
-`expr.rs:1241-1244`) and never stashes it into `probe_hit` too. `lsp.rs:
-266-269` documents this exact gap in its own code comment. Real PHPStan's
-only way to inspect an inferred type at a point is `PHPStan\dumpType($expr)`
-(`Rules/Debug/DumpTypeRule.php:1-50`) - editing the analyzed source to
-insert the call, then re-running the whole CLI. Wiring the same field for
-`ExprKind::Variable` is a ~3-line addition at an already-instrumented call
-site. (AM2 below depends on this same gap for one of its two cases.)
-
-**Effort: small.**
+`Checker::probe_span`/`probe_hit` (`src/checker.rs:758-776`) stash a
+matched span's inferred type during an ordinary `check_expr` pass for
+`MethodCall`/`PropertyAccess` receivers, and `ExprKind::Variable`
+(`src/checker/expr.rs:1249-1273`) already does the same for a plain
+variable read (`self.probe_hit_at(e.span, &ty)`, right after populating
+`probe_var_provenance` for the identical span) - not a gap, contrary to
+this section's own prior text. Every real binding-site shape stashes into
+`probe_hit` too: `bind_assignment_target`'s `Variable` arm
+(`src/checker/assignment.rs:142`, covering a plain/compound assignment's
+LHS, every destructuring leaf, and a `foreach` loop's value binding via
+`loops.rs:722`), `bind_simple_target` for a `foreach` key
+(`assignment.rs:372-379`, its own doc comment: "target is a foreach key's
+bare `$var` expression"), plus parameter/promoted-parameter
+(`function_decl.rs:449,555`), `global`/`static` declaration
+(`stmt.rs:443,470`), and `catch` binding (`stmt/try_catch.rs:184`) sites -
+all exercised by `src/lsp/tests/variable_definitions.rs`. Real PHPStan's
+only way to inspect an inferred type at a point remains
+`PHPStan\dumpType($expr)` (`Rules/Debug/DumpTypeRule.php:1-50`) - editing
+the analyzed source to insert the call, then re-running the whole CLI;
+phpstan-rs's LSP already does this live, for every binding-site shape,
+with no source edit required.
 
 ### F2. Wire the already-typed `DiagnosticFix` plumbing into `textDocument/codeAction`
 
@@ -2200,15 +2206,13 @@ exactly this case, so `probe_receiver_type` already returns the real
 feeding that `Type` through the already-defined `type_to_classes` helper
 and looking each resulting class name up in `decl_locations().classes`
 for its own declaration span. **(b)** Cursor on a bare local variable not
-used as a receiver: this needs the exact same fix F1 already names and
-describes as effort:small - `ExprKind::Variable`'s arm currently only
-stashes `probe_var_provenance` (assignment-site spans) and still does not
-set `probe_hit`, confirmed by reading that exact arm in the current
-working tree - so typeDefinition on a bare variable is blocked on
-completing F1's already-identified gap first, not a second independent
-gap (disclosed explicitly, not presented as independent).
+used as a receiver: `probe_hit` is already populated here too (see F1,
+now corrected) - `ExprKind::Variable`'s arm already stashes both
+`probe_var_provenance` and `probe_hit` at the same span, so this sub-case
+needs only the same `type_to_classes`/`decl_locations().classes` wiring
+as (a), not a second, F1-blocked gap.
 
-**Effort: medium.**
+**Effort: small** (revised down - both sub-cases need only the same LSP-side wiring, with no checker-side prerequisite left).
 
 ---
 

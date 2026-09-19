@@ -167,6 +167,34 @@ fn hover_on_a_variable_read_shows_its_inferred_type() {
 }
 
 #[test]
+fn hover_on_a_plain_assignment_targets_own_lhs_shows_its_inferred_type() {
+    let dir = TempDir::new("hover_var_assign_lhs");
+    let src = "<?php function f() { $x = 1; echo $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x = 1");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2)["contents"], "1");
+}
+
+#[test]
+fn hover_on_a_compound_assignment_targets_own_lhs_shows_post_op_type() {
+    // Pins the last-write-wins ordering: `check_expr(lhs)` stashes the
+    // pre-op read, then `bind_assignment_target(lhs, new_ty)` overwrites
+    // it, inside the `CompoundAssign` arm - hover must show the post-op
+    // result, not the stale pre-op value.
+    let dir = TempDir::new("hover_var_compound_assign_lhs");
+    let src = "<?php function f() { $x = 1; $x += 1; echo $x; }";
+    let path = dir.write("a.php", src);
+    let uri = path_to_uri(&path).to_string();
+    let pos = lsp_pos(src, "$x += 1");
+
+    let messages = run(&dir, &[hover_request(2, &uri, pos)]);
+    assert_eq!(response_result(&messages, 2)["contents"], "2");
+}
+
+#[test]
 fn hover_on_a_closure_use_capture_shows_its_inferred_type() {
     // The capture token itself, inside `use (...)`, is a real reference
     // to the outer scope's own `$x`, so `probe_hit`/hover must resolve
