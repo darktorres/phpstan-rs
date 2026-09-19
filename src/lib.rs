@@ -34,6 +34,7 @@ pub mod restricted_symbols;
 pub mod sql_reflection_config;
 pub mod sql_reflection_reflector;
 pub mod sql_reflection_schema;
+pub mod sql_reflection_schema_drift;
 pub mod token;
 pub mod types;
 

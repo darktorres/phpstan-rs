@@ -6,7 +6,8 @@ use std::sync::Arc;
 use output::OutputFormat;
 use phpstan_rs::{
     baseline, checker, composer, config, doctrine_functions, ignore_errors, output, php_version,
-    project, restricted_symbols, sql_reflection_config, sql_reflection_schema,
+    project, restricted_symbols, sql_reflection_config, sql_reflection_reflector,
+    sql_reflection_schema, sql_reflection_schema_drift,
 };
 use rayon::prelude::*;
 
@@ -661,6 +662,29 @@ pub(crate) fn run_check_project_command(
         }
         None => None,
     };
+    // Schema drift check: only meaningful when both a static schema
+    // *and* a live-connection config are configured together - a live
+    // connection is otherwise never opened eagerly at startup
+    // (`SqlReflectorHandle`'s own lazy-on-first-use design), but this
+    // check's whole point is comparing the two sources once, up front,
+    // so the eagerness here is scoped to exactly the case where the
+    // user already asked for both.
+    if let Some(schema) = &sql_reflection_schema
+        && let Some(config) = &sql_reflection_config
+    {
+        // `SqlReflectorHandle::get` already refuses a schema_file-only
+        // config with no real live intent (no `database`/`path`) -
+        // returning `None` there, same as it would for any other
+        // real caller, so nothing further needs to be checked here.
+        let handle = sql_reflection_reflector::SqlReflectorHandle::default();
+        if let Some(reflector) = handle.get(Some(config)) {
+            for warning in
+                sql_reflection_schema_drift::schema_drift_warnings(schema, reflector, config.driver)
+            {
+                eprintln!("{warning}");
+            }
+        }
+    }
 
     let mut scan_dirs = if !scan_dirs.is_empty() {
         scan_dirs

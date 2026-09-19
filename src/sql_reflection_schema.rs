@@ -80,6 +80,12 @@ impl SchemaCatalog {
     pub fn column(&self, table: &str, column: &str) -> Option<&SchemaColumn> {
         self.table(table)?.iter().find(|c| c.name == column)
     }
+
+    /// Every declared table's own name - the schema drift check's own
+    /// iteration surface (`sql_reflection_schema_drift`).
+    pub fn table_names(&self) -> impl Iterator<Item = &str> {
+        self.tables.keys().map(String::as_str)
+    }
 }
 
 pub fn parse_ddl_file(path: &Path, driver: SqlDriver) -> Result<SchemaCatalog, String> {
