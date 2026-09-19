@@ -1,0 +1,535 @@
+//! Sub-phase B: folds a `Doctrine\DBAL\Query\QueryBuilder` fluent chain
+//! (root: `$connection->createQueryBuilder()`) into one literal SQL
+//! string sub-phase C's reflector can `PREPARE` against. Same backward-
+//! walk architecture as Phase 168's `checker::doctrine::query_builder`
+//! (`resolve_query_builder_chain`), reusing its own `Locals::
+//! query_builder_aliases` map (`looks_like_query_builder_chain`'s own
+//! check is purely syntactic - "ends in a call named
+//! `createQueryBuilder`" - so it already covers this class's chains too,
+//! no separate recording path needed) - but the end product is
+//! different: this class has no ORM/entity metadata at all, so the goal
+//! is a syntactically valid SQL string, not a semantically faithful
+//! replica of what real `QueryBuilder::getSQL()` would produce.
+//! Clause order/text shape read directly from `vendor/doctrine/dbal/
+//! src/Query/QueryBuilder.php`'s own `getSQLForSelect`/`getFromClauses`/
+//! `getSQLForInsert`/`getSQLForUpdate`/`getSQLForDelete` as ground
+//! truth, not guessed.
+//!
+//! `where`/`andWhere`/`orWhere`/`having`/`andHaving`/`orHaving` genuinely
+//! need folding here, unlike Phase 168's own DQL chain-folder (which
+//! drops them entirely - they never change a DQL query's own result
+//! *shape*): this class's SQL text needs every clause to be a real,
+//! syntactically valid `PREPARE` target, and dropping a `WHERE`/`HAVING`
+//! clause could leave dangling SQL (e.g. an alias only introduced by a
+//! join condition). The exact boolean-combinator structure real DBAL's
+//! own `CompositeExpression` would produce isn't reproduced precisely
+//! (`andWhere`/`orWhere` are both folded by joining with their own
+//! keyword) - only syntactic validity matters here, never logical
+//! correctness, since this text is never executed, only prepared.
+
+use crate::ast::{Arg, Expr, ExprKind};
+use crate::checker::assignment::literal_string_value;
+use crate::checker::{Checker, Locals};
+use crate::types::Type;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum JoinKind {
+    Inner,
+    Left,
+    Right,
+}
+
+impl JoinKind {
+    fn keyword(self) -> &'static str {
+        match self {
+            JoinKind::Inner => "JOIN",
+            JoinKind::Left => "LEFT JOIN",
+            JoinKind::Right => "RIGHT JOIN",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FromClause {
+    table: String,
+    alias: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JoinClause {
+    kind: JoinKind,
+    table: String,
+    alias: String,
+    condition: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Dml {
+    Insert {
+        table: String,
+        values: Vec<(String, String)>,
+    },
+    Update {
+        table: String,
+        set: Vec<(String, String)>,
+    },
+    Delete {
+        table: String,
+    },
+}
+
+/// `None` fields/empty vecs mean "never set" - a `SELECT` chain with no
+/// `select()`/`from()` call at all is real, valid-to-detect-but-
+/// undecidable SQL (mirrors real `QueryBuilder::getSQLForSelect()`'s own
+/// `throw` on an empty `select`), not this module's own failure to look
+/// hard enough.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct DbalQueryBuilderChain {
+    distinct: bool,
+    select: Vec<String>,
+    from: Vec<FromClause>,
+    joins: Vec<JoinClause>,
+    where_parts: Vec<(bool, String)>, // (is_or, predicate) - first entry's own bool is irrelevant
+    group_by: Vec<String>,
+    having_parts: Vec<(bool, String)>,
+    order_by: Vec<String>,
+    limit: Option<i64>,
+    offset: Option<i64>,
+    dml: Option<Dml>,
+}
+
+impl DbalQueryBuilderChain {
+    /// Renders the folded chain into one literal SQL string, mirroring
+    /// real `QueryBuilder::getSQL()`'s own dispatch on statement kind -
+    /// `None` only for a `SELECT`-shaped chain with no `select`/`from`
+    /// at all (an empty chain, e.g. a bare `createQueryBuilder()` never
+    /// built on further - real DBAL throws at this exact point too).
+    fn render(&self) -> Option<String> {
+        if let Some(dml) = &self.dml {
+            return Some(match dml {
+                Dml::Insert { table, values } => {
+                    let columns = values.iter().map(|(c, _)| c.as_str()).collect::<Vec<_>>();
+                    let placeholders = values.iter().map(|(_, v)| v.as_str()).collect::<Vec<_>>();
+                    format!(
+                        "INSERT INTO {table} ({}) VALUES({})",
+                        columns.join(", "),
+                        placeholders.join(", ")
+                    )
+                }
+                Dml::Update { table, set } => {
+                    let assignments = set
+                        .iter()
+                        .map(|(k, v)| format!("{k} = {v}"))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let mut sql = format!("UPDATE {table} SET {assignments}");
+                    if let Some(where_sql) = self.where_sql() {
+                        sql.push_str(" WHERE ");
+                        sql.push_str(&where_sql);
+                    }
+                    sql
+                }
+                Dml::Delete { table } => {
+                    let mut sql = format!("DELETE FROM {table}");
+                    if let Some(where_sql) = self.where_sql() {
+                        sql.push_str(" WHERE ");
+                        sql.push_str(&where_sql);
+                    }
+                    sql
+                }
+            });
+        }
+
+        if self.select.is_empty() || self.from.is_empty() {
+            return None;
+        }
+        let mut sql = String::from("SELECT ");
+        if self.distinct {
+            sql.push_str("DISTINCT ");
+        }
+        sql.push_str(&self.select.join(", "));
+        sql.push_str(" FROM ");
+        let from_clauses: Vec<String> = self
+            .from
+            .iter()
+            .map(|f| match &f.alias {
+                Some(alias) if alias != &f.table => format!("{} {alias}", f.table),
+                _ => f.table.clone(),
+            })
+            .collect();
+        sql.push_str(&from_clauses.join(", "));
+        // Real DBAL associates each join with a specific `fromAlias`
+        // (`getSQLForJoins`) - simplified here to "every join follows
+        // every from clause, in call order," syntactically valid SQL for
+        // the overwhelmingly common single-`from()` shape and harmless
+        // even for a multi-`from()` query (the joined table still ends
+        // up in the right `FROM` list, just not annotated onto one
+        // specific from-alias's own text).
+        for join in &self.joins {
+            sql.push(' ');
+            sql.push_str(join.kind.keyword());
+            sql.push(' ');
+            sql.push_str(&join.table);
+            sql.push(' ');
+            sql.push_str(&join.alias);
+            if let Some(condition) = &join.condition {
+                sql.push_str(" ON ");
+                sql.push_str(condition);
+            }
+        }
+        if let Some(where_sql) = self.where_sql() {
+            sql.push_str(" WHERE ");
+            sql.push_str(&where_sql);
+        }
+        if !self.group_by.is_empty() {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(&self.group_by.join(", "));
+        }
+        if let Some(having_sql) = combine_predicate_parts(&self.having_parts) {
+            sql.push_str(" HAVING ");
+            sql.push_str(&having_sql);
+        }
+        if !self.order_by.is_empty() {
+            sql.push_str(" ORDER BY ");
+            sql.push_str(&self.order_by.join(", "));
+        }
+        if let Some(limit) = self.limit {
+            sql.push_str(&format!(" LIMIT {limit}"));
+        }
+        if let Some(offset) = self.offset {
+            sql.push_str(&format!(" OFFSET {offset}"));
+        }
+        Some(sql)
+    }
+
+    fn where_sql(&self) -> Option<String> {
+        combine_predicate_parts(&self.where_parts)
+    }
+}
+
+fn combine_predicate_parts(parts: &[(bool, String)]) -> Option<String> {
+    let mut iter = parts.iter();
+    let (_, first) = iter.next()?;
+    let mut out = first.clone();
+    for (is_or, part) in iter {
+        out.push_str(if *is_or { " OR " } else { " AND " });
+        out.push_str(part);
+    }
+    Some(out)
+}
+
+fn looks_like_dbal_query_builder_chain(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => true,
+        ExprKind::MethodCall(inner, _, _, _) => looks_like_dbal_query_builder_chain(inner),
+        ExprKind::Grouping(inner) => looks_like_dbal_query_builder_chain(inner),
+        _ => false,
+    }
+}
+
+struct ChainCall {
+    method: String,
+    args: Vec<Arg>,
+}
+
+enum Cursor<'a> {
+    Borrowed(&'a Expr),
+    Owned(std::rc::Rc<Expr>),
+}
+
+impl std::ops::Deref for Cursor<'_> {
+    type Target = Expr;
+
+    fn deref(&self) -> &Expr {
+        match self {
+            Cursor::Borrowed(e) => e,
+            Cursor::Owned(e) => e,
+        }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// A `fetch*`/`executeQuery`/`executeStatement` call's own receiver
+    /// expression - resolves its fluent `Doctrine\DBAL\Query\
+    /// QueryBuilder` chain into one literal SQL string, `None` when any
+    /// part of it is undecidable (a dynamic argument, an unrecognized
+    /// chain root, or a `SELECT`-shaped chain missing `select`/`from`
+    /// entirely).
+    pub(crate) fn resolve_dbal_query_builder_sql(
+        &self,
+        recv: &Expr,
+        locals: &Locals,
+    ) -> Option<String> {
+        if !looks_like_dbal_query_builder_chain(recv) {
+            return None;
+        }
+        let mut calls: Vec<ChainCall> = Vec::new();
+        let mut cursor = Cursor::Borrowed(recv);
+        loop {
+            match &cursor.kind {
+                ExprKind::MethodCall(_, method, _, _) if **method == *"createQueryBuilder" => break,
+                ExprKind::MethodCall(inner, method, args, _) => {
+                    calls.push(ChainCall {
+                        method: method.to_string(),
+                        args: args.clone(),
+                    });
+                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()));
+                }
+                ExprKind::Grouping(inner) => {
+                    cursor = Cursor::Owned(std::rc::Rc::new((**inner).clone()))
+                }
+                ExprKind::Variable(name) => {
+                    let rhs = locals.query_builder_aliases.get(name.as_ref())?;
+                    cursor = Cursor::Owned(rhs.clone());
+                }
+                _ => return None,
+            }
+        }
+        calls.reverse();
+
+        let mut chain = DbalQueryBuilderChain::default();
+        for call in &calls {
+            self.apply_dbal_chain_call(&mut chain, &call.method, &call.args, locals)?;
+        }
+        chain.render()
+    }
+
+    /// A directly-passed SQL argument (`fetchAssociative($sql, ...)`) -
+    /// the "already a plain string" shortcut, matching Phase 168's own
+    /// 168g precedent for `createQuery($dql)`: a literal or constant-
+    /// foldable string needs no chain-walking at all.
+    pub(crate) fn foldable_sql_string(&self, expr: &Expr, locals: &Locals) -> Option<String> {
+        fold_string_expr(self, expr, locals)
+    }
+
+    fn apply_dbal_chain_call(
+        &self,
+        chain: &mut DbalQueryBuilderChain,
+        method: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<()> {
+        match method {
+            "select" => chain.select = self.foldable_sql_arg_strings(args, locals)?,
+            "addSelect" => chain
+                .select
+                .extend(self.foldable_sql_arg_strings(args, locals)?),
+            "distinct" => chain.distinct = true,
+            "from" => {
+                let table = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                let alias = args
+                    .get(1)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                chain.from.push(FromClause { table, alias });
+            }
+            "join" | "innerJoin" | "leftJoin" | "rightJoin" => {
+                let kind = match method {
+                    "leftJoin" => JoinKind::Left,
+                    "rightJoin" => JoinKind::Right,
+                    _ => JoinKind::Inner,
+                };
+                // args[0] is `fromAlias`, not needed for this module's
+                // own simplified single-FROM-list rendering (see
+                // `DbalQueryBuilderChain::render`'s own doc comment).
+                let table = args
+                    .get(1)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                let alias = args
+                    .get(2)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                let condition = args
+                    .get(3)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                chain.joins.push(JoinClause {
+                    kind,
+                    table,
+                    alias,
+                    condition,
+                });
+            }
+            "where" => {
+                chain.where_parts = combine_variadic_predicates(self, args, locals, false)?;
+            }
+            "andWhere" => {
+                chain
+                    .where_parts
+                    .extend(combine_variadic_predicates(self, args, locals, false)?);
+            }
+            "orWhere" => {
+                chain
+                    .where_parts
+                    .extend(combine_variadic_predicates(self, args, locals, true)?);
+            }
+            "having" => {
+                chain.having_parts = combine_variadic_predicates(self, args, locals, false)?;
+            }
+            "andHaving" => {
+                chain
+                    .having_parts
+                    .extend(combine_variadic_predicates(self, args, locals, false)?);
+            }
+            "orHaving" => {
+                chain
+                    .having_parts
+                    .extend(combine_variadic_predicates(self, args, locals, true)?);
+            }
+            "groupBy" => chain.group_by = self.foldable_sql_arg_strings(args, locals)?,
+            "addGroupBy" => chain
+                .group_by
+                .extend(self.foldable_sql_arg_strings(args, locals)?),
+            "orderBy" => {
+                let sort = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                let order = args
+                    .get(1)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                chain.order_by = vec![order_by_entry(sort, order)];
+            }
+            "addOrderBy" => {
+                let sort = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                let order = args
+                    .get(1)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals));
+                chain.order_by.push(order_by_entry(sort, order));
+            }
+            "setMaxResults" => {
+                chain.limit = args.first().and_then(|a| self.foldable_arg_int(a, locals));
+            }
+            "setFirstResult" => {
+                chain.offset = args.first().and_then(|a| self.foldable_arg_int(a, locals));
+            }
+            "insert" => {
+                let table = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                chain.dml = Some(Dml::Insert {
+                    table,
+                    values: Vec::new(),
+                });
+            }
+            "update" => {
+                let table = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                chain.dml = Some(Dml::Update {
+                    table,
+                    set: Vec::new(),
+                });
+            }
+            "delete" => {
+                let table = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                chain.dml = Some(Dml::Delete { table });
+            }
+            "set" | "setValue" => {
+                let key = args
+                    .first()
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                let value = args
+                    .get(1)
+                    .and_then(|a| self.foldable_sql_arg_string(a, locals))?;
+                match &mut chain.dml {
+                    Some(Dml::Update { set, .. }) => set.push((key, value)),
+                    Some(Dml::Insert { values, .. }) => values.push((key, value)),
+                    _ => return None,
+                }
+            }
+            "values" => {
+                let ExprKind::ArrayLiteral(items) = &args.first()?.value.kind else {
+                    return None;
+                };
+                let mut values = Vec::new();
+                for item in items {
+                    let key = item
+                        .key
+                        .as_ref()
+                        .and_then(|k| self.foldable_arg_string_expr(k, locals))?;
+                    let value = self.foldable_arg_string_expr(&item.value, locals)?;
+                    values.push((key, value));
+                }
+                match &mut chain.dml {
+                    Some(Dml::Insert { values: dst, .. }) => *dst = values,
+                    _ => return None,
+                }
+            }
+            // `setParameter`/`setParameters`/parameter-related methods
+            // never change the SQL text itself (they bind a value to an
+            // already-written `?`/`:name` placeholder) - sub-phase E's
+            // own concern, not this fold. Any other unrecognized method
+            // is likewise simply ignored, matching Phase 168's own
+            // `apply_chain_call` precedent.
+            _ => {}
+        }
+        Some(())
+    }
+
+    fn foldable_sql_arg_string(&self, arg: &Arg, locals: &Locals) -> Option<String> {
+        self.foldable_arg_string_expr(&arg.value, locals)
+    }
+
+    fn foldable_arg_string_expr(&self, expr: &Expr, locals: &Locals) -> Option<String> {
+        fold_string_expr(self, expr, locals)
+    }
+
+    fn foldable_sql_arg_strings(&self, args: &[Arg], locals: &Locals) -> Option<Vec<String>> {
+        args.iter()
+            .map(|a| self.foldable_sql_arg_string(a, locals))
+            .collect()
+    }
+
+    fn foldable_arg_int(&self, arg: &Arg, locals: &Locals) -> Option<i64> {
+        match self.infer_expr(&arg.value, locals) {
+            Type::IntLiteral(n) => Some(n),
+            _ => None,
+        }
+    }
+}
+
+fn fold_string_expr(checker: &Checker, expr: &Expr, locals: &Locals) -> Option<String> {
+    if let Some(s) = literal_string_value(expr) {
+        return Some(s.into_owned());
+    }
+    match checker.infer_expr(expr, locals) {
+        Type::StringLiteral(s) => Some(s),
+        _ => None,
+    }
+}
+
+/// `where(...$predicates)`/`having(...$predicates)` take one-or-more
+/// variadic predicate strings, real DBAL `AND`-combining them together
+/// into one `CompositeExpression` even within a single call
+/// (`where('a = 1', 'b = 2')` means `a = 1 AND b = 2`) before that
+/// composite itself joins the chain's own running predicate the way
+/// `is_or` says.
+fn combine_variadic_predicates(
+    checker: &Checker,
+    args: &[Arg],
+    locals: &Locals,
+    is_or: bool,
+) -> Option<Vec<(bool, String)>> {
+    let mut parts = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        let s = fold_string_expr(checker, &arg.value, locals)?;
+        parts.push((if i == 0 { is_or } else { false }, s));
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    Some(parts)
+}
+
+fn order_by_entry(sort: String, order: Option<String>) -> String {
+    match order {
+        Some(order) => format!("{sort} {order}"),
+        None => sort,
+    }
+}
+
+#[cfg(test)]
+mod tests;

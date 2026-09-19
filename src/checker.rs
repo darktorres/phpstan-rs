@@ -1021,6 +1021,7 @@ mod property_type_too_wide;
 mod resolve;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
+pub(crate) mod sql_reflection;
 mod stmt;
 pub(crate) mod suggest;
 mod throws;
