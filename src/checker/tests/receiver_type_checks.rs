@@ -240,3 +240,129 @@ mod method_and_property_non_object {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }
+
+mod offset_non_accessible {
+    use super::*;
+
+    #[test]
+    fn indexing_each_closed_scalar_type_is_flagged() {
+        for hint in ["int", "bool", "float"] {
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({hint} $x) {{
+                        echo $x['a'];
+                    }}
+                "#
+            ));
+            assert_eq!(d.len(), 1, "hint {hint}: got {d:?}");
+            assert_eq!(
+                d[0].identifier, "offsetAccess.nonOffsetAccessible",
+                "hint {hint}: got {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn indexing_a_void_returning_call_s_result_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function voidFn(): void {}
+                function f() {
+                    $x = voidFn();
+                    echo $x['a'];
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "offsetAccess.nonOffsetAccessible");
+    }
+
+    #[test]
+    fn indexing_a_null_or_string_base_is_not_flagged() {
+        // The two verified exceptions: `NullType`/`StringType` both
+        // return "yes" from real PHPStan's own `isOffsetAccessible()`.
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = null;
+                    echo $x['a'];
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function f(string $x) {
+                    echo $x['a'];
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn indexing_an_arrayaccess_implementing_class_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Container implements ArrayAccess {
+                    function offsetExists($offset): bool { return true; }
+                    function offsetGet($offset): mixed { return null; }
+                    function offsetSet($offset, $value): void {}
+                    function offsetUnset($offset): void {}
+                }
+                function f(Container $c) {
+                    echo $c['a'];
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn indexing_a_plain_class_not_implementing_arrayaccess_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Plain {}
+                function f(Plain $p) {
+                    echo $p['a'];
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "offsetAccess.nonOffsetAccessible");
+    }
+
+    #[test]
+    fn indexing_an_interface_typed_receiver_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                interface Countable2 {}
+                function f(Countable2 $c) {
+                    echo $c['a'];
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn a_write_onto_a_null_or_scalar_base_is_not_flagged_by_this_check() {
+        // Real PHP auto-vivifies `null` into an array on write - this
+        // check is deliberately read-only, mirroring
+        // `check_shape_key_access`'s own identical write-side exclusion.
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = null;
+                    $x['a'] = 1;
+                }
+            "#,
+        );
+        assert!(
+            !d.iter()
+                .any(|x| x.identifier == "offsetAccess.nonOffsetAccessible"),
+            "unexpected diagnostics: {d:?}"
+        );
+    }
+}

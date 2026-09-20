@@ -1823,6 +1823,7 @@ impl<'a> Checker<'a> {
                 match idx {
                     Some(i) => {
                         self.check_expr(i, locals, label);
+                        self.check_offset_accessibility(&base_ty, i, label);
                         self.check_shape_key_access(base, i, locals, label);
                         self.check_dim_fetch_key_type(base, i, locals, label);
                         // The `Index` counterpart of `PropertyAccess`'s

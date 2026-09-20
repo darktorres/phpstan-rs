@@ -444,6 +444,89 @@ impl<'a> Checker<'a> {
             "shapeAccess.notFound",
         );
     }
+
+    /// Flags `$x[...]` (a read) when `$x`'s type is confirmed to never be
+    /// offset-accessible at all (`offsetAccess.nonOffsetAccessible`) -
+    /// mirrors real PHPStan's `Type::isOffsetAccessible()`. **Read-only**,
+    /// mirroring `check_shape_key_access`'s own explicit write-side
+    /// exclusion: `$x = null; $x['a'] = 1;` legally auto-vivifies `$x`
+    /// into an array on write, so this is only ever wired into a read
+    /// site, never `check_assignment_target`'s.
+    pub(crate) fn check_offset_accessibility(&mut self, base_ty: &Type, idx: &Expr, label: &str) {
+        if self.type_confirmed_not_offset_accessible(base_ty) {
+            self.report(
+                label.to_string(),
+                format!("Cannot access offset on {base_ty}."),
+                idx.span,
+                3,
+                "offsetAccess.nonOffsetAccessible",
+            );
+        }
+    }
+
+    /// Whether `ty` is confirmed to never support `[...]` read access -
+    /// verified against real PHPStan's own `Type::isOffsetAccessible()`
+    /// implementations, not assumed. `Null` is the one deliberate,
+    /// source-verified exception: unlike `Bool`/`Int`/`Float` (each
+    /// `use NonOffsetAccessibleTypeTrait`), `NullType::isOffsetAccessible()`
+    /// (`NullType.php:196`) returns "yes" - real PHPStan never flags
+    /// `$x = null; echo $x['a'];`, only the legal auto-vivification write
+    /// explains why `Null` needs this exemption while still being closed
+    /// for `method.nonObject`/`property.nonObject`/`foreach.nonIterable`.
+    /// `String`/`StringLiteral`/`ClassString` are accessible too - real
+    /// PHP's own `$str[0]` character read.
+    pub(crate) fn type_confirmed_not_offset_accessible(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(..)
+            | Type::ArrayShape(_)
+            | Type::HasOffsetValue(..)
+            | Type::String
+            | Type::StringLiteral(_)
+            | Type::ClassString(_)
+            | Type::Null => false,
+            Type::Void
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Int
+            | Type::IntLiteral(_)
+            | Type::IntRange(..)
+            | Type::Float
+            | Type::FloatLiteral(_) => true,
+            Type::Object(class, _) | Type::EnumCase(class, _) => {
+                self.class_confirmed_not(class, "ArrayAccess")
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|m| self.type_confirmed_not_offset_accessible(m)),
+            Type::Intersection(members) => members
+                .iter()
+                .all(|m| self.type_confirmed_not_offset_accessible(m)),
+            Type::TemplateParam(param) => self.type_confirmed_not_offset_accessible(&param.bound),
+            Type::Conditional {
+                if_true, if_false, ..
+            } => {
+                self.type_confirmed_not_offset_accessible(if_true)
+                    || self.type_confirmed_not_offset_accessible(if_false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Shared by `type_confirmed_not_offset_accessible`/
+    /// `type_confirmed_not_destructurable` - `class` is confirmed to
+    /// never satisfy `interface` only when it's a registered,
+    /// non-interface class that doesn't `is_subclass_of` it. An
+    /// interface-typed receiver, or an unregistered class, stays
+    /// "maybe" - mirrors `iterable_element_type`'s own identical
+    /// leniency for `Traversable` already established in this codebase.
+    pub(crate) fn class_confirmed_not(&self, class: &str, interface: &str) -> bool {
+        self.registry
+            .classes
+            .get(class)
+            .is_some_and(|info| info.kind != ClassKind::Interface)
+            && !self.registry.is_subclass_of(class, interface)
+    }
 }
 
 pub(crate) fn is_superglobal(name: &str) -> bool {
