@@ -618,3 +618,73 @@ mod destructuring_non_array {
         );
     }
 }
+
+mod clone_non_object {
+    use super::*;
+
+    #[test]
+    fn cloning_each_closed_scalar_type_is_flagged() {
+        for hint in ["int", "string", "array"] {
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({hint} $x) {{
+                        $y = clone $x;
+                    }}
+                "#
+            ));
+            assert_eq!(d.len(), 1, "hint {hint}: got {d:?}");
+            assert_eq!(d[0].identifier, "clone.nonObject", "hint {hint}: got {d:?}");
+        }
+    }
+
+    #[test]
+    fn cloning_null_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = null;
+                    $y = clone $x;
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "clone.nonObject");
+    }
+
+    #[test]
+    fn cloning_a_real_class_or_mixed_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Foo {}
+                function f(Foo $x) {
+                    $y = clone $x;
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function f($x) {
+                    $y = clone $x;
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn cloning_stdclass_is_not_flagged_unlike_calling_a_method_on_it() {
+        // `isCloneable()` has no `stdClass` exception, unlike
+        // `canCallMethods()` - the two must not share a classifier.
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = new stdClass();
+                    $y = clone $x;
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+}

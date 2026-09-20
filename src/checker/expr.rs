@@ -1577,6 +1577,19 @@ impl<'a> Checker<'a> {
             // honest answer.
             ExprKind::Clone(inner, overrides) => {
                 let inner_ty = self.check_expr(inner, locals, label);
+                // `clone.nonObject` - shares `property.nonObject`'s own
+                // `stdClass`-unaware classifier, not `method.nonObject`'s:
+                // real PHPStan's `ObjectType::isCloneable()` (unlike
+                // `canCallMethods()`) has no `stdClass` exception.
+                if type_can_never_be_object(&inner_ty) {
+                    self.report(
+                        label.to_string(),
+                        format!("Cannot clone non-object variable of type {inner_ty}."),
+                        inner.span,
+                        3,
+                        "clone.nonObject",
+                    );
+                }
                 if let Some(o) = overrides {
                     self.check_expr(o, locals, label);
                 }
