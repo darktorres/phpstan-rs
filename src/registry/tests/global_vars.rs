@@ -436,3 +436,58 @@ fn a_constant_then_literal_suffix_include_target_resolves_by_suffix_match() {
         Some(&Type::Object("Template".to_string(), vec![]))
     );
 }
+
+#[test]
+fn a_multi_level_nested_index_write_still_records_its_outermost_key() {
+    // Real Piwigo shape (`functions_mail.inc.php`'s `switch_lang_to`):
+    // `$switch_lang['language'][$user['language']]['lang_info'] = ...;`
+    // doesn't match the single-level `$name['key'] = value` shape at
+    // all, but the outermost key's own existence is still real and must
+    // be recorded - missing it produced a genuine false
+    // `shapeAccess.notFound` on `$switch_lang['language']` reads
+    // elsewhere, confirmed via a piwigo16 corpus diff before this test
+    // was written.
+    let registry = build_with_files(&[(
+        "a.php",
+        r#"<?php
+            $switch_lang['language'][$dynamic]['lang_info'] = 'x';
+        "#,
+    )]);
+    match global_type(&registry, "switch_lang") {
+        Some(Type::ArrayShape(fields)) => {
+            let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
+            assert_eq!(names, vec!["language"], "got: {names:?}");
+        }
+        other => panic!("expected an ArrayShape with a 'language' field, got: {other:?}"),
+    }
+}
+
+#[test]
+fn a_nested_append_write_still_records_its_outermost_key() {
+    // Real Piwigo shape (`functions_mail.inc.php`): `$switch_lang['stack'][]
+    // = $value;` - an append (`Index(base, None)`) nested one level under
+    // a real key. The outermost operation has no key of its own, but
+    // `'stack'` still needs to be recorded.
+    let registry = build_with_files(&[(
+        "a.php",
+        r#"<?php
+            $switch_lang['stack'][] = 'x';
+        "#,
+    )]);
+    match global_type(&registry, "switch_lang") {
+        Some(Type::ArrayShape(fields)) => {
+            let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
+            assert_eq!(names, vec!["stack"], "got: {names:?}");
+        }
+        other => panic!("expected an ArrayShape with a 'stack' field, got: {other:?}"),
+    }
+}
+
+#[test]
+fn a_bare_top_level_append_contributes_nothing() {
+    let registry = build_with_files(&[("a.php", "<?php $g[] = 'x';")]);
+    match global_type(&registry, "g") {
+        None | Some(Type::Mixed) => {}
+        other => panic!("expected no contribution from a bare append, got: {other:?}"),
+    }
+}

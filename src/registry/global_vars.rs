@@ -522,11 +522,14 @@ fn handle_assignment_target<'a>(
                 contribution,
             });
         }
-        ExprKind::Index(base, Some(key)) => {
-            if let ExprKind::Variable(name) = &unwrap_grouping(base).kind
+        ExprKind::Index(base, key_opt) => {
+            if let Some(key) = key_opt
+                && let ExprKind::Variable(name) = &unwrap_grouping(base).kind
                 && is_site(name)
                 && let Some(key_str) = literal_string_key(key)
             {
+                // `$name[<key>] = <rhs>;` - a direct, single-level write:
+                // the field's own value is `<rhs>`'s real resolved type.
                 let ty = if force_mixed {
                     Type::Mixed
                 } else {
@@ -537,9 +540,54 @@ fn handle_assignment_target<'a>(
                     name: Arc::from(name.as_ref()),
                     contribution: SiteContribution::ShapeField(key_str, ty),
                 });
+            } else if let Some((name, key_str)) = root_variable_and_first_key(lhs)
+                && is_site(name)
+            {
+                // `$name[<key>][...]...= <rhs>;` - a deeper, multi-level
+                // write (real Piwigo shape:
+                // `$switch_lang['language'][$user['language']]['lang_info']
+                // = $lang_info;`). The precise nested value type isn't
+                // tracked, but the outermost key's own *existence* is
+                // real and must be recorded - missing it here is exactly
+                // what produced a real false `shapeAccess.notFound`/
+                // `isset.offset` on `$switch_lang['language']` reads
+                // elsewhere before this arm existed (confirmed via a
+                // piwigo16 corpus diff, not hypothesized).
+                out.sites.push(StagedSite {
+                    gate: gate(),
+                    name: Arc::from(name.as_ref()),
+                    contribution: SiteContribution::ShapeField(key_str, Type::Mixed),
+                });
             }
         }
         _ => {}
+    }
+}
+
+/// Walks a chain of `Index` wrappers down to the `Variable` it's rooted
+/// at, returning that variable's name together with the *first* (i.e.
+/// innermost, closest-to-the-variable) literal-string key in the chain -
+/// `$name['language'][$dynamic]['lang_info']` resolves to `(name,
+/// "language")`, not `"lang_info"`. The outermost level's own key can be
+/// `None` (a real Piwigo shape: `$switch_lang['stack'][] = ...;`, an
+/// append onto a nested key, `Index(Index(Variable, Some("stack")),
+/// None)`) - only the *innermost* key, the one paired directly with the
+/// bottomed-out `Variable`, has to actually be a literal. `None` if the
+/// chain doesn't bottom out at a bare variable, or if that innermost key
+/// isn't a literal (including a bare append directly on the variable
+/// itself, `$name[] = ...` - nothing to report there, not a special
+/// case, `key.as_ref()` on `None` already falls through to `None`).
+fn root_variable_and_first_key(expr: &Expr) -> Option<(&Arc<str>, String)> {
+    let ExprKind::Index(base, key) = &unwrap_grouping(expr).kind else {
+        return None;
+    };
+    match &unwrap_grouping(base).kind {
+        ExprKind::Variable(name) => key
+            .as_deref()
+            .and_then(literal_string_key)
+            .map(|k| (name, k)),
+        ExprKind::Index(..) => root_variable_and_first_key(base),
+        _ => None,
     }
 }
 
