@@ -38,6 +38,111 @@ fn a_bare_callable_type_and_a_shaped_closure_type_are_mutually_assignable() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+// Two *different* shapes against each other - real contravariant-
+// parameter/covariant-return subtyping, not the old unconditional
+// leniency.
+
+#[test]
+fn a_narrower_return_type_is_assignable_to_a_wider_one_covariantly() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int): (string|int) $fn */
+            function needsWiderReturn($fn): void {}
+            /** @param Closure(int): string $fn */
+            function test($fn): void {
+                needsWiderReturn($fn);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_wider_return_type_is_not_assignable_to_a_narrower_one() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int): int $fn */
+            function needsIntReturn($fn): void {}
+            /** @param Closure(int): string $fn */
+            function test($fn): void {
+                needsIntReturn($fn);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "a Closure returning string must not satisfy a Closure(int): int position, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_accepting_a_wider_parameter_type_is_assignable_to_a_narrower_position() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int): void $fn */
+            function needsIntParam($fn): void {}
+            /** @param Closure(int|string): void $fn */
+            function test($fn): void {
+                needsIntParam($fn);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_closure_accepting_a_narrower_parameter_type_is_not_assignable_to_a_wider_position() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int|string): void $fn */
+            function needsWiderParam($fn): void {}
+            /** @param Closure(int): void $fn */
+            function test($fn): void {
+                needsWiderParam($fn);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "a Closure(int) only handles int, so it can't stand in for a position whose \
+         own callers might pass a string too - got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_requiring_more_arguments_than_the_expected_shape_provides_is_rejected() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int): void $fn */
+            function needsOneArg($fn): void {}
+            /** @param Closure(int, int): void $fn */
+            function test($fn): void {
+                needsOneArg($fn);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "a Closure requiring 2 arguments can't stand in where only 1 is ever \
+         supplied - got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_with_an_extra_optional_parameter_is_still_assignable() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int): void $fn */
+            function needsOneArg($fn): void {}
+            /** @param Closure(int, int=): void $fn */
+            function test($fn): void {
+                needsOneArg($fn);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_template_param_inside_a_closure_shape_is_marked_not_left_as_a_bogus_class_reference() {
     // Not full call-site template *substitution* - `check_expr`'s arm

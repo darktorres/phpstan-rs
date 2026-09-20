@@ -1891,35 +1891,6 @@ conflating the two). **Effort: medium** — one AST shape change with
 real fan-out, but every touch point is a mechanical match-arm addition,
 not new inference machinery.
 
-## Phase 160 — Contravariant-parameter/covariant-return comparison between two `Closure(...)`/`callable(...)` shapes
-
-Reevaluated out of "Permanent design boundaries" — that entry's stated
-blocker ("needs variance machinery this project declines to build",
-`types/subtype.rs:113-124`) is contradicted by this project's own
-`registry/assignability.rs`, which already has exactly this variance-
-composition machinery for generic template arguments (`Variance::
-Covariant`/`Contravariant`/`Invariant` driving which argument order a
-recursive `is_assignable` call uses - see the nested-variance
-regression tests added alongside this reevaluation). A function type's
-own variance rule is the textbook motivating example for that same
-composition (parameters contravariant, return type covariant), not a
-new concept:
-
-`(Type::Callable(Some(a)), Type::Callable(Some(b)))` should check `a`
-is a real subtype of `b` when: every one of `b`'s parameter types is
-assignable *to* the matching parameter in `a` (contravariant - `a`
-must accept at least everything `b` promises to pass it) and `a`'s
-return type is assignable to `b`'s return type (covariant); arity
-mismatches beyond `b`'s own optional/variadic tail fail outright. The
-"lenient in both directions between two different shapes" fallback
-stays only for a length/shape mismatch this comparison can't resolve
-(matching this project's general "don't know, don't guess" leniency),
-not for the common, fully-resolvable case both shapes already parsed.
-
-**Effort: small** — one `subtype.rs` match arm rewritten using the
-project's own existing variance-composition pattern; no new `Type`
-variant.
-
 ## Phase 165 — Anonymous-class synthetic per-declaration-site identity
 
 Reevaluated out of "Permanent design boundaries" - that entry's own

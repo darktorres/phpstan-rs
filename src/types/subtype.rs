@@ -1,4 +1,4 @@
-use crate::types::{AccessoryKind, Type};
+use crate::types::{AccessoryKind, CallableParam, CallableSig, Type};
 
 /// Whether `fields` (an `ArrayShape`'s field list) is a *definite* list,
 /// canonical-int-key-sequential from zero *and* no optional field
@@ -110,18 +110,17 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => true,
         (a, b) if a == b => true,
 
-        // A shaped callable is always compatible with a bare marker,
-        // and two *different* shapes are unconditionally compatible with
-        // each other - deliberately lenient, since real
-        // contravariant-parameter/covariant-return comparison
-        // (`CallableTypeHelper::isParametersAcceptorSuperTypeOf`) needs
-        // variance machinery this project declines to build. A parsed
-        // callable shape is thus only ever used *forward* (describing
-        // what happens when invoked), never *backward* (to reject an
-        // assignment).
+        // A shaped callable is always compatible with a bare marker -
+        // no shape to compare against on the other side at all.
         (Type::Callable(Some(_)), Type::Callable(None)) => true,
         (Type::Callable(None), Type::Callable(Some(_))) => true,
-        (Type::Callable(Some(_)), Type::Callable(Some(_))) => true,
+        // Real contravariant-parameter/covariant-return comparison
+        // between two *shaped* callables, reusing the identical
+        // variance-composition pattern `registry/assignability.rs`
+        // already has for generic template arguments (parameters
+        // contravariant, return type covariant is that same pattern's
+        // textbook motivating example, not a new concept).
+        (Type::Callable(Some(a)), Type::Callable(Some(b))) => callable_sig_is_subtype(a, b),
 
         (Type::IntLiteral(_), Type::Int) => true,
         (Type::StringLiteral(_), Type::String) => true,
@@ -394,6 +393,70 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
 
         _ => false,
     }
+}
+
+/// `params[i]`, or - once `i` runs past the end - `params`' own trailing
+/// variadic parameter standing in for every later position too (a
+/// variadic tail absorbs any number of positions beyond where it's
+/// written). `None` once `i` is past the end and there's no variadic
+/// tail to absorb it - this parameter list simply has nothing to say
+/// about position `i` at all.
+fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&CallableParam> {
+    params
+        .get(i)
+        .or_else(|| params.last().filter(|p| p.variadic))
+}
+
+/// `Type::Callable(Some(a))` vs `Type::Callable(Some(b))`'s own
+/// `is_subtype` arm - is `a` safely substitutable wherever `b` is
+/// expected? Real contravariant-parameter/covariant-return function-type
+/// subtyping: `a`'s return type must satisfy wherever `b`'s return is
+/// relied on (covariant), and `a` must accept at least everything `b`
+/// itself promises to accept - the same "textbook motivating example"
+/// `registry/assignability.rs`'s own generic-template variance
+/// composition already models for `Covariant`/`Contravariant` positions,
+/// not a new concept. Walks every position either signature has
+/// anything to say about (`effective_callable_param_at`'s own variadic-
+/// tail absorption on both sides), so it never needs an "arity doesn't
+/// resolve, stay lenient" escape hatch - a real mismatch (`a` lacking a
+/// required parameter `b`'s own callers could supply, or `b` lacking a
+/// position `a` requires) is a genuine, confident rejection, not a
+/// "don't know."
+fn callable_sig_is_subtype(a: &CallableSig, b: &CallableSig) -> bool {
+    if !is_subtype(&a.return_type, &b.return_type) {
+        return false;
+    }
+    let positions = a.params.len().max(b.params.len());
+    for i in 0..positions {
+        let a_param = effective_callable_param_at(&a.params, i);
+        let b_param = effective_callable_param_at(&b.params, i);
+        match (a_param, b_param) {
+            // Both signatures speak to this position - the ordinary
+            // contravariant per-parameter check.
+            (Some(ap), Some(bp)) => {
+                if !is_subtype(&bp.ty, &ap.ty) {
+                    return false;
+                }
+            }
+            // `b`'s own callers could supply an argument here (it's
+            // part of `b`'s own signature), but `a` has nothing at this
+            // position at all (no parameter, no variadic tail) - `a`
+            // genuinely can't stand in for `b`.
+            (None, Some(_)) => return false,
+            // `a` has a real parameter here that `b`'s own signature
+            // never reaches - only safe when `a`'s own caller (matching
+            // `b`'s shape) could simply omit it, i.e. it's optional or
+            // variadic; a required extra parameter `b`'s callers would
+            // never supply is a genuine mismatch.
+            (Some(ap), None) => {
+                if !ap.optional && !ap.variadic {
+                    return false;
+                }
+            }
+            (None, None) => {}
+        }
+    }
+    true
 }
 
 /// A practical approximation of PHP's real numeric-string grammar, not

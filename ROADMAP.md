@@ -1718,6 +1718,25 @@ template-binding and purity-tracking machinery are both scoped to a
 named, textually-declared signature, and a PHPDoc-only callable shape
 has no body at all).
 
+**Real contravariant-parameter/covariant-return subtyping between two
+different `Closure(...)`/`callable(...)` shapes** (PHASE_BACKLOG Phase
+160). `types::subtype::is_subtype`'s own `Callable(Some)` vs.
+`Callable(Some)` arm used to be an unconditional `true` between any two
+shapes at all, real contravariance not attempted; replaced with
+`callable_sig_is_subtype`, reusing the identical variance-composition
+pattern `registry/assignability.rs` already has for generic template
+arguments (parameters contravariant, return type covariant is that
+pattern's own textbook motivating example, not a new concept). Walks
+every parameter position either signature has anything to say about
+(`effective_callable_param_at`'s own variadic-tail absorption on both
+sides), so a real arity mismatch - `a` missing a position `b`'s own
+callers could supply, or `a` requiring an extra position `b`'s callers
+never would - is a genuine, confident rejection rather than a "don't
+know, stay lenient" retreat; an extra optional/variadic parameter on
+`a` beyond what `b` declares is still fine. The two bare-marker arms
+(`Callable(Some)` vs. `Callable(None)`, either direction) are unchanged
+- there's no shape to compare against there at all.
+
 **Unreachable-code / constant-condition family.** The full, inferred-
 type-trusting family: `if`/`elseif` (with real PHPStan's own
 last-condition-no-trailing-else exemption), `while`/`do-while`, the
