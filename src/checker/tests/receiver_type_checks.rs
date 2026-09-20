@@ -837,3 +837,152 @@ mod callable_non_callable {
         assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
     }
 }
+
+mod array_unpacking_non_iterable {
+    use super::*;
+
+    #[test]
+    fn spreading_each_closed_scalar_type_into_an_array_literal_is_flagged() {
+        for hint in ["int", "string", "null"] {
+            let (param, expr) = if hint == "null" {
+                ("".to_string(), "$x = null;".to_string())
+            } else {
+                (format!("{hint} $x", hint = hint), String::new())
+            };
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({param}) {{
+                        {expr}
+                        $a = [...$x];
+                    }}
+                "#
+            ));
+            assert_eq!(d.len(), 1, "hint {hint}: got {d:?}");
+            assert_eq!(
+                d[0].identifier, "arrayUnpacking.nonIterable",
+                "hint {hint}: got {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn spreading_an_array_or_an_iterator_implementing_object_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f(array $x) {
+                    $a = [...$x];
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+                /** @implements \Iterator<int, string> */
+                class StringIterator implements \Iterator {
+                    private array $items = ['a', 'b'];
+                    private int $pos = 0;
+                    public function current(): mixed { return $this->items[$this->pos]; }
+                    public function next(): void { $this->pos++; }
+                    public function key(): mixed { return $this->pos; }
+                    public function valid(): bool { return isset($this->items[$this->pos]); }
+                    public function rewind(): void { $this->pos = 0; }
+                }
+                function f(StringIterator $it) {
+                    $a = [...$it];
+                }
+            "#,
+        );
+        assert!(
+            !d.iter()
+                .any(|x| x.identifier == "arrayUnpacking.nonIterable"),
+            "unexpected diagnostics: {d:?}"
+        );
+    }
+
+    #[test]
+    fn the_rest_of_the_array_literal_is_still_checked() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f(int $x) {
+                    $a = [1, ...$x, 2];
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "arrayUnpacking.nonIterable");
+    }
+}
+
+mod argument_unpack_non_iterable {
+    use super::*;
+
+    #[test]
+    fn spreading_a_confirmed_non_iterable_into_a_plain_function_call_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function g($a, $b) {}
+                function f(int $x) {
+                    g(...$x);
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "argument.unpackNonIterable");
+    }
+
+    #[test]
+    fn spreading_a_confirmed_non_iterable_into_a_method_call_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Foo {
+                    function g($a, $b) {}
+                }
+                function f(Foo $obj, int $x) {
+                    $obj->g(...$x);
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "argument.unpackNonIterable");
+    }
+
+    #[test]
+    fn spreading_a_confirmed_non_iterable_into_a_constructor_call_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Foo {
+                    function __construct($a, $b) {}
+                }
+                function f(int $x) {
+                    new Foo(...$x);
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "argument.unpackNonIterable");
+    }
+
+    #[test]
+    fn spreading_mixed_or_an_array_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function g($a, $b) {}
+                function f($x) {
+                    g(...$x);
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function g($a, $b) {}
+                function f(array $x) {
+                    g(...$x);
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+}

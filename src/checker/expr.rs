@@ -508,6 +508,25 @@ impl<'a> Checker<'a> {
                         _ => None,
                     });
                 for (i, a) in args.iter().enumerate() {
+                    // `argument.unpackNonIterable` - `foo(...$x)` where
+                    // `$x` is confirmed to never be iterable at all.
+                    // Checked via `infer_expr` (read-only, no side
+                    // effects) rather than threading a captured type
+                    // through every branch below - this arm's own
+                    // per-argument dispatch already has four different
+                    // shapes, none of which uniformly produce one.
+                    if a.spread {
+                        let spread_ty = self.infer_expr(&a.value, locals);
+                        if self.type_confirmed_not_iterable(&spread_ty) {
+                            self.report(
+                                label.to_string(),
+                                format!("Only iterables can be unpacked, {spread_ty} given."),
+                                a.value.span,
+                                3,
+                                "argument.unpackNonIterable",
+                            );
+                        }
+                    }
                     if is_this_binding_call
                         && matches!(
                             unwrap_grouping(&a.value).kind,
@@ -1120,6 +1139,20 @@ impl<'a> Checker<'a> {
                 self.maybe_record_param_name_hints(sig, args);
                 self.predefine_byref_or_unknown_args(None, sig, args, &resolved, locals);
                 for (i, a) in args.iter().enumerate() {
+                    // `argument.unpackNonIterable` - see `ExprKind::Call`'s
+                    // identical check above.
+                    if a.spread {
+                        let spread_ty = self.infer_expr(&a.value, locals);
+                        if self.type_confirmed_not_iterable(&spread_ty) {
+                            self.report(
+                                label.to_string(),
+                                format!("Only iterables can be unpacked, {spread_ty} given."),
+                                a.value.span,
+                                3,
+                                "argument.unpackNonIterable",
+                            );
+                        }
+                    }
                     let closure_this = sig
                         .and_then(|s| s.params.get(i))
                         .and_then(|p| p.closure_this_type.clone());
@@ -1872,7 +1905,19 @@ impl<'a> Checker<'a> {
                         self.check_expr(k, locals, label);
                         self.check_array_item_key_type(k, locals, label);
                     }
-                    self.check_expr(&item.value, locals, label);
+                    let value_ty = self.check_expr(&item.value, locals, label);
+                    // `arrayUnpacking.nonIterable` - `[...$x]` where
+                    // `$x` is confirmed to never be iterable at all.
+                    // Shares `foreach.nonIterable`'s own classifier.
+                    if item.spread && self.type_confirmed_not_iterable(&value_ty) {
+                        self.report(
+                            label.to_string(),
+                            format!("Only iterables can be unpacked, {value_ty} given."),
+                            item.value.span,
+                            3,
+                            "arrayUnpacking.nonIterable",
+                        );
+                    }
                 }
                 self.check_array_literal_duplicate_keys(items, locals, label);
                 self.infer_array_literal_type(items, locals)
@@ -1952,6 +1997,20 @@ impl<'a> Checker<'a> {
                 self.maybe_record_param_name_hints(ctor_sig, args);
                 self.predefine_byref_or_unknown_args(None, ctor_sig, args, &resolved, locals);
                 for (i, a) in args.iter().enumerate() {
+                    // `argument.unpackNonIterable` - see `ExprKind::Call`'s
+                    // identical check above.
+                    if a.spread {
+                        let spread_ty = self.infer_expr(&a.value, locals);
+                        if self.type_confirmed_not_iterable(&spread_ty) {
+                            self.report(
+                                label.to_string(),
+                                format!("Only iterables can be unpacked, {spread_ty} given."),
+                                a.value.span,
+                                3,
+                                "argument.unpackNonIterable",
+                            );
+                        }
+                    }
                     let closure_this = ctor_sig
                         .and_then(|s| s.params.get(i))
                         .and_then(|p| p.closure_this_type.clone());
@@ -2187,9 +2246,37 @@ impl<'a> Checker<'a> {
                     );
                     for a in &args[1..] {
                         self.check_expr(&a.value, locals, label);
+                        // `argument.unpackNonIterable` - see
+                        // `ExprKind::Call`'s identical check above.
+                        if a.spread {
+                            let spread_ty = self.infer_expr(&a.value, locals);
+                            if self.type_confirmed_not_iterable(&spread_ty) {
+                                self.report(
+                                    label.to_string(),
+                                    format!("Only iterables can be unpacked, {spread_ty} given."),
+                                    a.value.span,
+                                    3,
+                                    "argument.unpackNonIterable",
+                                );
+                            }
+                        }
                     }
                 } else {
                     for (i, a) in args.iter().enumerate() {
+                        // `argument.unpackNonIterable` - see
+                        // `ExprKind::Call`'s identical check above.
+                        if a.spread {
+                            let spread_ty = self.infer_expr(&a.value, locals);
+                            if self.type_confirmed_not_iterable(&spread_ty) {
+                                self.report(
+                                    label.to_string(),
+                                    format!("Only iterables can be unpacked, {spread_ty} given."),
+                                    a.value.span,
+                                    3,
+                                    "argument.unpackNonIterable",
+                                );
+                            }
+                        }
                         let closure_this = sig
                             .and_then(|s| s.params.get(i))
                             .and_then(|p| p.closure_this_type.clone());
