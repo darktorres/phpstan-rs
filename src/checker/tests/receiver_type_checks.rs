@@ -501,3 +501,120 @@ mod foreach_non_iterable {
         assert_eq!(d[0].identifier, "foreach.nonIterable");
     }
 }
+
+mod destructuring_non_array {
+    use super::*;
+
+    #[test]
+    fn destructuring_each_closed_scalar_type_including_string_is_flagged() {
+        // `String` is flagged here, unlike `offsetAccess.nonOffsetAccessible`'s
+        // own `$str[0]` exemption - destructuring a string was never
+        // given PHP language support.
+        for hint in ["int", "bool", "string"] {
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({hint} $x) {{
+                        [$a, $b] = $x;
+                    }}
+                "#
+            ));
+            assert_eq!(d.len(), 1, "hint {hint}: got {d:?}");
+            assert_eq!(
+                d[0].identifier, "offsetAccess.nonArray",
+                "hint {hint}: got {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn destructuring_null_or_a_void_returning_call_s_result_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = null;
+                    [$a, $b] = $x;
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "offsetAccess.nonArray");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function voidFn(): void {}
+                function f() {
+                    [$a, $b] = voidFn();
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "offsetAccess.nonArray");
+    }
+
+    #[test]
+    fn destructuring_a_real_array_or_array_shape_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f(array $x) {
+                    [$a, $b] = $x;
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    [$a, $b] = [1, 2];
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn destructuring_an_arrayaccess_implementing_class_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Container implements ArrayAccess {
+                    function offsetExists($offset): bool { return true; }
+                    function offsetGet($offset): mixed { return null; }
+                    function offsetSet($offset, $value): void {}
+                    function offsetUnset($offset): void {}
+                }
+                function f(Container $c) {
+                    [$a, $b] = $c;
+                }
+            "#,
+        );
+        assert!(
+            !d.iter().any(|x| x.identifier == "offsetAccess.nonArray"),
+            "unexpected diagnostics: {d:?}"
+        );
+    }
+
+    #[test]
+    fn list_syntax_and_bracket_syntax_produce_the_identical_result() {
+        let flagged = diagnostics_for(
+            r#"<?php
+                function f(int $x) {
+                    list($a, $b) = $x;
+                }
+            "#,
+        );
+        assert_eq!(flagged.len(), 1, "got: {flagged:?}");
+        assert_eq!(flagged[0].identifier, "offsetAccess.nonArray");
+
+        let not_flagged = diagnostics_for(
+            r#"<?php
+                function f(array $x) {
+                    list($a, $b) = $x;
+                }
+            "#,
+        );
+        assert!(
+            not_flagged.is_empty(),
+            "unexpected diagnostics: {not_flagged:?}"
+        );
+    }
+}

@@ -1638,6 +1638,22 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Assign(lhs, rhs) => {
                 let rhs_ty = self.check_expr(rhs, locals, label);
+                // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
+                // `list($a, $b) = $x;` (both desugar to the same
+                // `ExprKind::ArrayLiteral` target - no separate
+                // `ExprKind::List` variant exists) destructuring a value
+                // confirmed to never be array-like at all.
+                if matches!(&lhs.kind, ExprKind::ArrayLiteral(_))
+                    && self.type_confirmed_not_destructurable(&rhs_ty)
+                {
+                    self.report(
+                        label.to_string(),
+                        format!("Cannot use array destructuring on {rhs_ty}."),
+                        rhs.span,
+                        3,
+                        "offsetAccess.nonArray",
+                    );
+                }
                 // `$this` is real PHP's reserved, implicitly-bound
                 // reference to the current object - reassigning it is an
                 // unconditional fatal error ("Cannot re-assign $this.").

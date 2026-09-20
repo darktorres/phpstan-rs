@@ -572,6 +572,52 @@ impl<'a> Checker<'a> {
             _ => false,
         }
     }
+
+    /// Whether `ty` is confirmed to never support array destructuring
+    /// (`[$a, $b] = $x;`/`list($a, $b) = $x;`) - used by
+    /// `offsetAccess.nonArray`. **Not** the same predicate as
+    /// `type_confirmed_not_offset_accessible`, verified from real
+    /// PHPStan's own `ArrayDestructuringRule` source: its criterion is
+    /// `isArray()->yes() || ArrayAccess`-superset, with no exemption for
+    /// `String` - unlike `$str[0]`, destructuring a string was never
+    /// given PHP language support (`[$a, $b] = 'ab';` raises the
+    /// identical `Cannot use string as array` warning real PHP gives
+    /// every other non-array scalar, empirically confirmed).
+    pub(crate) fn type_confirmed_not_destructurable(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(..) | Type::ArrayShape(_) | Type::HasOffsetValue(..) => false,
+            Type::Null
+            | Type::Void
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Int
+            | Type::IntLiteral(_)
+            | Type::IntRange(..)
+            | Type::Float
+            | Type::FloatLiteral(_)
+            | Type::String
+            | Type::StringLiteral(_)
+            | Type::ClassString(_) => true,
+            Type::Object(class, _) | Type::EnumCase(class, _) => {
+                self.class_confirmed_not(class, "ArrayAccess")
+            }
+            Type::Union(members) => members
+                .iter()
+                .any(|m| self.type_confirmed_not_destructurable(m)),
+            Type::Intersection(members) => members
+                .iter()
+                .all(|m| self.type_confirmed_not_destructurable(m)),
+            Type::TemplateParam(param) => self.type_confirmed_not_destructurable(&param.bound),
+            Type::Conditional {
+                if_true, if_false, ..
+            } => {
+                self.type_confirmed_not_destructurable(if_true)
+                    || self.type_confirmed_not_destructurable(if_false)
+            }
+            _ => false,
+        }
+    }
 }
 
 pub(crate) fn is_superglobal(name: &str) -> bool {
