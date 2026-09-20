@@ -230,6 +230,17 @@ pub struct Registry {
     // reason to build one without throwing it (e.g. handing it to a
     // logger).
     pub check_new_exception_discarded: bool,
+    // A PHPUnit test method (a `test`-prefixed method on a
+    // `PHPUnit\Framework\TestCase` subclass) or Pest `it()`/`test()`
+    // closure with zero assertion-shaped calls anywhere in its own
+    // body - opt-in, since this is a purely syntactic, per-body scan: a
+    // test that only ever calls a custom assertion-helper method (one
+    // not itself named with the `assert`/`expectException` prefix,
+    // e.g. `$this->assertDatabaseHas(...)`-style Laravel-testing sugar
+    // is still caught since that name *does* start with `assert`, but a
+    // differently-named wrapper isn't) is a real, disclosed false-
+    // positive this check can't rule out.
+    pub check_risky_tests: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

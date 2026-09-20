@@ -41,6 +41,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_throw_without_message: bool,
     pub(crate) check_throw_base_class: bool,
     pub(crate) check_new_exception_discarded: bool,
+    pub(crate) check_risky_tests: bool,
     pub(crate) php_version: Option<crate::php_version::PhpVersion>,
     pub(crate) restricted_symbol_entries: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
     pub(crate) doctrine_custom_function_entries:
@@ -211,6 +212,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_throw_without_message: config.check_throw_without_message.unwrap_or(false),
         check_throw_base_class: config.check_throw_base_class.unwrap_or(false),
         check_new_exception_discarded: config.check_new_exception_discarded.unwrap_or(false),
+        check_risky_tests: config.check_risky_tests.unwrap_or(false),
         php_version,
         restricted_symbol_entries: config.restricted_symbols.unwrap_or_default(),
         doctrine_custom_function_entries: config.doctrine_custom_functions.unwrap_or_default(),

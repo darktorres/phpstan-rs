@@ -437,6 +437,14 @@ impl Project {
         self.registry.check_new_exception_discarded = enabled;
     }
 
+    /// Opts the whole project's checking into assertion-less-test
+    /// ("risky test") detection - see
+    /// `registry::Registry::check_risky_tests`'s own doc comment for why
+    /// this defaults to `false`.
+    pub fn set_check_risky_tests(&mut self, enabled: bool) {
+        self.registry.check_risky_tests = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the

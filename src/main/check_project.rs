@@ -134,6 +134,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_new_exception_discarded: bool,
+    check_risky_tests: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -195,6 +196,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_new_exception_discarded(check_new_exception_discarded);
+    project.set_check_risky_tests(check_risky_tests);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
@@ -513,6 +515,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_new_exception_discarded: bool,
+    check_risky_tests: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -626,6 +629,7 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_new_exception_discarded =
         check_new_exception_discarded || config.check_new_exception_discarded.unwrap_or(false);
+    let check_risky_tests = check_risky_tests || config.check_risky_tests.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -764,6 +768,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_new_exception_discarded,
+        check_risky_tests,
         configured_level,
         &stub_dirs,
         php_version,

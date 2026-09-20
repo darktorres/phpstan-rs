@@ -410,6 +410,8 @@ impl Server {
             .set_check_throw_base_class(resolved.check_throw_base_class);
         self.project
             .set_check_new_exception_discarded(resolved.check_new_exception_discarded);
+        self.project
+            .set_check_risky_tests(resolved.check_risky_tests);
         self.project.set_configured_level(resolved.configured_level);
         self.project
             .set_restricted_symbols(&resolved.restricted_symbol_entries);

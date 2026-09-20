@@ -70,6 +70,7 @@ mod regexp_pattern_validity;
 mod require_and_sealed;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
+mod risky_tests;
 mod see_tag;
 mod sql_reflection_dispatch;
 mod sql_reflection_parameter_validation;

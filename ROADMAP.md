@@ -2253,6 +2253,29 @@ variable first (`$e = new Exception(...); throw $e;`) is never touched
 a logger, say - is legitimate code this checker can't distinguish from
 the typo. Gated behind `Registry::check_new_exception_discarded`.
 
+**Opt-in assertion-less-test ("risky test") detection** (PHASE_BACKLOG
+Phase 99, `test.risky`). PHPUnit's own `--fail-on-risky` flags a test
+method that performed zero assertions - a real, common mistake (a
+copy-pasted test body whose assertion line got deleted) PHPUnit itself
+only catches at runtime; neither real PHPStan ruleset has any static
+equivalent. `check_risky_test_methods`/`check_pest_risky_test`
+(`checker/risky_tests.rs`) compose already-built pieces rather than new
+architecture: `is_subclass_of` finds a real `PHPUnit\Framework\
+TestCase` subclass, whose own `test`-prefixed methods get scanned by a
+recursive whole-body walk (`body_has_assertion`/`stmt_has_assertion`/
+`expr_has_assertion`, mirroring `control_flow::generators::
+stmt_contains_yield`'s own exhaustive per-`StmtKind` shape) for any
+`assert*`/`expectException*`/`markTestSkipped`/`markTestIncomplete`/
+`addToAssertionCount` call; a Pest `it()`/`test()` closure (recognized
+via the same `pest_config::is_this_binding_call` predicate the existing
+`$this`-rebinding special case already uses) gets the identical scan,
+with a call to the global `expect()` function standing in for PHPUnit's
+`assert*` family. Opt-in, since a test that only ever calls a custom,
+differently-named assertion-helper method (one whose own name doesn't
+start with `assert`/`expectException`) is a real, disclosed false
+positive this purely syntactic scan can't rule out. Gated behind
+`Registry::check_risky_tests`.
+
 **Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
 168a, the first landed sub-item of a larger in-progress phase - see
 PHASE_BACKLOG.md for 168b onward). `ClassInfo::doctrine_entity`

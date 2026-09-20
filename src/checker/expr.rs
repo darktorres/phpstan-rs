@@ -410,6 +410,10 @@ impl<'a> Checker<'a> {
                 // `it('...', $variableHoldingAClosure)` falls through to
                 // plain check_expr, unrebound.
                 let is_this_binding_call = matches!(&callee.kind, ExprKind::Name(name) if pest_config::is_this_binding_call(name));
+                let pest_call_name: Option<&str> = match &callee.kind {
+                    ExprKind::Name(name) if is_this_binding_call => Some(name.as_ref()),
+                    _ => None,
+                };
                 // `isset($x['maybe_missing'])`/`empty($x['maybe_missing'])`
                 // are exactly PHP's own sanctioned way to safely probe a
                 // possibly-absent array key/property/variable - real PHP
@@ -551,6 +555,16 @@ impl<'a> Checker<'a> {
                             this_ty,
                             scope_class,
                         );
+                        if self.registry.check_risky_tests
+                            && let Some(name) = pest_call_name
+                        {
+                            self.check_pest_risky_test(
+                                name,
+                                unwrap_grouping(&a.value),
+                                e.span,
+                                label,
+                            );
+                        }
                     } else if is_existence_probe {
                         self.check_expr_quiet_root(&a.value, locals, label);
                         if let Some((identifier_prefix, operator_description, verdict_fn)) =

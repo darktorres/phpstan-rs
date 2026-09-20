@@ -1059,6 +1059,7 @@ mod property_type_too_wide;
 mod resolve;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
+mod risky_tests;
 pub(crate) mod semantic_tokens;
 pub(crate) mod sql_reflection;
 mod stmt;
@@ -1471,6 +1472,9 @@ impl<'a> Checker<'a> {
                         self.check_uninitialized_properties(&fqn, c);
                         self.check_premature_property_access(&fqn, c);
                         self.check_duplicate_class_members(&fqn, c);
+                        if self.registry.check_risky_tests {
+                            self.check_risky_test_methods(&fqn, c);
+                        }
                         self.check_method_declaration_sanity(
                             &fqn,
                             c.kind,

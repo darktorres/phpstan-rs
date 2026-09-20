@@ -487,19 +487,6 @@ directional asymmetry every sub-item below exploits.
   `check_get_hook`/`check_set_hook` (`checker/oop/property_hooks.rs`),
   currently wired only for ordinary function/method declarations.
 
-## Phase 99 — Assertion-less test method detection ("risky test") (§AE)
-
-Flag a PHPUnit test method or Pest test closure with zero
-assertion-shaped calls anywhere in its body (excluding
-`expectException*`/`markTestSkipped`/`markTestIncomplete`/
-`addToAssertionCount`) — PHPUnit's own `--fail-on-risky` catches this
-only at runtime; neither PHPStan ruleset has any static equivalent.
-Composes four already-built, already-grounded phpstan-rs mechanisms
-(`is_subclass_of` for TestCase detection, `apply_phpunit_assertion_
-narrowing`'s existing assert-method-name set, the recursive whole-body
-scan pattern used twice elsewhere, Pest hook-function detection) — no
-new architecture. **Effort: medium.**
-
 ## Phase 100 — Opt-in algorithmic-complexity heuristic (§AF)
 
 Flag a linear `in_array()`/`array_search()`/`array_key_exists()` lookup

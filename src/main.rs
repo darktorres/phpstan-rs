@@ -242,6 +242,14 @@ enum Command {
         /// discarded`'s own doc comment.
         #[arg(long)]
         check_new_exception_discarded: bool,
+        /// Enables assertion-less-test ("risky test") detection (a
+        /// PHPUnit test method/Pest test closure with zero assertion-
+        /// shaped calls anywhere in its body). Off by default - a test
+        /// that only ever calls a custom, differently-named assertion-
+        /// helper method is a real, disclosed false positive - see
+        /// `registry::Registry::check_risky_tests`'s own doc comment.
+        #[arg(long)]
+        check_risky_tests: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -341,6 +349,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_new_exception_discarded,
+            check_risky_tests,
             php_version,
             generate_baseline,
             baseline,
@@ -377,6 +386,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_new_exception_discarded,
+            check_risky_tests,
             php_version,
             generate_baseline,
             baseline,
