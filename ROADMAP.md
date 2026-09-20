@@ -3011,15 +3011,6 @@ became satisfied, then reinstated after this session's reevaluation of
 the boundaries/won't-port lists produced new phases (158-175) with live
 dependency edges among them.
 
-**17 - LSP hover/go-to-definition (PARTIAL).** See Done for what
-shipped. What's left is narrow and deliberate: a closure's own
-`use (&$x)`/`use ($x)` capture only resolves when the outer scope
-already has tracked provenance for that name, and only lexically
-visible binding syntax updates provenance at all - an ordinary call's
-incidental effect on an already-declared variable never does, on
-purpose (a read should resolve to where the variable was really
-declared, not every call that happened to touch it since).
-
 **18 - Extension/plugin API, Axis 3 Stage 2 (PARTIAL).** Split into 3
 axes: Axis 1 (declarative `restricted_symbols`) and Axis 2 (a public
 `ReflectionRule` trait over already-public reflection data) are fully
