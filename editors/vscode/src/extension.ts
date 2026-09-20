@@ -4,7 +4,6 @@ import {
   LanguageClientOptions,
   ServerOptions,
   State,
-  TransportKind,
 } from "vscode-languageclient/node";
 import { getSettings } from "./settings";
 import { buildInitializationOptions } from "./config";
@@ -55,11 +54,19 @@ async function startClient(context: vscode.ExtensionContext): Promise<void> {
 
   // `["lsp"]` - the real subcommand `Command::Lsp => lsp::run()`
   // dispatches on (src/main.rs), not a `--lsp` flag (see the doc-comment
-  // fix at src/lsp.rs:1 item 4.2's Rust-side change made).
+  // fix at src/lsp.rs:1 item 4.2's Rust-side change made). `transport`
+  // is deliberately omitted, not set to `TransportKind.stdio`: for an
+  // `Executable` server, vscode-languageclient only spawns via plain
+  // stdio pipes either way (`transport === undefined || transport ===
+  // TransportKind.stdio` is one branch in its own `node/main.js`), but
+  // an explicit `TransportKind.stdio` additionally appends a literal
+  // `--stdio` CLI argument the spawned process is expected to parse -
+  // `phpstan-rs lsp` takes no such flag (stdio is its only transport,
+  // unconditional) and rejects it outright, crashing the server 5 times
+  // in a row until vscode-languageclient gives up restarting it.
   const serverOptions: ServerOptions = {
     command,
     args: ["lsp"],
-    transport: TransportKind.stdio,
   };
   // `outputChannelName`, not a manually-created `outputChannel` - since
   // vscode-languageclient 10, `LanguageClientOptions.outputChannel`

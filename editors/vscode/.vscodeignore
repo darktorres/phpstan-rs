@@ -14,8 +14,10 @@ tsconfig.json
 
 # Compiled test output - the packaged .vsix ships out/extension.js
 # itself, but never the compiled unit/smoke test files alongside it.
-out/extension.test.js
-out/extension.test.js.map
-out/serverDownload.test.js
-out/serverDownload.test.js.map
+# Glob-matched (not one line per file) so a new out/*.test.ts unit test
+# file is excluded automatically instead of silently shipping in the
+# .vsix until someone notices and adds it here by hand (config.test.js/
+# serverBinary.test.js were both missing this way before).
+out/*.test.js
+out/*.test.js.map
 out/test/**
