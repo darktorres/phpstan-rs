@@ -527,6 +527,51 @@ impl<'a> Checker<'a> {
             .is_some_and(|info| info.kind != ClassKind::Interface)
             && !self.registry.is_subclass_of(class, interface)
     }
+
+    /// Whether `ty` is confirmed to never be a valid `foreach` subject -
+    /// used by `foreach.nonIterable`. Real PHP does **not** fall back to
+    /// "iterate the object's public properties" as a safe default for a
+    /// plain, non-`Traversable` class the way intuition might suggest -
+    /// real PHPStan's `ObjectType::isInstanceOf()` returns a definite
+    /// "no" for a concrete, non-interface class that doesn't implement
+    /// the target interface, which is why this fires on plain classes
+    /// too, not just scalars. `Array`/`ArrayShape`/`HasOffsetValue` are
+    /// `false` here for defensive completeness even though `check_foreach`
+    /// never actually reaches this classifier for them -
+    /// `array_element_type` claims that case first.
+    pub(crate) fn type_confirmed_not_iterable(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Array(..) | Type::ArrayShape(_) | Type::HasOffsetValue(..) => false,
+            Type::Null
+            | Type::Void
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Int
+            | Type::IntLiteral(_)
+            | Type::IntRange(..)
+            | Type::Float
+            | Type::FloatLiteral(_)
+            | Type::String
+            | Type::StringLiteral(_)
+            | Type::ClassString(_) => true,
+            Type::Object(class, _) | Type::EnumCase(class, _) => {
+                self.class_confirmed_not(class, "Traversable")
+            }
+            Type::Union(members) => members.iter().any(|m| self.type_confirmed_not_iterable(m)),
+            Type::Intersection(members) => {
+                members.iter().all(|m| self.type_confirmed_not_iterable(m))
+            }
+            Type::TemplateParam(param) => self.type_confirmed_not_iterable(&param.bound),
+            Type::Conditional {
+                if_true, if_false, ..
+            } => {
+                self.type_confirmed_not_iterable(if_true)
+                    || self.type_confirmed_not_iterable(if_false)
+            }
+            _ => false,
+        }
+    }
 }
 
 pub(crate) fn is_superglobal(name: &str) -> bool {

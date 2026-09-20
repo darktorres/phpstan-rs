@@ -613,9 +613,32 @@ impl<'a> Checker<'a> {
                 Self::array_key_type(&subject_ty).unwrap_or(Type::Mixed),
                 elem,
             ),
-            None => self
-                .iterable_element_type(&subject_ty)
-                .unwrap_or((Type::Mixed, Type::Mixed)),
+            None => match self.iterable_element_type(&subject_ty) {
+                Some(pair) => pair,
+                None => {
+                    // `foreach.nonIterable` - a subject confirmed to
+                    // never be iterable at all (a scalar, a plain
+                    // non-`Traversable` class - see
+                    // `type_confirmed_not_iterable`'s own doc comment for
+                    // why a plain object is closed here, unlike real
+                    // PHP's own runtime leniency). Reported and the body
+                    // is still checked against `Mixed`/`Mixed`, matching
+                    // `check_dim_fetch_key_type`'s "report and continue"
+                    // precedent.
+                    if self.type_confirmed_not_iterable(&subject_ty) {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "Argument of an invalid type {subject_ty} supplied for foreach, only iterables are supported."
+                            ),
+                            subject.span,
+                            3,
+                            "foreach.nonIterable",
+                        );
+                    }
+                    (Type::Mixed, Type::Mixed)
+                }
+            },
         };
         // A header-level inline `/** @var Type $value */` (or bare
         // `@var Type`, resolved to this exact loop's own value variable

@@ -366,3 +366,138 @@ mod offset_non_accessible {
         );
     }
 }
+
+mod foreach_non_iterable {
+    use super::*;
+
+    #[test]
+    fn foreach_over_each_closed_scalar_type_is_flagged() {
+        for hint in ["int", "string", "bool"] {
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({hint} $x) {{
+                        foreach ($x as $v) {{
+                        }}
+                    }}
+                "#
+            ));
+            assert_eq!(d.len(), 1, "hint {hint}: got {d:?}");
+            assert_eq!(
+                d[0].identifier, "foreach.nonIterable",
+                "hint {hint}: got {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn foreach_over_null_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = null;
+                    foreach ($x as $v) {
+                    }
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "foreach.nonIterable");
+    }
+
+    #[test]
+    fn foreach_over_a_void_returning_call_s_result_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function voidFn(): void {}
+                function f() {
+                    foreach (voidFn() as $v) {
+                    }
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "foreach.nonIterable");
+    }
+
+    #[test]
+    fn foreach_over_a_plain_non_traversable_class_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Plain {}
+                function f(Plain $p) {
+                    foreach ($p as $v) {
+                    }
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "foreach.nonIterable");
+    }
+
+    #[test]
+    fn foreach_over_an_iterator_implementing_class_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                /** @implements \Iterator<int, string> */
+                class StringIterator implements \Iterator {
+                    private array $items = ['a', 'b'];
+                    private int $pos = 0;
+                    public function current(): mixed { return $this->items[$this->pos]; }
+                    public function next(): void { $this->pos++; }
+                    public function key(): mixed { return $this->pos; }
+                    public function valid(): bool { return isset($this->items[$this->pos]); }
+                    public function rewind(): void { $this->pos = 0; }
+                }
+                function f(StringIterator $it): void {
+                    foreach ($it as $k => $v) {
+                    }
+                }
+            "#,
+        );
+        assert!(
+            !d.iter().any(|x| x.identifier == "foreach.nonIterable"),
+            "unexpected diagnostics: {d:?}"
+        );
+    }
+
+    #[test]
+    fn foreach_over_an_array_or_mixed_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f(array $a) {
+                    foreach ($a as $v) {
+                    }
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function f($x) {
+                    foreach ($x as $v) {
+                    }
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn the_loop_body_is_still_checked_against_mixed_after_the_diagnostic_fires() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f(int $x) {
+                    foreach ($x as $v) {
+                        $v->realMethodThatDoesNotMatterHere();
+                    }
+                }
+            "#,
+        );
+        // Just the one `foreach.nonIterable` - `$v` is bound to `Mixed`
+        // inside the (still-checked) body, so the call on it isn't
+        // separately flagged as `method.nonObject`/`method.notFound`.
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "foreach.nonIterable");
+    }
+}
