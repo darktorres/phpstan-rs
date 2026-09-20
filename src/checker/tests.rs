@@ -34,6 +34,7 @@ mod foreach_iterables;
 mod generator_types;
 mod generics_and_templates;
 mod global_constants;
+mod global_vars;
 mod helpers;
 mod inline_var_validation;
 mod int_range_arithmetic;
