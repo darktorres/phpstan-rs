@@ -1920,27 +1920,6 @@ not for the common, fully-resolvable case both shapes already parsed.
 project's own existing variance-composition pattern; no new `Type`
 variant.
 
-## Phase 164 — Bounded sequential dynamic-key writes preserve `list`/`non-empty` markers
-
-Reevaluated out of "Permanent design boundaries" - filed there as
-needing the same general loop-index/array-length correlation the
-broader "cross-variable/parallel-structure correlation" boundary
-declines to model. That's true for the *general* case, but the single
-named recurring shape (`CalendarRenderer::render`'s own `for ($i = 0;
-$i < count($arr); $i++) { $arr[$i] = ...; }`) is narrow and fully
-local, not a general correlation problem: a `for` loop whose own
-condition is exactly `$i < count($sameArrayBeingWritten)` and whose
-step is exactly `$i++`/`$i += 1`, writing `$arr[$i]` inside the body,
-never grows `$arr` past its own pre-loop length or skips an index -
-`write_index_into` can special-case this one recognizable `for`-loop
-shape (matching the project's existing precedent of special-casing a
-handful of named recognizable idioms, e.g. the sort-family above)
-rather than needing to solve arbitrary loop-index correlation.
-
-**Effort: small** — one new recognized `for`-loop shape in
-`write_index_into`'s own dynamic-key-write branch; does not touch the
-general correlation gap, which stays declined.
-
 ## Phase 165 — Anonymous-class synthetic per-declaration-site identity
 
 Reevaluated out of "Permanent design boundaries" - that entry's own
