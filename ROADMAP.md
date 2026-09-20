@@ -1634,6 +1634,31 @@ project-specific adaptation with no direct real-PHPStan equivalent).
 Dozens of individual stdlib array/string dynamic-return-type
 extensions: `array_fill_keys`,
 `array_search`, `array_intersect_key`, `array_flip`, `array_change_key_case`,
+`compact()`/`get_defined_vars()` (PHASE_BACKLOG Phase 159) - a real
+`Type::ArrayShape` built directly from `Locals`, the same whole-scope
+variable-type map every other purpose here already reads, not a new
+tracking mechanism: `compact()` resolves each string-literal argument
+(recursively, for a nested array-literal argument - real PHP's own
+`compact(['a', ['b']])` form since 7.3) via `locals.get(name)`, silently
+omitting a name with no matching local (matches real PHP's own "skip
+anything undefined" behavior); a spread argument, or any argument that
+isn't a literal name (or a literal-nested array of them), degrades the
+*whole* call back to the plain stub-declared `array` rather than
+guessing a partial shape. `get_defined_vars()` needed no new tracking at
+all - every currently-tracked `Locals` entry, filtered through the same
+`is_real_variable_key` predicate that already excludes `narrowing_key`'s
+own synthetic property-chain/array-index keys elsewhere. `array_flip()`
+also gained a precise, field-by-field flip specifically for a real
+`Type::ArrayShape` input (the shape `compact()` now produces, among
+others) - each literal-int/string-valued field becomes a real named
+field in the result, keyed by that literal and valued at the field's own
+original key (`types::canonical_int_key` recovering an int-keyed field's
+real numeric key from its shape-internal string name); a field whose
+value isn't a literal (or the shape's own unsealed `"..."` tail) can't
+name a real result field at all, so it folds into the result's own
+`"..."` tail instead of discarding precision for every other field too.
+A plain, non-shape `Type::Array` input keeps the prior, already-correct
+`array_key_type`/`array_element_type`-based flip unchanged.
 `array_rand`, `array_count_values`, `array_splice`, `array_replace(_recursive)`,
 `array_pad`, array-pointer accessors (`array_pop`/`array_shift` included),
 the `array_diff`/`array_intersect` family (a disclosed residual: the

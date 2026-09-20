@@ -1,9 +1,9 @@
 use crate::ast::*;
 use crate::checker::type_union::{has_offset_value_parts, union_types};
 use crate::checker::{
-    Checker, Locals, literal_string_key, literal_string_value, narrow_type_excluding,
-    narrow_type_excluding_falsy, narrow_type_to, resolve_call_args, string_type_has_accessory,
-    to_absolute_number,
+    Checker, Locals, is_real_variable_key, literal_string_key, literal_string_value,
+    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to, resolve_call_args,
+    string_type_has_accessory, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
@@ -567,6 +567,45 @@ impl<'a> Checker<'a> {
             // can't change whether there's at least one element).
             "array_flip" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
+                // A real `Type::ArrayShape` gets a precise, field-by-field
+                // flip: a field whose own value is an int/string literal
+                // becomes a real named field in the result (keyed by that
+                // literal, valued at the original field's own key -
+                // `types::canonical_int_key` recovers an int-keyed field's
+                // real numeric key from its shape-internal string name).
+                // A field whose value isn't a literal can't name a real
+                // result field at all (real PHP requires an int|string
+                // value here, or throws - either way the exact resulting
+                // key isn't knowable), so it degrades only that one field
+                // into the shape's own unsealed `"..."` tail, matching
+                // this project's existing "..." convention for "more real
+                // keys exist here, just not statically known which."
+                if let Some(fields) = extract_array_shape_fields(&arr_ty) {
+                    let mut flipped: Vec<(String, Type, bool)> = Vec::new();
+                    for (name, field_ty, optional) in fields {
+                        if name == "..." {
+                            push_unsealed_tail(&mut flipped);
+                            continue;
+                        }
+                        let old_key_ty = match types::canonical_int_key(name) {
+                            Some(n) => Type::IntLiteral(n),
+                            None => Type::StringLiteral(name.clone()),
+                        };
+                        let new_key = match field_ty {
+                            Type::IntLiteral(n) => Some(n.to_string()),
+                            Type::StringLiteral(s) => Some(s.clone()),
+                            _ => None,
+                        };
+                        match new_key {
+                            Some(key) => match flipped.iter_mut().find(|(k, _, _)| *k == key) {
+                                Some(existing) => *existing = (key, old_key_ty, *optional),
+                                None => flipped.push((key, old_key_ty, *optional)),
+                            },
+                            None => push_unsealed_tail(&mut flipped),
+                        }
+                    }
+                    return Type::ArrayShape(flipped);
+                }
                 if Self::is_array_like(&arr_ty) {
                     let key_ty =
                         Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
@@ -581,6 +620,62 @@ impl<'a> Checker<'a> {
                         flipped
                     };
                 }
+            }
+            // Each string-literal argument (recursively, for a nested
+            // array-literal argument - real PHP accepts `compact(['a',
+            // ['b', 'c']])` since 7.3) names a variable to read directly
+            // out of `locals`, the exact whole-scope variable-type map
+            // this project already threads through every call site here -
+            // no new tracking mechanism, just a new read over existing
+            // state. A name with no corresponding entry in `locals` is
+            // silently omitted, matching real PHP's own "skip anything
+            // undefined" `compact()` semantics (never an error). A
+            // spread argument, or any argument that isn't itself a
+            // string literal or a literal-nested array of names,
+            // degrades the *whole* call to today's plain stub-declared
+            // return type - `compact()` combines every argument into one
+            // result, so one unresolvable argument means the real key
+            // set genuinely isn't knowable, not just that one argument's
+            // own names.
+            "compact" if !args.is_empty() && !args.iter().any(|a| a.spread) => {
+                let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                let mut resolvable = true;
+                for arg in args {
+                    match compact_argument_names(&arg.value) {
+                        Some(names) => {
+                            for name in names {
+                                if fields.iter().any(|(k, _, _)| *k == name) {
+                                    continue;
+                                }
+                                if let Some(ty) = locals.get(&name) {
+                                    fields.push((name, ty.clone(), false));
+                                }
+                            }
+                        }
+                        None => {
+                            resolvable = false;
+                            break;
+                        }
+                    }
+                }
+                if resolvable {
+                    return Type::ArrayShape(fields);
+                }
+            }
+            // Every currently-tracked entry in `locals`, the identical
+            // whole-scope map every other purpose here already reads
+            // (narrowing, unused-variable detection) - a new read path,
+            // not new tracking. `is_real_variable_key` filters out
+            // `narrowing_key`'s own synthetic property-chain/array-index
+            // keys, which share the same `Locals` map but were never a
+            // real PHP variable `get_defined_vars()` could report.
+            "get_defined_vars" if args.is_empty() => {
+                let fields: Vec<(String, Type, bool)> = locals
+                    .iter()
+                    .filter(|(name, _)| is_real_variable_key(name))
+                    .map(|(name, ty)| (name.clone(), ty.clone(), false))
+                    .collect();
+                return Type::ArrayShape(fields);
             }
             // `array_pop`/`array_shift` remove and return the last/first
             // element (by reference - the caller's argument shrinks by
@@ -1884,6 +1979,31 @@ fn is_var_named(e: &Expr, name: &str) -> bool {
     matches!(&e.kind, ExprKind::Variable(n) if **n == *name)
 }
 
+/// `compact()`'s own name-list resolution for one argument - a bare
+/// string literal is one name; a literal array (real PHP's own nested-
+/// array-of-names form, accepted since 7.3) recurses into every item.
+/// `None` the moment anything isn't one of those two shapes (a variable
+/// holding a dynamically-built name, a spread item inside the nested
+/// array, ...) - the caller can't partially trust the rest of the list
+/// either, since real `compact()` combines every argument into one flat
+/// result.
+fn compact_argument_names(e: &Expr) -> Option<Vec<String>> {
+    if let Some(name) = literal_string_value(e) {
+        return Some(vec![name.into_owned()]);
+    }
+    if let ExprKind::ArrayLiteral(items) = &e.kind {
+        let mut names = Vec::new();
+        for item in items {
+            if item.spread {
+                return None;
+            }
+            names.extend(compact_argument_names(&item.value)?);
+        }
+        return Some(names);
+    }
+    None
+}
+
 /// Whether `ty` is a literal `Type::ArrayShape`, or an `Intersection`
 /// wrapping one (the accessory-marker-plus-shape combination
 /// `array_ops.rs`'s `infer_array_literal_type` produces) - `array_keys()`'s
@@ -1892,6 +2012,26 @@ fn is_var_named(e: &Expr, name: &str) -> bool {
 fn is_or_wraps_array_shape(ty: &Type) -> bool {
     matches!(ty, Type::ArrayShape(_))
         || matches!(ty, Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::ArrayShape(_))))
+}
+
+/// `is_or_wraps_array_shape`'s own field-extracting counterpart, for a
+/// caller (`array_flip`) that needs the real fields themselves, not just
+/// a yes/no answer.
+fn extract_array_shape_fields(ty: &Type) -> Option<&Vec<(String, Type, bool)>> {
+    match ty {
+        Type::ArrayShape(fields) => Some(fields),
+        Type::Intersection(members) => members.iter().find_map(extract_array_shape_fields),
+        _ => None,
+    }
+}
+
+/// Appends the shape-internal `"..."` unsealed-tail sentinel to `fields`,
+/// unless one is already present - shared by every `array_flip` field
+/// that can't itself become a real, precisely-named result field.
+fn push_unsealed_tail(fields: &mut Vec<(String, Type, bool)>) {
+    if !fields.iter().any(|(k, _, _)| k == "...") {
+        fields.push(("...".to_string(), Type::Mixed, false));
+    }
 }
 
 fn is_null_literal(e: &Expr) -> bool {

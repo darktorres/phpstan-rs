@@ -1891,43 +1891,6 @@ conflating the two). **Effort: medium** — one AST shape change with
 real fan-out, but every touch point is a mechanical match-arm addition,
 not new inference machinery.
 
-## Phase 159 — `compact()`/`get_defined_vars()`/`array_flip()` dynamic return types
-
-Reevaluated out of "Permanent design boundaries" — that entry's stated
-blocker ("needing array-key-type tracking or a whole-scope variable
-lookup") doesn't match what this project already has in hand at every
-call site. `checker/calls.rs`'s own signature-resolution functions
-already thread `locals: &Locals` through, and `Locals` already is the
-project's whole-scope variable-type map:
-
-- `compact('a', 'b')`/`compact(['a', 'b'])` - each string-literal
-  argument (recursively, for a nested array-literal argument) resolves
-  directly via `locals.get(name)`, building a real `Type::ArrayShape`
-  keyed by each name with that variable's current tracked type. A
-  non-literal argument (a variable holding a dynamically-built name
-  list) degrades to today's plain `array` - no worse than today, and
-  matches the general "unresolvable dynamic input" leniency used
-  throughout `calls.rs`.
-- `get_defined_vars()` - a real `Type::ArrayShape` built directly by
-  iterating every currently-tracked entry in `Locals` at the call
-  site - this project already knows exactly this map for every other
-  purpose (narrowing, unused-variable detection); this is a new read
-  path over existing state, not new tracking.
-- `array_flip($arr)` - for a `Type::ArrayShape` input, a mechanical
-  key/value swap of every known field (values must themselves be
-  int/string-literal-typed for a precise flipped key; a non-literal
-  field value degrades that one flipped key to `int|string`, not the
-  whole result). For a plain `Type::Array(key_ty, val_ty)`, the result
-  is `Type::Array(val_ty, key_ty)` when `val_ty` is already a valid
-  array-key type (`int`/`string`/a union of only those), else `Type::
-  Array(unknown_array_key(), key_ty)` - no new key-type inference
-  concept, just reusing the existing key/value type pair the project
-  already carries for every array.
-
-**Effort: small** — three self-contained additions to `calls.rs`'s
-existing per-function dynamic-return-type dispatch, no new `Type`
-variant or tracking mechanism.
-
 ## Phase 160 — Contravariant-parameter/covariant-return comparison between two `Closure(...)`/`callable(...)` shapes
 
 Reevaluated out of "Permanent design boundaries" — that entry's stated

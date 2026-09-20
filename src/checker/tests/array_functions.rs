@@ -2745,3 +2745,141 @@ fn a_shape_merged_with_a_strict_superset_of_itself_collapses_with_the_extra_key_
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// compact()/get_defined_vars() build a real ArrayShape directly out of
+// Locals, the same whole-scope variable-type map every other purpose
+// here already reads - not new tracking, a new read over existing
+// state.
+
+#[test]
+fn compact_builds_a_shape_from_the_named_locals() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = 1;
+                $b = 'x';
+                assertType("array{a: 1, b: 'x'}", compact('a', 'b'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn compact_accepts_a_nested_array_of_names() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = 1;
+                $b = 'x';
+                assertType("array{a: 1, b: 'x'}", compact(['a', ['b']]));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn compact_silently_omits_a_name_with_no_matching_local() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = 1;
+                assertType('array{a: 1}', compact('a', 'undefinedName'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn compact_with_a_non_literal_argument_keeps_the_plain_stub_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $dynamicName): void {
+                $a = 1;
+                assertType('array', compact('a', $dynamicName));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn get_defined_vars_builds_a_shape_from_every_current_local() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(int $x, string $y): void {
+                assertType('array{x: int, y: string}', get_defined_vars());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn compact_result_flips_cleanly_through_array_flip() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $a = 1;
+                $b = 2;
+                assertType("array{1: 'a', 2: 'b'}", array_flip(compact('a', 'b')));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// array_flip() on a real ArrayShape (not just a plain array<K, V>) does a
+// precise, field-by-field flip - each literal-valued field becomes a
+// real named field in the result, keyed by that literal and valued at
+// the field's own original key.
+
+#[test]
+fn array_flip_on_a_shape_produces_a_precise_flipped_shape() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{a: 1, b: 'x'} $shape */
+            function f(array $shape): void {
+                assertType("array{1: 'a', x: 'b'}", array_flip($shape));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_flip_on_a_shape_degrades_a_non_literal_field_to_an_unsealed_tail() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{a: 1, b: string} $shape */
+            function f(array $shape): void {
+                assertType("array{1: 'a', ...}", array_flip($shape));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_flip_on_a_shape_lets_a_later_duplicate_value_win() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{a: 1, b: 1} $shape */
+            function f(array $shape): void {
+                assertType("array{1: 'b'}", array_flip($shape));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
