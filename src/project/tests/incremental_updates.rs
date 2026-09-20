@@ -472,3 +472,44 @@ fn update_file_cancellable_can_be_aborted_mid_cascade_by_a_concurrent_generation
         "expected the cascade to abort after exactly one file, got: {result:?}"
     );
 }
+
+#[test]
+fn update_file_refreshes_inferred_global_variable_types() {
+    let mut project = Project::new();
+    project
+        .load_file(PathBuf::from("a.php"), "<?php class Template {}")
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("b.php"),
+            "<?php function f() { global $template; $template = new Template(); }",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    assert_eq!(
+        project.registry().global_variables.get("template"),
+        Some(&crate::types::Type::Object("Template".to_string(), vec![]))
+    );
+
+    // Editing the assigning file to point at a different class must
+    // update the registry's own inferred type on the next settle, not
+    // just at the initial `finish_loading()`.
+    project
+        .update_file(
+            &PathBuf::from("a.php"),
+            "<?php class Template {} class Other {}",
+        )
+        .unwrap();
+    project
+        .update_file(
+            &PathBuf::from("b.php"),
+            "<?php function f() { global $template; $template = new Other(); }",
+        )
+        .unwrap();
+
+    assert_eq!(
+        project.registry().global_variables.get("template"),
+        Some(&crate::types::Type::Object("Other".to_string(), vec![]))
+    );
+}
