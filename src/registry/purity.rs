@@ -445,7 +445,7 @@ fn expr_disqualifies(
             };
             resolve_this_method_call(class, name, registry, deps)
         }
-        ExprKind::StaticCall(class_name, name, args) => {
+        ExprKind::StaticCall(target, name, args) => {
             if args
                 .iter()
                 .any(|a| expr_disqualifies(&a.value, declaring_class, registry, deps))
@@ -455,7 +455,11 @@ fn expr_disqualifies(
             let Some(class) = declaring_class else {
                 return true;
             };
-            resolve_static_call(class, class_name, name, registry, deps)
+            // A genuinely dynamic receiver is never one of the three
+            // resolvable pseudo-keywords below - `unwrap_or("?")` matches
+            // the identical "disqualifying, unresolvable" outcome the
+            // parser's old permanent `"?"` sentinel already produced.
+            resolve_static_call(class, target.as_name().unwrap_or("?"), name, registry, deps)
         }
         ExprKind::New(callee, args) => {
             if args
@@ -938,13 +942,16 @@ fn collect_expr_impure_points(
                 collect_expr_impure_points(&a.value, declaring_class, registry, out);
             }
         }
-        ExprKind::StaticCall(class_name, name, args) => {
+        ExprKind::StaticCall(receiver, name, args) => {
             let resolved = declaring_class.is_some_and(|class| {
-                let target = if class_name.eq_ignore_ascii_case("parent") {
+                let is_receiver = |kw: &str| {
+                    receiver
+                        .as_name()
+                        .is_some_and(|n| n.eq_ignore_ascii_case(kw))
+                };
+                let target = if is_receiver("parent") {
                     registry.lookup_ancestor_method_with_owner(class, name)
-                } else if class_name.eq_ignore_ascii_case("self")
-                    || class_name.eq_ignore_ascii_case("static")
-                {
+                } else if is_receiver("self") || is_receiver("static") {
                     registry.lookup_method_with_owner(class, name)
                 } else {
                     None

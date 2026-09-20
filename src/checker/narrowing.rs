@@ -1129,8 +1129,8 @@ impl<'a> Checker<'a> {
             // Same idea as `MethodCall` just above, for a static method
             // call - no receiver expression exists here at all, so only
             // a `Param`-targeted assertion can ever resolve.
-            ExprKind::StaticCall(class_name, method, args) => {
-                if let Some(class) = self.resolve_static_class_name(class_name)
+            ExprKind::StaticCall(target, method, args) => {
+                if let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                 {
                     let infos = if branch_true {

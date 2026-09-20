@@ -31,7 +31,7 @@
 //! contains further statements*, not the need to look at a statement's own
 //! non-statement fields.
 
-use crate::ast::{Expr, ExprKind, InstanceofTarget, Stmt, StmtKind};
+use crate::ast::{Expr, ExprKind, InstanceofTarget, StaticTarget, Stmt, StmtKind};
 
 /// This `Expr`'s direct child expressions - see the module doc comment for
 /// the three variants (`Closure`/`ArrowFn`/`NewAnonymousClass`) that
@@ -83,7 +83,14 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
             v.extend(args.iter().map(|a| &a.value));
             v
         }
-        ExprKind::StaticCall(_, _, args) => args.iter().map(|a| &a.value).collect(),
+        ExprKind::StaticCall(target, _, args) => {
+            let mut v = Vec::new();
+            if let StaticTarget::Expr(t) = target {
+                v.push(t.as_ref());
+            }
+            v.extend(args.iter().map(|a| &a.value));
+            v
+        }
         ExprKind::Index(base, idx) => {
             let mut v = vec![base.as_ref()];
             if let Some(i) = idx {
@@ -229,7 +236,9 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
         ExprKind::DynamicMethodCall(recv, name_expr, args) => {
             f(recv) || f(name_expr) || args.iter().any(|a| f(&a.value))
         }
-        ExprKind::StaticCall(_, _, args) => args.iter().any(|a| f(&a.value)),
+        ExprKind::StaticCall(target, _, args) => {
+            matches!(target, StaticTarget::Expr(t) if f(t)) || args.iter().any(|a| f(&a.value))
+        }
         ExprKind::Index(base, idx) => f(base) || idx.as_ref().is_some_and(|i| f(i)),
         ExprKind::Instanceof(inner, target) => {
             f(inner) || matches!(target, InstanceofTarget::Expr(t) if f(t))

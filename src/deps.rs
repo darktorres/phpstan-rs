@@ -267,8 +267,14 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
 // comment for why).
 fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
     match &expr.kind {
-        ExprKind::StaticAccess(class, _) | ExprKind::StaticCall(class, _, _) => {
+        ExprKind::StaticAccess(class, _) => {
             names.insert(class.clone());
+        }
+        // A dynamic receiver's own name references (if any) are picked
+        // up by the generic `expr_children` recursion below, the same
+        // way `Instanceof`'s own `Expr` target already is.
+        ExprKind::StaticCall(StaticTarget::Name(n, _), _, _) => {
+            names.insert(n.clone());
         }
         ExprKind::Name(n) => {
             names.insert(n.clone());

@@ -1228,7 +1228,9 @@ fn body_calls_parent_construct(stmts: &[Stmt]) -> bool {
 fn stmt_calls_parent_construct(stmt: &Stmt) -> bool {
     if let StmtKind::Expression(e) = &stmt.kind
         && let ExprKind::StaticCall(class, method, _) = &unwrap_grouping(e).kind
-        && class.eq_ignore_ascii_case("parent")
+        && class
+            .as_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("parent"))
         && method.eq_ignore_ascii_case("__construct")
     {
         return true;

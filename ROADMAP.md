@@ -1737,6 +1737,38 @@ know, stay lenient" retreat; an extra optional/variadic parameter on
 (`Callable(Some)` vs. `Callable(None)`, either direction) are unchanged
 - there's no shape to compare against there at all.
 
+**Dynamic static-call target resolution (`$obj::method()`)** (PHASE_BACKLOG
+Phase 158). `ExprKind::StaticCall`'s first field is now a real
+`StaticTarget` enum (`Name(String, Span)`/`Expr(Box<Expr>)`, the
+identical shape `InstanceofTarget` already established for the same
+"literal name or dynamic expression" receiver problem) instead of a
+plain `String` that discarded a non-literal receiver into a permanent
+`"?"` sentinel at parse time. `resolve_static_target_class`/
+`infer_static_target_class` (`checker/resolve.rs`) resolve a `Name`
+exactly as before; for an `Expr` receiver, the expression is checked in
+full (so an undefined variable inside it is still caught, matching
+every other checked sub-expression) and resolved via its own real
+inferred type - a known `Type::Object(fqn)` gets checked against `fqn`
+exactly like a literal class name already is (existence, visibility,
+arg-type checking, return-type inference all now work through
+`$obj::method()`, not just `Foo::method()`); an unresolvable type
+(`Mixed`, an unhinted parameter, ...) stays the same silent no-op as
+before. `StaticTarget::as_name()` is the drop-in `Option<&str>`
+replacement every one of the ~25 real fan-out sites across ~20 files
+that only ever needed the old sentinel string uses (`unwrap_or("?")`
+reproduces that exact prior behavior byte-for-byte); `ast_walk.rs`'s
+`expr_children`/`any_expr_child` now also walk into a dynamic
+receiver's own expression (mirroring `Instanceof`'s identical `Expr`
+target), so every generic tree-walking consumer (`deps.rs`'s name
+collection, `use_sites.rs`'s reference tracking) picks up names inside
+it for free rather than needing its own special case.
+`lsp/navigation.rs`'s own hover/go-to-definition gained real coverage
+for this shape too - a dynamic receiver's own member name now resolves
+via the identical `Resolved::Instance` Stage-B type-probe `$x->method()`
+already uses (agnostic to `->` vs. `::`, since a real PHP static method
+is still just a method looked up on the receiver's own resolved class
+either way).
+
 **Unreachable-code / constant-condition family.** The full, inferred-
 type-trusting family: `if`/`elseif` (with real PHPStan's own
 last-condition-no-trailing-else exemption), `while`/`do-while`, the

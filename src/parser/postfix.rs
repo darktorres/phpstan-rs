@@ -107,10 +107,7 @@ impl Parser {
                 }
                 Token::DoubleColon => {
                     self.skip();
-                    let class_name = match &expr.kind {
-                        ExprKind::Name(n) => n.clone(),
-                        _ => "?".to_string(),
-                    };
+                    let receiver_expr = expr;
                     // `class` (`Foo::class`) already worked as a special
                     // case; any other keyword is just as valid here
                     // (`Foo::new()`, `Foo::default()`, `Foo::list()`).
@@ -154,13 +151,21 @@ impl Parser {
                     };
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
-                        let call = self.expr(ExprKind::StaticCall(class_name, member, args), start);
+                        let target = match &receiver_expr.kind {
+                            ExprKind::Name(n) => StaticTarget::Name(n.clone(), receiver_expr.span),
+                            _ => StaticTarget::Expr(Box::new(receiver_expr)),
+                        };
+                        let call = self.expr(ExprKind::StaticCall(target, member, args), start);
                         expr = if is_fcc {
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
                             call
                         };
                     } else {
+                        let class_name = match &receiver_expr.kind {
+                            ExprKind::Name(n) => n.clone(),
+                            _ => "?".to_string(),
+                        };
                         expr = self.expr(ExprKind::StaticAccess(class_name, member), start);
                     }
                 }

@@ -1,4 +1,5 @@
-use crate::checker::{Checker, class_type_word};
+use crate::ast::StaticTarget;
+use crate::checker::{Checker, Locals, class_type_word};
 use crate::registry::{self, FunctionSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -273,6 +274,51 @@ impl<'a> Checker<'a> {
         match self.resolve_name_expr(class_name) {
             Type::Object(class, _) => Some(class),
             _ => None,
+        }
+    }
+
+    /// `StaticCall`'s own full `StaticTarget` resolution, for a
+    /// `check_expr`-side call site (full diagnostics): `Name` resolves
+    /// exactly like `resolve_static_class_name` always has; a
+    /// genuinely dynamic `Expr` receiver (`$obj::method()`) is checked
+    /// in full first - so an undefined variable, an unresolvable
+    /// property access, etc. inside it is still caught, the same as any
+    /// other checked sub-expression - then resolved via its own real
+    /// inferred type, exactly like a literal class name already is.
+    /// `None` whenever that type isn't a known `Object` (unresolvable,
+    /// same "don't know, don't guess" leniency `resolve_static_class_name`
+    /// already has for `self`/`parent`/`static` outside any class
+    /// context).
+    pub(crate) fn resolve_static_target_class(
+        &mut self,
+        target: &StaticTarget,
+        locals: &mut Locals,
+        label: &str,
+    ) -> Option<String> {
+        match target {
+            StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
+            StaticTarget::Expr(receiver) => match self.check_expr(receiver, locals, label) {
+                Type::Object(class, _) => Some(class),
+                _ => None,
+            },
+        }
+    }
+
+    /// `resolve_static_target_class`'s own `infer_expr`-side counterpart
+    /// (no diagnostics - the receiver is only *inferred*, via the exact
+    /// same silent path every other speculative/probe inference already
+    /// uses, never re-checked).
+    pub(crate) fn infer_static_target_class(
+        &self,
+        target: &StaticTarget,
+        locals: &Locals,
+    ) -> Option<String> {
+        match target {
+            StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
+            StaticTarget::Expr(receiver) => match self.infer_expr(receiver, locals) {
+                Type::Object(class, _) => Some(class),
+                _ => None,
+            },
         }
     }
 

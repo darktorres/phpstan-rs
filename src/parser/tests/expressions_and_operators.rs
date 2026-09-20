@@ -662,7 +662,7 @@ fn dynamic_property_and_method_access_parse() {
     else {
         panic!("expected StaticCall");
     };
-    assert_eq!(class, "Foo");
+    assert_eq!(class.as_name(), Some("Foo"));
     assert_eq!(member, "{dynamic}");
 }
 

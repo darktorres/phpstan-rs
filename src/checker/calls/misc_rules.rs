@@ -65,8 +65,9 @@ impl<'a> Checker<'a> {
                     "method.resultDiscarded",
                 )
             }
-            ExprKind::StaticCall(class_name, method, _) => {
-                let Some(class) = self.resolve_static_class_name(class_name) else {
+            ExprKind::StaticCall(target, method, _) => {
+                let Some(class) = self.resolve_static_class_name(target.as_name().unwrap_or("?"))
+                else {
                     return;
                 };
                 let Some(sig) = self.registry.lookup_method(&class, method) else {

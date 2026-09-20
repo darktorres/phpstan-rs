@@ -381,14 +381,21 @@ impl<'a> Walker<'a> {
                 }
                 return;
             }
-            ExprKind::StaticCall(class, member, args) => {
+            ExprKind::StaticCall(target, member, args) => {
                 if contains(expr.span, self.pos) {
                     *best = None;
+                    // A genuinely dynamic receiver has no class-name text
+                    // to resolve here (this pass doesn't run a type
+                    // probe the way `navigation.rs`'s own equivalent
+                    // does) - `unwrap_or("?")` matches the identical
+                    // "unresolvable" outcome the parser's old permanent
+                    // `"?"` sentinel already produced for this case.
+                    let class = target.as_name().unwrap_or("?");
                     if let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
                         && let Some(spans) = split_identifier_spans(
                             self.source,
                             expr.span,
-                            &[class.as_str(), member.as_str()],
+                            &[class, member.as_str()],
                         )
                         && self.pos_past(spans[1].end)
                         && member != "class"

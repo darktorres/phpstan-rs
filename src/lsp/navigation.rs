@@ -602,7 +602,7 @@ impl<'a> Walker<'a> {
                     self.record(out, expr.span, resolved);
                 }
             }
-            ExprKind::StaticAccess(class, member) | ExprKind::StaticCall(class, member, _) => {
+            ExprKind::StaticAccess(class, member) => {
                 if self.anchor.matches(expr.span)
                     && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
                     && let Some(spans) = split_identifier_spans(
@@ -626,6 +626,64 @@ impl<'a> Walker<'a> {
                         out.push((spans[1], Resolved::Member(fqn, member.to_string())));
                     }
                 }
+            }
+            // `Foo::method()` mirrors `StaticAccess` above exactly (a
+            // literal class name, resolved by plain name lookup). A
+            // genuinely dynamic receiver (`$obj::method()`) has no
+            // class-name text to resolve here at all - it needs the
+            // exact same Stage B type-inference probe `MethodCall`'s own
+            // "any other receiver" branch below already uses, `Resolved::
+            // Instance` being agnostic to `->` vs `::` call syntax (a
+            // real PHP static method is still just a method looked up
+            // on the receiver's own resolved class either way).
+            ExprKind::StaticCall(target, member, args) => {
+                match target {
+                    StaticTarget::Name(class, _) => {
+                        if self.anchor.matches(expr.span)
+                            && let Some(fqn) =
+                                resolve_class_ref(class, current_class, ctx, self.registry)
+                            && let Some(spans) = split_identifier_spans(
+                                self.source,
+                                expr.span,
+                                &[class.as_str(), member.as_str()],
+                            )
+                        {
+                            if self.anchor.matches(spans[0]) {
+                                out.push((spans[0], Resolved::Class(fqn.clone())));
+                            }
+                            if self.anchor.matches(spans[1])
+                                && member != "class"
+                                && member != "{dynamic}"
+                            {
+                                let member = member.strip_prefix('$').unwrap_or(member);
+                                out.push((spans[1], Resolved::Member(fqn, member.to_string())));
+                            }
+                        }
+                    }
+                    StaticTarget::Expr(receiver) => {
+                        self.expr(receiver, ctx, current_class, out);
+                        if self.anchor.matches(expr.span)
+                            && let Some(spans) =
+                                split_identifier_spans(self.source, expr.span, &[member.as_ref()])
+                            && self.anchor.matches(spans[0])
+                        {
+                            out.push((
+                                spans[0],
+                                Resolved::Instance {
+                                    receiver_span: receiver.span,
+                                    member: member.to_string(),
+                                    scope: self.probe_scope(),
+                                    is_static: self.current_is_static,
+                                    class: current_class.map(str::to_string),
+                                },
+                            ));
+                        }
+                    }
+                }
+                for a in args {
+                    self.expr(&a.value, ctx, current_class, out);
+                }
+                return;
             }
             ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {
                 if self.anchor.matches(*span)

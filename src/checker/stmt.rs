@@ -690,7 +690,7 @@ impl<'a> Checker<'a> {
                     self.apply_assert_infos(&sig.assert, sig, Some(recv), args, locals);
                 }
             }
-            ExprKind::StaticCall(class_name, method, args) => {
+            ExprKind::StaticCall(target, method, args) => {
                 if !self
                     .registry
                     .names_with_assert_tags
@@ -698,7 +698,7 @@ impl<'a> Checker<'a> {
                 {
                     return;
                 }
-                if let Some(class) = self.resolve_static_class_name(class_name)
+                if let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some(sig) = self.registry.lookup_method(&class, method)
                     && !sig.assert.is_empty()
                 {

@@ -303,7 +303,23 @@ impl<'a> ClassFnRefWalker<'a> {
                     out.push((expr.span, RefTarget::Function(fqn)));
                 }
             }
-            ExprKind::StaticAccess(class, member) | ExprKind::StaticCall(class, member, _) => {
+            ExprKind::StaticAccess(class, member) => {
+                if let Some(fqn) = resolve_class_ref(class, current_class, ctx)
+                    && let Some(spans) = split_identifier_spans(
+                        self.source,
+                        expr.span,
+                        &[class.as_str(), member.as_str()],
+                    )
+                {
+                    out.push((spans[0], RefTarget::Class(fqn)));
+                }
+            }
+            // A genuinely dynamic receiver has no class-name text to
+            // record a reference for here at all - any name reference
+            // buried inside it is still picked up by the generic
+            // `expr_children` walk below (it's a real child of this
+            // node now, not a discarded `"?"` sentinel).
+            ExprKind::StaticCall(StaticTarget::Name(class, _), member, _) => {
                 if let Some(fqn) = resolve_class_ref(class, current_class, ctx)
                     && let Some(spans) = split_identifier_spans(
                         self.source,

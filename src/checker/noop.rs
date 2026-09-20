@@ -196,7 +196,7 @@ impl<'a> Checker<'a> {
                     "method.resultUnused",
                 )
             }
-            ExprKind::StaticCall(class_name, method, _) => {
+            ExprKind::StaticCall(target, method, _) => {
                 // Real PHPStan's `MethodWithoutImpurePointsCollector`
                 // explicitly excludes constructors
                 // (`if ($method->isConstructor()) return null;`) -
@@ -211,7 +211,7 @@ impl<'a> Checker<'a> {
                 if method.eq_ignore_ascii_case("__construct") {
                     return;
                 }
-                let Some(resolved_class) = self.resolve_static_class_name(class_name) else {
+                let Some(resolved_class) = self.infer_static_target_class(target, locals) else {
                     return;
                 };
                 let Some((owner, sig)) = self

@@ -208,9 +208,11 @@ fn self_parent_and_static_resolve_to_the_real_class_for_static_access() {
 }
 
 #[test]
-fn a_dynamic_static_target_is_never_checked() {
-    // `$className::method()` has no statically known class - nothing
-    // to check, and definitely not something to guess at.
+fn a_dynamic_static_target_with_no_known_type_is_never_checked() {
+    // `$className` is unhinted (`Mixed`), not a known `Object` - nothing
+    // to check, and definitely not something to guess at. See
+    // `a_dynamic_static_target_with_a_known_object_type_is_checked` just
+    // below for the case where the receiver's own type IS known.
     let d = diagnostics_for(
         r#"<?php
             function f($className) {
@@ -219,6 +221,60 @@ fn a_dynamic_static_target_is_never_checked() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_dynamic_static_target_with_a_known_object_type_is_checked() {
+    // `$obj::method()` - a genuinely dynamic receiver expression, not a
+    // literal class name, but its own inferred type IS known (`@param
+    // Foo`), so the call is checked against `Foo` exactly like a literal
+    // `Foo::method()` already would be.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @param Foo $obj */
+            function f($obj) {
+                return $obj::madeUpMethod();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "staticMethod.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_dynamic_static_target_resolving_a_real_method_infers_its_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo { public static function make(): string { return 'x'; } }
+            /** @param Foo $obj */
+            function f($obj) {
+                assertType('string', $obj::make());
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_undefined_variable_inside_a_dynamic_static_receiver_is_still_flagged() {
+    // The receiver expression is a real, checked sub-expression now -
+    // not discarded into a permanent "?" sentinel the moment it isn't a
+    // literal class name.
+    let d = diagnostics_for(
+        r#"<?php
+            function f() {
+                return $undefinedObj::method();
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "variable.undefined"),
+        "got: {d:?}"
+    );
 }
 
 #[test]

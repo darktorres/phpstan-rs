@@ -2187,12 +2187,14 @@ impl<'a> Checker<'a> {
                 }
                 self.anonymous_class_type(e.span)
             }
-            ExprKind::StaticCall(class_name, method, args) => {
+            ExprKind::StaticCall(target, method, args) => {
                 // Mirrors ExprKind::MethodCall's own structure exactly -
-                // resolve first (self/parent/static-aware), predefine
-                // byref/unknown args using the real signature before
-                // checking them, then the existence/arg-type check.
-                let resolved_class = self.resolve_static_class_name(class_name);
+                // resolve first (self/parent/static-aware, or - for a
+                // genuinely dynamic receiver - via its own checked,
+                // inferred type), predefine byref/unknown args using the
+                // real signature before checking them, then the
+                // existence/arg-type check.
+                let resolved_class = self.resolve_static_target_class(target, locals, label);
                 // `_with_owner`, not the plain `lookup_method` - the
                 // visibility check needs the *declaring* class, which can
                 // differ from `resolved_class` for an inherited method.
@@ -2308,7 +2310,9 @@ impl<'a> Checker<'a> {
                     // `class_name` itself; `check_class_name_case`'s
                     // registry lookup harmlessly no-ops for a pseudo-
                     // keyword like `self` or a genuinely undefined class).
-                    self.check_class_name_case(label, class_name, e.span);
+                    if let Some(raw) = target.as_name() {
+                        self.check_class_name_case(label, raw, e.span);
+                    }
                     if let Some(sig) = sig {
                         if let Some((owner, _)) = &sig_with_owner {
                             self.check_member_visibility(MemberVisibilityCheck {
@@ -2340,7 +2344,9 @@ impl<'a> Checker<'a> {
                             // late-static-binding unsafety as the
                             // identical class-constant/static-property
                             // rules.
-                            if class_name == "static" && sig.visibility == Visibility::Private {
+                            if target.as_name() == Some("static")
+                                && sig.visibility == Visibility::Private
+                            {
                                 self.check_static_private_method_access(
                                     owner, method, e.span, label,
                                 );
@@ -3462,8 +3468,8 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    ExprKind::StaticCall(class_name, method, _) => {
-                        if let Some(class) = self.resolve_static_class_name(class_name)
+                    ExprKind::StaticCall(target, method, _) => {
+                        if let Some(class) = self.resolve_static_target_class(target, locals, label)
                             && self.registry.classes.contains_key(class.as_str())
                         {
                             self.check_call_site_method_name_case(&class, method, e.span, label);
@@ -3508,7 +3514,9 @@ impl<'a> Checker<'a> {
                                     sig.is_internal,
                                     e.span,
                                 );
-                                if class_name == "static" && sig.visibility == Visibility::Private {
+                                if target.as_name() == Some("static")
+                                    && sig.visibility == Visibility::Private
+                                {
                                     self.check_static_private_method_access(
                                         &owner, method, e.span, label,
                                     );
@@ -3783,14 +3791,14 @@ impl<'a> Checker<'a> {
                     result
                 }
             }
-            ExprKind::StaticCall(class_name, method, args) => {
+            ExprKind::StaticCall(target, method, args) => {
                 if self.collect_member_refs
-                    && let Some(class) = self.resolve_static_class_name(class_name)
+                    && let Some(class) = self.infer_static_target_class(target, locals)
                     && let Some((owner, _)) = self.registry.lookup_method_with_owner(&class, method)
                 {
                     self.record_member_ref(e.span, &owner, method);
                 }
-                self.resolve_static_class_name(class_name)
+                self.infer_static_target_class(target, locals)
                     .and_then(|class| {
                         self.registry.lookup_method(&class, method).map(|sig| {
                             let resolved_args = resolve_call_args(args, &sig.params);
@@ -4098,8 +4106,8 @@ impl<'a> Checker<'a> {
                         }
                         _ => (None, None),
                     },
-                    ExprKind::StaticCall(class_name, method, _) => {
-                        match self.resolve_static_class_name(class_name) {
+                    ExprKind::StaticCall(target, method, _) => {
+                        match self.infer_static_target_class(target, locals) {
                             Some(class) => {
                                 if self.collect_member_refs
                                     && let Some((owner, _)) =

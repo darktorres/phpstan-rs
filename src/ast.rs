@@ -634,6 +634,36 @@ pub enum InstanceofTarget {
     Expr(Box<Expr>),
 }
 
+/// `ExprKind::StaticCall`'s own receiver - `InstanceofTarget`'s identical
+/// shape, reused rather than duplicated with different field names: a
+/// literal class name (`Foo::method()`, still the overwhelming common
+/// case) plus its own name span, or a genuinely dynamic receiver
+/// expression (`$obj::method()`, `(new Foo())::method()`, `self::$
+/// method()` when `$method` isn't itself the receiver but the member
+/// name - only the *receiver* side is ever `Expr` here).
+#[derive(Debug, Clone)]
+pub enum StaticTarget {
+    Name(String, Span),
+    Expr(Box<Expr>),
+}
+
+impl StaticTarget {
+    /// The literal class name, or `None` for a genuinely dynamic
+    /// receiver - the drop-in replacement for every consumer that only
+    /// ever needs `StaticCall`'s old permanent `"?"` sentinel string:
+    /// `target.as_name().unwrap_or("?")` reproduces that exact prior
+    /// behavior byte-for-byte (a real class registry/pseudo-name lookup
+    /// against the literal `"?"` already always failed/mismatched, the
+    /// same outcome `None` naturally produces here too), for every site
+    /// that isn't `check_static_call`'s own new receiver-type resolution.
+    pub(crate) fn as_name(&self) -> Option<&str> {
+        match self {
+            StaticTarget::Name(n, _) => Some(n),
+            StaticTarget::Expr(_) => None,
+        }
+    }
+}
+
 /// An expression, plus the real source span it occupies - see `Stmt`'s
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
@@ -686,7 +716,15 @@ pub enum ExprKind {
     DynamicPropertyAccess(Box<Expr>, Box<Expr>),
     DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>),
     StaticAccess(String, String),
-    StaticCall(String, String, Vec<Arg>),
+    // `Name` mirrors `InstanceofTarget::Name`'s own (name, name-span)
+    // shape exactly - a `Foo::method()` receiver, unchanged from before
+    // this variant existed. `Expr` is a real, non-`Name` receiver
+    // expression (`$obj::method()`) - previously discarded into a
+    // permanent `"?"` sentinel string at parse time; now the real,
+    // already-parsed receiver `Expr` survives into the AST, letting
+    // `check_static_call` resolve its inferred type and check the call
+    // against it, the same way a literal class name already is.
+    StaticCall(StaticTarget, String, Vec<Arg>),
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
     Instanceof(Box<Expr>, InstanceofTarget),

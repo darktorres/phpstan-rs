@@ -245,7 +245,9 @@ pub(crate) fn walk_expr_for_members(
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
             usage.methods.insert(name.clone());
         }
-        ExprKind::StaticCall(class_ref, name, _) if class_ref_is_self(class_ref, fqn, ctx) => {
+        ExprKind::StaticCall(target, name, _)
+            if class_ref_is_self(target.as_name().unwrap_or("?"), fqn, ctx) =>
+        {
             usage.methods.insert(Arc::from(name.as_str()));
         }
         // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member

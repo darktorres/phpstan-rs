@@ -726,8 +726,8 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                 .map(|sig| sig.return_type.clone())
                 .unwrap_or(Type::Mixed)
         }
-        ExprKind::StaticCall(class, method, _args) => {
-            let fqn = ctx.resolve(class);
+        ExprKind::StaticCall(target, method, _args) => {
+            let fqn = ctx.resolve(target.as_name().unwrap_or("?"));
             registry
                 .lookup_method(&fqn, method)
                 .map(|sig| sig.return_type.clone())

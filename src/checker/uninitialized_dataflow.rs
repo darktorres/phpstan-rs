@@ -503,14 +503,21 @@ fn walk_expr(
             }
             state
         }
-        ExprKind::StaticCall(class_name, name, args) => {
+        ExprKind::StaticCall(receiver, name, args) => {
             for a in args {
                 state = walk_expr(&a.value, state, ctx, declaring_class);
             }
             // Only the three pseudo-keywords are resolved - a literal
             // class name (`Foo::bar()`) is out of scope, since this
-            // walker only resolves to a real method on the same class.
-            let target = if class_name.eq_ignore_ascii_case("parent") {
+            // walker only resolves to a real method on the same class -
+            // same for a genuinely dynamic receiver, which has no name
+            // to compare against these keywords at all.
+            let is_receiver = |kw: &str| {
+                receiver
+                    .as_name()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(kw))
+            };
+            let target = if is_receiver("parent") {
                 // `parent::` is lexical, not virtual: it always means
                 // "the immediate parent of whichever class the *current*
                 // code is written in" - `declaring_class`'s own parent,
@@ -518,7 +525,7 @@ fn walk_expr(
                 ctx.checker
                     .registry
                     .lookup_ancestor_method_with_owner(declaring_class, name)
-            } else if class_name.eq_ignore_ascii_case("self") {
+            } else if is_receiver("self") {
                 // `self::` is also lexical (no late static binding),
                 // unlike `static::` below - real PHP resolves it against
                 // the class the code is written in, walking that class's
@@ -528,7 +535,7 @@ fn walk_expr(
                 ctx.checker
                     .registry
                     .lookup_method_with_owner(declaring_class, name)
-            } else if class_name.eq_ignore_ascii_case("static") {
+            } else if is_receiver("static") {
                 // Late static binding: virtual, exactly like `$this->`.
                 let checked_class = ctx.checked_class.clone();
                 ctx.checker

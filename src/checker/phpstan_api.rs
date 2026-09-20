@@ -1326,14 +1326,20 @@ impl<'a> Walker<'a> {
                     self.check_expr(&a.value, ctx, param_types, label);
                 }
             }
-            ExprKind::StaticCall(class_name, method, args) => {
+            ExprKind::StaticCall(target, method, args) => {
                 // Resolved unconditionally, NOT
                 // pre-filtered through `resolve_if_phpstan` - see
                 // `resolve_class_name`'s own doc comment for why.
                 // `report_static_method_not_covered` does its own
                 // `is_phpstan_code` gating against the method's real
-                // *declaring* class once it looks it up.
-                if let Some(fqn) = self.resolve_class_name(class_name, ctx) {
+                // *declaring* class once it looks it up. A genuinely
+                // dynamic receiver has no name to resolve here (this
+                // pass has no type-inference machinery of its own to
+                // fall back on, unlike `check_static_call`'s own real
+                // resolution) - `unwrap_or("?")` matches the identical
+                // "unresolvable" outcome the parser's old permanent `"?"`
+                // sentinel already produced for this exact case.
+                if let Some(fqn) = self.resolve_class_name(target.as_name().unwrap_or("?"), ctx) {
                     self.report_static_method_not_covered(&fqn, method, e.span, label, ctx);
                 }
                 for a in args {
