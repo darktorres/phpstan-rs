@@ -65,6 +65,7 @@ mod property_hooks;
 mod property_type_too_wide;
 mod purity;
 mod purity_tags;
+mod receiver_type_checks;
 mod regexp_pattern_validity;
 mod require_and_sealed;
 mod restricted_symbol_usage;

@@ -101,6 +101,91 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
     !matches!(ty, Type::Mixed | Type::Never) && narrow_type_excluding(ty, &Type::Null) == *ty
 }
 
+/// Whether `ty`'s value-space can never include a PHP object - real
+/// PHPStan's `Type::canCallMethods()`/`canAccessProperties()` return "no"
+/// for exactly this same set of scalar/array-family types (confirmed
+/// reading each one's own `use PHPStan\Type\Traits\Non*TypeTrait` block:
+/// `NullType`/`VoidType`/`BooleanType`/`IntegerType`/`FloatType`/
+/// `StringType`/`ArrayType` all use `NonObjectTypeTrait`). Used by both
+/// `method.nonObject` and `property.nonObject` - real PHPStan's own
+/// `MethodCallCheck`/`AccessPropertiesCheck` gate on the identical
+/// question. `Type::Callable` (could still resolve to a real `Closure`
+/// object at runtime - a literal closure already infers as
+/// `Type::Object("Closure", [])` directly, never `Type::Callable`),
+/// `Type::TemplateParam`'s own bound, an unresolved `Type::Conditional`
+/// (folded to `Union([if_true, if_false])`, its own doc comment's stated
+/// fallback), `Type::ObjectShape` (a structural bag with no class name to
+/// rule anything out), `Type::SelfRef`/`ParentRef`/`StaticRef` (resolved
+/// away by `Checker::resolve_pseudo` well before reaching a real
+/// expression's type in valid code), and `Type::Mixed`/`Never` are all
+/// left unflagged - matching real PHPStan's own permissive default for
+/// `Mixed` (`checkExplicitMixed`/`checkImplicitMixed` are opt-in toggles
+/// this project doesn't implement) and vacuous-`Never` behavior
+/// (`NeverType` itself overrides `canCallMethods` to unconditionally
+/// return "yes").
+///
+/// A `Union` is flagged the moment *any* member is confirmed closed; an
+/// `Intersection` only when *every* member is - the same rule this
+/// project's own `member_confirmed_missing` already uses for the
+/// sibling `method.notFound`/`property.notFound` checks, deliberately
+/// stricter than real PHPStan's own `checkUnionTypes`-gated (off by
+/// default below level 7) member-filtering default.
+///
+/// Used as-is by `property.nonObject` and `clone.nonObject` - real
+/// PHPStan's `ObjectType::canAccessProperties()`/`isCloneable()` are both
+/// an unconditional "yes" for every real class, no exceptions. `method.
+/// nonObject` needs one further exception on top of this
+/// (`type_can_never_call_methods` below) - `canCallMethods()` is the one
+/// of the three that special-cases `stdClass`.
+pub(crate) fn type_can_never_be_object(ty: &Type) -> bool {
+    match ty {
+        Type::Null
+        | Type::Void
+        | Type::Bool
+        | Type::True
+        | Type::False
+        | Type::Int
+        | Type::IntLiteral(_)
+        | Type::IntRange(..)
+        | Type::Float
+        | Type::FloatLiteral(_)
+        | Type::String
+        | Type::StringLiteral(_)
+        | Type::ClassString(_)
+        | Type::Array(..)
+        | Type::ArrayShape(_)
+        | Type::HasOffsetValue(..) => true,
+        Type::Union(members) => members.iter().any(type_can_never_be_object),
+        Type::Intersection(members) => members.iter().all(type_can_never_be_object),
+        Type::TemplateParam(param) => type_can_never_be_object(&param.bound),
+        Type::Conditional {
+            if_true, if_false, ..
+        } => type_can_never_be_object(if_true) || type_can_never_be_object(if_false),
+        _ => false,
+    }
+}
+
+/// `method.nonObject`'s own classifier - `type_can_never_be_object` plus
+/// one further exception: real PHPStan's `ObjectType::canCallMethods()`
+/// (`ObjectType.php:1072-1078`) special-cases `stdClass` to
+/// unconditionally return "no" (a real, registered, permanently
+/// zero-method class), unlike `canAccessProperties()`/`isCloneable()`,
+/// which have no such exception - so `property.nonObject`/
+/// `clone.nonObject` must keep using the plain, `stdClass`-unaware
+/// function above, not this one.
+pub(crate) fn type_can_never_call_methods(ty: &Type) -> bool {
+    match ty {
+        Type::Object(class, _) if class.as_str() == "stdClass" => true,
+        Type::Union(members) => members.iter().any(type_can_never_call_methods),
+        Type::Intersection(members) => members.iter().all(type_can_never_call_methods),
+        Type::TemplateParam(param) => type_can_never_call_methods(&param.bound),
+        Type::Conditional {
+            if_true, if_false, ..
+        } => type_can_never_call_methods(if_true) || type_can_never_call_methods(if_false),
+        _ => type_can_never_be_object(ty),
+    }
+}
+
 impl<'a> Checker<'a> {
     /// A `new class { ... }` expression's own inferred type - looks its
     /// span up in `anonymous_class_names` (populated once, at parse time,
@@ -922,6 +1007,39 @@ impl<'a> Checker<'a> {
                     }
                     _ => None,
                 };
+                // `method.nonObject` - a receiver whose type is confirmed
+                // to never be an object at all (a scalar, an array,
+                // `stdClass`) gets flagged here and short-circuits the
+                // rest of this arm's method-resolution logic entirely,
+                // rather than falling through to `method.notFound` below.
+                // `recv_class` above and `type_can_never_call_methods` are
+                // *not* disjoint sets once a `Union` mixes a real class
+                // with a closed member (e.g. `Foo|string`) - this early
+                // return, not non-overlapping domains, is what keeps the
+                // two checks from double-firing on the same call.
+                // Nullsafe-aware the same way real PHPStan's own
+                // `NullsafeOperatorHelper::getNullsafeShortcircuitedExprRespectingScope`
+                // is: `$x?->method()` on a `null`-only `$x` short-circuits
+                // to `null` rather than erroring, while plain
+                // `$x->method()` on the same `$x` is a real bug.
+                let nonobject_ty = if *nullsafe {
+                    narrow_type_excluding(&recv_ty, &Type::Null)
+                } else {
+                    recv_ty.clone()
+                };
+                if type_can_never_call_methods(&nonobject_ty) {
+                    self.report(
+                        label.to_string(),
+                        format!("call to method {method}() on a non-object type {recv_ty}"),
+                        e.span,
+                        0,
+                        "method.nonObject",
+                    );
+                    for a in args {
+                        self.check_expr(&a.value, locals, label);
+                    }
+                    return Type::Mixed;
+                }
                 // `sig` (and every class-name-dependent decision below
                 // it - argument-type checking, visibility/`@internal`/
                 // `@deprecated`, the Doctrine special case, and the final
@@ -2382,7 +2500,24 @@ impl<'a> Checker<'a> {
                                 .guarded_properties
                                 .contains(&(name.to_string(), prop.to_string()))
                     );
-                if !property_exists_guarded
+                // `property.nonObject` - same reasoning and nullsafe
+                // handling as `method.nonObject` above, checked first so
+                // it short-circuits before `property.notFound` ever gets
+                // a chance to also fire on the same access.
+                let nonobject_ty = if *nullsafe {
+                    narrow_type_excluding(&base_ty, &Type::Null)
+                } else {
+                    base_ty.clone()
+                };
+                if type_can_never_be_object(&nonobject_ty) {
+                    self.report(
+                        label.to_string(),
+                        format!("access to property ${prop} on a non-object type {base_ty}"),
+                        e.span,
+                        0,
+                        "property.nonObject",
+                    );
+                } else if !property_exists_guarded
                     && self.member_confirmed_missing(&base_ty, |c| {
                         c == "stdClass"
                             || self.registry.lookup_property(c, prop).is_some()
