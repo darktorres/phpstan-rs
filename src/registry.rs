@@ -10,6 +10,7 @@ mod assignability;
 mod class_info;
 mod function_sig;
 mod generics;
+mod global_vars;
 mod hierarchy;
 mod index;
 mod name_context;
@@ -74,6 +75,17 @@ pub struct Registry {
     // unindexed, the same "don't know, don't guess" leniency that
     // function already documents.
     pub global_constants: FxHashMap<Arc<str>, Type>,
+    // `global $x;`-declared variable name -> inferred-type table, built by
+    // folding every real assignment site to that name anywhere in the
+    // corpus (`global_vars::infer_global_variables`) - the project-wide
+    // vantage point real PHPStan's own per-file `GlobalHandler` doesn't
+    // have, so a bare `global $x;` doesn't have to resolve to `Mixed`
+    // unconditionally the way it otherwise would (see
+    // `checker::stmt`'s own `StmtKind::Global` arm). Absent entry (not a
+    // `Mixed`-valued one) means "no assignment site found or resolved" -
+    // callers should treat a missing key the same as they already treat
+    // `Mixed`.
+    pub global_variables: FxHashMap<Arc<str>, Type>,
     // A strictness-parameter half: an unknown array literal's type
     // (`Array(Mixed)`) freely satisfies any array/shape type it's
     // checked against. Defaults to `false` (today's permissive
@@ -396,6 +408,7 @@ impl Registry {
         registry.resolve_deferred_mixins();
         registry.precompute_ancestor_names();
         registry.precompute_member_owners();
+        registry.infer_global_variables(&[(std::path::Path::new("<flattened>"), program)]);
         registry
     }
 

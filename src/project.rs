@@ -629,6 +629,12 @@ impl Project {
         // needed.
         self.registry.resolve_transitive_purity();
         self.registry.precompute_ancestor_names();
+        let files: Vec<(&Path, &[Stmt])> = self
+            .files
+            .iter()
+            .map(|(p, f)| (p.as_path(), f.ast.as_slice()))
+            .collect();
+        self.registry.infer_global_variables(&files);
         self.rebuild_pest_config();
     }
 
@@ -872,6 +878,15 @@ impl Project {
         self.registry.precompute_member_owners();
         self.registry.resolve_transitive_purity();
         self.registry.precompute_ancestor_names();
+        {
+            let mut files: Vec<(&Path, &[Stmt])> = self
+                .files
+                .iter()
+                .map(|(p, f)| (p.as_path(), f.ast.as_slice()))
+                .collect();
+            files.push((path, ast.as_slice()));
+            self.registry.infer_global_variables(&files);
+        }
         register_references(&mut self.dependents, path, &references);
 
         self.files.insert(

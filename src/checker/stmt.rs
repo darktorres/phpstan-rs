@@ -440,18 +440,23 @@ impl<'a> Checker<'a> {
                         );
                         continue;
                     }
-                    // A `global $x;` declares `$x` here, even though
-                    // this checker deliberately doesn't try to link it
-                    // back to any specific top-level assignment (see
-                    // this arm's doc comment above) - `stmt.span` is as
-                    // precise an answer as the type side already gives
-                    // (`Mixed`, not a real inferred type either).
-                    // `.declare` unconditionally overwrites, so it's
-                    // only called when there's nothing here yet to
-                    // overwrite.
+                    // A `global $x;` declares `$x` here. `Registry::
+                    // global_variables` (`registry::global_vars::infer_
+                    // global_variables`) may already have a real type
+                    // folded from every assignment site to this name
+                    // anywhere in the corpus - fall back to `Mixed` only
+                    // when it doesn't. `.declare` unconditionally
+                    // overwrites, so it's only called when there's
+                    // nothing here yet to overwrite.
                     if !locals.contains_key(name) {
-                        self.probe_hit_at(stmt.span, &Type::Mixed);
-                        locals.declare(name.clone(), Type::Mixed, stmt.span);
+                        let ty = self
+                            .registry
+                            .global_variables
+                            .get(name.as_str())
+                            .cloned()
+                            .unwrap_or(Type::Mixed);
+                        self.probe_hit_at(stmt.span, &ty);
+                        locals.declare(name.clone(), ty, stmt.span);
                     }
                 }
             }
