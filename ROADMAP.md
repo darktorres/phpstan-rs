@@ -3212,6 +3212,43 @@ explicit-vs-implicit provenance field to key them off, and no
 threading provenance through every inference site that currently
 collapses to `Mixed`.
 
+**Receiver-type-checks phase (DONE).** Nine real-PHPStan identifiers for
+"this receiver's own type provably can never support the operation at
+all" - `method.nonObject`/`property.nonObject` (share one classifier,
+with a `stdClass`-specific carve-out for the method half only, verified
+against `ObjectType::canCallMethods()`/`canAccessProperties()`/
+`isCloneable()`), `offsetAccess.nonOffsetAccessible` (with `Null`
+exempted, matching `NullType::isOffsetAccessible()`'s own real-PHPStan
+`yes`), `foreach.nonIterable`, `offsetAccess.nonArray` (array/list
+destructuring, `Null` *not* exempted here, unlike offset access),
+`clone.nonObject`, `callable.nonCallable` (with a `resource`-specific
+carve-out and a `Null`-stripped-from-`Union` correction found by a real
+pre-existing test failure, not by re-reading), and the two spread/unpack
+shapes `arrayUnpacking.nonIterable`/`argument.unpackNonIterable`. Landed
+as 7 separately-committed sub-items (shared classifiers folding into the
+first check that needed them), each with its own targeted tests plus a
+full `checker::` regression run. Deliberately stricter than real
+PHPStan's own filtered-Union default for these checks specifically (a
+`Union` is flagged the moment *any* member is confirmed closed, mirroring
+this project's own pre-existing `member_confirmed_missing` precedent,
+not real PHPStan's `TrinaryLogic::lazyExtremeIdentity`-plus-`reportMaybes`
+combinator) - confirmed via a follow-up real-PHPStan corpus diff (see
+"Newly identified gaps" below) to produce zero false positives on
+piwigo16: every phpstan-rs-only diagnostic in that diff traced either to
+real PHPStan describing the same location as bare `mixed` (a message-
+granularity difference, not a disagreement) or to real PHPStan's own
+scope losing precision after a variable's first array-key write and
+silently downgrading to `mixed` for every later read (this project's own
+array-shape tracking doesn't degrade the same way, so it keeps flagging
+locations real PHPStan's default configuration goes quiet on - still
+genuine unchecked-`X|false` reads). Corpus-verified against both
+`~/piwigo16` (148 new diagnostics, 0 removed) and `~/piwigo17-frozen`
+(10 new diagnostics, 0 removed); `callable.nonCallable`/`clone.nonObject`/
+both unpack identifiers had zero non-`mixed` corpus hits in this
+particular corpus, per this project's own "corpus incidence isn't a
+decline reason" precedent - shipped unconditionally regardless, backed
+by their own unit tests.
+
 ---
 
 # Newly identified gaps (parity audit against real PHPStan Rules/)
@@ -3236,7 +3273,82 @@ workflow's own journal (`wf_495e5a37-b39/journal.jsonl`, under this
 session's own Claude project directory) if a future scoping pass needs
 more than the one-line summary here.
 
+**Follow-up batch (real-PHPStan-vs-phpstan-rs corpus diff, not the
+20-agent audit)**: after the receiver-type-checks phase landed, a direct
+`vendor/bin/phpstan analyse` (level 10, its own configured level) run
+against `~/piwigo16` was diffed identifier-by-identifier against a
+same-scope `phpstan-rs check-project --config phpstan-rs.toml` run on
+the same checkout, restricted to files both tools actually scan. Every
+identifier real PHPStan emitted that phpstan-rs's own source has no
+matching `"identifier.string"` literal for at all (not just "zero hits
+in this corpus" - confirmed by grepping `src/` directly, since level
+10's `checkImplicitMixed` inflates or silences many identifiers'
+corpus incidence in ways unrelated to whether the check exists) was
+cross-checked against every existing phase/Pending/Won't-port/Known-
+limitations mention project-wide before being added below - most of
+real PHPStan's ~116 distinct identifiers on this corpus were already
+covered or already documented as a gap elsewhere (e.g. `identical.
+alwaysFalse`/`alwaysTrue`, `instanceof.alwaysTrue`/`alwaysFalse`,
+`new.static`, the whole `unset.*` family, `parameter.defaultValue`/
+`.phpDocType`, `property.defaultValue`, `varTag.misplaced` - all
+already have a line above). What follows is only the residue: real,
+verified-absent-from-`src/`, previously-undocumented gaps.
+
+- **`Rules/Comparison/BooleanAndConstantConditionRule.php`/
+  `BooleanOrConstantConditionRule.php` - `and`/`or` word-operator
+  identifier fidelity**: not a missing check - `check_boolean_and_or`
+  (`src/checker/control_flow/boolean_conditions.rs:68-145`) already
+  covers the "left/right/whole-condition already constant" family
+  completely. The gap is identifier *naming*: this project's AST has a
+  single `BinOp::And`/`BinOp::Or` variant (`src/ast.rs:578-579`) for
+  both the symbol spelling (`&&`/`||`) and the word spelling (`and`/
+  `or`), so the check always reports under `booleanAnd.*`/`booleanOr.*`
+  - real PHPStan's own parser keeps them distinct and reports the
+  word-operator spelling as `logicalAnd.*`/`logicalOr.*` instead (a
+  different `$identifierType` string passed into the same shared rule
+  class). Cosmetic for a human reader, but would break exact-identifier
+  matching against a real-PHPStan-generated baseline file for any
+  `and`/`or`-spelled condition.
+- **`Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`**:
+  flags calling a type-check function (`is_string()`, `is_int()`,
+  `is_array()`, ...) whose outcome is already statically decided by the
+  argument's own inferred type - `function.alreadyNarrowedType` (the
+  check is always true, e.g. `is_int($x)` where `$x` is already known
+  `int`) and `function.impossibleType` (always false, e.g. `is_string($x)`
+  where `$x` is already known `int`). phpstan-rs has the PHPDoc-tag
+  analogue of this exact pair - `assert.alreadyNarrowedType`/
+  `.impossibleType` (`src/checker/narrowing.rs:1488-1499`, for
+  `@phpstan-assert`/`-if-true`/`-if-false` tag validity) - but nothing
+  wired to the far more commonly-hit plain-function-call case (108095
+  scoped diagnostics dominate the piwigo16 level-10 corpus overall, but
+  isolating this one rule alone: 60 `function.alreadyNarrowedType` + 26
+  `function.impossibleType` hits).
+
+## DeadCode
+
+- **`Rules/DeadCode/NoopRule.php`'s generic fallback**: phpstan-rs's own
+  `noop.rs` covers a set of specific named side-effect-free-statement
+  cases (`function.resultUnused`, `method.resultUnused`,
+  `staticMethod.resultUnused`, `logicalXor.resultUnused`,
+  `ternary.resultUnused`, and the `booleanAnd`/`booleanOr` family's own
+  `.resultUnused` sub-case) but has no generic catch-all for every
+  *other* provably-side-effect-free expression statement (a bare
+  comparison `$a == $b;`, a bare arithmetic expression, a bare property/
+  variable read used as a whole statement) - real PHPStan's own
+  `expr.resultUnused` is exactly this fallback, the last case in
+  `NoopRule.php` after every more specific one has been ruled out.
+
 ## Classes
+
+- **`Rules/Classes/UnusedConstructorParametersRule.php`**: shares its
+  underlying `UnusedFunctionParametersCheck` with phpstan-rs's own
+  already-implemented `parameter.unused`/`closure.unusedUse`
+  (`src/checker/unused.rs:66,98`), but real PHPStan's own check
+  deliberately reports an unused *constructor* parameter under its own
+  distinct identifier, `constructor.unusedParameter`, rather than the
+  generic `parameter.unused` - phpstan-rs's `unused.rs` never special-
+  cases `__construct`, so an unused constructor parameter is still
+  correctly flagged today, just always under the generic identifier.
 
 - **`Rules/Classes/ImpossibleInstanceOfRule.php`**: Real PHPStan's ImpossibleInstanceOfRule reports instanceof.alwaysTrue/instanceof.alwaysFalse/instanceof.invalidExprType whenever an `$x instanceof Foo` expression's own inferred type resolves to a literal boolean (or the dynamic class-name expr is not string|object) - phpstan-rs's own unreachable-code family deliberately excludes Instanceof from its generic if/while/ternary...
 - **`Rules/Classes/NewStaticRule.php`**: Real PHPStan's NewStaticRule reports the well-known 'Unsafe usage of new static().' (identifier new.static) whenever `new static()` is used in a non-final class without a consistent-constructor guarantee; NewStaticInAbstractClassStaticMethodRule reports a related, more specific case (new.staticInAbstractClassStaticMethod) inside an abstract class's own static method.
@@ -3248,7 +3360,22 @@ more than the one-line summary here.
 
 ## Functions
 
+- **`FunctionReturnTypeCheck.php`'s bare-`return;` validity check**:
+  `return.empty` flags a bare `return;` (no value) inside a function/
+  method whose declared return type requires one (i.e. isn't `void`/
+  `never`, and isn't an implicitly-nullable type). Distinct from the
+  already-covered `return.missing` (a code path falling off the end
+  with no `return` at all) and the already-tracked `return.never`
+  (Done, `FunctionReturnTypeCheck.php`/`MissingReturnRule.php`'s own
+  validate-direction check) - phpstan-rs has neither this specific check nor any mention
+  of it (5 corpus hits on piwigo16 at level 10).
 - **`Functions/CallCallablesRule.php (and the related dynamic-target half of FunctionCallableRule.php's callable.nonCallable check)`**: Real PHPStan's CallCallablesRule checks a dynamic call `$callable(...)` (callee is an arbitrary expression, not a plain function name): flags a non-callable value (callable.nonCallable), an inaccessible private/protected array-callable method (callable.inaccessibleMethod), and runs full arity/parameter-type checking against the resolved callable's signature.
+  **Partially closed**: the receiver-type-checks phase (Done) built
+  `callable.nonCallable` for exactly this dynamic-callee shape
+  (`type_confirmed_not_callable`, `src/checker/assignment.rs`). Still
+  open: `callable.inaccessibleMethod` and running arity/parameter-type
+  checking against a resolved `[$obj, 'method']`/`'Foo::bar'`-shaped
+  callable's own signature.
 - **`Functions/IncompatibleDefaultParameterTypeRule.php (+ IncompatibleClosureDefaultParameterTypeRule.php, IncompatibleArrowFunctionDefaultParameterTypeRule.php)`**: Real PHPStan (level 2) checks that a parameter's default value expression's type is assignable to that parameter's declared type hint (identifier parameter.defaultValue) for functions, closures, and arrow functions alike. phpstan-rs's AST carries a `default: Option<Expr>` on every parameter but no checker code anywhere validates it against the parameter's type hint.
 - **`Functions/ReturnNullsafeByRefRule.php (+ ArrowFunctionReturnNullsafeByRefRule.php)`**: Real PHPStan flags 'Nullsafe cannot be returned by reference' (identifier nullsafe.byRef) when a by-ref function/arrow-function returns an expression whose access chain passes through a nullsafe operator (?->). phpstan-rs has a `contains_nullsafe_access` helper already used for the analogous by-ref-argument check, but nothing calls it against a by-ref function/arrow-fn's own...
 - **`Functions/InvalidParameterNameRule.php + InvalidLexicalVariablesInClosureUseRule.php + RedefinedParametersRule.php + VariadicParametersDeclarationRule.php`**: A family of small level-0 parameter/closure-use-list sanity checks (parameter named $this or a superglobal; a closure `use($this)`/`use($_GET)`/a use-variable duplicating a param name; a duplicate parameter name; a non-last variadic parameter) has no phpstan-rs equivalent at all - none of the identifiers (parameter.superglobal, parameter.this, closure.useThis,...
@@ -3260,6 +3387,22 @@ more than the one-line summary here.
 - **`Rules/Methods/MissingMagicSerializationMethodsRule.php`**: Real PHPStan flags a non-abstract class implementing Serializable that lacks __serialize()/__unserialize() (identifier 'class.serializable', PHP-version-gated via serializableRequiresMagicMethods()). phpstan-rs's only Serializable-related logic is the unrelated 'enum cannot implement Serializable' check in oop.rs; the magic-method-presence check itself doesn't exist, and...
 - **`Rules/Methods/AbstractMethodInNonAbstractClassRule.php`**: Real PHPStan's second half of this rule flags a non-abstract, non-interface method with no body at all (identifier 'method.nonAbstract') - real PHP's parser accepts this syntax even though it's semantically invalid, so PHPStan itself must catch it.
 - **`Rules/Methods/MethodCallableRule.php`**: Real PHPStan gates first-class-callable syntax (`$obj->method(...)`) behind a PHP-8.1 version check, reporting 'callable.notSupported' when the configured target is older. phpstan-rs built an extensive PhpFeature/php_version.rs framework covering roughly a dozen similarly narrow PHP-version-gated syntax checks (noncapturing catch, throw-expression, promoted properties,...
+- **`Rules/Methods/StaticMethodCallCheck.php`'s own static/instance-context
+  mismatch half**: distinct from the file's already-tracked
+  casing-mismatch check (ROADMAP's identifier-casing family, `Static
+  MethodCallCheck.php:336`) - real PHPStan's `method.staticCall`
+  identifier flags calling a genuinely non-static method through
+  `Foo::method()` static-call syntax (or the reverse). No phpstan-rs
+  equivalent exists for this specific mismatch (2 corpus hits on
+  piwigo16 at level 10).
+- **`Rules/Methods/OverridingMethodRule.php`'s tentative-return-type
+  sub-check**: `method.tentativeReturnType` flags overriding a native
+  PHP method that core has annotated with a "tentative" return type
+  (PHP's own deprecation-notice mechanism for adding return types to
+  built-in classes without breaking userland overrides) without
+  matching it. Niche - only relevant when extending certain SPL/core
+  classes - not built and not previously documented (6 corpus hits, all
+  from vendored stdlib-adjacent code, not Piwigo's own).
 
 ## Properties
 
@@ -3278,6 +3421,15 @@ more than the one-line summary here.
 
 ## PhpDoc
 
+- **`Rules/PhpDoc/InvalidPhpDocTagValueRule.php`**: `phpDoc.parseError`
+  flags a PHPDoc tag whose value is syntactically malformed enough that
+  `phpstan/phpdoc-parser` can't parse it into a type at all (e.g. a
+  stray unclosed generic bracket in a `@param` type). Not implemented -
+  no evidence of `phpDoc.parseError` or malformed-tag-value detection
+  anywhere in `src/`; a high corpus count (155 hits), spread across
+  Piwigo's own code (`functions_url.inc.php`, `functions_mysql.inc.php`,
+  `template.class.php`, ...) rather than concentrated in one vendored
+  file, worth a closer look given the count.
 - **`Rules/PhpDoc/IncompatiblePhpDocTypeRule.php, IncompatiblePropertyPhpDocTypeRule.php, IncompatiblePropertyHookPhpDocTypeRule.php, IncompatibleClassConstantPhpDocTypeRule.php`**: Real PHPStan reports a real diagnostic (parameter.phpDocType/return.phpDocType/property.phpDocType/classConstant.phpDocType, plus *.unresolvableType siblings) when a @param/@return/@var/property/class-constant PHPDoc type is incompatible with (not a sub/supertype of) its own native type hint; phpstan-rs has no such diagnostic anywhere - it silently reconciles/coerces the doc...
 - **`Rules/PhpDoc/IncompatibleSelfOutTypeRule.php`**: @phpstan-self-out (asserting a method returns $this narrowed to a different subtype) is entirely unimplemented in phpstan-rs - the tag is only listed in the typo-detection whitelist so a real use of it isn't wrongly flagged as unknown, but it's never actually parsed into a type or consumed/checked (selfOut.type/.static/.unresolvableType, plus generic-type validation, have no...
 - **`Rules/PhpDoc/FunctionAssertRule.php, MethodAssertRule.php (AssertRuleHelper)`**: Phase 48.7 closed the plain class-existence slice of this (`class.notFound` on a `@phpstan-assert`/`-if-true`/`-if-false` tag's own asserted type - `checker/narrowing.rs`'s `check_assert_tag_types`). Still open: the deeper assertion-*validity* half real PHPStan validates - assert.impossibleType (an assertion that can never happen); assert.alreadyNarrowedType; assert.unresolvableType; assert.trait; assert.unknownExpr; generic-type/missing-typehint checks on the asserted type.
@@ -3294,12 +3446,29 @@ more than the one-line summary here.
 ## Arrays
 
 - **`Rules/Arrays/IterableInForeachRule.php`**: Real PHPStan flags `foreach` over a subject whose inferred type isn't iterable at all (identifier `foreach.nonIterable`); phpstan-rs's Foreach handling in the checker never validates the subject's type before iterating, it just falls back to `Mixed` element type via `array_element_type(...).unwrap_or(Type::Mixed)`.
+  **(Closed - see the receiver-type-checks phase in Done:
+  `type_confirmed_not_iterable`, `check_foreach`, `src/checker/stmt/
+  loops.rs`.)**
 - **`Rules/Arrays/DeadForeachRule.php`**: Real PHPStan flags a `foreach` whose subject is provably an always-empty array (`foreach.emptyArray`, level 4) as dead code; phpstan-rs has no `isIterableAtLeastOnce()`-style check anywhere and never reports this.
 - **`Rules/Arrays/ArrayDestructuringRule.php`**: Real PHPStan's list()/[] destructuring assignment checks that the RHS is actually array-like (`offsetAccess.nonArray`) and that each destructured key actually exists on it (via NonexistentOffsetInArrayDimFetchCheck). phpstan-rs's `bind_assignment_target`/`check_assignment_target` for an `ArrayLiteral` LHS only ever infers/binds - a non-array RHS silently falls to the `_ =>...
+  **`offsetAccess.nonArray` half closed** (receiver-type-checks phase,
+  Done: `type_confirmed_not_destructurable`, `src/checker/
+  assignment.rs`). The each-key-exists-on-the-RHS half (via
+  `NonexistentOffsetInArrayDimFetchCheck`) is still open.
 - **`Rules/Arrays/ArrayUnpackingRule.php`**: Real PHPStan flags `[...$arr]` when `$arr`'s key type could be string and the target PHP version predates 8.1's string-key unpacking support (`arrayUnpacking.stringOffset`). phpstan-rs's ArrayLiteral checking in `check_expr` never inspects `item.spread` at all - a spread item's value is only type-inferred, never validated against its key type or the configured PHP version.
 - **`Rules/Arrays/UnpackIterableInArrayRule.php`**: Real PHPStan flags `[...$x]` when `$x` isn't iterable (`arrayUnpacking.nonIterable`). phpstan-rs's array-literal checking never validates a spread item's value type against iterability - see ArrayUnpackingRule finding above, same root cause (spread items aren't specially checked at all).
+  **(Closed - see the receiver-type-checks phase in Done:
+  `type_confirmed_not_iterable`, `src/checker/expr.rs`'s `ArrayLiteral`
+  arm.)**
 - **`Rules/Arrays/OffsetAccessWithoutDimForReadingRule.php`**: Real PHPStan flags `$x[]` used in a read position (a PHP compile-time fatal error PHPStan pre-empts statically) via the non-ignorable `offsetAccess.noDim`. phpstan-rs's parser parses `expr[]` identically in any postfix position (no read/write distinction), and `check_expr`'s Index arm silently returns `Type::Mixed` for a `None` dim with no diagnostic.
 - **`Rules/Arrays/NonexistentOffsetInArrayDimFetchRule.php`**: Real PHPStan's NonexistentOffsetInArrayDimFetchRule/Check has two halves: (1) flag reading a nonexistent key (`offsetAccess.notFound`) across constant arrays, general arrays (opt-in) and shapes, and (2) flag indexing into a type that isn't offset-accessible at all (`offsetAccess.nonOffsetAccessible`, e.g. an int or a non-ArrayAccess object).
+  **Half (2) closed** (receiver-type-checks phase, Done:
+  `type_confirmed_not_offset_accessible`, `check_offset_accessibility`,
+  `src/checker/assignment.rs`; ships as phpstan-rs's own
+  `shapeAccess.notFound` for the array-shape-key case, not literally
+  named `offsetAccess.notFound` - a pre-existing naming difference, not
+  new). Half (1)'s general-array/constant-array-key existence checking
+  beyond shapes is still open.
 - **`Rules/Arrays/OffsetAccessAssignmentRule.php`**: Real PHPStan flags `$arr[$key] = $v;`/`$arr[$key] += $v;` when `$key`'s type is illegal for `$arr`'s own declared/known offset type (`offsetAssign.dimType`, shared by the sibling OffsetAccessAssignOpRule for compound-assignment operators).
 - **`Rules/Arrays/OffsetAccessValueAssignmentRule.php`**: Real PHPStan flags assigning a value of the wrong type into a typed array/object offset (`offsetAssign.valueType`, e.g. `array<int,string> $a; $a[0] = 5;`). phpstan-rs's `write_index_into` always unions the new value's type into the container's element type rather than checking it against any pre-existing declared value type, so an incompatible value is never reported - it's...
 
@@ -3318,6 +3487,20 @@ more than the one-line summary here.
 - **`Rules/Variables/CompactVariablesRule.php`**: Real PHPStan's CompactVariablesRule reports `variable.undefined` when a literal string (or nested array-of-strings) argument to compact() names a variable not defined (or maybe-undefined) in scope. phpstan-rs's own `variable.undefined` machinery only fires for direct `$var` reads; the only compact()-aware code in src/checker/unused.rs marks compact()'s named variables as...
 - **`Rules/Variables/UnsetRule.php`**: Real PHPStan's UnsetRule reports five distinct diagnostics on `unset(...)` targets: `unset.variable` (undefined variable), `unset.offset` (illegal/nonexistent array offset), `unset.readOnlyProperty`/`unset.readOnlyPropertyByPhpDoc`, `unset.hookedProperty`, and `unset.possiblyHookedProperty` (PHP 8.4).
 - **`Rules/Variables/VariableCloningRule.php`**: Real PHPStan's VariableCloningRule reports `clone.nonObject` when `clone $expr` targets a non-cloneable (non-object) type. phpstan-rs's checker infers a type for `ExprKind::Clone(...)` but performs no cloneability validation at all — no `clone.nonObject`-equivalent identifier exists anywhere in the codebase, and ROADMAP.md never mentions cloning validation (its 'clone' hits...
+  **(Closed since this entry was written - see the receiver-type-checks
+  phase in Done: `type_can_never_be_object`/`clone.nonObject`,
+  `src/checker/expr.rs`'s `Clone` arm.)**
+- **`Rules/Variables/NullCoalesceRule.php`'s own dead-`??`-operand
+  check**: phpstan-rs's existing `nullCoalesce.variable`/`.property`/
+  `.offset` (`src/checker/...`) only fire when the left side is
+  *definitely undefined*. Real PHPStan's own `nullCoalesce.expr`
+  additionally flags the opposite, equally-common case - the left side
+  is defined and its inferred type already excludes `null` entirely, so
+  `??`'s right side can never run at all (`$definitelyNotNull ?? $y`).
+  Not implemented; needs its own type-based check (probably
+  `type_definitely_excludes_null`, already used elsewhere in this
+  codebase) rather than the existing definedness-tracking machinery (5
+  corpus hits).
 
 ## Operators+Cast
 
@@ -3327,6 +3510,16 @@ more than the one-line summary here.
 - **`Rules/Cast/DeprecatedCastRule.php`**: Real PHPStan warns (`cast.deprecated`) on the non-standard cast spellings `(integer)`, `(boolean)`, `(double)`, `(binary)` as of PHP 8.5, recommending the canonical `(int)`/`(bool)`/`(float)`/`(string)` instead. phpstan-rs has no such diagnostic.
 - **`Rules/Cast/UnsetCastRule.php`**: Real PHPStan hard-errors (`cast.unset`, non-ignorable) on the `(unset)` cast when targeting PHP >= 8.0, since PHP itself removed it. phpstan-rs infers a type for `(unset)$x` (Type::Null) but never checks the configured php_version to flag its use as removed.
 - **`Rules/Cast/VoidCastRule.php`**: Real PHPStan flags the PHP 8.5 `(void)` cast two ways: `cast.voidNotSupported` when the configured PHP version predates 8.5, and `cast.void` (non-ignorable) whenever it's used as anything other than a first-level statement. phpstan-rs parses `(void)` as a legal, inert cast but never emits either diagnostic.
+- **`Rules/Operators/InvalidIncDecOperationRule.php`**: a whole
+  unimplemented rule family - flags `$x++`/`$x--`/`++$x`/`--$x`
+  (`postInc.type`/`postDec.type`/`preInc.type`/`preDec.type`) on a type
+  PHP can't meaningfully increment/decrement (an array, a bool, a plain
+  object without numeric-string semantics). phpstan-rs's checker infers
+  a type for pre/post inc/dec expressions but performs no operand-type
+  legality validation at all - no matching identifier or check exists
+  anywhere in `src/`, and this rule class isn't mentioned in ROADMAP.md
+  or the backlog docs. Non-trivial corpus incidence for legacy PHP:
+  postInc.type 41, postDec.type 14, preInc.type 3, preDec.type 2.
 
 ## Traits+InternalTag
 
