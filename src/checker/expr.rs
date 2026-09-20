@@ -124,12 +124,23 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// (`NeverType` itself overrides `canCallMethods` to unconditionally
 /// return "yes").
 ///
-/// A `Union` is flagged the moment *any* member is confirmed closed; an
-/// `Intersection` only when *every* member is - the same rule this
-/// project's own `member_confirmed_missing` already uses for the
-/// sibling `method.notFound`/`property.notFound` checks, deliberately
-/// stricter than real PHPStan's own `checkUnionTypes`-gated (off by
-/// default below level 7) member-filtering default.
+/// A `Union` is flagged the moment *any* **non-`Null`** member is
+/// confirmed closed; an `Intersection` only when *every* member is - the
+/// same rule this project's own `member_confirmed_missing` already uses
+/// for the sibling `method.notFound`/`property.notFound` checks,
+/// deliberately stricter than real PHPStan's own `checkUnionTypes`-gated
+/// (off by default below level 7) member-filtering default. `Null` is
+/// dropped from a `Union` before that evaluation specifically - real
+/// PHPStan's `RuleLevelHelper::findTypeToCheckImplementation` strips
+/// `Null` out of *any* type that isn't itself exactly `Null` before
+/// running any of these checks at all (`checkNullables`, off by default
+/// through level 7 - a *different*, unconditional-on-`checkUnionTypes`
+/// preamble than the member-filtering above), so `Closure|null` is
+/// checked as plain `Closure`, never as a `Union` with a closed `Null`
+/// member - confirmed the hard way, by a real, pre-existing test
+/// (`this_is_available_inside_a_closure_literal_passed_to_closure_bind`,
+/// exercising `Closure::bind()`'s genuinely nullable real return type)
+/// failing against the first implementation of this rule.
 ///
 /// Used as-is by `property.nonObject` and `clone.nonObject` - real
 /// PHPStan's `ObjectType::canAccessProperties()`/`isCloneable()` are both
@@ -155,7 +166,10 @@ pub(crate) fn type_can_never_be_object(ty: &Type) -> bool {
         | Type::Array(..)
         | Type::ArrayShape(_)
         | Type::HasOffsetValue(..) => true,
-        Type::Union(members) => members.iter().any(type_can_never_be_object),
+        Type::Union(members) => members
+            .iter()
+            .filter(|m| !matches!(m, Type::Null))
+            .any(type_can_never_be_object),
         Type::Intersection(members) => members.iter().all(type_can_never_be_object),
         Type::TemplateParam(param) => type_can_never_be_object(&param.bound),
         Type::Conditional {
@@ -176,7 +190,10 @@ pub(crate) fn type_can_never_be_object(ty: &Type) -> bool {
 pub(crate) fn type_can_never_call_methods(ty: &Type) -> bool {
     match ty {
         Type::Object(class, _) if class.as_str() == "stdClass" => true,
-        Type::Union(members) => members.iter().any(type_can_never_call_methods),
+        Type::Union(members) => members
+            .iter()
+            .filter(|m| !matches!(m, Type::Null))
+            .any(type_can_never_call_methods),
         Type::Intersection(members) => members.iter().all(type_can_never_call_methods),
         Type::TemplateParam(param) => type_can_never_call_methods(&param.bound),
         Type::Conditional {
@@ -757,6 +774,19 @@ impl<'a> Checker<'a> {
                     // `ExprKind::Name` guard, so this branch never fires
                     // for those.
                     let callee_ty = self.check_expr(callee, locals, label);
+                    // `callable.nonCallable` - checked (and, by
+                    // reference, before the `if let` below consumes
+                    // `callee_ty` by value) for every dynamic-callee
+                    // shape this branch covers.
+                    if self.type_confirmed_not_callable(&callee_ty) {
+                        self.report(
+                            label.to_string(),
+                            format!("Trying to invoke {callee_ty} but it's not a callable."),
+                            callee.span,
+                            2,
+                            "callable.nonCallable",
+                        );
+                    }
                     if let Type::Callable(Some(callable_sig)) = callee_ty {
                         self.check_dynamic_callable_args(
                             &callable_sig,

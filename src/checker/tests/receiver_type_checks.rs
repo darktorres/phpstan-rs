@@ -135,6 +135,31 @@ mod method_and_property_non_object {
     }
 
     #[test]
+    fn a_union_with_a_null_member_is_not_flagged_unlike_a_closed_scalar_member() {
+        // Real PHPStan strips `Null` out of any non-pure-`Null` type
+        // before running this whole check family at all
+        // (`checkNullables`, off by default through level 7) - a
+        // `Foo|null` receiver is checked as plain `Foo`, never as a
+        // `Union` with a closed `Null` member. Caught for real by
+        // `closures_and_callables.rs`'s own pre-existing
+        // `this_is_available_inside_a_closure_literal_passed_to_closure_bind`
+        // test (`Closure::bind()`'s genuine `Closure|null` return type)
+        // failing against the first implementation of this rule.
+        let d = diagnostics_for(
+            r#"<?php
+                class Foo {
+                    function bar() {}
+                }
+                /** @param Foo|null $x */
+                function f($x) {
+                    $x->bar();
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
     fn nullsafe_method_call_on_a_null_only_receiver_is_not_flagged() {
         let d = diagnostics_for(
             r#"<?php
@@ -682,6 +707,130 @@ mod clone_non_object {
                 function f() {
                     $x = new stdClass();
                     $y = clone $x;
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+}
+
+mod callable_non_callable {
+    use super::*;
+
+    #[test]
+    fn invoking_each_closed_scalar_type_is_flagged() {
+        for hint in ["int", "bool"] {
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({hint} $x) {{
+                        $x();
+                    }}
+                "#
+            ));
+            assert_eq!(d.len(), 1, "hint {hint}: got {d:?}");
+            assert_eq!(
+                d[0].identifier, "callable.nonCallable",
+                "hint {hint}: got {d:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn invoking_null_or_a_void_returning_call_s_result_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f() {
+                    $x = null;
+                    $x();
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "callable.nonCallable");
+
+        let d = diagnostics_for(
+            r#"<?php
+                function voidFn(): void {}
+                function f() {
+                    $x = voidFn();
+                    $x();
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "callable.nonCallable");
+    }
+
+    #[test]
+    fn invoking_a_plain_class_with_no_invoke_method_is_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Plain {}
+                function f(Plain $x) {
+                    $x();
+                }
+            "#,
+        );
+        assert_eq!(d.len(), 1, "got: {d:?}");
+        assert_eq!(d[0].identifier, "callable.nonCallable");
+    }
+
+    #[test]
+    fn invoking_mixed_string_or_array_is_not_flagged() {
+        for hint in ["", "string", "array"] {
+            let param = if hint.is_empty() {
+                "$x".to_string()
+            } else {
+                format!("{hint} $x")
+            };
+            let d = diagnostics_for(&format!(
+                r#"<?php
+                    function f({param}) {{
+                        $x();
+                    }}
+                "#
+            ));
+            assert!(d.is_empty(), "hint {hint:?}: unexpected diagnostics: {d:?}");
+        }
+    }
+
+    #[test]
+    fn invoking_a_closure_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                function f(Closure $x) {
+                    $x();
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn invoking_a_nullable_closure_is_not_flagged() {
+        // The real shape `Closure::bind()`'s own `?Closure` return type
+        // exercises - `Null` is dropped from the `Union` before
+        // evaluation, not treated as a normal closed member.
+        let d = diagnostics_for(
+            r#"<?php
+                /** @param Closure|null $x */
+                function f($x) {
+                    $x();
+                }
+            "#,
+        );
+        assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    }
+
+    #[test]
+    fn invoking_an_invoke_bearing_object_is_not_flagged() {
+        let d = diagnostics_for(
+            r#"<?php
+                class Invokable {
+                    function __invoke() {}
+                }
+                function f(Invokable $x) {
+                    $x();
                 }
             "#,
         );

@@ -558,7 +558,14 @@ impl<'a> Checker<'a> {
             Type::Object(class, _) | Type::EnumCase(class, _) => {
                 self.class_confirmed_not(class, "Traversable")
             }
-            Type::Union(members) => members.iter().any(|m| self.type_confirmed_not_iterable(m)),
+            // `Null` is dropped before this evaluation - see
+            // `type_can_never_be_object`'s own doc comment (`expr.rs`)
+            // for why: real PHPStan strips `Null` out of any non-pure-Null
+            // type before running this family of checks at all.
+            Type::Union(members) => members
+                .iter()
+                .filter(|m| !matches!(m, Type::Null))
+                .any(|m| self.type_confirmed_not_iterable(m)),
             Type::Intersection(members) => {
                 members.iter().all(|m| self.type_confirmed_not_iterable(m))
             }
@@ -604,6 +611,7 @@ impl<'a> Checker<'a> {
             }
             Type::Union(members) => members
                 .iter()
+                .filter(|m| !matches!(m, Type::Null))
                 .any(|m| self.type_confirmed_not_destructurable(m)),
             Type::Intersection(members) => members
                 .iter()
@@ -614,6 +622,61 @@ impl<'a> Checker<'a> {
             } => {
                 self.type_confirmed_not_destructurable(if_true)
                     || self.type_confirmed_not_destructurable(if_false)
+            }
+            _ => false,
+        }
+    }
+
+    /// Whether `ty` is confirmed to never be callable - used by
+    /// `callable.nonCallable` for a dynamic call (`$x(...)`). Verified
+    /// against which real `Type` implementations `use
+    /// PHPStan\Type\Traits\NonCallableTypeTrait` directly: `BooleanType`/
+    /// `IntegerType`/`FloatType`/`NullType`/`VoidType`. `String`/`Array`
+    /// stay "maybe" (a string can name a real function/static method, an
+    /// array can be a valid `[$obj, 'method']` callable) - resolving
+    /// either precisely enough to ever say "no" needs machinery well
+    /// beyond this check's scope, matching real PHPStan's own
+    /// `MaybeCallableTypeTrait` default for these two type families.
+    /// `resource` (this project's `Object("resource", [])` convention -
+    /// `resource` is never a real registered class) gets its own
+    /// explicit arm ahead of the general `Object` one, which would
+    /// otherwise treat it as an unregistered-class "maybe" - the wrong
+    /// answer for a well-understood, permanently-uninvokable pseudo-type.
+    pub(crate) fn type_confirmed_not_callable(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Null
+            | Type::Void
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Int
+            | Type::IntLiteral(_)
+            | Type::IntRange(..)
+            | Type::Float
+            | Type::FloatLiteral(_) => true,
+            Type::Object(class, _) if class.as_str() == "resource" => true,
+            Type::Object(class, _) | Type::EnumCase(class, _) => {
+                class.as_str() != "Closure"
+                    && self
+                        .registry
+                        .classes
+                        .get(class.as_str())
+                        .is_some_and(|info| info.kind != ClassKind::Interface)
+                    && self.registry.lookup_method(class, "__invoke").is_none()
+            }
+            Type::Union(members) => members
+                .iter()
+                .filter(|m| !matches!(m, Type::Null))
+                .any(|m| self.type_confirmed_not_callable(m)),
+            Type::Intersection(members) => {
+                members.iter().all(|m| self.type_confirmed_not_callable(m))
+            }
+            Type::TemplateParam(param) => self.type_confirmed_not_callable(&param.bound),
+            Type::Conditional {
+                if_true, if_false, ..
+            } => {
+                self.type_confirmed_not_callable(if_true)
+                    || self.type_confirmed_not_callable(if_false)
             }
             _ => false,
         }
