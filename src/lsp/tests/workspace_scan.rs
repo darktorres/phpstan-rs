@@ -1,7 +1,8 @@
 //! Filtering the workspace scan (vendor/.git/node_modules excluded from
-//! the analyzed walk by name) and the analyzed/context distinction that
-//! backs it, including the `didOpen`-of-a-never-discovered-vendor-file
-//! regression this item's own Step 4 fix closes.
+//! the analyzed walk by name, or a configured `phpstan-rs.toml` `paths`
+//! allowlist scanned instead of the whole root) and the analyzed/context
+//! distinction that backs it, including the `didOpen`-of-a-never-
+//! discovered-vendor-file regression this item's own Step 4 fix closes.
 
 use super::super::*;
 use super::helpers::run;
@@ -114,6 +115,67 @@ fn first_party_declaration_wins_a_same_name_collision_with_vendor_context() {
     let result = response_result(&messages, 2);
     assert_eq!(
         result["contents"], "Shared::ownMethod(): int",
+        "got: {result:?}"
+    );
+}
+
+// A configured `phpstan-rs.toml` `paths` key is an include-only
+// allowlist (mirrors `run_check_project`'s own `config.paths` handling)
+// - `load_workspace_files` must scan exactly those paths instead of the
+// whole workspace root when one is set, the real gap a real editor
+// session surfaced: Piwigo's own `phpstan-rs.toml` deliberately omits
+// `_data/` (compiled Smarty template cache) from `paths`, but the LSP
+// scanned it anyway since `ResolvedWorkspaceConfig` never carried
+// `config.paths` through at all before this fix.
+
+#[test]
+fn configured_paths_restrict_the_analyzed_walk_to_only_those_paths() {
+    let dir = TempDir::new("configured_paths_restrict_scan");
+    dir.write("phpstan-rs.toml", "paths = [\"src\"]\n");
+    dir.write(
+        "excluded/Ghost.php",
+        "<?php class GhostClass { public function ghostMethod(): int { return 1; } }",
+    );
+    let use_src = "<?php function use_it(GhostClass $g) { $g->ghostMethod(); }";
+    let use_path = dir.write("src/Use.php", use_src);
+    let use_uri = path_to_uri(&use_path).to_string();
+
+    let messages = run(
+        &dir,
+        &[notification(
+            "textDocument/didOpen",
+            json!({"textDocument": {"uri": use_uri, "languageId": "php", "version": 1, "text": use_src}}),
+        )],
+    );
+    let diags = last_publish_diagnostics_for(&messages, &use_uri);
+    assert!(
+        diags["params"]["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "class.notFound"),
+        "GhostClass is only declared under excluded/, which paths = [\"src\"] must leave \
+         unscanned - got: {diags:?}"
+    );
+}
+
+#[test]
+fn configured_paths_still_fully_analyze_everything_inside_them() {
+    let dir = TempDir::new("configured_paths_still_scan_included");
+    dir.write("phpstan-rs.toml", "paths = [\"src\"]\n");
+    dir.write(
+        "src/App.php",
+        "<?php class App { public function ownMethod(): int { return 1; } }",
+    );
+    let use_src = "<?php function use_it(App $a) { $a->ownMethod(); }";
+    let use_path = dir.write("src/Use.php", use_src);
+    let use_uri = path_to_uri(&use_path).to_string();
+    let pos = lsp_pos(use_src, "ownMethod");
+
+    let messages = run(&dir, &[hover_request(2, &use_uri, pos)]);
+    let result = response_result(&messages, 2);
+    assert_eq!(
+        result["contents"], "App::ownMethod(): int",
         "got: {result:?}"
     );
 }

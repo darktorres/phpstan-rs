@@ -52,16 +52,23 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) extra_context_dirs: Vec<PathBuf>,
     pub(crate) baseline: Option<crate::baseline::Baseline>,
     pub(crate) ignore_error_entries: Vec<crate::ignore_errors::IgnoreErrorEntry>,
+    pub(crate) analyze_paths: Vec<PathBuf>,
 }
 
 /// The two kinds of paths `Server::load_workspace` needs beyond `root`
 /// itself - loaded first, as context (`analyzed: false`), so `root`'s
 /// own walk can dedupe against them by canonicalized path. See
 /// `Server::load_workspace`'s own doc comment for why load order matters
-/// beyond just the dedup.
+/// beyond just the dedup. `analyze_paths` is the *analyzed* (`analyzed:
+/// true`) scope's own restriction - empty means "no `paths` key
+/// configured, walk all of `root`" (`Server::load_workspace_files`'s own
+/// fallback), matching `run_check_project`'s identical "config.paths
+/// empty -> analyze everything under the given dirs" default, not "empty
+/// -> analyze nothing".
 pub(crate) struct WorkspaceContextPaths {
     pub(crate) vendor: ComposerContext,
     pub(crate) extra_dirs: Vec<PathBuf>,
+    pub(crate) analyze_paths: Vec<PathBuf>,
 }
 
 /// Resolves `root`'s own `phpstan-rs.toml` (or `config_path_override`,
@@ -142,6 +149,13 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         )
     };
 
+    let analyze_paths: Vec<PathBuf> = config
+        .paths
+        .unwrap_or_default()
+        .into_iter()
+        .map(resolve_against_root)
+        .collect();
+
     let mut extra_context_dirs: Vec<PathBuf> = config
         .scan_paths
         .unwrap_or_default()
@@ -207,5 +221,6 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         extra_context_dirs,
         baseline,
         ignore_error_entries: config.ignore_errors.unwrap_or_default(),
+        analyze_paths,
     }
 }

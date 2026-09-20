@@ -431,6 +431,7 @@ impl Server {
         workspace_config::WorkspaceContextPaths {
             vendor: resolved.vendor_context,
             extra_dirs: resolved.extra_context_dirs,
+            analyze_paths: resolved.analyze_paths,
         }
     }
 
@@ -515,8 +516,11 @@ impl Server {
     }
 
     /// Loads `context`'s vendor/scan/stub paths first (`analyzed:
-    /// false`), then every `.php` file under `root` (`analyzed: true`,
-    /// skipping any path already loaded as context or by an earlier call,
+    /// false`), then every `.php` file under `context.analyze_paths`
+    /// (falling back to the whole of `root` when the config sets no
+    /// `paths` at all - see `WorkspaceContextPaths::analyze_paths`'s own
+    /// doc comment) as `analyzed: true` (skipping any path already loaded
+    /// as context or by an earlier call,
     /// e.g. a prior workspace folder, or an already-`didOpen`ed file),
     /// so the cross-file registry and dependency graph this whole phase
     /// is about are populated from the very first diagnostic, not built
@@ -561,11 +565,22 @@ impl Server {
         }
 
         let mut files = Vec::new();
-        crate::project::collect_php_files_excluding(
-            root,
-            crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
-            &mut files,
-        );
+        if context.analyze_paths.is_empty() {
+            crate::project::collect_php_files_excluding(
+                root,
+                crate::project::DEFAULT_SCAN_EXCLUDED_DIR_NAMES,
+                &mut files,
+            );
+        } else {
+            // A configured `paths` is an include-only allowlist, same as
+            // `run_check_project`'s own `collect_analyze_and_context_files`
+            // - no `DEFAULT_SCAN_EXCLUDED_DIR_NAMES` floor applies on top
+            // of it (an explicitly-listed `vendor/`-named entry, unlikely
+            // but real, would otherwise be silently dropped again here).
+            for path in &context.analyze_paths {
+                crate::project::collect_php_files(path, &mut files);
+            }
+        }
         // See main.rs's run_check_project for why this matters: a real
         // workspace can genuinely declare the same fully-qualified class
         // twice (duplicate vendored copies of a library), and
