@@ -1920,24 +1920,6 @@ not for the common, fully-resolvable case both shapes already parsed.
 project's own existing variance-composition pattern; no new `Type`
 variant.
 
-## Phase 163 — `array_splice()` by-reference first-argument mutation tracking
-
-Reevaluated out of "Permanent design boundaries." `calls.rs`'s own
-`predefine_byref_or_unknown_args` already special-cases the closely
-related `sort`/`rsort`/`usort`/`shuffle` family (reindexing a by-ref
-argument to a real `list`, preserving element type) and the
-`asort`/`arsort`/`ksort`/... family (preserving exact key structure) -
-`array_splice($arr, $offset, $length, $replacement)`'s own by-ref
-mutation of `$arr` is the same shape of problem, not a new mechanism:
-insert `$replacement`'s own element type into `$arr`'s existing element
-type (widen to their union), keep `$arr`'s own key-type/list-ness
-(splice preserves sequential integer keys - PHP renumbers after
-splicing, unlike `unset()`), same as the sort-family's own reindexing
-logic already models.
-
-**Effort: small** — one new `match fn_name` arm alongside the existing
-sort-family special cases in the same function.
-
 ## Phase 164 — Bounded sequential dynamic-key writes preserve `list`/`non-empty` markers
 
 Reevaluated out of "Permanent design boundaries" - filed there as
