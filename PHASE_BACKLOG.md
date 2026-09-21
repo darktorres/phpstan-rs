@@ -175,7 +175,11 @@ run, only to decide what to re-check next; phpstan-rs already keeps
   flag" discipline `member_usage.rs`'s existing private-member
   `escaped` fallback already uses, rather than assume it away when
   widening to protected/public members (B2, below, already does this
-  for top-level functions/classes - see ROADMAP's Done section).
+  for top-level functions/classes - see ROADMAP's Done section). This
+  is also the one sub-item of Phase 86 still actually needing
+  `Project.dependents` (or a Tier-1-shaped replacement, per B2's own
+  precision finding) - B2 and B3 both ended up not needing it at all,
+  once built.
   `tomasvotruba/unused-public` additionally covers properties and class
   constants, not just methods — broaden B1's own scope statement to
   match — and separately flags a public method *never called from
@@ -188,14 +192,16 @@ run, only to decide what to re-check next; phpstan-rs already keeps
   `NameContext`-resolved Tier-1 index, not `Project.dependents` (that
   index's own raw, unresolved, bare-last-segment string keys turned out
   too imprecise for a real "is this ever referenced" existence check -
-  see that Done entry for the full reasoning). B1/B3's own shared
-  `Project.dependents`-based sketches above are unaffected by this -
-  neither has been re-scoped onto the same, more precise mechanism, but
-  either could be, the same way B2 was.
-- **B3 (medium).** Circular class/namespace dependency-cycle detection —
-  PHPStan has no such rule; Tarjan's SCC over the already-live
-  `Project.dependents` graph, aggregated to namespace level via
-  `NameContext`.
+  see that Done entry for the full reasoning).
+- **B3 (medium, DONE)** — namespace-level circular structural-dependency
+  detection, folded into ROADMAP's Done section ("Namespace-level
+  circular-dependency detection"). Built directly on `Registry.classes`'
+  own already-resolved `extends`/`implements`/`uses` fields instead of
+  `Project.dependents` either - narrower than the "any reference"
+  cycle graph this sub-item's own sketch originally described (a cycle
+  formed purely through method-body calls/type hints is out of scope),
+  but fully precise and effectively free, needing neither `dependents`
+  nor `use_sites` at all - see that Done entry for the full reasoning.
 
 ## Phase 87 — Whole-program value-flow diagnostics (§H)
 

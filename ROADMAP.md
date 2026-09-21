@@ -2433,19 +2433,53 @@ release binary, `--config phpstan-rs.toml`). The first version of this
 fix ran `index_class_fn_refs_without_source` unconditionally for every
 loaded file, mirroring `decl_locations`'s own unconditional character -
 measuring it caught a real, serious regression this reasoning missed:
-26.86s/1.80 GiB with the flag off became 2:17.31/1.84 GiB, more than
+26.86s/1.76 GiB with the flag off became 2:17.31/1.84 GiB, more than
 5x slower, because it walked all ~14k loaded files (context included)
 on every run regardless of whether anything consumed the result. Fixed
 by gating the walk on `check_dead_code` itself (`Project::
 insert_parsed_file`'s own doc comment) rather than running it
 unconditionally - after the fix, the flag-off run returned to
-26.86s/1.80 GiB, a byte-for-byte identical 63 diagnostics to the
+26.86s/1.76 GiB, a byte-for-byte identical 63 diagnostics to the
 pre-this-work run. With `--check-dead-code` on: 27.08s/1.84 GiB - a
 real ~85 MiB RSS cost for Tier 1 across the whole corpus, no measurable
 wall-time cost (Tier 1 is a plain syntactic walk, not a `Checker` pass,
 unlike Tier 2's own real per-file cost for `check_dead_enum_cases`) -
 326 new findings (`function.unused`/`class.unused`) on top of the same
 63 pre-existing ones, none of the 63 changed.
+
+**Namespace-level circular-dependency detection** (PHASE_BACKLOG Phase
+86's B3, `namespace.circularDependency`) - a namespace with a class that
+`extends`/`implements`/`use`s a class in another namespace that, via
+some other class pair, has an edge back. No PHPStan rule for this
+exists at all. The backlog's own original sketch called for Tarjan's
+SCC over `Project.dependents`, the same "already-live reverse-reference
+graph" B2 (above) tried first and found too imprecise - rather than
+repeat that mistake, this reads directly off `Registry.classes`' own
+`extends`/`implements`/`uses` fields instead, each already resolved to
+its target's real canonical FQN at declaration time (`ctx.resolve`, in
+`class_info.rs`'s own `ClassInfo::from_decl`) - no new indexing pass at all,
+not even B2's own cheap Tier-1 use-site index. This trades completeness
+for precision and cost: a cycle formed purely through method-body calls
+or type hints (not a structural `extends`/`implements`/`uses` edge) is
+out of scope, disclosed rather than silently dropped, but every edge
+this check *does* see is a real, already-canonical fact - zero false
+edges, unlike a `dependents`-based version would have risked.
+`checker::whole_program::circular_namespace_deps::find_namespace_cycles`
+builds the namespace-level graph (an edge only when two classes'
+namespaces actually differ - a same-namespace `extends`/`implements`/
+`uses` never contributes a self-loop) and runs a standard recursive
+Tarjan's SCC over it; each strongly-connected component of 2+ namespaces
+is one finding, reported once, attached to the alphabetically-first
+class contributing an edge between the cycle's own alphabetically-first
+namespace pair - deterministic, and always resolvable through `decl_
+locations`, unlike trying to report a namespace-level fact against no
+single real declaration site at all. Gated behind `Registry::
+check_circular_dependencies`; needs no Tier-1/Tier-2 use-site index, so
+it costs nothing beyond its own graph traversal regardless of project
+size - confirmed on Piwigo (`~/piwigo17-frozen`, warm filesystem cache):
+29.15s/1.76 GiB with the flag on versus 26.86s/1.76 GiB with every
+whole-program check off, well within ordinary run-to-run noise, and
+zero findings (Piwigo's own namespace structure has no such cycle).
 
 **Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
 168a, the first landed sub-item of a larger in-progress phase - see

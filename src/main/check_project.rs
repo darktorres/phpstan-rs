@@ -137,6 +137,7 @@ fn run_check_project(
     check_risky_tests: bool,
     check_dead_enum_cases: bool,
     check_dead_code: bool,
+    check_circular_dependencies: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -201,6 +202,7 @@ fn run_check_project(
     project.set_check_risky_tests(check_risky_tests);
     project.set_check_dead_enum_cases(check_dead_enum_cases);
     project.set_check_dead_code(check_dead_code);
+    project.set_check_circular_dependencies(check_circular_dependencies);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
@@ -564,6 +566,7 @@ pub(crate) fn run_check_project_command(
     check_risky_tests: bool,
     check_dead_enum_cases: bool,
     check_dead_code: bool,
+    check_circular_dependencies: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -681,6 +684,8 @@ pub(crate) fn run_check_project_command(
     let check_dead_enum_cases =
         check_dead_enum_cases || config.check_dead_enum_cases.unwrap_or(false);
     let check_dead_code = check_dead_code || config.check_dead_code.unwrap_or(false);
+    let check_circular_dependencies =
+        check_circular_dependencies || config.check_circular_dependencies.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -822,6 +827,7 @@ pub(crate) fn run_check_project_command(
         check_risky_tests,
         check_dead_enum_cases,
         check_dead_code,
+        check_circular_dependencies,
         configured_level,
         &stub_dirs,
         php_version,

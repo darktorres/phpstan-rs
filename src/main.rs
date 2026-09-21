@@ -265,6 +265,13 @@ enum Command {
         /// the real, disclosed false-positive risks.
         #[arg(long)]
         check_dead_code: bool,
+        /// Enables namespace-level circular-dependency detection (a
+        /// namespace with a class that `extends`/`implements`/`use`s a
+        /// class in another namespace that, via some other class pair,
+        /// has an edge back). Off by default - see `registry::Registry::
+        /// check_circular_dependencies`'s own doc comment.
+        #[arg(long)]
+        check_circular_dependencies: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -367,6 +374,7 @@ fn main() {
             check_risky_tests,
             check_dead_enum_cases,
             check_dead_code,
+            check_circular_dependencies,
             php_version,
             generate_baseline,
             baseline,
@@ -406,6 +414,7 @@ fn main() {
             check_risky_tests,
             check_dead_enum_cases,
             check_dead_code,
+            check_circular_dependencies,
             php_version,
             generate_baseline,
             baseline,

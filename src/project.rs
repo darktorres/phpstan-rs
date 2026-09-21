@@ -489,6 +489,14 @@ impl Project {
         self.registry.check_dead_code = enabled;
     }
 
+    /// Opts the whole project's checking into namespace-level circular-
+    /// dependency detection - see `registry::Registry::
+    /// check_circular_dependencies`'s own doc comment for why this
+    /// defaults to `false`.
+    pub fn set_check_circular_dependencies(&mut self, enabled: bool) {
+        self.registry.check_circular_dependencies = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
@@ -1610,15 +1618,15 @@ impl Project {
     }
 
     /// Runs every opt-in whole-program diagnostic check (currently
-    /// `check_dead_enum_cases` and `check_dead_code`) - see `checker::
-    /// whole_program`'s own module doc comment for why these can't run
-    /// through the ordinary per-file `Checker` path `check_file`/
-    /// `check_all` above use. `check-project` calls this once, after its
-    /// own primary per-file pass has populated `results`, merging this
-    /// method's own return value in before level-filtering/
-    /// `ignore_errors`/baseline (so `@phpstan-ignore`/baseline
-    /// suppression apply to a whole-program finding exactly like an
-    /// ordinary one).
+    /// `check_dead_enum_cases`, `check_dead_code`, and `check_circular_
+    /// dependencies`) - see `checker::whole_program`'s own module doc
+    /// comment for why these can't run through the ordinary per-file
+    /// `Checker` path `check_file`/`check_all` above use. `check-project`
+    /// calls this once, after its own primary per-file pass has
+    /// populated `results`, merging this method's own return value in
+    /// before level-filtering/`ignore_errors`/baseline (so `@phpstan-
+    /// ignore`/baseline suppression apply to a whole-program finding
+    /// exactly like an ordinary one).
     ///
     /// `check_dead_enum_cases` needs `ensure_member_index_built`'s own
     /// Tier-2 use-site index - a real cost when it has to build it
@@ -1632,7 +1640,10 @@ impl Project {
     /// not a real `Checker` pass), but still real per-loaded-file cost,
     /// so `Project::insert_parsed_file` itself gates populating it in
     /// batch mode on this exact flag - see that call site's own doc
-    /// comment.
+    /// comment. `check_circular_dependencies` needs neither Tier - it
+    /// reads directly off `Registry.classes`' own already-resolved
+    /// `extends`/`implements`/`uses` fields, so it costs nothing beyond
+    /// its own graph traversal regardless of how large the project is.
     pub fn check_whole_program(&mut self) -> HashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
 
@@ -1699,6 +1710,30 @@ impl Project {
                     name.clone(),
                     format!("Class {name} is never referenced."),
                     "class.unused",
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
+            }
+        }
+
+        if self.registry.check_circular_dependencies {
+            let cycles = checker::whole_program::circular_namespace_deps::find_namespace_cycles(
+                &self.registry,
+            );
+            for cycle in cycles {
+                let Some((path, span)) =
+                    self.decl_locations.classes.get(&cycle.representative_class)
+                else {
+                    continue;
+                };
+                let path = path.clone();
+                let namespaces = cycle.namespaces.join(", ");
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    *span,
+                    cycle.representative_class.clone(),
+                    format!("Circular namespace dependency: {namespaces}."),
+                    "namespace.circularDependency",
                 ) {
                     results.entry(path).or_default().push(d);
                 }

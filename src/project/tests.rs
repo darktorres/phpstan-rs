@@ -1,6 +1,7 @@
 mod helpers;
 
 mod anonymous_class_naming;
+mod circular_namespace_deps;
 mod dead_code;
 mod dead_enum_cases;
 mod decl_locations;

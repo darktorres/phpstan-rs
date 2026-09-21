@@ -35,6 +35,7 @@
 //! check_risky_tests = false
 //! check_dead_enum_cases = false
 //! check_dead_code = false
+//! check_circular_dependencies = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -213,6 +214,10 @@ pub struct Config {
     /// Opt-in dead-function/dead-class detection - see
     /// `registry::Registry::check_dead_code`'s own doc comment for why.
     pub check_dead_code: Option<bool>,
+    /// Opt-in namespace-level circular-dependency detection - see
+    /// `registry::Registry::check_circular_dependencies`'s own doc
+    /// comment for why.
+    pub check_circular_dependencies: Option<bool>,
 }
 
 impl Config {

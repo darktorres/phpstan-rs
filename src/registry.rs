@@ -268,6 +268,16 @@ pub struct Registry {
     // only as a PHP attribute target (`#[MyAttribute]`); anything
     // reachable only through framework magic/reflection.
     pub check_dead_code: bool,
+    // A namespace-level `extends`/`implements`/`use`-trait dependency
+    // cycle (PHASE_BACKLOG Phase 86's B3) - real, structural, and fully
+    // precise (every edge is an already-canonical `ClassInfo` field, no
+    // approximation), so this is opt-in only because it's a genuinely
+    // new architectural-smell category, not because of any disclosed
+    // false-positive risk the way most of this project's other opt-in
+    // checks are. Deliberately narrower than a full "any reference"
+    // dependency graph - see `checker::whole_program::circular_
+    // namespace_deps`'s own module doc comment for why.
+    pub check_circular_dependencies: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats
