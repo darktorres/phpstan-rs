@@ -2096,6 +2096,45 @@ yet wired through this architecture; see PHASE_BACKLOG's Phase 175 for
 the one remaining named instance still needing this architecture,
 blocked on a different discriminant-shape gap of its own).
 
+**Collector / cross-file aggregation architecture, and every real
+consumer (Phase 82, now fully closed).** Real PHPStan's own `Collector`/
+`CollectedDataNode` machinery exists to reconcile results across its
+*parallel worker processes* - a problem this project's single-process,
+in-memory tool doesn't have. Every real consumer this project actually
+needs (enumerated and read in full across real PHPStan's 14 collectors)
+is better served by a registry-build-time fixed point, the same shape
+`flatten_phpdoc_inheritance`/`resolve_deferred_value_of` already use -
+Phase 41's own transitive-purity model above is the one genuine, high-
+value consumer built this way. Phase 15's own cross-file dedup piece (2
+of the 14 collectors) turned out not to need this architecture either,
+and is built too (see Phase 15). `FunctionCallConstantConditionCollector`'s
+own real gap - suppressing a call-conditioned constant-truth finding
+entirely when different hosts of the same trait disagree about it,
+rather than reporting either verdict - is closed by `check_trait_
+methods`'s own divergent-per-host suppression pass
+(`is_constant_condition_family_identifier`, `checker/control_flow/
+boolean_conditions.rs`). `ImpossibleCheckTypeReportedCollector` stays
+moot (no `ImpossibleCheckType*` rule family exists in this project yet -
+forward-coupled to that family's own separately-tracked gap, this file's
+own `function.alreadyNarrowedType`/`.impossibleType` entry).
+`NamedArgumentParameterMethodCallsCollector`/`OverridingMethodRenamesParameterCollector`
+(one whole-project registry-fixed-point feature, not two independent
+collectors - both are consumed exclusively by real PHPStan's own
+`MethodCallWithPossiblyRenamedNamedArgumentRule`,
+`argument.parameterRenamedInSubtype`) is built too: `checker::named_
+argument_renames` records every named-argument call site against a
+genuinely overridable method (keyed by the method's real *declaring*
+class, not the receiver's own possibly-narrower static class) and every
+override anywhere that renames a parameter relative to its own nearest
+ancestor prototype, both during the ordinary per-file `Checker` pass
+(kept reachable in `facts_only` mode); `Project::collect_named_
+argument_facts` merges every file's own contribution project-wide, and
+`checker::whole_program::renamed_named_arguments` cross-references the
+two. Opt-in (`Registry::check_renamed_named_arguments`), matching every
+other `checker::whole_program` check's own cost tradeoff - this one
+needs a real type-inferring `Checker` pass over every file, not a cheap
+syntactic scan or a pure `Registry` read.
+
 **`method.notFound` "did you mean?" tip** (PHASE_BACKLOG Phase 96's
 D8). `checker::suggest::suggest_similar_name` - plain case-insensitive
 Levenshtein distance, capped at 3, over `Registry::all_method_names`
@@ -3891,33 +3930,6 @@ attribute-context matching mechanism exists anywhere in this checker to
 build on yet, and its namespace/enum/superglobal/keyword-specific
 siblings are each a materially different detection shape needing its
 own separate investigation.
-
-**82 - Collector / cross-file aggregation architecture (RETIRED - real
-architecture built as a registry fixed point instead; see Phase 41,
-Done).** Real PHPStan's own `Collector`/`CollectedDataNode` machinery
-exists to reconcile results across its *parallel worker processes* - a
-problem this project's single-process, in-memory tool doesn't have.
-Every real consumer this project actually needs (enumerated and read in
-full across real PHPStan's 14 collectors) is better served by a
-registry-build-time fixed point, the same shape `flatten_phpdoc_
-inheritance`/`resolve_deferred_value_of` already use - Phase 41's own
-transitive-purity model is the one genuine, high-value consumer, and
-it's built. Phase 15's own cross-file dedup piece (2 of the 14
-collectors) turned out not to need this architecture either, and is
-also built (see Phase 15, Done).
-`FunctionCallConstantConditionCollector`'s own real gap (suppressing a
-call-conditioned constant-truth finding entirely when different hosts
-of the same trait disagree about it, rather than reporting either
-verdict) is closed too - see Done, `check_trait_methods`'s own
-divergent-per-host suppression pass. `ImpossibleCheckTypeReportedCollector`
-stays moot (no `ImpossibleCheckType*` rule family exists in this
-project yet - forward-coupled to that family's own separately-tracked
-gap, ROADMAP.md's `function.alreadyNarrowedType`/`.impossibleType`).
-`NamedArgumentParameterMethodCallsCollector`/
-`OverridingMethodRenamesParameterCollector` (one whole-project
-registry-fixed-point feature, not two independent collectors - both are
-consumed exclusively by `MethodCallWithPossiblyRenamedNamedArgumentRule`)
-remains unbuilt.
 
 **84 - `RuleLevelHelper`-equivalent level-aware type-acceptance,
 remaining (PARTIAL).** `Registry::accepts_at_configured_level` (see
