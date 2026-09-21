@@ -10,6 +10,7 @@ mod protocol_and_session;
 mod references_and_rename;
 mod semantic_tokens;
 mod signature_help;
+mod type_definition;
 mod variable_definitions;
 mod watched_files;
 mod workspace_config;

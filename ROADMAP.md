@@ -3039,6 +3039,63 @@ call's incidental effect on an already-declared variable's type
 never does, so a read afterward still resolves to the variable's real
 declaration.
 
+**LSP `textDocument/codeAction` fix wiring, whole-project references/
+rename, `signatureHelp`, `workspace/symbol`, `documentHighlight`,
+`semanticTokens`, and `inlayHint`** (PHASE_BACKLOG Phase 104's F2/F3,
+108's AM1, 107's AH2, 109's AO2, and 106's Y1/Y2 - all found already
+fully built during this cleanup pass, via the `VSCODE_EXTENSION_PLAN.md`
+work, never previously recorded in this Done section). `textDocument/
+codeAction` (F2) reads `Diagnostic.fix: Option<DiagnosticFix>` off
+`self.last_diagnostics` and offers one quick-fix per diagnostic that
+carries one - the wiring itself has zero production call sites
+populating a real `fix` yet (that's Phase 111's own, still-open job).
+Whole-project `textDocument/references`/`rename` (F3) is backed by a
+real two-tier use-site index (`project::use_sites`): Tier 1 (class/
+function references) is a purely syntactic name-resolution walk kept
+live on every `insert_parsed_file`/`update_file`; Tier 2 (member
+references) needs the checker's own receiver-type resolution and is
+built lazily, merged in by `Project::ensure_member_index_built`/
+`reindex_tier2_for_file`. Local-variable references/rename stay
+explicitly out of this v1's scope. `textDocument/signatureHelp` (AM1)
+resolves the active parameter from a real span-containment/gap query
+(the cursor is typically *between* argument spans, including the
+not-yet-typed-argument and trailing-comma cases), served from the
+last-successfully-parsed AST. `workspace/symbol` (AH2) fuzzy-searches
+every declared class/enum/interface/trait, top-level function, and
+class/enum member off `Project::decl_locations()`, resolving each
+match's own `SymbolKind`. `textDocument/documentHighlight` (AO2)
+generalizes `navigation::resolve_at`'s single-best-match pattern into a
+same-file `Vec` accumulator via `navigation::collect_all`.
+`textDocument/semanticTokens` (Y1) push-highlights every
+`@deprecated`/`@internal` usage site unconditionally, independent of
+whether either diagnostic flag is enabled - the checker already looks
+up the callee's sig at every such site regardless, only the
+diagnostic-emission call is gated. `textDocument/inlayHint` (Y2) covers
+both halves: parameter-name hints before call arguments, and inferred-
+type hints on unannotated local-variable assignments, both collected in
+one `Checker::check_program` pass via the `collect_inlay_hints` gate
+and cached per-file by version counter.
+
+**LSP `textDocument/typeDefinition`** (PHASE_BACKLOG Phase 108's AM2).
+Jumps from an inferred `Type` to that type's own class declaration(s),
+reusing the identical `probe_receiver_type`/`type_to_classes` pair
+hover's `Instance`/`VariableSelf`/`VariableRead` arms already use to
+answer "what type is at this span" - the only new work is resolving
+each class name the `Type` names to its own `decl_locations` entry
+instead of formatting it as text. On a member-access receiver
+(clicking the member name), it jumps to the *receiver's own* inferred
+class, not wherever the member itself is declared - a real, different
+answer from ordinary `textDocument/definition` whenever the member is
+inherited (`$x->bar()` where `$x: Foo extends Base` and only `Base`
+declares `bar` still jumps to `Foo`). A `Union`/`Intersection` receiver
+resolves to every real class it names, mirroring `definition`'s own
+multi-location handling. `Class`/`Function`/`Member` decline (`None`):
+none names a value with an inferred type to jump *from* in this v1.
+AM2's own stated blocker on Phase 104's F1 turned out to already be
+moot - `probe_hit_at` was already wired for `ExprKind::Variable` by
+Phase 17 above, so the bare-local-variable half needed no new
+checker-side plumbing at all.
+
 **LSP `textDocument/documentSymbol`** (Phase 107 AH1). A per-file
 hierarchical outline, built directly from `Project::ast`'s own
 top-level declarations (`src/lsp/document_symbol.rs`) rather than the

@@ -268,6 +268,14 @@ pub(super) fn definition_request(id: i64, uri: &str, pos: Value) -> Value {
     )
 }
 
+pub(super) fn type_definition_request(id: i64, uri: &str, pos: Value) -> Value {
+    request(
+        id,
+        "textDocument/typeDefinition",
+        json!({"textDocument": {"uri": uri}, "position": pos}),
+    )
+}
+
 pub(super) fn signature_help_request(id: i64, uri: &str, pos: Value) -> Value {
     request(
         id,

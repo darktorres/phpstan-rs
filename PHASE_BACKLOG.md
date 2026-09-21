@@ -525,28 +525,6 @@ is a gap in already-built plumbing. (See also `VSCODE_EXTENSION_PLAN.md`
 for the LSP server's own trustworthiness/concurrency/protocol
 hardening, a separate concern from net-new capabilities like these.)
 
-## Phase 104 — Single-cursor request/response capabilities (§F)
-
-- **F1 (small).** Live, flow-narrowed hover type for local variables —
-  `probe_hit` is already populated for `MethodCall`/`PropertyAccess`
-  receivers via `probe_span`, but `ExprKind::Variable`'s own call site
-  (already computing the live type via `locals.get(name)`) never
-  stashes it there too. `lsp.rs` already documents this exact gap in
-  its own comment. A ~3-line fix. (Phase 108's AM2 depends on this.)
-- **F2 (small — the wiring; populating individual checks is Part 6/
-  Phase 111).** Wire the already-fully-typed `Diagnostic.fix:
-  Option<DiagnosticFix>` field into `textDocument/codeAction` — no
-  production call site populates it yet, and `lsp.rs` never advertises
-  `code_action_provider`. Real PHPStan's own fix machinery is a
-  wholly separate paid-tier, out-of-process, signed-phar batch
-  rewriter, never a per-diagnostic in-editor quick-fix.
-- **F3 (large).** Whole-project "Find All References"/rename, on a new
-  use-site span index — `Project.dependents` today only tracks
-  file-level "which files reference this bare name," and
-  `DeclLocations` stores only declaration-site spans, never use-site
-  ones. Real PHPStan has no reference-finding capability at all.
-  (Phases 107's AH3 and 109's AO1 both depend on this same index.)
-
 ## Phase 105 — Finer-grained incremental re-check (§G)
 
 - **G1 (large).** Sub-file (per-function) real-time re-check on
@@ -568,61 +546,24 @@ hardening, a separate concern from net-new capabilities like these.)
   without a rewrite — this project's own code comment already names it
   as future work.
 
-## Phase 106 — Passive LSP rendering: `semanticTokens`/`inlayHint` (§Y)
-
-- **Y1 (medium).** `textDocument/semanticTokens` push-highlighting for
-  deprecated/internal symbol usage — computed unconditionally (not
-  gated behind the opt-in diagnostic flags), since the checker already
-  looks up the callee's sig at every such site regardless; only the
-  diagnostic-emission call is gated today, the fact itself is free.
-- **Y2 (medium).** `textDocument/inlayHint`: (a) parameter-name hints
-  before call arguments — near-free, `resolve_call_args` already
-  resolves every argument to its `ParamSig.name`; (b) inferred-type
-  hints on unannotated locals — materially new work, a genuinely new
-  always-on `Vec<(Span, Type)>` collection mode across the whole open
-  file on every edit, not a small extension of F1's single-target
-  `probe_hit`.
-
 ## Phase 107 — Whole-file/whole-project symbol lists (§AH)
 
-- **AH2 (medium).** `workspace/symbol` — project-wide fuzzy search over
-  `DeclLocations`' existing maps. Two genuinely new pieces: a
-  substring/fuzzy-match query layer (doesn't exist anywhere today), and
-  resolving each match's `SymbolKind` (`DeclLocations` stores no kind).
-- **AH3 (medium, depends on Phase 104's F3).** `textDocument/codeLens`
-  reference-count annotations above declarations — aggregating F3's
-  proposed use-site index into per-declaration counts, plus new
-  `CodeLens` response wiring.
+- **AH3 (medium).** `textDocument/codeLens` reference-count annotations
+  above declarations — aggregating the already-built Tier-1/Tier-2
+  use-site index (`project::use_sites`, built for `textDocument/
+  references`/rename) into per-declaration counts, plus new `CodeLens`
+  response wiring.
 
-## Phase 108 — `signatureHelp` and `typeDefinition` (§AM)
+## Phase 109 — `willRenameFiles` (§AO)
 
-- **AM1 (medium).** `textDocument/signatureHelp` — active-parameter
-  tooltip while typing inside a call's parens, including the
-  not-yet-typed-argument case. Needs a genuinely new span-containment/
-  gap query (cursor is typically *between* argument spans, not on one),
-  and must serve from the last-successfully-parsed AST since the parser
-  has no error recovery and momentarily-invalid syntax is the normal
-  typing state.
-- **AM2 (medium, part (b) depends on Phase 104's F1).**
-  `textDocument/typeDefinition` — jump from an inferred type to that
-  type's own declaration. (a) On a member-access receiver: near-free,
-  `probe_receiver_type` already has the `Type`, only new LSP-side
-  lookup work. (b) On a bare local variable: blocked on F1's same
-  `probe_hit`-for-`Variable` gap.
-
-## Phase 109 — `willRenameFiles` and `documentHighlight` (§AO)
-
-- **AO1 (large, depends on Phase 114's R1 and Phase 104's F3).**
-  `workspace/willRenameFiles` — PSR-4-consistent rename-file
-  refactoring on a file-explorer move: derive the old FQN (reverse
-  `DeclLocations` lookup) and the new FQN the new path implies (mirror-
-  image arithmetic of R1's path-to-FQN), rewrite the declaration plus
-  every project-wide use-site (needs F3's index).
-- **AO2 (medium, needs neither dependency above).** `textDocument/
-  documentHighlight` — same-file occurrence highlighting only. A small,
-  self-contained generalization of the existing `navigation::
-  resolve_at` single-best-match pattern into a `Vec` accumulator over
-  one file, no new index or cross-file plumbing.
+- **AO1 (large, depends on Phase 114's R1).** `workspace/
+  willRenameFiles` — PSR-4-consistent rename-file refactoring on a
+  file-explorer move: derive the old FQN (reverse `DeclLocations`
+  lookup) and the new FQN the new path implies (mirror-image
+  arithmetic of R1's path-to-FQN), rewrite the declaration plus every
+  project-wide use-site via the already-built `project::use_sites`
+  index (no longer a second dependency — it's the same index
+  `textDocument/references`/rename already consume).
 
 ## Phase 110 — Diagnostic explainability: derivation traces (§T)
 
@@ -649,8 +590,11 @@ editing source + a full CLI re-run.
 # Part 6 (BEYOND_PHPSTAN): Codemods
 
 Four fixes attaching to an existing (or Phase 101 E3-proposed)
-diagnostic via Phase 104's F2 plumbing. Real PHPStan's entire autofix
-surface is used by only 4 rule files project-wide.
+diagnostic via the already-built `textDocument/codeAction` wiring
+(`Diagnostic.fix: Option<DiagnosticFix>`, `Server::code_actions`) — the
+wiring itself has zero production call sites populating a real `fix`
+yet, which is exactly what each item below does. Real PHPStan's entire
+autofix surface is used by only 4 rule files project-wide.
 
 ## Phase 111 — Codemods attached to diagnostics phpstan-rs already ships (§I)
 
@@ -1261,7 +1205,8 @@ this section.
   include_path/the file's own directory.
 - `{Dump,DumpNative,DumpPhpDoc}TypeRule`/`DebugScopeRule` — PHPStan's
   own ad hoc developer-debugging hooks (`\PHPStan\dumpType()` and
-  siblings). (Phase 110's T1/T2 and Phase 104's F1 are phpstan-rs's own,
+  siblings). (Phase 110's T1/T2 and the already-shipped hover-type
+  lookup (ROADMAP's Phase 17/108-AM2 Done entries) are phpstan-rs's own,
   materially more capable, interactive answer to this same need — this
   entry stays here only as the parity-audit's own finding, not a
   separate build.)

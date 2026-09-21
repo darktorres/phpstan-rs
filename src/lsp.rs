@@ -1230,6 +1230,67 @@ impl Server {
         }
     }
 
+    /// `textDocument/typeDefinition` (Phase 108's AM2) - jumps from an
+    /// inferred `Type` to that type's own class declaration(s), reusing
+    /// the identical throwaway-`Checker` probe/`type_to_classes` pair
+    /// `format_hover`'s `Instance`/`VariableSelf`/`VariableRead` arms
+    /// already use to answer "what type is at this span" - the only new
+    /// work is resolving each class name the `Type` names to its own
+    /// `decl_locations` entry, instead of formatting the `Type` as text.
+    /// `Class`/`Function`/`Member` decline (`None`): none of them is a
+    /// value with an inferred type to jump *from* (a class/function name
+    /// reference already resolves to itself via ordinary
+    /// `textDocument/definition`; a class member reference alone doesn't
+    /// disambiguate a receiver type the way `Instance` does), matching
+    /// `rename`'s own precedent of scoping a new capability narrower
+    /// than every `Resolved` variant in its v1.
+    fn type_definition(&self, uri: &Uri, position: LspPosition) -> Option<GotoDefinitionResponse> {
+        let path = uri_to_path(uri)?;
+        let resolved = navigation::resolve_at(&self.project, &path, from_lsp_position(position))?;
+        let ty = match &resolved {
+            navigation::Resolved::Instance {
+                receiver_span,
+                scope,
+                is_static,
+                class,
+                ..
+            } => self.probe_receiver_type(*receiver_span, scope, *is_static, class.as_deref())?,
+            navigation::Resolved::VariableSelf {
+                span,
+                scope,
+                is_static,
+                class,
+                ..
+            }
+            | navigation::Resolved::VariableRead {
+                span,
+                scope,
+                is_static,
+                class,
+                ..
+            } => self.probe_receiver_type(*span, scope, *is_static, class.as_deref())?,
+            navigation::Resolved::Class(_)
+            | navigation::Resolved::Function(_)
+            | navigation::Resolved::Member(_, _) => return None,
+        };
+        let mut classes = Vec::new();
+        type_to_classes(&ty, &mut classes);
+        let locations = self.project.decl_locations();
+        let mut locs: Vec<Location> = Vec::new();
+        for class in &classes {
+            if let Some((target_path, span)) = locations.classes.get(class) {
+                locs.push(self.location(target_path, *span));
+            }
+        }
+        match locs.len() {
+            0 => None,
+            1 => Some(GotoDefinitionResponse::Scalar(
+                locs.into_iter().next().unwrap(),
+            )),
+            _ => Some(GotoDefinitionResponse::Array(locs)),
+        }
+    }
+
     fn document_symbol(&self, uri: &Uri) -> Option<DocumentSymbolResponse> {
         let path = uri_to_path(uri)?;
         let stmts = self.project.ast(&path)?;
@@ -2412,6 +2473,9 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                     )),
                     hover_provider: Some(HoverProviderCapability::Simple(true)),
                     definition_provider: Some(OneOf::Left(true)),
+                    type_definition_provider: Some(
+                        lsp_types::TypeDefinitionProviderCapability::Simple(true),
+                    ),
                     document_symbol_provider: Some(OneOf::Left(true)),
                     code_action_provider: Some(CodeActionProviderCapability::Options(
                         CodeActionOptions {
@@ -2480,6 +2544,19 @@ fn handle_request<W: Write>(server: &mut Server, writer: &mut W, req: Request) {
                 .ok()
                 .and_then(|params| {
                     server.definition(
+                        &params.text_document_position_params.text_document.uri,
+                        params.text_document_position_params.position,
+                    )
+                })
+                .map(|loc| serde_json::to_value(loc).unwrap_or(serde_json::Value::Null))
+                .unwrap_or(serde_json::Value::Null);
+            Message::Response(Response::new_ok(id.clone(), result))
+        }
+        "textDocument/typeDefinition" => {
+            let result = serde_json::from_value::<GotoDefinitionParams>(req.params)
+                .ok()
+                .and_then(|params| {
+                    server.type_definition(
                         &params.text_document_position_params.text_document.uri,
                         params.text_document_position_params.position,
                     )
