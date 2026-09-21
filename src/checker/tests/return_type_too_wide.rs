@@ -465,3 +465,37 @@ fn an_arrow_fn_reassigning_a_captured_by_ref_parameter_is_never_checked_against_
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// Destructuring-target coverage - a by-ref parameter reassigned via
+// `[$byRef] = $arr;`/`['key' => $byRef] = $arr;` gets the same
+// `parameterByRef.type` check a bare `$byRef = ...` already does.
+
+#[test]
+fn a_by_ref_parameter_destructured_from_a_mismatched_positional_element_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function f(int &$x): void {
+                [$x] = ['not an int'];
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|d| d.identifier == "parameterByRef.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_by_ref_parameter_destructured_from_a_matching_keyed_element_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function f(int &$x): void {
+                ['a' => $x] = ['a' => 1];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|d| d.identifier == "parameterByRef.type"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

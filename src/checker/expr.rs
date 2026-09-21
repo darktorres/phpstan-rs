@@ -1792,8 +1792,11 @@ impl<'a> Checker<'a> {
                 self.check_self_assignment(lhs, rhs, label);
                 self.check_property_assignment(lhs, rhs, locals, label);
                 // A bare by-ref-parameter variable directly assigned a
-                // value its declared type can't hold.
+                // value its declared type can't hold. Also covers a
+                // destructured by-ref target (`[$byRef] = $arr;`) - see
+                // `check_by_ref_destructuring`'s own doc comment.
                 self.check_param_out_assignment(lhs, &rhs_ty, label);
+                self.check_by_ref_destructuring(lhs, &rhs_ty, label);
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
                 self.record_condition_alias(lhs, rhs, locals);
                 self.record_query_builder_alias(lhs, rhs, locals);

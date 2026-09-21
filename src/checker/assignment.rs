@@ -222,6 +222,55 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Sibling recursion to `bind_assignment_target`'s own `ArrayLiteral`
+    /// arm below - a by-ref parameter destructured out of an array
+    /// (`[$byRef, $b] = $arr;`/`list($byRef) = $arr;`, any nesting depth)
+    /// needs the same `parameterByRef.type` check a bare `$byRef = ...`
+    /// assignment already gets from `check_param_out_assignment` - a
+    /// no-op for anything that isn't a destructuring target at all (a
+    /// bare `Variable`/`PropertyAccess`/`Index` lhs is already fully
+    /// covered by the direct `check_param_out_assignment` call at this
+    /// method's own call site). Mirrors `bind_assignment_target`'s
+    /// per-position/per-key element-type resolution exactly, so a
+    /// destructured `Type::ArrayShape` source still checks each element
+    /// against its own real per-slot type, not a blanket `Mixed`.
+    pub(crate) fn check_by_ref_destructuring(&mut self, lhs: &Expr, ty: &Type, label: &str) {
+        let ExprKind::ArrayLiteral(items) = &lhs.kind else {
+            return;
+        };
+        match ty {
+            Type::ArrayShape(fields) => {
+                for (position, item) in items.iter().enumerate() {
+                    let field_key = match item.key.as_ref().map(|k| &k.kind) {
+                        Some(ExprKind::Literal(Literal::String(s))) => Some(s.to_string()),
+                        Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
+                        Some(_) => None,
+                        None => Some(position.to_string()),
+                    };
+                    let element_ty = field_key
+                        .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
+                        .map(|(_, t, _)| t.clone())
+                        .unwrap_or(Type::Mixed);
+                    self.check_param_out_assignment(&item.value, &element_ty, label);
+                    self.check_by_ref_destructuring(&item.value, &element_ty, label);
+                }
+            }
+            Type::Array(..) | Type::Intersection(_) => {
+                let element_ty = Self::array_element_type(ty).unwrap_or(Type::Mixed);
+                for item in items {
+                    self.check_param_out_assignment(&item.value, &element_ty, label);
+                    self.check_by_ref_destructuring(&item.value, &element_ty, label);
+                }
+            }
+            _ => {
+                for item in items {
+                    self.check_param_out_assignment(&item.value, &Type::Mixed, label);
+                    self.check_by_ref_destructuring(&item.value, &Type::Mixed, label);
+                }
+            }
+        }
+    }
+
     /// Binds an assignment's (or a `foreach` value's) left-hand side to
     /// `ty`, the type of whatever was just assigned/iterated - recursing
     /// into a nested `ArrayLiteral` target (`[$a, $b] = $arr;` and
