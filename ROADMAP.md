@@ -3323,8 +3323,20 @@ Case-sensitivity matches real PHP exactly: property/static-property/
 class-constant keys are case-sensitive, function/method/static-method/
 class keys are case-insensitive. The `Class` kind's own detection
 surface (instantiation, `instanceof`, `catch`, `extends`/`implements`,
-param/return type hints) reuses the identical `@internal`-engine
-threading above.
+param/return type hints, first-class-callables) is now fully closed too
+- this paragraph's own prior text claimed `extends`/`implements` and
+param/return type hints already reused the `@internal`-engine threading
+above, which a direct `check_restricted_class_name_usage` call-site grep
+turned up false: only `instanceof`/`new` ever called it (`catch` did,
+correctly, despite the same prior text's doubt). `check_restricted_
+class_inheritance` (mirroring `check_internal_inheritance`'s exact
+shape) and `check_restricted_param_and_return_types`/`_raw` (mirroring
+`check_internal_param_and_return_types_raw`, sharing its `collect_
+referenced_class_names` helper) close both gaps. A restricted
+function's own first-class-callable syntax (`banned_func(...)`) is
+checked now too - the `Method`/`StaticMethod` first-class-callable arms
+already called `check_restricted_method_call`, but the plain-function
+arm never called `check_restricted_function_call` at all.
 
 **Class-specific `ReflectionMethod<T>`/`ReflectionProperty<T>` modeling**
 (Phase 77). A synthetic, stub-patched `@template-covariant TClass of
@@ -3922,14 +3934,31 @@ native param/return type-hints, first-class-callables, implicit
 position too) and the declarative `restricted_symbols` config list (this
 phase's own answer to the separate, user-configured restricted-usage
 mechanism real PHPStan's third-party extensions implement) are both done
-- see Done. Declined, a genuine missing-prerequisite gap rather than a
-scope trim: the real `spaze/phpstan-disallowed-calls` package's own much
-larger allow/disallow-in filter DSL (~12 keys, attribute-*context*-
-matching beyond plain attribute *usage*) - no call-site-scope-path/
-attribute-context matching mechanism exists anywhere in this checker to
-build on yet, and its namespace/enum/superglobal/keyword-specific
-siblings are each a materially different detection shape needing its
-own separate investigation.
+- see Done. The `Class` kind's own detection surface's real, previously-
+undisclosed gaps are closed too (see Done): `check_restricted_class_
+name_usage` was never actually called from the `extends`/`implements`
+loops nor from either native param/return type-hint check site (ROADMAP's
+own prior "Done" text claiming full coverage there was wrong), and a
+restricted function's own first-class-callable syntax
+(`banned_func(...)`) went unchecked even though the ordinary call site
+already was. Still genuinely unbuilt: the real `spaze/phpstan-disallowed-
+calls` package's own much larger allow/disallow-in filter DSL (confirmed
+directly against its real README/docs this session - `allowIn`/
+`allowExceptIn` path patterns via `fnmatch()`, `allowInClassWithAttributes`/
+`allowExceptInClassWithAttributes`, `allowInMethodsWithAttributes`/
+`allowExceptInMethodsWithAttributes`, `allowInClassWithMethodAttributes`,
+`allowInParamTypes`/`allowInReturnType` and their `allowExcept*` inverses,
+`allowInUse`, evaluated in a specific precedence order across all of
+these). This project's own `Checker` still has no notion of its own
+current file path at all (needed for path-scoped allow/disallow - the
+recommended design is a post-filter over collected diagnostics,
+mirroring `ignore_errors::filter`'s own precedent, not a new `Checker`
+field) nor any "current declaration's own attributes" tracking (needed
+for attribute-context matching - a real new field, threaded through
+every declaration entry point, comparable in size to `current_class`/
+`current_method`). Its namespace/enum/superglobal/keyword-specific
+siblings are each a materially different detection shape needing their
+own separate investigation too.
 
 **84 - `RuleLevelHelper`-equivalent level-aware type-acceptance,
 remaining (PARTIAL).** `Registry::accepts_at_configured_level` (see
