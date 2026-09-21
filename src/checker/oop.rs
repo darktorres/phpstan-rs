@@ -696,7 +696,7 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
-    /// Three small, independent PHP-version/modifier-consistency checks
+    /// Four small, independent PHP-version/modifier-consistency checks
     /// on a class constant's declaration, matching real PHPStan's
     /// identifiers:
     ///
@@ -707,10 +707,32 @@ impl<'a> Checker<'a> {
     /// see it to override in the first place - unconditional, no
     /// PHP-version gate; `classConstant.nativeTypeNotSupported`
     /// (`NativeTypedClassConstantRule`) - a typed constant (`const TYPE
-    /// NAME = value;`) needs PHP 8.3+.
-    pub(crate) fn check_class_constant_modifiers(&mut self, fqn: &str, consts: &[ClassConst]) {
+    /// NAME = value;`) needs PHP 8.3+; `classConstant.inTrait`
+    /// (`ConstantsInTraitsRule`) - a trait's own `const` declaration
+    /// needs PHP 8.2+.
+    pub(crate) fn check_class_constant_modifiers(
+        &mut self,
+        fqn: &str,
+        kind: ClassKind,
+        consts: &[ClassConst],
+    ) {
         let version = self.registry.php_version;
         for c in consts {
+            if kind == ClassKind::Trait
+                && let Some(version) = version
+                && !crate::php_version::PhpFeature::ConstantsInTraits.is_available(version)
+            {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        "Constant is declared inside a trait but is only supported on PHP 8.2 and later.".to_string(),
+                        c.span,
+                        0,
+                        "classConstant.inTrait",
+                    )
+                    .non_ignorable(),
+                );
+            }
             if c.is_final
                 && let Some(version) = version
                 && !crate::php_version::PhpFeature::FinalClassConstants.is_available(version)

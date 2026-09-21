@@ -314,3 +314,69 @@ fn an_untyped_constant_is_never_flagged_for_native_type_version_support() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// A trait's own `const` declaration (`ConstantsInTraitsRule`) needs PHP
+// 8.2+.
+
+#[test]
+fn a_constant_declared_inside_a_trait_below_php_8_2_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            trait Foo {
+                const X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "classConstant.inTrait"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_constant_declared_inside_a_trait_on_php_8_2_or_later_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            trait Foo {
+                const X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 2)),
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.inTrait"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_constant_declared_inside_a_trait_with_no_configured_php_version_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait Foo {
+                const X = 1;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.inTrait"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_constant_declared_inside_a_class_is_never_flagged_as_in_trait() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                const X = 1;
+            }
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.inTrait"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
