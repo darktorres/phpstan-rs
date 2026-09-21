@@ -3304,7 +3304,25 @@ exempted from `missingType.generics` (`ReflectionMethod`/
 bare `ReflectionMethod $m` type hint anywhere (a return type, a param, a
 `@var`) would start producing a brand-new false positive at level 6+,
 since real PHPStan does not consider either of these two classes
-generic at all.
+generic at all. Binding a *specific* reflected member's own value type -
+`ReflectionClass<T>::getMethod('name')`/`getProperty('name')`'s own
+member-name literal, carried through to `invoke()`/`getValue()` - is
+done too, a further stretch beyond what any real PHPStan extension
+does either: a new `Type::ReflectedMember(Box<Type>, String)` variant
+(owner type, member name), only ever an `Intersection` member alongside
+its own `ReflectionMethod<T>`/`ReflectionProperty<T>` base (mirrors
+`HasOffsetValue`'s exact shape and minimal blast radius - one
+exhaustive-match site, `types/display.rs`), attached when the member
+name is a literal (or a variable whose own inferred type is one,
+matching the Doctrine DQL arm's identical convention) and the
+receiver's own `T` isn't itself erased to `Mixed`. `invoke()`/
+`getValue()` resolve the real member's declared type on the owner via
+the same class-template substitution an ordinary generic method call
+already uses. Disclosed, not silently dropped: `ReflectionObject`'s own
+`__construct` carries no `@template` annotation in real
+phpstorm-stubs (a separate constructor from `ReflectionClass`'s own
+patched one), so its own `T` stays erased and this feature correctly
+declines to attach a fact it could never resolve, rather than guessing.
 
 **`DOMDocument::createElement()`/`SimpleXMLElement` validation** (Phase
 78). `checker/xml_name.rs`'s `is_valid_xml_name` implements the W3C XML
@@ -3873,18 +3891,6 @@ attribute-context matching mechanism exists anywhere in this checker to
 build on yet, and its namespace/enum/superglobal/keyword-specific
 siblings are each a materially different detection shape needing its
 own separate investigation.
-
-**77 - Runtime-capability modeling, remaining (PARTIAL).** Most of the
-originally-scoped functions, `SimpleXMLElement`'s own magic-property
-type resolution, `ReflectionClass<T>`'s own constructor-argument-driven
-binding, and class-specific `ReflectionMethod<T>`/`ReflectionProperty<T>`
-modeling (`getMethods()`/`getProperties()`/`getMethod()`/`getProperty()`
-now propagate the receiver's own `T` instead of returning the stub's
-generic, untemplated collections) are all done (see Done). Binding a
-*specific* member's own value type (a literal property/method name
-resolved at the type level for `getValue()`/`invoke()`) remains a
-further, separate stretch beyond what any real PHPStan extension does
-either - not attempted, not a disguised decline.
 
 **82 - Collector / cross-file aggregation architecture (RETIRED - real
 architecture built as a registry fixed point instead; see Phase 41,
@@ -4647,9 +4653,12 @@ individually itemized:
   type contribution is no longer in this bucket - Phase 42 built it by
   reusing the hand-rolled spec-grammar validator Phase 78 already
   shipped (confirmed against real `php -l`/`php -r`, not runtime
-  construction) instead of needing a real interpreter. The
-  format-table half of `DateTime`/`date()` handling stays genuinely
-  portable and is scheduled (Phase 77/78).
+  construction) instead of needing a real interpreter.
+  `DateTimeConstructorThrowTypeExtension`'s own contribution is out of
+  this bucket too now (Phase 78's own `src/php_date_parser.rs` port,
+  same "confirmed against real `php`, not runtime construction"
+  technique) - `DateTime`/`date()`'s own format-table half was already
+  done separately (see Done).
 - A handful of one-off inapplicable rules: `AllowedSubTypesRule`
   (sealed-hierarchy extension point, inert even in stock PHPStan
   without third-party config); `ClassNameUsageLocationCreateIdentifierDynamicReturnTypeExtension`
