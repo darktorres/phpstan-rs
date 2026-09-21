@@ -1,9 +1,12 @@
 //! `Project::use_sites()`'s two-tier index: Tier 1 (class/function
-//! reference sites) - eager, syntactic, gated on `retain_source` exactly
-//! like `decl_locations` - and Tier 2 (member reference sites) - lazy,
-//! checker-driven, built once by `ensure_member_index_built`. The LSP
-//! wiring itself (`textDocument/references`/`textDocument/rename`) is
-//! exercised separately in `lsp::tests::references_and_rename`.
+//! reference sites) - eager, syntactic, gated on `retain_source`
+//! (genuinely needs the retained source text for `split_identifier_
+//! spans`, unlike `decl_locations`, which no longer shares this gate -
+//! see `decl_locations.rs`'s own tests) - and Tier 2 (member reference
+//! sites) - lazy, checker-driven, built once by `ensure_member_index_
+//! built`. The LSP wiring itself (`textDocument/references`/
+//! `textDocument/rename`) is exercised separately in `lsp::tests::
+//! references_and_rename`.
 
 use super::super::use_sites::RefTarget;
 use super::super::*;
@@ -89,7 +92,8 @@ fn use_site_index_is_empty_without_retain_source() {
             .references(&RefTarget::Function("greet".to_string()))
             .len(),
         0,
-        "Tier 1 must stay off (like decl_locations) when retain_source is off"
+        "Tier 1 must stay off when retain_source is off - unlike decl_locations, \
+         which no longer shares this gate"
     );
 }
 

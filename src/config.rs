@@ -33,6 +33,7 @@
 //! check_throw_base_class = false
 //! check_new_exception_discarded = false
 //! check_risky_tests = false
+//! check_dead_enum_cases = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -204,6 +205,10 @@ pub struct Config {
     /// `registry::Registry::check_risky_tests`'s own doc comment for
     /// why.
     pub check_risky_tests: Option<bool>,
+    /// Opt-in dead-enum-case detection - see
+    /// `registry::Registry::check_dead_enum_cases`'s own doc comment for
+    /// why.
+    pub check_dead_enum_cases: Option<bool>,
 }
 
 impl Config {

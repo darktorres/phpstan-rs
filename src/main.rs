@@ -250,6 +250,14 @@ enum Command {
         /// `registry::Registry::check_risky_tests`'s own doc comment.
         #[arg(long)]
         check_risky_tests: bool,
+        /// Enables dead-enum-case detection (a declared case never
+        /// referenced via `EnumName::CaseName`, a `match`/`switch` arm
+        /// value, or a literal `::from()`/`::tryFrom()` argument,
+        /// project-wide). Off by default - see
+        /// `registry::Registry::check_dead_enum_cases`'s own doc comment
+        /// for the real, disclosed false-positive risks.
+        #[arg(long)]
+        check_dead_enum_cases: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -350,6 +358,7 @@ fn main() {
             check_throw_base_class,
             check_new_exception_discarded,
             check_risky_tests,
+            check_dead_enum_cases,
             php_version,
             generate_baseline,
             baseline,
@@ -387,6 +396,7 @@ fn main() {
             check_throw_base_class,
             check_new_exception_discarded,
             check_risky_tests,
+            check_dead_enum_cases,
             php_version,
             generate_baseline,
             baseline,

@@ -102,18 +102,22 @@ pub struct Project {
     // hover/definition's own text-split technique (`lsp::text_split`)
     // needs a known span's exact source text, including whatever an
     // editor's `didChange` most recently sent - not necessarily what's on
-    // disk. Also gates `decl_locations` below, for the identical "only
-    // the LSP needs this" reasoning.
+    // disk.
     retain_source: bool,
     // See `DeclLocations`'s own doc comment. Populated/pruned alongside
     // `registry.index`/`remove_declarations` in `load_file`/
-    // `update_file`, gated behind `retain_source` the same as
-    // `FileState.source` - a batch `check-project` run never does a
-    // position- or name-based lookup after checking, so building this
-    // index there would be pure overhead.
+    // `update_file`, unconditionally - unlike `FileState.source`/Tier-1
+    // `use_sites`, this needs no retained source text at all (`index`
+    // takes only `&ast`/`&path`), so there's no reason to gate it behind
+    // `retain_source` too. Was gated behind it until `check_whole_
+    // program` (`Project`'s own doc comment) started needing a batch
+    // `check-project` run to resolve a whole-program fact's own
+    // declaring file/span - the "a batch run never does a position- or
+    // name-based lookup" assumption this comment used to make no longer
+    // holds.
     decl_locations: DeclLocations,
     // Every top-level function's own unconditional declaration site(s) -
-    // always populated (no `retain_source` gate, unlike `decl_locations`
+    // always populated (no `retain_source` gate, same as `decl_locations`
     // above), the same indexing-side/check-side split
     // `duplicate_class_sites` below uses: its own gate is at the check
     // side, `Registry::check_duplicate_function_declarations`, not the
@@ -129,9 +133,10 @@ pub struct Project {
     // `textDocument/references`/`textDocument/rename`'s own whole-project
     // use-site index - see `use_sites`'s own module doc comment for the
     // two-tier split. Tier 1 (class/function references) is indexed
-    // eagerly here, gated behind `retain_source` exactly like
-    // `decl_locations` above, for the identical "only the LSP needs
-    // this" reasoning. Tier 2 (member references) is NOT populated by
+    // eagerly here, gated behind `retain_source` - unlike `decl_locations`
+    // above, this genuinely needs the retained source text
+    // (`index_class_fn_refs`'s own `split_identifier_spans` call), so it
+    // stays LSP-only. Tier 2 (member references) is NOT populated by
     // ordinary indexing at all - see `member_index_built`.
     use_sites: UseSiteIndex,
     // Whether Tier 2 (member references) of `use_sites` has ever been
@@ -142,12 +147,31 @@ pub struct Project {
     // only `textDocument/references`/`textDocument/rename` actually
     // need - see `ensure_member_index_built`'s own doc comment.
     member_index_built: bool,
+    // Every real `Enum` class's own canonically-declared FQN that
+    // `Checker::escaped_enums` (see its own doc comment) recorded for
+    // some file - populated/queried alongside `use_sites`/`member_
+    // index_built` above, by the identical two paths (`ensure_member_
+    // index_built`'s own loop, or `seed_member_refs` fed from `check-
+    // project`'s primary pass). Consulted by `checker::whole_program::
+    // dead_enum_cases::find_dead_cases`.
+    escaped_enum_cases: HashSet<String>,
 }
 
 /// The result of `Project::check_paths_isolating_panics`: successful
 /// per-file diagnostics, plus every path whose own check panicked
 /// (message, not a diagnostic list) instead of completing.
 pub type CheckPathsIsolatingPanics = (HashMap<PathBuf, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
+
+/// The result of `check_file_impl`'s own Tier-2-collecting mode
+/// (`check_file_and_member_refs`/`check_file_with_property_assign_
+/// facts_collecting_member_refs`): a file's diagnostics, its own
+/// member-reference sites, and the `Enum` classes it saw escape (see
+/// `Checker::escaped_enums`'s own doc comment).
+pub type CheckWithMemberRefs = (
+    Vec<Diagnostic>,
+    Vec<(Span, String, String)>,
+    HashSet<String>,
+);
 
 impl Project {
     pub fn new() -> Self {
@@ -167,6 +191,7 @@ impl Project {
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
             member_index_built: false,
+            escaped_enum_cases: HashSet::new(),
         }
     }
 
@@ -445,6 +470,13 @@ impl Project {
         self.registry.check_risky_tests = enabled;
     }
 
+    /// Opts the whole project's checking into dead-enum-case detection -
+    /// see `registry::Registry::check_dead_enum_cases`'s own doc comment
+    /// for why this defaults to `false`.
+    pub fn set_check_dead_enum_cases(&mut self, enabled: bool) {
+        self.registry.check_dead_enum_cases = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
@@ -575,9 +607,9 @@ impl Project {
         for decl in built_decls.into_iter().chain(anonymous_class_decls) {
             self.registry.insert_built_decl(decl, analyzed);
         }
+        self.decl_locations
+            .index(&ast, &mut NameContext::default(), &path);
         if self.retain_source {
-            self.decl_locations
-                .index(&ast, &mut NameContext::default(), &path);
             for (span, target) in use_sites::index_class_fn_refs(&ast, &source) {
                 self.use_sites.insert(&path, target, span);
             }
@@ -665,10 +697,8 @@ impl Project {
         };
         self.registry
             .remove_declarations(&old.functions, &old.classes);
-        if self.retain_source {
-            self.decl_locations
-                .remove_declarations(&old.functions, &old.classes);
-        }
+        self.decl_locations
+            .remove_declarations(&old.functions, &old.classes);
         self.use_sites.remove_file(path);
         self.duplicate_fn_sites
             .remove_declarations(path, &old.functions);
@@ -683,8 +713,8 @@ impl Project {
     /// Recomputes `path`'s own Tier-1 (class/function) use-sites from its
     /// currently-loaded `FileState`, replacing whatever was previously
     /// indexed for it - a no-op past the initial `use_sites.remove_file`
-    /// when `retain_source` is off (matching `decl_locations`' identical
-    /// gate) or `path` isn't currently loaded at all. Called for EVERY
+    /// when `retain_source` is off or `path` isn't currently loaded at
+    /// all. Called for EVERY
     /// file `update_file`'s own affected-file loop re-checks, not just
     /// the one that was directly edited: a dependent file's own bare-
     /// `Name`/`StaticAccess` resolution can change (e.g. registry-wide
@@ -741,12 +771,37 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let (_, member_refs) = self.check_file_and_member_refs(&path);
-            for (span, owner, member) in member_refs {
-                self.use_sites
-                    .insert(&path, use_sites::RefTarget::Member(owner, member), span);
-            }
+            let (_, member_refs, escaped_enums) = self.check_file_impl(&path, None, true);
+            self.seed_member_refs(&path, member_refs, escaped_enums);
         }
+        self.mark_member_index_built();
+    }
+
+    /// Adopts already-computed Tier-2 member-ref/escaped-enum data for
+    /// `path` into `use_sites`/`escaped_enum_cases` - the per-file work
+    /// `ensure_member_index_built`'s own loop body does above, factored
+    /// out so `check-project`'s own primary pass can feed it data it
+    /// already computed inline (via `check_file_with_property_assign_
+    /// facts_collecting_member_refs`) instead of `ensure_member_index_
+    /// built` re-deriving it via a second, redundant pass. Caller must
+    /// call `mark_member_index_built` once every file has been seeded.
+    pub fn seed_member_refs(
+        &mut self,
+        path: &Path,
+        member_refs: Vec<(Span, String, String)>,
+        escaped_enums: HashSet<String>,
+    ) {
+        for (span, owner, member) in member_refs {
+            self.use_sites
+                .insert(path, use_sites::RefTarget::Member(owner, member), span);
+        }
+        self.escaped_enum_cases.extend(escaped_enums);
+    }
+
+    /// See `seed_member_refs`'s own doc comment - marks Tier 2 as built
+    /// without `ensure_member_index_built`'s own per-file loop ever
+    /// running, once every file has been seeded some other way.
+    pub fn mark_member_index_built(&mut self) {
         self.member_index_built = true;
     }
 
@@ -848,10 +903,8 @@ impl Project {
         for name in &classes {
             self.registry.record_phpstan_class_file(name, path);
         }
-        if self.retain_source {
-            self.decl_locations
-                .index(&ast, &mut NameContext::default(), path);
-        }
+        self.decl_locations
+            .index(&ast, &mut NameContext::default(), path);
         self.duplicate_fn_sites
             .index(&ast, &mut NameContext::default(), path, false);
         // `is_stub: false` - same reasoning as `load_file_impl`'s own
@@ -1116,7 +1169,8 @@ impl Project {
         &self,
         path: &Path,
     ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        self.check_file_impl(path, None, true)
+        let (diagnostics, member_refs, _escaped_enums) = self.check_file_impl(path, None, true);
+        (diagnostics, member_refs)
     }
 
     /// The two-pass counterpart of `check_file` - `facts` is the whole-
@@ -1131,6 +1185,24 @@ impl Project {
         facts: &Arc<PropertyAssignFacts>,
     ) -> Vec<Diagnostic> {
         self.check_file_impl(path, Some(facts), false).0
+    }
+
+    /// `check_file_with_property_assign_facts`'s own Tier-2-collecting
+    /// sibling - the property-assign-facts-aware counterpart of
+    /// `check_file_and_member_refs`, letting `check-project`'s own
+    /// already-parallel primary pass collect Tier-2 member-ref/escaped-
+    /// enum data inline (via `seed_member_refs`/`mark_member_index_built`
+    /// below) instead of `ensure_member_index_built` paying for a wholly
+    /// separate, redundant second `Checker` pass over every file
+    /// afterward. Only used when at least one whole-program check that
+    /// needs Tier 2 (e.g. `check_dead_enum_cases`) is enabled - see
+    /// `main/check_project.rs`'s own primary loop.
+    pub fn check_file_with_property_assign_facts_collecting_member_refs(
+        &self,
+        path: &Path,
+        facts: &Arc<PropertyAssignFacts>,
+    ) -> CheckWithMemberRefs {
+        self.check_file_impl(path, Some(facts), true)
     }
 
     /// A bare, un-run `Checker` for `path` plus its AST, for an LSP
@@ -1170,9 +1242,9 @@ impl Project {
         path: &Path,
         cross_file_property_assign_facts: Option<&Arc<PropertyAssignFacts>>,
         collect_member_refs: bool,
-    ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
+    ) -> CheckWithMemberRefs {
         let Some(file) = self.files.get(path) else {
-            return (Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new(), HashSet::new());
         };
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
@@ -1187,6 +1259,7 @@ impl Project {
             checker.collect_default_and_const_value_member_refs(&file.ast);
         }
         let member_refs = checker.take_member_ref_sites();
+        let escaped_enums = checker.take_escaped_enums();
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
             diagnostics.extend(
@@ -1242,7 +1315,7 @@ impl Project {
                         .is_some_and(|ids| ids.iter().any(|id| id == &d.identifier))
             });
         }
-        (diagnostics, member_refs)
+        (diagnostics, member_refs, escaped_enums)
     }
 
     pub fn registry(&self) -> &Registry {
@@ -1456,6 +1529,76 @@ impl Project {
     /// does.
     pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
         self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>())
+    }
+
+    /// Runs every opt-in whole-program diagnostic check (currently just
+    /// `check_dead_enum_cases`) - see `checker::whole_program`'s own
+    /// module doc comment for why these can't run through the ordinary
+    /// per-file `Checker` path `check_file`/`check_all` above use.
+    /// `check-project` calls this once, after its own primary per-file
+    /// pass has populated `results`, merging this method's own return
+    /// value in before level-filtering/`ignore_errors`/baseline (so
+    /// `@phpstan-ignore`/baseline suppression apply to a whole-program
+    /// finding exactly like an ordinary one).
+    ///
+    /// Every whole-program check needs `ensure_member_index_built`'s own
+    /// Tier-2 use-site index - a real cost when it has to build it
+    /// itself (a second, redundant `Checker` pass per file), avoided
+    /// entirely when the caller already seeded it via `seed_member_refs`/
+    /// `mark_member_index_built` (`check-project`'s own primary pass
+    /// does exactly this - see its own doc comment) before calling here,
+    /// in which case `ensure_member_index_built` is a complete no-op.
+    /// Correctness doesn't depend on which path fed it - this method
+    /// works identically either way, just faster when pre-seeded.
+    pub fn check_whole_program(&mut self) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        if !self.registry.check_dead_enum_cases {
+            return HashMap::new();
+        }
+        self.ensure_member_index_built();
+        let dead = checker::whole_program::dead_enum_cases::find_dead_cases(
+            &self.registry,
+            &self.use_sites,
+            &self.escaped_enum_cases,
+        );
+        let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+        for (fqn, case) in dead {
+            let Some((path, span)) = self
+                .decl_locations
+                .members
+                .get(&(fqn.clone(), case.clone()))
+            else {
+                continue;
+            };
+            let diagnostic = Diagnostic {
+                location: fqn.clone(),
+                message: format!("Enum case {fqn}::{case} is never used."),
+                span: *span,
+                level: 5,
+                identifier: "enumCase.unused".to_string(),
+                tip: None,
+                non_ignorable: false,
+                metadata: HashMap::new(),
+                fix: None,
+            };
+            // `@phpstan-ignore-line`/`-next-line`/`@phpstan-ignore
+            // <identifiers>` - `check_file_impl`'s own identical two
+            // `retain` calls only ever run *inside* the per-file
+            // `Checker` pass, filtering diagnostics before they leave
+            // that call at all; a diagnostic built here, entirely
+            // outside that path, would never see them otherwise.
+            if let Some(file) = self.files.get(path)
+                && !diagnostic.non_ignorable
+                && (file.ignore_lines.contains(&span.start.line)
+                    || file
+                        .ignore_identifiers
+                        .get(&span.start.line)
+                        .is_some_and(|ids| ids.iter().any(|id| id == &diagnostic.identifier)))
+            {
+                continue;
+            }
+            results.entry(path.clone()).or_default().push(diagnostic);
+        }
+        results
     }
 
     pub fn file_count(&self) -> usize {

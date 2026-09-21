@@ -81,19 +81,18 @@ whole-program fact PHPStan's own 14-collector `CollectedDataNode`
 machinery makes expensive that phpstan-rs's single live `Registry` gets
 nearly for free.
 
-**Shared, currently-missing prerequisite for every whole-program
-*diagnostic* phase below (86-94, and Part 8's composer-hygiene phases
-113-120)** - found while scoping Phase 92, disclosed there in full:
-this project has no whole-project, non-per-file diagnostic-emission
-path at all yet (every diagnostic today flows through a per-file
-`Checker`/`check_program`/`check_file` call, integrated into
-`main/check_project.rs`'s own CLI/JSON/baseline pipeline), and reporting
-a declaration's own file/span outside the file currently being checked
-needs `Project::decl_locations`, gated behind `retain_source` (`false`
-in batch/`check-project` mode today, only ever turned on by the LSP).
-Worth building once, deliberately, as its own shared piece of
-infrastructure - not something to half-invent inside whichever one of
-these phases gets picked up first.
+**Shared prerequisite for every whole-program *diagnostic* phase below
+(86-94, and Part 8's composer-hygiene phases 113-120) - now built,
+found and closed while implementing Phase 92 (folded into ROADMAP's
+Done section, "Whole-program diagnostic-emission pipeline" - see there
+for the full design).** This project used to have no whole-project,
+non-per-file diagnostic-emission path at all, and `Project::decl_
+locations` used to be gated behind `retain_source` (off in batch
+`check-project` mode) - both fixed. Any of these phases can now build
+directly on `Project::check_whole_program` (gate a new opt-in `Registry`
+bool, resolve findings through `decl_locations` exactly like Phase 92's
+own `checker::whole_program::dead_enum_cases` does) instead of
+re-deriving this infrastructure.
 
 ## Phase 85 — More precise than real PHPStan itself (BEYOND_PHPSTAN §A)
 
@@ -331,46 +330,6 @@ of) — cite as concrete "this exact idea already ships" evidence when X1
 is picked up. The same package's `NarrowReturnObjectTypeRule` is the
 return-type sibling, closer in spirit to the already-built too-wide-
 return-type check (Phase 111's I3/Phase 45's 45A) than to X1 itself.
-
-## Phase 92 — Whole-program dead-enum-case detection (§AD)
-
-Flag a declared enum case never referenced via `EnumName::CaseName`,
-never a `match`/`switch` arm value, and never provably produced by a
-literal `::from()`/`::tryFrom()` argument, project-wide. PHPStan's only
-dead-code family gates on `isPrivate()` — structurally can't apply to
-enum cases at all (no visibility syntax exists for them). Every needed
-piece already exists unconnected: `Registry::enum_case_for_value`
-(Phase 79), `ClassInfo.consts`. Real gotcha: `Switch`'s own `test`
-expression isn't covered by generic `stmt_children` and needs the same
-manual handling `member_usage.rs` already applies elsewhere; any
-`::cases()` call or dynamic access escapes the whole enum, conservative
-all-or-nothing.
-
-**Undersold as "medium," corrected during a 2026-09-20 investigation
-(not built - two real, disclosed blockers found while scoping it, not
-implemented around).** (1) This project has **no whole-project,
-non-per-file diagnostic-emission path at all** yet - every diagnostic
-today flows through a per-file `Checker`/`check_program`/`check_file`
-call; a whole-program fact like "this case is never referenced
-anywhere" needs a genuinely new post-pass (after every file's own
-per-file check) integrated into `main/check_project.rs`'s own
-CLI/JSON/baseline output pipeline, not just a new match arm somewhere.
-This exact same gap blocks **every other Phase 86-94 whole-program item
-and every Phase 113-120 composer-hygiene item** - none of those are
-small "just wire it up" tasks either, once this is accounted for; it's
-worth building once, deliberately, as its own shared prerequisite
-rather than half-inventing it inside whichever phase gets picked up
-first. (2) Reporting each dead case's own location needs
-`Project::decl_locations`, which is gated behind `retain_source` -
-`false` in batch/`check-project` mode today (only the LSP turns it on).
-Whether to unconditionally turn it on for batch mode too (retaining
-every file's raw source text in memory for the whole run) is a real
-memory/perf trade-off that deserves measuring against a real corpus
-(e.g. Piwigo) before flipping it, not an assumption - this is the exact
-same "`DeclLocations` opened for batch `check-project` runs" prerequisite
-Phase 113/114/115 already disclosed for themselves; Phase 92 needs it
-too, just not previously noted here. **Effort: medium once both
-prerequisites exist, large including them.**
 
 ## Phase 93 — Whole-program dead abstract-class detection (§AJ)
 
@@ -687,13 +646,12 @@ kind — structural, since it has no persistent whole-program "which
 package provides this symbol" index. phpstan-rs already has most
 underlying pieces built for other reasons (`composer::
 find_composer_package_name`, `detect_phpstan_dependency`,
-`deps::referenced_names`, `DeclLocations` — several items below note
-`DeclLocations` needs opening up for batch `check-project` runs, not
-just its current LSP-only `retain_source` gate — see Part 1's own
-shared-prerequisite note above Phase 85 for the fuller disclosure,
-found while scoping Phase 92: this project also has no whole-project,
-non-per-file diagnostic-emission path yet, a second, likely bigger gap
-every phase below shares too, not just the `DeclLocations` half).
+`deps::referenced_names`, `DeclLocations` — several items below
+originally noted `DeclLocations` needing to be opened up for batch
+`check-project` runs, not just its LSP-only `retain_source` gate; that,
+plus the whole-program diagnostic-emission pipeline every phase below
+also needs, are both now built — see Part 1's own shared-prerequisite
+note above Phase 85).
 
 ## Phase 113 — Composer declared-vs-used dependency hygiene (§K)
 
@@ -713,7 +671,8 @@ classes for reflection — it never validates location matches namespace.
 
 - **R1 (medium).** `psr4.pathMismatch` — resolve each declared FQN's
   expected PSR-4 path and compare against its real declared file
-  (`DeclLocations.classes`, once opened for batch runs). A file
+  (`DeclLocations.classes`, now populated in batch runs too - see
+  Part 1's own shared-prerequisite note above Phase 85). A file
   loading fine today only because Composer's dev autoloader falls back
   to directory scanning silently breaks under `composer dump-autoload
   --optimize`. (Phase 109's AO1 reuses this same prefix-map data in
@@ -734,8 +693,8 @@ dump-autoload --no-dev` drops the dev root entirely, so the reference
 fatals at runtime with zero warning today even though every dev-mode
 install (what CI and every local run actually uses) resolves it fine.
 Needs extending `composer.rs`'s existing parse to also read
-`autoload-dev.psr-4`, plus `DeclLocations` opened for batch runs (same
-prerequisite as Phase 114). **Effort: medium.**
+`autoload-dev.psr-4` - `DeclLocations`'s own batch-mode prerequisite
+(same as Phase 114's R1) is already built. **Effort: medium.**
 
 ## Phase 116 — `provide.unimplemented` (§AG)
 

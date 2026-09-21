@@ -262,6 +262,44 @@ fn check_project_check_uninitialized_properties_flag_opts_into_the_extra_check()
 }
 
 #[test]
+fn check_project_check_dead_enum_cases_flag_opts_into_the_extra_check() {
+    // Off by default (see `registry::Registry::check_dead_enum_cases`'s
+    // own doc comment) - only `--check-dead-enum-cases` turns it on.
+    // Also exercises the real end-to-end path: `check_whole_program`
+    // wired into `check-project`'s own primary loop, not just the
+    // library-level `Project::check_whole_program` unit tests.
+    let dir = TempDir::new("check_project_dead_enum");
+    dir.write(
+        "foo.php",
+        r#"<?php
+            enum Suit {
+                case Hearts;
+                case Spades;
+            }
+        "#,
+    );
+
+    let unfiltered = bin().arg("check-project").arg(dir.path()).output().unwrap();
+    let unfiltered_stdout = String::from_utf8_lossy(&unfiltered.stdout);
+    assert!(
+        !unfiltered_stdout.contains("enumCase.unused"),
+        "expected the check to be off by default, got: {unfiltered_stdout}"
+    );
+
+    let enabled = bin()
+        .arg("check-project")
+        .arg("--check-dead-enum-cases")
+        .arg(dir.path())
+        .output()
+        .unwrap();
+    let enabled_stdout = String::from_utf8_lossy(&enabled.stdout);
+    assert!(
+        enabled_stdout.contains("enumCase.unused") && enabled_stdout.contains("Suit::Hearts"),
+        "got: {enabled_stdout}"
+    );
+}
+
+#[test]
 fn check_project_check_internal_usage_flag_opts_into_the_extra_check() {
     // Off by default (mirroring PHPStan's own opt-in
     // `featureToggles.internalTag`, see `registry::Registry::

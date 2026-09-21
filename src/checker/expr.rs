@@ -2216,6 +2216,23 @@ impl<'a> Checker<'a> {
                     .as_ref()
                     .and_then(|class| self.registry.lookup_method_with_owner(class, method));
                 let sig = sig_with_owner.as_ref().map(|(_, s)| *s);
+                // Phase 92's own `::cases()` escape hatch - see
+                // `Checker::escaped_enums`'s own doc comment. `owner`
+                // (not `resolved_class`) is the registry's own
+                // canonically-declared name, which matters here: a
+                // differently-cased call site (`SUIT::cases()`) would
+                // silently fail to match `self.registry.classes` if
+                // keyed by `resolved_class` instead.
+                if method.eq_ignore_ascii_case("cases")
+                    && let Some((owner, _)) = &sig_with_owner
+                    && self
+                        .registry
+                        .classes
+                        .get(owner.as_ref())
+                        .is_some_and(|c| c.kind == ClassKind::Enum)
+                {
+                    self.record_enum_escape(owner);
+                }
                 // This static call's own throw contribution.
                 if let Some(class) = &resolved_class {
                     let dynamic_throw = self.dynamic_method_throw_type(class, method, args);
@@ -2417,6 +2434,15 @@ impl<'a> Checker<'a> {
                         let resolved_ty = self.infer_call_return_type(s, &resolved, locals);
                         let resolved_ty =
                             self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
+                        // Phase 92's own `::from()`/`::tryFrom()` literal-
+                        // argument signal - see `checker::whole_program::
+                        // dead_enum_cases`'s own doc comment. Reads the
+                        // type `narrow_enum_from_call` just computed
+                        // rather than threading a new span parameter
+                        // through it.
+                        if let Type::EnumCase(ref case_class, ref case) = resolved_ty {
+                            self.record_member_ref(e.span, case_class, case);
+                        }
                         self.resolve_pseudo(&resolved_ty, class)
                     }
                     _ => Type::Mixed,
@@ -2438,6 +2464,20 @@ impl<'a> Checker<'a> {
                     };
                 }
                 if member == "{dynamic}" {
+                    // Phase 92's own dynamic-member escape hatch - see
+                    // `Checker::escaped_enums`'s own doc comment. No
+                    // `lookup_method_with_owner`-style call to piggyback
+                    // an already-canonical name off here (the member
+                    // name genuinely isn't known), so this calls
+                    // `lookup_class` itself for the canonical form -
+                    // `resolve_static_class_name` alone doesn't
+                    // guarantee it.
+                    if let Some(raw) = self.resolve_static_class_name(class_name)
+                        && let Some((canonical, info)) = self.registry.lookup_class(&raw)
+                        && info.kind == ClassKind::Enum
+                    {
+                        self.record_enum_escape(canonical);
+                    }
                     return Type::Mixed;
                 }
                 // A static property (`self::$prop`) can be narrowed the
@@ -3811,6 +3851,20 @@ impl<'a> Checker<'a> {
                     && let Some((owner, _)) = self.registry.lookup_method_with_owner(&class, method)
                 {
                     self.record_member_ref(e.span, &owner, method);
+                    // Phase 92's own `::cases()` escape hatch - see
+                    // `Checker::escaped_enums`'s own doc comment. `owner`
+                    // is already the registry's own canonically-declared
+                    // name (same reasoning as `check_expr`'s identical
+                    // hook).
+                    if method.eq_ignore_ascii_case("cases")
+                        && self
+                            .registry
+                            .classes
+                            .get(owner.as_ref())
+                            .is_some_and(|c| c.kind == ClassKind::Enum)
+                    {
+                        self.record_enum_escape(&owner);
+                    }
                 }
                 self.infer_static_target_class(target, locals)
                     .and_then(|class| {
@@ -3819,6 +3873,16 @@ impl<'a> Checker<'a> {
                             let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
                             let resolved =
                                 self.narrow_enum_from_call(&class, method, args, resolved, locals);
+                            // Phase 92's own `::from()`/`::tryFrom()`
+                            // literal-argument signal - see `check_expr`'s
+                            // identical fix just above `ExprKind::
+                            // StaticAccess` for why this reads the
+                            // already-computed type rather than
+                            // threading a new span parameter through
+                            // `narrow_enum_from_call`.
+                            if let Type::EnumCase(ref case_class, ref case) = resolved {
+                                self.record_member_ref(e.span, case_class, case);
+                            }
                             self.resolve_pseudo(&resolved, &class)
                         })
                     })
@@ -3844,19 +3908,32 @@ impl<'a> Checker<'a> {
                 if self.collect_member_refs
                     && let Some(class) = self.resolve_static_class_name(class_name)
                 {
-                    match member.strip_prefix('$') {
-                        Some(prop_name) => {
-                            if let Some((owner, _)) =
-                                self.registry.lookup_property_with_owner(&class, prop_name)
-                            {
-                                self.record_member_ref(e.span, &owner, prop_name);
-                            }
+                    if member == "{dynamic}" {
+                        // Phase 92's own dynamic-member escape hatch -
+                        // see `check_expr`'s identical fix on this same
+                        // `"{dynamic}"` sentinel for why this needs
+                        // `lookup_class` for the canonical name rather
+                        // than trusting `class` as-is.
+                        if let Some((canonical, info)) = self.registry.lookup_class(&class)
+                            && info.kind == ClassKind::Enum
+                        {
+                            self.record_enum_escape(canonical);
                         }
-                        None => {
-                            if let Some((owner, _)) =
-                                self.registry.lookup_const_with_owner(&class, member)
-                            {
-                                self.record_member_ref(e.span, &owner, member);
+                    } else {
+                        match member.strip_prefix('$') {
+                            Some(prop_name) => {
+                                if let Some((owner, _)) =
+                                    self.registry.lookup_property_with_owner(&class, prop_name)
+                                {
+                                    self.record_member_ref(e.span, &owner, prop_name);
+                                }
+                            }
+                            None => {
+                                if let Some((owner, _)) =
+                                    self.registry.lookup_const_with_owner(&class, member)
+                                {
+                                    self.record_member_ref(e.span, &owner, member);
+                                }
                             }
                         }
                     }

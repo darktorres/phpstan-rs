@@ -999,6 +999,18 @@ pub struct Checker<'a> {
     pub(crate) collect_member_refs: bool,
     #[allow(clippy::type_complexity)]
     member_ref_sites: RefCell<HashSet<(Span, String, String)>>,
+    // Phase 92's own escape hatch: every real `Enum` class this file's
+    // check pass saw a `::cases()` call or a dynamic (`{dynamic}`)
+    // member access against - either one means "some case of this enum
+    // is used in a way this project can't attribute to a specific case
+    // name," so `checker::whole_program::dead_enum_cases` treats the
+    // whole enum as conservatively used rather than risk a false
+    // "unused" report. Populated only when `collect_member_refs` is on
+    // (the same Tier-2 pass `member_ref_sites` rides along with) -
+    // `record_enum_escape` self-gates on it internally, mirroring
+    // `record_member_ref`'s own pattern, so every plain call site below
+    // stays unconditional.
+    escaped_enums: RefCell<HashSet<String>>,
     // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
     // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
     // `infer_expr`'s separate `Call` arm both independently re-derive this
@@ -1070,6 +1082,7 @@ mod uninitialized;
 mod uninitialized_dataflow;
 mod unused;
 mod visibility;
+pub(crate) mod whole_program;
 mod xml_name;
 mod xml_wellformedness;
 
@@ -1155,6 +1168,7 @@ impl<'a> Checker<'a> {
             inlay_local_type_hints: Vec::new(),
             collect_member_refs: false,
             member_ref_sites: RefCell::new(HashSet::new()),
+            escaped_enums: RefCell::new(HashSet::new()),
             semantic_tokens: Vec::new(),
             call_candidate_cache: RefCell::new(HashMap::new()),
             pending_or_disjunctions: Vec::new(),
@@ -1287,6 +1301,24 @@ impl<'a> Checker<'a> {
     /// field up.
     pub(crate) fn take_member_ref_sites(&mut self) -> Vec<(Span, String, String)> {
         self.member_ref_sites.take().into_iter().collect()
+    }
+
+    /// See `escaped_enums`'s own doc comment. `class` must already be
+    /// the registry's own canonically-declared name - every call site
+    /// gets this for free (either reusing an already-canonical `owner`
+    /// from a `lookup_method_with_owner`/`lookup_class` call it made for
+    /// an unrelated reason, or calling `lookup_class` itself), never a
+    /// raw, possibly differently-cased receiver name.
+    pub(crate) fn record_enum_escape(&self, class: &str) {
+        if !self.collect_member_refs {
+            return;
+        }
+        self.escaped_enums.borrow_mut().insert(class.to_string());
+    }
+
+    /// `take_member_ref_sites`'s own sibling for `escaped_enums`.
+    pub(crate) fn take_escaped_enums(&mut self) -> HashSet<String> {
+        self.escaped_enums.take()
     }
 
     /// The declaration-site counterpart of the read-site probe hook inline

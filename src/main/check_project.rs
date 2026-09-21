@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -7,7 +7,7 @@ use output::OutputFormat;
 use phpstan_rs::{
     baseline, checker, composer, config, doctrine_functions, ignore_errors, output, php_version,
     project, restricted_symbols, sql_reflection_config, sql_reflection_reflector,
-    sql_reflection_schema, sql_reflection_schema_drift,
+    sql_reflection_schema, sql_reflection_schema_drift, token::Span,
 };
 use rayon::prelude::*;
 
@@ -135,6 +135,7 @@ fn run_check_project(
     check_throw_base_class: bool,
     check_new_exception_discarded: bool,
     check_risky_tests: bool,
+    check_dead_enum_cases: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -197,6 +198,7 @@ fn run_check_project(
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_new_exception_discarded(check_new_exception_discarded);
     project.set_check_risky_tests(check_risky_tests);
+    project.set_check_dead_enum_cases(check_dead_enum_cases);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
@@ -364,38 +366,80 @@ fn run_check_project(
         }))
         .unwrap_or_default(),
     );
-    let checked_results: Vec<(PathBuf, Result<Vec<checker::Diagnostic>, String>)> =
-        pool.install(|| {
-            analyze_files_by_size
-                .par_iter()
-                .map(|path| {
-                    let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                        project.check_file_with_property_assign_facts(path, &property_assign_facts)
-                    }));
-                    let outcome = outcome.map_err(|payload| {
-                        payload
-                            .downcast_ref::<String>()
-                            .cloned()
-                            .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                            .unwrap_or_else(|| "unknown panic".to_string())
-                    });
-                    (path.clone(), outcome)
-                })
-                .collect()
-        });
+    // Widened to optionally carry Tier-2 member-ref/escaped-enum data
+    // alongside each file's diagnostics - `None` (the `check_dead_enum_
+    // cases`-off common case) costs nothing extra. Folding this into the
+    // primary pass, rather than letting `check_whole_program`'s own
+    // `ensure_member_index_built` call derive it via a wholly separate
+    // second `Checker` pass over every file afterward, is what keeps a
+    // whole-program check's own real cost to the per-node tracking work
+    // below, not a doubling of total check time - see `Project::check_
+    // whole_program`'s own doc comment.
+    type MemberRefData = (Vec<(Span, String, String)>, HashSet<String>);
+    type CheckOutcome = Result<(Vec<checker::Diagnostic>, Option<MemberRefData>), String>;
+    let checked_results: Vec<(PathBuf, CheckOutcome)> = pool.install(|| {
+        analyze_files_by_size
+            .par_iter()
+            .map(|path| {
+                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    if check_dead_enum_cases {
+                        let (diagnostics, member_refs, escaped_enums) = project
+                            .check_file_with_property_assign_facts_collecting_member_refs(
+                                path,
+                                &property_assign_facts,
+                            );
+                        (diagnostics, Some((member_refs, escaped_enums)))
+                    } else {
+                        (
+                            project.check_file_with_property_assign_facts(
+                                path,
+                                &property_assign_facts,
+                            ),
+                            None,
+                        )
+                    }
+                }));
+                let outcome = outcome.map_err(|payload| {
+                    payload
+                        .downcast_ref::<String>()
+                        .cloned()
+                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                        .unwrap_or_else(|| "unknown panic".to_string())
+                });
+                (path.clone(), outcome)
+            })
+            .collect()
+    });
     std::panic::set_hook(default_hook);
 
     let mut results: HashMap<PathBuf, Vec<checker::Diagnostic>> = HashMap::new();
     let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
     for (path, outcome) in checked_results {
         match outcome {
-            Ok(diagnostics) => {
+            Ok((diagnostics, member_data)) => {
+                if let Some((member_refs, escaped_enums)) = member_data {
+                    project.seed_member_refs(&path, member_refs, escaped_enums);
+                }
                 results.insert(path, diagnostics);
             }
             Err(msg) => check_panics.push((path, msg)),
         }
     }
     check_panics.sort();
+    if check_dead_enum_cases {
+        project.mark_member_index_built();
+    }
+
+    for (path, diags) in project.check_whole_program() {
+        let entry = results.entry(path).or_default();
+        entry.extend(diags);
+        // `check_file_impl` always leaves its own per-file diagnostics
+        // sorted by span - a plain `.extend()` here would silently break
+        // that invariant for any file that has both ordinary and
+        // whole-program diagnostics (the new ones would always print
+        // last, regardless of their own line).
+        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+    }
 
     let mut results = apply_level_filter(results, level);
     ignore_errors::filter(&mut results, ignore_error_entries);
@@ -516,6 +560,7 @@ pub(crate) fn run_check_project_command(
     check_throw_base_class: bool,
     check_new_exception_discarded: bool,
     check_risky_tests: bool,
+    check_dead_enum_cases: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -630,6 +675,8 @@ pub(crate) fn run_check_project_command(
     let check_new_exception_discarded =
         check_new_exception_discarded || config.check_new_exception_discarded.unwrap_or(false);
     let check_risky_tests = check_risky_tests || config.check_risky_tests.unwrap_or(false);
+    let check_dead_enum_cases =
+        check_dead_enum_cases || config.check_dead_enum_cases.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -769,6 +816,7 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class,
         check_new_exception_discarded,
         check_risky_tests,
+        check_dead_enum_cases,
         configured_level,
         &stub_dirs,
         php_version,

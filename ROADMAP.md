@@ -2276,6 +2276,92 @@ start with `assert`/`expectException`) is a real, disclosed false
 positive this purely syntactic scan can't rule out. Gated behind
 `Registry::check_risky_tests`.
 
+**Whole-program diagnostic-emission pipeline, plus opt-in dead-enum-case
+detection built on top of it as its first real consumer** (PHASE_BACKLOG
+Phase 92, `enumCase.unused`). Two real architecture gaps were found
+scoping Phase 92 (PHASE_BACKLOG's own disclosure, since corrected): this
+project had no whole-project, non-per-file diagnostic-emission path at
+all, and `Project::decl_locations` (needed to resolve a whole-program
+fact's own reportable location) was gated behind `retain_source`, off in
+batch `check-project` mode. Both are now fixed, unblocking every other
+Phase 86-94 whole-program item and Phase 113-120 composer-hygiene item,
+not just this one:
+- `decl_locations` no longer shares `retain_source`'s gate at all
+  (`Project::insert_parsed_file`/`unindex_file`/`update_file`) - it
+  never needed the retained source text in the first place
+  (`DeclLocations::index` takes only `&ast`/`&path`), only Tier-1
+  `use_sites` genuinely does (`split_identifier_spans`), and stays
+  LSP-only.
+- `Project::check_whole_program` is the new entry point: gated on
+  `Registry::check_dead_enum_cases` (a full no-op when every
+  whole-program check is off, the default), it resolves each finding
+  through `decl_locations`, applies the same per-line `@phpstan-ignore`
+  suppression every ordinary diagnostic gets, and returns the same
+  `HashMap<PathBuf, Vec<Diagnostic>>` shape `check_all`/`check_file`
+  already do - `check-project`'s own primary loop merges it in once,
+  before level-filtering/`ignore_errors`/baseline, so both apply to a
+  whole-program finding exactly like a per-file one.
+- The real cost this needed to avoid: every whole-program check needs
+  `ensure_member_index_built`'s Tier-2 use-site index, which - built the
+  naive way - reruns a full second `Checker` pass over every file right
+  after `check-project`'s own primary pass already did, doubling total
+  check time whenever any whole-program check is enabled. Avoided by
+  folding Tier-2 collection into the primary pass instead: `check_file_
+  with_property_assign_facts_collecting_member_refs` (a new sibling of
+  the existing `check_file_and_member_refs`) runs inside the exact same
+  already-parallel, already-panic-isolated, already-large-stack-pooled
+  `pool.install(|| par_iter())` closure the primary pass always ran
+  anyway; `Project::seed_member_refs`/`mark_member_index_built` adopt
+  its results afterward, making `check_whole_program`'s own later
+  `ensure_member_index_built` call (needed for correctness when nothing
+  pre-seeds it - e.g. a direct library caller, or the LSP's own
+  unrelated `references`/`rename` use of the same method) a complete
+  no-op in the batch-mode case that actually matters for performance.
+- `checker::whole_program::dead_enum_cases::find_dead_cases` is the
+  actual check: every real `Enum` class's every case, unless referenced
+  via `EnumName::CaseName` (`record_member_ref`, already fired by the
+  existing `StaticAccess` arms in both `check_expr` and `infer_expr` -
+  which, via `collect_default_and_const_value_member_refs`, already
+  covers a property/const default value too), a `match`/`switch` arm
+  value (already reached by the ordinary hand-written `check_switch`/
+  `Match`-arm traversal, not the generic `stmt_children` walker a naive
+  read of the original finding's own "Switch gotcha" would suggest), or
+  a literal `::from()`/`::tryFrom()` argument (the one signal genuinely
+  missing - now recorded at both of `narrow_enum_from_call`'s call
+  sites). A `::cases()` call or a dynamic (`{dynamic}`) member access on
+  a real enum escapes the whole enum, conservative all-or-nothing
+  (`Checker::escaped_enums`, canonical-cased via the same `owner`/
+  `lookup_class` idiom `record_member_ref` itself already relies on, to
+  survive a differently-cased call site). Disclosed, not fixed (real but
+  narrow): a case reachable only through framework magic/reflection; one
+  referenced only inside a `Closure`/`ArrowFn` literal's own default
+  parameter value (inherited from `collect_default_and_const_value_
+  member_refs`'s own pre-existing gap); one referenced only via PHP 8.1
+  first-class-callable syntax on `cases()` specifically (`Suit::
+  cases(...)`, a separate, pre-existing `ExprKind::FirstClassCallable`
+  code path this project doesn't chase for such an unrealistic pattern).
+  Gated behind `Registry::check_dead_enum_cases`; `check-project`-only
+  for now (LSP support explicitly out of scope - a whole-program scan
+  doesn't fit the LSP's own per-edit cost model the way a per-file check
+  does, and none of the phases this unblocks need it either).
+
+  **Real corpus measurement** (Piwigo, `~/piwigo17-frozen`, 2807 first-
+  party files, `--no-composer`, warm filesystem cache, three comparable
+  runs of the real release binary): the pre-this-work commit (`200a040`)
+  ran in 54.64s/2.652 GiB peak RSS; after `decl_locations` decoupling
+  with `--check-dead-enum-cases` left off, 58.16s/2.657 GiB - a ~5 MiB
+  RSS delta (confirming "cheap, no technical dependency on retain_source"
+  at real scale, not just in the LSP's own already-known-fine case) and
+  a wall-time difference within ordinary run-to-run noise for a run this
+  length; with `--check-dead-enum-cases` on, 57.59s/2.773 GiB - a real
+  ~116 MiB RSS cost for Tier-2 tracking across every file, but *no*
+  runtime doubling (in this trial, actually faster than the flag-off
+  run) - confirming the fold-into-the-primary-pass fix avoided the
+  redundant-second-pass cost it was built to avoid. A byte-for-byte sort-
+  and-diff of the flag-off run against the pre-this-work run's own output
+  showed zero differences - `decl_locations`'s decoupling is confirmed
+  behavior-neutral, not just fast.
+
 **Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
 168a, the first landed sub-item of a larger in-progress phase - see
 PHASE_BACKLOG.md for 168b onward). `ClassInfo::doctrine_entity`

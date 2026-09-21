@@ -241,6 +241,21 @@ pub struct Registry {
     // differently-named wrapper isn't) is a real, disclosed false-
     // positive this check can't rule out.
     pub check_risky_tests: bool,
+    // A declared enum case never referenced via `EnumName::CaseName`,
+    // never a `match`/`switch` arm value, and never provably produced
+    // by a literal `::from()`/`::tryFrom()` argument, project-wide
+    // (PHASE_BACKLOG Phase 92) - opt-in, since this is a whole-program
+    // fact this project's own closed-world registry can prove sound for
+    // its own analyzed set, but real PHP has escape hatches this
+    // project can't rule out in general: a case reachable only through
+    // framework magic/reflection (a template calling `EnumName::
+    // {$dynamicCaseName}` by a runtime-computed string, a DI container/
+    // serialization layer resolving a case by name), or one referenced
+    // only from inside a `Closure`/`ArrowFn` literal's own default
+    // parameter value (a real, disclosed, narrower gap this check
+    // inherits from `checker::expr::collect_default_and_const_value_
+    // member_refs`, not something specific to this check).
+    pub check_dead_enum_cases: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

@@ -1,6 +1,8 @@
 mod helpers;
 
 mod anonymous_class_naming;
+mod dead_enum_cases;
+mod decl_locations;
 mod duplicate_classes;
 mod duplicate_functions;
 mod file_discovery_and_misc;
