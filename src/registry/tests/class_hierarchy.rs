@@ -328,3 +328,78 @@ fn property_lookup_walks_up_extends_chain() {
     );
     assert_eq!(r.lookup_property("Sub", "name").unwrap().ty, Type::String);
 }
+
+// `is_intersection_possible` - real PHPStan's own `UnresolvableTypeHelper`
+// reference semantics for a native intersection type (`Foo&Bar`).
+
+#[test]
+fn two_unrelated_concrete_classes_are_never_possible() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {}
+            class Bar {}
+        "#,
+    );
+    assert!(!r.is_intersection_possible(&["Foo".to_string(), "Bar".to_string()]));
+}
+
+#[test]
+fn a_class_and_its_own_ancestor_are_possible() {
+    let r = build_registry(
+        r#"<?php
+            class Base {}
+            class Sub extends Base {}
+        "#,
+    );
+    assert!(r.is_intersection_possible(&["Sub".to_string(), "Base".to_string()]));
+}
+
+#[test]
+fn two_unrelated_interfaces_are_possible() {
+    let r = build_registry(
+        r#"<?php
+            interface A {}
+            interface B {}
+        "#,
+    );
+    assert!(r.is_intersection_possible(&["A".to_string(), "B".to_string()]));
+}
+
+#[test]
+fn a_non_final_class_and_an_unrelated_interface_are_possible() {
+    let r = build_registry(
+        r#"<?php
+            class Foo {}
+            interface Bar {}
+        "#,
+    );
+    assert!(r.is_intersection_possible(&["Foo".to_string(), "Bar".to_string()]));
+}
+
+#[test]
+fn a_final_class_and_an_interface_it_doesnt_implement_is_impossible() {
+    let r = build_registry(
+        r#"<?php
+            final class Foo {}
+            interface Bar {}
+        "#,
+    );
+    assert!(!r.is_intersection_possible(&["Foo".to_string(), "Bar".to_string()]));
+}
+
+#[test]
+fn a_final_class_and_an_interface_it_does_implement_is_possible() {
+    let r = build_registry(
+        r#"<?php
+            interface Bar {}
+            final class Foo implements Bar {}
+        "#,
+    );
+    assert!(r.is_intersection_possible(&["Foo".to_string(), "Bar".to_string()]));
+}
+
+#[test]
+fn an_unregistered_class_is_never_treated_as_impossible() {
+    let r = build_registry(r#"<?php class Foo {}"#);
+    assert!(r.is_intersection_possible(&["Foo".to_string(), "SomeUnregisteredClass".to_string()]));
+}

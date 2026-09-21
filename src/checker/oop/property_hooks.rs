@@ -506,6 +506,20 @@ impl<'a> Checker<'a> {
                 p.name_span,
                 &label,
             );
+            // `ExistingClassesInPropertyHookTypehintsRule`'s
+            // `parameter.unresolvableNativeType` half - real PHP hooks
+            // have no return-type position (see above), so only the
+            // parameter half is reachable here.
+            self.check_unresolvable_native_type(
+                p.type_hint.as_deref(),
+                &format!(
+                    "Parameter ${} of set hook for property {fqn}::${name} has unresolvable native type.",
+                    p.name,
+                ),
+                "parameter.unresolvableNativeType",
+                p.name_span,
+                &label,
+            );
         }
 
         let previous_class = self.current_class.take();

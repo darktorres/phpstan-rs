@@ -1029,4 +1029,60 @@ impl Registry {
         let first = matches.next()?;
         matches.next().is_none().then_some(first)
     }
+
+    /// Whether a native intersection type's own members (`Foo&Bar&...`)
+    /// could ever be satisfied by some real value - real PHPStan's own
+    /// `UnresolvableTypeHelper` reference semantics (`FunctionDefinitionCheck`'s
+    /// `parameter.unresolvableNativeType`/`return.unresolvableNativeType`).
+    /// Checks every pair; the whole intersection is impossible the
+    /// moment any one pair is. Deliberately conservative, matching this
+    /// project's own "don't know, don't guess" precedent everywhere
+    /// else: an unrelated pair where either side isn't a class this
+    /// registry actually knows is never treated as impossible (a real
+    /// but unregistered class - a PHAR-bundled dependency, say - could
+    /// always turn out to satisfy both).
+    pub(crate) fn is_intersection_possible(&self, members: &[String]) -> bool {
+        for (i, a) in members.iter().enumerate() {
+            for b in &members[i + 1..] {
+                if !self.pair_possible_in_intersection(a, b) {
+                    return false;
+                }
+            }
+        }
+        true
+    }
+
+    /// One pair's own half of `is_intersection_possible`. Two rules,
+    /// both grounded in real PHP single-inheritance semantics rather
+    /// than guessed at: (1) two distinct, registered `ClassKind::Class`
+    /// members with no `extends`/`implements` relationship between them
+    /// can never coexist - a real object has exactly one concrete class
+    /// identity, so two unrelated concrete classes are never satisfiable
+    /// together regardless of `final`-ness; (2) a `final` class paired
+    /// with an interface it doesn't itself implement is also impossible -
+    /// `final` forecloses the one remaining way that combination could
+    /// ever become true (a not-yet-written subclass implementing the
+    /// interface too). Every other combination (two interfaces; a
+    /// non-final class with an interface it doesn't yet implement; one
+    /// side genuinely unresolvable) stays "possible" - a real subclass,
+    /// or a class this registry simply doesn't know about, could always
+    /// satisfy it.
+    fn pair_possible_in_intersection(&self, a: &str, b: &str) -> bool {
+        if a.eq_ignore_ascii_case(b) || self.is_subclass_of(a, b) || self.is_subclass_of(b, a) {
+            return true;
+        }
+        let Some(a_info) = self.classes.get(a) else {
+            return true;
+        };
+        let Some(b_info) = self.classes.get(b) else {
+            return true;
+        };
+        use crate::ast::ClassKind::{Class, Interface};
+        match (a_info.kind, b_info.kind) {
+            (Class, Class) => false,
+            (Class, Interface) => !a_info.is_final,
+            (Interface, Class) => !b_info.is_final,
+            _ => true,
+        }
+    }
 }

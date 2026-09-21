@@ -1,8 +1,9 @@
 use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
-    ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw, body_contains_yield,
-    collect_goto_targets, generator_missing_return_type, type_allows_generator_return,
+    ATTRIBUTE_TARGET_PROPERTY, Checker, DiagnosticBuilder, Locals, body_contains_explicit_throw,
+    body_contains_yield, collect_goto_targets, generator_missing_return_type,
+    type_allows_generator_return,
 };
 use crate::docblock;
 use crate::php_version::PhpFeature;
@@ -277,6 +278,7 @@ impl<'a> Checker<'a> {
             // cut given this family's low expected value against a project
             // targeting a modern PHP version.
             self.check_native_union_types_supported(f, class_name.is_some(), &label);
+            self.check_unresolvable_native_types(f, &label);
             self.check_implicitly_nullable_params(f, &label);
             self.check_required_parameter_after_optional(f, &label);
             // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-
@@ -1192,6 +1194,84 @@ impl<'a> Checker<'a> {
                 "return.unionTypeNotSupported",
             );
         }
+    }
+
+    /// Mirrors real PHPStan's `parameter.unresolvableNativeType`
+    /// (`FunctionDefinitionCheck`/`UnresolvableTypeHelper`, gated on PHP
+    /// 8.1 pure-intersection-type support) - fires once per parameter,
+    /// unlike `check_native_union_types_supported_raw`'s single-report
+    /// latch, matching real PHPStan's own per-parameter loop.
+    fn check_unresolvable_native_types(&mut self, f: &FunctionDecl, label: &str) {
+        for p in &f.params {
+            self.check_unresolvable_native_type(
+                p.type_hint.as_deref(),
+                &format!(
+                    "Parameter ${} of {label}() has unresolvable native type.",
+                    p.name
+                ),
+                "parameter.unresolvableNativeType",
+                p.name_span,
+                label,
+            );
+        }
+        self.check_unresolvable_native_type(
+            f.return_type.as_deref(),
+            &format!("{label}() has unresolvable native return type."),
+            "return.unresolvableNativeType",
+            f.span,
+            label,
+        );
+    }
+
+    /// The signature-agnostic core `check_unresolvable_native_types`
+    /// wraps, shared with property-hook checking the same way `check_
+    /// native_union_types_supported_raw` is - a hook has no `FunctionDecl`
+    /// to hand the wrapper above. Resolves `hint`'s own native type (no
+    /// docblock merge, matching real PHPStan's `getNativeType()` scope)
+    /// and flags it via `Registry::is_intersection_possible` when it's a
+    /// pure-object intersection with no possible concrete implementor.
+    /// Only ever acts on a bare object-only intersection - any other
+    /// member shape (an accessory type, a generic argument, ...) is left
+    /// alone; this project's own intersection-legality logic doesn't
+    /// model non-class impossibility at all, and guessing there would
+    /// risk a false positive on a shape nothing has verified yet.
+    pub(crate) fn check_unresolvable_native_type(
+        &mut self,
+        hint: Option<&str>,
+        message: &str,
+        identifier: &'static str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if !PhpFeature::PureIntersectionTypes.is_available(version) {
+            return;
+        }
+        let Some(hint) = hint else {
+            return;
+        };
+        if !hint.contains('&') {
+            return;
+        }
+        let Type::Intersection(members) = self.resolve_type_hint(Some(hint)) else {
+            return;
+        };
+        let mut names = Vec::with_capacity(members.len());
+        for m in &members {
+            let Type::Object(name, _) = m else {
+                return;
+            };
+            names.push(name.clone());
+        }
+        if self.registry.is_intersection_possible(&names) {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(label.to_string(), message.to_string(), span, 0, identifier)
+                .non_ignorable(),
+        );
     }
 
     /// Mirrors real PHPStan's `parameter.implicitlyNullable` (PHP 8.4) -

@@ -450,6 +450,121 @@ fn a_set_hook_with_the_implicit_untyped_value_parameter_is_never_flagged() {
     );
 }
 
+// `FunctionDefinitionCheck`'s `parameter.unresolvableNativeType`/`return.
+// unresolvableNativeType` (PHP 8.1 pure-intersection-type support) - a
+// native intersection type-hint whose members can never be satisfied by
+// any real value.
+
+#[test]
+fn an_impossible_native_intersection_parameter_type_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            final class Foo {}
+            final class Bar {}
+            function f(Foo&Bar $x): void {}
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.unresolvableNativeType"
+                && x.message.contains("has unresolvable native type")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_impossible_native_intersection_return_type_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            final class Foo {}
+            final class Bar {}
+            function f(): Foo&Bar { throw new \Exception(); }
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "return.unresolvableNativeType"
+                && x.message.contains("has unresolvable native return type")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_possible_native_intersection_of_two_interfaces_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            interface Foo {}
+            interface Bar {}
+            function f(Foo&Bar $x): void {}
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.unresolvableNativeType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_impossible_native_intersection_before_php_8_1_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            final class Foo {}
+            final class Bar {}
+            function f(Foo&Bar $x): void {}
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.unresolvableNativeType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn with_no_configured_php_version_the_unresolvable_intersection_check_stays_silent() {
+    let d = diagnostics_for(
+        r#"<?php
+            final class Foo {}
+            final class Bar {}
+            function f(Foo&Bar $x): void {}
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.unresolvableNativeType"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_set_hooks_impossible_native_intersection_parameter_type_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            final class Foo {}
+            final class Bar {}
+            class Baz {
+                public mixed $bar {
+                    set(Foo&Bar $value) {
+                        $this->bar = $value;
+                    }
+                }
+            }
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.unresolvableNativeType"
+                && x.message.contains("set hook for property Baz::$bar")),
+        "got: {d:?}"
+    );
+}
+
 #[test]
 fn a_plain_typed_parameter_defaulting_to_null_on_8_4_is_flagged() {
     let d = diagnostics_for_with(

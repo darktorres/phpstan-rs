@@ -171,6 +171,12 @@ pub enum PhpFeature {
     /// real PHPStan's full version-layered logic; see
     /// `check_required_parameter_after_optional`'s own doc comment).
     RequiredParameterAfterOptionalDeprecated,
+    /// Native intersection type-hints (`Foo&Bar`), gating whether it's
+    /// meaningful to check one for satisfiability at all.
+    /// `PhpVersion::supportsPureIntersectionTypes` (`FunctionDefinitionCheck`'s
+    /// own `parameter.unresolvableNativeType`/`return.unresolvableNativeType`,
+    /// backed by `UnresolvableTypeHelper`).
+    PureIntersectionTypes,
 }
 
 impl PhpFeature {
@@ -189,7 +195,10 @@ impl PhpFeature {
             | PrintfHhSpecifier
             | NativeUnionTypes
             | RequiredParameterAfterOptionalDeprecated => (8, 0),
-            FinalClassConstants | ArrayUnpackingWithStringKeys | DeprecatesFloatArrayKey => (8, 1),
+            FinalClassConstants
+            | ArrayUnpackingWithStringKeys
+            | DeprecatesFloatArrayKey
+            | PureIntersectionTypes => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
             | ReadOnlyAnonymousClasses

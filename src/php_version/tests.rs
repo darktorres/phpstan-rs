@@ -68,6 +68,7 @@ fn thresholds_match_real_phpstans_own_phpversion_class() {
     assert_eq!(PhpFeature::UnsetCastRemoved.threshold(), (8, 0));
     assert_eq!(PhpFeature::FinalClassConstants.threshold(), (8, 1));
     assert_eq!(PhpFeature::ArrayUnpackingWithStringKeys.threshold(), (8, 1));
+    assert_eq!(PhpFeature::PureIntersectionTypes.threshold(), (8, 1));
     assert_eq!(PhpFeature::ReadOnlyClasses.threshold(), (8, 2));
     assert_eq!(PhpFeature::ConstantsInTraits.threshold(), (8, 2));
     assert_eq!(PhpFeature::NativeTypedClassConstants.threshold(), (8, 3));
