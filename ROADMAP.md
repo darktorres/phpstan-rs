@@ -1692,7 +1692,24 @@ latter - genuinely sound, not an approximation, for every fixed-width
 specifier), `DateTimeInterface::diff()` narrowing its result to
 `DateInterval&object{days: int}`, and `SimpleXMLElement::asXML()`'s
 real arity-dependent overload split (one argument - a filename - is
-`bool`; zero arguments is `string|false`).
+`bool`; zero arguments is `string|false`). `new DateTime()`/`new
+DateTimeImmutable()`'s own constructor-string validation (Phase 78's
+last remaining piece, previously declined as needing "real PHP/ICU
+runtime simulation") is done too: `src/php_date_parser.rs` hand-rolls
+the format families PHP's own `ext/date/lib/parse_date.re` grammar
+accepts most often (ISO 8601 absolute dates, `@timestamp`, the unified
+relative-delta family with a full unit table including `fortnight`/
+`weekday`, `next`/`last <weekday|unit>`, `first`/`last day of <month>`,
+and a handful of bare keywords), each shape cross-checked directly
+against a real local PHP 8.5 binary since `parse_date.re` itself isn't
+vendored anywhere in this repo. `strtotime()`'s own existing narrowing
+(this same grammar's relative-delta fragment) now calls into this one
+shared module instead of keeping its own separate, silently-divergent
+copy. Deliberately conservative: an unrecognized shape (natural-language
+month names, ordinal weekdays, and the rest of the grammar's long tail)
+stays silent rather than risk a false positive - only a recognized
+shape whose own fields are provably out of range (`"2024-13-01"`'s
+month, `"2024-01-15T25:00:00"`'s hour) is ever flagged.
 `UnreachableStatementRule` (`deadCode.unreachable`, level 4), reported
 once per maximal unreachable run without skipping analysis of the rest.
 
@@ -3868,19 +3885,6 @@ generic, untemplated collections) are all done (see Done). Binding a
 resolved at the type level for `getValue()`/`invoke()`) remains a
 further, separate stretch beyond what any real PHPStan extension does
 either - not attempted, not a disguised decline.
-
-**78 - DateTime, remaining (PARTIAL, declined).** `DateInterval`'s own
-duration-string grammar, `DateTimeInterface::format()`/`DateInterval::
-format()` return-type wiring, `DateTimeInterface::diff()`'s `days: int`
-narrowing, `SimpleXMLElement::asXML()`'s arity-dependent overload split,
-`DOMDocument::createElement()`'s own W3C XML `Name`-grammar tag-name
-validation, and `SimpleXMLElement`/`simplexml_load_string()`'s own XML
-well-formedness validation are all done (see Done). Only `DateTime`'s
-relative-date-string parsing stays declined - it needs real PHP/ICU
-runtime simulation, not a formally-specified grammar any crate
-replicates (unlike XML well-formedness, which does have one). `checker/
-throws/dynamic.rs`'s own doc comment names this as the one remaining
-excluded dynamic-throw-type extension.
 
 **82 - Collector / cross-file aggregation architecture (RETIRED - real
 architecture built as a registry fixed point instead; see Phase 41,

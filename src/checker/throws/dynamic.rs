@@ -14,10 +14,12 @@
 //! conservative, never less.
 //!
 //! Excluded: `version_compare()` (would need PHP-version-awareness
-//! plumbing this project doesn't have, and the value density is low);
-//! DateTime's relative-date-string parsing (genuinely infeasible - real
-//! PHP invokes its actual C/ICU date parser at analysis time, with no
-//! formally-specified grammar to replicate the way DOM/SimpleXML have).
+//! plumbing this project doesn't have, and the value density is low).
+//! `DateTime`/`DateTimeImmutable`'s own relative-date-string parsing is
+//! *not* modeled here - `checker::date_time::check_date_time_constructor`
+//! validates it as a direct diagnostic instead (mirroring `DateInterval`'s
+//! own established pattern, `is_valid_date_interval_spec` below), not as
+//! a throw-type extension.
 
 use crate::ast::{Arg, ExprKind, Literal, UnaryOp};
 use crate::checker::date_interval::is_valid_date_interval_spec;
