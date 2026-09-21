@@ -1282,6 +1282,18 @@ impl<'a> Checker<'a> {
                         self.check_dbal_parameter_binding(
                             class, method, recv, args, locals, e.span, label,
                         );
+                        // Phase 82's named-argument-rename feature -
+                        // see `checker::named_argument_renames`'s own
+                        // module doc comment. Always on (not gated on
+                        // `facts_only`) - this arm's whole body already
+                        // runs unconditionally.
+                        self.record_named_argument_call(
+                            owner,
+                            method,
+                            &sig.visibility,
+                            e.span,
+                            args,
+                        );
                         // See the identical comment on the plain-function
                         // Call arm above - `check_args` is spread-aware,
                         // so it's always worth calling.

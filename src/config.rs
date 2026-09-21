@@ -38,6 +38,7 @@
 //! check_circular_dependencies = false
 //! check_dead_abstract_classes = false
 //! check_dead_members = false
+//! check_renamed_named_arguments = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -229,6 +230,10 @@ pub struct Config {
     /// Opt-in dead-protected/public-member detection - see `registry::
     /// Registry::check_dead_members`'s own doc comment for why.
     pub check_dead_members: Option<bool>,
+    /// Opt-in named-argument-rename-collision detection - see
+    /// `registry::Registry::check_renamed_named_arguments`'s own doc
+    /// comment for why.
+    pub check_renamed_named_arguments: Option<bool>,
 }
 
 impl Config {

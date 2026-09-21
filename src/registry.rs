@@ -304,6 +304,18 @@ pub struct Registry {
     // whole_program::dead_members`'s own module doc comment for the
     // escape-hatch mechanism that closes the *resolvable*-receiver case).
     pub check_dead_members: bool,
+    // Phase 82's `MethodCallWithPossiblyRenamedNamedArgumentRule`
+    // (`argument.parameterRenamedInSubtype`) - a named-argument call
+    // site against `Base::m(int $old)` that would throw at runtime the
+    // moment the actual receiver is a `Sub extends Base` renaming `$old`
+    // to `$new` on override. Opt-in, matching every other `checker::
+    // whole_program` check's own cost/architecture tradeoff (see
+    // `check_dead_code`'s own doc comment): unlike those, this one needs
+    // a real, type-inferring `Checker` pass over every loaded file (not
+    // a cheap syntactic scan or a pure `&Registry` read) purely to
+    // harvest named-argument call sites, real added cost for a rare
+    // (renamed-parameter-on-override) bug shape.
+    pub check_renamed_named_arguments: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

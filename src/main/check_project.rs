@@ -141,6 +141,7 @@ fn run_check_project(
     check_circular_dependencies: bool,
     check_dead_abstract_classes: bool,
     check_dead_members: bool,
+    check_renamed_named_arguments: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -211,6 +212,7 @@ fn run_check_project(
     project.set_check_circular_dependencies(check_circular_dependencies);
     project.set_check_dead_abstract_classes(check_dead_abstract_classes);
     project.set_check_dead_members(check_dead_members);
+    project.set_check_renamed_named_arguments(check_renamed_named_arguments);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
@@ -591,6 +593,7 @@ pub(crate) fn run_check_project_command(
     check_circular_dependencies: bool,
     check_dead_abstract_classes: bool,
     check_dead_members: bool,
+    check_renamed_named_arguments: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -718,6 +721,8 @@ pub(crate) fn run_check_project_command(
     let check_dead_abstract_classes =
         check_dead_abstract_classes || config.check_dead_abstract_classes.unwrap_or(false);
     let check_dead_members = check_dead_members || config.check_dead_members.unwrap_or(false);
+    let check_renamed_named_arguments =
+        check_renamed_named_arguments || config.check_renamed_named_arguments.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -863,6 +868,7 @@ pub(crate) fn run_check_project_command(
         check_circular_dependencies,
         check_dead_abstract_classes,
         check_dead_members,
+        check_renamed_named_arguments,
         configured_level,
         &stub_dirs,
         php_version,

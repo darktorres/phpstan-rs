@@ -290,6 +290,13 @@ enum Command {
         /// own doc comment for the real, disclosed false-positive risks.
         #[arg(long)]
         check_dead_members: bool,
+        /// Enables named-argument-rename-collision detection (a named-
+        /// argument call site against a method an override elsewhere
+        /// renamed a parameter on). Off by default - see `registry::
+        /// Registry::check_renamed_named_arguments`'s own doc comment
+        /// for the real added cost.
+        #[arg(long)]
+        check_renamed_named_arguments: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -396,6 +403,7 @@ fn main() {
             check_circular_dependencies,
             check_dead_abstract_classes,
             check_dead_members,
+            check_renamed_named_arguments,
             php_version,
             generate_baseline,
             baseline,
@@ -439,6 +447,7 @@ fn main() {
             check_circular_dependencies,
             check_dead_abstract_classes,
             check_dead_members,
+            check_renamed_named_arguments,
             php_version,
             generate_baseline,
             baseline,

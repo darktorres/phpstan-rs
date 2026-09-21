@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
+use crate::checker::whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 use crate::checker::{self, Checker, Diagnostic, PropertyAssignFacts};
 use crate::deps;
 use crate::ignore_comments;
@@ -529,6 +530,14 @@ impl Project {
     /// own doc comment for why this defaults to `false`.
     pub fn set_check_dead_members(&mut self, enabled: bool) {
         self.registry.check_dead_members = enabled;
+    }
+
+    /// Opts the whole project's checking into named-argument-rename-
+    /// collision detection - see `registry::Registry::check_renamed_
+    /// named_arguments`'s own doc comment for why this defaults to
+    /// `false`.
+    pub fn set_check_renamed_named_arguments(&mut self, enabled: bool) {
+        self.registry.check_renamed_named_arguments = enabled;
     }
 
     /// Configures the project's own `level` setting for
@@ -1522,6 +1531,43 @@ impl Project {
         merged
     }
 
+    /// Phase 82's named-argument-rename feature - the collect half,
+    /// mirroring `collect_property_assign_facts`'s own two-pass shape
+    /// exactly, but gathering both of `checker::named_argument_renames`'s
+    /// fact kinds from the same throwaway per-file pass, and (unlike
+    /// `PropertyAssignFacts`, which only aggregates types) tagging each
+    /// named-argument call site's own span with the file it came from -
+    /// `checker::whole_program::renamed_named_arguments`'s own cross-
+    /// referencing pass reports directly at that site, not through
+    /// `decl_locations`. Runs over every loaded file unconditionally
+    /// (like `collect_property_assign_facts`) - a rename could be
+    /// declared in one file and called against from any other.
+    pub(crate) fn collect_named_argument_facts(
+        &self,
+    ) -> (
+        NamedArgumentCallFactsWithPath,
+        checker::RenamedParameterOverrideFacts,
+    ) {
+        let mut calls: NamedArgumentCallFactsWithPath = HashMap::new();
+        let mut overrides: checker::RenamedParameterOverrideFacts = Vec::new();
+        for path in self.files.keys() {
+            let Some(file) = self.files.get(path) else {
+                continue;
+            };
+            let mut checker = Checker::new(&self.registry);
+            checker.set_facts_only(true);
+            checker.check_program(&file.ast);
+            for (key, spans) in checker.take_named_argument_call_facts() {
+                calls
+                    .entry(key)
+                    .or_default()
+                    .extend(spans.into_iter().map(|span| (path.clone(), span)));
+            }
+            overrides.extend(checker.take_renamed_parameter_override_facts());
+        }
+        (calls, overrides)
+    }
+
     /// Runs the checker over exactly `paths` (which must already be
     /// loaded) - the two-pass `collect_property_assign_facts`-then-
     /// `check_file_with_property_assign_facts` architecture `check_all`
@@ -1845,6 +1891,25 @@ impl Project {
                     owner.clone(),
                     format!("{noun} {owner}::{name} is never used."),
                     identifier,
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
+            }
+        }
+
+        if self.registry.check_renamed_named_arguments {
+            let (calls, overrides) = self.collect_named_argument_facts();
+            let collisions =
+                checker::whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
+                    &calls, &overrides,
+                );
+            for (path, span, location, message) in collisions {
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    span,
+                    location,
+                    message,
+                    "argument.parameterRenamedInSubtype",
                 ) {
                     results.entry(path).or_default().push(d);
                 }

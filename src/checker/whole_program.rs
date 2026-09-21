@@ -12,3 +12,4 @@ pub(crate) mod dead_abstract_classes;
 pub(crate) mod dead_code;
 pub(crate) mod dead_enum_cases;
 pub(crate) mod dead_members;
+pub(crate) mod renamed_named_arguments;
