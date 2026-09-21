@@ -3338,6 +3338,35 @@ checked now too - the `Method`/`StaticMethod` first-class-callable arms
 already called `check_restricted_method_call`, but the plain-function
 arm never called `check_restricted_function_call` at all.
 
+**`restricted_symbols`' own allow/disallow-in filter-DSL extension**
+(Phase 67). A real slice of the real `spaze/phpstan-disallowed-calls`
+package's own much larger filter DSL (its exact config schema confirmed
+directly against its real docs this session, not recalled knowledge):
+`allow_in`/`allow_except_in` (`fnmatch()`-style path patterns) and
+`allow_in_class_with_attributes`/`allow_except_in_class_with_attributes`/
+`allow_in_methods_with_attributes`/`allow_except_in_methods_with_
+attributes` (attribute-name patterns). Path-scoping is a **post-filter**
+over already-produced diagnostics (`restricted_symbols::filter_by_path`,
+mirroring `ignore_errors::filter`'s own precedent exactly) rather than a
+new `Checker`-level "current file path" field - `Checker::new` has 31
+call sites across 6 files, and the ordinary per-file checking walk has
+no other need to know its own path; each entry's own patterns travel to
+the filter as diagnostic metadata, since the post-filter has no
+`Registry`/entry to re-look-up against. Attribute-context matching is
+checked inline instead (the checker already has that context on hand at
+report time): two new `Checker` fields, `current_class_attrs`/
+`current_method_attrs`, set at the same `check_function_impl` choke
+point as `current_class`/`current_method` (plus a new `Registry::
+ClassInfo::attrs` field for the class-level half) - deliberately not
+reset for a nested closure/arrow-fn body, since PHP attributes can't
+attach to either; a disclosed simplification, not an oversight. Both
+route through one new shared `report_restricted` helper, so all 6
+`check_restricted_*` call sites get the identical allow/disallow
+evaluation. Deliberately narrower than the real package's own full DSL -
+no `allowInClassWithMethodAttributes`, `allowInParamTypes`/
+`allowInReturnType`, `allowInUse`, or parameter-value conditions; see
+Pending for what's left.
+
 **Class-specific `ReflectionMethod<T>`/`ReflectionProperty<T>` modeling**
 (Phase 77). A synthetic, stub-patched `@template-covariant TClass of
 object` (not present in real phpstorm-stubs, purely an internal
@@ -3927,38 +3956,17 @@ grammar itself (deeply nested generics/conditional types/complex
 intersections), not corpus-evidenced as a live gap today. Size: XL.
 
 **67 - `@internal`/`restricted_symbols`, remaining (PARTIAL).** The
-`@internal` restricted-usage engine (calls, property/constant access,
-instantiation, `instanceof`, `catch`, `extends`/`implements`/trait-use,
-native param/return type-hints, first-class-callables, implicit
-`__toString()`, and now every PHPDoc-tag/attribute-usage class-name
-position too) and the declarative `restricted_symbols` config list (this
-phase's own answer to the separate, user-configured restricted-usage
-mechanism real PHPStan's third-party extensions implement) are both done
-- see Done. The `Class` kind's own detection surface's real, previously-
-undisclosed gaps are closed too (see Done): `check_restricted_class_
-name_usage` was never actually called from the `extends`/`implements`
-loops nor from either native param/return type-hint check site (ROADMAP's
-own prior "Done" text claiming full coverage there was wrong), and a
-restricted function's own first-class-callable syntax
-(`banned_func(...)`) went unchecked even though the ordinary call site
-already was. Still genuinely unbuilt: the real `spaze/phpstan-disallowed-
-calls` package's own much larger allow/disallow-in filter DSL (confirmed
-directly against its real README/docs this session - `allowIn`/
-`allowExceptIn` path patterns via `fnmatch()`, `allowInClassWithAttributes`/
-`allowExceptInClassWithAttributes`, `allowInMethodsWithAttributes`/
-`allowExceptInMethodsWithAttributes`, `allowInClassWithMethodAttributes`,
-`allowInParamTypes`/`allowInReturnType` and their `allowExcept*` inverses,
-`allowInUse`, evaluated in a specific precedence order across all of
-these). This project's own `Checker` still has no notion of its own
-current file path at all (needed for path-scoped allow/disallow - the
-recommended design is a post-filter over collected diagnostics,
-mirroring `ignore_errors::filter`'s own precedent, not a new `Checker`
-field) nor any "current declaration's own attributes" tracking (needed
-for attribute-context matching - a real new field, threaded through
-every declaration entry point, comparable in size to `current_class`/
-`current_method`). Its namespace/enum/superglobal/keyword-specific
-siblings are each a materially different detection shape needing their
-own separate investigation too.
+`@internal` restricted-usage engine, the declarative `restricted_symbols`
+config list, its `Class`-kind detection-surface gaps, and a real slice of
+the real `spaze/phpstan-disallowed-calls` package's own allow/disallow-in
+filter DSL (path-scoped and attribute-context-scoped allow/disallow) are
+all done now - see Done. Still genuinely unbuilt, a narrower remainder
+than before: the rest of that same filter DSL
+(`allowInClassWithMethodAttributes`, `allowInParamTypes`/
+`allowInReturnType` and their `allowExcept*` inverses, `allowInUse`,
+parameter-value conditions) and its wholly-separate namespace/enum/
+superglobal/keyword-specific siblings, each a materially different
+detection shape needing its own separate investigation.
 
 **84 - `RuleLevelHelper`-equivalent level-aware type-acceptance,
 remaining (PARTIAL).** `Registry::accepts_at_configured_level` (see
