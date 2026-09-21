@@ -125,6 +125,12 @@ enum Command {
         /// own doc comment.
         #[arg(long)]
         check_too_wide_return_type_in_protected_and_public_methods: bool,
+        /// The by-ref-parameter analogue of the flag above
+        /// (`TooWideMethodParameterOutTypeRule`) - see `registry::Registry::
+        /// check_too_wide_by_ref_type_in_protected_and_public_methods`'s
+        /// own doc comment.
+        #[arg(long)]
+        check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
         /// Enables `MethodThrowTypeCovarianceRule` (a method's own
         /// `@throws` type must be covariant with its immediate parent
         /// class/every transitive interface/abstract trait declaration's
@@ -368,6 +374,7 @@ fn main() {
             check_strict_printf_placeholder_types,
             check_too_wide_throw_type_in_protected_and_public_methods,
             check_too_wide_return_type_in_protected_and_public_methods,
+            check_too_wide_by_ref_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
@@ -410,6 +417,7 @@ fn main() {
             check_strict_printf_placeholder_types,
             check_too_wide_throw_type_in_protected_and_public_methods,
             check_too_wide_return_type_in_protected_and_public_methods,
+            check_too_wide_by_ref_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,

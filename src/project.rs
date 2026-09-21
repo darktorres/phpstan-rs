@@ -363,6 +363,17 @@ impl Project {
             .check_too_wide_return_type_in_protected_and_public_methods = enabled;
     }
 
+    /// The by-ref-parameter analogue - see `registry::Registry::
+    /// check_too_wide_by_ref_type_in_protected_and_public_methods`'s own
+    /// doc comment.
+    pub fn set_check_too_wide_by_ref_type_in_protected_and_public_methods(
+        &mut self,
+        enabled: bool,
+    ) {
+        self.registry
+            .check_too_wide_by_ref_type_in_protected_and_public_methods = enabled;
+    }
+
     /// Opts the whole project's checking into
     /// `MethodThrowTypeCovarianceRule` - see `registry::Registry::
     /// check_method_throw_type_covariance`'s own doc comment for why

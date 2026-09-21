@@ -99,6 +99,9 @@ pub struct Config {
     /// The return-type analogue - see
     /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`.
     pub check_too_wide_return_type_in_protected_and_public_methods: Option<bool>,
+    /// The by-ref-parameter analogue - see
+    /// `registry::Registry::check_too_wide_by_ref_type_in_protected_and_public_methods`.
+    pub check_too_wide_by_ref_type_in_protected_and_public_methods: Option<bool>,
     /// Opt-in `MethodThrowTypeCovarianceRule` - see
     /// `registry::Registry::check_method_throw_type_covariance`.
     pub check_method_throw_type_covariance: Option<bool>,

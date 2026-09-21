@@ -192,6 +192,7 @@ impl<'a> Checker<'a> {
                     self.current_function_saw_explicit_return = true;
                     self.current_function_return_points.push(actual.clone());
                 }
+                self.record_by_ref_exit_snapshot(locals);
                 if let Some(expected) = declared_return {
                     let expected = match &self.current_class {
                         Some(c) => self.resolve_pseudo(expected, c),
@@ -299,6 +300,7 @@ impl<'a> Checker<'a> {
                     self.current_function_saw_explicit_return = true;
                     self.current_function_return_points.push(Type::Void);
                 }
+                self.record_by_ref_exit_snapshot(locals);
                 // A bare `return;` inside a generator sets
                 // Generator::getReturn()'s own value, not this function's
                 // return value - real PHPStan never checks it against the

@@ -3209,6 +3209,24 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
                 );
+                // Real PHPStan exempts an anonymous function entirely
+                // from both by-ref-parameter rules (`isInAnonymousFunction()`
+                // bails in `ParameterOutAssignedTypeRule`/
+                // `ParameterOutExecutionEndTypeRule`) - a closure
+                // capturing an outer by-ref parameter via `use (&$x)`
+                // and reassigning it inside its own body is a genuinely
+                // different question from the *enclosing* function's own
+                // by-ref contract, so this must not silently check the
+                // closure body's assignments against it. Emptied for the
+                // closure body's own `check_block` pass below, restored
+                // after, the same shape as every other `current_function_*`
+                // field here.
+                let previous_by_ref_params =
+                    std::mem::take(&mut self.current_function_by_ref_params);
+                let previous_by_ref_exit_snapshots =
+                    std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
+                let previous_by_ref_params_with_tag =
+                    std::mem::take(&mut self.current_function_by_ref_params_with_tag);
                 // A closure's own throw points never belong to the
                 // enclosing function's count (calling the closure, not
                 // merely declaring it, is what would matter, and this
@@ -3255,6 +3273,9 @@ impl<'a> Checker<'a> {
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
+                self.current_function_by_ref_params = previous_by_ref_params;
+                self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
+                self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
                 // A `use(...)` capture never referenced anywhere in the
                 // closure's own body. `ClosureUse` carries no span of its
                 // own (see its doc comment), so every finding here
@@ -3369,6 +3390,19 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
+                // Same by-ref-parameter exemption as the `Closure` arm
+                // above - an arrow function's own implicit by-value
+                // capture (`arrow_locals` is a clone, not an alias) means
+                // `$x = ...;` as its single body expression never
+                // actually mutates the enclosing function's own by-ref
+                // parameter either, so it must not be checked against
+                // that parameter's own contract.
+                let previous_by_ref_params =
+                    std::mem::take(&mut self.current_function_by_ref_params);
+                let previous_by_ref_exit_snapshots =
+                    std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
+                let previous_by_ref_params_with_tag =
+                    std::mem::take(&mut self.current_function_by_ref_params_with_tag);
                 self.check_generator_return_type(declared_return.as_ref(), e.span, label);
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.current_function_is_generator = previous_generator_flag;
@@ -3376,6 +3410,9 @@ impl<'a> Checker<'a> {
                 self.current_function_throw_points = previous_throw_points;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
+                self.current_function_by_ref_params = previous_by_ref_params;
+                self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
+                self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
                 // Its body is a single implicit-return expression, not a
                 // StmtKind::Return - the equivalent of check_stmt's own
                 // Return-vs-declared_return check, kept here since

@@ -878,15 +878,21 @@ impl<'a> Checker<'a> {
         // `sig` at all - correctly lenient-by-omission, matching every
         // other registry-aware check in this function.
         let previous_by_ref_params = std::mem::take(&mut self.current_function_by_ref_params);
-        let previous_by_ref_assigned_types =
-            std::mem::take(&mut self.current_function_by_ref_assigned_types);
+        let previous_by_ref_exit_snapshots =
+            std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
+        let previous_by_ref_params_with_tag =
+            std::mem::take(&mut self.current_function_by_ref_params_with_tag);
         match sig {
             Some(sig) => {
                 for param in &sig.params {
                     if param.by_ref {
+                        let name: std::sync::Arc<str> = std::sync::Arc::from(param.name.as_ref());
+                        if let Some(out_ty) = &param.out_ty {
+                            self.current_function_by_ref_params_with_tag
+                                .insert(name.clone(), out_ty.clone());
+                        }
                         let check_ty = param.out_ty.clone().unwrap_or_else(|| param.ty.clone());
-                        self.current_function_by_ref_params
-                            .insert(std::sync::Arc::from(param.name.as_ref()), check_ty);
+                        self.current_function_by_ref_params.insert(name, check_ty);
                     }
                 }
             }
@@ -951,6 +957,9 @@ impl<'a> Checker<'a> {
             // uncommitted fact). Never for a generator, same reasoning as
             // both `Return` arms in `stmt.rs`.
             let body_falls_off_end = !f.body.iter().any(|s| self.always_terminates(s, &locals));
+            if body_falls_off_end {
+                self.record_by_ref_exit_snapshot(&locals);
+            }
             if !self.current_function_is_generator && body_falls_off_end {
                 self.current_function_return_points.push(Type::Void);
                 if native_return.is_none() {
@@ -1100,6 +1109,20 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
+                // Real `ParameterOutExecutionEndTypeRule` has no
+                // visibility/finality gate of its own (unlike the two
+                // too-wide rules) - runs whenever a by-ref parameter
+                // actually declares `@param-out` at all.
+                self.check_by_ref_execution_end(&label, f.span);
+                let should_check_by_ref_too_wide = match (class_name, sig) {
+                    (Some(c), Some(s)) => {
+                        self.should_check_too_wide_by_ref_type(c, &f.name, s.visibility.clone())
+                    }
+                    _ => true,
+                };
+                if should_check_by_ref_too_wide {
+                    self.check_too_wide_by_ref_type(&label, f.span);
+                }
             }
         }
 
@@ -1115,7 +1138,8 @@ impl<'a> Checker<'a> {
         self.current_function_return_points = previous_return_points;
         self.current_function_saw_explicit_return = previous_saw_explicit_return;
         self.current_function_by_ref_params = previous_by_ref_params;
-        self.current_function_by_ref_assigned_types = previous_by_ref_assigned_types;
+        self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
+        self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
         self.current_function_goto_targets = previous_goto_targets;
 
         self.current_class = previous_class;

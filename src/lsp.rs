@@ -380,6 +380,10 @@ impl Server {
                 resolved.check_too_wide_return_type_in_protected_and_public_methods,
             );
         self.project
+            .set_check_too_wide_by_ref_type_in_protected_and_public_methods(
+                resolved.check_too_wide_by_ref_type_in_protected_and_public_methods,
+            );
+        self.project
             .set_check_method_throw_type_covariance(resolved.check_method_throw_type_covariance);
         self.project.set_check_duplicate_function_declarations(
             resolved.check_duplicate_function_declarations,

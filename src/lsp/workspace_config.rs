@@ -26,6 +26,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_strict_printf_placeholder_types: bool,
     pub(crate) check_too_wide_throw_type_in_protected_and_public_methods: bool,
     pub(crate) check_too_wide_return_type_in_protected_and_public_methods: bool,
+    pub(crate) check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     pub(crate) check_method_throw_type_covariance: bool,
     pub(crate) check_duplicate_function_declarations: bool,
     pub(crate) check_duplicate_class_declarations: bool,
@@ -188,6 +189,9 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
             .unwrap_or(false),
         check_too_wide_return_type_in_protected_and_public_methods: config
             .check_too_wide_return_type_in_protected_and_public_methods
+            .unwrap_or(false),
+        check_too_wide_by_ref_type_in_protected_and_public_methods: config
+            .check_too_wide_by_ref_type_in_protected_and_public_methods
             .unwrap_or(false),
         check_method_throw_type_covariance: config
             .check_method_throw_type_covariance

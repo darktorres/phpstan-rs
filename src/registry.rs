@@ -151,6 +151,10 @@ pub struct Registry {
     // PHPStan's own `checkTooWideReturnTypesInProtectedAndPublicMethods`
     // for `TooWideMethodReturnTypehintRule`.
     pub check_too_wide_return_type_in_protected_and_public_methods: bool,
+    // The by-ref-parameter analogue of the flag above, mirroring real
+    // PHPStan's own `checkProtectedAndPublicMethods` for
+    // `TooWideMethodParameterOutTypeRule`.
+    pub check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     // `MethodThrowTypeCovarianceRule` (`checker/oop/method_overrides.rs`)
     // - a real PHPStan rule, but shipped opt-in here rather than
     // mirroring its unconditional-by-default registration: this

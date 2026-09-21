@@ -736,13 +736,33 @@ pub struct Checker<'a> {
     // supplies one - see `ParamSig::out_ty`'s doc comment), set/restored
     // at the same choke point as `current_declared_return_type`.
     pub(crate) current_function_by_ref_params: std::collections::HashMap<Arc<str>, Type>,
-    // Every value ever assigned to a by-ref parameter anywhere in the
-    // enclosing body (direct/compound assignment, destructuring,
-    // `foreach`-rebind) - unioned and compared against each by-ref
-    // parameter's declared type by `check_too_wide_by_ref_param_type`, the
-    // by-ref-parameter analogue of `current_function_return_points`.
-    pub(crate) current_function_by_ref_assigned_types:
+    // Every by-ref parameter's own `locals`-tracked type, snapshotted at
+    // each real execution-end point of the enclosing body (an explicit
+    // `return`, with or without a value, and the implicit falls-off-the-
+    // end point) - the by-ref-parameter analogue of `current_function_
+    // return_points`, but keyed per-parameter and taken from `locals` at
+    // each exit rather than from the return expression itself. This is
+    // deliberately NOT "every value ever assigned anywhere in the body"
+    // (a flat accumulator of that shape doesn't have the flow-sensitivity
+    // either of this field's own two real consumers needs - real
+    // PHPStan's `ParameterOutExecutionEndTypeRule`/`TooWideParameterOutTypeCheck`
+    // both build a merged "final scope" over every real exit point, not a
+    // union of every intermediate assignment): a `&$x` reassigned to a
+    // different type before every real exit would otherwise still count
+    // its now-overwritten earlier value, which no execution path can
+    // ever actually observe by the time the function returns. Consumed
+    // by `check_by_ref_execution_end`/`check_by_ref_too_wide`
+    // (`checker/by_ref_params.rs`).
+    pub(crate) current_function_by_ref_exit_snapshots:
         std::collections::HashMap<Arc<str>, Vec<Type>>,
+    // The subset of `current_function_by_ref_params` that actually
+    // declares a real `@param-out` tag (its own resolved out-type, not
+    // just a native-type fallback) - real `ParameterOutExecutionEndTypeRule`
+    // bails entirely (`getOutType() === null`) for a by-ref parameter
+    // with no `@param-out` tag, unlike the tag-independent direct-
+    // assignment rule (`check_by_ref_value`) which happily falls back to
+    // the native type. Consulted by `check_by_ref_execution_end` only.
+    pub(crate) current_function_by_ref_params_with_tag: std::collections::HashMap<Arc<str>, Type>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (see
     // `collect_goto_targets`'s doc comment for the real corpus false
@@ -1156,7 +1176,8 @@ impl<'a> Checker<'a> {
             current_function_return_points: Vec::new(),
             current_function_saw_explicit_return: false,
             current_function_by_ref_params: std::collections::HashMap::new(),
-            current_function_by_ref_assigned_types: std::collections::HashMap::new(),
+            current_function_by_ref_exit_snapshots: std::collections::HashMap::new(),
+            current_function_by_ref_params_with_tag: std::collections::HashMap::new(),
             current_function_goto_targets: std::collections::HashSet::new(),
             in_bare_statement_position: false,
             in_condition_position: false,

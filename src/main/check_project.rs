@@ -119,6 +119,7 @@ fn run_check_project(
     check_strict_printf_placeholder_types: bool,
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
     check_too_wide_return_type_in_protected_and_public_methods: bool,
+    check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
     check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
@@ -185,6 +186,9 @@ fn run_check_project(
     );
     project.set_check_too_wide_return_type_in_protected_and_public_methods(
         check_too_wide_return_type_in_protected_and_public_methods,
+    );
+    project.set_check_too_wide_by_ref_type_in_protected_and_public_methods(
+        check_too_wide_by_ref_type_in_protected_and_public_methods,
     );
     project.set_check_method_throw_type_covariance(check_method_throw_type_covariance);
     project.set_check_duplicate_function_declarations(check_duplicate_function_declarations);
@@ -565,6 +569,7 @@ pub(crate) fn run_check_project_command(
     check_strict_printf_placeholder_types: bool,
     check_too_wide_throw_type_in_protected_and_public_methods: bool,
     check_too_wide_return_type_in_protected_and_public_methods: bool,
+    check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
     check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
@@ -668,6 +673,11 @@ pub(crate) fn run_check_project_command(
         check_too_wide_return_type_in_protected_and_public_methods
             || config
                 .check_too_wide_return_type_in_protected_and_public_methods
+                .unwrap_or(false);
+    let check_too_wide_by_ref_type_in_protected_and_public_methods =
+        check_too_wide_by_ref_type_in_protected_and_public_methods
+            || config
+                .check_too_wide_by_ref_type_in_protected_and_public_methods
                 .unwrap_or(false);
     let check_method_throw_type_covariance = check_method_throw_type_covariance
         || config.check_method_throw_type_covariance.unwrap_or(false);
@@ -831,6 +841,7 @@ pub(crate) fn run_check_project_command(
         check_strict_printf_placeholder_types,
         check_too_wide_throw_type_in_protected_and_public_methods,
         check_too_wide_return_type_in_protected_and_public_methods,
+        check_too_wide_by_ref_type_in_protected_and_public_methods,
         check_method_throw_type_covariance,
         check_duplicate_function_declarations,
         check_duplicate_class_declarations,
