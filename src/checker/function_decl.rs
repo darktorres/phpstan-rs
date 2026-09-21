@@ -296,6 +296,7 @@ impl<'a> Checker<'a> {
             self.check_purity_impure_points(f, sig, class_name.is_some(), &label);
             self.check_declared_param_callable_tags(f, &label);
             self.check_internal_param_and_return_types(f, class_name, &label);
+            self.check_restricted_param_and_return_types(f, class_name, &label);
             self.check_assert_tag_types(sig, f.span, &label);
             // `method.templateTypeNotInParameter` - neither a closure nor an
             // arrow-fn is indexed into the registry at all (see

@@ -3210,6 +3210,13 @@ impl<'a> Checker<'a> {
                     current_class_for_internal_check.as_deref(),
                     &closure_label,
                 );
+                self.check_restricted_param_and_return_types_raw(
+                    params,
+                    return_type.as_deref(),
+                    e.span,
+                    current_class_for_internal_check.as_deref(),
+                    &closure_label,
+                );
                 // A generator-returning closure needs the same
                 // current_function_is_generator save/set/restore
                 // check_function does for a named function/method -
@@ -3486,6 +3493,13 @@ impl<'a> Checker<'a> {
                     current_class_for_internal_check.as_deref(),
                     label,
                 );
+                self.check_restricted_param_and_return_types_raw(
+                    params,
+                    return_type.as_deref(),
+                    e.span,
+                    current_class_for_internal_check.as_deref(),
+                    label,
+                );
                 Type::Object("Closure".to_string(), Vec::new())
             }
             // `foo(...)`/`$obj->method(...)`/`Class::method(...)` (PHP 8.1
@@ -3530,6 +3544,18 @@ impl<'a> Checker<'a> {
                                         self.check_internal_function_call(
                                             &resolved_name,
                                             sig,
+                                            e.span,
+                                            label,
+                                        );
+                                        // Closes a real, live bypass: a
+                                        // banned function's own
+                                        // first-class-callable syntax
+                                        // (`banned_func(...)`) previously
+                                        // went unchecked even though the
+                                        // ordinary call site
+                                        // (`banned_func()`) already was.
+                                        self.check_restricted_function_call(
+                                            &resolved_name,
                                             e.span,
                                             label,
                                         );

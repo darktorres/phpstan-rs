@@ -615,7 +615,7 @@ impl<'a> Checker<'a> {
 /// call-site-variance sentinels (`Type::Object`-shaped but not real class
 /// names) are excluded too, matching every other consumer of a resolved
 /// `Type::Object` name in this codebase.
-fn collect_referenced_class_names(ty: &Type, out: &mut Vec<String>) {
+pub(crate) fn collect_referenced_class_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(name, _)
             if !matches!(

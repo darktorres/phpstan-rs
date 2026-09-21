@@ -235,3 +235,156 @@ fn a_restricted_class_instanceof_is_flagged() {
         "got: {d:?}"
     );
 }
+
+// The `Class` kind's own remaining detection surface - `extends`/
+// `implements`/`catch`/param/return native type hints, plus the
+// first-class-callable bypass for a restricted function - closed
+// alongside `instanceof`/`new`/`catch` above.
+
+#[test]
+fn extending_a_restricted_class_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            class Banned {}
+            class Sub extends Banned {}
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("extends")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn implementing_a_restricted_interface_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            interface Banned {}
+            class Sub implements Banned {}
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("implements")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn catching_a_restricted_class_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            class Banned extends \Exception {}
+            function f(): void {
+                try {
+                } catch (Banned $e) {
+                }
+            }
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.class"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_class_parameter_type_hint_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            class Banned {}
+            function f(Banned $x): void {}
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("Parameter")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_class_return_type_hint_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            class Banned {}
+            function f(): Banned {}
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("Return type")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_class_closure_parameter_type_hint_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            class Banned {}
+            $f = function (Banned $x): void {};
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.class"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_function_s_first_class_callable_is_flagged() {
+    let d = with_entries(
+        r#"<?php
+            $f = var_dump(...);
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Function,
+            None,
+            "var_dump",
+            "no debug dumps",
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.function"),
+        "got: {d:?}"
+    );
+}

@@ -1624,6 +1624,7 @@ impl<'a> Checker<'a> {
                         self.check_final_class_extension(&fqn, c.span);
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
+                        self.check_restricted_class_inheritance(&fqn, c.span);
                         for (i, parent) in c.extends.iter().enumerate() {
                             let span = c.extends_spans.get(i).copied().unwrap_or(c.span);
                             self.check_class_name_case(&fqn, parent, span);
@@ -1756,6 +1757,7 @@ impl<'a> Checker<'a> {
                         self.check_class_completeness(&fqn, e.span);
                         self.check_class_references_exist(&fqn, e.span);
                         self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
+                        self.check_restricted_class_inheritance(&fqn, e.span);
                         for (i, iface) in e.implements.iter().enumerate() {
                             let span = e.implements_spans.get(i).copied().unwrap_or(e.span);
                             self.check_class_name_case(&fqn, iface, span);
