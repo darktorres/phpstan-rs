@@ -78,6 +78,10 @@ fn a_deprecated_function_call_gets_a_token_even_with_the_diagnostic_gate_left_of
     assert_eq!(tokens[0].token_type, 0, "expected a Function-kind token");
     assert_eq!(tokens[0].modifiers, DEPRECATED_BIT);
     assert_eq!(tokens[0].line, 3);
+    assert_eq!(
+        tokens[0].start, 0,
+        "expected the token to start at column 0"
+    );
     assert_eq!(tokens[0].length, 3, "expected the bare \"foo\" callee span");
 
     let publish = last_publish_diagnostics_for(&messages, &uri);

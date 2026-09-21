@@ -1,10 +1,17 @@
 //! `Project::use_sites()`'s two-tier index: Tier 1 (class/function
-//! reference sites) - eager, syntactic, gated on `retain_source`
-//! (genuinely needs the retained source text for `split_identifier_
-//! spans`, unlike `decl_locations`, which no longer shares this gate -
-//! see `decl_locations.rs`'s own tests) - and Tier 2 (member reference
+//! reference sites) - eager, syntactic - and Tier 2 (member reference
 //! sites) - lazy, checker-driven, built once by `ensure_member_index_
-//! built`. The LSP wiring itself (`textDocument/references`/
+//! built`. Tier 1 is populated whenever `retain_source` is on (the LSP;
+//! real, precise per-identifier spans via `use_sites::
+//! index_class_fn_refs`) OR `check_dead_code` is on (a batch
+//! `check-project` run with no retained source, via `index_class_fn_
+//! refs_without_source` - real references still, just scoped to a less
+//! narrow AST-node span - see that function's own doc comment); with
+//! neither on, Tier 1 stays empty - measured too expensive on a real
+//! corpus to populate unconditionally the way `decl_locations` is (see
+//! `Project::insert_parsed_file`'s own doc comment). This is what
+//! `checker::whole_program::dead_code` (`project::tests::dead_code`)
+//! relies on. The LSP wiring itself (`textDocument/references`/
 //! `textDocument/rename`) is exercised separately in `lsp::tests::
 //! references_and_rename`.
 
@@ -77,7 +84,7 @@ fn updating_a_file_drops_its_stale_use_sites() {
 }
 
 #[test]
-fn use_site_index_is_empty_without_retain_source() {
+fn tier_1_stays_empty_without_retain_source_or_check_dead_code() {
     let mut project = Project::new();
     project
         .load_file(
@@ -92,8 +99,33 @@ fn use_site_index_is_empty_without_retain_source() {
             .references(&RefTarget::Function("greet".to_string()))
             .len(),
         0,
-        "Tier 1 must stay off when retain_source is off - unlike decl_locations, \
-         which no longer shares this gate"
+        "Tier 1 must stay off when neither retain_source nor check_dead_code \
+         is on - a real corpus measurement found it too expensive to \
+         populate unconditionally"
+    );
+}
+
+#[test]
+fn tier_1_is_indexed_without_retain_source_when_check_dead_code_is_on() {
+    let mut project = Project::new();
+    project.set_check_dead_code(true);
+    project
+        .load_file(
+            PathBuf::from("a.php"),
+            "<?php function greet(): void {}\ngreet();\n",
+        )
+        .unwrap();
+    project.finish_loading();
+    assert_eq!(
+        project
+            .use_sites()
+            .references(&RefTarget::Function("greet".to_string()))
+            .len(),
+        1,
+        "Tier 1 doesn't need retained source text to exist at all when \
+         check_dead_code needs it - only to get a precise per-identifier \
+         span, see `use_sites::index_class_fn_refs_without_source`'s own \
+         doc comment"
     );
 }
 

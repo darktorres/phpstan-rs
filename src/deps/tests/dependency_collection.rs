@@ -49,3 +49,28 @@ fn collects_from_closures_and_arrow_functions() {
     assert!(names.contains("InClosure"));
     assert!(names.contains("InArrow"));
 }
+
+#[test]
+fn collects_attribute_names_and_their_argument_expressions() {
+    let names = refs(
+        r#"<?php
+            #[OnClass(Thing::class)]
+            class Foo {
+                #[OnProp]
+                public $x;
+
+                #[OnConst]
+                const C = 1;
+
+                #[OnMethod]
+                public function m(#[OnParam] $p) {}
+            }
+        "#,
+    );
+    assert!(names.contains("OnClass"));
+    assert!(names.contains("Thing"));
+    assert!(names.contains("OnProp"));
+    assert!(names.contains("OnConst"));
+    assert!(names.contains("OnMethod"));
+    assert!(names.contains("OnParam"));
+}

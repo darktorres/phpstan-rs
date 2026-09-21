@@ -2362,6 +2362,91 @@ not just this one:
   showed zero differences - `decl_locations`'s decoupling is confirmed
   behavior-neutral, not just fast.
 
+**Whole-program dead-function/dead-class detection** (PHASE_BACKLOG
+Phase 86's B2, `function.unused`/`class.unused`), built directly on the
+whole-program pipeline above as its second consumer. The backlog's own
+sketch proposed reusing `Project.dependents` - already live, in memory,
+for incremental re-check invalidation - as the reverse-reference index
+this needs. Checking that against the actual code (not assumed) found
+it's the wrong tool: `dependents`'s keys are the raw, unresolved string
+exactly as each reference was written (`deps::referenced_names`'s own
+deliberate simplification, "no backslash-stripping, no namespace/`use`-
+import resolution"), so a class referenced only via a relatively- or
+fully-qualified spelling (not its own bare, `use`-imported name) inserts
+a *different* map key than a bare-name query for the same class would
+look up - a real false-positive risk on ordinary, unremarkable
+namespaced PHP, not an exotic edge case. Fixed by relying on
+`Project::use_sites`'s Tier-1 index instead (`RefTarget::Class`/
+`RefTarget::Function`, already real, canonical, `NameContext`-resolved
+FQNs, built for `textDocument/references`/`rename`) - its own one real
+gap for a batch `check-project` run was needing retained source text
+purely to carve a precise per-identifier span out of a combined multi-
+identifier expression (`split_identifier_spans`), never for the
+resolution itself. New `use_sites::index_class_fn_refs_without_source`
+runs the identical walk with no source text at all, falling back to a
+real (if less narrowly-scoped) AST-node span at the 3 call sites that
+used to need one - invisible to an existence-only caller, which never
+reads a use-site's span - so Tier 1 now runs unconditionally
+(`Project::insert_parsed_file`), not gated behind `retain_source`
+either, mirroring `decl_locations`'s own earlier fix. Two more real bugs
+surfaced and were fixed alongside this:
+- `Project::check_whole_program` never filtered a finding to first-
+  party (analyzed) files - `decl_locations` indexes every loaded file,
+  vendor/context included, so a dead vendor-only enum case or class
+  used to leak into `check-project`'s own `results` map as a brand new,
+  never-otherwise-checked entry. Fixed once, generically, in a new
+  shared `whole_program_diagnostic` helper every whole-program check
+  (both this one and `check_dead_enum_cases`) now goes through - caught
+  by its own regression test, since the existing `dead_enum_cases`
+  fixture tests turned out to use non-analyzed `load_file`, not
+  `load_analyzed_file`, and started failing the moment the filter was
+  added.
+- `deps::referenced_names` (feeding `Project.dependents`, unrelated to
+  this check's own final design but still a real, independently-worth-
+  fixing incremental-invalidation gap) never walked any `Attribute`
+  group at all - a class referenced only via `#[MyAttribute]` on some
+  other declaration was invisible to it. Fixed generically (`collect_
+  attrs`, called from every `attrs`/`get_attrs`/`set_attrs` site).
+  `use_sites`'s own Tier-1 walker has the identical gap, left unfixed
+  deliberately - fixing it risks corrupting `textDocument/rename`'s
+  real rewrite spans for comparatively little benefit - and disclosed
+  instead as a real, narrow false-positive risk for `class.unused`.
+
+`checker::whole_program::dead_code::find_dead_functions`/`find_dead_
+classes` are the actual check: every `Registry.functions`/`.classes`
+entry with zero `use_sites` references anywhere, except `__autoload`
+(PHP's own deprecated magic autoload function, called by the engine
+itself with no source-level reference ever). Gated behind `Registry::
+check_dead_code`; `check-project`-only, needs no Tier-2 use-site index
+at all (Tier 1 alone is enough), so it costs nothing beyond its own
+`Registry`/`use_sites` iteration. Disclosed, not fixed: a function/class
+that's this project's own public API, consumed only by code outside the
+analyzed set (a library, not an application - real PHPStan has no such
+rule at all, for exactly this open-world reason); a function referenced
+only via a string-callable (`array_map('myFunc', ...)`); a class
+referenced only as a PHP attribute target (the `use_sites` gap above);
+anything reachable only through framework magic/reflection.
+
+**Real corpus measurement** (Piwigo, `~/piwigo17-frozen`, 2792 first-
+party files plus 11459 loaded for context, warm filesystem cache, same
+release binary, `--config phpstan-rs.toml`). The first version of this
+fix ran `index_class_fn_refs_without_source` unconditionally for every
+loaded file, mirroring `decl_locations`'s own unconditional character -
+measuring it caught a real, serious regression this reasoning missed:
+26.86s/1.80 GiB with the flag off became 2:17.31/1.84 GiB, more than
+5x slower, because it walked all ~14k loaded files (context included)
+on every run regardless of whether anything consumed the result. Fixed
+by gating the walk on `check_dead_code` itself (`Project::
+insert_parsed_file`'s own doc comment) rather than running it
+unconditionally - after the fix, the flag-off run returned to
+26.86s/1.80 GiB, a byte-for-byte identical 63 diagnostics to the
+pre-this-work run. With `--check-dead-code` on: 27.08s/1.84 GiB - a
+real ~85 MiB RSS cost for Tier 1 across the whole corpus, no measurable
+wall-time cost (Tier 1 is a plain syntactic walk, not a `Checker` pass,
+unlike Tier 2's own real per-file cost for `check_dead_enum_cases`) -
+326 new findings (`function.unused`/`class.unused`) on top of the same
+63 pre-existing ones, none of the 63 changed.
+
 **Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
 168a, the first landed sub-item of a larger in-progress phase - see
 PHASE_BACKLOG.md for 168b onward). `ClassInfo::doctrine_entity`

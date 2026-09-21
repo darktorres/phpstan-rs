@@ -256,6 +256,18 @@ pub struct Registry {
     // inherits from `checker::expr::collect_default_and_const_value_
     // member_refs`, not something specific to this check).
     pub check_dead_enum_cases: bool,
+    // A top-level function or class/interface/trait/enum never referenced
+    // anywhere in the project (PHASE_BACKLOG Phase 86's B2) - opt-in, for
+    // real, disclosed reasons real PHPStan has no equivalent rule at all
+    // (its own per-file, open-world reflection can't prove a symbol has
+    // zero consumers anywhere; this project's closed-world registry
+    // usually can, but not always): a function/class that's this
+    // project's own public API, consumed only outside the analyzed set
+    // (a library, not an application); a function referenced only via a
+    // string-callable (`array_map('myFunc', ...)`); a class referenced
+    // only as a PHP attribute target (`#[MyAttribute]`); anything
+    // reachable only through framework magic/reflection.
+    pub check_dead_code: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

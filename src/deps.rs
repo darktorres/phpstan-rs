@@ -79,7 +79,21 @@ fn collect_type_hint(hint: &str, names: &mut HashSet<String>) {
     }
 }
 
+/// `#[Name(args), ...]` - a class used only as an attribute target
+/// (`#[MyAttribute]` on some other declaration) has no `Name`/`New`/
+/// `StaticAccess` node anywhere pointing at it, so without this it would
+/// look identically unreferenced to a genuinely dead class.
+fn collect_attrs(attrs: &[Attribute], names: &mut HashSet<String>) {
+    for a in attrs {
+        names.insert(a.name.clone());
+        for arg in &a.args {
+            collect_expr(&arg.value, names);
+        }
+    }
+}
+
 fn collect_param(p: &Param, names: &mut HashSet<String>) {
+    collect_attrs(&p.attrs, names);
     if let Some(h) = &p.type_hint {
         collect_type_hint(h, names);
     }
@@ -92,6 +106,8 @@ fn collect_param(p: &Param, names: &mut HashSet<String>) {
 }
 
 fn collect_property_hooks(hooks: &PropertyHooks, names: &mut HashSet<String>) {
+    collect_attrs(&hooks.get_attrs, names);
+    collect_attrs(&hooks.set_attrs, names);
     if let Some(body) = &hooks.get {
         collect_hook_body(body, names);
     }
@@ -117,6 +133,7 @@ fn collect_hook_body(body: &PropertyHookBody, names: &mut HashSet<String>) {
 }
 
 fn collect_function(f: &FunctionDecl, names: &mut HashSet<String>) {
+    collect_attrs(&f.attrs, names);
     for p in &f.params {
         collect_param(p, names);
     }
@@ -129,10 +146,12 @@ fn collect_function(f: &FunctionDecl, names: &mut HashSet<String>) {
 }
 
 fn collect_class(c: &ClassDecl, names: &mut HashSet<String>) {
+    collect_attrs(&c.attrs, names);
     names.extend(c.extends.iter().cloned());
     names.extend(c.implements.iter().cloned());
     names.extend(c.uses.iter().cloned());
     for p in &c.properties {
+        collect_attrs(&p.attrs, names);
         if let Some(h) = &p.type_hint {
             collect_type_hint(h, names);
         }
@@ -147,20 +166,24 @@ fn collect_class(c: &ClassDecl, names: &mut HashSet<String>) {
         collect_function(&m.function, names);
     }
     for cst in &c.consts {
+        collect_attrs(&cst.attrs, names);
         collect_expr(&cst.value, names);
     }
 }
 
 fn collect_enum(e: &EnumDecl, names: &mut HashSet<String>) {
+    collect_attrs(&e.attrs, names);
     names.extend(e.implements.iter().cloned());
     names.extend(e.uses.iter().cloned());
     for m in &e.methods {
         collect_function(&m.function, names);
     }
     for cst in &e.consts {
+        collect_attrs(&cst.attrs, names);
         collect_expr(&cst.value, names);
     }
     for case in &e.cases {
+        collect_attrs(&case.attrs, names);
         if let Some(v) = &case.value {
             collect_expr(v, names);
         }

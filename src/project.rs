@@ -133,11 +133,16 @@ pub struct Project {
     // `textDocument/references`/`textDocument/rename`'s own whole-project
     // use-site index - see `use_sites`'s own module doc comment for the
     // two-tier split. Tier 1 (class/function references) is indexed
-    // eagerly here, gated behind `retain_source` - unlike `decl_locations`
-    // above, this genuinely needs the retained source text
-    // (`index_class_fn_refs`'s own `split_identifier_spans` call), so it
-    // stays LSP-only. Tier 2 (member references) is NOT populated by
-    // ordinary indexing at all - see `member_index_built`.
+    // eagerly here whenever `retain_source` is on (the LSP; real, narrow
+    // per-identifier spans) or `check_dead_code` is on (a batch
+    // `check-project` run with no retained source; real but less
+    // narrowly-scoped AST-node spans instead - see `use_sites::
+    // index_class_fn_refs_without_source`'s own doc comment) - NOT
+    // unconditionally, unlike `decl_locations` above: measured on a real
+    // corpus, this walk is too expensive to run for every loaded file
+    // when nothing in batch mode consumes it. Tier 2 (member references)
+    // is NOT populated by ordinary indexing at all - see
+    // `member_index_built`.
     use_sites: UseSiteIndex,
     // Whether Tier 2 (member references) of `use_sites` has ever been
     // built for this project - `false` until the first
@@ -477,6 +482,13 @@ impl Project {
         self.registry.check_dead_enum_cases = enabled;
     }
 
+    /// Opts the whole project's checking into dead-function/dead-class
+    /// detection - see `registry::Registry::check_dead_code`'s own doc
+    /// comment for why this defaults to `false`.
+    pub fn set_check_dead_code(&mut self, enabled: bool) {
+        self.registry.check_dead_code = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
@@ -609,10 +621,29 @@ impl Project {
         }
         self.decl_locations
             .index(&ast, &mut NameContext::default(), &path);
-        if self.retain_source {
-            for (span, target) in use_sites::index_class_fn_refs(&ast, &source) {
-                self.use_sites.insert(&path, target, span);
-            }
+        // Real source text (`retain_source`) buys narrower per-identifier
+        // spans (`use_sites::index_class_fn_refs`'s own doc comment) - a
+        // batch run with no retained source can still get real, just less
+        // precisely-scoped, entries via `index_class_fn_refs_without_
+        // source`, which `checker::whole_program::dead_code` (existence-
+        // only, never reads a use-site's span) can't tell apart from the
+        // precise version at all. But unlike `decl_locations` above, this
+        // walk is NOT cheap enough to run unconditionally in batch mode -
+        // measured on a real corpus (Piwigo, ~14k loaded files including
+        // vendor context): running it for every loaded file regardless of
+        // whether anything consumes it roughly doubled `check-project`'s
+        // own wall time. Gated on `check_dead_code` (its only batch-mode
+        // consumer) for exactly that reason - a run with the check left
+        // off, the default, pays nothing extra here at all.
+        let class_fn_refs = if self.retain_source {
+            use_sites::index_class_fn_refs(&ast, &source)
+        } else if self.registry.check_dead_code {
+            use_sites::index_class_fn_refs_without_source(&ast)
+        } else {
+            Vec::new()
+        };
+        for (span, target) in class_fn_refs {
+            self.use_sites.insert(&path, target, span);
         }
         // `record_phpstan_class_file` no-ops unless
         // `phpstan_api_check_enabled` and the name is `PHPStan\*`-
@@ -1531,73 +1562,149 @@ impl Project {
         self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>())
     }
 
-    /// Runs every opt-in whole-program diagnostic check (currently just
-    /// `check_dead_enum_cases`) - see `checker::whole_program`'s own
-    /// module doc comment for why these can't run through the ordinary
-    /// per-file `Checker` path `check_file`/`check_all` above use.
-    /// `check-project` calls this once, after its own primary per-file
-    /// pass has populated `results`, merging this method's own return
-    /// value in before level-filtering/`ignore_errors`/baseline (so
-    /// `@phpstan-ignore`/baseline suppression apply to a whole-program
-    /// finding exactly like an ordinary one).
+    /// Resolves one whole-program finding's own reportable location and
+    /// applies the same two things every per-file diagnostic already
+    /// gets for free, that a diagnostic built entirely outside
+    /// `check_file_impl` would otherwise never see at all: "only report
+    /// first-party files, never vendor/context ones swept in only
+    /// because `decl_locations` indexes every loaded file, analyzed or
+    /// not" (a real bug on an earlier pass of this exact method - a
+    /// vendor-only dead enum case used to create a brand new, never-
+    /// otherwise-checked entry in `check-project`'s own `results` map),
+    /// and `@phpstan-ignore-line`/`-next-line`/`@phpstan-ignore
+    /// <identifiers>` suppression (`check_file_impl`'s own identical
+    /// `retain` calls only ever run *inside* the per-file `Checker`
+    /// pass). `None` for an unloaded/context path, or one whose own
+    /// ignore-comment already covers `identifier` on `span`'s line.
+    fn whole_program_diagnostic(
+        &self,
+        path: &Path,
+        span: Span,
+        location: String,
+        message: String,
+        identifier: &'static str,
+    ) -> Option<Diagnostic> {
+        let file = self.files.get(path)?;
+        if !file.analyzed {
+            return None;
+        }
+        if file.ignore_lines.contains(&span.start.line)
+            || file
+                .ignore_identifiers
+                .get(&span.start.line)
+                .is_some_and(|ids| ids.iter().any(|id| id == identifier))
+        {
+            return None;
+        }
+        Some(Diagnostic {
+            location,
+            message,
+            span,
+            level: 5,
+            identifier: identifier.to_string(),
+            tip: None,
+            non_ignorable: false,
+            metadata: HashMap::new(),
+            fix: None,
+        })
+    }
+
+    /// Runs every opt-in whole-program diagnostic check (currently
+    /// `check_dead_enum_cases` and `check_dead_code`) - see `checker::
+    /// whole_program`'s own module doc comment for why these can't run
+    /// through the ordinary per-file `Checker` path `check_file`/
+    /// `check_all` above use. `check-project` calls this once, after its
+    /// own primary per-file pass has populated `results`, merging this
+    /// method's own return value in before level-filtering/
+    /// `ignore_errors`/baseline (so `@phpstan-ignore`/baseline
+    /// suppression apply to a whole-program finding exactly like an
+    /// ordinary one).
     ///
-    /// Every whole-program check needs `ensure_member_index_built`'s own
+    /// `check_dead_enum_cases` needs `ensure_member_index_built`'s own
     /// Tier-2 use-site index - a real cost when it has to build it
     /// itself (a second, redundant `Checker` pass per file), avoided
     /// entirely when the caller already seeded it via `seed_member_refs`/
     /// `mark_member_index_built` (`check-project`'s own primary pass
     /// does exactly this - see its own doc comment) before calling here,
     /// in which case `ensure_member_index_built` is a complete no-op.
-    /// Correctness doesn't depend on which path fed it - this method
-    /// works identically either way, just faster when pre-seeded.
+    /// `check_dead_code` needs only Tier 1 (`use_sites`'s class/function
+    /// reference sites) - cheaper than Tier 2 (a plain syntactic walk,
+    /// not a real `Checker` pass), but still real per-loaded-file cost,
+    /// so `Project::insert_parsed_file` itself gates populating it in
+    /// batch mode on this exact flag - see that call site's own doc
+    /// comment.
     pub fn check_whole_program(&mut self) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        if !self.registry.check_dead_enum_cases {
-            return HashMap::new();
-        }
-        self.ensure_member_index_built();
-        let dead = checker::whole_program::dead_enum_cases::find_dead_cases(
-            &self.registry,
-            &self.use_sites,
-            &self.escaped_enum_cases,
-        );
         let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
-        for (fqn, case) in dead {
-            let Some((path, span)) = self
-                .decl_locations
-                .members
-                .get(&(fqn.clone(), case.clone()))
-            else {
-                continue;
-            };
-            let diagnostic = Diagnostic {
-                location: fqn.clone(),
-                message: format!("Enum case {fqn}::{case} is never used."),
-                span: *span,
-                level: 5,
-                identifier: "enumCase.unused".to_string(),
-                tip: None,
-                non_ignorable: false,
-                metadata: HashMap::new(),
-                fix: None,
-            };
-            // `@phpstan-ignore-line`/`-next-line`/`@phpstan-ignore
-            // <identifiers>` - `check_file_impl`'s own identical two
-            // `retain` calls only ever run *inside* the per-file
-            // `Checker` pass, filtering diagnostics before they leave
-            // that call at all; a diagnostic built here, entirely
-            // outside that path, would never see them otherwise.
-            if let Some(file) = self.files.get(path)
-                && !diagnostic.non_ignorable
-                && (file.ignore_lines.contains(&span.start.line)
-                    || file
-                        .ignore_identifiers
-                        .get(&span.start.line)
-                        .is_some_and(|ids| ids.iter().any(|id| id == &diagnostic.identifier)))
-            {
-                continue;
+
+        if self.registry.check_dead_enum_cases {
+            self.ensure_member_index_built();
+            let dead = checker::whole_program::dead_enum_cases::find_dead_cases(
+                &self.registry,
+                &self.use_sites,
+                &self.escaped_enum_cases,
+            );
+            for (fqn, case) in dead {
+                let Some((path, span)) = self
+                    .decl_locations
+                    .members
+                    .get(&(fqn.clone(), case.clone()))
+                else {
+                    continue;
+                };
+                let path = path.clone();
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    *span,
+                    fqn.clone(),
+                    format!("Enum case {fqn}::{case} is never used."),
+                    "enumCase.unused",
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
             }
-            results.entry(path.clone()).or_default().push(diagnostic);
         }
+
+        if self.registry.check_dead_code {
+            let dead_functions = checker::whole_program::dead_code::find_dead_functions(
+                &self.registry,
+                &self.use_sites,
+            );
+            for name in dead_functions {
+                let Some((path, span)) = self.decl_locations.functions.get(&name) else {
+                    continue;
+                };
+                let path = path.clone();
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    *span,
+                    name.clone(),
+                    format!("Function {name} is never referenced."),
+                    "function.unused",
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
+            }
+            let dead_classes = checker::whole_program::dead_code::find_dead_classes(
+                &self.registry,
+                &self.use_sites,
+            );
+            for name in dead_classes {
+                let Some((path, span)) = self.decl_locations.classes.get(&name) else {
+                    continue;
+                };
+                let path = path.clone();
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    *span,
+                    name.clone(),
+                    format!("Class {name} is never referenced."),
+                    "class.unused",
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
+            }
+        }
+
         results
     }
 

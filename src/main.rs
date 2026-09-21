@@ -258,6 +258,13 @@ enum Command {
         /// for the real, disclosed false-positive risks.
         #[arg(long)]
         check_dead_enum_cases: bool,
+        /// Enables dead-function/dead-class detection (a top-level
+        /// function or class/interface/trait/enum never referenced
+        /// anywhere in the project). Off by default - see
+        /// `registry::Registry::check_dead_code`'s own doc comment for
+        /// the real, disclosed false-positive risks.
+        #[arg(long)]
+        check_dead_code: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -359,6 +366,7 @@ fn main() {
             check_new_exception_discarded,
             check_risky_tests,
             check_dead_enum_cases,
+            check_dead_code,
             php_version,
             generate_baseline,
             baseline,
@@ -397,6 +405,7 @@ fn main() {
             check_new_exception_discarded,
             check_risky_tests,
             check_dead_enum_cases,
+            check_dead_code,
             php_version,
             generate_baseline,
             baseline,

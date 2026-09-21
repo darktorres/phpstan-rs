@@ -6,10 +6,21 @@
 //! syntactic, name-resolution-only walk (`ClassFnRefWalker`), structured
 //! after (not sharing code with) `lsp::navigation::Walker` - the same
 //! proven traversal shape, reused for "record every match", never "find
-//! the one match at a cursor". Cheap enough to run eagerly on every
-//! `insert_parsed_file`/`update_file`, gated only by `retain_source`
-//! (the same gate `DeclLocations` already uses, for the identical
-//! "only the LSP needs this" reasoning).
+//! the one match at a cursor". Real caret-precision spans need the
+//! file's retained source text (`index_class_fn_refs`, LSP-only, gated
+//! behind `retain_source` exactly like `DeclLocations` used to be); a
+//! batch `check-project` run has no retained source but, when `checker::
+//! whole_program::dead_code` is enabled, still needs to know *whether* a
+//! class/function is referenced at all -
+//! `index_class_fn_refs_without_source` runs instead there, trading
+//! precise sub-spans (needs real source text to carve out of a combined
+//! multi-identifier span) for real, already-on-hand AST-node spans that
+//! are merely less narrowly scoped - see that function's own doc
+//! comment. NOT run unconditionally the way `DeclLocations` now is,
+//! though: measured on a real corpus, this walk is too expensive to pay
+//! for every loaded file (including every vendor/context one) when
+//! nothing consumes it - `Project::insert_parsed_file` gates it on
+//! `check_dead_code` specifically, its only batch-mode consumer.
 //!
 //! Tier 2 (member reference sites - method/property/class-constant
 //! access) needs a real, checker-driven resolution of the receiver's
@@ -123,13 +134,38 @@ fn resolve_class_ref(
 pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, RefTarget)> {
     let mut ctx = NameContext::default();
     let mut out = Vec::new();
-    let w = ClassFnRefWalker { source };
+    let w = ClassFnRefWalker {
+        source: Some(source),
+    };
+    w.stmts(stmts, &mut ctx, None, &mut out);
+    out
+}
+
+/// Same walk, for a caller with no retained source text at all (a batch
+/// `check-project` run - `FileState.source` is `None` there, see
+/// `Project::retain_source`'s own doc comment). Each of the 3 spots below
+/// that would otherwise need `split_identifier_spans` to carve a precise
+/// sub-span out of a combined multi-identifier text span instead records
+/// the whole already-real AST span it has on hand - still a correct
+/// reference *site* (this project's own convention for "the identifier's
+/// own span, when its owning node doesn't carve out a narrower one"), just
+/// not narrowed to the exact identifier's own characters. Existence-only
+/// callers (a whole-program "was this ever referenced" check, e.g.
+/// `checker::whole_program::dead_code`) never read a use-site's span at
+/// all, so the imprecision is invisible to them; a real caret-precision
+/// consumer (`textDocument/references`/`rename`) only ever runs with
+/// `retain_source` on, so it always gets `index_class_fn_refs`'s own exact
+/// version above, never this one.
+pub(crate) fn index_class_fn_refs_without_source(stmts: &[Stmt]) -> Vec<(Span, RefTarget)> {
+    let mut ctx = NameContext::default();
+    let mut out = Vec::new();
+    let w = ClassFnRefWalker { source: None };
     w.stmts(stmts, &mut ctx, None, &mut out);
     out
 }
 
 struct ClassFnRefWalker<'a> {
-    source: &'a str,
+    source: Option<&'a str>,
 }
 
 impl<'a> ClassFnRefWalker<'a> {
@@ -142,8 +178,16 @@ impl<'a> ClassFnRefWalker<'a> {
         ctx: &NameContext,
     ) {
         let names = type_hint_identifiers(hint);
+        let Some(source) = self.source else {
+            for name in &names {
+                if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+                    out.push((span, RefTarget::Class(fqn)));
+                }
+            }
+            return;
+        };
         let expected: Vec<&str> = names.iter().map(String::as_str).collect();
-        let Some(spans) = split_identifier_spans(self.source, span, &expected) else {
+        let Some(spans) = split_identifier_spans(source, span, &expected) else {
             return;
         };
         for (name, name_span) in names.iter().zip(spans.iter()) {
@@ -304,14 +348,19 @@ impl<'a> ClassFnRefWalker<'a> {
                 }
             }
             ExprKind::StaticAccess(class, member) => {
-                if let Some(fqn) = resolve_class_ref(class, current_class, ctx)
-                    && let Some(spans) = split_identifier_spans(
-                        self.source,
-                        expr.span,
-                        &[class.as_str(), member.as_str()],
-                    )
-                {
-                    out.push((spans[0], RefTarget::Class(fqn)));
+                if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
+                    match self.source {
+                        Some(source) => {
+                            if let Some(spans) = split_identifier_spans(
+                                source,
+                                expr.span,
+                                &[class.as_str(), member.as_str()],
+                            ) {
+                                out.push((spans[0], RefTarget::Class(fqn)));
+                            }
+                        }
+                        None => out.push((expr.span, RefTarget::Class(fqn))),
+                    }
                 }
             }
             // A genuinely dynamic receiver has no class-name text to
@@ -320,14 +369,19 @@ impl<'a> ClassFnRefWalker<'a> {
             // `expr_children` walk below (it's a real child of this
             // node now, not a discarded `"?"` sentinel).
             ExprKind::StaticCall(StaticTarget::Name(class, _), member, _) => {
-                if let Some(fqn) = resolve_class_ref(class, current_class, ctx)
-                    && let Some(spans) = split_identifier_spans(
-                        self.source,
-                        expr.span,
-                        &[class.as_str(), member.as_str()],
-                    )
-                {
-                    out.push((spans[0], RefTarget::Class(fqn)));
+                if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
+                    match self.source {
+                        Some(source) => {
+                            if let Some(spans) = split_identifier_spans(
+                                source,
+                                expr.span,
+                                &[class.as_str(), member.as_str()],
+                            ) {
+                                out.push((spans[0], RefTarget::Class(fqn)));
+                            }
+                        }
+                        None => out.push((expr.span, RefTarget::Class(fqn))),
+                    }
                 }
             }
             ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {

@@ -7,4 +7,5 @@
 //! whole_program` is the single entry point that runs them, called once
 //! per `check-project` invocation - see that method's own doc comment.
 
+pub(crate) mod dead_code;
 pub(crate) mod dead_enum_cases;

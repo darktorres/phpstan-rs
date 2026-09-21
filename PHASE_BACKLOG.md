@@ -157,35 +157,41 @@ run, only to decide what to re-check next; phpstan-rs already keeps
   needs its cross-process collector machinery. Extend `checker/
   unused/member_usage.rs`'s existing private-member tracker to walk
   every class's protected/public accesses project-wide via the registry.
-- **B2 (medium).** Dead top-level function / never-instantiated class
-  detection — no `UnusedFunctionRule`/`UnusedClassRule` exists in
-  PHPStan at all. `Project.dependents` is already the reverse-reference
-  index this needs; a symbol with zero entries (and not an entry
-  point/magic method/attribute target) is provably dead. Ship opt-in.
   **Triple-confirmed by real production tools** (top-100 Packagist
   survey): `shipmonk/dead-code-detector` and `tomasvotruba/unused-public`
   are both comprehensive, independently-built, actively-maintained
-  implementations of exactly B1/B2 — worth reading both before building.
-  Two concrete refinements they surface: (1) `shipmonk/dead-code-
-  detector` ships a real auto-fix (deletes the dead declaration's source
-  text) — pair with a Phase 111-style codemod once built, not just
-  detection; (2) both tools' own ~20 framework "usage provider" plugins
-  (Twig/Symfony/Laravel/Nette/Doctrine/Eloquent/Blade/Behat/PHPUnit/
-  Composer/plain Reflection) reveal the real scoping risk any sound
-  whole-project dead-code detector must handle — a member reachable only
-  via framework magic (a template calling a method by name, a DI
-  container definition, PHPUnit attribute discovery, runtime
-  Reflection) is invisible to ordinary reference-counting. B1/B2 should
+  implementations of exactly this shape — worth reading both before
+  building. Two concrete refinements they surface: (1) `shipmonk/dead-
+  code-detector` ships a real auto-fix (deletes the dead declaration's
+  source text) — pair with a Phase 111-style codemod once built, not
+  just detection; (2) both tools' own ~20 framework "usage provider"
+  plugins (Twig/Symfony/Laravel/Nette/Doctrine/Eloquent/Blade/Behat/
+  PHPUnit/Composer/plain Reflection) reveal the real scoping risk any
+  sound whole-project dead-code detector must handle — a member
+  reachable only via framework magic (a template calling a method by
+  name, a DI container definition, PHPUnit attribute discovery, runtime
+  Reflection) is invisible to ordinary reference-counting — B1 should
   explicitly generalize the same conservative "escaped means don't
   flag" discipline `member_usage.rs`'s existing private-member
   `escaped` fallback already uses, rather than assume it away when
-  widening to protected/public and top-level functions/classes.
+  widening to protected/public members (B2, below, already does this
+  for top-level functions/classes - see ROADMAP's Done section).
   `tomasvotruba/unused-public` additionally covers properties and class
   constants, not just methods — broaden B1's own scope statement to
   match — and separately flags a public method *never called from
   outside its own declaring class* (over-visible, not dead) as a
-  "could be private" suggestion, worth a small B4 sub-item alongside
-  B1/B2 if picked up.
+  "could be private" suggestion, worth a small B4 sub-item alongside B1
+  if picked up.
+- **B2 (medium, DONE)** — dead top-level function/class detection,
+  folded into ROADMAP's Done section ("Whole-program dead-function/
+  dead-class detection"). Built on `Project::use_sites`'s canonical,
+  `NameContext`-resolved Tier-1 index, not `Project.dependents` (that
+  index's own raw, unresolved, bare-last-segment string keys turned out
+  too imprecise for a real "is this ever referenced" existence check -
+  see that Done entry for the full reasoning). B1/B3's own shared
+  `Project.dependents`-based sketches above are unaffected by this -
+  neither has been re-scoped onto the same, more precise mechanism, but
+  either could be, the same way B2 was.
 - **B3 (medium).** Circular class/namespace dependency-cycle detection —
   PHPStan has no such rule; Tarjan's SCC over the already-live
   `Project.dependents` graph, aggregated to namespace level via
