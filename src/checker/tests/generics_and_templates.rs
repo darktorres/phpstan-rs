@@ -2773,13 +2773,20 @@ fn reflection_class_new_instance_args_returns_its_own_template_not_a_nullable_ob
 // `getDeclaringClass()` hands it straight back.
 #[test]
 fn reflection_class_get_method_binds_its_receiver_s_own_template() {
+    // Also carries Phase 77's own reflected-member-binding fact
+    // (`Type::ReflectedMember`) since `'bar'` is a genuine string
+    // literal - see the dedicated `reflected_member_binding` tests below
+    // for `invoke()`/`getValue()` actually consuming it.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
             final class Foo {}
             function f(): void {
                 $reflClass = new ReflectionClass(Foo::class);
-                assertType('ReflectionMethod<Foo>', $reflClass->getMethod('bar'));
+                assertType(
+                    "ReflectionMethod<Foo>&reflectedMember(Foo, 'bar')",
+                    $reflClass->getMethod('bar'),
+                );
             }
         "#,
     );
@@ -2809,7 +2816,10 @@ fn reflection_class_get_property_binds_its_receiver_s_own_template() {
             final class Foo {}
             function f(): void {
                 $reflClass = new ReflectionClass(Foo::class);
-                assertType('ReflectionProperty<Foo>', $reflClass->getProperty('bar'));
+                assertType(
+                    "ReflectionProperty<Foo>&reflectedMember(Foo, 'bar')",
+                    $reflClass->getProperty('bar'),
+                );
             }
         "#,
     );
@@ -2907,6 +2917,108 @@ fn a_bare_reflection_method_return_type_hint_produces_no_missing_generics_diagno
     .into_iter()
     .filter(|d| d.identifier == "missingType.generics")
     .collect();
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// Phase 77's reflected-member-binding stretch item:
+// `ReflectionMethod::invoke()`/`ReflectionProperty::getValue()`
+// resolving the real bound member's own value/return type, not just a
+// bare `mixed`.
+
+#[test]
+fn reflection_property_get_value_resolves_the_real_property_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {
+                public int $bar = 1;
+            }
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                $prop = $reflClass->getProperty('bar');
+                assertType('int', $prop->getValue(new Foo()));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_method_invoke_resolves_the_real_method_s_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {
+                public function bar(): string { return 'x'; }
+            }
+            function f(): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                $method = $reflClass->getMethod('bar');
+                assertType('string', $method->invoke(new Foo()));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_property_get_value_also_resolves_from_a_string_literal_typed_variable() {
+    // Matches this project's own established "a variable whose own
+    // inferred type is a string literal, not just a syntactic literal
+    // token" convention (e.g. the Doctrine DQL arm's identical
+    // fallback).
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {
+                public int $bar = 1;
+            }
+            function f(): void {
+                $name = 'bar';
+                $reflClass = new ReflectionClass(Foo::class);
+                $prop = $reflClass->getProperty($name);
+                assertType('int', $prop->getValue(new Foo()));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_property_get_value_stays_mixed_for_a_non_literal_member_name() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Foo {
+                public int $bar = 1;
+            }
+            function f(string $propName): void {
+                $reflClass = new ReflectionClass(Foo::class);
+                $prop = $reflClass->getProperty($propName);
+                assertType('mixed', $prop->getValue(new Foo()));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn reflection_object_s_own_erased_template_never_binds_a_reflected_member_either() {
+    // Disclosed residual limitation (Phase 77's own doc comment,
+    // `php_stubs.rs`): `ReflectionObject::__construct` carries no
+    // `@template` annotation of its own in real phpstorm-stubs, so `T`
+    // stays erased to `mixed` - the reflected-member-binding feature
+    // correctly declines to attach a fact it could never resolve rather
+    // than producing a wrong one.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(object $x): void {
+                $reflClass = new ReflectionObject($x);
+                assertType('ReflectionMethod<mixed>', $reflClass->getMethod('bar'));
+            }
+        "#,
+    );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

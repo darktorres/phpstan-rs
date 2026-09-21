@@ -685,6 +685,82 @@ impl<'a> Checker<'a> {
                     Type::Union(vec![Type::String, Type::False])
                 }
             }
+            // Phase 77's reflected-member-binding stretch item:
+            // `ReflectionClass<T>::getMethod('name')`/`getProperty('name')` -
+            // once the member name is a genuine string literal (or a
+            // variable whose own inferred type is one, matching this
+            // project's own established literal-or-string-literal-typed-
+            // variable convention, e.g. the DQL literal-string arm above),
+            // attaches a `Type::ReflectedMember(T, name)` fact onto the
+            // stub's own `ReflectionMethod<T>`/`ReflectionProperty<T>`
+            // return type so a later `->invoke()`/`->getValue()` call
+            // (below) can resolve the real member's own value type - see
+            // `Type::ReflectedMember`'s own doc comment. A non-literal
+            // name just keeps the stub's own untargeted return type,
+            // unchanged from before this feature existed.
+            Type::Object(class, type_args)
+                if matches!(method, "getMethod" | "getProperty")
+                    && self.registry.is_subclass_of(class, "ReflectionClass") =>
+            {
+                let base =
+                    self.generic_object_method_return_type(class, type_args, method, args, locals);
+                // An erased receiver `T` (`substitute_class_templates`'s
+                // own unbound-template fallback, `Type::Mixed`) can never
+                // resolve a real member type either - skip the wrap
+                // entirely rather than attach a fact that can only ever
+                // stay unresolved, matching `Type::ReflectedMember`'s own
+                // "don't guess" leniency for a not-genuinely-concrete
+                // owner.
+                let owner_ty = type_args.first().cloned().filter(|t| *t != Type::Mixed);
+                let name = args
+                    .first()
+                    .and_then(|a| match literal_string_value(&a.value) {
+                        Some(s) => Some(s.into_owned()),
+                        None => match self.infer_expr(&a.value, locals) {
+                            Type::StringLiteral(s) => Some(s),
+                            _ => None,
+                        },
+                    });
+                match (owner_ty, name) {
+                    (Some(owner_ty), Some(name)) => Type::Intersection(vec![
+                        base,
+                        Type::ReflectedMember(Box::new(owner_ty), name),
+                    ]),
+                    _ => base,
+                }
+            }
+            // The consuming half of the feature just above -
+            // `ReflectionProperty::getValue($obj)`/`ReflectionMethod::
+            // invoke($obj, ...$args)` resolve the real member's own
+            // declared type on the owner this reflector was bound to,
+            // substituting the owner's own `@template` bindings the same
+            // way an ordinary generic method call already does.
+            // `invoke()`'s own extra arguments (after the leading
+            // `$object`) map onto the target method's own parameters
+            // positionally, so they're forwarded from index 1, matching
+            // real PHP's own `invoke($object, ...$args)` signature. An
+            // owner that isn't itself a plain resolved `Type::Object`
+            // (an unresolved template, a union, ...) can't be looked up
+            // at all - stays `Mixed`, not a guess.
+            Type::ReflectedMember(owner_ty, name) if method == "getValue" => {
+                match owner_ty.as_ref() {
+                    Type::Object(class, type_args) => {
+                        self.generic_object_property_type(class, type_args, name)
+                    }
+                    _ => Type::Mixed,
+                }
+            }
+            Type::ReflectedMember(owner_ty, name) if method == "invoke" => {
+                match owner_ty.as_ref() {
+                    Type::Object(class, type_args) => {
+                        let forwarded = args.get(1..).unwrap_or(&[]);
+                        self.generic_object_method_return_type(
+                            class, type_args, name, forwarded, locals,
+                        )
+                    }
+                    _ => Type::Mixed,
+                }
+            }
             // Sub-phase D of the live SQL query reflection phase (see
             // delegated-tumbling-dongarra.md): `Doctrine\DBAL\Result`'s
             // own no-argument terminal methods - the second hop of the
@@ -871,6 +947,20 @@ impl<'a> Checker<'a> {
                 let resolved_args = resolve_call_args(args, &sig.params);
                 let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
                 self.resolve_pseudo(&resolved, class)
+            })
+            .unwrap_or(Type::Mixed)
+    }
+
+    /// `generic_object_method_return_type`'s property-typed sibling -
+    /// Phase 77's reflected-member-binding feature's own `getValue()`
+    /// consumer (`Type::ReflectedMember`'s own doc comment).
+    fn generic_object_property_type(&self, class: &str, type_args: &[Type], prop: &str) -> Type {
+        self.registry
+            .lookup_property_with_owner(class, prop)
+            .map(|(owner, sig)| {
+                let ty =
+                    self.substitute_class_template_property_type(&sig.ty, class, type_args, &owner);
+                self.resolve_pseudo(&ty, class)
             })
             .unwrap_or(Type::Mixed)
     }

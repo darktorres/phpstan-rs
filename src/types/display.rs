@@ -133,6 +133,12 @@ impl fmt::Display for Type {
             Type::HasOffsetValue(key, value) => {
                 write!(f, "hasOffsetValue('{key}', {value})")
             }
+            // No real PHPStan equivalent to mirror (this variant is a
+            // this-project-only synthesis, see its own doc comment) -
+            // a plain, self-describing debug format.
+            Type::ReflectedMember(owner, name) => {
+                write!(f, "reflectedMember({owner}, '{name}')")
+            }
             Type::Conditional {
                 subject,
                 target,

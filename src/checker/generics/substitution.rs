@@ -172,6 +172,36 @@ impl<'a> Checker<'a> {
             is_magic: sig.is_magic,
         })
     }
+
+    /// Same substitution as `substitute_class_templates`, for a single
+    /// bare property type rather than a whole method signature - Phase
+    /// 77's reflected-member-binding feature (`checker::expr::member_
+    /// resolution`'s `generic_object_property_type`) is its one consumer
+    /// so far. Only covers this function's own "fast path" (`owner`
+    /// itself declares a real `@template`) - the rarer "`owner` declares
+    /// none of its own, but its own inherited type still carries an
+    /// ancestor's template" case `substitute_class_templates`
+    /// additionally handles for a method signature is not replicated
+    /// here; a disclosed, narrower scope than that sibling, not a silent
+    /// one.
+    pub(crate) fn substitute_class_template_property_type(
+        &self,
+        ty: &Type,
+        class: &str,
+        type_args: &[Type],
+        owner: &str,
+    ) -> Type {
+        if !self
+            .registry
+            .classes
+            .get(owner)
+            .is_some_and(|c| !c.templates.is_empty())
+        {
+            return ty.clone();
+        }
+        let bindings = self.class_template_bindings(class, type_args, owner);
+        substitute_scoped(ty, &bindings, owner)
+    }
 }
 
 /// Applies the same class-template substitution `substitute_class_

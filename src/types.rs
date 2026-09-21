@@ -102,6 +102,26 @@ pub enum Type {
     // generalizes away before the merge that produces the loop's own
     // exit type.
     HasOffsetValue(String, Box<Type>),
+    // A `ReflectionMethod`/`ReflectionProperty` bound to one specific,
+    // literally-named member (owner type, member name) of a
+    // `ReflectionClass<T>`'s own reflected `T` - Phase 77's "binding a
+    // specific reflected member's own value type" stretch item. Only
+    // ever a member of a `Type::Intersection` alongside its own coarse
+    // `Type::Object("ReflectionMethod"|"ReflectionProperty", [TClass])`
+    // base (mirrors `HasOffsetValue`'s own shape exactly), constructed at
+    // `getMethod('name')`/`getProperty('name')`'s own call site
+    // (`checker::expr::member_resolution`) and consumed at
+    // `invoke()`/`getValue()`'s own call site, which resolves the real
+    // member's declared type on the owner, substituting the owner's own
+    // `@template` bindings the same way an ordinary generic method call
+    // already does. The owner is stored as a full `Type` (not a bare
+    // class-name string) so a generic reflected class
+    // (`ReflectionClass<Foo<Bar>>`) keeps its own resolved type
+    // arguments too. A dynamic (non-literal) member name, or a variable
+    // whose own inferred type isn't a string literal either, never
+    // produces this - matching this project's own "don't guess" leniency
+    // for every other literal-key-aware construction site.
+    ReflectedMember(Box<Type>, String),
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real
     // call-site argument type for `subject` is known
