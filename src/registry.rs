@@ -278,6 +278,12 @@ pub struct Registry {
     // dependency graph - see `checker::whole_program::circular_
     // namespace_deps`'s own module doc comment for why.
     pub check_circular_dependencies: bool,
+    // An `abstract class` with zero concrete descendants anywhere in the
+    // closed universe (PHASE_BACKLOG Phase 93) - opt-in for the one real
+    // disclosed risk: a concrete subclass generated only at runtime by
+    // framework magic (a Doctrine proxy, a mocking framework) is
+    // invisible to this project's static registry.
+    pub check_dead_abstract_classes: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

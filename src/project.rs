@@ -497,6 +497,13 @@ impl Project {
         self.registry.check_circular_dependencies = enabled;
     }
 
+    /// Opts the whole project's checking into dead-abstract-class
+    /// detection - see `registry::Registry::check_dead_abstract_classes`'s
+    /// own doc comment for why this defaults to `false`.
+    pub fn set_check_dead_abstract_classes(&mut self, enabled: bool) {
+        self.registry.check_dead_abstract_classes = enabled;
+    }
+
     /// Configures the project's own `level` setting for
     /// `registry::Registry::accepts_at_configured_level` - see that
     /// field's own doc comment for why this is `Option<u8>` (not the
@@ -1618,15 +1625,16 @@ impl Project {
     }
 
     /// Runs every opt-in whole-program diagnostic check (currently
-    /// `check_dead_enum_cases`, `check_dead_code`, and `check_circular_
-    /// dependencies`) - see `checker::whole_program`'s own module doc
-    /// comment for why these can't run through the ordinary per-file
-    /// `Checker` path `check_file`/`check_all` above use. `check-project`
-    /// calls this once, after its own primary per-file pass has
-    /// populated `results`, merging this method's own return value in
-    /// before level-filtering/`ignore_errors`/baseline (so `@phpstan-
-    /// ignore`/baseline suppression apply to a whole-program finding
-    /// exactly like an ordinary one).
+    /// `check_dead_enum_cases`, `check_dead_code`, `check_circular_
+    /// dependencies`, and `check_dead_abstract_classes`) - see `checker::
+    /// whole_program`'s own module doc comment for why these can't run
+    /// through the ordinary per-file `Checker` path `check_file`/
+    /// `check_all` above use. `check-project` calls this once, after its
+    /// own primary per-file pass has populated `results`, merging this
+    /// method's own return value in before level-filtering/
+    /// `ignore_errors`/baseline (so `@phpstan-ignore`/baseline
+    /// suppression apply to a whole-program finding exactly like an
+    /// ordinary one).
     ///
     /// `check_dead_enum_cases` needs `ensure_member_index_built`'s own
     /// Tier-2 use-site index - a real cost when it has to build it
@@ -1640,10 +1648,10 @@ impl Project {
     /// not a real `Checker` pass), but still real per-loaded-file cost,
     /// so `Project::insert_parsed_file` itself gates populating it in
     /// batch mode on this exact flag - see that call site's own doc
-    /// comment. `check_circular_dependencies` needs neither Tier - it
-    /// reads directly off `Registry.classes`' own already-resolved
-    /// `extends`/`implements`/`uses` fields, so it costs nothing beyond
-    /// its own graph traversal regardless of how large the project is.
+    /// comment. `check_circular_dependencies` and `check_dead_abstract_
+    /// classes` need neither Tier - both read directly off `Registry.
+    /// classes`' own already-resolved fields, so each costs nothing
+    /// beyond its own traversal regardless of how large the project is.
     pub fn check_whole_program(&mut self) -> HashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
 
@@ -1734,6 +1742,30 @@ impl Project {
                     cycle.representative_class.clone(),
                     format!("Circular namespace dependency: {namespaces}."),
                     "namespace.circularDependency",
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
+            }
+        }
+
+        if self.registry.check_dead_abstract_classes {
+            let dead_abstract_classes =
+                checker::whole_program::dead_abstract_classes::find_dead_abstract_classes(
+                    &self.registry,
+                );
+            for name in dead_abstract_classes {
+                let Some((path, span)) = self.decl_locations.classes.get(&name) else {
+                    continue;
+                };
+                let path = path.clone();
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    *span,
+                    name.clone(),
+                    format!(
+                        "Abstract class {name} has no concrete subclass anywhere in the project."
+                    ),
+                    "class.deadAbstract",
                 ) {
                     results.entry(path).or_default().push(d);
                 }

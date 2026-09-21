@@ -2481,6 +2481,41 @@ size - confirmed on Piwigo (`~/piwigo17-frozen`, warm filesystem cache):
 whole-program check off, well within ordinary run-to-run noise, and
 zero findings (Piwigo's own namespace structure has no such cycle).
 
+**Whole-program dead-abstract-class detection** (PHASE_BACKLOG Phase 93,
+`class.deadAbstract`) - an `abstract class` with zero concrete
+descendants anywhere in the closed universe, a permanent structural
+fact rather than "currently unused" (distinct from Phase 86's B2 above -
+a polymorphic-dispatch-only abstract class referenced only through a
+type hint on its own name has non-zero Tier-1 references there even
+with zero real subclasses, so B2 alone would never catch this). No
+PHPStan rule exists for this at all - the same open-world reason Phase
+85's A5 (closed sealed-hierarchy inference, this phase's own original
+backlog citation) doesn't have one either. Deliberately narrower than
+A5's own full scope: A5 is a pervasive change to `ObjectType::
+isInstanceOf`'s own type-narrowing semantics (returning certain `false`
+instead of PHPStan's permanent `Maybe`), needing a persistent reverse
+(parent-to-children) index on `Registry`; this only needs A5's own
+narrower "does *any* concrete descendant exist" existence query, answered
+directly via `Registry::all_ancestor_names` inverted (every concrete,
+non-abstract `ClassKind::Class` in the registry is a "witness" - its own
+ancestor set, already computed by that existing method, names every
+abstract superclass it proves alive) - no persistent reverse index
+needed at all, since nothing else yet consumes one. `checker::whole_
+program::dead_abstract_classes::find_dead_abstract_classes` builds this
+witness set once, then flags every `is_abstract`, `ClassKind::Class`
+entry missing from it - an abstract class extended only by *other*
+abstract classes (no real, instantiable descendant anywhere) is still
+flagged, exactly matching "permanent structural fact," not "currently
+unused." Gated behind `Registry::check_dead_abstract_classes`; disclosed,
+not fixed: a concrete subclass generated only at runtime by framework
+magic (a Doctrine proxy, a mocking framework) is invisible to this
+project's static, closed-world registry. Needs no Tier-1/Tier-2 use-site
+index either, so it costs nothing beyond its own traversal - confirmed
+on Piwigo (`~/piwigo17-frozen`, warm filesystem cache): 25.73s/1.76 GiB
+with the flag on versus 26.86s/1.76 GiB off, well within run-to-run
+noise, and one real finding (`Piwigo\Tests\Support\
+OpenApiContractAssertions`, an unused test-support base class).
+
 **Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
 168a, the first landed sub-item of a larger in-progress phase - see
 PHASE_BACKLOG.md for 168b onward). `ClassInfo::doctrine_entity`

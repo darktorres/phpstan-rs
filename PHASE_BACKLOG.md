@@ -136,7 +136,10 @@ reasons; phpstan-rs doesn't share the reason.
   phpstan-rs's closed-world model makes "zero subclasses found anywhere
   in the analyzed set" sound. Needs a new reverse (parent-to-children)
   index on top of `hierarchy.rs`'s forward-only `all_ancestor_names`
-  (reused directly by Phases 88/94/93 below).
+  (reused directly by Phase 88/94 below - Phase 93, which cited this
+  item too, turned out not to need the reverse index at all: an inverted
+  `all_ancestor_names` sufficed for its own narrower "any concrete
+  descendant" existence query - see ROADMAP's Done section).
 - **A6 remainder (small).** `Add`, `Sub`'s constant-shift fast path, and
   `Mul` now union `Float` in on genuine `i64` overflow (see ROADMAP's
   Done section) - `sub_int_range_full`'s own general range-minus-range
@@ -175,11 +178,40 @@ run, only to decide what to re-check next; phpstan-rs already keeps
   flag" discipline `member_usage.rs`'s existing private-member
   `escaped` fallback already uses, rather than assume it away when
   widening to protected/public members (B2, below, already does this
-  for top-level functions/classes - see ROADMAP's Done section). This
-  is also the one sub-item of Phase 86 still actually needing
-  `Project.dependents` (or a Tier-1-shaped replacement, per B2's own
-  precision finding) - B2 and B3 both ended up not needing it at all,
-  once built.
+  for top-level functions/classes - see ROADMAP's Done section).
+  **Two real, unresolved design questions found scoping this** (not yet
+  built, deliberately deferred rather than shipped half-precise):
+  (1) unlike B2/B3, this genuinely needs Tier 2 (`use_sites::RefTarget::
+  Member`, not `Project.dependents` - already canonical-owner-keyed,
+  see B2's own precision finding), since a protected/public member can
+  be reached from *any* file, not just its own declaring one - but
+  `member_usage.rs`'s own "scan the raw `ClassDecl`/`EnumDecl`, never
+  the trait-flattened `ClassInfo`" trick (so a trait-provided member is
+  never a false-positive candidate) has no equivalent once building
+  from `Registry.classes` directly for a whole-program scan: `ClassInfo`
+  has no field distinguishing a directly-declared member from one
+  merged in by `flatten_traits`, so a naive registry-driven version
+  either double-counts a trait method under every host class as its own
+  independent "candidate" (attribution ambiguity: does Tier 2 record a
+  trait-donated method's owner as the host or the trait itself?) or
+  needs a new `ClassInfo`-level provenance field to resolve cleanly -
+  not designed yet. (2) Tier 2 has *zero* existing escape-hatch tracking
+  for a dynamic member access (`checker/expr.rs`'s `DynamicMethodCall`/
+  `DynamicPropertyAccess` arms just return `Type::Mixed`, no `record_*`
+  call at all) - unlike `check_dead_enum_cases`'s own `{dynamic}`/
+  `::cases()` hooks (PHASE_BACKLOG Phase 92), which this check would
+  need a sibling of: resolving the receiver's own inferred type and
+  walking `Registry::all_ancestor_names` upward from it to mark every
+  reachable owner escaped handles the *known-typed* receiver case
+  precisely (no new reverse index needed, mirroring Phase 93's own
+  inversion trick above); a genuinely `Mixed`-typed receiver (an
+  untyped parameter, real Mixed data) can't be attributed to any class
+  at all and would need to stay a disclosed, unfixed risk, exactly like
+  the framework-magic gap above. Both are real, tractable designs, not
+  blockers - just not committed to without a dedicated pass, given this
+  phase's own "large" sizing and B2/B3's own lesson that the backlog's
+  original sketch mechanism doesn't survive contact with the real code
+  unmodified.
   `tomasvotruba/unused-public` additionally covers properties and class
   constants, not just methods — broaden B1's own scope statement to
   match — and separately flags a public method *never called from
@@ -342,17 +374,6 @@ of) — cite as concrete "this exact idea already ships" evidence when X1
 is picked up. The same package's `NarrowReturnObjectTypeRule` is the
 return-type sibling, closer in spirit to the already-built too-wide-
 return-type check (Phase 111's I3/Phase 45's 45A) than to X1 itself.
-
-## Phase 93 — Whole-program dead abstract-class detection (§AJ)
-
-For every `is_abstract` class, walk the reverse subclass index (Phase
-85's A5) to confirm no concrete descendant exists anywhere in the closed
-universe — not "currently unused," a permanent structural fact. No
-PHPStan rule exists (its `Reflection/` layer has no descendant-
-enumeration API at all, for the same open-world reason as A5). Distinct
-from Phase 86's B2 (name-reference-based dead code — a polymorphic-
-dispatch-only abstract class has non-zero dependents there even with
-zero real subclasses). **Effort: medium.**
 
 ## Phase 94 — Closed-world precision unlocking Pending techniques further (§P)
 
