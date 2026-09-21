@@ -41,9 +41,20 @@ pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
         | ExprKind::DynamicPropertyAccess(..)
         | ExprKind::Index(..)
         | ExprKind::StaticAccess(..) => false,
-        ExprKind::ArrayLiteral(items) => items
-            .iter()
-            .any(|item| is_non_assignable_target(&item.value)),
+        // A skipped destructuring slot (`[, $x]`/`[$a, , $c]`) has no
+        // item of its own in real PHPStan's AST at all (`$item ===
+        // null`, skipped outright) - this project's own parser instead
+        // represents that same empty slot as a real item whose `value`
+        // is a bare `Literal::Null` (confirmed via `destructuring_with_
+        // skipped_slot_parses`), which must get the identical "skip,
+        // never non-assignable" treatment or every real, common skipped-
+        // slot destructuring in a real corpus false-positives here
+        // (caught via a live Piwigo corpus measurement: `[, $extension]
+        // = explode(...)`).
+        ExprKind::ArrayLiteral(items) => items.iter().any(|item| {
+            !matches!(&item.value.kind, ExprKind::Literal(Literal::Null))
+                && is_non_assignable_target(&item.value)
+        }),
         _ => true,
     }
 }

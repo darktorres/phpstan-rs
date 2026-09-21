@@ -241,3 +241,25 @@ fn ordinary_assignable_targets_are_never_flagged_as_invalid() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn a_skipped_destructuring_slot_is_never_flagged_as_a_non_assignable_target() {
+    // A real, common idiom (`[, $x] = explode(...)`) - caught as a false
+    // positive via a live Piwigo corpus measurement: this project's own
+    // parser represents a skipped slot as a bare `Literal::Null` item
+    // (see `destructuring_with_skipped_slot_parses`), which must not be
+    // treated as a non-assignable expression the way a genuine literal
+    // value would be.
+    let d = diagnostics_for(
+        r#"<?php
+            function test(string $s, array $t) {
+                [, $extension] = explode('-', $s);
+                [$a, , $c] = $t;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "assign.invalidExpr"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
