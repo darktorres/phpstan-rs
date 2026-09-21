@@ -1978,11 +1978,35 @@ duplicating what `return.type` already reports. 45B: `Checker::current_
 function_by_ref_params` feeds `check_param_out_assignment`/`check_by_
 ref_value` (`parameterByRef.type`, level 3) on a direct `$byRefParam =
 expr;`/compound-assign, checked against `@param-out`'s widened type when
-present or the native declared type otherwise. Not built, disclosed:
-45C (`ParameterOutExecutionEndTypeRule`, unioning each by-ref
-parameter's exit-point values), 45D (too-wide by-ref narrowing), and
-destructuring/`foreach`-rebind coverage for 45B - see Pending. Two real,
-severe bugs the Piwigo corpus-verification pass itself found and fixed
+present or the native declared type otherwise. 45C
+(`ParameterOutExecutionEndTypeRule`, `parameterByRef.executionEnd`) and
+45D (`TooWideParameterOutTypeCheck`/`TooWideMethodParameterOutTypeRule`,
+`parameterByRef.tooWide`, opt-in for protected/public non-final methods
+via `Registry::check_too_wide_by_ref_type_in_protected_and_public_methods`,
+threaded through the same 8-file plumbing the return-type flag uses)
+are now done too, built on a genuine per-exit-point accumulator
+(`Checker::current_function_by_ref_exit_snapshots`, snapshotting every
+by-ref parameter's own `locals`-tracked type at each real
+`return`/falls-off-the-end point) rather than a flat "ever assigned
+anywhere" union - real `TooWideParameterOutTypeCheck` merges the scope
+at each real exit point into one final scope, which a flat accumulator
+systematically over-widens against (missing real too-wide findings
+whenever a variable is reassigned to a different type before its real
+exit). 45C only ever fires for a parameter with a genuine `@param-out`
+tag, matching `getOutType() === null`'s own bail in the real rule - the
+tag-independent 45B keeps its native-type fallback unchanged. Both also
+close a real, live gap found in the same pass: a closure/arrow-fn body
+capturing an outer by-ref parameter by reference/by value and
+reassigning it inside was being checked against the *outer* function's
+own by-ref contract - fixed by resetting/restoring the by-ref state
+around both `ExprKind::Closure`'s and `ExprKind::ArrowFn`'s own body
+check, matching real PHPStan's `isInAnonymousFunction()` exemption.
+Destructuring-target (`[$a, $byRef] = foo()`, any nesting depth,
+reusing `bind_assignment_target`'s own per-position/per-key element-type
+resolution) and `foreach ($x as &$byRef)`-rebind coverage (the
+per-iteration bind inside `converge_loop_body`'s own closure,
+`checker/stmt/loops.rs`) for the 45B/45C/45D checks are done too. Two
+real, severe bugs the Piwigo corpus-verification pass itself found and fixed
 in the shared type-inference machinery 45A's own comparison depends on,
 neither specific to this item's own new code: (1) `checker::resolve::
 resolve_pseudo` never recursed into a generic class reference's own
@@ -3729,19 +3753,6 @@ demand call. Declined outright, not staged: any `dlopen`/`cdylib`
 dynamic-loading mechanism (no stable Rust ABI without a large separate
 FFI project) and a NEON registration syntax (no parser exists project-
 wide for NEON, already declined elsewhere for the same reason).
-
-**45 - Declared-vs-actual-narrowest-type inference (PARTIAL).** The
-return/property variant (45A) and the by-ref direct-assignment variant
-(45B, gated on new `@param-out` tag support) are both done - see Done.
-Not built: `ParameterOutExecutionEndTypeRule` (45C - unioning each
-by-ref parameter's value at every `return`/execution-end point against
-its declared/`@param-out` type) and `TooWideFunctionParameterOutTypeRule`/
-`TooWideMethodParameterOutTypeRule` (45D - too-wide narrowing for by-ref
-parameters), plus destructuring-target (`[$a, $byRef] = foo()`) and
-`foreach ($x as &$byRef)`-rebind coverage for the by-ref check 45B
-already builds for a plain `$x = ...`/`$x += ...` assignment. 45A's own
-property half (including cross-file trait-supplied property-assignment
-tracking) is now done too - see Done, Phases 166/174.
 
 **48 - Symbol-existence pipeline, remaining stretch goals (PARTIAL).**
 The existence-check MVP, typed-class-constant validation, multi-
