@@ -5,6 +5,7 @@ mod circular_namespace_deps;
 mod dead_abstract_classes;
 mod dead_code;
 mod dead_enum_cases;
+mod dead_members;
 mod decl_locations;
 mod duplicate_classes;
 mod duplicate_functions;

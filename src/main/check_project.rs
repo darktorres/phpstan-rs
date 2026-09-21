@@ -139,6 +139,7 @@ fn run_check_project(
     check_dead_code: bool,
     check_circular_dependencies: bool,
     check_dead_abstract_classes: bool,
+    check_dead_members: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -205,6 +206,7 @@ fn run_check_project(
     project.set_check_dead_code(check_dead_code);
     project.set_check_circular_dependencies(check_circular_dependencies);
     project.set_check_dead_abstract_classes(check_dead_abstract_classes);
+    project.set_check_dead_members(check_dead_members);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
@@ -381,20 +383,28 @@ fn run_check_project(
     // whole-program check's own real cost to the per-node tracking work
     // below, not a doubling of total check time - see `Project::check_
     // whole_program`'s own doc comment.
-    type MemberRefData = (Vec<(Span, String, String)>, HashSet<String>);
+    type MemberRefData = (
+        Vec<(Span, String, String)>,
+        HashSet<String>,
+        HashSet<String>,
+    );
     type CheckOutcome = Result<(Vec<checker::Diagnostic>, Option<MemberRefData>), String>;
+    let needs_tier_2 = check_dead_enum_cases || check_dead_members;
     let checked_results: Vec<(PathBuf, CheckOutcome)> = pool.install(|| {
         analyze_files_by_size
             .par_iter()
             .map(|path| {
                 let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if check_dead_enum_cases {
-                        let (diagnostics, member_refs, escaped_enums) = project
-                            .check_file_with_property_assign_facts_collecting_member_refs(
+                    if needs_tier_2 {
+                        let (diagnostics, member_refs, escaped_enums, escaped_member_classes) =
+                            project.check_file_with_property_assign_facts_collecting_member_refs(
                                 path,
                                 &property_assign_facts,
                             );
-                        (diagnostics, Some((member_refs, escaped_enums)))
+                        (
+                            diagnostics,
+                            Some((member_refs, escaped_enums, escaped_member_classes)),
+                        )
                     } else {
                         (
                             project.check_file_with_property_assign_facts(
@@ -423,8 +433,13 @@ fn run_check_project(
     for (path, outcome) in checked_results {
         match outcome {
             Ok((diagnostics, member_data)) => {
-                if let Some((member_refs, escaped_enums)) = member_data {
-                    project.seed_member_refs(&path, member_refs, escaped_enums);
+                if let Some((member_refs, escaped_enums, escaped_member_classes)) = member_data {
+                    project.seed_member_refs(
+                        &path,
+                        member_refs,
+                        escaped_enums,
+                        escaped_member_classes,
+                    );
                 }
                 results.insert(path, diagnostics);
             }
@@ -432,7 +447,7 @@ fn run_check_project(
         }
     }
     check_panics.sort();
-    if check_dead_enum_cases {
+    if needs_tier_2 {
         project.mark_member_index_built();
     }
 
@@ -570,6 +585,7 @@ pub(crate) fn run_check_project_command(
     check_dead_code: bool,
     check_circular_dependencies: bool,
     check_dead_abstract_classes: bool,
+    check_dead_members: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -691,6 +707,7 @@ pub(crate) fn run_check_project_command(
         check_circular_dependencies || config.check_circular_dependencies.unwrap_or(false);
     let check_dead_abstract_classes =
         check_dead_abstract_classes || config.check_dead_abstract_classes.unwrap_or(false);
+    let check_dead_members = check_dead_members || config.check_dead_members.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -834,6 +851,7 @@ pub(crate) fn run_check_project_command(
         check_dead_code,
         check_circular_dependencies,
         check_dead_abstract_classes,
+        check_dead_members,
         configured_level,
         &stub_dirs,
         php_version,

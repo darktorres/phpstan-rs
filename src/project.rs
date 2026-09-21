@@ -160,6 +160,11 @@ pub struct Project {
     // project`'s primary pass). Consulted by `checker::whole_program::
     // dead_enum_cases::find_dead_cases`.
     escaped_enum_cases: HashSet<String>,
+    // `Checker::escaped_member_classes`'s own project-wide merge -
+    // exactly the same shape/population paths as `escaped_enum_cases`
+    // above, just for Phase 86's B1 (`checker::whole_program::
+    // dead_members::find_dead_members`) instead of Phase 92.
+    escaped_member_classes: HashSet<String>,
 }
 
 /// The result of `Project::check_paths_isolating_panics`: successful
@@ -170,11 +175,14 @@ pub type CheckPathsIsolatingPanics = (HashMap<PathBuf, Vec<Diagnostic>>, Vec<(Pa
 /// The result of `check_file_impl`'s own Tier-2-collecting mode
 /// (`check_file_and_member_refs`/`check_file_with_property_assign_
 /// facts_collecting_member_refs`): a file's diagnostics, its own
-/// member-reference sites, and the `Enum` classes it saw escape (see
-/// `Checker::escaped_enums`'s own doc comment).
+/// member-reference sites, the `Enum` classes it saw escape (see
+/// `Checker::escaped_enums`'s own doc comment), and the classes it saw
+/// escape via a genuinely dynamic member access (see `Checker::
+/// escaped_member_classes`'s own doc comment).
 pub type CheckWithMemberRefs = (
     Vec<Diagnostic>,
     Vec<(Span, String, String)>,
+    HashSet<String>,
     HashSet<String>,
 );
 
@@ -197,6 +205,7 @@ impl Project {
             use_sites: UseSiteIndex::default(),
             member_index_built: false,
             escaped_enum_cases: HashSet::new(),
+            escaped_member_classes: HashSet::new(),
         }
     }
 
@@ -502,6 +511,13 @@ impl Project {
     /// own doc comment for why this defaults to `false`.
     pub fn set_check_dead_abstract_classes(&mut self, enabled: bool) {
         self.registry.check_dead_abstract_classes = enabled;
+    }
+
+    /// Opts the whole project's checking into dead-protected/public-
+    /// member detection - see `registry::Registry::check_dead_members`'s
+    /// own doc comment for why this defaults to `false`.
+    pub fn set_check_dead_members(&mut self, enabled: bool) {
+        self.registry.check_dead_members = enabled;
     }
 
     /// Configures the project's own `level` setting for
@@ -817,31 +833,35 @@ impl Project {
         }
         let paths: Vec<PathBuf> = self.files.keys().cloned().collect();
         for path in paths {
-            let (_, member_refs, escaped_enums) = self.check_file_impl(&path, None, true);
-            self.seed_member_refs(&path, member_refs, escaped_enums);
+            let (_, member_refs, escaped_enums, escaped_member_classes) =
+                self.check_file_impl(&path, None, true);
+            self.seed_member_refs(&path, member_refs, escaped_enums, escaped_member_classes);
         }
         self.mark_member_index_built();
     }
 
-    /// Adopts already-computed Tier-2 member-ref/escaped-enum data for
-    /// `path` into `use_sites`/`escaped_enum_cases` - the per-file work
-    /// `ensure_member_index_built`'s own loop body does above, factored
-    /// out so `check-project`'s own primary pass can feed it data it
-    /// already computed inline (via `check_file_with_property_assign_
-    /// facts_collecting_member_refs`) instead of `ensure_member_index_
-    /// built` re-deriving it via a second, redundant pass. Caller must
-    /// call `mark_member_index_built` once every file has been seeded.
+    /// Adopts already-computed Tier-2 member-ref/escaped-enum/escaped-
+    /// member-class data for `path` into `use_sites`/`escaped_enum_
+    /// cases`/`escaped_member_classes` - the per-file work `ensure_
+    /// member_index_built`'s own loop body does above, factored out so
+    /// `check-project`'s own primary pass can feed it data it already
+    /// computed inline (via `check_file_with_property_assign_facts_
+    /// collecting_member_refs`) instead of `ensure_member_index_built`
+    /// re-deriving it via a second, redundant pass. Caller must call
+    /// `mark_member_index_built` once every file has been seeded.
     pub fn seed_member_refs(
         &mut self,
         path: &Path,
         member_refs: Vec<(Span, String, String)>,
         escaped_enums: HashSet<String>,
+        escaped_member_classes: HashSet<String>,
     ) {
         for (span, owner, member) in member_refs {
             self.use_sites
                 .insert(path, use_sites::RefTarget::Member(owner, member), span);
         }
         self.escaped_enum_cases.extend(escaped_enums);
+        self.escaped_member_classes.extend(escaped_member_classes);
     }
 
     /// See `seed_member_refs`'s own doc comment - marks Tier 2 as built
@@ -1215,7 +1235,8 @@ impl Project {
         &self,
         path: &Path,
     ) -> (Vec<Diagnostic>, Vec<(Span, String, String)>) {
-        let (diagnostics, member_refs, _escaped_enums) = self.check_file_impl(path, None, true);
+        let (diagnostics, member_refs, _escaped_enums, _escaped_member_classes) =
+            self.check_file_impl(path, None, true);
         (diagnostics, member_refs)
     }
 
@@ -1290,7 +1311,7 @@ impl Project {
         collect_member_refs: bool,
     ) -> CheckWithMemberRefs {
         let Some(file) = self.files.get(path) else {
-            return (Vec::new(), Vec::new(), HashSet::new());
+            return (Vec::new(), Vec::new(), HashSet::new(), HashSet::new());
         };
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
@@ -1306,6 +1327,7 @@ impl Project {
         }
         let member_refs = checker.take_member_ref_sites();
         let escaped_enums = checker.take_escaped_enums();
+        let escaped_member_classes = checker.take_escaped_member_classes();
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
             diagnostics.extend(
@@ -1361,7 +1383,12 @@ impl Project {
                         .is_some_and(|ids| ids.iter().any(|id| id == &d.identifier))
             });
         }
-        (diagnostics, member_refs, escaped_enums)
+        (
+            diagnostics,
+            member_refs,
+            escaped_enums,
+            escaped_member_classes,
+        )
     }
 
     pub fn registry(&self) -> &Registry {
@@ -1626,32 +1653,34 @@ impl Project {
 
     /// Runs every opt-in whole-program diagnostic check (currently
     /// `check_dead_enum_cases`, `check_dead_code`, `check_circular_
-    /// dependencies`, and `check_dead_abstract_classes`) - see `checker::
-    /// whole_program`'s own module doc comment for why these can't run
-    /// through the ordinary per-file `Checker` path `check_file`/
-    /// `check_all` above use. `check-project` calls this once, after its
-    /// own primary per-file pass has populated `results`, merging this
-    /// method's own return value in before level-filtering/
-    /// `ignore_errors`/baseline (so `@phpstan-ignore`/baseline
-    /// suppression apply to a whole-program finding exactly like an
-    /// ordinary one).
+    /// dependencies`, `check_dead_abstract_classes`, and `check_dead_
+    /// members`) - see `checker::whole_program`'s own module doc comment
+    /// for why these can't run through the ordinary per-file `Checker`
+    /// path `check_file`/`check_all` above use. `check-project` calls
+    /// this once, after its own primary per-file pass has populated
+    /// `results`, merging this method's own return value in before
+    /// level-filtering/`ignore_errors`/baseline (so `@phpstan-ignore`/
+    /// baseline suppression apply to a whole-program finding exactly
+    /// like an ordinary one).
     ///
-    /// `check_dead_enum_cases` needs `ensure_member_index_built`'s own
-    /// Tier-2 use-site index - a real cost when it has to build it
-    /// itself (a second, redundant `Checker` pass per file), avoided
-    /// entirely when the caller already seeded it via `seed_member_refs`/
-    /// `mark_member_index_built` (`check-project`'s own primary pass
-    /// does exactly this - see its own doc comment) before calling here,
-    /// in which case `ensure_member_index_built` is a complete no-op.
-    /// `check_dead_code` needs only Tier 1 (`use_sites`'s class/function
-    /// reference sites) - cheaper than Tier 2 (a plain syntactic walk,
-    /// not a real `Checker` pass), but still real per-loaded-file cost,
-    /// so `Project::insert_parsed_file` itself gates populating it in
-    /// batch mode on this exact flag - see that call site's own doc
-    /// comment. `check_circular_dependencies` and `check_dead_abstract_
-    /// classes` need neither Tier - both read directly off `Registry.
-    /// classes`' own already-resolved fields, so each costs nothing
-    /// beyond its own traversal regardless of how large the project is.
+    /// `check_dead_enum_cases` and `check_dead_members` both need
+    /// `ensure_member_index_built`'s own Tier-2 use-site index - a real
+    /// cost when it has to build it itself (a second, redundant
+    /// `Checker` pass per file), avoided entirely when the caller
+    /// already seeded it via `seed_member_refs`/`mark_member_index_
+    /// built` (`check-project`'s own primary pass does exactly this,
+    /// whenever either flag is on - see its own doc comment) before
+    /// calling here, in which case `ensure_member_index_built` is a
+    /// complete no-op. `check_dead_code` needs only Tier 1 (`use_sites`'s
+    /// class/function reference sites) - cheaper than Tier 2 (a plain
+    /// syntactic walk, not a real `Checker` pass), but still real per-
+    /// loaded-file cost, so `Project::insert_parsed_file` itself gates
+    /// populating it in batch mode on this exact flag - see that call
+    /// site's own doc comment. `check_circular_dependencies` and
+    /// `check_dead_abstract_classes` need neither Tier - both read
+    /// directly off `Registry.classes`' own already-resolved fields, so
+    /// each costs nothing beyond its own traversal regardless of how
+    /// large the project is.
     pub fn check_whole_program(&mut self) -> HashMap<PathBuf, Vec<Diagnostic>> {
         let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
 
@@ -1766,6 +1795,45 @@ impl Project {
                         "Abstract class {name} has no concrete subclass anywhere in the project."
                     ),
                     "class.deadAbstract",
+                ) {
+                    results.entry(path).or_default().push(d);
+                }
+            }
+        }
+
+        if self.registry.check_dead_members {
+            self.ensure_member_index_built();
+            let dead_members = checker::whole_program::dead_members::find_dead_members(
+                &self.registry,
+                &self.use_sites,
+                &self.escaped_member_classes,
+            );
+            for (owner, name, kind) in dead_members {
+                let Some((path, span)) = self
+                    .decl_locations
+                    .members
+                    .get(&(owner.clone(), name.clone()))
+                else {
+                    continue;
+                };
+                let path = path.clone();
+                let (noun, identifier) = match kind {
+                    checker::whole_program::dead_members::MemberKind::Method => {
+                        ("Method", "method.unused")
+                    }
+                    checker::whole_program::dead_members::MemberKind::Property => {
+                        ("Property", "property.unused")
+                    }
+                    checker::whole_program::dead_members::MemberKind::Const => {
+                        ("Constant", "classConstant.unused")
+                    }
+                };
+                if let Some(d) = self.whole_program_diagnostic(
+                    &path,
+                    *span,
+                    owner.clone(),
+                    format!("{noun} {owner}::{name} is never used."),
+                    identifier,
                 ) {
                     results.entry(path).or_default().push(d);
                 }

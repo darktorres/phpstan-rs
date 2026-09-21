@@ -278,6 +278,12 @@ enum Command {
         /// check_dead_abstract_classes`'s own doc comment.
         #[arg(long)]
         check_dead_abstract_classes: bool,
+        /// Enables dead-protected/public-member detection (a method/
+        /// property/const never referenced anywhere in the project). Off
+        /// by default - see `registry::Registry::check_dead_members`'s
+        /// own doc comment for the real, disclosed false-positive risks.
+        #[arg(long)]
+        check_dead_members: bool,
         /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
         /// portability rules that check "X is only supported on PHP Y.Z
         /// and later" (see `php_version::PhpFeature`). Unset means no
@@ -382,6 +388,7 @@ fn main() {
             check_dead_code,
             check_circular_dependencies,
             check_dead_abstract_classes,
+            check_dead_members,
             php_version,
             generate_baseline,
             baseline,
@@ -423,6 +430,7 @@ fn main() {
             check_dead_code,
             check_circular_dependencies,
             check_dead_abstract_classes,
+            check_dead_members,
             php_version,
             generate_baseline,
             baseline,

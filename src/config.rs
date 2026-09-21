@@ -37,6 +37,7 @@
 //! check_dead_code = false
 //! check_circular_dependencies = false
 //! check_dead_abstract_classes = false
+//! check_dead_members = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -222,6 +223,9 @@ pub struct Config {
     /// Opt-in dead-abstract-class detection - see `registry::Registry::
     /// check_dead_abstract_classes`'s own doc comment for why.
     pub check_dead_abstract_classes: Option<bool>,
+    /// Opt-in dead-protected/public-member detection - see `registry::
+    /// Registry::check_dead_members`'s own doc comment for why.
+    pub check_dead_members: Option<bool>,
 }
 
 impl Config {

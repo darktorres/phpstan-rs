@@ -2516,6 +2516,114 @@ with the flag on versus 26.86s/1.76 GiB off, well within run-to-run
 noise, and one real finding (`Piwigo\Tests\Support\
 OpenApiContractAssertions`, an unused test-support base class).
 
+**Whole-application unused protected/public member detection**
+(PHASE_BACKLOG Phase 86's B1, `method.unused`/`property.unused`/
+`classConstant.unused`) - closes out Phase 86 entirely (B2/B3 above).
+Real PHPStan's own dead-member rule gates on `isPrivate()` specifically,
+since verifying no *other file* reaches a broader-visibility member
+needs cross-process collector machinery; this project's closed-world
+`Registry`/Tier-2 `use_sites` index (`RefTarget::Member`, already
+canonical-owner-keyed) already has that fact for free - every ordinary
+access arm (`checker/expr.rs`'s `PropertyAccess`/`MethodCall`/
+`StaticAccess`/`StaticCall`) already calls `record_member_ref`, so an
+ordinary reference needed no new instrumentation at all. Two real gaps
+did, both scoping open questions from when B1 was first triaged:
+
+- **The escape-hatch mechanism** (this phase's own main design task): a
+  genuinely dynamic member access (`$obj->{$expr}`/`$obj->$name`) used
+  to have zero escape-hatch tracking, unlike `check_dead_enum_cases`'s
+  own `{dynamic}`/`::cases()` hooks. New `Checker::escape_targets_for_
+  receiver_type` + `escaped_member_classes` (mirroring `escaped_enums`'
+  own shape, threaded through `CheckWithMemberRefs`/`seed_member_refs`
+  exactly like it): `check_expr`'s `DynamicPropertyAccess`/
+  `DynamicMethodCall` arms first check whether the dynamic name is a
+  *literal string* - PHP-semantically, `$obj->{'foo'}` **is** `$obj->foo`,
+  so that case now records a real reference instead of escaping
+  anything (a precision improvement for every Tier-2 consumer, not just
+  this one). A genuinely computed name escapes every class the
+  receiver's own resolved type could reach: itself, its ancestors (an
+  inherited member is reachable through a subclass instance too), and -
+  for an interface/non-final-abstract receiver - every real subclass/
+  implementor anywhere in the registry, found by inverting `Registry::
+  all_ancestor_names` (the same technique Phase 93 above uses). A
+  `Union`/`Intersection` receiver escapes every member's own targets
+  (conservative - under-escaping is the wrong-direction mistake for an
+  escape hatch, unlike this project's usual "favor false negatives"
+  bias). A genuinely unresolvable (`Mixed`) receiver contributes no
+  escape protection at all - a real, disclosed risk with no fix
+  possible without real type information. Also found, pre-existing and
+  unrelated to this check: `$obj->$name(...)` (a bare variable, not the
+  braced form above) parses (`parser/postfix.rs`'s own "best-effort"
+  modeling) as an ordinary access literally named after the *variable's
+  own source name*, never its runtime value - a real, common dynamic-
+  dispatch idiom this project already couldn't model correctly, now
+  disclosed rather than silently assumed handled; fixing the underlying
+  AST shape is out of scope (a parser-level change, wider blast radius
+  than this one check).
+- **Which methods PHP itself calls implicitly, with no source-level
+  reference this project could ever see.** Three real categories, found
+  in that order by actually measuring a real corpus (Piwigo) rather than
+  assuming the first two were enough: PHP's own magic method names
+  (`__construct`, `__toString`, ...), hard-excluded by name; a method
+  overriding *any* real ancestor's own same-named method (an
+  interface's contract method, or a regular ancestor's method reached
+  only through polymorphic dispatch on a base-typed variable) - this
+  replaced an initial small hand-maintained table of well-known SPL
+  interfaces (`Countable`, `Iterator`, ...) after the first real Piwigo
+  measurement (3807 findings) caught that table's own real blind spot:
+  several genuinely-used `PhpParser\NodeVisitor` implementations
+  (`enterNode`/`leaveNode`, called polymorphically by php-parser's own
+  vendored traverser) were flagged dead. The generic ancestor-override
+  check catches every such interface automatically, with no library-
+  specific knowledge at all (down to 2506 findings); a PHPUnit test
+  method or lifecycle callback (`setUp`, `test*`) on a real `TestCase`
+  subclass - the actual *dominant* source of noise a second measurement
+  revealed (thousands of `test*` methods, each only ever invoked by
+  PHPUnit's own reflection-based discovery), recognized the exact same
+  way `checker::risky_tests::check_risky_test_methods` already does
+  (down to 193 findings, a workable signal-to-noise ratio). An
+  interface/trait's own method declaration is never itself a candidate
+  either (never instantiable, so never itself "dead" in a meaningful
+  sense - only a real class/enum's own methods/properties/consts are).
+  An enum's built-in `name`/`value` properties and an enum case's own
+  `consts` entry (already Phase 92's own domain) are excluded too.
+
+Gated behind `Registry::check_dead_members`; needs the same Tier-2
+use-site index `check_dead_enum_cases` does (`main/check_project.rs`'s
+own primary loop now triggers Tier-2 collection whenever *either* flag
+is on). Real, disclosed false-positive risks left unfixed (ship
+opt-in): the whole-program pass only ever runs over analyzed (first-
+party) files, never vendor/context ones - a call made entirely from
+within vendor code (the exact shape the `NodeVisitor` case above turned
+out to be, before the generic override check independently fixed it) is
+invisible to this check for that architectural reason; a member
+reachable only through framework magic/reflection generally (a
+template calling a method by name, a DI container definition); a
+member called only through a `[$obj, 'methodName']` array-callable - a
+real, known-name reference this project doesn't yet resolve, unlike the
+literal-string-dynamic-access case above; a property and a method
+sharing the exact same name on one class (legal PHP) share one Tier-2
+usage signal, so using one can mask the other's own real deadness - a
+real, but only ever false-*negative* limitation, the safe direction.
+Not built, deliberately deferred (`tomasvotruba/unused-public`'s own
+idea): flagging a public method *never* called from outside its own
+declaring class as "could be private" (over-visible, not dead) - a
+different, suggestion-shaped finding, not this check's own "is it dead"
+question.
+
+**Real corpus measurement** (Piwigo, `~/piwigo17-frozen`, warm
+filesystem cache, `--config phpstan-rs.toml`): 27.56s-29.95s/1.83-1.87
+GiB across the design's three iterations (each within ordinary
+run-to-run noise of the ~26.86s/1.76 GiB baseline with every whole-
+program check off - the added RSS is Tier 2's own real per-node
+tracking cost, the same character `check_dead_enum_cases` already
+measured, not a new cost category). The finding *count* moved far more
+than the cost did as the design was corrected against real evidence:
+3807 findings (initial hand-maintained-SPL-table design) → 2506 (after
+the generic ancestor-override fix) → 193 (after the PHPUnit test-method/
+lifecycle-callback fix) - each drop a real, measured correction, not a
+guess, and each documented above rather than silently folded away.
+
 **Doctrine ORM entity metadata resolution** (PHASE_BACKLOG Phase 168's
 168a, the first landed sub-item of a larger in-progress phase - see
 PHASE_BACKLOG.md for 168b onward). `ClassInfo::doctrine_entity`

@@ -2795,16 +2795,45 @@ impl<'a> Checker<'a> {
                     result
                 }
             }
+            // `$obj->{$expr}` - when `$expr` is a literal string, this is
+            // PHP-semantically an ordinary, fully-known access
+            // (`$obj->{'foo'}` === `$obj->foo`), so it's recorded as a
+            // real member reference instead of escaping anything - any
+            // Tier-2 consumer sees it exactly like a plain `PropertyAccess`
+            // would. Only a genuinely computed name - the receiver's own
+            // type is known or not, the *name* itself never is - falls
+            // back to `escape_targets_for_receiver_type`'s conservative
+            // whole-class escape hatch.
             ExprKind::DynamicPropertyAccess(base, name_expr) => {
-                self.check_expr(base, locals, label);
+                let base_ty = self.check_expr(base, locals, label);
                 self.check_expr(name_expr, locals, label);
+                if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind {
+                    if let Some((owner, _)) = self.find_property_owner(&base_ty, name) {
+                        self.record_member_ref(e.span, &owner, name);
+                    }
+                } else {
+                    for class in self.escape_targets_for_receiver_type(&base_ty) {
+                        self.record_member_class_escape(&class);
+                    }
+                }
                 Type::Mixed
             }
+            // Same literal-name-is-real-usage/genuinely-dynamic-name-
+            // escapes split as `DynamicPropertyAccess` just above.
             ExprKind::DynamicMethodCall(recv, name_expr, args) => {
-                self.check_expr(recv, locals, label);
+                let recv_ty = self.check_expr(recv, locals, label);
                 self.check_expr(name_expr, locals, label);
                 for a in args {
                     self.check_expr(&a.value, locals, label);
+                }
+                if let ExprKind::Literal(Literal::String(name)) = &name_expr.kind {
+                    if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
+                        self.record_member_ref(e.span, &owner, name);
+                    }
+                } else {
+                    for class in self.escape_targets_for_receiver_type(&recv_ty) {
+                        self.record_member_class_escape(&class);
+                    }
                 }
                 Type::Mixed
             }

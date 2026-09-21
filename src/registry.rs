@@ -284,6 +284,22 @@ pub struct Registry {
     // framework magic (a Doctrine proxy, a mocking framework) is
     // invisible to this project's static registry.
     pub check_dead_abstract_classes: bool,
+    // A protected/public method/property/const never referenced
+    // anywhere in the project (PHASE_BACKLOG Phase 86's B1) - opt-in for
+    // real, disclosed reasons real PHPStan's own dead-member rule
+    // doesn't cover this visibility at all (it gates on `isPrivate()`
+    // specifically, since verifying no *other file* reaches a broader-
+    // visibility member needs cross-process collector machinery this
+    // project's own closed-world registry doesn't need): a member
+    // reachable only through framework magic/reflection (a template
+    // calling a method by name, a DI container definition, PHPUnit
+    // attribute discovery); a member reachable only through a
+    // genuinely dynamic access (`$obj->{$expr}`/`$obj->$name`) whose
+    // receiver's own type this project can't resolve at all (a real,
+    // narrower risk than the framework-magic one - see `checker::
+    // whole_program::dead_members`'s own module doc comment for the
+    // escape-hatch mechanism that closes the *resolvable*-receiver case).
+    pub check_dead_members: bool,
     // The project's own `level` setting, *before* `check-project`'s own
     // `MAX_LEVEL`-driven `.unwrap_or(6)` collapse - `None` when never
     // explicitly configured, which `accepts_at_configured_level` treats

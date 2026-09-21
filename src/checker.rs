@@ -1011,6 +1011,20 @@ pub struct Checker<'a> {
     // `record_member_ref`'s own pattern, so every plain call site below
     // stays unconditional.
     escaped_enums: RefCell<HashSet<String>>,
+    // Phase 86's B1 own escape hatch: every class (and each of its own
+    // ancestors/real subclasses - see `Checker::escape_targets_for_
+    // receiver_type`) this file's check pass saw reached through a
+    // *genuinely* dynamic member access (`$obj->{$expr}`/`$obj->$name`,
+    // the name itself not a literal string - see `check_expr`'s own
+    // `DynamicPropertyAccess`/`DynamicMethodCall` arms) whose receiver
+    // resolved to a known type. `checker::whole_program::dead_members`
+    // treats every member of an escaped class as conservatively used,
+    // the same "can't attribute to one specific member, don't flag any
+    // of them" discipline `escaped_enums` above already uses for enum
+    // cases. Populated only when `collect_member_refs` is on -
+    // `record_member_class_escape` self-gates on it internally,
+    // mirroring `record_enum_escape`'s own pattern.
+    escaped_member_classes: RefCell<HashSet<String>>,
     // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
     // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
     // `infer_expr`'s separate `Call` arm both independently re-derive this
@@ -1169,6 +1183,7 @@ impl<'a> Checker<'a> {
             collect_member_refs: false,
             member_ref_sites: RefCell::new(HashSet::new()),
             escaped_enums: RefCell::new(HashSet::new()),
+            escaped_member_classes: RefCell::new(HashSet::new()),
             semantic_tokens: Vec::new(),
             call_candidate_cache: RefCell::new(HashMap::new()),
             pending_or_disjunctions: Vec::new(),
@@ -1319,6 +1334,98 @@ impl<'a> Checker<'a> {
     /// `take_member_ref_sites`'s own sibling for `escaped_enums`.
     pub(crate) fn take_escaped_enums(&mut self) -> HashSet<String> {
         self.escaped_enums.take()
+    }
+
+    /// See `escaped_member_classes`'s own doc comment. Unlike `record_
+    /// enum_escape`, `class` here is never assumed pre-canonicalized by
+    /// the caller - every call site instead passes each class from
+    /// `escape_targets_for_receiver_type`'s own already-canonical
+    /// `Vec`, so this stays a plain, unconditional insert.
+    pub(crate) fn record_member_class_escape(&self, class: &str) {
+        if !self.collect_member_refs {
+            return;
+        }
+        self.escaped_member_classes
+            .borrow_mut()
+            .insert(class.to_string());
+    }
+
+    /// `take_escaped_enums`'s own sibling for `escaped_member_classes`.
+    pub(crate) fn take_escaped_member_classes(&mut self) -> HashSet<String> {
+        self.escaped_member_classes.take()
+    }
+
+    /// Every class a *genuinely* dynamic member access on `ty` could
+    /// reach a protected/public member of - `ty` resolving to a known,
+    /// concrete class includes that class and everything in its own
+    /// `Registry::all_ancestor_names` (an inherited member is reachable
+    /// through a subclass instance too); `ty` resolving to an interface
+    /// or non-final abstract class additionally includes every real
+    /// class anywhere in the registry that has it in *their* own
+    /// ancestor set (the same inversion `checker::whole_program::dead_
+    /// abstract_classes` already uses, applied here per dynamic-access
+    /// site instead of once project-wide - dynamic accesses are rare
+    /// enough in practice that this doesn't need its own persistent
+    /// index). A `Union`/`Intersection` recurses into every member and
+    /// escapes the union of all of them - conservative by design: the
+    /// real runtime receiver could be any one of them, and under-
+    /// escaping (missing a real dynamic-dispatch reference) is the
+    /// wrong-direction mistake for an escape hatch, unlike most of this
+    /// project's other "favor false negatives" checks. Returns empty for
+    /// anything else (`Mixed`, an unresolved type) - a real, disclosed
+    /// false-positive risk `dead_members`'s own doc comment names, not
+    /// silently assumed safe.
+    pub(crate) fn escape_targets_for_receiver_type(&self, ty: &Type) -> Vec<String> {
+        match ty {
+            Type::Object(class, _) => {
+                let Some((canonical, info)) = self.registry.lookup_class(class) else {
+                    return Vec::new();
+                };
+                let canonical = canonical.to_string();
+                let mut targets: Vec<String> = vec![canonical.clone()];
+                targets.extend(
+                    self.registry
+                        .all_ancestor_names(&canonical)
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                if info.is_abstract || info.kind != ClassKind::Class {
+                    for (other_fqn, other_info) in &self.registry.classes {
+                        if other_info.kind == ClassKind::Class
+                            && !other_info.is_abstract
+                            && self
+                                .registry
+                                .all_ancestor_names(other_fqn)
+                                .contains(canonical.as_str())
+                        {
+                            targets.push(other_fqn.to_string());
+                            targets.extend(
+                                self.registry
+                                    .all_ancestor_names(other_fqn)
+                                    .iter()
+                                    .map(|s| s.to_string()),
+                            );
+                        }
+                    }
+                }
+                targets
+            }
+            Type::EnumCase(fqn, _) => {
+                let mut targets = vec![fqn.to_string()];
+                targets.extend(
+                    self.registry
+                        .all_ancestor_names(fqn)
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                targets
+            }
+            Type::Union(members) | Type::Intersection(members) => members
+                .iter()
+                .flat_map(|m| self.escape_targets_for_receiver_type(m))
+                .collect(),
+            _ => Vec::new(),
+        }
     }
 
     /// The declaration-site counterpart of the read-site probe hook inline
