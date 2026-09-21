@@ -381,6 +381,75 @@ fn with_no_configured_php_version_the_union_type_check_stays_silent() {
     );
 }
 
+// `ExistingClassesInPropertyHookTypehintsRule`'s native-union-pre-8.0
+// half, reached from a property hook - a hook has no `FunctionDecl` to
+// reuse `check_function`'s own registry lookup, so this needs its own
+// call site into the shared raw-text core.
+
+#[test]
+fn a_set_hooks_native_union_parameter_type_pre_8_0_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public int $bar {
+                    set(int|string $value) {
+                        $this->bar = 1;
+                    }
+                }
+            }
+        "#,
+        |r| r.php_version = Some((7, 4)),
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "parameter.unionTypeNotSupported"
+                && x.message.contains("Set hook for property Foo::$bar")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_set_hooks_native_union_parameter_type_on_8_0_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public int $bar {
+                    set(int|string $value) {
+                        $this->bar = 1;
+                    }
+                }
+            }
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.unionTypeNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_set_hook_with_the_implicit_untyped_value_parameter_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            class Foo {
+                public int $bar {
+                    set {
+                        $this->bar = $value;
+                    }
+                }
+            }
+        "#,
+        |r| r.php_version = Some((7, 4)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "parameter.unionTypeNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 #[test]
 fn a_plain_typed_parameter_defaulting_to_null_on_8_4_is_flagged() {
     let d = diagnostics_for_with(

@@ -1123,45 +1123,74 @@ impl<'a> Checker<'a> {
 
     /// Mirrors real PHPStan's `parameter.unionTypeNotSupported`/`return.
     /// unionTypeNotSupported` - a native union type-hint (`int|string`)
-    /// pre-8.0. Works directly off each `Param::type_hint`'s raw text (a
-    /// native-only union always contains a bare top-level `|` with no
-    /// enclosing `?`/generic wrapper), not the docblock-merged `Type`,
-    /// matching real PHPStan's native-AST-node-only scope. Reports at
-    /// most once per declaration (first offending site), matching real
-    /// PHPStan's `$unionTypeReported` latch.
+    /// pre-8.0. Thin wrapper over `check_native_union_types_supported_raw`
+    /// (below), which does the real work off raw text so it can also be
+    /// called from property-hook checking - a hook has no `FunctionDecl`
+    /// to hand this.
     fn check_native_union_types_supported(
         &mut self,
         f: &FunctionDecl,
         is_method: bool,
         label: &str,
     ) {
-        if let Some(version) = self.registry.php_version
-            && !PhpFeature::NativeUnionTypes.is_available(version)
-        {
-            let kind_word = if is_method { "Method" } else { "Function" };
-            let message = format!(
-                "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
-            );
-            if f.params
-                .iter()
-                .any(|p| is_bare_native_union(p.type_hint.as_deref()))
-            {
+        let kind_word = if is_method { "Method" } else { "Function" };
+        let message = format!(
+            "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
+        );
+        self.check_native_union_types_supported_raw(
+            f.params.iter().map(|p| p.type_hint.as_deref()),
+            f.return_type.as_deref(),
+            &message,
+            f.span,
+            label,
+        );
+    }
+
+    /// The signature-agnostic core of `check_native_union_types_supported`,
+    /// shared the same way real PHPStan's own `FunctionDefinitionCheck::
+    /// checkParametersAcceptor` is shared between an ordinary function/
+    /// method and a property hook (`ExistingClassesInPropertyHookTypehintsRule`
+    /// calls straight into it via `FunctionDefinitionCheck::checkClassMethod`).
+    /// Works directly off each parameter's raw native type-hint text (a
+    /// native-only union always contains a bare top-level `|` with no
+    /// enclosing `?`/generic wrapper), not the docblock-merged `Type`,
+    /// matching real PHPStan's native-AST-node-only scope. Reports at
+    /// most once (first offending parameter, else the return type),
+    /// matching real PHPStan's own `$unionTypeReported` latch.
+    pub(crate) fn check_native_union_types_supported_raw<'p>(
+        &mut self,
+        param_hints: impl Iterator<Item = Option<&'p str>>,
+        return_hint: Option<&str>,
+        message: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if PhpFeature::NativeUnionTypes.is_available(version) {
+            return;
+        }
+        for hint in param_hints {
+            if is_bare_native_union(hint) {
                 self.report(
                     label.to_string(),
-                    message,
-                    f.span,
+                    message.to_string(),
+                    span,
                     0,
                     "parameter.unionTypeNotSupported",
                 );
-            } else if is_bare_native_union(f.return_type.as_deref()) {
-                self.report(
-                    label.to_string(),
-                    message,
-                    f.span,
-                    0,
-                    "return.unionTypeNotSupported",
-                );
+                return;
             }
+        }
+        if is_bare_native_union(return_hint) {
+            self.report(
+                label.to_string(),
+                message.to_string(),
+                span,
+                0,
+                "return.unionTypeNotSupported",
+            );
         }
     }
 

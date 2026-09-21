@@ -487,6 +487,27 @@ impl<'a> Checker<'a> {
             self.check_type_class_name_case(&prop_sig.set_case_refs, &label, span);
         }
 
+        // `ExistingClassesInPropertyHookTypehintsRule`'s native-union-
+        // pre-8.0 half, reusing `check_function_impl`'s own raw-text
+        // core - a hook has no `FunctionDecl` to hand it. Only the `set`
+        // hook's own parameter can ever carry a native union type; a
+        // hook has no return-type position at all (`nikic/php-parser`'s
+        // own `PropertyHook::getReturnType()` is hardcoded `null` -
+        // confirmed real PHPStan's own equivalent call passes an
+        // impossible-to-trigger return-type message for this exact
+        // reason), so this only ever checks the parameter half.
+        if let Some(p) = param {
+            self.check_native_union_types_supported_raw(
+                std::iter::once(p.type_hint.as_deref()),
+                None,
+                &format!(
+                    "Set hook for property {fqn}::${name} uses native union types but they're supported only on PHP 8.0 and later."
+                ),
+                p.name_span,
+                &label,
+            );
+        }
+
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
         let mut locals = Locals::default();
