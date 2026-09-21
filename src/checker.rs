@@ -645,6 +645,22 @@ pub struct Checker<'a> {
     // happening inside its own declaring class's constructor (any write
     // outside that exact spot is flagged).
     pub(crate) current_method: Option<String>,
+    // `checker::restricted_symbol_usage`'s own `allow_in_class_with_
+    // attributes`/`allow_except_in_class_with_attributes` matching - the
+    // enclosing class's own directly-declared attribute names (`Registry::
+    // ClassInfo::attrs`, looked up by `current_class` at the same choke
+    // point that field is set). Empty for a top-level function/no
+    // enclosing class.
+    pub(crate) current_class_attrs: Vec<Arc<str>>,
+    // Same as `current_class_attrs`, for `allow_in_methods_with_
+    // attributes`/`allow_except_in_methods_with_attributes` - the
+    // function/method declaration's own attributes (`FunctionDecl::attrs`),
+    // set directly from the AST, no registry lookup needed. Deliberately
+    // not reset for a nested closure/arrow-fn body (PHP has no attribute
+    // syntax for either) - a restricted call textually inside a closure
+    // literal defined inside an attributed method still counts as "in
+    // that method" for this check, a disclosed simplification.
+    pub(crate) current_method_attrs: Vec<Arc<str>>,
     // The trait whose method bodies are currently being checked, if any -
     // `check_trait_methods` re-checks a trait's methods once per using
     // host, with `current_class` set to the *host*, so a trait's own
@@ -1176,6 +1192,8 @@ impl<'a> Checker<'a> {
             name_ctx: NameContext::default(),
             current_class: None,
             current_method: None,
+            current_class_attrs: Vec::new(),
+            current_method_attrs: Vec::new(),
             current_trait: None,
             current_scope_deprecated: false,
             saw_dynamic_var_construct: false,

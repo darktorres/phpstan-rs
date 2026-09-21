@@ -52,7 +52,7 @@ use crate::project::use_sites;
 use crate::registry::{FunctionSig, format_signature, param_label};
 use crate::token::Span;
 use crate::types::Type;
-use crate::{baseline, ignore_errors};
+use crate::{baseline, ignore_errors, restricted_symbols};
 
 mod completion;
 mod debounce;
@@ -480,6 +480,7 @@ impl Server {
         if !self.ignore_error_entries.is_empty() {
             ignore_errors::filter(&mut relative, &self.ignore_error_entries);
         }
+        restricted_symbols::filter_by_path(&mut relative);
         if let Some(baseline) = &self.baseline {
             let _stale = baseline::filter(&mut relative, baseline);
         }

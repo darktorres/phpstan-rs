@@ -15,12 +15,29 @@
 //! registry-field wiring shape is the real precedent here, not
 //! `ignore_errors`'s.
 //!
-//! Explicitly out of scope for this pass: the real `spaze` package's much
-//! larger allow/disallow-in filter DSL (attribute-context matching, call-
-//! site-scope-path matching) - no such mechanism exists anywhere in this
-//! checker to build on yet, a genuine missing-prerequisite gap; and its
-//! namespace/enum/superglobal/keyword-specific siblings, each a
-//! materially different detection shape needing its own investigation.
+//! `allow_in`/`allow_except_in` (path-scoped) and `allow_in_class_with_
+//! attributes`/`allow_except_in_class_with_attributes`/`allow_in_methods_
+//! with_attributes`/`allow_except_in_methods_with_attributes` (attribute-
+//! context-scoped) mirror the real `spaze` package's own `allowIn`/
+//! `allowExceptIn`/`allowInClassWithAttributes`/etc. (confirmed directly
+//! against its real docs, not recalled knowledge) - a deliberately
+//! narrower slice of its much larger filter DSL (no `allowInClassWith
+//! MethodAttributes`, `allowInParamTypes`/`allowInReturnType`, `allowInUse`,
+//! or parameter-value conditions). Path-scoping is a post-filter
+//! (`filter_by_path` below), not a `Checker`-level field - see that
+//! function's own doc comment for why. Attribute-context matching is
+//! checked inline instead, against `Checker::current_class_attrs`/
+//! `current_method_attrs` (`checker/restricted_symbol_usage.rs`), since
+//! (unlike the file path) the checker already has that context on hand
+//! at report time.
+//!
+//! Still explicitly out of scope: its namespace/enum/superglobal/
+//! keyword-specific siblings, each a materially different detection shape
+//! needing its own separate investigation.
+
+use crate::checker::Diagnostic;
+use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
@@ -55,6 +72,36 @@ pub struct RestrictedSymbolEntry {
     pub class: Option<String>,
     pub name: String,
     pub message: String,
+    /// `fnmatch()`-style patterns (`*` matches `/` too, mirroring
+    /// `ignore_errors::glob_matches`' own identical semantics) against a
+    /// diagnostic's own already-relative file path - a match allows
+    /// (drops) it. Empty means no path-based allowance at all.
+    #[serde(default)]
+    pub allow_in: Vec<String>,
+    /// The inverse of `allow_in`: when non-empty, the item is reported
+    /// only when the path *does* match one of these patterns, and allowed
+    /// (dropped) otherwise - mirrors real `allowExceptIn`/`disallowIn`.
+    #[serde(default)]
+    pub allow_except_in: Vec<String>,
+    /// `fnmatch()`-style patterns against an attribute name - a match
+    /// against any attribute on the *enclosing class* of the reported
+    /// usage allows it. Checked inline (`Checker::current_class_attrs`),
+    /// not via the path post-filter.
+    #[serde(default)]
+    pub allow_in_class_with_attributes: Vec<String>,
+    /// The inverse of `allow_in_class_with_attributes`: when non-empty,
+    /// the item is reported only when the enclosing class *does* carry a
+    /// matching attribute, and allowed otherwise.
+    #[serde(default)]
+    pub allow_except_in_class_with_attributes: Vec<String>,
+    /// Same as `allow_in_class_with_attributes`, checked against the
+    /// enclosing method/function's own attributes instead
+    /// (`Checker::current_method_attrs`).
+    #[serde(default)]
+    pub allow_in_methods_with_attributes: Vec<String>,
+    /// The inverse of `allow_in_methods_with_attributes`.
+    #[serde(default)]
+    pub allow_except_in_methods_with_attributes: Vec<String>,
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -183,6 +230,62 @@ impl RestrictedSymbols {
     }
 }
 
+/// The two metadata keys `checker::restricted_symbol_usage`'s own
+/// `report_restricted` attaches to a diagnostic when its entry has real
+/// `allow_in`/`allow_except_in` patterns - read back here, not re-looked-
+/// up against the registry, since this runs as a post-filter over already-
+/// produced diagnostics with no `Checker`/`Registry` in scope at all.
+const ALLOW_IN_METADATA_KEY: &str = "restrictedSymbol.allowIn";
+const ALLOW_EXCEPT_IN_METADATA_KEY: &str = "restrictedSymbol.allowExceptIn";
+
+/// Path-scoped `allow_in`/`allow_except_in` (Phase 67's own DSL
+/// extension) - a **post-filter** over already-produced diagnostics,
+/// mirroring `ignore_errors::filter`'s own precedent exactly, rather than
+/// a new `Checker`-level "current file path" field: `Checker::new` has 31
+/// call sites across 6 files, and the ordinary per-file checking walk
+/// has no other need to know its own path at all. Scoped to `restrictedSymbol.*`
+/// identifiers only - every other diagnostic family is untouched.
+pub fn filter_by_path(results: &mut HashMap<PathBuf, Vec<Diagnostic>>) {
+    for (file, diagnostics) in results.iter_mut() {
+        let path = file.display().to_string();
+        diagnostics.retain(|d| !is_allowed_by_path(d, &path));
+    }
+}
+
+fn is_allowed_by_path(d: &Diagnostic, path: &str) -> bool {
+    if !d.identifier.starts_with("restrictedSymbol.") {
+        return false;
+    }
+    let allow_in = string_array_metadata(d, ALLOW_IN_METADATA_KEY);
+    if allow_in
+        .iter()
+        .any(|p| crate::ignore_errors::glob_matches(p, path))
+    {
+        return true;
+    }
+    let allow_except_in = string_array_metadata(d, ALLOW_EXCEPT_IN_METADATA_KEY);
+    if !allow_except_in.is_empty()
+        && !allow_except_in
+            .iter()
+            .any(|p| crate::ignore_errors::glob_matches(p, path))
+    {
+        return true;
+    }
+    false
+}
+
+fn string_array_metadata(d: &Diagnostic, key: &str) -> Vec<String> {
+    d.metadata
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +296,12 @@ mod tests {
             class: class.map(str::to_string),
             name: name.to_string(),
             message: "do not use this".to_string(),
+            allow_in: Vec::new(),
+            allow_except_in: Vec::new(),
+            allow_in_class_with_attributes: Vec::new(),
+            allow_except_in_class_with_attributes: Vec::new(),
+            allow_in_methods_with_attributes: Vec::new(),
+            allow_except_in_methods_with_attributes: Vec::new(),
         }
     }
 
@@ -238,5 +347,81 @@ mod tests {
     #[test]
     fn empty_config_produces_an_empty_index() {
         assert!(RestrictedSymbols::default().is_empty());
+    }
+
+    fn restricted_diagnostic(
+        allow_in: &[&str],
+        allow_except_in: &[&str],
+    ) -> crate::checker::Diagnostic {
+        let mut metadata = std::collections::HashMap::new();
+        if !allow_in.is_empty() {
+            metadata.insert(
+                ALLOW_IN_METADATA_KEY.to_string(),
+                serde_json::json!(allow_in),
+            );
+        }
+        if !allow_except_in.is_empty() {
+            metadata.insert(
+                ALLOW_EXCEPT_IN_METADATA_KEY.to_string(),
+                serde_json::json!(allow_except_in),
+            );
+        }
+        crate::checker::Diagnostic {
+            location: "f".to_string(),
+            message: "restricted".to_string(),
+            span: crate::token::Span::default(),
+            level: 0,
+            identifier: "restrictedSymbol.function".to_string(),
+            tip: None,
+            non_ignorable: false,
+            metadata,
+            fix: None,
+        }
+    }
+
+    #[test]
+    fn a_matching_allow_in_pattern_drops_the_diagnostic() {
+        assert!(is_allowed_by_path(
+            &restricted_diagnostic(&["tests/*.php"], &[]),
+            "tests/Foo.php"
+        ));
+    }
+
+    #[test]
+    fn a_non_matching_allow_in_pattern_keeps_the_diagnostic() {
+        assert!(!is_allowed_by_path(
+            &restricted_diagnostic(&["tests/*.php"], &[]),
+            "src/Foo.php"
+        ));
+    }
+
+    #[test]
+    fn allow_except_in_only_reports_inside_the_matching_paths() {
+        let d = restricted_diagnostic(&[], &["legacy/*.php"]);
+        assert!(!is_allowed_by_path(&d, "legacy/Foo.php"));
+        assert!(is_allowed_by_path(&d, "src/Foo.php"));
+    }
+
+    #[test]
+    fn a_non_restricted_symbol_diagnostic_is_never_touched_by_the_path_filter() {
+        let mut d = restricted_diagnostic(&["tests/*.php"], &[]);
+        d.identifier = "argument.type".to_string();
+        assert!(!is_allowed_by_path(&d, "src/Foo.php"));
+    }
+
+    #[test]
+    fn filter_by_path_drops_only_the_allowed_entries() {
+        let mut results: HashMap<PathBuf, Vec<crate::checker::Diagnostic>> = HashMap::new();
+        results.insert(
+            PathBuf::from("tests/Foo.php"),
+            vec![restricted_diagnostic(&["tests/*.php"], &[])],
+        );
+        results.insert(
+            PathBuf::from("src/Foo.php"),
+            vec![restricted_diagnostic(&["tests/*.php"], &[])],
+        );
+        filter_by_path(&mut results);
+        assert!(results[&PathBuf::from("tests/Foo.php")].is_empty());
+        assert_eq!(results[&PathBuf::from("src/Foo.php")].len(), 1);
     }
 }

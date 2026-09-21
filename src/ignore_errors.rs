@@ -94,7 +94,7 @@ impl IgnoreErrorEntry {
 /// an `Event` directory at any depth) needs. No `?`/`[...]` character-class
 /// support - not used anywhere in a real `phpstan.neon`, and adding it
 /// would just be unverified surface area.
-fn glob_matches(pattern: &str, path: &str) -> bool {
+pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
     let parts: Vec<&str> = pattern.split('*').collect();
     if parts.len() == 1 {
         return path == pattern;

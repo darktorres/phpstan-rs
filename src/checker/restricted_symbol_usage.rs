@@ -5,12 +5,101 @@
 //! `is_empty()` bail.
 
 use crate::ast::{ClassKind, FunctionDecl, Param};
-use crate::checker::Checker;
 use crate::checker::internal_usage::class_type_word;
 use crate::checker::internal_usage::collect_referenced_class_names;
+use crate::checker::{Checker, DiagnosticBuilder};
+use crate::ignore_errors::glob_matches;
+use crate::restricted_symbols::RestrictedSymbolEntry;
 use crate::token::Span;
 
 impl<'a> Checker<'a> {
+    /// Every `check_restricted_*` report call routes through here -
+    /// centralizes both halves of Phase 67's own filter-DSL extension
+    /// (confirmed against the real `spaze/phpstan-disallowed-calls`
+    /// docs): attribute-context matching (`allow_in_class_with_
+    /// attributes`/`allow_in_methods_with_attributes` and their
+    /// `allow_except_*` inverses) is checked inline, right here, against
+    /// `current_class_attrs`/`current_method_attrs` - the checker already
+    /// has that context on hand at report time, unlike the file path
+    /// (path-scoped `allow_in`/`allow_except_in` are instead attached as
+    /// diagnostic metadata and resolved by a later post-filter,
+    /// `restricted_symbols::filter_by_path` - see that function's own doc
+    /// comment for why).
+    fn report_restricted(
+        &mut self,
+        entry: &RestrictedSymbolEntry,
+        label: &str,
+        message: String,
+        span: Span,
+        identifier: &'static str,
+    ) {
+        if self.is_allowed_by_attribute_context(entry) {
+            return;
+        }
+        let mut builder = DiagnosticBuilder::new(label.to_string(), message, span, 0, identifier);
+        if !entry.allow_in.is_empty() {
+            builder = builder.metadata(
+                "restrictedSymbol.allowIn",
+                serde_json::json!(entry.allow_in),
+            );
+        }
+        if !entry.allow_except_in.is_empty() {
+            builder = builder.metadata(
+                "restrictedSymbol.allowExceptIn",
+                serde_json::json!(entry.allow_except_in),
+            );
+        }
+        self.report_builder(builder);
+    }
+
+    /// `allow_in_class_with_attributes`/`allow_except_in_class_with_
+    /// attributes` and their method-level siblings, evaluated in the
+    /// same "first genuine allow wins" order the real package's own
+    /// broader DSL uses (see `restricted_symbols.rs`'s own module doc
+    /// comment) - class-level checked before method-level, `allow_in_*`
+    /// before its own `allow_except_in_*` inverse. Attribute-name
+    /// matching is case-insensitive (`glob_matches` itself isn't, so both
+    /// sides are lowercased first), matching PHP's own class-name
+    /// case-insensitivity - an attribute name is, after all, a class
+    /// name.
+    fn is_allowed_by_attribute_context(&self, entry: &RestrictedSymbolEntry) -> bool {
+        let matches_any = |patterns: &[String], attrs: &[std::sync::Arc<str>]| {
+            patterns.iter().any(|p| {
+                let p = p.to_lowercase();
+                attrs.iter().any(|a| glob_matches(&p, &a.to_lowercase()))
+            })
+        };
+        if matches_any(
+            &entry.allow_in_class_with_attributes,
+            &self.current_class_attrs,
+        ) {
+            return true;
+        }
+        if !entry.allow_except_in_class_with_attributes.is_empty()
+            && !matches_any(
+                &entry.allow_except_in_class_with_attributes,
+                &self.current_class_attrs,
+            )
+        {
+            return true;
+        }
+        if matches_any(
+            &entry.allow_in_methods_with_attributes,
+            &self.current_method_attrs,
+        ) {
+            return true;
+        }
+        if !entry.allow_except_in_methods_with_attributes.is_empty()
+            && !matches_any(
+                &entry.allow_except_in_methods_with_attributes,
+                &self.current_method_attrs,
+            )
+        {
+            return true;
+        }
+        false
+    }
+
     pub(crate) fn check_restricted_function_call(&mut self, fqn: &str, span: Span, label: &str) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -19,11 +108,12 @@ impl<'a> Checker<'a> {
         let Some(entry) = self.registry.restricted_symbols.function(bare) else {
             return;
         };
-        self.report(
-            label.to_string(),
+        let entry = entry.clone();
+        self.report_restricted(
+            &entry,
+            label,
             format!("Call to restricted function {bare}(): {}", entry.message),
             span,
-            0,
             "restrictedSymbol.function",
         );
     }
@@ -47,20 +137,21 @@ impl<'a> Checker<'a> {
             self.registry.restricted_symbols.method(owner, method)
         };
         let Some(entry) = entry else { return };
+        let entry = entry.clone();
         let static_word = if is_static { "static " } else { "" };
         let identifier = if is_static {
             "restrictedSymbol.staticMethod"
         } else {
             "restrictedSymbol.method"
         };
-        self.report(
-            label.to_string(),
+        self.report_restricted(
+            &entry,
+            label,
             format!(
                 "Call to restricted {static_word}method {owner}::{method}(): {}",
                 entry.message
             ),
             span,
-            0,
             identifier,
         );
     }
@@ -84,20 +175,21 @@ impl<'a> Checker<'a> {
             self.registry.restricted_symbols.property(owner, prop)
         };
         let Some(entry) = entry else { return };
+        let entry = entry.clone();
         let static_word = if is_static { "static " } else { "" };
         let identifier = if is_static {
             "restrictedSymbol.staticProperty"
         } else {
             "restrictedSymbol.property"
         };
-        self.report(
-            label.to_string(),
+        self.report_restricted(
+            &entry,
+            label,
             format!(
                 "Access to restricted {static_word}property {owner}::${prop}: {}",
                 entry.message
             ),
             span,
-            0,
             identifier,
         );
     }
@@ -119,14 +211,15 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        self.report(
-            label.to_string(),
+        let entry = entry.clone();
+        self.report_restricted(
+            &entry,
+            label,
             format!(
                 "Access to restricted constant {owner}::{const_name}: {}",
                 entry.message
             ),
             span,
-            0,
             "restrictedSymbol.classConstant",
         );
     }
@@ -147,21 +240,22 @@ impl<'a> Checker<'a> {
         let Some(entry) = self.registry.restricted_symbols.class(class) else {
             return;
         };
+        let entry = entry.clone();
         let type_word = self
             .registry
             .classes
             .get(class)
             .map(|info| class_type_word(info.kind))
             .unwrap_or_else(|| class_type_word(ClassKind::Class));
-        self.report(
-            label.to_string(),
+        self.report_restricted(
+            &entry,
+            label,
             format!(
                 "{verb_phrase} restricted {} {class}: {}",
                 type_word.to_lowercase(),
                 entry.message
             ),
             span,
-            0,
             "restrictedSymbol.class",
         );
     }

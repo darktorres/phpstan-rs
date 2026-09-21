@@ -288,6 +288,15 @@ pub struct ClassInfo {
     // default parameter value - see `compute_attribute_targets`'s doc
     // comment).
     pub attribute_targets: Option<u32>,
+    // This class's own directly-declared attribute names (`#[Foo]
+    // #[Bar] class X {}` -> `["Foo", "Bar"]`), as raw, as-written text
+    // (never resolved to an FQN) - `checker::restricted_symbol_usage`'s
+    // own `allow_in_class_with_attributes`/`allow_except_in_class_with_
+    // attributes` matching is the one consumer, via `Checker::current_
+    // class_attrs`. Distinct from `attribute_targets` above (whether
+    // *this* class is itself usable as an attribute) - this is what's
+    // attached *to* this class's own declaration instead.
+    pub attrs: Vec<Arc<str>>,
     // For a backed enum only, each case's literal backing value
     // (`StringLiteral`/`IntLiteral`), keyed by case name - lets
     // `::from()`/`::tryFrom()` narrow a literal-argument call to the
@@ -1081,6 +1090,7 @@ impl ClassInfo {
             mixin_case_refs,
             deprecated,
             attribute_targets,
+            attrs: c.attrs.iter().map(|a| intern(&a.name)).collect(),
             enum_case_values: HashMap::new(),
             type_aliases,
             type_alias_case_refs,
@@ -1540,6 +1550,7 @@ impl ClassInfo {
             mixin_case_refs: Vec::new(),
             deprecated: class_doc.as_ref().and_then(|d| d.deprecated.clone()),
             attribute_targets: compute_attribute_targets(&e.attrs),
+            attrs: e.attrs.iter().map(|a| intern(&a.name)).collect(),
             enum_case_values,
             type_aliases: HashMap::new(),
             type_alias_case_refs: HashMap::new(),

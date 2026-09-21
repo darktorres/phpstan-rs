@@ -470,6 +470,7 @@ fn run_check_project(
 
     let mut results = apply_level_filter(results, level);
     ignore_errors::filter(&mut results, ignore_error_entries);
+    restricted_symbols::filter_by_path(&mut results);
 
     if let Some(generate_baseline_path) = generate_baseline_path {
         match baseline::generate(generate_baseline_path, &results) {

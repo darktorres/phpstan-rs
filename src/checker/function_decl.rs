@@ -860,6 +860,19 @@ impl<'a> Checker<'a> {
         self.current_class = class_name.map(|s| s.to_string());
         let previous_method = self.current_method.take();
         self.current_method = Some(f.name.to_string());
+        // `checker::restricted_symbol_usage`'s own attribute-context
+        // matching - see `current_class_attrs`'s own doc comment.
+        let previous_class_attrs = std::mem::take(&mut self.current_class_attrs);
+        self.current_class_attrs = class_name
+            .and_then(|c| self.registry.classes.get(c))
+            .map(|info| info.attrs.clone())
+            .unwrap_or_default();
+        let previous_method_attrs = std::mem::take(&mut self.current_method_attrs);
+        self.current_method_attrs = f
+            .attrs
+            .iter()
+            .map(|a| crate::intern::intern(&a.name))
+            .collect();
         // Mirrors real PHPStan's `DeprecatedScopeHelper` - suppresses
         // every deprecated-usage diagnostic from within a deprecated
         // function/method, class, or trait's own body.
@@ -1179,6 +1192,8 @@ impl<'a> Checker<'a> {
 
         self.current_class = previous_class;
         self.current_method = previous_method;
+        self.current_class_attrs = previous_class_attrs;
+        self.current_method_attrs = previous_method_attrs;
         self.current_scope_deprecated = previous_scope_deprecated;
     }
 

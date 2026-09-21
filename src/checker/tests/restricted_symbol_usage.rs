@@ -21,7 +21,25 @@ fn entry(
         class: class.map(str::to_string),
         name: name.to_string(),
         message: message.to_string(),
+        allow_in: Vec::new(),
+        allow_except_in: Vec::new(),
+        allow_in_class_with_attributes: Vec::new(),
+        allow_except_in_class_with_attributes: Vec::new(),
+        allow_in_methods_with_attributes: Vec::new(),
+        allow_except_in_methods_with_attributes: Vec::new(),
     }
+}
+
+fn entry_with(
+    kind: RestrictedSymbolKind,
+    class: Option<&str>,
+    name: &str,
+    message: &str,
+    f: impl FnOnce(&mut RestrictedSymbolEntry),
+) -> RestrictedSymbolEntry {
+    let mut e = entry(kind, class, name, message);
+    f(&mut e);
+    e
 }
 
 #[test]
@@ -386,5 +404,135 @@ fn a_restricted_function_s_first_class_callable_is_flagged() {
         d.iter()
             .any(|x| x.identifier == "restrictedSymbol.function"),
         "got: {d:?}"
+    );
+}
+
+// Phase 67's own filter-DSL extension: attribute-context matching
+// (checked inline, unlike path-scoping - see `restricted_symbols.rs`'s
+// own unit tests for that half).
+
+#[test]
+fn a_restricted_call_is_allowed_in_a_method_with_the_configured_attribute() {
+    let d = with_entries(
+        r#"<?php
+            #[Attribute]
+            class AllowedLegacy {}
+            class Db { public function query(string $sql) {} }
+            class Repo {
+                #[AllowedLegacy]
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_in_methods_with_attributes = vec!["AllowedLegacy".to_string()],
+        )],
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_call_is_still_flagged_in_a_method_without_the_configured_attribute() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            class Repo {
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_in_methods_with_attributes = vec!["AllowedLegacy".to_string()],
+        )],
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_call_is_allowed_in_a_class_with_the_configured_attribute() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            #[AllowedLegacy]
+            class Repo {
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_in_class_with_attributes = vec!["AllowedLegacy".to_string()],
+        )],
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn allow_except_in_class_with_attributes_only_flags_inside_the_matching_classes() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            #[Special]
+            class Repo {
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+            class OtherRepo {
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_except_in_class_with_attributes = vec!["Special".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(flagged[0].location.contains("Repo") && !flagged[0].location.contains("OtherRepo"));
+}
+
+#[test]
+fn attribute_name_matching_is_case_insensitive() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            class Repo {
+                #[allowedlegacy]
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_in_methods_with_attributes = vec!["AllowedLegacy".to_string()],
+        )],
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "unexpected diagnostics: {d:?}"
     );
 }
