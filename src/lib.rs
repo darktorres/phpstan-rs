@@ -23,6 +23,7 @@ pub mod output;
 pub mod parser;
 pub(crate) mod pcre_validate;
 pub mod pest_config;
+pub(crate) mod php_date_parser;
 pub(crate) mod php_float_format;
 pub mod php_stubs;
 pub mod php_version;

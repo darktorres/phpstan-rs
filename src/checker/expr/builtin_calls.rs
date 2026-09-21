@@ -79,12 +79,15 @@ impl<'a> Checker<'a> {
             // matching this project's own "don't guess, narrow to the
             // verified need" precedent (`strlen`'s doc comment above), only
             // the bounded "N unit(s) [ago]" relative-offset shape is
-            // recognized (`is_relative_time_offset_literal`) - every real
-            // corpus call site (`'-1 hour'`/`'-30 days'`/`'-90 days'`) is
-            // exactly this shape. Anything else keeps today's `int|false`.
+            // recognized (`php_date_parser::validate_relative_delta` - the
+            // single source of truth for this one grammar fragment,
+            // shared with `DateTime`'s own constructor-string check) -
+            // every real corpus call site (`'-1 hour'`/`'-30 days'`/
+            // `'-90 days'`) is exactly this shape. Anything else keeps
+            // today's `int|false`.
             "strtotime" if !args.is_empty() => {
                 if let Some(literal) = literal_string_value(&args[0].value)
-                    && is_relative_time_offset_literal(&literal)
+                    && crate::php_date_parser::validate_relative_delta(&literal) == Some(true)
                 {
                     return Type::Int;
                 }
@@ -2953,49 +2956,6 @@ fn parse_url_component_type(name: &str) -> Option<Type> {
 enum SscanfSpecifier {
     Char(char),
     Bracket,
-}
-
-/// Recognizes the bounded "N unit(s) [ago]" slice of PHP's real
-/// relative-time grammar this project models for `strtotime()`
-/// (`"strtotime"` arm's own doc comment) -
-/// `[+-]? \d+ \s+ unit(s)? (\s+ ago)?`, case-insensitive, `unit` one of
-/// second/minute/hour/day/week/month/year. A hand-rolled scan, matching
-/// `sprintf_literal_remainder`'s own precedent below (no regex engine
-/// available to ordinary checker code).
-fn is_relative_time_offset_literal(s: &str) -> bool {
-    let s = s.trim();
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    if i < bytes.len() && (bytes[i] == b'+' || bytes[i] == b'-') {
-        i += 1;
-    }
-    while i < bytes.len() && bytes[i] == b' ' {
-        i += 1;
-    }
-    let digits_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_digit() {
-        i += 1;
-    }
-    if i == digits_start || i >= bytes.len() || bytes[i] != b' ' {
-        return false;
-    }
-    while i < bytes.len() && bytes[i] == b' ' {
-        i += 1;
-    }
-    let unit_start = i;
-    while i < bytes.len() && bytes[i].is_ascii_alphabetic() {
-        i += 1;
-    }
-    let unit_lower = s[unit_start..i].to_ascii_lowercase();
-    let unit = unit_lower.strip_suffix('s').unwrap_or(&unit_lower);
-    if !matches!(
-        unit,
-        "second" | "minute" | "hour" | "day" | "week" | "month" | "year"
-    ) {
-        return false;
-    }
-    let rest = s[i..].trim();
-    rest.is_empty() || rest.eq_ignore_ascii_case("ago")
 }
 
 /// Strips every real `sprintf()`/`vsprintf()` conversion specifier
