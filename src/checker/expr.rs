@@ -1457,6 +1457,9 @@ impl<'a> Checker<'a> {
                 if *op == BinOp::LogicalXor {
                     self.check_logical_xor(l, r, locals, label);
                 }
+                if *op == BinOp::Pipe {
+                    self.check_pipe_byref(r, locals, label);
+                }
                 self.infer_binary(op, l, r, locals)
             }
             ExprKind::Variable(name) => {

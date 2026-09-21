@@ -59,6 +59,7 @@ mod parent_constructor_call;
 mod phpstan_api_method_calls;
 mod phpstan_assert_tags;
 mod phpstan_tag_typos;
+mod pipe_operator;
 mod preg_and_regex;
 mod preg_quote_delimiter;
 mod printf_format_arguments;

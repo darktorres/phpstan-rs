@@ -1079,6 +1079,7 @@ mod noop;
 mod oop;
 mod operators;
 pub(crate) mod phpstan_api;
+mod pipe_operator;
 mod preg_pattern_validity;
 mod property_assignment;
 mod property_type_too_wide;
