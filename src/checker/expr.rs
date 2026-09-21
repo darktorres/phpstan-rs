@@ -2811,7 +2811,13 @@ impl<'a> Checker<'a> {
                     if let Some((owner, _)) = self.find_property_owner(&base_ty, name) {
                         self.record_member_ref(e.span, &owner, name);
                     }
-                } else {
+                } else if self.collect_member_refs {
+                    // `escape_targets_for_receiver_type` can do a real,
+                    // whole-registry scan (an interface/abstract
+                    // receiver) - `record_member_class_escape`'s own
+                    // internal self-gate only skips *recording* its
+                    // result, not computing it, so it must not be called
+                    // at all unless Tier 2 is actually being collected.
                     for class in self.escape_targets_for_receiver_type(&base_ty) {
                         self.record_member_class_escape(&class);
                     }
@@ -2830,7 +2836,7 @@ impl<'a> Checker<'a> {
                     if let Some((owner, _)) = self.find_method_owner(&recv_ty, name) {
                         self.record_member_ref(e.span, &owner, name);
                     }
-                } else {
+                } else if self.collect_member_refs {
                     for class in self.escape_targets_for_receiver_type(&recv_ty) {
                         self.record_member_class_escape(&class);
                     }

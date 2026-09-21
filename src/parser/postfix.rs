@@ -17,13 +17,17 @@ impl Parser {
                     self.skip();
                     // `$obj->{expr}` - a fully dynamic property/method
                     // name, computed from an arbitrary expression rather
-                    // than a fixed identifier or `$var`. `$obj->${expr}`
-                    // and `$obj->$$expr` (the name comes from a
-                    // variable-variable instead of a plain `$var`) are
-                    // treated the same way - the exact double-indirection
-                    // isn't modeled, matching how the plain `$obj->$prop`
-                    // case above already just uses the variable's own name
-                    // rather than its value.
+                    // than a fixed identifier. `$obj->${expr}` and
+                    // `$obj->$$expr` (the name comes from a variable-
+                    // variable instead of a plain `$var`) are treated the
+                    // same way - the exact double-indirection isn't
+                    // modeled (the inner variable's own name, not the
+                    // variable *it* names, ends up as the computed
+                    // expression) - a real, disclosed simplification, but
+                    // a plain `$obj->$var` (below) is not: `$var`'s own
+                    // runtime value is always the real member name, so
+                    // it gets a real `Variable` sub-expression here too,
+                    // not just its own declared name as a bare string.
                     let dynamic_name =
                         if self.check(&Token::LBrace) || self.check(&Token::DollarBrace) {
                             self.skip();
@@ -32,6 +36,8 @@ impl Parser {
                             Some(e)
                         } else if self.check(&Token::Dollar) {
                             self.skip();
+                            Some(self.parse_primary()?)
+                        } else if matches!(self.peek(), Token::Variable(_)) {
                             Some(self.parse_primary()?)
                         } else {
                             None
@@ -69,13 +75,6 @@ impl Parser {
                     let name = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => {
                             self.take_name_segment().unwrap()
-                        }
-                        Token::Variable(_) => {
-                            // $obj->$prop dynamic access, best-effort.
-                            let Token::Variable(s) = self.take_token() else {
-                                unreachable!()
-                            };
-                            s
                         }
                         other => {
                             return Err(ParseError {

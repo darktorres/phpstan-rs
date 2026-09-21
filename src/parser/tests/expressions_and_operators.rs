@@ -967,6 +967,37 @@ fn double_dollar_variable_variable_in_member_position_parses() {
 }
 
 #[test]
+fn bare_variable_in_member_position_parses_as_dynamic() {
+    // Unlike `Foo::$name` (the ordinary, non-dynamic way PHP spells "the
+    // static property literally named `name`" - no dynamic dispatch, no
+    // sigil ambiguity), `$obj->$name` on the instance side is genuinely
+    // ambiguous: `->` needs no sigil to introduce a member name at all,
+    // so a bare `$name` right after it is real PHP for "the member
+    // named by `$name`'s own runtime value" - a real dynamic access,
+    // same as the braced `$obj->{$name}` form just above.
+    let program = parse(
+        r#"<?php
+            $obj->$name;
+            $obj->$name();
+        "#,
+    );
+    assert!(matches!(
+        &program[0].kind,
+        StmtKind::Expression(Expr {
+            kind: ExprKind::DynamicPropertyAccess(_, _),
+            ..
+        })
+    ));
+    assert!(matches!(
+        &program[1].kind,
+        StmtKind::Expression(Expr {
+            kind: ExprKind::DynamicMethodCall(_, _, _),
+            ..
+        })
+    ));
+}
+
+#[test]
 fn array_cast_parses() {
     let program = parse(r#"<?php $tmp = (array)$var;"#);
     let StmtKind::Expression(Expr {

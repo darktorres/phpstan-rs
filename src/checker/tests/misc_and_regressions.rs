@@ -256,16 +256,16 @@ fn check_expr_recurses_into_every_simple_wrapper_expression() {
 
 #[test]
 fn check_expr_recurses_into_dynamic_property_and_method_name_expressions() {
-    // $obj->$prop (a single plain variable) is deliberately treated
-    // as a literal property name, not the variable's value (see the
-    // parser's own "best-effort" comment on that arm) - it does NOT
-    // produce a DynamicPropertyAccess/DynamicMethodCall, so it can't
-    // exercise this. The brace and double-dollar forms are the ones
-    // that actually do, and those are what this checks.
+    // The brace, bare-variable, and double-dollar forms all produce a
+    // real DynamicPropertyAccess/DynamicMethodCall name expression, so
+    // check_expr recurses into all three (a bare `$obj->$prop` used to
+    // be mis-modeled as a literal property named after the variable's
+    // own declared name, not its value - fixed at the parser level).
     let d = diagnostics_for(
         r#"<?php
             function f($obj) {
                 $obj->{$undefinedInDynPropBrace};
+                $obj->$undefinedInDynPropSingle;
                 $obj->$$undefinedInDynMethodDollarDollar();
             }
         "#,
@@ -274,6 +274,12 @@ fn check_expr_recurses_into_dynamic_property_and_method_name_expressions() {
         d.iter().any(|x| x
             .message
             .contains("undefined variable $undefinedInDynPropBrace")),
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x
+            .message
+            .contains("undefined variable $undefinedInDynPropSingle")),
         "got: {d:?}"
     );
     assert!(

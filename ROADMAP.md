@@ -2553,13 +2553,21 @@ did, both scoping open questions from when B1 was first triaged:
   escape protection at all - a real, disclosed risk with no fix
   possible without real type information. Also found, pre-existing and
   unrelated to this check: `$obj->$name(...)` (a bare variable, not the
-  braced form above) parses (`parser/postfix.rs`'s own "best-effort"
-  modeling) as an ordinary access literally named after the *variable's
-  own source name*, never its runtime value - a real, common dynamic-
-  dispatch idiom this project already couldn't model correctly, now
-  disclosed rather than silently assumed handled; fixing the underlying
-  AST shape is out of scope (a parser-level change, wider blast radius
-  than this one check).
+  braced form above) used to parse (`parser/postfix.rs`'s own "best-
+  effort" modeling) as an ordinary access literally named after the
+  *variable's own source name*, never its runtime value - a real,
+  common dynamic-dispatch idiom this project couldn't model correctly.
+  Disclosed here first, then actually fixed at the parser level in a
+  follow-up pass (the same session): it now parses identically to the
+  braced form above, so both get the same escape-hatch treatment - see
+  `src/parser/postfix.rs`'s own doc comment. That same pass also found
+  and fixed a real, latent performance bug this exact gap had been
+  masking: `escape_targets_for_receiver_type`'s own interface/abstract
+  branch (a linear scan over every registry class) ran unconditionally
+  regardless of `collect_member_refs`, with only its *recording* step
+  gated - harmless while the bare-variable form was rare, but the
+  parser fix would have made it common. Both call sites now gate the
+  whole computation, not just the recording, on `collect_member_refs`.
 - **Which methods PHP itself calls implicitly, with no source-level
   reference this project could ever see.** Three real categories, found
   in that order by actually measuring a real corpus (Piwigo) rather than

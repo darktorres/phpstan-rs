@@ -417,15 +417,16 @@ fn a_dynamic_call_on_a_mixed_typed_receiver_gives_no_escape_protection() {
 }
 
 #[test]
-fn a_bare_variable_dynamic_call_gives_no_escape_protection_either() {
-    // Disclosed, not fixed - `$obj->$name()` (unlike the braced
-    // `$obj->{$name}()` this check's own escape hatch handles) parses
-    // as an ordinary `MethodCall` named after the *variable's own
-    // source name* ("name"), never its runtime value - see `checker::
-    // whole_program::dead_members`'s own module doc comment. Foo::bar
-    // still gets flagged dead - proving this pre-existing parser
-    // modeling choice really does carry the disclosed risk, not
-    // silently escaping it by accident.
+fn a_bare_variable_dynamic_call_escapes_the_whole_class_the_same_way_the_braced_form_does() {
+    // `$obj->$name()` (a bare variable, no braces) used to be a real,
+    // disclosed gap: `parser/postfix.rs` mis-modeled it as an ordinary
+    // `MethodCall` named after the variable's own *declared name*
+    // ("name"), never its runtime value, so this check's own escape
+    // hatch never saw it at all. Fixed at the parser level - it now
+    // parses identically to the braced `$obj->{$name}()` form (see
+    // `a_genuinely_dynamic_method_call_on_a_known_type_escapes_the_
+    // whole_class`'s own identical assertion), so Foo::bar is no
+    // longer flagged.
     let mut project = project_with_check_enabled();
     let path = PathBuf::from("a.php");
     project
@@ -445,7 +446,7 @@ fn a_bare_variable_dynamic_call_gives_no_escape_protection_either() {
     let results = project.check_whole_program();
     let diags = results.get(&path).cloned().unwrap_or_default();
     assert!(
-        diags.iter().any(|d| d.message.contains("Foo::bar")),
+        !diags.iter().any(|d| d.message.contains("Foo::bar")),
         "got: {diags:?}"
     );
 }

@@ -84,20 +84,15 @@
 //! on one class (legal PHP - `$this->x` and `$this->x()` are
 //! independently dispatched) share one Tier-2 usage signal here, so
 //! using one can mask the other's own real deadness - a real, but only
-//! ever false-*negative* limitation, the safe direction. One more, pre-
-//! existing and *not* introduced by this check: `$obj->$name(...)` (a
-//! bare variable right after `->`, not the braced `$obj->{$name}(...)`
-//! this module's own escape hatch handles) is a real, common dynamic-
-//! dispatch idiom, but `parser/postfix.rs`'s own "best-effort" modeling
-//! of it uses the *variable's own source name* ("name") as a literal
-//! `MethodCall`/`PropertyAccess` member name, never the variable's
-//! runtime *value* - so this check (and every other Tier-2 consumer)
-//! sees an ordinary, statically-named access to a member that's
-//! probably never really being called this way at all, gaining no
-//! escape protection for whatever member the dynamic dispatch really
-//! reaches at runtime. Fixing the underlying AST modeling is out of
-//! scope here (a parser-level change with a much wider blast radius
-//! than this one check).
+//! ever false-*negative* limitation, the safe direction.
+//!
+//! `$obj->$name(...)` (a bare variable right after `->`) used to be a
+//! real gap here too - `parser/postfix.rs` mis-modeled it as an
+//! ordinary, statically-named `MethodCall`/`PropertyAccess` (the
+//! variable's own *declared name*, never its runtime value), so this
+//! check's own escape hatch above never saw it. Fixed at the parser
+//! level: it now parses exactly like the braced `$obj->{$name}(...)`
+//! form, so both get identical escape-hatch treatment.
 
 use crate::ast::{ClassKind, Visibility};
 use crate::project::use_sites::{RefTarget, UseSiteIndex};

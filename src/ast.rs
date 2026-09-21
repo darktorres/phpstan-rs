@@ -699,12 +699,14 @@ pub enum ExprKind {
     // syntactically, but real PHP's `?->` implicitly makes the whole
     // access `null` when its base is `null`, which `infer_expr` needs to
     // know to union `Null` into the result.
-    // The property/method name: `Arc<str>`, moved straight out of either
-    // an interned `Token::Identifier`/`Token::Keyword` (via
-    // `Parser::take_name_segment`) or an interned `Token::Variable` (the
-    // rarer `$obj->$prop` dynamic-by-variable-name shape) - or, for a
-    // string-interpolation `$obj->prop` occurrence, the identically-
-    // interned `StringPart::PropertyAccess::prop`.
+    // The property/method name: `Arc<str>`, moved straight out of an
+    // interned `Token::Identifier`/`Token::Keyword` (via `Parser::
+    // take_name_segment`) - or, for a string-interpolation `$obj->prop`
+    // occurrence, the identically-interned `StringPart::
+    // PropertyAccess::prop`. A `$obj->$prop` dynamic-by-variable-name
+    // access is a `DynamicPropertyAccess`/`DynamicMethodCall` below, not
+    // this variant - `$prop`'s own runtime value, not its declared name,
+    // is the real member name.
     PropertyAccess(Box<Expr>, Arc<str>, bool),
     MethodCall(Box<Expr>, Arc<str>, Vec<Arg>, bool),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
