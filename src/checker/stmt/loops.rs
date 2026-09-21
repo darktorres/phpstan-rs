@@ -742,6 +742,15 @@ impl<'a> Checker<'a> {
                 // a pure definition site, so no separate
                 // `check_expr` call is needed on top of it.
                 this.check_assignment_target(value, pass_locals, label);
+                // Same by-ref-parameter check a plain assignment already
+                // gets (`ExprKind::Assign`'s own call site, `checker/
+                // expr.rs`) - a `foreach` value binding is just as real a
+                // per-iteration rebind as any other assignment, so a
+                // value variable that happens to name one of this
+                // function's own by-ref parameters (or destructures one
+                // out) is checked against its declared type here too.
+                this.check_param_out_assignment(value, &element_ty, label);
+                this.check_by_ref_destructuring(value, &element_ty, label);
                 this.bind_assignment_target(value, element_ty.clone(), pass_locals);
                 // Eager propagation: `value` was just bound from
                 // `subject`'s own (dynamic-keyed) element - if `subject`

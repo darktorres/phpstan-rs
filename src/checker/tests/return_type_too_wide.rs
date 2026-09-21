@@ -499,3 +499,40 @@ fn a_by_ref_parameter_destructured_from_a_matching_keyed_element_is_not_flagged(
         "unexpected diagnostics: {d:?}"
     );
 }
+
+// `foreach ($x as &$byRef)` coverage - a foreach value binding is just
+// as real a per-iteration rebind as a plain assignment, so a value
+// variable naming one of this function's own by-ref parameters is
+// checked against its declared type on every iteration too.
+
+#[test]
+fn a_foreach_value_rebinding_a_by_ref_parameter_to_a_mismatched_element_is_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function f(int &$x): void {
+                foreach (['not an int'] as $x) {
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|d| d.identifier == "parameterByRef.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_foreach_value_rebinding_a_by_ref_parameter_to_a_matching_element_is_not_flagged() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function f(int &$x): void {
+                foreach ([1, 2, 3] as $x) {
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|d| d.identifier == "parameterByRef.type"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
