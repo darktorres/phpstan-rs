@@ -329,3 +329,212 @@ fn casting_a_gmp_instance_to_string_int_and_float_is_never_flagged() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// `(unset)` cast - `UnsetCastRule` (`cast.unset`): removed as of PHP 8.0.
+
+#[test]
+fn an_unset_cast_on_php_8_or_later_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test($x) {
+                $y = (unset) $x;
+            }
+        "#,
+        |r| r.php_version = Some((8, 0)),
+    );
+    assert!(d.iter().any(|x| x.identifier == "cast.unset"), "got: {d:?}");
+}
+
+#[test]
+fn an_unset_cast_below_php_8_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test($x) {
+                $y = (unset) $x;
+            }
+        "#,
+        |r| r.php_version = Some((7, 4)),
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.unset"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_unset_cast_with_no_configured_php_version_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test($x) {
+                $y = (unset) $x;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.unset"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// `(void)` cast - `VoidCastRule` (`cast.voidNotSupported`/`cast.void`):
+// needs PHP 8.5+, and is only ever legal as its own top-level statement.
+
+#[test]
+fn a_void_cast_as_its_own_statement_below_php_8_5_is_flagged_as_unsupported_only() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test() {
+                (void) foo();
+            }
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "cast.voidNotSupported"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.void"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_void_cast_as_its_own_statement_on_php_8_5_or_later_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test() {
+                (void) foo();
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "cast.voidNotSupported" || x.identifier == "cast.void"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_void_cast_nested_inside_an_expression_is_flagged_even_on_php_8_5() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test() {
+                $x = (void) foo();
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(d.iter().any(|x| x.identifier == "cast.void"), "got: {d:?}");
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.voidNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_void_cast_with_no_configured_php_version_is_never_flagged_for_version_support() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test() {
+                (void) foo();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.voidNotSupported"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+// Non-canonical cast spellings - `DeprecatedCastRule` (`cast.deprecated`):
+// `(integer)`/`(boolean)`/`(double)`/`(binary)` are deprecated as of PHP
+// 8.5; `(real)` is a faithful, unflagged gap (see `ExprKind::Cast`'s doc
+// comment - real PHPStan's own rule never checks it either).
+
+#[test]
+fn each_non_canonical_cast_spelling_on_php_8_5_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test($x) {
+                $a = (integer) $x;
+                $b = (boolean) $x;
+                $c = (double) $x;
+                $d = (binary) $x;
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    let deprecated: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "cast.deprecated")
+        .collect();
+    assert_eq!(deprecated.len(), 4, "got: {d:?}");
+}
+
+#[test]
+fn real_is_never_flagged_as_a_deprecated_cast_spelling() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test($x) {
+                $a = (real) $x;
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn canonical_cast_spellings_are_never_flagged_as_deprecated() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test($x) {
+                $a = (int) $x;
+                $b = (bool) $x;
+                $c = (float) $x;
+                $d = (string) $x;
+            }
+        "#,
+        |r| r.php_version = Some((8, 5)),
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_canonical_cast_spelling_below_php_8_5_is_never_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            function test($x) {
+                $a = (integer) $x;
+            }
+        "#,
+        |r| r.php_version = Some((8, 4)),
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_non_canonical_cast_spelling_with_no_configured_php_version_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test($x) {
+                $a = (integer) $x;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "cast.deprecated"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

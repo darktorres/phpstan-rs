@@ -731,8 +731,13 @@ pub enum ExprKind {
     Name(String),
     Instanceof(Box<Expr>, InstanceofTarget),
     // Cast target is normalized to one of: int, float, string, bool,
-    // array, object, unset.
-    Cast(String, Box<Expr>),
+    // array, object, unset. The trailing `bool` is `DeprecatedCastRule`'s
+    // own concern only: true for the four non-canonical spellings PHP
+    // 8.5 deprecates - `(integer)`, `(boolean)`, `(double)`, `(binary)` -
+    // false for every canonical spelling (including `(real)`, which real
+    // PHPStan's own `DeprecatedCastRule` never flags either, a faithful
+    // gap - see its own `KIND_FLOAT`-vs-`KIND_DOUBLE`-only check).
+    Cast(String, Box<Expr>, bool),
     Grouping(Box<Expr>),
     // `clone $x` / PHP 8.5's `clone($x, $overrides)` (the second field is
     // the property-overrides array, when present). Both produce an object

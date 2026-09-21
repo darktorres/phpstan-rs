@@ -200,7 +200,7 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
 /// compared against.
 fn disjunctive_syllogism_atom_key(e: &Expr) -> Option<String> {
     let inner = match &e.kind {
-        ExprKind::Cast(kind, inner) if kind == "bool" => inner,
+        ExprKind::Cast(kind, inner, _) if kind == "bool" => inner,
         ExprKind::Grouping(inner) => inner,
         _ => e,
     };
@@ -762,7 +762,7 @@ impl<'a> Checker<'a> {
             // this narrows precisely as if the cast weren't there at all.
             // Any other cast (`(int)`, `(string)`, ...) genuinely changes
             // the value and isn't narrowable this way, so it's left alone.
-            ExprKind::Cast(kind, inner) if kind == "bool" => {
+            ExprKind::Cast(kind, inner, _) if kind == "bool" => {
                 self.apply_narrowing(inner, locals, branch_true);
             }
             ExprKind::Call(callee, args) => {

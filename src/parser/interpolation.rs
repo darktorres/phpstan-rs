@@ -169,7 +169,7 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
         ExprKind::DynamicVariable(e)
         | ExprKind::Unary(_, e)
         | ExprKind::Grouping(e)
-        | ExprKind::Cast(_, e)
+        | ExprKind::Cast(_, e, _)
         | ExprKind::Throw(e)
         | ExprKind::YieldFrom(e)
         | ExprKind::FirstClassCallable(e)

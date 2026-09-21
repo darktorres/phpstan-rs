@@ -13,7 +13,7 @@
 //! `bool` arm can never actually fire and isn't worth a coercion method
 //! of its own.
 
-use crate::checker::{Checker, union_types};
+use crate::checker::{Checker, DiagnosticBuilder, union_types};
 use crate::token::Span;
 use crate::types::{AccessoryKind, Type};
 
@@ -159,6 +159,102 @@ impl<'a> Checker<'a> {
             span,
             2,
             identifier,
+        );
+    }
+
+    /// Real PHPStan's `UnsetCastRule` (`cast.unset`) - the `(unset)`
+    /// cast was removed as of PHP 8.0.
+    pub(crate) fn check_unset_cast_supported(&mut self, span: Span, label: &str) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if crate::php_version::PhpFeature::UnsetCastRemoved.is_available(version) {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                "The (unset) cast is no longer supported in PHP 8.0 and later.".to_string(),
+                span,
+                0,
+                "cast.unset",
+            )
+            .non_ignorable(),
+        );
+    }
+
+    /// Real PHPStan's `VoidCastRule` (`cast.voidNotSupported`/
+    /// `cast.void`) - the `(void)` cast needs PHP 8.5+, and
+    /// (independently of version) is only ever legal as an entire,
+    /// top-level statement on its own (`(void) foo();`), never nested
+    /// inside a larger expression - both checks can fire together on the
+    /// same occurrence.
+    pub(crate) fn check_void_cast(&mut self, span: Span, label: &str, is_bare_statement: bool) {
+        if let Some(version) = self.registry.php_version
+            && !crate::php_version::PhpFeature::VoidCast.is_available(version)
+        {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    "The (void) cast is supported only on PHP 8.5 and later.".to_string(),
+                    span,
+                    0,
+                    "cast.voidNotSupported",
+                )
+                .non_ignorable(),
+            );
+        }
+        if is_bare_statement {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                "The (void) cast cannot be used within an expression.".to_string(),
+                span,
+                0,
+                "cast.void",
+            )
+            .non_ignorable(),
+        );
+    }
+
+    /// Real PHPStan's `DeprecatedCastRule` (`cast.deprecated`) - the
+    /// four non-canonical cast spellings (`(integer)`, `(boolean)`,
+    /// `(double)`, `(binary)`) are deprecated as of PHP 8.5; `(real)`
+    /// isn't flagged either, faithfully matching real PHPStan's own gap
+    /// (see `ExprKind::Cast`'s doc comment). `cast_ty` is the already-
+    /// normalized target (`"int"`/`"float"`/`"string"`/`"bool"`), which
+    /// uniquely determines which deprecated spelling produced it - the
+    /// parser only ever sets the `deprecated_spelling` flag this is
+    /// gated on for exactly those four normalized targets.
+    pub(crate) fn check_deprecated_cast_spelling(
+        &mut self,
+        cast_ty: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if !crate::php_version::PhpFeature::DeprecatedNonStandardCasts.is_available(version) {
+            return;
+        }
+        let (spelling, canonical) = match cast_ty {
+            "int" => ("integer", "int"),
+            "float" => ("double", "float"),
+            "string" => ("binary", "string"),
+            "bool" => ("boolean", "bool"),
+            _ => return,
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "Non-standard ({spelling}) cast is deprecated in PHP 8.5. Use ({canonical}) instead."
+            ),
+            span,
+            0,
+            "cast.deprecated",
         );
     }
 

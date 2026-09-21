@@ -46,7 +46,7 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
         }
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
-        | ExprKind::Cast(_, inner)
+        | ExprKind::Cast(_, inner, _)
         | ExprKind::Grouping(inner)
         | ExprKind::FirstClassCallable(inner)
         | ExprKind::Throw(inner)
@@ -213,7 +213,7 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
         | ExprKind::Name(_) => false,
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
-        | ExprKind::Cast(_, inner)
+        | ExprKind::Cast(_, inner, _)
         | ExprKind::Grouping(inner)
         | ExprKind::FirstClassCallable(inner)
         | ExprKind::Throw(inner)

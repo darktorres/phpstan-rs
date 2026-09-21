@@ -1586,9 +1586,18 @@ impl<'a> Checker<'a> {
                 to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
             }
             ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
-            ExprKind::Cast(ty, inner) => {
+            ExprKind::Cast(ty, inner, deprecated_spelling) => {
                 let inner_ty = self.check_expr(inner, locals, label);
                 self.check_cast_validity(ty, &inner_ty, inner.span, label);
+                if ty == "unset" {
+                    self.check_unset_cast_supported(e.span, label);
+                }
+                if ty == "void" {
+                    self.check_void_cast(e.span, label, is_bare_statement);
+                }
+                if *deprecated_spelling {
+                    self.check_deprecated_cast_spelling(ty, e.span, label);
+                }
                 // An implicit `(string)` cast of an object triggers a
                 // real `__toString()` call - see
                 // `check_implicit_tostring_usage`'s doc comment.
@@ -3711,7 +3720,7 @@ impl<'a> Checker<'a> {
             // a function that always throws or exits.
             ExprKind::Throw(_) => Type::Never,
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
-            ExprKind::Cast(ty, _) => match ty.as_str() {
+            ExprKind::Cast(ty, _, _) => match ty.as_str() {
                 "int" => Type::Int,
                 "float" => Type::Float,
                 "string" => Type::String,

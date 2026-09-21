@@ -240,7 +240,7 @@ fn an_assignment_nested_as_a_cast_operand_parses_as_real_php_does() {
     let ExprKind::Assign(_, value) = &e.kind else {
         panic!("expected the statement to be an Assign, got {:?}", e.kind);
     };
-    let ExprKind::Cast(_, operand) = &value.kind else {
+    let ExprKind::Cast(_, operand, _) = &value.kind else {
         panic!("expected a top-level Cast expression, got {value:?}");
     };
     let ExprKind::Assign(target, inner_value) = &operand.kind else {
@@ -740,7 +740,7 @@ fn clone_with_overrides_and_classic_forms_both_parse() {
 fn void_and_binary_casts_parse() {
     let program = parse(r#"<?php (void) foo(); $x = (binary) 42;"#);
     assert!(
-        matches!(&program[0].kind, StmtKind::Expression(Expr { kind: ExprKind::Cast(ty, _), .. }) if ty == "void")
+        matches!(&program[0].kind, StmtKind::Expression(Expr { kind: ExprKind::Cast(ty, _, deprecated), .. }) if ty == "void" && !deprecated)
     );
     let StmtKind::Expression(Expr {
         kind: ExprKind::Assign(_, rhs),
@@ -749,7 +749,54 @@ fn void_and_binary_casts_parse() {
     else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Cast(ty, _) if ty == "string"));
+    // `(binary)` is `(string)`'s own non-canonical spelling -
+    // `DeprecatedCastRule`'s own flag must be set, unlike `(void)` above.
+    assert!(
+        matches!(&rhs.kind, ExprKind::Cast(ty, _, deprecated) if ty == "string" && *deprecated)
+    );
+}
+
+#[test]
+fn non_canonical_cast_spellings_set_the_deprecated_flag_canonical_ones_dont() {
+    let program = parse(
+        r#"<?php
+            (integer) $a;
+            (boolean) $a;
+            (double) $a;
+            (real) $a;
+            (int) $a;
+            (bool) $a;
+            (float) $a;
+        "#,
+    );
+    let flags: Vec<(String, bool)> = program
+        .iter()
+        .map(|s| {
+            let StmtKind::Expression(Expr {
+                kind: ExprKind::Cast(ty, _, deprecated),
+                ..
+            }) = &s.kind
+            else {
+                panic!("expected a Cast expression statement, got {:?}", s.kind);
+            };
+            (ty.clone(), *deprecated)
+        })
+        .collect();
+    assert_eq!(
+        flags,
+        vec![
+            ("int".to_string(), true),
+            ("bool".to_string(), true),
+            ("float".to_string(), true),
+            // `(real)` is float's OTHER non-canonical spelling, but real
+            // PHPStan's own `DeprecatedCastRule` never flags it (only
+            // `KIND_DOUBLE`) - faithfully unflagged here too.
+            ("float".to_string(), false),
+            ("int".to_string(), false),
+            ("bool".to_string(), false),
+            ("float".to_string(), false),
+        ]
+    );
 }
 
 #[test]
@@ -1007,5 +1054,5 @@ fn array_cast_parses() {
     else {
         panic!("expected assignment");
     };
-    assert!(matches!(&rhs.kind, ExprKind::Cast(ty, _) if ty == "array"));
+    assert!(matches!(&rhs.kind, ExprKind::Cast(ty, _, _) if ty == "array"));
 }
