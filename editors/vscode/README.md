@@ -9,9 +9,9 @@ Cargo workspace - it never touches `Cargo.lock`/`target/`.
 - Package manager: npm (`package-lock.json`, committed).
 - Node version: whatever `@types/node`'s major targets (see
   `package.json`) - no `.nvmrc` pinned yet.
-- No bundler (esbuild/webpack) yet - deferred; see `VSCODE_EXTENSION_PLAN.md`
-  §4.1's own scope notes. The packaged `.vsix` ships `node_modules/`
-  as-is for its one runtime dependency, `vscode-languageclient`.
+- No bundler (esbuild/webpack) yet - deferred, not a correctness gap.
+  The packaged `.vsix` ships `node_modules/` as-is for its one runtime
+  dependency, `vscode-languageclient`.
 
 ## Development
 

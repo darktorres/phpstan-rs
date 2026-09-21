@@ -123,13 +123,13 @@ fn initialize_loads_the_workspace_and_returns_server_capabilities() {
 
 #[test]
 fn initialize_tolerates_unrecognized_initialization_options() {
-    // Forward-compatibility guard for the VS Code extension's settings
-    // (VSCODE_EXTENSION_PLAN.md item 4.3): configPath/enable are sent
-    // via initializationOptions today even though nothing server-side
-    // reads them yet (that's 1.1) - InitializeParams.initialization_options
-    // is already Option<Value> in lsp-types and is simply dropped, so
-    // this must keep working rather than start erroring once someone
-    // adds real fields to look for.
+    // Forward-compatibility guard for the VS Code extension's settings:
+    // configPath/enable are sent via initializationOptions, but config
+    // resolution actually runs from the workspace root's own
+    // phpstan-rs.toml (lsp/workspace_config.rs), not from these -
+    // InitializeParams.initialization_options is already Option<Value>
+    // in lsp-types and is simply dropped, so this must keep working
+    // rather than start erroring if a future field ever gets read here.
     let dir = TempDir::new("init_options");
     dir.write("a.php", "<?php function helperA(): int { return 1; }");
 

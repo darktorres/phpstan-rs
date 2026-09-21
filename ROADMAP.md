@@ -3567,6 +3567,86 @@ their own consts/properties/methods/cases as children; a declaration
 inside a top-level `if`/`Block` is still walked, mirroring
 `DeclLocations::index`'s own recursion.
 
+**LSP server hardening and the VSCode extension client, all of it**
+(`VSCODE_EXTENSION_PLAN.md` in full - the document itself is retired,
+folded in here, since every one of its ~30 action items landed with
+nothing left open; see this paragraph's own closing note for the one
+disclosed exception). The plan's own diagnosis - "the LSP server today
+behaves like a per-file hover/definition helper, not like `check-project`
+running live," plus "the VSCode extension client doesn't exist anywhere
+in this repo yet" - is no longer true of either half:
+
+- *Trustworthy diagnostics* (the plan's Phase 1): `lsp/workspace_config.rs`
+  resolves a workspace's own `phpstan-rs.toml` (or an override) and calls
+  the same `composer::discover_vendor_context` sequence `check-project`
+  itself uses, before the workspace ever loads - a team's CI-enforced
+  settings (deprecated/internal-usage checks, a baseline, `php_version`)
+  now apply identically in the editor. The workspace scan filters
+  `vendor/`/`.git/`/`node_modules/` the same way `check-project`'s own
+  analyzed-vs-context-only split does, loading `vendor/` only through the
+  precise autoload-map-driven vendor context rather than a blind recursive
+  walk. Diagnostics for the *whole* workspace publish once loading
+  finishes, not only for files that happen to get opened/edited in a
+  session. `Diagnostic::level` now maps to a real `DiagnosticSeverity`
+  tier instead of every finding rendering as a hardcoded red squiggle.
+- *Concurrency* (Phase 2): the server no longer parks its only thread in
+  a blocking stdin read - `Connection::stdio()` plus a `recv_timeout`-
+  based loop (`RUN_LOOP_TICK`, `src/lsp.rs`) frees it to debounce and
+  answer `hover`/`definition` against last-good state while a recheck
+  runs. `spawn_debounce_worker`/`DebounceHandle`/`handle_debounced_change`
+  coalesce rapid `didChange` bursts behind a short timer, replace-and-
+  restart on a newer edit for the same URI, and drop an already-completed
+  but now-stale recheck's diagnostics via a per-URI generation counter
+  (`current_generation`) rather than publishing them. `Project::
+  remove_file`/`remove_files` unwind a deleted/moved file's registry
+  contributions the same way `update_file` already unwinds stale
+  declarations before re-indexing. `publishDiagnostics` is stamped with
+  the real document version. The initial workspace scan no longer blocks
+  `initialize`'s own response.
+- *Protocol completeness* (Phase 3): `workspace/didChangeWatchedFiles`
+  (external `git checkout`/`composer install`/other-tool changes),
+  multi-root workspace loading plus `workspace/didChangeWorkspaceFolders`,
+  live `workspace/didChangeConfiguration` reload, outbound-request
+  plumbing (the concrete prerequisite the previous three needed), UTF-8
+  `position_encoding` negotiation at `initialize` (`starts_with_drive_letter`'s
+  own sibling fix, Windows `file:///C:/...` URI round-tripping, landed
+  alongside it), `window/logMessage` surfacing for a workspace file that
+  fails to load (previously silent `eprintln!`), and `$/cancelRequest`
+  plus exit-code-compliant `exit` handling for inbound requests.
+- *The VSCode extension client itself* (Phase 4, previously "100% net-new
+  work... confirmed absent everywhere," now real, tested, and directly
+  used): lives under `editors/vscode/`, a standard `vscode-languageclient`
+  extension (`extension.ts`) with `phpstan-rs.enable`/`.configPath`/
+  `.serverPath`/`.trace.server` settings, a `phpstan-rs.restartServer`
+  command, and a config-change prompt. Binary distribution follows rust-
+  analyzer's own pattern - a release CI job cross-compiles per target
+  triple and the extension's `serverBinary.ts`/`serverDownload.ts`
+  auto-download and cache the matching asset on first activation, with
+  `serverPath` as a local-build override. A real test harness
+  (`editors/vscode/src/test/`, `@vscode/test-electron` for an integration
+  lane inside a genuine Extension Development Host, plain `node:test` for
+  the unit lane) plus its own CI workflow
+  (`.github/workflows/extension-ci.yml`) back it, and a packaged
+  `phpstan-rs-vscode-0.0.1.vsix` exists and has been used directly in a
+  real VSCode session.
+
+Beyond the plan's own original ~19 numbered items, the same cleanup pass
+found several further LSP capabilities already fully built with no
+previous record here: `textDocument/completion` (member, static-access,
+and class-name completion) is the one genuinely new mention added by
+this paragraph; `codeAction`/references+rename/`signatureHelp`/
+`workspace/symbol`/`documentHighlight`/`semanticTokens`/`inlayHint`/
+`typeDefinition`/`documentSymbol` were each already recorded in their own
+paragraphs elsewhere in this Done section (see just above) rather than
+repeated here.
+
+Two small, disclosed items stay open, neither a correctness gap:
+local-variable references/rename stay explicitly out of scope (the
+whole-project reference index is class/function/member-level only, not
+per-variable), and the extension has no bundler (esbuild/webpack) yet -
+its packaged `.vsix` ships `node_modules/` as-is for its one runtime
+dependency (`editors/vscode/README.md`).
+
 **Fuzz testing infrastructure** (Phase 19). `cargo-fuzz` for the lexer/
 parser: `lex_parse` (primary target, mirroring production's exact
 `String::from_utf8_lossy`+lex+parse pipeline, including its own 64MiB

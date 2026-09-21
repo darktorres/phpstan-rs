@@ -466,9 +466,11 @@ Real PHPStan ships no first-party LSP or interactive query API at all —
 `FileAnalyser::analyseFile` is its sole entry point, always a fresh
 whole-file CLI invocation. phpstan-rs's LSP server already keeps a
 resident, incrementally-updated `Project`/`Registry` — every phase below
-is a gap in already-built plumbing. (See also `VSCODE_EXTENSION_PLAN.md`
-for the LSP server's own trustworthiness/concurrency/protocol
-hardening, a separate concern from net-new capabilities like these.)
+is a gap in already-built plumbing. (The LSP server's own trustworthiness/
+concurrency/protocol hardening, plus the VSCode extension client itself,
+were a separate concern, formerly tracked in `VSCODE_EXTENSION_PLAN.md` —
+that document is now retired, fully done; see ROADMAP's own "Performance
+& tooling" Done section.)
 
 ## Phase 105 — Finer-grained incremental re-check (§G)
 

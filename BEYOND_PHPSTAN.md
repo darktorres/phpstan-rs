@@ -1866,10 +1866,10 @@ index of any kind. phpstan-rs's LSP server already keeps a resident,
 incrementally-updated `Project`/`Registry` (`src/project.rs:69-114`) - the
 items below are gaps in already-built plumbing, not new architecture. This
 is the cluster most directly relevant to a future VSCode extension for
-realtime incremental analysis (see also `VSCODE_EXTENSION_PLAN.md`, a
-separate, synthesized execution plan for the LSP server's own
-trustworthiness/concurrency/protocol gaps rather than net-new capabilities
-like these).
+realtime incremental analysis (the LSP server's own trustworthiness/
+concurrency/protocol gaps, and the VSCode extension client itself, were
+a separate, now-fully-done initiative - see ROADMAP's "Performance &
+tooling" Done section).
 
 ## F. Single-cursor request/response capabilities
 
