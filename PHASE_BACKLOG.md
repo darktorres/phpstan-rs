@@ -1110,29 +1110,6 @@ this section.
   type; phpstan-rs infers a type for `Clone` but performs zero
   cloneability validation.
 
-## Phase 135 — Operators+Cast (`Rules/Operators/`, `Rules/Cast/` gaps)
-
-- `BacktickRule` — the backtick shell-exec operator's PHP-8.5
-  deprecation warning. Still unbuilt - the parser deliberately doesn't
-  distinguish a real `` `cmd` `` occurrence from an ordinary
-  `shell_exec()` call at the AST level (both desugar to the identical
-  `Call` node), so this would need its own AST marker first.
-- `InvalidAssignVarRule` (partial, see ROADMAP's Done section) — the
-  nullsafe-assignment-target and non-assignable-LHS halves
-  (`nullsafe.assign`/`assign.invalidExpr`) are done. The remaining
-  third of this rule, nullsafe on the RHS of assign-by-ref
-  (`nullsafe.byRef`), stays unbuilt - this project doesn't model
-  assignment-by-reference as its own `Expr` shape at all (`$a = &$b`
-  parses as a plain `Assign`, the `&` just consumed), so there's no way
-  to distinguish that RHS position from an ordinary read yet.
-- `PipeOperatorRule` — PHP 8.5's `|>` pipe with a by-ref-first-parameter
-  callable on its right side (the pipe always passes by-value). Still
-  unbuilt - needs a general "resolve an arbitrary expression's type to
-  its callable parameter list" helper (closure, first-class callable,
-  string function name, `[obj, method]` array callable, ...) that
-  doesn't exist anywhere in this project yet; every existing higher-
-  order-function check special-cases its own known builtin instead.
-
 ## Phase 136 — Traits+InternalTag (`Rules/Traits/` gaps)
 
 - `ConflictingTraitConstantsRule` — a class constant overriding one

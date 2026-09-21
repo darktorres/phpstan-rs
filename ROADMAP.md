@@ -3362,11 +3362,9 @@ with no consumer (`UnsetCastRemoved`, `VoidCast`,
   `DeprecatedCastRule`, which only checks `KIND_DOUBLE`, never
   `KIND_REAL`.
 
-**`InvalidAssignVarRule`'s nullsafe-assignment-target and non-
-assignable-LHS halves** (PHASE_BACKLOG Phase 135, partial -
-`nullsafe.assign`/`assign.invalidExpr`, both non-ignorable). Two new
-`checker/assignment.rs` checks, run unconditionally at the top of both
-`Assign`'s and `CompoundAssign`'s own `check_expr` arms:
+**`InvalidAssignVarRule`, all three cases** (PHASE_BACKLOG Phase 135,
+`nullsafe.assign`/`nullsafe.byRef`/`assign.invalidExpr`, all non-
+ignorable). Three `checker/assignment.rs` checks:
 - `contains_nullsafe` walks an assignment target's own access chain
   (`PropertyAccess`/`MethodCall`'s own nullsafe flag, recursing through
   `Index`/a `StaticCall` with a real expression receiver/a destructuring
@@ -3375,7 +3373,21 @@ assignable-LHS halves** (PHASE_BACKLOG Phase 135, partial -
   Doesn't see through `DynamicPropertyAccess`/`DynamicMethodCall`
   (`$a?->{$expr}`), which don't carry their own nullsafe flag at all
   (see `ExprKind::DynamicPropertyAccess`'s own doc comment) - a real,
-  disclosed, narrow gap.
+  disclosed, narrow gap. Checked against both `Assign`'s/`AssignRef`'s
+  own LHS (`nullsafe.assign`) and, for `AssignRef` specifically, its own
+  RHS too (`nullsafe.byRef` - `$a = &$b?->c;`).
+- `nullsafe.byRef` needed a genuinely new `ExprKind::AssignRef` variant
+  first, distinct from `Assign` - this project previously had no way to
+  tell an assign-by-reference (`$a = &$b;`) apart from a plain
+  assignment at all (the `&` was just consumed and discarded at parse
+  time), so there was no RHS position to check nullsafe against.
+  Propagated through every real consumer a full semantic review turned
+  up (narrowing, purity disqualification, uninitialized-property/
+  private-member/global-variable write tracking, ...), each decided
+  independently on whether `AssignRef` should behave like `Assign`
+  (almost always yes) or differently (declining a few combinations real
+  PHP itself doesn't allow, like a byref-assigned literal or `new`
+  expression).
 - `is_non_assignable_target` confirmed a real, live gap first: unlike a
   grammar that would reject it at parse time, this project's own
   `parse_assignment_tail` accepts *any* expression as an assignment's
@@ -3391,13 +3403,34 @@ assignable-LHS halves** (PHASE_BACKLOG Phase 135, partial -
   just `PropertyFetch`) - `MethodCall`/`DynamicMethodCall` intentionally
   get no such treatment, since neither is ever a valid assignment target
   in real PHP either.
-- The rule's third case, nullsafe on the RHS of assign-by-ref
-  (`nullsafe.byRef`), is *not* built - this project doesn't model
-  assignment-by-reference as its own `Expr` shape at all (`$a = &$b`
-  parses as a plain `Assign`, with the `&` just consumed and discarded
-  at parse time), so there's no way to distinguish that RHS position
-  from an ordinary read. A real, disclosed, permanent-until-that-AST-
-  gap-closes limitation, not an oversight.
+
+**`BacktickRule`** (PHASE_BACKLOG Phase 135, `backtick.deprecated`, not
+non-ignorable). A new `ExprKind::ShellExec` wraps the identically-shaped
+`Call(Name("shell_exec"), [cmd])` a plain `shell_exec($cmd)` call would
+itself produce (the parser already built this exact node for a `` `cmd`
+`` occurrence) purely so this check can tell "this was literally
+backtick syntax" apart from an author writing `shell_exec()`
+themselves - every other consumer (type inference, argument checking,
+the generic `ast_walk` traversal helpers) delegates straight through to
+the wrapped `Call`, unchanged.
+
+**`PipeOperatorRule`** (PHASE_BACKLOG Phase 135, `pipe.byRef`). PHP
+8.5's `|>` always passes by value, so a right-hand callable whose first
+parameter is declared by-reference can never actually receive anything.
+Real PHPStan resolves this against the right side's own *type*
+(`getCallableParametersAcceptors`), but this project's own inferred type
+for a closure/arrow-fn *literal* is the coarse `Type::Object("Closure",
+[])`, not a real parameter-shaped `Type::Callable` - building that
+machinery first would be a large, disproportionate undertaking for this
+one narrow check. `checker/pipe_operator.rs` instead resolves directly
+against the right-hand side's own literal syntax - a closure/arrow-fn
+literal, a first-class callable (`foo(...)`/`$obj->method(...)`/
+`Foo::method(...)`), a bare string function name, or a two-element
+`[$obj, 'method']`/`['Class', 'method']` array callable - covering every
+real pipe-target idiom; anything else (a plain variable holding an
+already-built `Closure`) is silently skipped, matching real PHPStan's
+own silent skip whenever its type-level resolution can't produce a
+confident `isCallable()` type either.
 
 ## Performance & tooling
 
@@ -4080,8 +4113,6 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 
 ## Operators+Cast
 
-- **`Rules/Operators/BacktickRule.php`**: Real PHPStan warns (`backtick.deprecated`) that the backtick shell-exec operator is deprecated as of PHP 8.5, suggesting `shell_exec()` instead. phpstan-rs has no equivalent diagnostic anywhere, and ROADMAP.md never mentions BacktickRule, backtick deprecation, or the identifier at all.
-- **`Rules/Operators/PipeOperatorRule.php`**: Real PHPStan's PipeOperatorRule flags a PHP 8.5 pipe (`|>`) whose right-hand callable's first parameter is passed by reference (`pipe.byRef`), since the pipe operator always passes its value by-value. phpstan-rs parses `|>` but performs no legality checking on the callable at all.
 - **`Rules/Operators/InvalidIncDecOperationRule.php`**: a whole
   unimplemented rule family - flags `$x++`/`$x--`/`++$x`/`--$x`
   (`postInc.type`/`postDec.type`/`preInc.type`/`preDec.type`) on a type
