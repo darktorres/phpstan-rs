@@ -454,6 +454,49 @@ impl TagParser {
     /// `array{...}`/`list{...}`/`object{...}`, `callable(...)`/
     /// `Closure(...)`, `int<...>`, `Name::CONST`, or an ordinary
     /// `Name<Args>` generic (or a bare `Name` alone).
+    /// One generic-argument position, checked first for real PHPStan's
+    /// own call-site variance marker syntax (`Collection<covariant
+    /// Foo>`/`Collection<contravariant Foo>`/a bare `Collection<*>`)
+    /// before falling through to an ordinary type - encoded the same
+    /// "sentinel name, guarded impossible" way `types::parse::
+    /// parse_generic_arg` already encodes it at the `Type` level
+    /// (`"$$covariant"`/`"$$contravariant"`/`"$$bivariant"`, see its own
+    /// doc comment), so `TypeNode::to_source_string` can re-emit the
+    /// exact literal `"covariant "`/`"contravariant "`/`"*"` surface
+    /// syntax that consumer's own `strip_prefix` checks match against
+    /// textually - not this grammar's own `Name<Args>` bracket shape.
+    /// Case-sensitive and only when a real type token follows, mirroring
+    /// that same consumer exactly: a bare `Collection<covariant>` (no
+    /// following type at all) is a plain type literally named
+    /// `covariant`, not a variance marker with nothing to wrap.
+    fn parse_generic_arg(&mut self) -> TypeNode {
+        if matches!(self.peek(), PhpDocToken::Star)
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                Some(PhpDocToken::Comma | PhpDocToken::RAngle)
+            )
+        {
+            self.advance();
+            return TypeNode::Generic("$$bivariant".to_string(), Vec::new());
+        }
+        for (keyword, sentinel) in [
+            ("covariant", "$$covariant"),
+            ("contravariant", "$$contravariant"),
+        ] {
+            if let PhpDocToken::Identifier(s) = self.peek()
+                && s == keyword
+                && !matches!(
+                    self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                    Some(PhpDocToken::Comma | PhpDocToken::RAngle | PhpDocToken::Eof)
+                )
+            {
+                self.advance();
+                return TypeNode::Generic(sentinel.to_string(), vec![self.parse_type()]);
+            }
+        }
+        self.parse_type()
+    }
+
     fn parse_identifier_led(&mut self, name: String) -> TypeNode {
         let lower = name.to_ascii_lowercase();
         if matches!(self.peek(), PhpDocToken::LBrace)
@@ -493,7 +536,7 @@ impl TagParser {
             };
         }
         if self.eat(&PhpDocToken::LAngle) {
-            let mut args = vec![self.parse_type()];
+            let mut args = vec![self.parse_generic_arg()];
             while self.eat(&PhpDocToken::Comma) {
                 // A trailing comma before `>` (real, common style,
                 // `Collection<int, string,>`) - stop instead of trying
@@ -501,7 +544,7 @@ impl TagParser {
                 if matches!(self.peek(), PhpDocToken::RAngle) {
                     break;
                 }
-                args.push(self.parse_type());
+                args.push(self.parse_generic_arg());
             }
             self.expect(&PhpDocToken::RAngle, "'>'");
             return TypeNode::Generic(name, args);
@@ -698,6 +741,47 @@ impl TagParser {
             if_false: Box::new(if_false),
         })
     }
+}
+
+/// Parses one tag's own already tag-name-stripped `rest` text into a
+/// `PhpDocTagValue`, exactly the shape the whole-comment `parse` entry
+/// point itself would build for a tag named `name` - used by `docblock::
+/// apply_tag`'s Stage B migration to source one tag's structured value at
+/// a time, alongside its own byte-exact `rest` text (rather than
+/// re-deriving the whole comment's own `tag_lines` join a second time).
+pub(crate) fn parse_tag_rest(name: &str, rest: &str) -> (PhpDocTagValue, Vec<PhpDocParseError>) {
+    let tokens = Lexer::new(rest).tokenize();
+    let mut parser = TagParser::new(tokens);
+    let value = parser.parse_tag_value(name);
+    (value, parser.errors)
+}
+
+/// Parses a single leading type expression off `rest`, returning it
+/// alongside `rest`'s own remaining raw text - untouched, byte-exact, not
+/// reconstructed from tokens - plus any error the type itself produced.
+/// `None` when `rest` doesn't start with anything type-shaped at all.
+/// Used by `docblock::apply_tag`'s Stage B migration for the handful of
+/// tags real PHPStan gives no dedicated tag-value shape to (`@mixin`,
+/// `@sealed`, `@phpstan-type`, ...) that are nonetheless, in practice, one
+/// leading type expression followed by trailing free text.
+pub(crate) fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpDocParseError>) {
+    let tokens = Lexer::new(rest).tokenize();
+    let mut parser = TagParser::new(tokens);
+    let ty = parser.try_parse_type();
+    // `rest` is always one already-joined logical line (no embedded
+    // newline - see `parse`'s own doc comment), so the lexer's own 1-based
+    // `col` maps directly onto a *char* index into `rest`; converted to a
+    // byte index since Rust string slicing is byte-indexed and `rest` can
+    // contain multi-byte UTF-8 (this project's own identifier grammar
+    // explicitly allows non-ASCII bytes, see `lexer.rs`'s own doc
+    // comment).
+    let char_idx = (parser.peek_span().start.col as usize).saturating_sub(1);
+    let byte_idx = rest
+        .char_indices()
+        .nth(char_idx)
+        .map(|(b, _)| b)
+        .unwrap_or(rest.len());
+    (ty, &rest[byte_idx..], parser.errors)
 }
 
 fn token_text(t: &PhpDocToken) -> String {

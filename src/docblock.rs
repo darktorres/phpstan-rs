@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::phpdoc_grammar::{self, PhpDocParseError, PhpDocTagValue};
+
 /// A parsed subset of a `/** ... */` doc comment: just the tags this
 /// checker can use (`@param`, `@return`, `@var`, ...). Types are kept as
 /// raw strings here, resolved through `types::parse_type_string` only
@@ -168,6 +170,15 @@ pub struct DocBlock {
     // the same mechanism `Closure::bind`/`->bindTo()` use - see
     // `registry::function_sig::ParamSig::closure_this_type`.
     pub param_closure_this: HashMap<String, String>,
+    // Every real, recoverable parse error `phpdoc_grammar` produced while
+    // parsing this docblock's own type expressions - real PHPStan's own
+    // `phpDoc.parseError`, structurally available now that Stage B (see
+    // `phpdoc_grammar`'s own module doc comment) sources every type-
+    // bearing tag's type from that grammar instead of the old bracket-
+    // depth-only `take_type_token` scan. Not yet consumed by any checker
+    // rule - collected here so a future rule can be, without another
+    // parsing pass.
+    pub parse_errors: Vec<PhpDocParseError>,
 }
 
 /// One parsed `@phpstan-import-type` tag - see `DocBlock::type_imports`'s
@@ -227,30 +238,33 @@ pub struct AssertTag {
 /// (`"!null $this->testFilesFile"`) into a negation flag, a type text,
 /// and a target text - `None` for the `=Type`/`!=value` forms this
 /// project doesn't model (a genuinely different, value/generic-argument
-/// comparison, not a type check `take_type_token` could parse
-/// meaningfully anyway).
-fn parse_assert_tag(rest: &str) -> Option<AssertTag> {
+/// comparison, not a real type check anyway).
+fn parse_assert_tag(rest: &str) -> (Option<AssertTag>, Vec<PhpDocParseError>) {
     let rest = rest.trim();
     if rest.starts_with("!=") || rest.starts_with('=') {
-        return None;
+        return (None, Vec::new());
     }
     let (negated, rest) = match rest.strip_prefix('!') {
         Some(after) => (true, after),
         None => (false, rest),
     };
-    let ty = take_type_token(rest);
-    if ty.is_empty() {
-        return None;
+    let (ty, target, errors) = phpdoc_grammar::parse_type_prefix(rest);
+    let Some(ty) = ty else {
+        return (None, errors);
+    };
+    let ty = ty.to_source_string();
+    let target = target.trim();
+    if ty.is_empty() || target.is_empty() {
+        return (None, errors);
     }
-    let target = rest[ty.len()..].trim();
-    if target.is_empty() {
-        return None;
-    }
-    Some(AssertTag {
-        negated,
-        ty: ty.to_string(),
-        target: target.to_string(),
-    })
+    (
+        Some(AssertTag {
+            negated,
+            ty,
+            target: target.to_string(),
+        }),
+        errors,
+    )
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -360,64 +374,89 @@ fn extract_doc_var_name(token: &str) -> Option<&str> {
 fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
     {
         match tag {
+            // Every type-bearing tag below sources its type from
+            // `phpdoc_grammar` - a real tokenizer + recursive-descent
+            // parser (Phase 56 Stage A/B) - rather than the old `take_
+            // type_token` bracket-depth-only scan, then re-stringifies
+            // the parsed `TypeNode` back into this struct's own
+            // `Option<String>` fields for full backward compatibility
+            // with every existing consumer (`phpdoc_grammar`'s own
+            // module doc comment). Any tag whose name `phpdoc_grammar`
+            // gives a dedicated structured shape to (`PhpDocTagValue::
+            // TypedVar`/`Type`/`Template`/`ExtendsLike`/`Method`) also
+            // sources its variable name/by-ref/variadic/bound/default
+            // from that same structure, not from a second, independent
+            // re-derivation of the surrounding text.
             "param" => {
-                // Convention is `Type $name description...`.
-                let ty = take_type_token(rest);
-                let remainder = rest[ty.len()..].trim_start();
-                let var_token = remainder.split_whitespace().next().unwrap_or("");
-                if let Some(name) = extract_doc_var_name(var_token) {
-                    if !ty.is_empty() {
-                        block.params.insert(name.to_string(), ty.to_string());
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("param", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::TypedVar {
+                    ty,
+                    variable: Some(name),
+                    description,
+                    ..
+                } = value
+                {
+                    if let Some(ty) = ty {
+                        block.params.insert(name.clone(), ty.to_source_string());
                     }
-                    let after_name = remainder[var_token.len()..].trim_start();
-                    if after_name.starts_with("[optional]") {
-                        block.optional_params.insert(name.to_string());
+                    // Tokens reconstruct with a space between every one
+                    // of them (`remaining_description`'s own doc
+                    // comment) - `"[optional]"` re-lexes as three
+                    // separate tokens (`[`, `optional`, `]`), so
+                    // stripping spaces before comparing is what makes
+                    // this survive that reconstruction.
+                    if description.replace(' ', "").starts_with("[optional]") {
+                        block.optional_params.insert(name);
                     }
                 }
             }
             "param-out" => {
                 // Identical shape to `"param"` above (minus its own
                 // `[optional]` marker, meaningless for an output type).
-                let ty = take_type_token(rest);
-                let remainder = rest[ty.len()..].trim_start();
-                let var_token = remainder.split_whitespace().next().unwrap_or("");
-                if let Some(name) = extract_doc_var_name(var_token)
-                    && !ty.is_empty()
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("param-out", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::TypedVar {
+                    ty: Some(ty),
+                    variable: Some(name),
+                    ..
+                } = value
                 {
-                    block.param_out.insert(name.to_string(), ty.to_string());
+                    block.param_out.insert(name, ty.to_source_string());
                 }
             }
             "return" => {
-                let ty = take_type_token(rest);
                 // Conditional return types (`(\$param
                 // is Foo ? Bar : Baz)`, real PHPStan syntax Doctrine
                 // DBAL's own `DriverManager::getConnection()` uses) used
-                // to be deliberately excluded here (`!ty.starts_with
-                // ("($")`) - this project had no per-call-site binding for
-                // them, and `types::parse_type_string` collapsed one to
-                // an eager union of both branches, discarding the
-                // condition entirely, so setting `return_type` from one
-                // was worse than leaving it unset. Now that `Type::
-                // Conditional`/`resolve_conditional` exist and do real
-                // per-call-site resolution, that exclusion is gone -
-                // `take_type_token`'s own balanced-parens grab is exactly
-                // what `try_parse_conditional_type` needs to see the
-                // whole `(...)` token intact.
-                if !ty.is_empty() {
-                    block.return_type = Some(ty.to_string());
+                // to be deliberately excluded here - this project had no
+                // per-call-site binding for them, and `types::
+                // parse_type_string` collapsed one to an eager union of
+                // both branches, discarding the condition entirely, so
+                // setting `return_type` from one was worse than leaving
+                // it unset. Now that `Type::Conditional`/
+                // `resolve_conditional` exist and do real per-call-site
+                // resolution, that exclusion is gone -
+                // `phpdoc_grammar`'s own `parse_paren_or_conditional`
+                // parses the whole `(...)` shape as a real `TypeNode::
+                // Conditional`, and `to_source_string` re-emits it in
+                // exactly the `" is "`/`"?"`/`":"` shape `types::
+                // parse_type_string`'s own conditional parser expects.
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("return", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {
+                    block.return_type = Some(ty.to_source_string());
                 }
             }
             "var" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.var_type = Some(ty.to_string());
-                    let remainder = rest[ty.len()..].trim_start();
-                    if let Some(name) = remainder
-                        .split_whitespace()
-                        .next()
-                        .and_then(extract_doc_var_name)
-                    {
-                        block.var_name = Some(name.to_string());
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("var", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::TypedVar { ty, variable, .. } = value {
+                    if let Some(ty) = ty {
+                        block.var_type = Some(ty.to_source_string());
+                    }
+                    if let Some(name) = variable {
+                        block.var_name = Some(name);
                     }
                 }
             }
@@ -436,79 +475,72 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "param-closure-this" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    let remainder = rest[ty.len()..].trim_start();
-                    if let Some(name) = remainder
+                // Not one of `phpdoc_grammar`'s own dedicated tag shapes
+                // (`TYPED_VAR_TAGS`) - just one leading type expression
+                // followed by `$name`, same shape `parse_type_prefix`
+                // exists for.
+                let (ty, remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty
+                    && let Some(name) = remainder
                         .split_whitespace()
                         .next()
                         .and_then(extract_doc_var_name)
-                    {
-                        block
-                            .param_closure_this
-                            .insert(name.to_string(), ty.to_string());
-                    }
+                {
+                    block
+                        .param_closure_this
+                        .insert(name.to_string(), ty.to_source_string());
                 }
             }
             "property" | "property-read" | "property-write" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    let remainder = rest[ty.len()..].trim_start();
-                    if let Some(name) = remainder
-                        .split_whitespace()
-                        .next()
-                        .and_then(extract_doc_var_name)
-                    {
-                        block.properties.push(PropertyTag {
-                            name: name.to_string(),
-                            ty: ty.to_string(),
-                            readable: tag != "property-write",
-                            writable: tag != "property-read",
-                        });
-                    }
+                let (value, errors) = phpdoc_grammar::parse_tag_rest(tag, rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::TypedVar {
+                    ty: Some(ty),
+                    variable: Some(name),
+                    ..
+                } = value
+                {
+                    block.properties.push(PropertyTag {
+                        name,
+                        ty: ty.to_source_string(),
+                        readable: tag != "property-write",
+                        writable: tag != "property-read",
+                    });
                 }
             }
-            "template" => {
-                if let Some((name, bound, default)) = parse_template_tag(rest) {
+            "template" | "template-covariant" | "template-contravariant" => {
+                let (value, errors) = phpdoc_grammar::parse_tag_rest(tag, rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::Template {
+                    name,
+                    bound,
+                    default,
+                } = value
+                    && !name.is_empty()
+                {
                     if !block.templates.contains(&name) {
                         block.templates.push(name.clone());
                     }
                     if let Some(bound) = bound {
-                        block.template_bounds.insert(name.clone(), bound);
+                        block
+                            .template_bounds
+                            .insert(name.clone(), bound.to_source_string());
                     }
                     if let Some(default) = default {
-                        block.template_defaults.insert(name, default);
+                        block
+                            .template_defaults
+                            .insert(name.clone(), default.to_source_string());
                     }
-                }
-            }
-            // Same shape as a plain `@template`, plus which direction
-            // the parameter is allowed to vary in.
-            "template-covariant" => {
-                if let Some((name, bound, default)) = parse_template_tag(rest) {
-                    if !block.templates.contains(&name) {
-                        block.templates.push(name.clone());
+                    match tag {
+                        "template-covariant" => {
+                            block.covariant_templates.insert(name);
+                        }
+                        "template-contravariant" => {
+                            block.contravariant_templates.insert(name);
+                        }
+                        _ => {}
                     }
-                    if let Some(bound) = bound {
-                        block.template_bounds.insert(name.clone(), bound);
-                    }
-                    if let Some(default) = default {
-                        block.template_defaults.insert(name.clone(), default);
-                    }
-                    block.covariant_templates.insert(name);
-                }
-            }
-            "template-contravariant" => {
-                if let Some((name, bound, default)) = parse_template_tag(rest) {
-                    if !block.templates.contains(&name) {
-                        block.templates.push(name.clone());
-                    }
-                    if let Some(bound) = bound {
-                        block.template_bounds.insert(name.clone(), bound);
-                    }
-                    if let Some(default) = default {
-                        block.template_defaults.insert(name.clone(), default);
-                    }
-                    block.contravariant_templates.insert(name);
                 }
             }
             "type" => {
@@ -518,17 +550,20 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 // A common variant of this tag's syntax writes an `=`
                 // between the alias name and its type expression
                 // (`@phpstan-type Alias = ConcreteType`) - without
-                // stripping it, `take_type_token` stops at the first
-                // whitespace and takes the bare `=` itself as the whole
-                // "type", later resolved into a bogus namespace-qualified
-                // class name ending in `\=`.
+                // stripping it, the type parser sees a bare `=` as its
+                // first token and errors out instead of parsing the real
+                // type that follows.
                 let remainder = remainder
                     .strip_prefix('=')
                     .unwrap_or(remainder)
                     .trim_start();
-                let ty = take_type_token(remainder);
-                if !name.is_empty() && !ty.is_empty() {
-                    block.type_aliases.insert(name.to_string(), ty.to_string());
+                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(remainder);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty {
+                    let ty = ty.to_source_string();
+                    if !name.is_empty() && !ty.is_empty() {
+                        block.type_aliases.insert(name.to_string(), ty);
+                    }
                 }
             }
             "import-type" => {
@@ -563,17 +598,28 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // `implements_args["Iterator"]` would be silently empty, and
             // `Registry::class_template_bindings(_, _, "Iterator")` on
             // any `Generator<...>`-typed value would zip its real type
-            // arguments against nothing.
+            // arguments against nothing. `phpdoc_grammar` only knows the
+            // plain names, so the synonym is mapped onto its bare
+            // counterpart right here rather than taught to the grammar
+            // itself.
             "extends" | "template-extends" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.extends = Some(ty.to_string());
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("extends", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::ExtendsLike { ty } = value {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.extends = Some(ty);
+                    }
                 }
             }
             "implements" | "template-implements" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.implements.push(ty.to_string());
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("implements", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::ExtendsLike { ty } = value {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.implements.push(ty);
+                    }
                 }
             }
             // Real PHPStan-recognized synonym for `@use`, mirroring
@@ -582,38 +628,81 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             // separate arm: `parse`'s own two-pass loop already strips a
             // leading `phpstan-` off every tag.
             "use" | "template-use" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.uses.push(ty.to_string());
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("use", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::ExtendsLike { ty } = value {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.uses.push(ty);
+                    }
                 }
             }
             "require-extends" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.require_extends.push(ty.to_string());
+                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.require_extends.push(ty);
+                    }
                 }
             }
             "require-implements" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.require_implements.push(ty.to_string());
+                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.require_implements.push(ty);
+                    }
                 }
             }
             "sealed" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.sealed.push(ty.to_string());
+                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.sealed.push(ty);
+                    }
                 }
             }
             "method" => {
-                if let Some(tag) = parse_method_tag(rest) {
-                    block.method_tags.push(tag);
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("method", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::Method {
+                    is_static,
+                    return_type,
+                    name,
+                    params,
+                } = value
+                    && !name.is_empty()
+                {
+                    block.method_tags.push(MethodTag {
+                        is_static,
+                        return_type: return_type.map(|t| t.to_source_string()),
+                        name,
+                        params: params
+                            .into_iter()
+                            .map(|p| MethodTagParam {
+                                ty: p.ty.map(|t| t.to_source_string()),
+                                name: p.name,
+                                by_ref: p.by_ref,
+                                variadic: p.variadic,
+                                has_default: p.has_default,
+                            })
+                            .collect(),
+                    });
                 }
             }
             "mixin" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.mixins.push(ty.to_string());
+                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty {
+                    let ty = ty.to_source_string();
+                    if !ty.is_empty() {
+                        block.mixins.push(ty);
+                    }
                 }
             }
             // See `DocBlock::api`/`api_do_not_implement`'s own
@@ -658,11 +747,18 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 block.deprecated = Some(rest.trim().to_string());
             }
             "throws" => {
-                let ty = take_type_token(rest);
-                if !ty.is_empty() {
-                    block.throws.push(ty.to_string());
+                let (value, errors) = phpdoc_grammar::parse_tag_rest("throws", rest);
+                block.parse_errors.extend(errors);
+                if let PhpDocTagValue::Type { ty: Some(ty), .. } = value {
+                    block.throws.push(ty.to_source_string());
                 }
             }
+            // Not routed through `phpdoc_grammar` at all - a `@see`
+            // target is a plain symbol reference, a URL, or free text,
+            // never a real type expression (real PHPStan's own
+            // `phpstan/phpdoc-parser` has no `SeeTagValueNode` either -
+            // see `DocBlock::see`'s own doc comment) - the type grammar's
+            // stricter parsing would only misparse it.
             "see" => {
                 let target = take_type_token(rest);
                 if !target.is_empty() {
@@ -670,57 +766,29 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                 }
             }
             "assert-if-true" => {
-                if let Some(tag) = parse_assert_tag(rest) {
+                let (tag, errors) = parse_assert_tag(rest);
+                block.parse_errors.extend(errors);
+                if let Some(tag) = tag {
                     block.assert_if_true.push(tag);
                 }
             }
             "assert-if-false" => {
-                if let Some(tag) = parse_assert_tag(rest) {
+                let (tag, errors) = parse_assert_tag(rest);
+                block.parse_errors.extend(errors);
+                if let Some(tag) = tag {
                     block.assert_if_false.push(tag);
                 }
             }
             "assert" => {
-                if let Some(tag) = parse_assert_tag(rest) {
+                let (tag, errors) = parse_assert_tag(rest);
+                block.parse_errors.extend(errors);
+                if let Some(tag) = tag {
                     block.assert.push(tag);
                 }
             }
             _ => {}
         }
     }
-}
-
-/// Parses `@template`'s own body: `T` alone, `T of Bound`, `T = Default`
-/// or `T of Bound = Default` with both together, in that
-/// order - real PHPStan's own grammar always writes the bound (when
-/// present) before the default. Either a bound or a default can itself be
-/// a union (`T of Foo|Bar`, `T = Foo|Bar`), so both go through
-/// `take_type_token` like every other type token here, not a bare
-/// `split_whitespace`. Returns `None` only when there's no name at all (a
-/// malformed/empty tag).
-fn parse_template_tag(rest: &str) -> Option<(String, Option<String>, Option<String>)> {
-    let mut parts = rest.splitn(2, char::is_whitespace);
-    let name = parts.next()?.to_string();
-    if name.is_empty() {
-        return None;
-    }
-    let mut remainder = parts.next().unwrap_or("").trim();
-    let bound = match remainder
-        .strip_prefix("of")
-        .filter(|s| s.starts_with(char::is_whitespace))
-    {
-        Some(s) => {
-            let s = s.trim_start();
-            let bound = take_type_token(s);
-            remainder = s[bound.len()..].trim_start();
-            (!bound.is_empty()).then(|| bound.to_string())
-        }
-        None => None,
-    };
-    let default = remainder.strip_prefix('=').and_then(|s| {
-        let default = take_type_token(s.trim_start());
-        (!default.is_empty()).then(|| default.to_string())
-    });
-    Some((name, bound, default))
 }
 
 /// Takes the leading type expression off `s`, stopping at the first
@@ -791,133 +859,6 @@ fn take_type_token(s: &str) -> &str {
         }
     }
     s
-}
-
-/// Splits `s` on `,`, but only where it appears outside any `<>`/`{}`/
-/// `()`/`[]` nesting - `@method`'s parameter list needs this (e.g.
-/// `array<string, mixed> $options = []`, whose internal comma must not
-/// split the parameter list itself). Mirrors `take_type_
-/// token`'s exact bracket-depth/quote-tracking shape one call up - a
-/// deliberate duplication, not shared with `types::split_top_level`
-/// (nearly identical logic, comma instead of whitespace as the
-/// separator): this module's own doc comment already commits to zero
-/// dependency on `types` at all.
-fn split_top_level_commas(s: &str) -> Vec<&str> {
-    let mut parts = Vec::new();
-    let mut depth = 0i32;
-    let mut start = 0usize;
-    let mut quote: Option<char> = None;
-    for (i, c) in s.char_indices() {
-        if let Some(q) = quote {
-            if c == q {
-                quote = None;
-            }
-            continue;
-        }
-        match c {
-            '\'' | '"' => quote = Some(c),
-            '<' | '{' | '(' | '[' => depth += 1,
-            '>' | '}' | ')' | ']' => depth -= 1,
-            ',' if depth == 0 => {
-                parts.push(&s[start..i]);
-                start = i + 1;
-            }
-            _ => {}
-        }
-    }
-    parts.push(&s[start..]);
-    parts
-}
-
-/// `@method [static] ReturnType methodName(Type $param = default, ...)` -
-/// mirrors real `phpstan/phpdoc-parser`'s own `parseMethodTagValue`/
-/// `parseMethodTagValueParameter`. The return-type-vs-method-name
-/// ambiguity (both are bare-identifier-shaped) resolves the same way:
-/// try a type token first:
-/// if it already contains its own `(...)` (no whitespace before the
-/// parameter list at all), it was actually the *method name*, and there
-/// is no return type; otherwise it's the return type, and the very next
-/// token is the method name. A trailing free-text description (real,
-/// common style) is simply never consumed past the parameter list's own
-/// closing `)`, same as every other tag's own trailing-description text
-/// elsewhere in this file.
-fn parse_method_tag(rest: &str) -> Option<MethodTag> {
-    let rest = rest.trim_start();
-    let (is_static, rest) = match rest.strip_prefix("static") {
-        Some(r) if r.starts_with(char::is_whitespace) => (true, r.trim_start()),
-        _ => (false, rest),
-    };
-    let first = take_type_token(rest);
-    if first.is_empty() {
-        return None;
-    }
-    let (return_type, name_and_params) = if first.contains('(') {
-        (None, first)
-    } else {
-        let remainder = rest[first.len()..].trim_start();
-        let second = take_type_token(remainder);
-        if second.is_empty() {
-            return None;
-        }
-        (Some(first.to_string()), second)
-    };
-    let paren_idx = name_and_params.find('(')?;
-    let name = name_and_params[..paren_idx].to_string();
-    if name.is_empty() {
-        return None;
-    }
-    let params_str = name_and_params[paren_idx + 1..].trim_end_matches(')');
-    let params = if params_str.trim().is_empty() {
-        Vec::new()
-    } else {
-        split_top_level_commas(params_str)
-            .into_iter()
-            .filter_map(parse_method_tag_param)
-            .collect()
-    };
-    Some(MethodTag {
-        is_static,
-        return_type,
-        name,
-        params,
-    })
-}
-
-/// One `@method` parameter - see `parse_method_tag`. The type-omitted
-/// case (`p` starting directly with `$`/`&`/`...`) mirrors real
-/// PHPStan's own lookahead (`parseMethodTagValueParameter`): a parameter
-/// type is only ever parsed when the current token isn't already
-/// variable/reference/variadic-shaped.
-fn parse_method_tag_param(p: &str) -> Option<MethodTagParam> {
-    let p = p.trim();
-    if p.is_empty() {
-        return None;
-    }
-    let (ty, remainder) = if p.starts_with('$') || p.starts_with('&') || p.starts_with("...") {
-        (None, p)
-    } else {
-        let t = take_type_token(p);
-        (Some(t.to_string()), p[t.len()..].trim_start())
-    };
-    let by_ref = remainder.starts_with('&');
-    let remainder = remainder.trim_start_matches('&').trim_start();
-    let variadic = remainder.starts_with("...");
-    let remainder = remainder.trim_start_matches("...").trim_start();
-    let (name_part, has_default) = match remainder.split_once('=') {
-        Some((n, _)) => (n.trim(), true),
-        None => (remainder.trim(), false),
-    };
-    let name = name_part.strip_prefix('$')?.to_string();
-    if name.is_empty() {
-        return None;
-    }
-    Some(MethodTagParam {
-        ty,
-        name,
-        by_ref,
-        variadic,
-        has_default,
-    })
 }
 
 /// Every `@phpstan-*` tag name real PHPStan itself recognizes - `real

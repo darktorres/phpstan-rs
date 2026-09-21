@@ -230,7 +230,7 @@ fn a_var_type_wrapped_across_multiple_lines_with_trailing_line_comments_strips_t
     );
     assert_eq!(
         block.var_type,
-        Some("array{ v?: string, b?: bool, }".to_string())
+        Some("array{v?: string, b?: bool}".to_string())
     );
 }
 

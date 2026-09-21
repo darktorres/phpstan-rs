@@ -183,6 +183,139 @@ impl TypeNode {
             other => other,
         }
     }
+
+    /// Re-stringifies a parsed node back into real PHPStan type-expression
+    /// syntax - not necessarily byte-identical to whatever text originally
+    /// produced it (whitespace is normalized, a string literal's own
+    /// internal quotes aren't re-escaped), but always something `types::
+    /// parse_type_string` parses into the same underlying `Type` - the
+    /// mechanism `docblock::DocBlock`'s Stage B migration uses to stay
+    /// populated from this AST while keeping its own fields `Option<
+    /// String>` for every existing consumer (see `docblock.rs`'s own
+    /// module doc comment).
+    pub(crate) fn to_source_string(&self) -> String {
+        match self {
+            TypeNode::Identifier(s) => s.clone(),
+            TypeNode::Nullable(inner) => format!("?{}", inner.to_source_string()),
+            TypeNode::Union(members) => members
+                .iter()
+                .map(TypeNode::to_source_string)
+                .collect::<Vec<_>>()
+                .join("|"),
+            TypeNode::Intersection(members) => members
+                .iter()
+                .map(TypeNode::to_source_string)
+                .collect::<Vec<_>>()
+                .join("&"),
+            // The three call-site-variance sentinel names `parser::
+            // parse_generic_arg` produces - see its own doc comment -
+            // re-emit real PHPStan's own literal surface syntax instead
+            // of this arm's ordinary `Name<Args>` bracket shape, since
+            // that's the exact text `types::parse::parse_generic_arg`
+            // matches back against once Stage B feeds this string into
+            // it.
+            TypeNode::Generic(name, args) if name == "$$bivariant" => "*".to_string(),
+            TypeNode::Generic(name, args) if name == "$$covariant" => {
+                format!("covariant {}", args[0].to_source_string())
+            }
+            TypeNode::Generic(name, args) if name == "$$contravariant" => {
+                format!("contravariant {}", args[0].to_source_string())
+            }
+            TypeNode::Generic(name, args) => format!(
+                "{name}<{}>",
+                args.iter()
+                    .map(TypeNode::to_source_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            TypeNode::ArrayOf(inner) => format!("{}[]", inner.to_source_string()),
+            TypeNode::ArrayShape {
+                keyword,
+                fields,
+                sealed,
+            } => {
+                let mut parts: Vec<String> = fields
+                    .iter()
+                    .map(|f| {
+                        let value = f.ty.to_source_string();
+                        match &f.key {
+                            Some(key) => {
+                                let key = match key {
+                                    ShapeKey::Int(n) => n.to_string(),
+                                    ShapeKey::String(s) => format!("'{s}'"),
+                                    ShapeKey::Identifier(s) => s.clone(),
+                                };
+                                let opt = if f.optional { "?" } else { "" };
+                                format!("{key}{opt}: {value}")
+                            }
+                            None => value,
+                        }
+                    })
+                    .collect();
+                if !*sealed {
+                    parts.push("...".to_string());
+                }
+                format!("{keyword}{{{}}}", parts.join(", "))
+            }
+            TypeNode::Callable {
+                keyword,
+                params,
+                return_type,
+            } => {
+                let params_str = params
+                    .iter()
+                    .map(|p| {
+                        let mut s = p.ty.to_source_string();
+                        if p.by_ref {
+                            s.push('&');
+                        }
+                        if p.variadic {
+                            s.push_str("...");
+                        }
+                        if p.optional {
+                            s.push('=');
+                        }
+                        s
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                match return_type {
+                    Some(rt) => format!("{keyword}({params_str}): {}", rt.to_source_string()),
+                    None => format!("{keyword}({params_str})"),
+                }
+            }
+            TypeNode::IntRange(min, max) => {
+                let min = min
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "min".to_string());
+                let max = max
+                    .map(|n| n.to_string())
+                    .unwrap_or_else(|| "max".to_string());
+                format!("int<{min}, {max}>")
+            }
+            TypeNode::IntLiteral(n) => n.to_string(),
+            TypeNode::FloatLiteral(n) => n.to_string(),
+            TypeNode::StringLiteral(s) => format!("'{s}'"),
+            TypeNode::ConstFetch { class, const_name } => format!("{class}::{const_name}"),
+            TypeNode::Conditional {
+                subject,
+                negated,
+                target,
+                if_true,
+                if_false,
+            } => {
+                let is = if *negated { "is not" } else { "is" };
+                format!(
+                    "({subject} {is} {} ? {} : {})",
+                    target.to_source_string(),
+                    if_true.to_source_string(),
+                    if_false.to_source_string()
+                )
+            }
+            TypeNode::Paren(inner) => format!("({})", inner.to_source_string()),
+            TypeNode::Error => String::new(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]

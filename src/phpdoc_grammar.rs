@@ -49,5 +49,10 @@ pub fn parse(raw: &str) -> PhpDocNode {
     parser::parse(raw)
 }
 
+/// See `parser::parse_tag_rest`'s own doc comment.
+pub(crate) use parser::parse_tag_rest;
+/// See `parser::parse_type_prefix`'s own doc comment.
+pub(crate) use parser::parse_type_prefix;
+
 #[cfg(test)]
 mod tests;

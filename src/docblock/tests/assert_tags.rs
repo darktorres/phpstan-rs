@@ -73,7 +73,7 @@ fn a_generic_type_argument_is_kept_as_part_of_the_type_text() {
         block.assert_if_true,
         vec![AssertTag {
             negated: false,
-            ty: "Collection<TKey,T>".to_string(),
+            ty: "Collection<TKey, T>".to_string(),
             target: "$this->collection".to_string(),
         }]
     );

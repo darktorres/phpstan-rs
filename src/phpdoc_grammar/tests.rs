@@ -449,6 +449,52 @@ fn a_malformed_tag_does_not_prevent_a_later_valid_tag_from_parsing() {
 }
 
 #[test]
+fn a_covariant_call_site_variance_marker_parses_and_round_trips() {
+    let ty = type_of("/** @return Collection<covariant Cat> */");
+    match &ty {
+        TypeNode::Generic(outer, args) if outer == "Collection" => match &args[0] {
+            TypeNode::Generic(name, inner) if name == "$$covariant" => {
+                assert_eq!(inner[0], TypeNode::Identifier("Cat".to_string()));
+            }
+            other => panic!("got: {other:?}"),
+        },
+        other => panic!("got: {other:?}"),
+    }
+    assert_eq!(ty.to_source_string(), "Collection<covariant Cat>");
+}
+
+#[test]
+fn a_contravariant_call_site_variance_marker_parses_and_round_trips() {
+    let ty = type_of("/** @return Collection<contravariant Cat> */");
+    assert_eq!(ty.to_source_string(), "Collection<contravariant Cat>");
+}
+
+#[test]
+fn a_bivariant_call_site_marker_parses_and_round_trips() {
+    let ty = type_of("/** @return Collection<*> */");
+    match &ty {
+        TypeNode::Generic(outer, args) if outer == "Collection" => match &args[0] {
+            TypeNode::Generic(name, inner) if name == "$$bivariant" => assert!(inner.is_empty()),
+            other => panic!("got: {other:?}"),
+        },
+        other => panic!("got: {other:?}"),
+    }
+    assert_eq!(ty.to_source_string(), "Collection<*>");
+}
+
+#[test]
+fn a_bare_type_literally_named_covariant_is_not_mistaken_for_the_marker() {
+    let ty = type_of("/** @return Collection<covariant> */");
+    assert_eq!(
+        ty,
+        TypeNode::Generic(
+            "Collection".to_string(),
+            vec![TypeNode::Identifier("covariant".to_string())]
+        )
+    );
+}
+
+#[test]
 fn a_wrapped_continuation_line_joins_onto_its_own_tag() {
     let node = parse(
         r#"/**
