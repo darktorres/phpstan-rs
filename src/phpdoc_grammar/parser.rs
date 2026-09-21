@@ -1,0 +1,731 @@
+use super::ast::{
+    ArrayShapeField, CallableParam, MethodTagParam, PhpDocNode, PhpDocParseError, PhpDocTag,
+    PhpDocTagValue, ShapeKey, TypeNode,
+};
+use super::lexer::{Lexer, PhpDocToken};
+use crate::token::{Position, Span};
+
+/// The whole doc-comment-parsing entry point - preprocesses `raw` into
+/// one logical text span per `@tag` (joining wrapped continuation
+/// lines, exactly matching `docblock::parse`'s own existing "every line
+/// joins onto the most recent `@tag` line" convention, so a later Stage
+/// B migration doesn't have to reconcile two different joining rules),
+/// then parses each tag's own text independently. A malformed tag never
+/// aborts the others - `errors` accumulates across the whole comment.
+pub(crate) fn parse(raw: &str) -> PhpDocNode {
+    let mut node = PhpDocNode::default();
+    let inner = raw.trim().trim_start_matches("/**").trim_end_matches("*/");
+    let mut tag_lines: Vec<String> = Vec::new();
+    for raw_line in inner.lines() {
+        let line = raw_line.trim();
+        let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
+        let line = line
+            .split_once("//")
+            .map_or(line, |(before, _)| before.trim());
+        if line.starts_with('@') || tag_lines.is_empty() {
+            tag_lines.push(line.to_string());
+        } else if let Some(last) = tag_lines.last_mut() {
+            last.push(' ');
+            last.push_str(line);
+        }
+    }
+    for line in &tag_lines {
+        let Some(tag_body) = line.strip_prefix('@') else {
+            continue;
+        };
+        let mut parts = tag_body.splitn(2, char::is_whitespace);
+        let name = parts.next().unwrap_or("").to_string();
+        let rest = parts.next().unwrap_or("").trim();
+        if name.is_empty() {
+            continue;
+        }
+        let tokens = Lexer::new(rest).tokenize();
+        let span = tokens.first().map(|(_, s)| *s).unwrap_or(Span {
+            start: Position { line: 1, col: 1 },
+            end: Position { line: 1, col: 1 },
+        });
+        let mut parser = TagParser::new(tokens);
+        let value = parser.parse_tag_value(&name);
+        node.errors.append(&mut parser.errors);
+        node.tags.push(PhpDocTag { name, span, value });
+    }
+    node
+}
+
+struct TagParser {
+    tokens: Vec<(PhpDocToken, Span)>,
+    pos: usize,
+    errors: Vec<PhpDocParseError>,
+}
+
+/// Bare-word tag names carrying a `[Type] [&][...]$name [description]`
+/// shape - `TypeNode::TypedVar`'s own consumers. Matched case-
+/// insensitively against the tag's own un-prefixed name (a leading
+/// `phpstan-` is stripped by the caller's own dispatch below, mirroring
+/// `docblock.rs`'s identical `@phpstan-*`-is-a-precise-override
+/// convention).
+const TYPED_VAR_TAGS: &[&str] = &[
+    "param",
+    "param-out",
+    "var",
+    "property",
+    "property-read",
+    "property-write",
+];
+const TYPE_ONLY_TAGS: &[&str] = &["return", "throws"];
+
+impl TagParser {
+    fn new(tokens: Vec<(PhpDocToken, Span)>) -> Self {
+        TagParser {
+            tokens,
+            pos: 0,
+            errors: Vec::new(),
+        }
+    }
+
+    fn peek(&self) -> &PhpDocToken {
+        &self.tokens[self.pos.min(self.tokens.len() - 1)].0
+    }
+
+    fn peek_span(&self) -> Span {
+        self.tokens[self.pos.min(self.tokens.len() - 1)].1
+    }
+
+    fn advance(&mut self) -> (PhpDocToken, Span) {
+        let t = self.tokens[self.pos.min(self.tokens.len() - 1)].clone();
+        if self.pos < self.tokens.len() - 1 {
+            self.pos += 1;
+        }
+        t
+    }
+
+    fn at_eof(&self) -> bool {
+        matches!(self.peek(), PhpDocToken::Eof)
+    }
+
+    fn error(&mut self, message: impl Into<String>) {
+        self.errors.push(PhpDocParseError {
+            message: message.into(),
+            span: self.peek_span(),
+        });
+    }
+
+    fn eat(&mut self, tok: &PhpDocToken) -> bool {
+        if self.peek() == tok {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    fn expect(&mut self, tok: &PhpDocToken, what: &str) -> bool {
+        if self.eat(tok) {
+            true
+        } else {
+            self.error(format!("expected {what}"));
+            false
+        }
+    }
+
+    /// Case-insensitive keyword match against a bare `Identifier` token -
+    /// `is`/`not`/`min`/`max` and the array-shape/callable introducer
+    /// keywords are all matched this way, mirroring real PHPStan's own
+    /// case-insensitive type-keyword handling.
+    fn eat_keyword(&mut self, word: &str) -> bool {
+        if let PhpDocToken::Identifier(s) = self.peek()
+            && s.eq_ignore_ascii_case(word)
+        {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Whatever raw text remains once type/structural parsing has
+    /// consumed everything it recognizes - the free-text description
+    /// half of `@param`/`@return`/etc. Reconstructed from the remaining
+    /// tokens' own literal text rather than a byte-offset slice, since
+    /// the lexer doesn't keep the original source around once tokenized.
+    fn remaining_description(&mut self) -> String {
+        let mut parts = Vec::new();
+        while !self.at_eof() {
+            let (tok, _) = self.advance();
+            parts.push(token_text(&tok));
+        }
+        parts.join(" ")
+    }
+
+    fn parse_tag_value(&mut self, name: &str) -> PhpDocTagValue {
+        let bare = name.strip_prefix("phpstan-").unwrap_or(name);
+        let lower = bare.to_ascii_lowercase();
+        if TYPED_VAR_TAGS.contains(&lower.as_str()) {
+            return self.parse_typed_var();
+        }
+        if TYPE_ONLY_TAGS.contains(&lower.as_str()) {
+            let ty = self.try_parse_type();
+            let description = self.remaining_description();
+            return PhpDocTagValue::Type { ty, description };
+        }
+        match lower.as_str() {
+            "template" | "template-covariant" | "template-contravariant" => self.parse_template(),
+            "extends" | "implements" | "use" => self.parse_extends_like(),
+            "method" => self.parse_method(),
+            _ => PhpDocTagValue::Generic(self.remaining_description()),
+        }
+    }
+
+    fn parse_typed_var(&mut self) -> PhpDocTagValue {
+        let ty = self.try_parse_type_if_present();
+        let mut by_ref = self.eat(&PhpDocToken::Amp);
+        let variadic = self.eat(&PhpDocToken::Ellipsis);
+        if !by_ref {
+            by_ref = self.eat(&PhpDocToken::Amp);
+        }
+        let variable = if let PhpDocToken::Variable(v) = self.peek() {
+            let v = v.clone();
+            self.advance();
+            Some(v)
+        } else {
+            None
+        };
+        let description = self.remaining_description();
+        PhpDocTagValue::TypedVar {
+            ty,
+            variable,
+            by_ref,
+            variadic,
+            description,
+        }
+    }
+
+    /// A type is present here whenever the tag's own text doesn't start
+    /// straight off with `$name`/`&$name`/`...$name` - real PHPStan
+    /// tolerates a type-less `@var $x`/`@param $x` (the type resolved
+    /// some other way, e.g. a native hint already covers it).
+    fn try_parse_type_if_present(&mut self) -> Option<TypeNode> {
+        if matches!(self.peek(), PhpDocToken::Variable(_))
+            || matches!(self.peek(), PhpDocToken::Amp | PhpDocToken::Ellipsis)
+        {
+            return None;
+        }
+        self.try_parse_type()
+    }
+
+    fn try_parse_type(&mut self) -> Option<TypeNode> {
+        if self.at_eof() {
+            return None;
+        }
+        Some(self.parse_type())
+    }
+
+    fn parse_template(&mut self) -> PhpDocTagValue {
+        let name = if let PhpDocToken::Identifier(s) = self.peek() {
+            let s = s.clone();
+            self.advance();
+            s
+        } else {
+            self.error("expected a @template name");
+            String::new()
+        };
+        let bound = if self.eat_keyword("of") || self.eat_keyword("as") {
+            Some(self.parse_type())
+        } else {
+            None
+        };
+        let default = if self.eat(&PhpDocToken::Equals) {
+            Some(self.parse_type())
+        } else {
+            None
+        };
+        PhpDocTagValue::Template {
+            name,
+            bound,
+            default,
+        }
+    }
+
+    fn parse_extends_like(&mut self) -> PhpDocTagValue {
+        PhpDocTagValue::ExtendsLike {
+            ty: self.parse_type(),
+        }
+    }
+
+    fn parse_method(&mut self) -> PhpDocTagValue {
+        let is_static = self.eat_keyword("static");
+        // Real PHPStan's own ambiguity: a bare identifier here could be
+        // the return type or the method name itself (`@method foo()`,
+        // no return type at all, implicitly `void`) - only committing to
+        // "this was the return type" once we see a further identifier
+        // token following it that itself is immediately followed by `(`.
+        let checkpoint = self.pos;
+        let first = self.parse_type();
+        let (return_type, name) = if let PhpDocToken::Identifier(n) = self.peek() {
+            let n = n.clone();
+            if self.peek_ahead_is_lparen() {
+                self.advance();
+                (Some(first), n)
+            } else {
+                self.pos = checkpoint;
+                (None, self.take_identifier_or_error())
+            }
+        } else {
+            self.pos = checkpoint;
+            (None, self.take_identifier_or_error())
+        };
+        self.expect(&PhpDocToken::LParen, "'('");
+        let mut params = Vec::new();
+        if !self.eat(&PhpDocToken::RParen) {
+            loop {
+                let ty = self.try_parse_type_if_present();
+                let by_ref = self.eat(&PhpDocToken::Amp);
+                let variadic = self.eat(&PhpDocToken::Ellipsis);
+                let param_name = if let PhpDocToken::Variable(v) = self.peek() {
+                    let v = v.clone();
+                    self.advance();
+                    v
+                } else {
+                    self.error("expected a $parameter name");
+                    String::new()
+                };
+                let has_default = self.eat(&PhpDocToken::Equals);
+                if has_default {
+                    // The default value's own expression grammar is real
+                    // PHP, not this file's own - skip forward past it
+                    // rather than trying to parse it, matching this
+                    // whole tag's own "kept coarse" scope.
+                    while !matches!(self.peek(), PhpDocToken::Comma | PhpDocToken::RParen)
+                        && !self.at_eof()
+                    {
+                        self.advance();
+                    }
+                }
+                params.push(MethodTagParam {
+                    ty,
+                    name: param_name,
+                    variadic,
+                    by_ref,
+                    has_default,
+                });
+                if !self.eat(&PhpDocToken::Comma) {
+                    break;
+                }
+            }
+            self.expect(&PhpDocToken::RParen, "')'");
+        }
+        PhpDocTagValue::Method {
+            is_static,
+            return_type,
+            name,
+            params,
+        }
+    }
+
+    fn peek_ahead_is_lparen(&self) -> bool {
+        self.tokens
+            .get(self.pos + 1)
+            .map(|(t, _)| matches!(t, PhpDocToken::LParen))
+            .unwrap_or(false)
+    }
+
+    fn take_identifier_or_error(&mut self) -> String {
+        if let PhpDocToken::Identifier(n) = self.peek() {
+            let n = n.clone();
+            self.advance();
+            n
+        } else {
+            self.error("expected a method name");
+            String::new()
+        }
+    }
+
+    // ---- Type-expression grammar ----
+
+    fn parse_type(&mut self) -> TypeNode {
+        self.parse_union()
+    }
+
+    fn parse_union(&mut self) -> TypeNode {
+        let first = self.parse_intersection();
+        if !matches!(self.peek(), PhpDocToken::Pipe) {
+            return first;
+        }
+        let mut members = vec![first];
+        while self.eat(&PhpDocToken::Pipe) {
+            members.push(self.parse_intersection());
+        }
+        TypeNode::Union(members)
+    }
+
+    fn parse_intersection(&mut self) -> TypeNode {
+        let first = self.parse_nullable();
+        if !self.amp_starts_another_type() {
+            return first;
+        }
+        let mut members = vec![first];
+        while self.amp_starts_another_type() {
+            self.advance();
+            members.push(self.parse_nullable());
+        }
+        TypeNode::Intersection(members)
+    }
+
+    /// A real ambiguity in `@param`/`@method`-parameter position: `&`
+    /// right after a type can mean either "intersect with the next type"
+    /// or the unrelated by-ref parameter marker (`@param int &...$xs`,
+    /// `@param int &$x`) - real PHPStan's own grammar resolves it the
+    /// same way, by lookahead: only a genuine type-shaped token
+    /// following `&` makes it an intersection continuation.
+    fn amp_starts_another_type(&self) -> bool {
+        if !matches!(self.peek(), PhpDocToken::Amp) {
+            return false;
+        }
+        !matches!(
+            self.tokens.get(self.pos + 1).map(|(t, _)| t),
+            Some(PhpDocToken::Variable(_) | PhpDocToken::Ellipsis | PhpDocToken::Eof)
+        )
+    }
+
+    fn parse_nullable(&mut self) -> TypeNode {
+        if self.eat(&PhpDocToken::Question) {
+            TypeNode::Nullable(Box::new(self.parse_array_suffixed()))
+        } else {
+            self.parse_array_suffixed()
+        }
+    }
+
+    fn parse_array_suffixed(&mut self) -> TypeNode {
+        let mut ty = self.parse_atom();
+        loop {
+            if matches!(self.peek(), PhpDocToken::LBracket)
+                && matches!(
+                    self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                    Some(PhpDocToken::RBracket)
+                )
+            {
+                self.advance();
+                self.advance();
+                ty = TypeNode::ArrayOf(Box::new(ty));
+            } else {
+                break;
+            }
+        }
+        ty
+    }
+
+    fn parse_atom(&mut self) -> TypeNode {
+        match self.peek().clone() {
+            PhpDocToken::LParen => {
+                self.advance();
+                self.parse_paren_or_conditional()
+            }
+            PhpDocToken::Variable(name) => {
+                self.advance();
+                TypeNode::Identifier(format!("${name}"))
+            }
+            PhpDocToken::IntLiteral(n) => {
+                self.advance();
+                TypeNode::IntLiteral(n)
+            }
+            PhpDocToken::FloatLiteral(n) => {
+                self.advance();
+                TypeNode::FloatLiteral(n)
+            }
+            PhpDocToken::StringLiteral(s) => {
+                self.advance();
+                TypeNode::StringLiteral(s)
+            }
+            PhpDocToken::Identifier(name) => {
+                self.advance();
+                self.parse_identifier_led(name)
+            }
+            _ => {
+                self.error("expected a type");
+                if !self.at_eof() {
+                    self.advance();
+                }
+                TypeNode::Error
+            }
+        }
+    }
+
+    /// Everything that can follow a bare identifier already consumed:
+    /// `array{...}`/`list{...}`/`object{...}`, `callable(...)`/
+    /// `Closure(...)`, `int<...>`, `Name::CONST`, or an ordinary
+    /// `Name<Args>` generic (or a bare `Name` alone).
+    fn parse_identifier_led(&mut self, name: String) -> TypeNode {
+        let lower = name.to_ascii_lowercase();
+        if matches!(self.peek(), PhpDocToken::LBrace)
+            && matches!(lower.as_str(), "array" | "list" | "object" | "shape")
+        {
+            return self.parse_array_shape(name);
+        }
+        if matches!(self.peek(), PhpDocToken::LParen)
+            && matches!(lower.as_str(), "callable" | "closure")
+        {
+            return self.parse_callable(name);
+        }
+        if matches!(self.peek(), PhpDocToken::LAngle)
+            && lower.ends_with("int")
+            && let Some(range) = self.try_parse_int_range()
+        {
+            return range;
+        }
+        if self.eat(&PhpDocToken::ColonColon) {
+            let const_name = if let PhpDocToken::Identifier(c) = self.peek() {
+                let c = c.clone();
+                self.advance();
+                if self.eat(&PhpDocToken::Star) {
+                    format!("{c}*")
+                } else {
+                    c
+                }
+            } else if self.eat(&PhpDocToken::Star) {
+                "*".to_string()
+            } else {
+                self.error("expected a class constant name");
+                String::new()
+            };
+            return TypeNode::ConstFetch {
+                class: name,
+                const_name,
+            };
+        }
+        if self.eat(&PhpDocToken::LAngle) {
+            let mut args = vec![self.parse_type()];
+            while self.eat(&PhpDocToken::Comma) {
+                // A trailing comma before `>` (real, common style,
+                // `Collection<int, string,>`) - stop instead of trying
+                // to parse one more type from an empty remainder.
+                if matches!(self.peek(), PhpDocToken::RAngle) {
+                    break;
+                }
+                args.push(self.parse_type());
+            }
+            self.expect(&PhpDocToken::RAngle, "'>'");
+            return TypeNode::Generic(name, args);
+        }
+        TypeNode::Identifier(name)
+    }
+
+    fn try_parse_int_range(&mut self) -> Option<TypeNode> {
+        let checkpoint = self.pos;
+        let errors_checkpoint = self.errors.len();
+        self.advance(); // consume '<'
+        let min = self.parse_int_bound();
+        if !self.eat(&PhpDocToken::Comma) {
+            self.pos = checkpoint;
+            self.errors.truncate(errors_checkpoint);
+            return None;
+        }
+        let max = self.parse_int_bound();
+        if !self.eat(&PhpDocToken::RAngle) {
+            self.pos = checkpoint;
+            self.errors.truncate(errors_checkpoint);
+            return None;
+        }
+        match (min, max) {
+            (Some(min), Some(max)) => Some(TypeNode::IntRange(min, max)),
+            _ => {
+                self.pos = checkpoint;
+                self.errors.truncate(errors_checkpoint);
+                None
+            }
+        }
+    }
+
+    /// `Some(None)` = the literal `min`/`max` keyword (unbounded on that
+    /// side); `None` = this wasn't a valid int-range bound at all, so
+    /// the caller should abandon the whole `int<...>` interpretation and
+    /// fall back to ordinary generic parsing.
+    fn parse_int_bound(&mut self) -> Option<Option<i64>> {
+        if self.eat_keyword("min") || self.eat_keyword("max") {
+            return Some(None);
+        }
+        if let PhpDocToken::IntLiteral(n) = self.peek() {
+            let n = *n;
+            self.advance();
+            return Some(Some(n));
+        }
+        None
+    }
+
+    fn parse_array_shape(&mut self, keyword: String) -> TypeNode {
+        self.advance(); // consume '{'
+        let mut fields = Vec::new();
+        let mut sealed = true;
+        if !matches!(self.peek(), PhpDocToken::RBrace) {
+            loop {
+                if self.eat(&PhpDocToken::Ellipsis) {
+                    sealed = false;
+                    break;
+                }
+                let checkpoint = self.pos;
+                let key = self.try_parse_shape_key();
+                let optional = key.is_some() && self.eat(&PhpDocToken::Question);
+                let has_colon = key.is_some() && self.eat(&PhpDocToken::Colon);
+                let (key, optional, ty) = if has_colon {
+                    (key, optional, self.parse_type())
+                } else {
+                    // Wasn't actually `key: Type` - backtrack and this
+                    // whole field is just a bare, unkeyed type
+                    // (positional/list-style shape entry).
+                    self.pos = checkpoint;
+                    (None, false, self.parse_type())
+                };
+                fields.push(ArrayShapeField { key, ty, optional });
+                if !self.eat(&PhpDocToken::Comma) {
+                    break;
+                }
+                if matches!(self.peek(), PhpDocToken::RBrace) {
+                    break;
+                }
+            }
+        }
+        self.expect(&PhpDocToken::RBrace, "'}'");
+        TypeNode::ArrayShape {
+            keyword,
+            fields,
+            sealed,
+        }
+    }
+
+    fn try_parse_shape_key(&mut self) -> Option<ShapeKey> {
+        match self.peek().clone() {
+            PhpDocToken::IntLiteral(n) => {
+                self.advance();
+                Some(ShapeKey::Int(n))
+            }
+            PhpDocToken::StringLiteral(s) => {
+                self.advance();
+                Some(ShapeKey::String(s))
+            }
+            PhpDocToken::Identifier(s) => {
+                self.advance();
+                Some(ShapeKey::Identifier(s))
+            }
+            _ => None,
+        }
+    }
+
+    fn parse_callable(&mut self, keyword: String) -> TypeNode {
+        self.advance(); // consume '('
+        let mut params = Vec::new();
+        if !matches!(self.peek(), PhpDocToken::RParen) {
+            loop {
+                let ty = self.parse_type();
+                let by_ref = self.eat(&PhpDocToken::Amp);
+                let variadic = self.eat(&PhpDocToken::Ellipsis);
+                let optional = self.eat(&PhpDocToken::Equals);
+                params.push(CallableParam {
+                    ty,
+                    variadic,
+                    by_ref,
+                    optional,
+                });
+                if !self.eat(&PhpDocToken::Comma) {
+                    break;
+                }
+                if matches!(self.peek(), PhpDocToken::RParen) {
+                    break;
+                }
+            }
+        }
+        self.expect(&PhpDocToken::RParen, "')'");
+        let return_type = if self.eat(&PhpDocToken::Colon) {
+            Some(Box::new(self.parse_type()))
+        } else {
+            None
+        };
+        TypeNode::Callable {
+            keyword,
+            params,
+            return_type,
+        }
+    }
+
+    /// Called right after consuming a `(` - tries the conditional-type
+    /// grammar (`$subject is Type ? A : B`) first, backtracking to plain
+    /// parenthesized-type parsing (discarding any errors the failed
+    /// attempt recorded) if it doesn't match.
+    fn parse_paren_or_conditional(&mut self) -> TypeNode {
+        let checkpoint = self.pos;
+        let errors_checkpoint = self.errors.len();
+        if let Some(conditional) = self.try_parse_conditional() {
+            return conditional;
+        }
+        self.pos = checkpoint;
+        self.errors.truncate(errors_checkpoint);
+        let inner = self.parse_type();
+        self.expect(&PhpDocToken::RParen, "')'");
+        TypeNode::Paren(Box::new(inner))
+    }
+
+    fn try_parse_conditional(&mut self) -> Option<TypeNode> {
+        let subject = match self.peek().clone() {
+            PhpDocToken::Variable(v) => {
+                self.advance();
+                format!("${v}")
+            }
+            PhpDocToken::Identifier(s) => {
+                self.advance();
+                s
+            }
+            _ => return None,
+        };
+        if !self.eat_keyword("is") {
+            return None;
+        }
+        let negated = self.eat_keyword("not");
+        let target = self.parse_type();
+        if !self.eat(&PhpDocToken::Question) {
+            return None;
+        }
+        let if_true = self.parse_type();
+        if !self.eat(&PhpDocToken::Colon) {
+            return None;
+        }
+        let if_false = self.parse_type();
+        if !self.eat(&PhpDocToken::RParen) {
+            return None;
+        }
+        Some(TypeNode::Conditional {
+            subject,
+            negated,
+            target: Box::new(target),
+            if_true: Box::new(if_true),
+            if_false: Box::new(if_false),
+        })
+    }
+}
+
+fn token_text(t: &PhpDocToken) -> String {
+    match t {
+        PhpDocToken::At => "@".to_string(),
+        PhpDocToken::Identifier(s) => s.clone(),
+        PhpDocToken::Variable(s) => format!("${s}"),
+        PhpDocToken::IntLiteral(n) => n.to_string(),
+        PhpDocToken::FloatLiteral(n) => n.to_string(),
+        PhpDocToken::StringLiteral(s) => s.clone(),
+        PhpDocToken::Pipe => "|".to_string(),
+        PhpDocToken::Amp => "&".to_string(),
+        PhpDocToken::Question => "?".to_string(),
+        PhpDocToken::LAngle => "<".to_string(),
+        PhpDocToken::RAngle => ">".to_string(),
+        PhpDocToken::LBrace => "{".to_string(),
+        PhpDocToken::RBrace => "}".to_string(),
+        PhpDocToken::LParen => "(".to_string(),
+        PhpDocToken::RParen => ")".to_string(),
+        PhpDocToken::LBracket => "[".to_string(),
+        PhpDocToken::RBracket => "]".to_string(),
+        PhpDocToken::Comma => ",".to_string(),
+        PhpDocToken::Colon => ":".to_string(),
+        PhpDocToken::ColonColon => "::".to_string(),
+        PhpDocToken::Equals => "=".to_string(),
+        PhpDocToken::Ellipsis => "...".to_string(),
+        PhpDocToken::Star => "*".to_string(),
+        PhpDocToken::Unknown(c) => c.to_string(),
+        PhpDocToken::Eof => String::new(),
+    }
+}
