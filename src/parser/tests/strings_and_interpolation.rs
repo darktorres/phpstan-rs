@@ -14,7 +14,13 @@ fn shell_exec_backtick_string_parses() {
     else {
         panic!("expected assignment");
     };
-    let ExprKind::Call(callee, _) = &rhs.kind else {
+    // Wraps a plain shell_exec() call - see `ExprKind::ShellExec`'s own
+    // doc comment for why `BacktickRule` needs to tell these two shapes
+    // apart even though they behave identically otherwise.
+    let ExprKind::ShellExec(inner) = &rhs.kind else {
+        panic!("expected a ShellExec, got {:?}", rhs.kind);
+    };
+    let ExprKind::Call(callee, _) = &inner.kind else {
         panic!("expected a call");
     };
     assert!(matches!(&callee.kind, ExprKind::Name(n) if n == "shell_exec"));

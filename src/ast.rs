@@ -761,6 +761,15 @@ pub enum ExprKind {
     // this syntax, so it's never mistaken for (and argument-count-checked
     // as) a real zero-argument call.
     FirstClassCallable(Box<Expr>),
+    // `` `cmd $interpolated` `` - shell-exec shorthand. Wraps the
+    // identically-shaped `Call(Name("shell_exec"), [cmd])` a plain
+    // `shell_exec($cmd)` call would itself produce (built once, at parse
+    // time, by the exact same code) purely so `BacktickRule`'s own
+    // `backtick.deprecated` check can tell "this was literally backtick
+    // syntax" apart from "the author wrote shell_exec() themselves" -
+    // every other consumer (type inference, argument checking, ...) just
+    // delegates straight through to the wrapped `Call`, unchanged.
+    ShellExec(Box<Expr>),
     // `throw` as an expression (PHP 8.0+): valid in match arms, ternary
     // branches, ??'s right side, arrow function bodies, etc - as opposed
     // to StmtKind::Throw, a bare `throw expr;` statement, which is still

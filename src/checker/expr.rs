@@ -1617,6 +1617,14 @@ impl<'a> Checker<'a> {
                     _ => Type::Mixed,
                 }
             }
+            // See `ExprKind::ShellExec`'s own doc comment - a thin
+            // wrapper around the identical `Call` a plain `shell_exec()`
+            // invocation would itself produce, so every consumer besides
+            // this one new check just delegates straight through.
+            ExprKind::ShellExec(inner) => {
+                self.check_backtick_deprecation(e.span, label);
+                self.check_expr(inner, locals, label)
+            }
             // A throw expression never actually produces a value - Never
             // is exactly the right type for it, the same way it's used
             // for a function that always throws or exits.
@@ -3727,6 +3735,7 @@ impl<'a> Checker<'a> {
             // a function that always throws or exits.
             ExprKind::Throw(_) => Type::Never,
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
+            ExprKind::ShellExec(inner) => self.infer_expr(inner, locals),
             ExprKind::Cast(ty, _, _) => match ty.as_str() {
                 "int" => Type::Int,
                 "float" => Type::Float,

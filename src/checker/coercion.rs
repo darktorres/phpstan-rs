@@ -258,6 +258,26 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Real PHPStan's `BacktickRule` (`backtick.deprecated`, not
+    /// non-ignorable) - the backtick shell-exec operator is deprecated
+    /// as of PHP 8.5 in favor of a plain `shell_exec()` call.
+    pub(crate) fn check_backtick_deprecation(&mut self, span: Span, label: &str) {
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        if !crate::php_version::PhpFeature::DeprecatedBacktickOperator.is_available(version) {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            "Backtick operator is deprecated in PHP 8.5. Use shell_exec() function call instead."
+                .to_string(),
+            span,
+            0,
+            "backtick.deprecated",
+        );
+    }
+
     /// Real PHPStan's `EchoRule` (`echo.nonString`) - `position` is
     /// 0-based, real PHPStan's own message counts from 1.
     pub(crate) fn check_echo_validity(

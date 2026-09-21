@@ -49,6 +49,7 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::Cast(_, inner, _)
         | ExprKind::Grouping(inner)
         | ExprKind::FirstClassCallable(inner)
+        | ExprKind::ShellExec(inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, _, _) => vec![inner],
@@ -217,6 +218,7 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
         | ExprKind::Cast(_, inner, _)
         | ExprKind::Grouping(inner)
         | ExprKind::FirstClassCallable(inner)
+        | ExprKind::ShellExec(inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
         | ExprKind::PropertyAccess(inner, _, _) => f(inner),
