@@ -1,7 +1,8 @@
 //! Real PHPStan's `InvalidAssignVarRule` - `nullsafe.assign` (a nullsafe
-//! operator anywhere in an assignment's own left-hand side) and
-//! `assign.invalidExpr` (a left-hand side that isn't a real PHP lvalue
-//! at all).
+//! operator anywhere in an assignment's own left-hand side),
+//! `nullsafe.byRef` (a nullsafe operator anywhere in an assign-by-
+//! reference's own right-hand side), and `assign.invalidExpr` (a
+//! left-hand side that isn't a real PHP lvalue at all).
 
 use super::helpers::*;
 
@@ -102,6 +103,73 @@ fn a_compound_assignment_to_a_nullsafe_target_is_flagged() {
     assert!(
         d.iter().any(|x| x.identifier == "nullsafe.assign"),
         "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_nullsafe_property_access_on_the_rhs_of_a_ref_assignment_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo { public ?Foo $bar = null; }
+            function test(?Foo $f) {
+                $x = &$f?->bar;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "nullsafe.byRef"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_nullsafe_operator_nested_deeper_in_a_ref_assignments_rhs_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo { public ?Foo $bar = null; public ?Foo $baz = null; }
+            function test(?Foo $f) {
+                $x = &$f?->bar->baz;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "nullsafe.byRef"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_non_nullsafe_ref_assignment_is_never_flagged_as_byref_nullsafe() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo { public ?Foo $bar = null; }
+            function test(Foo $f) {
+                $x = &$f->bar;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "nullsafe.byRef"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_nullsafe_property_access_on_the_rhs_of_a_plain_assignment_is_never_flagged_as_byref() {
+    // `nullsafe.byRef` only ever applies to the RHS of a genuine
+    // assign-by-reference (`=&`) - an ordinary read-side nullsafe access
+    // on a plain `=`'s RHS is completely legal PHP.
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo { public ?Foo $bar = null; }
+            function test(?Foo $f) {
+                $x = $f?->bar;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "nullsafe.byRef"),
+        "unexpected diagnostics: {d:?}"
     );
 }
 

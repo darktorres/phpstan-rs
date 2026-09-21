@@ -541,22 +541,32 @@ fn not_binds_looser_than_instanceof() {
 }
 
 #[test]
-fn reference_assignment_parses() {
+fn reference_assignment_parses_as_assign_ref_not_plain_assign() {
     let program = parse(
         r#"<?php
             $a = &$b;
             $c =& $d;
+            $e = $f;
         "#,
     );
     assert!(matches!(
         &program[0].kind,
         StmtKind::Expression(Expr {
-            kind: ExprKind::Assign(_, _),
+            kind: ExprKind::AssignRef(_, _),
             ..
         })
     ));
     assert!(matches!(
         &program[1].kind,
+        StmtKind::Expression(Expr {
+            kind: ExprKind::AssignRef(_, _),
+            ..
+        })
+    ));
+    // An ordinary assignment with no `&` must still parse as plain
+    // `Assign`, not `AssignRef`.
+    assert!(matches!(
+        &program[2].kind,
         StmtKind::Expression(Expr {
             kind: ExprKind::Assign(_, _),
             ..

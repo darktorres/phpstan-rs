@@ -1198,7 +1198,7 @@ impl<'a> Checker<'a> {
             // `strpos()`'s raw `int<0, max>|false` inside the truthy
             // branch instead of a real non-zero `int` (`substr()`'s 3rd
             // argument expects `int|null`, not `int<0, max>|false`).
-            ExprKind::Assign(lhs, rhs) => {
+            ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
                 let rhs_ty = self.infer_expr(rhs, locals);
                 self.bind_assignment_target(lhs, rhs_ty, locals);
                 if branch_true

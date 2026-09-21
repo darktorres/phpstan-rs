@@ -377,7 +377,7 @@ fn expr_disqualifies(
         ExprKind::StaticAccess(_, _) => true,
         ExprKind::Variable(name) if is_superglobal(name) => true,
         ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
-        ExprKind::Assign(lhs, rhs) => {
+        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
             property_write_target(lhs)
                 || expr_disqualifies(lhs, declaring_class, registry, deps)
                 || expr_disqualifies(rhs, declaring_class, registry, deps)

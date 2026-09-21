@@ -96,7 +96,7 @@ impl<'a> Checker<'a> {
                 self.in_bare_statement_position = true;
                 let ty = self.check_expr(e, locals, label);
                 if self.collect_inlay_hints
-                    && let ExprKind::Assign(lhs, _) = &e.kind
+                    && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
                     && let ExprKind::Variable(name) = &lhs.kind
                     && ty != Type::Mixed
                     && !inline_var
@@ -984,7 +984,7 @@ impl<'a> Checker<'a> {
         let StmtKind::Expression(e) = &stmt.kind else {
             return;
         };
-        let ExprKind::Assign(lhs, rhs) = &e.kind else {
+        let (ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs)) = &e.kind else {
             return;
         };
         let ExprKind::Variable(lhs_name) = &lhs.kind else {
@@ -1072,7 +1072,7 @@ fn bare_assert_condition(e: &Expr) -> Option<&Expr> {
 fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
     match kind {
         StmtKind::Expression(e) => match &e.kind {
-            ExprKind::Assign(lhs, _) => match &lhs.kind {
+            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => match &lhs.kind {
                 ExprKind::Variable(name) => vec![name.to_string()],
                 _ => Vec::new(),
             },

@@ -58,6 +58,7 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
             .collect(),
         ExprKind::Binary(_, l, r)
         | ExprKind::Assign(l, r)
+        | ExprKind::AssignRef(l, r)
         | ExprKind::CompoundAssign(_, l, r)
         | ExprKind::DynamicPropertyAccess(l, r) => vec![l, r],
         ExprKind::Ternary(cond, then_, else_) => {
@@ -224,6 +225,7 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
             .any(|item| item.key.as_ref().is_some_and(&mut f) || f(&item.value)),
         ExprKind::Binary(_, l, r)
         | ExprKind::Assign(l, r)
+        | ExprKind::AssignRef(l, r)
         | ExprKind::CompoundAssign(_, l, r)
         | ExprKind::DynamicPropertyAccess(l, r) => f(l) || f(r),
         ExprKind::Ternary(cond, then_, else_) => {

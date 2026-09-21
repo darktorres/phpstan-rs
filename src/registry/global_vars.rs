@@ -482,7 +482,7 @@ fn handle_top_expr_statement<'a>(
     let gate = || top_level.then(|| file_ctx.path.to_path_buf());
 
     match &e.kind {
-        ExprKind::Assign(lhs, rhs) => {
+        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
             handle_assignment_target(lhs, rhs, ctx, file_ctx, &is_site, &gate, out, false);
         }
         ExprKind::CompoundAssign(BinOp::Coalesce, lhs, rhs) => {

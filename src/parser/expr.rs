@@ -127,14 +127,13 @@ impl Parser {
         };
         self.skip();
         // Reference assignment (`$a = &$b;`) - only valid on a plain `=`,
-        // never a compound one. Aliasing itself isn't modeled (nothing
-        // here tracks that two variables now share storage), so this is
-        // just consumed and the RHS's type still flows through normally.
-        if op.is_none() {
-            self.eat(&Token::Amp);
-        }
+        // never a compound one. See `ExprKind::AssignRef`'s own doc
+        // comment for why this gets its own variant rather than just
+        // being consumed and discarded.
+        let is_ref = op.is_none() && self.eat(&Token::Amp);
         let rhs = self.parse_assignment()?;
         Ok(match op {
+            None if is_ref => self.expr(ExprKind::AssignRef(Box::new(lhs), Box::new(rhs)), start),
             None => self.expr(ExprKind::Assign(Box::new(lhs), Box::new(rhs)), start),
             Some(binop) => self.expr(
                 ExprKind::CompoundAssign(binop, Box::new(lhs), Box::new(rhs)),

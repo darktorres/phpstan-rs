@@ -187,10 +187,12 @@ pub(crate) fn walk_expr_for_members(
         // recorded as a write only, not *also* as a read the way falling
         // through to the generic `PropertyAccess`/`StaticAccess` arms
         // further down would.
-        ExprKind::Assign(l, r) => {
+        ExprKind::Assign(l, r) | ExprKind::AssignRef(l, r) => {
             walk_expr_for_members(r, fqn, ctx, usage);
             // `$var = new self()`/`new static()`/`new <SameClass>()` -
-            // see `MemberUsage::aliases`'s own doc comment.
+            // see `MemberUsage::aliases`'s own doc comment. Moot for
+            // `AssignRef` in practice (real PHP rejects `=& new ...`),
+            // but harmless to still check.
             if let ExprKind::Variable(name) = &l.kind
                 && is_new_self_instance(r, fqn, ctx)
             {

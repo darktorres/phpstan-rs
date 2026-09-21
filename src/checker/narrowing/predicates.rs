@@ -113,7 +113,7 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // checked here is equally true of `lhs`'s own key afterward -
         // narrowing key can borrow the underlying variable/property/index
         // key without needing its own dedicated storage.
-        ExprKind::Assign(lhs, _) => narrowing_key(lhs),
+        ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => narrowing_key(lhs),
         // `($file = readdir($dir)) !== false` - the
         // "assign-then-check" idiom above, but wrapped in parens, which
         // real PHP requires for the statement's own top-level shape

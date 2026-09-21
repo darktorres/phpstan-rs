@@ -183,7 +183,10 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
                 bias_expr_spans(&mut item.value, frag_base);
             }
         }
-        ExprKind::Binary(_, l, r) | ExprKind::Assign(l, r) | ExprKind::CompoundAssign(_, l, r) => {
+        ExprKind::Binary(_, l, r)
+        | ExprKind::Assign(l, r)
+        | ExprKind::AssignRef(l, r)
+        | ExprKind::CompoundAssign(_, l, r) => {
             bias_expr_spans(l, frag_base);
             bias_expr_spans(r, frag_base);
         }

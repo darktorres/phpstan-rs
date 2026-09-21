@@ -427,7 +427,7 @@ fn walk_expr(
             }
             state
         }
-        ExprKind::Assign(lhs, rhs) => {
+        ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
             state = walk_expr(rhs, state, ctx, declaring_class);
             assign_target(lhs, state, ctx, declaring_class)
         }

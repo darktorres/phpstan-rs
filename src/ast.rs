@@ -690,6 +690,17 @@ pub enum ExprKind {
     Unary(UnaryOp, Box<Expr>),
     Binary(BinOp, Box<Expr>, Box<Expr>),
     Assign(Box<Expr>, Box<Expr>),
+    // `$a = &$b;` - reference assignment, only ever valid on a plain
+    // `=` (never a compound one). A genuinely distinct variant, not a
+    // flag on `Assign`, specifically so a `nullsafe.byRef` check
+    // (`$a = &$b?->c;`) can tell this RHS position apart from an
+    // ordinary read - aliasing itself still isn't modeled beyond that
+    // (nothing tracks that two variables now share storage; the RHS's
+    // own type still just flows through normally, identically to
+    // `Assign`). Every other consumer that doesn't care about the
+    // by-ref distinction folds this into the same arm as `Assign` via
+    // an or-pattern.
+    AssignRef(Box<Expr>, Box<Expr>),
     CompoundAssign(BinOp, Box<Expr>, Box<Expr>),
     Ternary(Box<Expr>, Option<Box<Expr>>, Box<Expr>),
     Call(Box<Expr>, Vec<Arg>),

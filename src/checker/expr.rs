@@ -1735,9 +1735,12 @@ impl<'a> Checker<'a> {
                 }
                 Type::Mixed
             }
-            ExprKind::Assign(lhs, rhs) => {
+            ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
                 self.check_nullsafe_assignment_target(lhs, label);
                 self.check_assignable_target(lhs, label);
+                if matches!(&e.kind, ExprKind::AssignRef(..)) {
+                    self.check_nullsafe_byref_target(rhs, label);
+                }
                 let rhs_ty = self.check_expr(rhs, locals, label);
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
                 // `list($a, $b) = $x;` (both desugar to the same
@@ -3755,7 +3758,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(_, inner) => self.infer_expr(inner, locals),
             ExprKind::Binary(op, l, r) => self.infer_binary(op, l, r, locals),
-            ExprKind::Assign(_, rhs) => self.infer_expr(rhs, locals),
+            ExprKind::Assign(_, rhs) | ExprKind::AssignRef(_, rhs) => self.infer_expr(rhs, locals),
             // `self`/`parent`/`static` aren't lexed as keywords (see the
             // parser: they're indistinguishable from any other identifier),
             // so a literal `ExprKind::Name("self")` has to be special-cased

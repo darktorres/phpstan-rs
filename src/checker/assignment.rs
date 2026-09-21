@@ -49,31 +49,15 @@ pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
 }
 
 impl<'a> Checker<'a> {
-    /// The actual variable-binding side effect of an assignment - lives in
-    /// `check_expr` (called from every place an assignment expression can
-    /// appear: a bare expression statement, a `for` init/step, a `while`
-    /// condition, ...) rather than a separate pass triggered only for
-    /// top-level expression statements, so `for ($j = 0; ...)`'s `$j`
-    /// gets bound.
-    /// Checks an assignment's own left-hand side for whatever isn't a
-    /// pure "definition site" - a plain variable (or nested variable,
-    /// recursing through any level of `[$a, $b] = ...`-style
-    /// destructuring) is never a read, but an `Index`'s own key
-    /// expression and a `PropertyAccess`'s own base still are. Shared
-    /// between the top-level assignment target and every nested
-    /// destructuring element, so `[[$a, $b], $c] = $nested;` doesn't
-    /// wrongly check `$a`/`$b` as reads of not-yet-defined variables.
-    /// Real PHPStan's `InvalidAssignVarRule`'s own nullsafe half
-    /// (`nullsafe.assign`) - `$a?->b = 1;` is a real, unconditional PHP
-    /// fatal ("Cannot assign to nullsafe operator"), not a narrowing
-    /// question, so it's checked unconditionally rather than folded into
-    /// `check_assignment_target`'s otherwise type-driven arms. The rule's
-    /// by-ref-RHS half (`nullsafe.byRef`) has no matching check here -
-    /// this project doesn't model assignment-by-reference as its own
-    /// `Expr` shape at all (`$a = &$b` parses as a plain `Assign`), so
-    /// there's no way to distinguish that RHS position from an ordinary
-    /// read; a real, disclosed gap. Its `assign.invalidExpr` half is
-    /// `check_assignable_target`, just below.
+    /// Real PHPStan's `InvalidAssignVarRule`'s own nullsafe-assignment-
+    /// target half (`nullsafe.assign`) - `$a?->b = 1;` is a real,
+    /// unconditional PHP fatal ("Cannot assign to nullsafe operator"),
+    /// not a narrowing question, so it's checked unconditionally rather
+    /// than folded into `check_assignment_target`'s otherwise type-
+    /// driven arms. The rule's other two halves are
+    /// `check_nullsafe_byref_target` (nullsafe on an assign-by-ref's own
+    /// RHS) and `check_assignable_target` (a non-assignable LHS),
+    /// both just below.
     pub(crate) fn check_nullsafe_assignment_target(&mut self, target: &Expr, label: &str) {
         if !contains_nullsafe(target) {
             return;
@@ -85,6 +69,29 @@ impl<'a> Checker<'a> {
                 target.span,
                 0,
                 "nullsafe.assign",
+            )
+            .non_ignorable(),
+        );
+    }
+
+    /// Real PHPStan's `InvalidAssignVarRule`'s own nullsafe-by-ref-RHS
+    /// half (`nullsafe.byRef`) - `$a = &$b?->c;` is a real, unconditional
+    /// PHP fatal ("Cannot assign by reference to an overloaded object"/
+    /// nullsafe-specific variant), the RHS-position mirror of
+    /// `check_nullsafe_assignment_target` just above. Only ever called
+    /// for `ExprKind::AssignRef`'s own RHS - a plain `Assign`'s RHS is an
+    /// ordinary read, never checked this way.
+    pub(crate) fn check_nullsafe_byref_target(&mut self, target: &Expr, label: &str) {
+        if !contains_nullsafe(target) {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                "Nullsafe operator cannot be on right side of assignment by reference.".to_string(),
+                target.span,
+                0,
+                "nullsafe.byRef",
             )
             .non_ignorable(),
         );
@@ -113,6 +120,20 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// The actual variable-binding side effect of an assignment - lives in
+    /// `check_expr` (called from every place an assignment expression can
+    /// appear: a bare expression statement, a `for` init/step, a `while`
+    /// condition, ...) rather than a separate pass triggered only for
+    /// top-level expression statements, so `for ($j = 0; ...)`'s `$j`
+    /// gets bound.
+    /// Checks an assignment's own left-hand side for whatever isn't a
+    /// pure "definition site" - a plain variable (or nested variable,
+    /// recursing through any level of `[$a, $b] = ...`-style
+    /// destructuring) is never a read, but an `Index`'s own key
+    /// expression and a `PropertyAccess`'s own base still are. Shared
+    /// between the top-level assignment target and every nested
+    /// destructuring element, so `[[$a, $b], $c] = $nested;` doesn't
+    /// wrongly check `$a`/`$b` as reads of not-yet-defined variables.
     pub(crate) fn check_assignment_target(
         &mut self,
         target: &Expr,

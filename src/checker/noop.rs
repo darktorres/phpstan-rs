@@ -80,6 +80,7 @@ fn expr_is_side_effect_free(e: &Expr) -> bool {
             | ExprKind::New(..)
             | ExprKind::NewAnonymousClass(..)
             | ExprKind::Assign(..)
+            | ExprKind::AssignRef(..)
             | ExprKind::CompoundAssign(..)
             | ExprKind::Throw(..)
             | ExprKind::Clone(..)

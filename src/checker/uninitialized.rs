@@ -159,7 +159,9 @@ fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &HashSet<Strin
 
 fn initializes_property(e: &Expr, prop: &str, self_vars: &HashSet<String>) -> bool {
     match &e.kind {
-        ExprKind::Assign(lhs, _) => is_tracked_property(lhs, prop, self_vars),
+        ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => {
+            is_tracked_property(lhs, prop, self_vars)
+        }
         // `$this->x ??= $default;` is real PHP's canonical lazy-init
         // idiom for a typed property specifically because `??=`'s
         // left-hand check is `isset()`-based, not a raw read, and

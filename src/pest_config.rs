@@ -163,7 +163,8 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut HashSet<String>) {
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
         };
-        let ExprKind::Assign(lhs, _) = &unwrap_grouping(e).kind else {
+        let (ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _)) = &unwrap_grouping(e).kind
+        else {
             continue;
         };
         let ExprKind::PropertyAccess(base, prop, _) = &lhs.kind else {
