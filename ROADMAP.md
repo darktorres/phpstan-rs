@@ -3904,8 +3904,20 @@ inheritance`/`resolve_deferred_value_of` already use - Phase 41's own
 transitive-purity model is the one genuine, high-value consumer, and
 it's built. Phase 15's own cross-file dedup piece (2 of the 14
 collectors) turned out not to need this architecture either, and is
-also built (see Phase 15, Done). The remaining 5 collectors feed
-genuinely narrow, low-value, self-contained rules, none built.
+also built (see Phase 15, Done).
+`FunctionCallConstantConditionCollector`'s own real gap (suppressing a
+call-conditioned constant-truth finding entirely when different hosts
+of the same trait disagree about it, rather than reporting either
+verdict) is closed too - see Done, `check_trait_methods`'s own
+divergent-per-host suppression pass. `ImpossibleCheckTypeReportedCollector`
+stays moot (no `ImpossibleCheckType*` rule family exists in this
+project yet - forward-coupled to that family's own separately-tracked
+gap, ROADMAP.md's `function.alreadyNarrowedType`/`.impossibleType`).
+`NamedArgumentParameterMethodCallsCollector`/
+`OverridingMethodRenamesParameterCollector` (one whole-project
+registry-fixed-point feature, not two independent collectors - both are
+consumed exclusively by `MethodCallWithPossiblyRenamedNamedArgumentRule`)
+remains unbuilt.
 
 **84 - `RuleLevelHelper`-equivalent level-aware type-acceptance,
 remaining (PARTIAL).** `Registry::accepts_at_configured_level` (see
