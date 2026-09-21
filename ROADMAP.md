@@ -3944,16 +3944,31 @@ arm decomposing `sub` before `sup`) cannot occur for that shape at all,
 since the specific, textually-earlier `Intersection`-vs-`Intersection`
 arm has existed since Phase 14, predating the note that named it a gap.
 
-**56 - Grammar-level PHPDoc parser rewrite (PLANNED).** `docblock.rs` is
-a lenient, hand-rolled ad-hoc string tokenizer (not built on the
-`regex` crate at all - plain `split_whitespace`/char-scanning) that
-silently drops what it doesn't recognize, unlike real PHPStan's
-recoverable-error grammar parser. Not
-a hard blocker for any current Phase 36 sub-item - each has its own
-small, bounded, self-contained grammar already. This phase's real
-motivation is narrower: robustness of the general type-expression
-grammar itself (deeply nested generics/conditional types/complex
-intersections), not corpus-evidenced as a live gap today. Size: XL.
+**56 - Grammar-level PHPDoc parser rewrite, Stage A done, Stage B
+PLANNED (PARTIAL).** `docblock.rs` is a lenient, hand-rolled ad-hoc
+string tokenizer (`take_type_token`'s own bracket-depth-only scan,
+deferring real type-string parsing to a later, separate `types::
+parse_type_string` call) that silently produces whatever substring it
+happened to stop at rather than validating a type expression's own
+grammar, unlike real PHPStan's recoverable-error `phpDoc.parseError`.
+Stage A (a real tokenizer + recursive-descent parser, `src/
+phpdoc_grammar/`) is built: nullable/union/intersection types, generics,
+array shapes, callable/`Closure` signatures, int ranges, literal types,
+const-fetch types, conditional types, and every tag structure this
+project's own `DocBlock` currently reads, all producing a real
+`PhpDocNode` AST plus recoverable `PhpDocParseError` diagnostics - see
+Done. Deliberately additive only: nothing in `checker`/`registry`
+consumes it yet, `docblock.rs`/`types::parse_type_string` remain the
+real, load-bearing pipeline. Stage B - migrating `DocBlock` to be
+populated from this parser (re-stringifying parsed types back into its
+existing `Option<String>` fields for full backward compatibility, then
+retiring the old hand-rolled tokenizer once nothing calls it anymore) -
+stays unbuilt: a real, separate, higher-risk migration touching the
+single most heavily-consumed subsystem in the whole checker, needing its
+own full Piwigo corpus diff to verify no silent behavior regression
+before it can be trusted - the one sub-item in this whole area where
+that's a real, live risk. Size: XL (now split - Stage A done, Stage B
+still XL on its own).
 
 **67 - `@internal`/`restricted_symbols`, remaining (PARTIAL).** The
 `@internal` restricted-usage engine, the declarative `restricted_symbols`
