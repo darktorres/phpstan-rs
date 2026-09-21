@@ -81,6 +81,20 @@ whole-program fact PHPStan's own 14-collector `CollectedDataNode`
 machinery makes expensive that phpstan-rs's single live `Registry` gets
 nearly for free.
 
+**Shared, currently-missing prerequisite for every whole-program
+*diagnostic* phase below (86-94, and Part 8's composer-hygiene phases
+113-120)** - found while scoping Phase 92, disclosed there in full:
+this project has no whole-project, non-per-file diagnostic-emission
+path at all yet (every diagnostic today flows through a per-file
+`Checker`/`check_program`/`check_file` call, integrated into
+`main/check_project.rs`'s own CLI/JSON/baseline pipeline), and reporting
+a declaration's own file/span outside the file currently being checked
+needs `Project::decl_locations`, gated behind `retain_source` (`false`
+in batch/`check-project` mode today, only ever turned on by the LSP).
+Worth building once, deliberately, as its own shared piece of
+infrastructure - not something to half-invent inside whichever one of
+these phases gets picked up first.
+
 ## Phase 85 — More precise than real PHPStan itself (BEYOND_PHPSTAN §A)
 
 Real PHPStan approximates in these spots for its own architectural
@@ -330,7 +344,33 @@ piece already exists unconnected: `Registry::enum_case_for_value`
 expression isn't covered by generic `stmt_children` and needs the same
 manual handling `member_usage.rs` already applies elsewhere; any
 `::cases()` call or dynamic access escapes the whole enum, conservative
-all-or-nothing. **Effort: medium.**
+all-or-nothing.
+
+**Undersold as "medium," corrected during a 2026-09-20 investigation
+(not built - two real, disclosed blockers found while scoping it, not
+implemented around).** (1) This project has **no whole-project,
+non-per-file diagnostic-emission path at all** yet - every diagnostic
+today flows through a per-file `Checker`/`check_program`/`check_file`
+call; a whole-program fact like "this case is never referenced
+anywhere" needs a genuinely new post-pass (after every file's own
+per-file check) integrated into `main/check_project.rs`'s own
+CLI/JSON/baseline output pipeline, not just a new match arm somewhere.
+This exact same gap blocks **every other Phase 86-94 whole-program item
+and every Phase 113-120 composer-hygiene item** - none of those are
+small "just wire it up" tasks either, once this is accounted for; it's
+worth building once, deliberately, as its own shared prerequisite
+rather than half-inventing it inside whichever phase gets picked up
+first. (2) Reporting each dead case's own location needs
+`Project::decl_locations`, which is gated behind `retain_source` -
+`false` in batch/`check-project` mode today (only the LSP turns it on).
+Whether to unconditionally turn it on for batch mode too (retaining
+every file's raw source text in memory for the whole run) is a real
+memory/perf trade-off that deserves measuring against a real corpus
+(e.g. Piwigo) before flipping it, not an assumption - this is the exact
+same "`DeclLocations` opened for batch `check-project` runs" prerequisite
+Phase 113/114/115 already disclosed for themselves; Phase 92 needs it
+too, just not previously noted here. **Effort: medium once both
+prerequisites exist, large including them.**
 
 ## Phase 93 — Whole-program dead abstract-class detection (§AJ)
 
@@ -649,7 +689,11 @@ underlying pieces built for other reasons (`composer::
 find_composer_package_name`, `detect_phpstan_dependency`,
 `deps::referenced_names`, `DeclLocations` — several items below note
 `DeclLocations` needs opening up for batch `check-project` runs, not
-just its current LSP-only `retain_source` gate).
+just its current LSP-only `retain_source` gate — see Part 1's own
+shared-prerequisite note above Phase 85 for the fuller disclosure,
+found while scoping Phase 92: this project also has no whole-project,
+non-per-file diagnostic-emission path yet, a second, likely bigger gap
+every phase below shares too, not just the `DeclLocations` half).
 
 ## Phase 113 — Composer declared-vs-used dependency hygiene (§K)
 
