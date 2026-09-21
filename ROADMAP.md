@@ -3326,6 +3326,79 @@ declared return type uses plain `list<T>` on both tuple slots, never
 proof obligation, and the actual failure was this much narrower,
 already-precedented by-ref-effect gap.
 
+**Constants declared inside a trait need PHP 8.2+** (PHASE_BACKLOG Phase
+136's `ConstantsInTraitsRule` item, `classConstant.inTrait`,
+non-ignorable). `check_class_constant_modifiers` (`checker/oop.rs`,
+already the home of `classConstant.finalNotSupported`/`.finalPrivate`/
+`.nativeTypeNotSupported`) gained a fourth, independent check: when the
+declaring class-like is a `Trait`, every one of its own `const`
+declarations is flagged unless the configured PHP version is >= 8.2 -
+the already-defined `PhpFeature::ConstantsInTraits` gate finally gets a
+call site. Fires once per constant, at its own declaration site,
+regardless of how many classes use the trait (matching real PHPStan's
+own per-`ClassConst`-node rule shape).
+
+**Three PHP-8.x-version-gated cast diagnostics** (PHASE_BACKLOG Phase
+135, `UnsetCastRule`/`VoidCastRule`/`DeprecatedCastRule`). All three
+reuse `check_cast_validity`'s own call site in `check_expr`'s `Cast`
+arm, and all three already had their `PhpFeature` gate data defined
+with no consumer (`UnsetCastRemoved`, `VoidCast`,
+`DeprecatedNonStandardCasts`) - only the check logic itself
+(`checker/coercion.rs`) was missing:
+- `cast.unset` (non-ignorable): `(unset)` was removed as of PHP 8.0.
+- `cast.voidNotSupported` (non-ignorable, PHP < 8.5) and `cast.void`
+  (non-ignorable, whenever the cast isn't its own bare top-level
+  statement) - independent checks, both can fire on the same
+  occurrence. Reuses `check_expr`'s own already-existing
+  `is_bare_statement` flag (the same one `check_void_cast`'s "first-
+  level statement" question needs) rather than adding a new one.
+- `cast.deprecated` (PHP >= 8.5): the four non-canonical spellings
+  `(integer)`/`(boolean)`/`(double)`/`(binary)` - required widening
+  `ExprKind::Cast(String, Box<Expr>)` to a 3-tuple
+  (`..., bool`), since the normalized cast target alone can't
+  distinguish `(integer)` from `(int)` once parsed. `(real)` (the
+  *other* non-canonical spelling of `(float)`) is deliberately left
+  unflagged, faithfully matching real PHPStan's own
+  `DeprecatedCastRule`, which only checks `KIND_DOUBLE`, never
+  `KIND_REAL`.
+
+**`InvalidAssignVarRule`'s nullsafe-assignment-target and non-
+assignable-LHS halves** (PHASE_BACKLOG Phase 135, partial -
+`nullsafe.assign`/`assign.invalidExpr`, both non-ignorable). Two new
+`checker/assignment.rs` checks, run unconditionally at the top of both
+`Assign`'s and `CompoundAssign`'s own `check_expr` arms:
+- `contains_nullsafe` walks an assignment target's own access chain
+  (`PropertyAccess`/`MethodCall`'s own nullsafe flag, recursing through
+  `Index`/a `StaticCall` with a real expression receiver/a destructuring
+  `ArrayLiteral`'s items) - `$a?->b = 1;` is a real, unconditional PHP
+  fatal regardless of any type information, not a narrowing question.
+  Doesn't see through `DynamicPropertyAccess`/`DynamicMethodCall`
+  (`$a?->{$expr}`), which don't carry their own nullsafe flag at all
+  (see `ExprKind::DynamicPropertyAccess`'s own doc comment) - a real,
+  disclosed, narrow gap.
+- `is_non_assignable_target` confirmed a real, live gap first: unlike a
+  grammar that would reject it at parse time, this project's own
+  `parse_assignment_tail` accepts *any* expression as an assignment's
+  left-hand side (needed for the `if (false === $x = fn())`-style
+  guard-clause idiom documented on that same function), so `foo() =
+  1;`/`1 = 2;` genuinely reach the checker rather than already being a
+  parse error. Mirrors real PHPStan's own `containsNonAssignableExpression`
+  allow-list (`Variable`/`PropertyAccess`/`Index`/`StaticAccess`/a
+  recursively-valid destructuring `ArrayLiteral`), with one deliberate
+  addition: `DynamicPropertyAccess` also counts as assignable, since
+  real PHPStan's own AST never distinguishes a computed property name
+  from a plain one at the node-type level in the first place (both are
+  just `PropertyFetch`) - `MethodCall`/`DynamicMethodCall` intentionally
+  get no such treatment, since neither is ever a valid assignment target
+  in real PHP either.
+- The rule's third case, nullsafe on the RHS of assign-by-ref
+  (`nullsafe.byRef`), is *not* built - this project doesn't model
+  assignment-by-reference as its own `Expr` shape at all (`$a = &$b`
+  parses as a plain `Assign`, with the `&` just consumed and discarded
+  at parse time), so there's no way to distinguish that RHS position
+  from an ordinary read. A real, disclosed, permanent-until-that-AST-
+  gap-closes limitation, not an oversight.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4008,11 +4081,7 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 ## Operators+Cast
 
 - **`Rules/Operators/BacktickRule.php`**: Real PHPStan warns (`backtick.deprecated`) that the backtick shell-exec operator is deprecated as of PHP 8.5, suggesting `shell_exec()` instead. phpstan-rs has no equivalent diagnostic anywhere, and ROADMAP.md never mentions BacktickRule, backtick deprecation, or the identifier at all.
-- **`Rules/Operators/InvalidAssignVarRule.php`**: Real PHPStan flags three shapes on the left side of an assignment: nullsafe operator on the assignment target (`nullsafe.assign`), nullsafe operator on the right side of assign-by-ref (`nullsafe.byRef`), and any non-assignable LHS expression, e.g. a call result or literal (`assign.invalidExpr`). None of these are checked anywhere in phpstan-rs.
 - **`Rules/Operators/PipeOperatorRule.php`**: Real PHPStan's PipeOperatorRule flags a PHP 8.5 pipe (`|>`) whose right-hand callable's first parameter is passed by reference (`pipe.byRef`), since the pipe operator always passes its value by-value. phpstan-rs parses `|>` but performs no legality checking on the callable at all.
-- **`Rules/Cast/DeprecatedCastRule.php`**: Real PHPStan warns (`cast.deprecated`) on the non-standard cast spellings `(integer)`, `(boolean)`, `(double)`, `(binary)` as of PHP 8.5, recommending the canonical `(int)`/`(bool)`/`(float)`/`(string)` instead. phpstan-rs has no such diagnostic.
-- **`Rules/Cast/UnsetCastRule.php`**: Real PHPStan hard-errors (`cast.unset`, non-ignorable) on the `(unset)` cast when targeting PHP >= 8.0, since PHP itself removed it. phpstan-rs infers a type for `(unset)$x` (Type::Null) but never checks the configured php_version to flag its use as removed.
-- **`Rules/Cast/VoidCastRule.php`**: Real PHPStan flags the PHP 8.5 `(void)` cast two ways: `cast.voidNotSupported` when the configured PHP version predates 8.5, and `cast.void` (non-ignorable) whenever it's used as anything other than a first-level statement. phpstan-rs parses `(void)` as a legal, inert cast but never emits either diagnostic.
 - **`Rules/Operators/InvalidIncDecOperationRule.php`**: a whole
   unimplemented rule family - flags `$x++`/`$x--`/`++$x`/`--$x`
   (`postInc.type`/`postDec.type`/`preInc.type`/`preDec.type`) on a type
@@ -4027,7 +4096,6 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 ## Traits+InternalTag
 
 - **`Rules/Traits/ConflictingTraitConstantsRule.php`**: Real PHPStan checks that a class constant overriding one supplied by a used trait keeps the same visibility, final-ness, native type, and (for immediately-used traits) the same value - reporting classConstant.visibility/.nonFinal/.final/.nativeType/.missingNativeType/.value.
-- **`Rules/Traits/ConstantsInTraitsRule.php`**: Real PHPStan reports classConstant.inTrait when a constant is declared inside a trait body but the project's configured PHP version predates 8.2 (constants-in-traits support). phpstan-rs defines a matching PhpFeature::ConstantsInTraits variant with the correct (8,2) threshold in src/php_version.rs, but it is never consumed by any check call site - grepping the codebase for it...
 
 ## Keywords+Debug
 

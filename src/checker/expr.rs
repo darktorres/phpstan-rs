@@ -1736,6 +1736,8 @@ impl<'a> Checker<'a> {
                 Type::Mixed
             }
             ExprKind::Assign(lhs, rhs) => {
+                self.check_nullsafe_assignment_target(lhs, label);
+                self.check_assignable_target(lhs, label);
                 let rhs_ty = self.check_expr(rhs, locals, label);
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
                 // `list($a, $b) = $x;` (both desugar to the same
@@ -1803,6 +1805,8 @@ impl<'a> Checker<'a> {
                 rhs_ty
             }
             ExprKind::CompoundAssign(op, lhs, rhs) => {
+                self.check_nullsafe_assignment_target(lhs, label);
+                self.check_assignable_target(lhs, label);
                 // `$x ??= $default;` is defined as exactly
                 // `$x = $x ?? $default;` - the same quiet-left-side
                 // exemption as plain `??` applies to its own left side.

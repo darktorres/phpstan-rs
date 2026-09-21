@@ -1,8 +1,52 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, Locals, is_unsealed_shape, narrowing_key, purge_stale_narrowing_for, union_types,
+    Checker, DiagnosticBuilder, Locals, is_unsealed_shape, narrowing_key,
+    purge_stale_narrowing_for, union_types, unwrap_grouping,
 };
 use crate::types::{AccessoryKind, Type, is_subtype};
+
+/// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an
+/// assignment target's own access chain contains a nullsafe `?->`
+/// anywhere along it (`$a?->b = 1`, or nested deeper: `$a?->b->c = 1`).
+/// Doesn't see through `DynamicPropertyAccess`/`DynamicMethodCall`
+/// (`$a?->{$expr}`) - that shape doesn't carry its own nullsafe flag at
+/// all (see `ExprKind::DynamicPropertyAccess`'s own doc comment), a
+/// real, disclosed gap matching how rare it is in practice.
+pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
+    match &unwrap_grouping(expr).kind {
+        ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe(base),
+        ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe(base),
+        ExprKind::Index(base, _) => contains_nullsafe(base),
+        ExprKind::StaticCall(StaticTarget::Expr(base), _, _) => contains_nullsafe(base),
+        ExprKind::ArrayLiteral(items) => items.iter().any(|item| {
+            item.key.as_ref().is_some_and(contains_nullsafe) || contains_nullsafe(&item.value)
+        }),
+        _ => false,
+    }
+}
+
+/// Real PHPStan's `InvalidAssignVarRule::containsNonAssignableExpression`,
+/// i.e. whether an assignment's own left-hand side is a real PHP lvalue
+/// (`assign.invalidExpr` otherwise: `foo() = 1;`/`1 = 2;`, a real
+/// unconditional fatal). Unlike real PHPStan's own AST (where a computed
+/// property name is still just `PropertyFetch`, never a distinct node
+/// type), this project's `DynamicPropertyAccess` (`$obj->{$expr} = 1;`)
+/// needs its own explicit "assignable" arm to match that same semantics,
+/// while `DynamicMethodCall`/`MethodCall` deliberately don't get one,
+/// since neither is ever a valid assignment target in real PHP either.
+pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
+    match &unwrap_grouping(expr).kind {
+        ExprKind::Variable(_)
+        | ExprKind::PropertyAccess(..)
+        | ExprKind::DynamicPropertyAccess(..)
+        | ExprKind::Index(..)
+        | ExprKind::StaticAccess(..) => false,
+        ExprKind::ArrayLiteral(items) => items
+            .iter()
+            .any(|item| is_non_assignable_target(&item.value)),
+        _ => true,
+    }
+}
 
 impl<'a> Checker<'a> {
     /// The actual variable-binding side effect of an assignment - lives in
@@ -19,6 +63,56 @@ impl<'a> Checker<'a> {
     /// between the top-level assignment target and every nested
     /// destructuring element, so `[[$a, $b], $c] = $nested;` doesn't
     /// wrongly check `$a`/`$b` as reads of not-yet-defined variables.
+    /// Real PHPStan's `InvalidAssignVarRule`'s own nullsafe half
+    /// (`nullsafe.assign`) - `$a?->b = 1;` is a real, unconditional PHP
+    /// fatal ("Cannot assign to nullsafe operator"), not a narrowing
+    /// question, so it's checked unconditionally rather than folded into
+    /// `check_assignment_target`'s otherwise type-driven arms. The rule's
+    /// by-ref-RHS half (`nullsafe.byRef`) has no matching check here -
+    /// this project doesn't model assignment-by-reference as its own
+    /// `Expr` shape at all (`$a = &$b` parses as a plain `Assign`), so
+    /// there's no way to distinguish that RHS position from an ordinary
+    /// read; a real, disclosed gap. Its `assign.invalidExpr` half is
+    /// `check_assignable_target`, just below.
+    pub(crate) fn check_nullsafe_assignment_target(&mut self, target: &Expr, label: &str) {
+        if !contains_nullsafe(target) {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                "Nullsafe operator cannot be on left side of assignment.".to_string(),
+                target.span,
+                0,
+                "nullsafe.assign",
+            )
+            .non_ignorable(),
+        );
+    }
+
+    /// Real PHPStan's `InvalidAssignVarRule`'s own non-assignable-
+    /// expression half (`assign.invalidExpr`) - unlike a real lvalue-
+    /// grammar-enforcing parser, this project's own `parse_assignment_
+    /// tail` accepts any expression as an assignment's left-hand side
+    /// (needed for the guard-clause idiom documented on `parse_
+    /// assignment_tail` itself), so `foo() = 1;`/`1 = 2;` genuinely
+    /// reach here rather than already being a parse error.
+    pub(crate) fn check_assignable_target(&mut self, target: &Expr, label: &str) {
+        if !is_non_assignable_target(target) {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                "Expression on left side of assignment is not assignable.".to_string(),
+                target.span,
+                0,
+                "assign.invalidExpr",
+            )
+            .non_ignorable(),
+        );
+    }
+
     pub(crate) fn check_assignment_target(
         &mut self,
         target: &Expr,

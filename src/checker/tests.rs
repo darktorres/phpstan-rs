@@ -39,6 +39,7 @@ mod helpers;
 mod inline_var_validation;
 mod int_range_arithmetic;
 mod internal_usage;
+mod invalid_assignment_targets;
 mod key_value_of;
 mod method_and_mixin;
 mod misc_and_regressions;
