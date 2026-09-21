@@ -924,3 +924,70 @@ fn a_negated_literal_true_as_a_last_elseif_without_else_is_exempt() {
         "got: {d:?}"
     );
 }
+
+// A trait method's own call-conditioned constant-truth finding that
+// genuinely disagrees between two different hosts (one host's own
+// `self::FLAG` makes it provably true, another's makes it provably
+// false) is real PHPStan's own `ConstantConditionInTraitRule` shape -
+// fully suppressed, not reported for either verdict (`check_trait_
+// methods`'s own doc comment, `function_decl.rs`).
+
+#[test]
+fn a_trait_condition_that_diverges_across_two_hosts_is_suppressed_entirely() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait Common {
+                public function check(): void {
+                    if (self::FLAG) {
+                        echo 1;
+                    }
+                }
+            }
+            class HostTrue {
+                use Common;
+                const FLAG = true;
+            }
+            class HostFalse {
+                use Common;
+                const FLAG = false;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "if.alwaysTrue" || x.identifier == "if.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_trait_condition_that_agrees_across_every_host_is_still_flagged() {
+    // Negative control: the new divergence-suppression must not silently
+    // eat a genuinely host-independent finding just because there's more
+    // than one host - matches the pre-existing exact-duplicate `dedup_by`
+    // collapsing this down to one diagnostic, not zero.
+    let d = diagnostics_for(
+        r#"<?php
+            trait Common {
+                public function check(): void {
+                    if (self::FLAG) {
+                        echo 1;
+                    }
+                }
+            }
+            class HostA {
+                use Common;
+                const FLAG = true;
+            }
+            class HostB {
+                use Common;
+                const FLAG = true;
+            }
+        "#,
+    );
+    assert_eq!(
+        d.iter().filter(|x| x.identifier == "if.alwaysTrue").count(),
+        1,
+        "got: {d:?}"
+    );
+}

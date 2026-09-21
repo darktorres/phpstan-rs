@@ -235,3 +235,28 @@ fn should_skip_constant_condition(e: &Expr) -> bool {
             | ExprKind::Ternary(_, _, _)
     )
 }
+
+/// Whether `identifier` belongs to this whole "condition provably
+/// always true/false" family - every real one this checker ever reports
+/// (`if.alwaysTrue`, `booleanAnd.leftAlwaysFalse`, `logicalXor.
+/// rightAlwaysFalse`, ...) ends with `true`/`false` case-insensitively
+/// and contains `always` somewhere before that, regardless of whether
+/// that word starts the identifier's own tag half (`if.alwaysTrue`) or
+/// sits mid-camelCase (`booleanAnd.leftAlwaysTrue`) - checked via a
+/// lowercased substring/suffix test rather than enumerating every real
+/// spelling, so a new sibling rule joining this family later doesn't
+/// need a matching update here. Used by `check_trait_methods`'s own
+/// divergent-per-host suppression (`function_decl.rs`) - a call-
+/// conditioned member of this family is the only shape whose truth can
+/// ever actually depend on which host uses a trait; a literal condition
+/// (`if (true)`) can never diverge across hosts at all, so restricting
+/// to "this family, landed at an identical span with a different
+/// message across two host passes" already scopes correctly to the
+/// call-conditioned case with no separate call-shape bookkeeping
+/// needed. Deliberately excludes non-boolean-truth families that
+/// happen to share the word `always` (`arrayFilter.alwaysEmpty`) by
+/// also requiring the `true`/`false` suffix.
+pub(crate) fn is_constant_condition_family_identifier(identifier: &str) -> bool {
+    let lower = identifier.to_ascii_lowercase();
+    lower.contains("always") && (lower.ends_with("true") || lower.ends_with("false"))
+}

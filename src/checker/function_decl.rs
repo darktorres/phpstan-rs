@@ -3,7 +3,7 @@ use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, DiagnosticBuilder, Locals, body_contains_explicit_throw,
     body_contains_yield, collect_goto_targets, generator_missing_return_type,
-    type_allows_generator_return,
+    is_constant_condition_family_identifier, type_allows_generator_return,
 };
 use crate::docblock;
 use crate::php_version::PhpFeature;
@@ -94,6 +94,40 @@ impl<'a> Checker<'a> {
         });
         self.diagnostics
             .dedup_by(|a, b| a.span == b.span && a.message == b.message);
+        // Real PHPStan's own `ConstantConditionInTraitRule` (`checker/
+        // control_flow/boolean_conditions.rs`'s own doc comment on why a
+        // bare call condition is folded into the ordinary if/while/
+        // ternary/&&/|| rules rather than getting a separate one) - a
+        // call-conditioned constant-truth finding (`if.alwaysTrue`,
+        // `while.alwaysFalse`, ...) that disagrees between two different
+        // hosts of this same trait (one host's own state makes it
+        // provably true, another's makes it provably false) is
+        // completely suppressed, not reported for either verdict -
+        // exactly the false-positive shape real PHPStan's own collector-
+        // based suppression exists to prevent. The exact-duplicate
+        // `dedup_by` just above only ever collapses an *identical*
+        // message repeated across hosts; a genuinely divergent pair
+        // survives it as two adjacent (same span, sorted) but distinct
+        // entries - `is_constant_condition_family_identifier`'s own doc
+        // comment explains why restricting to this one family already
+        // scopes correctly to the call-conditioned case with no
+        // separate call-shape bookkeeping needed.
+        if has_hosts {
+            let mut family_span_counts: std::collections::HashMap<Span, usize> =
+                std::collections::HashMap::new();
+            for d in &self.diagnostics[start..] {
+                if is_constant_condition_family_identifier(&d.identifier) {
+                    *family_span_counts.entry(d.span).or_insert(0) += 1;
+                }
+            }
+            if family_span_counts.values().any(|&count| count > 1) {
+                let tail = self.diagnostics.split_off(start);
+                self.diagnostics.extend(tail.into_iter().filter(|d| {
+                    !(is_constant_condition_family_identifier(&d.identifier)
+                        && family_span_counts.get(&d.span).copied().unwrap_or(0) > 1)
+                }));
+            }
+        }
     }
 
     /// Looks up this exact declaration's resolved signature in the
