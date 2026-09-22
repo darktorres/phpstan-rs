@@ -20,7 +20,9 @@ the source of truth for their own material:
 
 **Status:** every phase below is **PLANNED** — none of this is built,
 with twenty-two exceptions: Phases 166, 169, and 174 (unblocking two
-live dependency edges in `PHASE_DEPENDENCIES.md`), Phases 161, 162,
+live dependency edges formerly tracked in `PHASE_DEPENDENCIES.md`,
+retired once these shipped and left no live edge behind - see
+ROADMAP's own "Pending / partial" intro), Phases 161, 162,
 167, 170, 171, and 172 (the small narrowing-engine batch this
 unblocking made it natural to pick up next), and Phase 96's D8, D2,
 D5, D6, and D7, Phase 97's AA3 and AA5, Phase 98's AB2, Phase 101's

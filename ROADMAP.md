@@ -884,11 +884,16 @@ Each entry: what's missing, and the root cause blocking it where one's
 known. Numbered by the original phase for cross-reference; the number
 is not a priority order. Cross-phase dependencies, when a phase's own
 entry has one, are named inline in that entry's own text - a separate
-dependency graph (`PHASE_DEPENDENCIES.md`) was maintained through most
-of this project's development, retired once every edge it tracked
-became satisfied, then reinstated after a later session's reevaluation
-of the boundaries/won't-port lists produced new phases (158-175) with
-live dependency edges among them.
+dependency graph (`PHASE_DEPENDENCIES.md`) was maintained across two
+earlier stretches of this project's development, each time retired once
+every edge it tracked became satisfied and reinstated only once a fresh
+batch of new phases (158-175, the most recent) produced live edges
+again. Retired a second time once Phases 166/169/174 shipped and left
+no live phase-to-phase edge behind - the one remaining insight it held
+(the two-pass checking architecture Phases 166/174 built, see Done's
+own "Too-wide return/property types" entry, is necessary but not
+sufficient for general cross-function array correlation) is folded into
+that boundary's own entry below instead of a standalone file.
 
 **48 - Symbol-existence pipeline, remaining stretch goal (PARTIAL, small
 residual).** The MVP, name-case family, and a fresh 20-file audit of
@@ -1347,11 +1352,13 @@ Pending entry instead).
   cluster). Two real, still-open sub-cases: a cross-*function* version
   of the parallel-accumulator-array correlation (the same-function case
   is filed and buildable - PHASE_BACKLOG Phase 173; the cross-function
-  generalization splits into "needs the two-pass collect-then-consume
-  architecture" - real, disclosed, large work - and "soundly answering
-  whether the correlation still holds by the time a different function
-  reads it" - a fundamentally harder, unbounded invariant-maintenance
-  problem, the actual wall); a compound `RateService::rate`-shaped case
+  generalization splits into two layers - the two-pass collect-then-
+  consume checking architecture (Phases 166/174, now built - see Done's
+  "Too-wide return/property types" entry), necessary but not sufficient
+  on its own, and "soundly answering whether the correlation still holds
+  by the time a different function reads it" - a fundamentally harder,
+  unbounded invariant-maintenance problem with no known bounded design
+  yet, the actual wall); a compound `RateService::rate`-shaped case
   compounding discriminant-variable correlation with closure-capture
   timing (PHASE_BACKLOG Phase 175, blocked on Phase 169 - now built, so
   this specific compound case is a real, narrow, buildable follow-up).
