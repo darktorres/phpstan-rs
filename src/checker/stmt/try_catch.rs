@@ -145,7 +145,13 @@ impl<'a> Checker<'a> {
                         let span = c.types_spans.get(i).copied().unwrap_or(c.span);
                         self.check_class_name_case(label, t, span);
                         self.check_internal_catch(&class, c.span, label);
-                        self.check_restricted_class_name_usage(&class, "Catching", c.span, label);
+                        self.check_restricted_class_name_usage(
+                            &class,
+                            "Catching",
+                            c.span,
+                            label,
+                            crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
+                        );
                     }
                 }
             }

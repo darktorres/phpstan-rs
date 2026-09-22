@@ -30,6 +30,10 @@ fn entry(
         allow_in_class_with_method_attributes: Vec::new(),
         allow_except_in_class_with_method_attributes: Vec::new(),
         allow_in_use: false,
+        allow_in_param_types: false,
+        allow_except_in_param_types: false,
+        allow_in_return_type: false,
+        allow_except_in_return_type: false,
     }
 }
 
@@ -387,6 +391,156 @@ fn a_restricted_class_closure_parameter_type_hint_is_flagged() {
     assert!(
         d.iter().any(|x| x.identifier == "restrictedSymbol.class"),
         "got: {d:?}"
+    );
+}
+
+// `allowInParamTypes`/`allowInReturnType` and their `allowExceptIn*`
+// inverses - `Class`-kind only. Mirrors the real docs' own worked
+// examples (`OldService`/`LegacyValue`) exactly.
+
+#[test]
+fn allow_in_param_types_allows_only_the_parameter_position() {
+    let d = with_entries(
+        r#"<?php
+            class OldService {}
+            class Foo {
+                public function __construct(OldService $service) {}
+                public function handle(OldService $svc): void {
+                    $old = new OldService();
+                }
+                public function get(): OldService {}
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Class,
+            None,
+            "OldService",
+            "use NewService instead",
+            |e| e.allow_in_param_types = true,
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.class")
+        .collect();
+    // `new` and the return type are still disallowed - only the two
+    // parameter type hints (constructor + `handle`) are allowed.
+    assert!(
+        flagged.iter().any(|x| x.message.contains("Instantiation")),
+        "got: {d:?}"
+    );
+    assert!(
+        flagged
+            .iter()
+            .any(|x| x.message.contains("Return type references")),
+        "got: {d:?}"
+    );
+    assert!(
+        !flagged
+            .iter()
+            .any(|x| x.message.contains("Parameter") && x.message.contains("references")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn allow_except_in_param_types_disallows_only_the_parameter_position() {
+    let d = with_entries(
+        r#"<?php
+            class LegacyValue {}
+            class Bar {
+                public function process(LegacyValue $v): void {}
+                public function get(): LegacyValue {}
+                public function create(): void {
+                    $v = new LegacyValue();
+                }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Class,
+            None,
+            "LegacyValue",
+            "do not accept LegacyValue as a parameter type",
+            |e| e.allow_except_in_param_types = true,
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.class")
+        .collect();
+    // Only the parameter type hint is disallowed - the return type and
+    // `new` are both allowed now that the entry's own default is
+    // inverted (`allow_except_in_return_type_combined_with_allow_in_
+    // use_also_allows_the_use_import` below covers the `use`-import
+    // side of the same inversion).
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(
+        flagged[0].message.contains("Parameter") && flagged[0].message.contains("references"),
+        "got: {:?}",
+        flagged[0]
+    );
+}
+
+#[test]
+fn allow_except_in_return_type_disallows_only_the_return_position() {
+    let d = with_entries(
+        r#"<?php
+            class RawData {}
+            class Processor {
+                public function transform(RawData $input): void {}
+                public function fetch(): RawData {}
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Class,
+            None,
+            "RawData",
+            "do not expose RawData as a return type",
+            |e| e.allow_except_in_return_type = true,
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.class")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(
+        flagged[0].message.contains("Return type references"),
+        "got: {:?}",
+        flagged[0]
+    );
+}
+
+#[test]
+fn allow_except_in_return_type_combined_with_allow_in_use_also_allows_the_use_import() {
+    let d = with_entries(
+        r#"<?php
+            namespace App;
+            use Vendor\RawData;
+            class Processor {
+                public function fetch(): RawData {}
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Class,
+            None,
+            "Vendor\\RawData",
+            "do not expose RawData as a return type",
+            |e| {
+                e.allow_except_in_return_type = true;
+                e.allow_in_use = true;
+            },
+        )],
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("Importing")),
+        "the use import should be allowed by allow_in_use: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.class"
+            && x.message.contains("Return type references")),
+        "the return type should still be disallowed: {d:?}"
     );
 }
 

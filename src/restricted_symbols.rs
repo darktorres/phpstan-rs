@@ -126,6 +126,32 @@ pub struct RestrictedSymbolEntry {
     /// unaffected, mirroring the real `allowInUse` key exactly.
     #[serde(default)]
     pub allow_in_use: bool,
+    /// `Class`-kind only: `true` allows this class specifically when
+    /// used as a parameter type hint, on top of the ordinary "disallowed
+    /// everywhere" default - purely additive, unlike its own
+    /// `allow_except_in_param_types` inverse just below.
+    #[serde(default)]
+    pub allow_in_param_types: bool,
+    /// `Class`-kind only, alias `disallowInParamTypes` in the real
+    /// package (this project picks one canonical spelling, matching
+    /// every other `allow_except_in_*` field here having no separate
+    /// `disallow_in_*` alias either): unlike every other allow field in
+    /// this struct, `true` here *inverts the entry's own default
+    /// entirely* - the class becomes allowed everywhere except
+    /// specifically as a parameter type hint, where it's still reported
+    /// (confirmed against the real docs' own worked example: a `use` of
+    /// the class, `new`-ing it, and using it as a *return* type all
+    /// become allowed once this is set).
+    #[serde(default)]
+    pub allow_except_in_param_types: bool,
+    /// `allow_in_param_types`'s return-type sibling.
+    #[serde(default)]
+    pub allow_in_return_type: bool,
+    /// `allow_except_in_param_types`'s return-type sibling - the same
+    /// default-inverting behavior, just for the return-type-hint
+    /// position instead.
+    #[serde(default)]
+    pub allow_except_in_return_type: bool,
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -329,6 +355,10 @@ mod tests {
             allow_in_class_with_method_attributes: Vec::new(),
             allow_except_in_class_with_method_attributes: Vec::new(),
             allow_in_use: false,
+            allow_in_param_types: false,
+            allow_except_in_param_types: false,
+            allow_in_return_type: false,
+            allow_except_in_return_type: false,
         }
     }
 

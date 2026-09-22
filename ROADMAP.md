@@ -4685,33 +4685,42 @@ a new `current_class_any_method_attrs` walk every sibling method via
 `ClassInfo::methods` rather than only the currently-executing one
 `current_method_attrs` alone ever had.
 
-Still genuinely unbuilt, scoped against the real fetched docs rather
-than a guess:
-- `allowInParamTypes`/`allowExceptInParamTypes` (alias
-  `disallowInParamTypes`) and their `*ReturnType` siblings, `Class`-kind
-  only. Materially bigger than the purely-additive shapes built so far:
-  `allowIn*` opts a class *out* of its normal "disallowed everywhere"
-  default at exactly one type-hint position, but `allowExceptIn*`
-  *inverts the entry's own default entirely* - "disallow a class only
-  when it appears as a parameter type hint, allowing it everywhere
-  else" - a real, different mechanism (every allow field built so far is
-  strictly additive, never flipping the base posture), needing its own
-  design pass before touching `check_restricted_param_and_return_types_
-  raw`'s two now-position-aware call sites.
-- Parameter-value conditions (`allowParamsInAllowed`/`allowParamsAnywhere`/
-  `allowExceptParamsAnywhere`/`allowExceptParamsInAllowed`/their
-  `AnyValue`/`CaseInsensitive` siblings) - real scope confirmed
-  substantial, not a small addendum: positional *and* named-parameter
-  resolution, three distinct value-matching modes (`value` - scalars
-  only; `typeString` - full PHPDoc-type matching, arrays/unions/classes;
-  `classPattern` - `fnmatch()` against an argument's own declared class,
-  no ancestor traversal), a first-class-callable edge case (a condition
-  restricting which calls are *allowed* always reports a bare `(...)`
-  reference, since there's no argument list yet to evaluate; one
-  restricting which are *disallowed* never does), and combining with
-  every existing zone directive (`allowIn`/`allowInMethods`/etc.) as a
-  further narrowing rather than a replacement. Its own separate,
-  properly-scoped investigation, not folded in here.
+`allowInParamTypes`/`allowExceptInParamTypes` (alias
+`disallowInParamTypes`) and their `*ReturnType` siblings are done too,
+`Class`-kind only. Materially bigger than every purely-additive shape
+built before them: `allowIn*` opts a class *out* of its normal
+"disallowed everywhere" default at exactly one type-hint position (a
+new `ClassUsageLocation::{ParamType,ReturnType,Other}` threaded through
+`check_restricted_class_name_usage`'s 7 call sites, `Other` covering
+`new`/`instanceof`/`catch`/`extends`/`implements`/the separate `allow_
+in_use` mechanism - none of which either flag ever touches, confirmed
+against the real docs), but `allowExceptIn*` *inverts the entry's own
+default entirely* - "disallow a class only when it appears as a
+parameter type hint, allowing it everywhere else" (confirmed against
+the real docs' own worked examples: a `use` of the class, `new`-ing it,
+and using it as the *other* type-hint position all become allowed once
+set). A new `is_allowed_by_position`, checked before every other allow
+mechanism (which still apply on top once it returns `false`, matching
+how every allow directive here combines), implements both halves: the
+purely-additive `allow_in_*` pair short-circuits to allowed at exactly
+its own position; the default-inverting `allow_except_in_*` pair flips
+the baseline to "allowed everywhere except the marked position(s)."
+
+Still genuinely unbuilt: parameter-value conditions
+(`allowParamsInAllowed`/`allowParamsAnywhere`/
+`allowExceptParamsAnywhere`/`allowExceptParamsInAllowed`/their
+`AnyValue`/`CaseInsensitive` siblings) - real scope confirmed
+substantial, not a small addendum: positional *and* named-parameter
+resolution, three distinct value-matching modes (`value` - scalars
+only; `typeString` - full PHPDoc-type matching, arrays/unions/classes;
+`classPattern` - `fnmatch()` against an argument's own declared class,
+no ancestor traversal), a first-class-callable edge case (a condition
+restricting which calls are *allowed* always reports a bare `(...)`
+reference, since there's no argument list yet to evaluate; one
+restricting which are *disallowed* never does), and combining with
+every existing zone directive (`allowIn`/`allowInMethods`/etc.) as a
+further narrowing rather than a replacement. Its own separate,
+properly-scoped investigation, not folded in here.
 
 Still wholly out of scope, unchanged: the filter DSL's own wholly-
 separate namespace/enum/superglobal/keyword-specific siblings, each a

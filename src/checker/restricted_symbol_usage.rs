@@ -12,6 +12,52 @@ use crate::ignore_errors::glob_matches;
 use crate::restricted_symbols::RestrictedSymbolEntry;
 use crate::token::Span;
 
+/// Where a `Class`-kind ban's own referenced-class check fires -
+/// `allowInParamTypes`/`allowInReturnType` and their `allowExceptIn*`
+/// inverses (`Class`-kind only) need to distinguish exactly these two
+/// positions from every other detection surface (`new`/`instanceof`/
+/// `catch`/`extends`/`implements`, none of which either flag ever
+/// touches - confirmed against the real docs' own worked examples).
+/// `use`-import context is deliberately not a variant here: real
+/// PHPStan's own docs confirm a `use` import is never affected by
+/// either flag at all (`allowInUse` is its own, wholly separate
+/// mechanism - see `check_restricted_class_use_import`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ClassUsageLocation {
+    ParamType,
+    ReturnType,
+    Other,
+}
+
+/// `allowInParamTypes`/`allowExceptInParamTypes` (`disallowInParamTypes`)
+/// and their `*ReturnType` siblings. Unlike every other allow mechanism
+/// in this module (purely additive on top of "disallowed everywhere"),
+/// `allow_except_in_*` inverts the *entry's own default* entirely:
+/// "disallow a class only when it appears as a parameter type hint,
+/// allowing it everywhere else" (confirmed against the real docs' own
+/// worked example - a `use` of the same class, `new`-ing it, and using
+/// it as a *return* type all become allowed once `disallowInParamTypes`
+/// is set; only the parameter-type-hint position stays reported).
+/// Evaluated before `report_restricted`'s own attribute/path checks,
+/// which still apply on top once this returns `false` - matching how
+/// every allow directive here combines ("the item is allowed as soon as
+/// one of the allow directives matches").
+fn is_allowed_by_position(entry: &RestrictedSymbolEntry, location: ClassUsageLocation) -> bool {
+    if entry.allow_in_param_types && location == ClassUsageLocation::ParamType {
+        return true;
+    }
+    if entry.allow_in_return_type && location == ClassUsageLocation::ReturnType {
+        return true;
+    }
+    if entry.allow_except_in_param_types || entry.allow_except_in_return_type {
+        let disallowed_here = (entry.allow_except_in_param_types
+            && location == ClassUsageLocation::ParamType)
+            || (entry.allow_except_in_return_type && location == ClassUsageLocation::ReturnType);
+        return !disallowed_here;
+    }
+    false
+}
+
 impl<'a> Checker<'a> {
     /// Every `check_restricted_*` report call routes through here -
     /// centralizes both halves of Phase 67's own filter-DSL extension
@@ -272,13 +318,16 @@ impl<'a> Checker<'a> {
 
     /// Shared by every native class-name-usage location a `Class`-kind
     /// ban covers (instantiation/`instanceof`/`catch`/`extends`/
-    /// `implements`/param-and-return-type-hints).
+    /// `implements`/param-and-return-type-hints). `location` is only
+    /// ever meaningfully distinguished by `is_allowed_by_position` -
+    /// every non-type-hint call site passes `ClassUsageLocation::Other`.
     pub(crate) fn check_restricted_class_name_usage(
         &mut self,
         class: &str,
         verb_phrase: &str,
         span: Span,
         label: &str,
+        location: ClassUsageLocation,
     ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
@@ -286,6 +335,9 @@ impl<'a> Checker<'a> {
         let Some(entry) = self.registry.restricted_symbols.class(class) else {
             return;
         };
+        if is_allowed_by_position(entry, location) {
+            return;
+        }
         let entry = entry.clone();
         let type_word = self
             .registry
@@ -363,10 +415,22 @@ impl<'a> Checker<'a> {
         };
         let (extends, implements) = (info.extends.clone(), info.implements.clone());
         for parent in &extends {
-            self.check_restricted_class_name_usage(parent, &format!("{fqn} extends"), span, fqn);
+            self.check_restricted_class_name_usage(
+                parent,
+                &format!("{fqn} extends"),
+                span,
+                fqn,
+                ClassUsageLocation::Other,
+            );
         }
         for iface in &implements {
-            self.check_restricted_class_name_usage(iface, &format!("{fqn} implements"), span, fqn);
+            self.check_restricted_class_name_usage(
+                iface,
+                &format!("{fqn} implements"),
+                span,
+                fqn,
+                ClassUsageLocation::Other,
+            );
         }
     }
 
@@ -422,6 +486,7 @@ impl<'a> Checker<'a> {
                     &format!("Parameter ${} references", p.name),
                     p.type_hint_span.unwrap_or(p.name_span),
                     label,
+                    ClassUsageLocation::ParamType,
                 );
             }
         }
@@ -439,6 +504,7 @@ impl<'a> Checker<'a> {
                     "Return type references",
                     return_type_fallback_span,
                     label,
+                    ClassUsageLocation::ReturnType,
                 );
             }
         }

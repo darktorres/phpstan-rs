@@ -1803,6 +1803,7 @@ impl<'a> Checker<'a> {
                                     "Instanceof references",
                                     e.span,
                                     label,
+                                    crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                                 );
                             }
                         }
@@ -2166,6 +2167,7 @@ impl<'a> Checker<'a> {
                         "Instantiation of",
                         e.span,
                         label,
+                        crate::checker::restricted_symbol_usage::ClassUsageLocation::Other,
                     );
                     self.check_deprecated_instantiation(class, e.span, label);
                     self.record_instantiation_usage_token(class, class_expr.span);
