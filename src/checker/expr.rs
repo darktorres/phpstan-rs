@@ -3600,6 +3600,14 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_has_unannotated_call);
                 let previous_explicit_throw_points =
                     std::mem::take(&mut self.current_function_explicit_throw_points);
+                // The closure's own `return` statements belong to the
+                // closure, not the enclosing function's too-wide-return
+                // accumulator - saved/restored the same way, and read back
+                // below as the closure's own inferred return type.
+                let previous_return_points =
+                    std::mem::take(&mut self.current_function_return_points);
+                let previous_saw_explicit_return =
+                    std::mem::take(&mut self.current_function_saw_explicit_return);
                 self.check_generator_return_type(declared_return.as_ref(), e.span, &closure_label);
                 // A closure literal may run zero-to-many times (any
                 // callback-accepting builtin, or simply being called more
@@ -3625,10 +3633,26 @@ impl<'a> Checker<'a> {
                         subject_exempt: None,
                     },
                     |this, pass_locals, declared_return, label, _pass| {
+                        // Only the kept (last) pass's return points count,
+                        // the same way only its diagnostics survive.
+                        this.current_function_return_points.clear();
+                        this.current_function_saw_explicit_return = false;
                         this.check_block(body, pass_locals, declared_return, label);
                     },
                 );
                 closure_locals = converged;
+                let closure_return_points = std::mem::replace(
+                    &mut self.current_function_return_points,
+                    previous_return_points,
+                );
+                let closure_saw_explicit_return = std::mem::replace(
+                    &mut self.current_function_saw_explicit_return,
+                    previous_saw_explicit_return,
+                );
+                let closure_is_generator = self.current_function_is_generator;
+                let closure_falls_off_end = !body
+                    .iter()
+                    .any(|s| self.always_terminates(s, &closure_locals));
                 // One final snapshot from the fully-converged post-body
                 // state - covers both "falls off the end with no
                 // explicit return" and "never actually invoked"
@@ -3718,7 +3742,14 @@ impl<'a> Checker<'a> {
                         locals.insert(u.name.to_string(), mutated);
                     }
                 }
-                self.closure_literal_type(params, return_type.as_deref(), None)
+                let inferred_return = (return_type.is_none() && !closure_is_generator).then(|| {
+                    closure_inferred_return_type(
+                        closure_return_points,
+                        closure_saw_explicit_return,
+                        closure_falls_off_end,
+                    )
+                });
+                self.closure_literal_type(params, return_type.as_deref(), inferred_return, None)
             }
             ExprKind::ArrowFn {
                 params,
@@ -3882,6 +3913,7 @@ impl<'a> Checker<'a> {
                     params,
                     return_type.as_deref(),
                     (return_type.is_none() && !expr_contains_yield(body)).then(|| body_ty.clone()),
+                    None,
                 )
             }
             // `foo(...)`/`$obj->method(...)`/`Class::method(...)` (PHP 8.1
@@ -4168,18 +4200,33 @@ impl<'a> Checker<'a> {
             ExprKind::FirstClassCallable(_) => Type::Object("Closure".to_string(), Vec::new()),
             ExprKind::Closure {
                 params,
+                uses,
+                body,
+                is_static,
                 return_type,
                 ..
-            } => self.closure_literal_type(params, return_type.as_deref(), None),
+            } => {
+                let inferred = if return_type.is_none() {
+                    self.closure_syntactic_return_type(params, uses, body, *is_static, locals, None)
+                } else {
+                    None
+                };
+                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
+            }
             ExprKind::ArrowFn {
                 params,
                 return_type,
                 body,
                 ..
             } => {
-                let inferred =
-                    self.arrow_fn_inferred_return(params, return_type.as_deref(), body, locals);
-                self.closure_literal_type(params, return_type.as_deref(), inferred)
+                let inferred = self.arrow_fn_inferred_return(
+                    params,
+                    return_type.as_deref(),
+                    body,
+                    locals,
+                    None,
+                );
+                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::Match {
                 subject,
@@ -5642,12 +5689,15 @@ impl<'a> Checker<'a> {
     /// takes `inferred_return` when the caller has one (an arrow fn's own
     /// body-expression type, which is what real PHPStan's `ClosureType`
     /// reports), and is `mixed` otherwise; an unhinted parameter is
-    /// `mixed`. The callable-shape comparison treats `mixed` as "any".
+    /// `mixed`, unless `overrides` supplies the type the surrounding
+    /// context expects there (see `closure_param_type`). The
+    /// callable-shape comparison treats `mixed` as "any".
     pub(crate) fn closure_literal_type(
         &self,
         params: &[Param],
         return_type: Option<&str>,
         inferred_return: Option<Type>,
+        overrides: Option<&[Type]>,
     ) -> Type {
         let resolve = |hint: Option<&str>| {
             let ty = self.resolve_type_hint(hint);
@@ -5659,8 +5709,12 @@ impl<'a> Checker<'a> {
         Type::closure_literal(types::CallableSig {
             params: params
                 .iter()
-                .map(|p| types::CallableParam {
-                    ty: resolve(p.type_hint.as_deref()),
+                .enumerate()
+                .map(|(i, p)| types::CallableParam {
+                    ty: match p.type_hint {
+                        Some(_) => resolve(p.type_hint.as_deref()),
+                        None => self.closure_param_type(p, i, overrides),
+                    },
                     variadic: p.variadic,
                     optional: p.default.is_some(),
                     by_ref: p.by_ref,
@@ -5673,6 +5727,72 @@ impl<'a> Checker<'a> {
         })
     }
 
+    /// `infer_expr`'s (read-only, no body walk) view of an unhinted,
+    /// non-generator closure literal's return type: each `return`
+    /// statement in the body (nested functions/classes excluded, and a
+    /// nested closure's statements are never reached - they live inside an
+    /// expression) inferred against a scope holding the parameters and the
+    /// `use (...)` captures, combined by `closure_inferred_return_type`.
+    /// It sees none of the body's own narrowing, unlike `check_expr`'s arm,
+    /// which reads the closure's real return points - sound, just less
+    /// precise where a return depends on a guard.
+    fn closure_syntactic_return_type(
+        &self,
+        params: &[Param],
+        uses: &[ClosureUse],
+        body: &[Stmt],
+        is_static: bool,
+        locals: &Locals,
+        overrides: Option<&[Type]>,
+    ) -> Option<Type> {
+        if body_contains_yield(body) {
+            return None;
+        }
+        let mut scope = locals.fresh_scope();
+        for u in uses {
+            if let Some(ty) = locals.get(&u.name) {
+                scope.insert(u.name.to_string(), ty.clone());
+            }
+        }
+        if !is_static && let Some(this_ty) = locals.get("this") {
+            scope.insert("this".to_string(), this_ty.clone());
+        }
+        for (i, p) in params.iter().enumerate() {
+            let ty = self.closure_param_type(p, i, overrides);
+            let ty = if p.variadic {
+                Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+            } else {
+                ty
+            };
+            scope.insert(p.name.to_string(), ty);
+        }
+        let mut points = Vec::new();
+        let mut saw_explicit_return = false;
+        let mut stack: Vec<&Stmt> = body.iter().collect();
+        while let Some(s) = stack.pop() {
+            match &s.kind {
+                StmtKind::Return(Some(value)) => {
+                    saw_explicit_return = true;
+                    points.push(self.infer_expr(value, &scope));
+                }
+                StmtKind::Return(None) => {
+                    saw_explicit_return = true;
+                    points.push(Type::Void);
+                }
+                _ => {}
+            }
+            stack.extend(crate::ast_walk::stmt_children(s));
+        }
+        let falls_off_end = !body
+            .last()
+            .is_some_and(|s| matches!(s.kind, StmtKind::Return(_) | StmtKind::Throw(_)));
+        Some(closure_inferred_return_type(
+            points,
+            saw_explicit_return,
+            falls_off_end,
+        ))
+    }
+
     /// An unhinted, non-generator arrow fn's own return type: its body
     /// expression inferred against the enclosing scope (captured by
     /// value, the same as `check_expr`'s arm) with its parameters bound.
@@ -5682,13 +5802,14 @@ impl<'a> Checker<'a> {
         return_type: Option<&str>,
         body: &Expr,
         locals: &Locals,
+        overrides: Option<&[Type]>,
     ) -> Option<Type> {
         if return_type.is_some() || expr_contains_yield(body) {
             return None;
         }
         let mut arrow_locals = locals.clone();
-        for p in params {
-            let ty = self.resolve_type_hint(p.type_hint.as_deref());
+        for (i, p) in params.iter().enumerate() {
+            let ty = self.closure_param_type(p, i, overrides);
             let ty = if p.variadic {
                 Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
             } else {
@@ -5697,6 +5818,89 @@ impl<'a> Checker<'a> {
             arrow_locals.insert(p.name.to_string(), ty);
         }
         Some(self.infer_expr(body, &arrow_locals))
+    }
+
+    /// A closure/arrow-fn literal parameter's type: its own native hint
+    /// when it has one, else the type the surrounding context expects at
+    /// that position (`overrides`, a `Closure(int): string`-shaped
+    /// parameter's own parameter types - real PHPStan infers an unhinted
+    /// closure parameter from the expected callable the same way), else
+    /// `mixed`.
+    fn closure_param_type(&self, p: &Param, i: usize, overrides: Option<&[Type]>) -> Type {
+        match (&p.type_hint, overrides.and_then(|o| o.get(i))) {
+            (Some(_), _) => self.resolve_type_hint(p.type_hint.as_deref()),
+            (None, Some(expected)) => expected.clone(),
+            (None, None) => Type::Mixed(false),
+        }
+    }
+
+    /// A closure/arrow-fn literal argument's type as seen by a parameter
+    /// expecting a shaped callable (`Closure(int): string`, possibly one
+    /// member of a union): its unhinted parameters typed from that shape,
+    /// and its unhinted return inferred with those parameter types bound.
+    /// `None` when `arg` isn't a literal or `expected` carries no shape -
+    /// the caller's ordinary `infer_expr` applies then.
+    pub(crate) fn infer_closure_literal_in_context(
+        &self,
+        arg: &Expr,
+        expected: &Type,
+        locals: &Locals,
+    ) -> Option<Type> {
+        let sig = expected.callable_sig().or_else(|| match expected {
+            Type::Union(members) => members.iter().find_map(Type::callable_sig),
+            _ => None,
+        })?;
+        let overrides: Vec<Type> = sig.params.iter().map(|p| p.ty.clone()).collect();
+        match &unwrap_grouping(arg).kind {
+            ExprKind::ArrowFn {
+                params,
+                return_type,
+                body,
+                ..
+            } => {
+                let inferred = self.arrow_fn_inferred_return(
+                    params,
+                    return_type.as_deref(),
+                    body,
+                    locals,
+                    Some(&overrides),
+                );
+                Some(self.closure_literal_type(
+                    params,
+                    return_type.as_deref(),
+                    inferred,
+                    Some(&overrides),
+                ))
+            }
+            ExprKind::Closure {
+                params,
+                uses,
+                body,
+                is_static,
+                return_type,
+                ..
+            } => {
+                let inferred = if return_type.is_none() {
+                    self.closure_syntactic_return_type(
+                        params,
+                        uses,
+                        body,
+                        *is_static,
+                        locals,
+                        Some(&overrides),
+                    )
+                } else {
+                    None
+                };
+                Some(self.closure_literal_type(
+                    params,
+                    return_type.as_deref(),
+                    inferred,
+                    Some(&overrides),
+                ))
+            }
+            _ => None,
+        }
     }
 }
 
@@ -5950,4 +6154,42 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
         ExprKind::Grouping(inner) => postfix_chain_has_nullsafe(inner),
         _ => false,
     }
+}
+
+/// An unhinted, non-generator closure literal's own return type, from the
+/// types its `return` statements produced - real PHPStan's `ClosureType`
+/// return: no `return` at all is `void`; explicit returns are unioned,
+/// with `null` added when the body can also fall off its end; a bare
+/// `return;` mixed with value returns reads as `null` there, since `void`
+/// only means "no value" when it's the whole story.
+fn closure_inferred_return_type(
+    points: Vec<Type>,
+    saw_explicit_return: bool,
+    falls_off_end: bool,
+) -> Type {
+    if !saw_explicit_return {
+        return Type::Void;
+    }
+    let mut members = points;
+    if falls_off_end {
+        members.push(Type::Void);
+    }
+    let has_value = members.iter().any(|m| *m != Type::Void);
+    let mut members: Vec<Type> = members
+        .into_iter()
+        .map(|m| {
+            if has_value && m == Type::Void {
+                Type::Null
+            } else {
+                m
+            }
+        })
+        .collect();
+    // `null` last, the order real PHPStan's own union description uses
+    // (`int|null`, not `null|int`).
+    members.sort_by_key(|m| *m == Type::Null);
+    members
+        .into_iter()
+        .reduce(union_types)
+        .unwrap_or(Type::Void)
 }

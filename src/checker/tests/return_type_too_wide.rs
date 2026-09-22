@@ -536,3 +536,26 @@ fn a_foreach_value_rebinding_a_by_ref_parameter_to_a_matching_element_is_not_fla
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn a_closure_literals_own_returns_do_not_count_toward_the_enclosing_function() {
+    // A `return 'x'` inside a closure is the closure's own return point,
+    // not the enclosing method's - it must not hide the method's own
+    // never-returned `string`.
+    let d = all_diagnostics_for(
+        r#"<?php
+            class C {
+                private function f(): int|string {
+                    $g = function () { return 'x'; };
+                    return 1;
+                }
+                public function use(): int|string { return $this->f(); }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "return.unusedType" && x.message.contains("C::f()")),
+        "got: {d:?}"
+    );
+}

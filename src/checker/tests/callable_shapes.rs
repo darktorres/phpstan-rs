@@ -240,7 +240,7 @@ fn a_closure_literal_argument_at_a_closure_shaped_parameter_gets_its_unhinted_pa
             /** @param Closure(int): string $fn */
             function apply($fn): void {}
             apply(function ($x) {
-                return $x + 1;
+                return (string) ($x + 1);
             });
         "#,
     );
@@ -298,7 +298,7 @@ fn an_already_hinted_closure_literal_parameter_keeps_its_own_hint_over_the_shape
     );
     assert!(
         d.iter().any(|x| x.identifier == "argument.type"
-            && x.message.contains("Closure(string): mixed given")),
+            && x.message.contains("Closure(string): void given")),
         "got: {d:?}"
     );
 }
@@ -431,7 +431,7 @@ fn invoking_a_closure_literal_variable_infers_its_declared_return_type() {
                 assertType('Closure(int): bool', $g);
                 assertType('bool', $g(1));
                 $h = function (int $x) { return $x; };
-                assertType('Closure(int): mixed', $h);
+                assertType('Closure(int): int', $h);
             }
         "#,
     );
@@ -509,4 +509,25 @@ fn a_closure_literal_still_resolves_closure_class_methods_and_instanceof() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_unhinted_closure_literal_infers_its_return_type_from_its_returns() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(bool $b): void {
+                $none = function () { echo 'x'; };
+                assertType('Closure(): void', $none);
+                $mixedReturns = function () use ($b) { if ($b) { return; } return 1; };
+                assertType('Closure(): 1|null', $mixedReturns);
+                $mayFallOff = function () use ($b) { if ($b) { return 'a'; } };
+                assertType("Closure(): 'a'|null", $mayFallOff);
+                $narrowed = function (int|string $v) { if (is_int($v)) { return $v; } return 'x'; };
+                assertType("Closure(int|string): int|'x'", $narrowed);
+                assertType("int|'x'", $narrowed(1));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }

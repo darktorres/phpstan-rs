@@ -445,7 +445,14 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
-            let arg_ty = self.infer_expr(arg, locals);
+            // A closure/arrow-fn literal at a shaped-callable parameter is
+            // typed in that context (its unhinted parameters from the
+            // shape, its return inferred from them), as real PHPStan does
+            // - otherwise an unhinted `fn ($x) => ...` is compared as
+            // `Closure(mixed): ...`.
+            let arg_ty = self
+                .infer_closure_literal_in_context(arg, &param.ty, locals)
+                .unwrap_or_else(|| self.infer_expr(arg, locals));
             // `accepts_at_configured_level` already accepts a `Mixed`
             // argument unconditionally below real PHPStan's own level
             // 9/10 `checkExplicitMixed`/`checkImplicitMixed` threshold -
