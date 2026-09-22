@@ -2299,6 +2299,7 @@ impl<'a> Checker<'a> {
                 );
                 if let Some(name) = self.current_anonymous_class.clone() {
                     self.check_inheritance_target_kinds(&name, true, label, e.span);
+                    self.check_magic_serialization_methods(&name, "anonymous class", label, e.span);
                 }
                 self.check_readonly_class_version(decl.is_readonly, true, label, e.span);
                 for m in &decl.methods {

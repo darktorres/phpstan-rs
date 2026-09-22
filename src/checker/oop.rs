@@ -845,6 +845,54 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
+    /// A concrete class implementing `Serializable` without also providing
+    /// `__serialize()`/`__unserialize()` (`class.serializable`), which PHP
+    /// 8.1+ deprecates. `registry_name` is the class's registry key,
+    /// `display` how messages name it.
+    pub(crate) fn check_magic_serialization_methods(
+        &mut self,
+        registry_name: &str,
+        display: &str,
+        label: &str,
+        span: Span,
+    ) {
+        if self.registry.php_version.is_some_and(|v| {
+            !crate::php_version::PhpFeature::SerializableRequiresMagicMethods.is_available(v)
+        }) {
+            return;
+        }
+        let Some(info) = self.registry.classes.get(registry_name) else {
+            return;
+        };
+        if info.kind != ClassKind::Class
+            || info.is_abstract
+            || !self.registry.is_subclass_of(registry_name, "Serializable")
+        {
+            return;
+        }
+        for method in ["__serialize", "__unserialize"] {
+            let declared = self
+                .registry
+                .lookup_method(registry_name, method)
+                .is_some_and(|sig| !sig.is_magic);
+            if declared {
+                continue;
+            }
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    format!(
+                        "non-abstract class {display} implements the Serializable interface, but does not implement {method}()"
+                    ),
+                    span,
+                    0,
+                    "class.serializable",
+                )
+                .tip("See https://wiki.php.net/rfc/phase_out_serializable"),
+            );
+        }
+    }
+
     /// `readonly class` needs PHP 8.2+, a `readonly` anonymous class PHP
     /// 8.3+ (`ReadOnlyClassRule`). Reported under real PHPStan's own
     /// identifier for this rule, `classConstant.nativeTypeNotSupported`.

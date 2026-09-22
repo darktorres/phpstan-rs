@@ -441,3 +441,36 @@ fn readonly_class_is_gated_on_php_8_2_and_anonymous_on_8_3() {
     );
     assert!(gate((8, 3)).is_empty());
 }
+
+#[test]
+fn serializable_class_without_magic_serialization_methods_is_flagged() {
+    let src = r#"<?php
+        class OldSchool implements Serializable {
+            public function serialize() { return ''; }
+            public function unserialize($data) {}
+        }
+        class Modern implements Serializable {
+            public function serialize() { return ''; }
+            public function unserialize($data) {}
+            public function __serialize(): array { return []; }
+            public function __unserialize(array $data): void {}
+        }
+        class ModernChild extends Modern {}
+        abstract class AbstractOld implements Serializable {}
+    "#;
+    let found = |v| {
+        diagnostics_for_with(src, |r| r.php_version = Some(v))
+            .into_iter()
+            .filter(|x| x.identifier == "class.serializable")
+            .map(|x| x.message)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        found((8, 1)),
+        vec![
+            "non-abstract class OldSchool implements the Serializable interface, but does not implement __serialize()",
+            "non-abstract class OldSchool implements the Serializable interface, but does not implement __unserialize()",
+        ]
+    );
+    assert!(found((8, 0)).is_empty());
+}
