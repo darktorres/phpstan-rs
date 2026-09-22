@@ -8,10 +8,17 @@ below cites the actual PHPStan source it's grounded in
 (`vendor/phpstan-src/src`, `vendor/phpstan-strict-rules/src`) and the actual
 phpstan-rs source (`src/`) that would implement it - every citation has been
 checked directly against the vendored/working trees, not taken on an
-agent's word. 100 findings total, grouped below by what they're actually
+agent's word. 116 findings total, grouped below by what they're actually
 about rather than by when they were found. Nothing here is scheduled; it's
 a grounded idea backlog, same status as ROADMAP's own "Newly identified
-gaps" until triaged into a numbered phase.
+gaps" until triaged into a numbered phase. Part 10 draws on a second
+reference project, Psalm - not `vendor/psalm` (the pinned submodule used
+elsewhere in this project purely as a corpus-validation target), but a
+separate, ad hoc `git clone https://github.com/vimeo/psalm.git` one
+directory up from this repo (`../psalm`), checked out for this research
+pass only. Every Part 10 citation was checked directly against that
+clone the same way every other citation here was checked against the
+vendored trees.
 
 Two structural facts most items below trace back to, repeatedly:
 
@@ -32,7 +39,7 @@ Two structural facts most items below trace back to, repeatedly:
   constraint - single process, real shared references, whole-program view by
   default.
 
-Nine parts:
+Ten parts:
 
 1. Precision, whole-program analysis, and closed-world inference
 2. Native-performance wins real PHPStan needs a separate extension for
@@ -43,6 +50,7 @@ Nine parts:
 7. Config/strictness composability
 8. Composer/dependency hygiene
 9. Type-system policy, baseline robustness, reverted-feature fixes, API diffing
+10. Findings grounded in Psalm's production implementation
 
 ---
 
@@ -265,6 +273,19 @@ already uses (`src/registry/purity.rs`) could extend
 project-wide, resolving each receiver's declared/inherited class through
 the registry instead of assuming `self`.
 
+Not just theoretical: Psalm ships almost exactly this feature in
+production (`consolidateAnalyzedData`/`checkMethodReferences`/
+`checkPropertyReferences`, `vendor-adjacent` reference,
+`Internal/Codebase/ClassLikes.php:824-863`), gated the same
+whole-program way this item proposes - a class's members are checked
+for real usage only once the class itself is confirmed referenced
+somewhere (`$classlike_storage->public_api ||
+$this->file_reference_provider->isClassReferenced(...)`, `ClassLikes.php:847-849`).
+Worth carrying over as prior art for this item's own exemption list: a
+`public_api`-equivalent flag (already close to this project's own
+`@api`/`is_internal` tracking) plus the magic-method/entry-point
+exemptions this item already lists.
+
 **Effort: large.**
 
 ### B2. Dead top-level function / never-instantiated class detection
@@ -289,6 +310,17 @@ Ship opt-in, matching this project's own "don't discard correct checks,
 ship opt-in" precedent, since libraries/entry points need an exclusion
 path. (AJ below reuses the same graph for a narrower, class-specific case:
 an abstract class that's referenced but never subclassed concretely.)
+
+Psalm's own version of the top-level-symbol half of this
+(`UnusedClass`/`UnusedMethod`/`PossiblyUnusedMethod`,
+`ClassLikes.php:1922-1953` for the method-return-value-shaped sibling
+described under H2 below) independently confirms the exemption shape
+this item already proposes, and adds one refinement worth folding in:
+severity split by visibility rather than a single "referenced nowhere"
+bar - `private`/whole-call-site-visible members get the harder
+diagnostic, broader-visibility ones the softer "possibly unused" one,
+since external/reflection-based callers could still exist for the
+latter even in phpstan-rs's closed-world model.
 
 **Effort: medium.**
 
@@ -365,6 +397,17 @@ needs: `FunctionSig.no_discard` (`registry/function_sig.rs:120-130`) is
 exactly the bit an inferred version would set automatically, and
 `check_useless_return_value_call` (`checker/expr/array_ops.rs:342-354`)
 already answers "is this exact call's result unused" per occurrence.
+
+Psalm ships the whole-program half of this in production too
+(`UnusedReturnValue`/`PossiblyUnusedReturnValue`, `ClassLikes.php:1922-1953`)
+and its implementation has two refinements worth folding into this
+item when it's built: it exempts "probably fluent" methods (a
+`return $this;` builder-chain method) from the check entirely
+(`!$method_storage->probably_fluent`, `ClassLikes.php:1928`), and it
+splits severity by visibility the same way the B1/B2 amendments above
+do - `private` (the whole call-site universe is visible, so "unused" is
+definite) versus broader visibility (softer "possibly unused," since an
+external/reflection-based caller could exist).
 
 **Effort: medium.**
 
@@ -3216,3 +3259,544 @@ across snapshots (checking narrowing direction via `is_subtype`, not just
 inequality) is additive to Q1's own walk, not new architecture.
 
 **Effort: medium.**
+
+---
+
+# Part 10: Findings grounded in Psalm's production implementation
+
+Every part above is grounded in what real PHPStan does or doesn't do.
+This part instead cross-checks against Psalm (`vimeo/psalm`), the other
+major PHP static analyzer, doing the same kind of comparison Part 4
+already does against `phpstan-strict-rules`, but against a whole
+separate codebase's own diagnostic catalog: all 325 distinct issue
+classes under `src/Psalm/Issue/` in the ad hoc clone described above,
+read exhaustively (every file, not a sample chosen by promising-sounding
+name) and cross-checked against both `vendor/phpstan-src` (to rule out
+that real PHPStan already covers the same ground) and phpstan-rs's own
+`src/` (to rule out that this project already covers it a different
+way, often under different diagnostic-identifier naming than Psalm
+uses). Most of the 325 turned out to be one of three things: ordinary
+type-checking phpstan-rs already has (confirmed via phpstan-rs's own
+`"identifier.string"` literal census cross-checked against each Issue
+class's actual Psalm emission site, not assumed from the name), real
+PHPStan parity gaps with no Psalm-specific angle at all (folded into
+ROADMAP.md's own "Newly identified gaps" instead - see the new
+`MatchExpressionRule.php` entry under its "Comparison" section, this
+research pass's one addition there), or Psalm-internal implementation
+detail with no general applicability (see part AR below). What survived
+all three filters is below.
+
+## L. Concrete new checks with no PHPStan or phpstan-rs precedent
+
+### L1. `ClassMustBeFinal` - suggest `final` on a class that's never subclassed and isn't public API
+
+Psalm ships a whole-program design-pattern suggestion phpstan-rs has no
+equivalent of at all: a class gets flagged for `final` when it's
+non-abstract, non-enum, non-interface, not already `final`, isn't part
+of the codebase's declared public API, and - checked against the whole
+analyzed project - is never subclassed anywhere
+(`consolidateAnalyzedData`, `Internal/Codebase/ClassLikes.php:864-897`;
+`Issue/ClassMustBeFinal.php`). This is a genuinely new rule *category*
+for this project (Part 3's "new rule categories" theme), not a variant
+of an existing check - nothing in `src/checker/` currently reasons about
+whether a class *should* be sealed based on observed whole-program
+subclassing, only about enforcing an already-declared `final`/
+`@phpstan-sealed`. phpstan-rs's registry already has everything this
+needs in the closed-world, single-`Registry` shape Part 1's own thesis
+argues for repeatedly: `all_ancestor_names`
+(`registry/hierarchy.rs:105`) gives the parent-direction walk, and A5's
+proposed reverse (parent-to-children) index - already called for by A5,
+P1, U1, and AJ elsewhere in this document - is exactly the "is this
+class ever extended" query this item also needs. A `public_api`-
+equivalent gate is already close at hand too (`is_internal`/`@api`
+tracking this project already carries per `FunctionSig`/`ClassInfo`).
+
+**Effort: medium** (mostly the reverse-index dependency shared with A5).
+
+### L2. `MissingOverrideAttribute` - suggest adding `#[\Override]` where a method silently overrides one
+
+phpstan-rs already validates the *presence* of a `#[\Override]`
+attribute is correct - `own_sig.has_override_attr && !has_real_ancestor`
+flags an attribute on a method that doesn't actually override anything
+(`checker/oop/method_overrides.rs:273-282`). Psalm checks the reverse
+direction phpstan-rs has no equivalent of: a method that genuinely
+overrides a parent/interface method but is *missing* `#[\Override]`
+(`FunctionLikeAnalyzer.php:2029-2056`), exempting `__construct`,
+trait-defined methods, and `__toString` unless the class implements
+`Stringable`. This is nearly free to add: the exact `has_real_ancestor`/
+`ancestor` lookup `method_overrides.rs:273` already computes at this
+call site is everything the reverse check needs too - it's an `if
+!own_sig.has_override_attr && has_real_ancestor` sitting right next to
+the check that's already there, with the same exemption list
+`method_overrides.rs`'s own `__construct`-special-casing (line 365-369)
+already establishes for the neighboring compatibility check.
+
+**Effort: small.**
+
+### L3. `DirectConstructorCall` - flag `$obj->__construct()` called via ordinary method-call syntax
+
+Legal PHP, but virtually always a bug: `$var->__construct(...)` (as
+opposed to the legitimate `parent::__construct()`/`self::__construct()`
+chaining syntax) re-runs the constructor on an already-existing object
+instead of creating a new one via `new`
+(`MethodCallAnalyzer.php:102-106`). Confirmed absent from real PHPStan
+(`grep -rli "direct.*constructor" vendor/phpstan-src/src` - nothing) and
+from phpstan-rs, which only checks the legitimate chaining direction
+(`constructor.missingParentCall`, `checker/oop.rs:989-1034` - a
+constructor that *forgets* to call `parent::__construct()`). The two
+checks are complementary, not overlapping: this item is about the
+*wrong syntax* being used to invoke a constructor at all, not about
+whether a legitimate `parent::`/`self::` call happened.
+
+**Effort: small** - a syntactic check on `ExprKind::MethodCall` where
+the resolved member name is `__construct` and the receiver isn't
+`parent`/`self`/`static`.
+
+### L4. `ConstructorSignatureMismatch` - a subclass constructor requiring *more* parameters than its parent's
+
+Real PHP (and PHPStan, and phpstan-rs - confirmed at
+`checker/oop/method_overrides.rs:365-369`) deliberately exempts
+`__construct` from the general override signature-compatibility check
+entirely, since a subclass is legitimately allowed a totally different
+constructor shape from its parent's. Psalm still flags one narrow slice
+of that exempted space: a subclass constructor that requires *more*
+required parameters than the parent's (`MethodComparator.php:210-225`) -
+a latent `ArgumentCountError` the moment that subclass is instantiated
+polymorphically (a factory, a DI container, `new $class(...)` via
+`class-string<Base>`) by code that only knows the parent's shape.
+Neither PHPStan nor phpstan-rs checks this at all today. Cheap to add:
+`method_overrides.rs`'s existing `compatibility_ancestor`/`ancestor`
+resolution for `__construct` (line 378) already has the parent
+constructor's signature in hand right where the general exemption is
+applied - this is a narrow carve-out of that exemption, not new
+resolution machinery.
+
+**Effort: small.**
+
+### L5. `StringIncrement` - flag `$str++`/`++$str` on a non-numeric string
+
+A real, common PHP gotcha with zero coverage on either side: PHP's `++`
+on a non-numeric string performs Perl-style alphabetic increment
+(`'a'` becomes `'b'`, `'z'` becomes `'aa'`, `'Az'` becomes `'Ba'`) rather
+than any kind of arithmetic, which essentially never matches what a
+developer intended when reaching for `++`
+(`ArithmeticOpAnalyzer.php:395-416` - `$has_string_increment` set
+specifically when the left operand is a `TString` that isn't
+`TNumericString`/a numeric `TLiteralString`, and the parent node is a
+pre/post-increment). Confirmed absent from real PHPStan
+(`grep -rli "string.*increment" vendor/phpstan-src/src` - nothing) and
+from phpstan-rs.
+
+**Effort: small** - a type check on the operand of `ExprKind::PreInc`/
+`PostInc` (or the by-ref-assignment-inc idiom) whose inferred type is
+`Type::String` without the numeric-string accessory.
+
+### L6. `RiskyTruthyFalsyComparison` - flag a boolean-context check whose union type mixes "always truthy/falsy" and "data-dependent" members
+
+Flags `if ($x)`-shaped boolean-context checks where `$x`'s inferred
+union type mixes members whose truthiness is a foregone conclusion
+(`true`, a non-empty-string literal) with members whose truthiness is
+genuinely data-dependent (plain `int`, plain `string`) -
+(`Internal/Analyzer/Statements/ExpressionAnalyzer.php:148-172`, message:
+"...contains type(s) ..., which can be falsy and truthy... Use strict
+comparison instead"). The underlying gotcha is real: PHP's falsy set
+(`0`, `'0'`, `''`, `[]`, `null`, `false`) spans multiple otherwise
+unrelated types, so an implicit truthy check on a mixed-truthiness union
+can silently misbehave for members the author wasn't thinking about.
+Confirmed absent from real PHPStan
+(`grep -rli "risky.*truthy\|truthy.*falsy" vendor/phpstan-src/src` - only
+unrelated infra hits) and from phpstan-rs, whose `narrowing.rs` already
+computes exactly which atomic types are always-truthy/always-falsy
+internally (for branch narrowing) but never surfaces "this comparison
+mixes both kinds" as its own diagnostic.
+
+**Effort: medium** - reuses `narrowing.rs`'s existing truthy/falsy
+classification per union member; the new part is applying it as a
+standalone diagnostic at condition sites rather than only for narrowing.
+
+### L7. `UnnecessaryVarAnnotation` - flag an inline `@var` that adds no information over plain inference
+
+phpstan-rs's `check_inline_var_annotation_type`
+(`checker/stmt.rs:978`) already mirrors real PHPStan's
+`VarTagTypeRuleHelper::checkExprType`
+(`vendor/phpstan-src/src/Rules/PhpDoc/VarTagTypeRuleHelper.php:100-140`)
+- read directly, that helper only ever checks *compatibility* (is the
+`@var` type a valid super/subtype of the inferred type -
+`varTag.nativeType`/`varTag.type`), never *redundancy*. Psalm adds the
+redundancy case on top: when an inline `@var`'s type is identical to
+what inference already produces without it (and isn't narrowing away
+from `mixed`), it's dead weight worth flagging for removal
+(`ForeachAnalyzer.php:190-205`, `AssignmentAnalyzer.php:233-239`).
+Cheap: `check_inline_var_annotation_type` already has both the parsed
+docblock type and the natively-inferred type sitting side by side at
+the exact call site this needs.
+
+**Effort: small.**
+
+### L8. `RedundantCast` / `RedundantFunctionCall` / `RedundantIdentityWithTrue` - semantic no-ops that aren't whole-statement no-ops
+
+Three related, lower-value-but-real checks bundled together: `(string)
+$x` where `$x` is already `string` (`CastAnalyzer.php:955`); a call like
+`array_values()` whose transformation is a no-op given the argument's
+already-known type (`NamedFunctionCallHandler.php:564-574`); and `$x
+=== true` where `$x` is already `bool`, where the comparison itself is
+redundant (`AssertionFinder.php:2204-2214`). All three are distinct from
+phpstan-rs's existing `checker/noop.rs`, which (mirroring real
+PHPStan's own `NoopRule`) only flags a bare *statement* with zero
+effect - these fire even when the cast/call/comparison's result is
+actually used in a larger expression. Cosmetic/code-quality tier rather
+than bug-catching, so lower priority than L1-L7 above, but genuinely
+absent from both real PHPStan and phpstan-rs.
+
+**Effort: small** each, once the "what does this type's cast/call/
+comparison actually change" comparison exists as a shared helper.
+
+### L9. `InvalidTraversableImplementation` / `InvalidInterfaceImplementation` - implementing a marker interface directly instead of through its required base
+
+One real PHP rule, two Psalm issue classes for its two built-in
+instances. `class Foo implements Traversable` directly (rather than via
+`IteratorAggregate`/`Iterator`) is a genuine PHP compile-time fatal
+error, with a short, fixed exception list of SPL/extension classes PHP
+itself special-cases (`PDOStatement`, `Ds\Collection`, `DOMNodeList`,
+`DatePeriod`) - `ClassAnalyzer.php:2130-2144`, condition: `$fq_interface_
+name_lc === 'traversable' && !$storage->abstract && !isset($storage->
+class_implements['iteratoraggregate'|'iterator']) && ` (four more
+`parent_classes` exceptions). The identical rule applies to `Throwable`
+(must extend `Exception`/`Error`, not implement `Throwable` directly) -
+same file, `ClassAnalyzer.php:2148-2156`, same condition shape. Confirmed
+absent from both real PHPStan (`grep -rli "cannot implement.*Traversable\|
+ImplementsTraversable\|toStringReturnType" vendor/phpstan-src/src` -
+nothing for either) and phpstan-rs (`grep -rln "Traversable" src` turns
+up only `foreach`-subject type-resolution comments, never a
+class-*declaration*-time check).
+
+**Effort: small** - a declaration-time check on `implements`, reusing
+whatever ancestor-interface-name resolution `oop.rs`'s existing interface
+checks already have in hand.
+
+### L10. `InvalidToString` - `__toString()`'s inferred return type must be `string`, even with no declared return type
+
+PHP enforces `__toString()` returning `string` as a runtime `TypeError`
+regardless of whether the method has an explicit native return type -
+extremely common in code written before PHP made this checkable at all.
+Psalm validates the *inferred* return type against `string`
+(`ReturnTypeAnalyzer.php:311-328`), which is what makes this distinct
+from ordinary declared-vs-actual return-type checking: when there's no
+declared return type, phpstan-rs's general return-type check has
+nothing to compare against and stays silent. Confirmed absent from real
+PHPStan (`find vendor/phpstan-src/src -iname '*ToString*'` turns up
+`ImplicitToStringCallHelper` and stub-related type machinery, never a
+`__toString`-return-type rule) and from phpstan-rs (no `__toString`
+return-type validation anywhere in `src/checker/`).
+
+**Effort: small** - a magic-method-name special case in the same place
+`function_decl.rs`/`oop.rs` already validate a method's returns against
+its type, requiring `string` regardless of whether one was declared.
+
+### L11. `AbstractMethodCall` - calling an abstract static method directly
+
+`Foo::abstractStaticMethod()` (a real PHP fatal error - there's no
+implementation to run) is confirmed absent from both real PHPStan
+(`grep -rli "abstract.*method.*cannot.*call\|CallToStaticMethodOnAbstract"
+vendor/phpstan-src/src` - nothing) and phpstan-rs (no
+`staticMethod.abstract`-shaped identifier in the existing static-call
+identifier census: `staticMethod.notFound`/`.private`/`.protected`/
+`.deprecated`/`.internalClass`/`.resultDiscarded`/`.resultUnused`, never
+one for a directly-called abstract target).
+
+**Effort: small** - the static-call resolution `staticMethod.notFound`
+already runs through has the resolved method's `is_abstract` flag
+available; this is an extra condition on an already-resolved lookup, not
+new resolution machinery.
+
+### L12. `NonVariableReferenceReturn` - a by-ref-returning function returning a non-variable
+
+`function &foo() { return 5; }` (or any non-variable/non-property
+expression) is illegal for a `by_ref`-declared function - there's no
+real storage location to hand back a reference to
+(`ReturnAnalyzer.php:237-249`, condition: `$storage->signature_return_
+type->by_ref && !($stmt->expr instanceof Variable|PropertyFetch|
+StaticPropertyFetch)`). Confirmed absent from real PHPStan (no
+`OnlyVariable`/`returnByRef`-shaped rule in `vendor/phpstan-src/src`) and
+from phpstan-rs (no by-ref-return-target validation anywhere in
+`src/checker/`).
+
+**Effort: small** - a check on `StmtKind::Return`'s expression kind,
+gated on the enclosing function's own `by_ref` flag (already tracked for
+by-ref *parameters* via `checker/by_ref_params.rs`'s existing machinery,
+just not yet applied to the return side).
+
+### L13. `InvalidStringClass` - `new $plainStringVar()`, stricter than real PHPStan's own `new.nonObject`
+
+Real PHPStan's own `InstantiationRule::checkClassNameExprType`
+(`Rules/Classes/InstantiationRule.php:93-116`) accepts *any* `string`-typed
+value for `new $x()` unconditionally (`$acceptedType = StringType() |
+ObjectWithoutClassType()`), with no further validation that the string
+is actually a `class-string` - a real gap even in PHPStan's own model
+that Psalm closes by default: `NewAnalyzer.php:1065-1075` rejects a
+plain (non-`class-string`-narrowed) `string`, and unconditionally rejects
+a `TNumericString` regardless of config, since a numeric string can
+never validly name a class. phpstan-rs mirrors PHPStan's own gap here,
+not just its behavior - confirmed via `checker/expr.rs:2040-2043`'s own
+comment: a dynamic `new $className()` target "has no concrete name to
+check" and is skipped entirely, not merely under-validated.
+
+**Effort: small** - a type check at the same `ExprKind::New` site already
+cited, requiring the resolved type be `class-string`-narrowed (or an
+object) rather than an unnarrowed `string`.
+
+### L14. `ImpurePropertyFetch` - reading (not just writing) a mutable object's property inside a declared-pure context
+
+The one `Impure*`-family member phpstan-rs doesn't already cover: Phase
+41's purity-disqualification walk (`registry/purity.rs:367-445`,
+`expr_disqualifies`) already treats property *writes*, static access,
+static variables, superglobal reads, and by-ref assignment as
+disqualifying - matching real PHPStan's own `ImpurePoint` taxonomy
+exactly (confirmed via `FunctionPurityCheck.php`, itself already cited
+in this project's Phase 41 follow-up notes) - but neither phpstan-rs nor
+real PHPStan disqualifies a plain property *read*
+(`Internal/Analyzer/Statements/Expression/Fetch/AtomicPropertyFetchAnalyzer.php:507-520`,
+condition: `$context->pure && !$class_storage->external_mutation_free`).
+Psalm's stricter model: reading a mutable object's property inside a
+`@psalm-pure` function isn't side-effecting, but it isn't
+referentially-transparent either - the same "pure" call could observe a
+different value on a second invocation if something else mutated the
+object first, breaking the memoization-style guarantee purity is
+usually used for. Narrow and debatable (arguably philosophy, not a bug),
+but genuinely absent from both real PHPStan and phpstan-rs, and cheap to
+add since the exact "is this a mutable-object receiver" check the
+condition needs is already computed one line away for the write-side
+check.
+
+**Effort: small.**
+
+## AP. Severity tiering as a systemic diagnostic policy, not a single rule
+
+### AP1. Split "definitely wrong" from "possibly wrong" across type-compatibility diagnostics
+
+Confirmed real PHPStan has no general definite-vs-possibly severity
+split anywhere (`grep -rli possibly vendor/phpstan-src/src/Rules` turns
+up only unrelated hits - purity/dead-code/named-argument rules, never a
+systemic severity tier), and phpstan-rs mirrors that same flat model:
+`checker/calls.rs`'s `argument.type` reports one message shape whether
+the passed value is *definitely* the wrong type or a nullable/mixed
+union that merely *might* be. Psalm splits this at the exact decision
+point, repeated across its whole argument/operand/array-access/iterator
+diagnostic family: `$input_type->isNull()` gets the hard `NullArgument`
+error, `$input_type->isNullable()` (the union merely *contains* null
+among other members) gets the softer, individually-suppressible
+`PossiblyNullArgument` (`ArgumentAnalyzer.php:1309-1338`); the same
+shape repeats for false/invalid-type/undefined-offset. This is a real
+signal-to-noise improvement - separating "this call is definitely
+broken" from "narrow this before use" - but it's a cross-cutting
+severity policy, not a single new rule: adopting it means threading a
+"is the offending member the *entire* type or just *part of* the
+union" distinction through most of the existing type-compatibility call
+sites (`calls.rs`, `assignment.rs`, `return_type_too_wide.rs`'s sibling
+checks, `expr.rs`'s operand checks), each picking a harder/softer
+message and (optionally) a distinct suppressible identifier for its own
+existing diagnostic.
+
+**Effort: large** (small per call site, but the value is in doing it
+uniformly across every existing type-compatibility check, not once).
+
+## AQ. The `Mixed*` family - type-erosion tracking with no PHPStan equivalent at all
+
+### AQ1. Flag a `mixed`-typed value flowing into a typed context, with provenance
+
+Confirmed real PHPStan has *zero* rules for this
+(`find vendor/phpstan-src/src/Rules -iname '*mixed*'` returns nothing).
+Psalm has 18 distinct issue types for exactly this shape -
+`MixedAssignment`, `MixedArgument`, `MixedArrayAccess`,
+`MixedMethodCall`, `MixedPropertyFetch`, and so on - each firing when a
+value phpstan-rs's own inference would resolve to `Type::Mixed` reaches
+a context expecting something more specific. The production
+implementation (`AssignmentAnalyzer.php:356-376`) does more than flag
+the symptom: it walks Psalm's dataflow graph to report *where* the
+value became `mixed` in the first place (an untyped `json_decode()`
+result, an unstubbed third-party call), not just that it currently is.
+This is real type-erosion detection - a `mixed` value silently
+defeating the type system somewhere upstream - that no PHPStan-based
+tool catches today. It's also the largest single item in this part: a
+bare "this is mixed" version is a straightforward walk of expressions
+phpstan-rs's checker already resolves to `Type::Mixed` at the point
+they're consumed by a typed context, but the *useful* version (pointing
+at *where* the value became `mixed`) needs the same kind of
+provenance-tracking dataflow graph the taint-analysis item just below
+would also need - not separable infrastructure, so realistically a
+shared prerequisite for both.
+
+**Effort: large** for the provenance-tracking version; **medium** for a
+bare presence-only version with no "where did this come from" tracing.
+
+## AR. Investigated and deliberately not pursued
+
+Recorded here so a future pass over Psalm doesn't re-spend the same
+research budget re-discovering the same "not worth it" verdict:
+
+- **Taint analysis** (`Tainted*`, 17 issue types; `Internal/Codebase/
+  TaintFlowGraph.php`, ~1,100 lines just for the graph itself, plus
+  source/sink annotations threaded through most of the type-checking
+  pipeline). Real, valuable, and completely absent from phpstan-rs and
+  PHPStan alike - but architecturally a whole separate subsystem
+  (a source-to-sink dataflow graph), not a bolt-on rule. Worth a
+  dedicated future scoping pass of its own, not folded into this list.
+  AQ1's provenance tracking above would share infrastructure with it.
+- **The reference-aliasing family** (`ConflictingReferenceConstraint`,
+  `ReferenceConstraintViolation`, `ReferenceReusedFromConfusingScope`,
+  `UnsupportedReferenceUsage`, `UnsupportedPropertyReferenceUsage`) -
+  read the actual implementation (`IfAnalyzer.php:200-215`,
+  `ExpressionAnalyzer.php:378-388`, and siblings); these are Psalm's own
+  internal "my by-reference type-tracking couldn't cope with this code"
+  escape hatches (one message is literally "This reference cannot be
+  analyzed by Psalm"), not a distinct user-facing bug class. Low value
+  for the size of subsystem (a full reference-aliasing type model) it'd
+  require.
+- **`ComplexFunction`/`ComplexMethod`** (a complexity-limit warning) -
+  real, but its metric is derived from Psalm's taint/dataflow graph's
+  own edge statistics (`StatementsAnalyzer.php:886-910`), not a cheap
+  standalone cyclomatic-complexity count. Not separable from the
+  taint-analysis prerequisite above.
+- **`ImplicitToStringCast`** - real PHPStan already has equivalent
+  machinery (`Analyser/ExprHandler/ImplicitToStringCallHelper.php`);
+  parity territory, not Psalm-exclusive.
+- **`OverriddenFinalConstant`/`AmbiguousConstantInheritance`/
+  `OverriddenInterfaceConstant`** (PHP 8.1+ final/interface-constant
+  override conflicts) - real PHPStan already has this family
+  (`Rules/Constants/OverridingConstantRule.php`); already tracked as a
+  parity gap in ROADMAP.md's "Newly identified gaps" (Constants
+  section), not added here to avoid a duplicate.
+- **`UnsafeInstantiation`** (`new static()` without
+  `@psalm-consistent-constructor`) - real PHPStan parity territory
+  (`Rules/Classes/NewStaticRule.php`), not Psalm-exclusive.
+- **`ParamNameMismatch`** (an overriding method renaming a parameter
+  that named-argument calls depend on) - phpstan-rs already covers this,
+  and more precisely: `checker/named_argument_renames.rs` tracks actual
+  call sites project-wide (mirroring real PHPStan's Phase 82), where
+  Psalm's version is a purely declaration-time static check.
+- **`PrivateFinalMethod`** (redundant `final` on an unoverridable
+  private method) - already covered
+  (`checker/oop.rs:874-879`, `method.finalPrivate`, matching real
+  PHPStan's identical rule).
+- **`MissingImmutableAnnotation`/`MutableDependency`** (subclass/trait
+  immutability-annotation consistency) - doesn't apply to this project's
+  design: `registry::class_is_immutable` (`hierarchy.rs:80-96`) already
+  walks `extends` transitively, so immutability is automatically
+  inherited rather than needing to be redundantly restated: closer to a
+  design improvement over Psalm's requirement than a gap.
+- **`PropertyNotSetInConstructor`/`DuplicateEnumCaseValue`** - already
+  covered (`checker/uninitialized.rs`, `checker/oop/enums.rs:39-59`).
+- **`ReservedWord`** (a user class named `int`/`string`/etc.) - real PHP
+  already rejects this at compile time; a static pre-check's practical
+  value is marginal.
+- **`RedundantFlag`** - narrow, single-function-scoped (`filter_var()`'s
+  `flags`/`options` array keys specifically), not a generalizable
+  pattern.
+
+The rest of this list was added on a second, genuinely exhaustive pass
+after the first pass turned out to have sampled rather than read every
+one of the 325 Issue classes individually (the family-level bulk
+verification described in this part's own intro above). These are the
+additional items that pass turned up and ruled out - not because they
+were skipped, but because each was individually read and found to
+already be covered, out of scope, or too narrow to be worth the size of
+change:
+
+- **`InvalidOverride`** - turned out to be the exact mirror of
+  phpstan-rs's own existing check: `#[\Override]` present with no real
+  overridden method, or present on `__construct`
+  (`FunctionLikeAnalyzer.php:2017-2023`) is precisely `own_sig.has_
+  override_attr && !has_real_ancestor` at `method_overrides.rs:273-282`.
+  Same check, different issue-class name.
+- **`NoInterfaceProperties`** (assigning to a property through an
+  interface-typed variable) - interfaces have no properties to find in
+  the registry in the first place, so this already falls through to the
+  general undefined-property-assignment path every other "property
+  doesn't exist" case already goes through.
+- **`NonInvariantPropertyType`/`NonInvariantDocblockPropertyType`**
+  (property-type invariance on override) - already covered,
+  `checker/oop/property_overrides.rs:29-53`'s `check_one_property_
+  override`, mirroring real PHPStan's `OverridingPropertyRule`.
+- **`ConstantDeclarationInTrait`** (PHP 8.2+ gate on trait constants) -
+  already covered, `classConstant.inTrait`
+  (`checker/oop.rs:710-731`), matching real PHPStan's
+  `ConstantsInTraitsRule` exactly.
+- **`TraitMethodSignatureMismatch`** - same visibility-on-override check
+  already confirmed for `OverriddenMethodAccess` (`method.visibility`),
+  just a trait-specific message variant in Psalm, not a distinct check.
+- **`UninitializedProperty`** (reading a property before it's
+  definitely initialized) - already covered by
+  `checker/uninitialized_dataflow.rs`'s per-constructor "was this
+  definitely assigned by this exact point" walk, a deliberately-scoped
+  design choice (documented in that module's own header) rather than an
+  oversight.
+- **`LessSpecificReturnStatement`** - the same general declared-vs-actual
+  return-type mismatch phpstan-rs's `return.type` already checks, just
+  phrased "more general than" instead of "incompatible with."
+- **`InvalidClassConstantType`/`LessSpecificClassConstantType`**
+  (typed-class-constant override compatibility, PHP 8.3+) - real but
+  narrow: typed class constants are rare, and overriding one with an
+  incompatible/wider type rarer still. Read both (`ClassConstAnalyzer.php:
+  787-810`), judged too low-incidence to be worth chasing further here.
+- **`MoreSpecificReturnType`**, **`IncompatibleTypeParameters`** - both
+  tied tightly to Psalm-internal inference mechanics (explicit-`never`
+  union tracking; `TypeVariableTracker`'s own bidirectional bound
+  resolution) with no clean general pattern to port.
+- **`ArgumentTypeCoercion`/`PropertyTypeCoercion`/`MixedArgumentTypeCoercion`/
+  `MixedPropertyTypeCoercion`/`MixedArrayTypeCoercion`/`MixedReturnTypeCoercion`**
+  - conceptually the same "definite vs. possibly" severity split already
+  proposed as its own systemic item (AP1) below, not a separate check.
+- **`EmptyArrayAccess`** (indexing a provably-empty array) - an empty
+  array shape has zero valid keys, so this is already a degenerate case
+  of the general shape-key-existence check (`shapeAccess.notFound`)
+  rather than needing its own special case.
+- **`RedundantPropertyInitializationCheck`** (an `isset()` check on an
+  already-non-nullable property) - same "redundant condition given a
+  known type" territory L8 above already covers.
+- **`CircularReference`** (a class constant whose own value expression
+  references itself, e.g. `const A = self::A;`) - real (PHP treats this
+  as a fatal error at runtime) but confirmed low-risk in phpstan-rs's own
+  architecture: `infer_const_type` (`registry/function_sig.rs:165-198`)
+  never recursively resolves a cross-constant reference at all - it
+  falls straight to `Mixed` for anything beyond a literal - so there's no
+  infinite-recursion hazard, just an undetected rare-in-practice bug
+  class. Low enough incidence not to be worth its own item here.
+- **`ParentNotFound`** (`parent::$prop` fetch in a class with no parent)
+  - real but low-incidence; the `parent`-as-*type* case is already
+  covered (`return.noParent`/`parameter.noParent`), just not this
+  narrower `parent::`-as-property-fetch-prefix variant.
+- **`CheckType`/`Trace`/`UndefinedTrace`** - Psalm's own `@psalm-check-type`/
+  `@psalm-trace` debugging annotations, the same category as real
+  PHPStan's own `\PHPStan\dumpType()`/`debugScope()` developer-debug
+  helpers (already noted as out of scope under ROADMAP.md's own
+  "Keywords+Debug" section) - not a user-facing code check at all.
+- **`UnrecognizedExpression`/`UnrecognizedStatement`/`PsalmInternalError`/
+  `ParseError`/`UnresolvableConstant`/`UnresolvableInclude`** - Psalm's
+  own "I can't make sense of this" internal fallbacks and giving-up
+  notices, not a portable diagnostic concept.
+- **`IfThisIsMismatch`** - tied to Psalm's own `@psalm-if-this-is`
+  conditional-`$this`-typing template mechanism, a Psalm-specific
+  generics feature with no clean separation from Psalm's whole template
+  system.
+- **`InvalidGlobal`/`InvalidStaticInvocation`/`InvalidParent`/
+  `InvalidAttribute`/`NoValue`** - each read individually; real but
+  either tied to Psalm's own script-execution-scope model (`InvalidGlobal`),
+  already covered by an existing check (`InvalidStaticInvocation`,
+  same `method.static` family as `NonStaticSelfCall`), or narrow enough
+  (a literal `: parent` return type with no parent class; a trait used
+  as an attribute class; Psalm's own type-narrowing producing `Never`
+  for an argument) that the size of a dedicated check isn't justified
+  by how rarely it would fire.
+- **`DuplicateParam`** (a function declaring the same parameter name
+  twice) - real (confirmed via real PHPStan's own
+  `Rules/Functions/RedefinedParametersRule.php`) but already documented
+  as a parity gap in ROADMAP.md's "Newly identified gaps" (bundled into
+  the `Functions/InvalidParameterNameRule.php...` entry), not added here
+  to avoid a duplicate.
+- **`InaccessibleProperty`/`InaccessibleMethod`/`InaccessibleClassConstant`**,
+  the rest of the **`Undefined*`/`Invalid*`/`Missing*Type`/`Deprecated*`/
+  `Duplicate*`/`Impure*`(except L14)/generics/enum/interface/abstract**
+  families, and **`UndefinedInterface`** - all individually read this
+  pass (not just identifier-census-matched as the first pass did) and
+  confirmed already covered by phpstan-rs's existing, comprehensive
+  type-checking, visibility, and symbol-resolution machinery.

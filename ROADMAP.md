@@ -4221,6 +4221,7 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 - **`Rules/Comparison/StrictComparisonOfDifferentTypesRule.php`**: Real PHPStan flags a `===`/`!==` comparison whose outcome is provably constant (operands' types disjoint => always false, or provably equal => always true) with identical.alwaysFalse/alwaysTrue and notIdentical.alwaysFalse/alwaysTrue.
 - **`Rules/Comparison/ImpossibleInArrayHaystackFiniteTypesRule.php`**: Real PHPStan flags a call to in_array()/array_search()/array_keys() where a needle's finite type can never match any value in a constant-array haystack (function.impossibleHaystackValue, registered at level 4 via conf/config.level4.neon).
 - **`Rules/Comparison/UsageOfVoidMatchExpressionRule.php`**: Real PHPStan flags using the result of a match expression whose every arm's result is a void-returning call (match.void). phpstan-rs's Match handling (both the statement-checking arm in checker/expr.rs and the type-inference arm) has no void-result-usage check at all, and this identifier/feature appears nowhere in src/ or ROADMAP.md.
+- **`Rules/Comparison/MatchExpressionRule.php`** (level 4, `#[RegisteredRule]`): Real PHPStan's own `match`-exhaustiveness check - flags a `match` with no `default` arm whose condition's type isn't fully covered by the arm conditions present (`match.unhandled`, `MatchExpressionRule.php:179` - the real `UnhandledMatchError` PHP itself throws at runtime), plus two dead-arm variants: a later arm whose own condition can never be reached because an earlier arm already covers its whole type (`match.alwaysTrue`, line 146) or is disjoint from the subject's remaining type (`match.alwaysFalse`, line 119). Confirmed absent from phpstan-rs entirely - no `match.unhandled`/`match.alwaysTrue`/`match.alwaysFalse` (or any other `match.*` identifier) exists anywhere in `src/`, and both of phpstan-rs's own `Match` handling sites (`checker/expr.rs:2929`, the statement-checking arm, and `:3774`, the type-inference arm) only ever compute the match's *result type* from its arms, never validate arm coverage against the subject's type at all. Distinct from the neighboring `UsageOfVoidMatchExpressionRule` gap above (that one's about a match's *result* being misused; this one's about the match itself never completing). A common real-world regression shape (add an enum case, forget to add its `match` arm) makes this one of the highest-value single gaps in this whole "Newly identified gaps" list.
 
 ## PhpDoc
 
@@ -4583,6 +4584,174 @@ section used to carry:
   own `return.type` finding may partly be `token_get_all()`'s own
   generically-`mixed` stub shape rather than purely the already-
   documented `!== []`-narrowing gap above - not confirmed either way.
+
+**erp-web corpus round (real, closed-source Laravel app; `check-project`
+against `app`/`tests`/`database`, `php_version = "8.5"`; 2803 files
+checked, 2730 diagnostics, 1 parse-error skip).** Four genuine engine
+bugs, independent of the Laravel-specific gap documented separately
+below:
+
+- **Heredoc parsing fails on dense literal braces sitting next to real
+  `{$...}` interpolations - one confirmed parse-error skip.** Isolated
+  to `vendor/dompdf/dompdf/src/Css/Stylesheet.php:1271-1303`, a flexible
+  (indented) heredoc mixing two genuine `{$pattern_atimport_string}`/
+  `{$pattern_atimport_url}` interpolations with a large PCRE pattern body
+  dense with literal, non-interpolated `{`/`}` from named/conditional/
+  recursive regex groups (`(?<CSS_ATFONT_BODY>.*?)}`, `(?(CSS_ATFONT)...)`,
+  `(?R)`, `[^{}]*`). Confirmed isolated by testing every file in that
+  directory individually (`Style.php` - 156 diagnostics, no skip;
+  `Stylesheet.php` alone - 0 diagnostics, 1 skip). Not yet minimized to a
+  standalone repro; the recommended next step is extracting just that
+  heredoc assignment into its own `<?php $re = <<<EOL ... EOL;` file to
+  confirm it alone reproduces the failure, then bisecting the brace
+  density/nesting against the interpolation scanner. Separately: neither
+  the text nor `--format json` output names which file was skipped when
+  this happens - isolating it took ~12 runs of binary-searching smaller
+  directory subsets. The skip diagnostic should always carry the file's
+  own path, independent of whatever's causing the skip itself.
+- **Trait constant `self::` resolution fails when the constant-declaring
+  trait method executes in the context of the composing class -
+  135 false-positive `classConstant.notFound`.** A `private const array
+  SINGULAR_RELATIONS`/`private const string STOP` declared inside a
+  trait (`tests/Feature/Architecture/Support/BladeTypeWalker.php:24-33`),
+  referenced via `self::STOP`/`self::SINGULAR_RELATIONS` from methods
+  defined in that same trait
+  (`BladeTypeWalker.php:99,127,128,146,153,189,202`), consumed via `use
+  BladeTypeWalker;` by two separate classes
+  (`Tests\Feature\Architecture\BladeComponentPropTypeTest`,
+  `BladeRelationAccessTest`). PHP 8.2+ trait constants are real and get
+  composed into the consuming class at compile time - this project's
+  `self::`-resolution inside a trait-defined method's body apparently
+  still resolves against the trait itself (or nothing) rather than the
+  actual composing class it ends up running in for each user. Unrelated
+  to Laravel; a real trait-constant-resolution gap.
+- **`shapeAccess.notFound` false-positives on a plain integer-keyed list
+  built via `$arr[] = $x;` - 5 occurrences, apparent int/string key
+  representation mismatch.** `array{...} has no key '0'` reported against
+  accessing `$arr[0]` (a literal PHP int `0`) on an array shape built
+  purely through `$arr[] = $x;` push-appends inside a closure
+  (`tests/Feature/Marketing/Ads/MetaCampaignManagementGatewayTest.php:
+  228,234,236`). Looks like the shape's own key gets tracked one way
+  internally (as an int key from the push-append) while the literal-`0`
+  offset-access comparison happens another way (as a string, or some
+  other representation that doesn't compare equal) - needs tracing
+  through wherever `$arr[] = ...`'s key-tracking and `$arr[0]`'s
+  offset-lookup comparison diverge in representation.
+- **A union type containing `mixed` isn't collapsed to bare `mixed`** -
+  `mixed` absorbs every other union member by definition, so
+  `null|string|mixed` (observed verbatim in a diagnostic message,
+  `app/Data/Ponto/PontoFalhaLinhaData.php:72`) should always normalize to
+  plain `mixed`. Any diagnostic keyed off an un-normalized union like
+  this is suspect for the same reason - confirmed to also cause 7
+  `nullsafe.neverNull` false positives on receivers like
+  `App\Models\DexperienceRun|mixed`/`mixed|mixed`
+  (`app/Http/Controllers/Web/DexperienceWebController.php:216`,
+  `LegacyImportAdminController.php:49` - since a union containing `mixed`
+  already includes `null`, "never null" should never fire here), and
+  plausibly explains stray false positives elsewhere that weren't
+  individually traced back to it this round. Wherever this project
+  constructs/simplifies a `Type::Union`, it needs a `mixed`-absorption
+  rule alongside whatever normalization already exists.
+
+**Design question, not a bug**: `arrayValues.list` (26 occurrences, all
+in this corpus technically correct on inspection - e.g.
+`app/Casts/IntListCast.php:45`, where `array_map()` over an already-
+`@param list<int>|null`-typed parameter preserves list-ness, making the
+following `array_values()` call provably redundant *given the PHPDoc*).
+This is a phpstan-rs-original rule with no real-PHPStan/Larastan
+equivalent at all. The cases found are genuine defensive coding against
+callers who don't respect an unenforced-at-runtime PHPDoc contract, not
+bugs - worth a deliberate decision on whether this rule should exist as
+currently scoped, or relax specifically when "already a list" is proven
+only from an unenforced PHPDoc annotation rather than a
+runtime-guaranteed construct (a native `list` return type, a literal
+array). Not resolved here; flagging for a scoping decision before either
+building on top of the rule or changing it.
+
+**Framework/ecosystem stub-layer gap - a Larastan-equivalent for
+Laravel, no phpstan-src equivalent since Larastan is itself a third-party
+PHPStan extension, not core.** The same erp-web corpus round: of 2730
+total diagnostics, roughly 75-80% trace back to phpstan-rs having no
+equivalent of Larastan's Laravel-specific stub/extension layer, split
+across five distinct causes, each independently confirmed against the
+corpus:
+
+- **Untyped base-class properties never get their real types** (1121
+  `missingType.property`, the single largest bucket:
+  `$fillable`/`$table`/`$timestamps`/`$incrementing`/`$primaryKey`/
+  `$keyType` from every `Illuminate\Database\Eloquent\Model` subclass,
+  `$signature`/`$description` from every `Illuminate\Console\Command`
+  subclass, `$model` from factories). Real PHPStan doesn't flag these
+  because Larastan ships stub files
+  (`vendor/larastan/larastan/stubs/*.stub`) attaching PHPDoc types to
+  these exact base properties; phpstan-rs has no equivalent stub layer,
+  so every subclass override looks untyped.
+- **Fluent Laravel facade/helper calls resolve to their broad interface
+  type instead of the concrete runtime type** (440 `method.notFound`:
+  `Http::get()` etc. resolving to `Response|PromiseInterface` instead of
+  bare `Response`; `view()` to `Factory|View` instead of `View`;
+  `auth()` to `Factory|Guard` instead of the concrete guard; `Storage::
+  disk()` to the `Filesystem` contract instead of the concrete
+  `FilesystemAdapter`; Mockery's `shouldReceive()`/`shouldExpect()` chain
+  to `Expectation|ExpectationInterface|HigherOrderMessage` instead of
+  `Expectation`). Larastan's core value is a large set of dynamic
+  return-type extensions narrowing exactly these; phpstan-rs has none of
+  them, so most fluent facade/Mockery-chain calls anywhere in a Laravel
+  app misreport `method.notFound` for methods that genuinely exist at
+  runtime.
+- **`Builder::select()`/`Request::only()` (and likely siblings -
+  `Request::except()`, `Model::only()` - not checked) are declared
+  single-parameter but actually variadic via internal `func_get_args()`**
+  (40 `arguments.count`). Larastan ships stubs re-declaring these as
+  effectively variadic; phpstan-rs uses the literal single-parameter
+  signature from Laravel's own source.
+- **Composed/nested local `@phpstan-type` aliases aren't resolved** (a
+  majority of 70 `class.notFound`: a local alias's own definition
+  referencing another `@phpstan-type` alias on the same class gets
+  treated as a literal, unresolvable class name -
+  `app/Data/Orcamento/SimuladorResultData.php:36` and 3+ siblings). Real
+  PHPStan resolves nested/composed local type aliases natively. The
+  remainder of this bucket (2 confirmed, ~53 not individually
+  re-verified) is Laravel's global facade-alias resolution
+  (`\Log::error(...)` with no `use` import, relying on `AliasLoader`'s
+  runtime `class_alias()`) - Larastan replicates it, phpstan-rs doesn't.
+- **Trait-declared constants composed via `use`** (135 `classConstant.
+  notFound` - the same trait-constant bug already documented above as a
+  general engine bug, not Laravel-specific, just discovered in this
+  corpus round via Laravel-adjacent test code).
+- **`array_filter()` with no callback drops falsy union members
+  (including `null`) from its result type, and phpstan-rs appears not to
+  narrow for it** (majority of 506 `return.type`, spot-checked ~20 of
+  ~20 `app/Data/**/Create*Data.php::toVersaoFields()`/`toArray()`
+  methods returning `array_filter([...])` where the literal contains
+  `string|null`/`int|null`/`bool|null` members declared against a
+  `@return` type that already excludes them). Real PHPStan has a
+  dynamic-return-type extension for `array_filter()` doing exactly this
+  narrowing. Not independently verified for the remaining ~486 of 506;
+  re-triage once this specific narrowing is fixed, since it should
+  collapse this bucket substantially on its own.
+
+Buckets from the same corpus run not deep-dived and not yet triaged at
+all: `missingType.iterableValue` (15), `return.unusedType` (5),
+`varTag.type`/`method.protected` (2 each), and seven one-off identifiers
+(`smaller.alwaysFalse`, `greater.alwaysTrue`, `foreach.nonIterable`,
+`booleanOr.*` x3, `phpstanApi.instanceofAssumption`,
+`property.unusedType`) at 1 each. Also from `argument.type` (281, mixed
+bucket): `Mockery::mock(SomeClass::class)` passing a single
+`class-string` (31 occurrences) is Mockery's single most common usage
+and a real, valid overload phpstan-rs's Mockery stub appears to be
+missing; `Command::option()`/`argument()` calls compared against a
+narrower expected type is the same Larastan-signature-parsing gap as the
+bullet above, a distinct dynamic-return-type extension Larastan has and
+phpstan-rs doesn't. The rest of that bucket looked like genuine,
+unrelated app-level type mismatches on spot-check, not phpstan-rs bugs.
+`missingType.return` (40, all against a shared trait method in
+`database/factories/Concerns/CreatesVersionedEntity.php:51`),
+`method.nonObject` (11, `$request->file(...)` used without narrowing a
+`UploadedFile|array|null` union first), and `assign.propertyType` (10,
+`CarbonInterface` assigned to a `Carbon`-typed property) all looked like
+genuine app-level findings on spot-check, not phpstan-rs bugs - kept as
+correct rather than triaged further.
 
 ## Permanent design boundaries (not planned, by choice)
 
