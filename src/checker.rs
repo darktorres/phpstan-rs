@@ -1168,6 +1168,7 @@ mod expr;
 mod function_decl;
 mod generics;
 mod imports;
+mod impossible_instanceof;
 mod instantiation;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;

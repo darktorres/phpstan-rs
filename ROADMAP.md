@@ -516,7 +516,13 @@ promotes with implicit `public` visibility. `ReadOnlyClassRule`'s version gate
 classes, `@phpstan-consistent-constructor`, interface-pinned, `final`,
 or abstract-prototype constructors) and
 `new.staticInAbstractClassStaticMethod`; `new Foo(...)` reports
-`callable.notSupported`.
+`callable.notSupported`. `ImpossibleInstanceOfRule`
+(`instanceof.alwaysTrue`/`.alwaysFalse` from a registry-aware
+always/never/maybe verdict over the checked expression's type, the
+always-true half exempt as the last `elseif`; `instanceof.invalidExprType`
+for a dynamic target that can't name a class). A constant-condition
+finding inside a trait is kept only when every using host reports it
+with the same verdict, matching `ConstantConditionInTraitRule`.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3501,14 +3507,6 @@ identifier diff, direct `vendor/bin/phpstan analyse` (level 10) against
 `phpstan-rs check-project` on `~/piwigo16`, took every real identifier
 with no matching literal anywhere in this project's source, checked it
 against this list, and added the real gaps the audit had missed.
-
-### Phase 125 — Classes (real-PHPStan `Rules/Classes/` gaps)
-
-- `ImpossibleInstanceOfRule` — `instanceof.alwaysTrue`/`.alwaysFalse`/
-  `.invalidExprType` when an `instanceof`'s own type resolves to a
-  literal boolean or a non-string/object dynamic class-name expr;
-  phpstan-rs's unreachable-code family deliberately excludes
-  `instanceof` today.
 
 ### Phase 126 — Functions (`Rules/Functions/` gaps)
 

@@ -1837,6 +1837,14 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
+                self.check_impossible_instanceof(
+                    inner,
+                    target,
+                    e.span,
+                    locals,
+                    label,
+                    is_exempt_last_condition,
+                );
                 Type::Mixed(false)
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {

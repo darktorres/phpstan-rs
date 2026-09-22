@@ -177,6 +177,19 @@ pub enum PhpFeature {
     /// own `parameter.unresolvableNativeType`/`return.unresolvableNativeType`,
     /// backed by `UnresolvableTypeHelper`).
     PureIntersectionTypes,
+    /// A trait's own abstract methods being enforced against the using
+    /// class's implementation. `PhpVersion::supportsAbstractTraitMethods`
+    /// (`NewStaticRule`'s trait-constructor exemption).
+    AbstractTraitMethods,
+    /// A `Serializable` implementation also needing `__serialize()`/
+    /// `__unserialize()`. `PhpVersion::serializableRequiresMagicMethods`
+    /// (`MissingMagicSerializationMethodsRule`).
+    SerializableRequiresMagicMethods,
+    /// First-class-callable syntax (`foo(...)`, `$obj->method(...)`,
+    /// `Foo::method(...)`). `PhpVersion::supportsFirstClassCallables`
+    /// (`FunctionCallableRule`/`MethodCallableRule`/
+    /// `StaticMethodCallableRule`).
+    FirstClassCallables,
 }
 
 impl PhpFeature {
@@ -194,11 +207,14 @@ impl PhpFeature {
             | CaseInsensitiveConstantsRemoved
             | PrintfHhSpecifier
             | NativeUnionTypes
-            | RequiredParameterAfterOptionalDeprecated => (8, 0),
+            | RequiredParameterAfterOptionalDeprecated
+            | AbstractTraitMethods => (8, 0),
             FinalClassConstants
             | ArrayUnpackingWithStringKeys
             | DeprecatesFloatArrayKey
-            | PureIntersectionTypes => (8, 1),
+            | PureIntersectionTypes
+            | SerializableRequiresMagicMethods
+            | FirstClassCallables => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
             | ReadOnlyAnonymousClasses

@@ -1287,6 +1287,7 @@ fn instanceof_against_an_unrelated_class_still_checks_a_write_to_a_property_on_t
 fn instanceof_against_an_unrelated_interface_on_a_nullable_type_keeps_the_original_type_too() {
     let d = diagnostics_for(
         r#"<?php
+            namespace Amp;
             interface ResourceStream { public function unreference(): void; }
             interface Socket { public function read(): ?string; }
             function f(?Socket $socket): void {
@@ -1321,7 +1322,10 @@ fn instanceof_true_on_a_provably_non_object_type_does_not_build_a_nonsense_inter
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier.starts_with("instanceof.")),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 // Three independent, sequential `instanceof` checks on the same
@@ -1403,7 +1407,10 @@ fn instanceof_false_branch_of_the_exact_declared_class_is_dead_code() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier.starts_with("instanceof.")),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]

@@ -40,6 +40,7 @@ mod generics_and_templates;
 mod global_constants;
 mod global_vars;
 mod helpers;
+mod impossible_instanceof;
 mod inline_var_validation;
 mod instantiation;
 mod int_range_arithmetic;

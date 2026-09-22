@@ -12,7 +12,7 @@ use crate::types::Type;
 /// Whether `ty` can never be a `string` or an object, so `new` on it
 /// always fails. A `Union` answers for its non-`null` members, the
 /// same leniency `type_can_never_be_object` applies.
-fn type_can_never_name_a_class(ty: &Type) -> bool {
+pub(crate) fn type_can_never_name_a_class(ty: &Type) -> bool {
     match ty {
         Type::Null
         | Type::Void
@@ -324,7 +324,9 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        let abstract_trait_methods_supported = registry.php_version.is_none_or(|v| v >= (8, 0));
+        let abstract_trait_methods_supported = registry
+            .php_version
+            .is_none_or(|v| crate::php_version::PhpFeature::AbstractTraitMethods.is_available(v));
         if abstract_trait_methods_supported
             && let Some(t) = &self.current_trait
             && registry
