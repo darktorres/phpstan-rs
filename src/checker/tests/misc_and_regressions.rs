@@ -448,6 +448,11 @@ fn a_negative_typed_class_constant_infers_its_real_int_type() {
             }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

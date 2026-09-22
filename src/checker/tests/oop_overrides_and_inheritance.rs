@@ -706,6 +706,11 @@ fn a_constructor_with_an_incompatible_signature_is_not_flagged() {
             class Sub10 extends Base10 { public function __construct(int $a, int $b) {} }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -718,6 +723,11 @@ fn a_consistent_constructor_tagged_ancestor_re_enables_signature_checking() {
             class Sub12 extends Base12 { public function __construct(int $a, int $b) {} }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert_eq!(d[0].identifier, "method.childParameterType");
 }
@@ -731,6 +741,11 @@ fn a_consistent_constructor_tagged_ancestor_stays_quiet_for_a_compatible_overrid
             class Sub13 extends Base13 { public function __construct(string $a) {} }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -746,6 +761,11 @@ fn a_consistent_constructor_tag_is_inherited_through_an_untagged_intermediate_cl
             class Sub14 extends Middle14 { public function __construct() {} }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert_eq!(d[0].identifier, "parameter.missing");
 }
@@ -758,6 +778,11 @@ fn an_untagged_ancestor_still_exempts_the_constructor_as_before() {
             class Sub15 extends Base15 { public function __construct(int $a, int $b) {} }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

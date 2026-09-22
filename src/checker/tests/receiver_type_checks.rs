@@ -959,6 +959,11 @@ mod argument_unpack_non_iterable {
                 }
             "#,
         );
+        // An empty-bodied constructor's parameters are unused.
+        let d: Vec<_> = d
+            .into_iter()
+            .filter(|x| x.identifier != "constructor.unusedParameter")
+            .collect();
         assert_eq!(d.len(), 1, "got: {d:?}");
         assert_eq!(d[0].identifier, "argument.unpackNonIterable");
     }

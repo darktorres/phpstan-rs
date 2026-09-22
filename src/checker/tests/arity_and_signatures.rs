@@ -248,6 +248,11 @@ fn spread_argument_in_a_constructor_call_is_not_flagged() {
             function test(array $coords): Point { return new Point(...$coords); }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -552,6 +557,11 @@ fn constructor_call_with_correct_arguments_is_not_flagged() {
             function f() { return new Point(1, 2); }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

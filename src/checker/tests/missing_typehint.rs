@@ -563,6 +563,11 @@ fn constructor_with_no_return_type_is_not_flagged() {
             }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

@@ -78,6 +78,11 @@ fn a_backed_enum_s_value_satisfies_a_matching_literal_union_parameter() {
             }
         "#,
     );
+    // An empty-bodied constructor's parameters are unused.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "constructor.unusedParameter")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
