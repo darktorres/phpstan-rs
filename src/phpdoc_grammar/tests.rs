@@ -233,6 +233,37 @@ fn a_callable_signature_parses() {
 }
 
 #[test]
+fn a_callable_signature_with_named_parameters_still_parses_its_whole_shape() {
+    // Real text from Rector's own `BinaryOpManipulator::
+    // validateCondition()` docblock - a callable parameter's own `$name`
+    // is legal, purely-documentation syntax that must not break parsing
+    // of the parameters (or the return type) that follow it.
+    let ty = type_of(
+        "/** @return callable(Node $firstNode, Node $secondNode): bool|class-string<Node> */",
+    );
+    match ty {
+        TypeNode::Callable {
+            params,
+            return_type: Some(ret),
+            ..
+        } => {
+            assert_eq!(params.len(), 2);
+            assert_eq!(
+                *ret,
+                TypeNode::Union(vec![
+                    TypeNode::Identifier("bool".to_string()),
+                    TypeNode::Generic(
+                        "class-string".to_string(),
+                        vec![TypeNode::Identifier("Node".to_string())]
+                    ),
+                ])
+            );
+        }
+        other => panic!("got: {other:?}"),
+    }
+}
+
+#[test]
 fn a_closure_signature_parses() {
     let ty = type_of("/** @return Closure(int): string */");
     assert!(matches!(ty, TypeNode::Callable { keyword, .. } if keyword == "Closure"));
@@ -492,6 +523,80 @@ fn a_bare_type_literally_named_covariant_is_not_mistaken_for_the_marker() {
             vec![TypeNode::Identifier("covariant".to_string())]
         )
     );
+}
+
+#[test]
+fn a_trailing_html_paragraph_is_not_mistaken_for_a_generic_argument_list() {
+    // Real text from phpstorm-stubs' own `Core.php::debug_backtrace()`.
+    let ty = type_of(
+        "/** @return array <p>an array of associative arrays. The possible returned elements</p> */",
+    );
+    assert_eq!(ty, TypeNode::Identifier("array".to_string()));
+}
+
+#[test]
+fn a_genuine_generic_argument_named_like_an_html_tag_still_parses_when_unclosed() {
+    // No matching `</p>` anywhere ahead - not HTML, so this stays a
+    // (nonsensical but structurally real) generic argument named `p`.
+    let ty = type_of("/** @return Collection<p> */");
+    assert_eq!(
+        ty,
+        TypeNode::Generic(
+            "Collection".to_string(),
+            vec![TypeNode::Identifier("p".to_string())]
+        )
+    );
+}
+
+#[test]
+fn a_fully_qualified_closure_type_still_parses_its_own_signature() {
+    // Real text from Laravel's own `Container::factory()` conditional
+    // return type - a leading `\` before `Closure` must not defeat the
+    // callable-keyword check.
+    let ty = type_of("/** @return \\Closure(): int */");
+    assert!(matches!(ty, TypeNode::Callable { keyword, .. } if keyword == "\\Closure"));
+}
+
+#[test]
+fn a_bare_wildcard_suffix_with_no_class_scope_keeps_its_star() {
+    // Real text from symfony/console's own
+    // `SignalableCommandInterface::getSubscribedSignals()`.
+    let ty = type_of("/** @return list<\\SIG*> */");
+    match ty {
+        TypeNode::Generic(name, args) if name == "list" => {
+            assert_eq!(args[0], TypeNode::Identifier("\\SIG*".to_string()));
+        }
+        other => panic!("got: {other:?}"),
+    }
+}
+
+#[test]
+fn markdown_emphasis_in_the_description_is_not_mistaken_for_a_wildcard_suffix() {
+    // Real text from Piwigo's own `StringHelper::qualifyUtf8()` - a
+    // plain `int` return type, followed by a description that happens
+    // to start with a space then a markdown-style `*0*` emphasis run.
+    // The `*` isn't adjacent to `int`, so it must not attach to it.
+    let ty = type_of("/** @return int *0* if ASCII, *1* if UTF-8 */");
+    assert_eq!(ty, TypeNode::Identifier("int".to_string()));
+}
+
+#[test]
+fn a_psalm_negated_type_degrades_to_its_wrapped_type() {
+    // Real text from webmozart/assert's own
+    // `Assert::allNullOrNotEmpty()` - Psalm's own negation syntax, not
+    // real PHPStan grammar; not worth its own node, but also not a real
+    // parse error the way genuinely malformed syntax is.
+    let ty = type_of("/** @return iterable<!empty|null> */");
+    match ty {
+        TypeNode::Generic(name, args) if name == "iterable" => match &args[0] {
+            TypeNode::Union(members) => {
+                assert_eq!(members[0], TypeNode::Identifier("empty".to_string()));
+                assert_eq!(members[1], TypeNode::Identifier("null".to_string()));
+            }
+            other => panic!("got: {other:?}"),
+        },
+        other => panic!("got: {other:?}"),
+    }
 }
 
 #[test]

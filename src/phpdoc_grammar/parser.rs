@@ -119,6 +119,18 @@ impl TagParser {
         }
     }
 
+    /// Consumes a `Variable` token if present, discarding its name -
+    /// `eat` can't be used here since `PhpDocToken::Variable` carries
+    /// data, so there's no fixed value to compare `peek()` against.
+    fn eat_variable(&mut self) -> bool {
+        if matches!(self.peek(), PhpDocToken::Variable(_)) {
+            self.advance();
+            true
+        } else {
+            false
+        }
+    }
+
     fn expect(&mut self, tok: &PhpDocToken, what: &str) -> bool {
         if self.eat(tok) {
             true
@@ -440,6 +452,18 @@ impl TagParser {
                 self.advance();
                 self.parse_identifier_led(name)
             }
+            // Psalm's own negated-type syntax (`!empty`, `!null`) -
+            // real text from `webmozart/assert`'s own docblocks, mixed
+            // into otherwise-PHPStan-flavored stubs. Not a real parse
+            // error (the old raw-substring pipeline never flagged this
+            // either) and not worth its own real negation node just for
+            // one third-party package's own style - degrade to the
+            // wrapped type itself, silently dropping the negation
+            // rather than the whole type.
+            PhpDocToken::Unknown('!') => {
+                self.advance();
+                self.parse_atom()
+            }
             _ => {
                 self.error("expected a type");
                 if !self.at_eof() {
@@ -450,10 +474,6 @@ impl TagParser {
         }
     }
 
-    /// Everything that can follow a bare identifier already consumed:
-    /// `array{...}`/`list{...}`/`object{...}`, `callable(...)`/
-    /// `Closure(...)`, `int<...>`, `Name::CONST`, or an ordinary
-    /// `Name<Args>` generic (or a bare `Name` alone).
     /// One generic-argument position, checked first for real PHPStan's
     /// own call-site variance marker syntax (`Collection<covariant
     /// Foo>`/`Collection<contravariant Foo>`/a bare `Collection<*>`)
@@ -497,8 +517,18 @@ impl TagParser {
         self.parse_type()
     }
 
+    /// Everything that can follow a bare identifier already consumed:
+    /// `array{...}`/`list{...}`/`object{...}`, `callable(...)`/
+    /// `Closure(...)`, `int<...>`, `Name::CONST`, or an ordinary
+    /// `Name<Args>` generic (or a bare `Name` alone).
     fn parse_identifier_led(&mut self, name: String) -> TypeNode {
-        let lower = name.to_ascii_lowercase();
+        // A fully-qualified name keeps its own leading `\` in `name`
+        // itself (a real, meaningful part of the reference - `\Closure`
+        // deliberately forces the global namespace, common real-world
+        // style) but every keyword comparison below ignores it, so
+        // `\Closure(...)`/`\array{...}`/`\int<0, 100>` are still
+        // recognized the same as their unqualified spelling.
+        let lower = name.trim_start_matches('\\').to_ascii_lowercase();
         if matches!(self.peek(), PhpDocToken::LBrace)
             && matches!(lower.as_str(), "array" | "list" | "object" | "shape")
         {
@@ -535,7 +565,8 @@ impl TagParser {
                 const_name,
             };
         }
-        if self.eat(&PhpDocToken::LAngle) {
+        if matches!(self.peek(), PhpDocToken::LAngle) && !self.looks_like_html() {
+            self.advance();
             let mut args = vec![self.parse_generic_arg()];
             while self.eat(&PhpDocToken::Comma) {
                 // A trailing comma before `>` (real, common style,
@@ -549,7 +580,70 @@ impl TagParser {
             self.expect(&PhpDocToken::RAngle, "'>'");
             return TypeNode::Generic(name, args);
         }
+        // A bare wildcard suffix with no `::` at all (`\SIG*`, real text
+        // from `symfony/console`'s own `SignalableCommandInterface::
+        // getSubscribedSignals()` docblock - "any `SIG_*`-style
+        // constant", informally) - keep the `*` as part of the
+        // identifier's own text (same idea as `ConstFetch`'s own
+        // wildcard `const_name`, just with no class scope to attach it
+        // to) rather than silently dropping it once this token is
+        // reached. Only when directly adjacent, no preceding whitespace
+        // - this lexer discards whitespace entirely rather than keeping
+        // it as its own token the way `vendor/phpstan/phpdoc-parser`'s
+        // own lexer does, so span adjacency is this grammar's only way
+        // to tell `\SIG*` apart from a type followed by free-text
+        // markdown emphasis (`@return int *0* if ASCII...`, real text
+        // from Piwigo's own `StringHelper::qualifyUtf8()` - genuinely
+        // just a plain `int` return type, not a wildcard).
+        if matches!(self.peek(), PhpDocToken::Star) && self.is_adjacent_to_previous() {
+            self.advance();
+            return TypeNode::Identifier(format!("{name}*"));
+        }
         TypeNode::Identifier(name)
+    }
+
+    /// Whether the current token immediately follows the previous one
+    /// with no whitespace between them - see `parse_identifier_led`'s
+    /// own wildcard-suffix check, its only caller.
+    fn is_adjacent_to_previous(&self) -> bool {
+        self.pos > 0 && self.tokens[self.pos].1.start == self.tokens[self.pos - 1].1.end
+    }
+
+    fn token_at(&self, idx: usize) -> Option<&PhpDocToken> {
+        self.tokens.get(idx).map(|(t, _)| t)
+    }
+
+    /// `phpstorm-stubs`' own docblocks routinely trail a type with a
+    /// literal HTML fragment (`@return array <p>an array of...</p>`,
+    /// real text from `Core.php`'s own `debug_backtrace()`) - genuine
+    /// free-text description, not the start of a `Name<Args>` generic.
+    /// Mirrors `vendor/phpstan/phpdoc-parser`'s own `TypeParser::isHtml`
+    /// exactly: once `<name>` is seen, scan the remaining tokens for a
+    /// matching `</name>` closing tag before treating `<` as opening a
+    /// generic-argument list at all - real PHPStan hits the identical
+    /// ambiguity (its lexer also tokenizes `<` as a bare angle-bracket
+    /// token unconditionally) and resolves it the same way.
+    fn looks_like_html(&self) -> bool {
+        let Some(PhpDocToken::Identifier(tag_name)) = self.token_at(self.pos + 1) else {
+            return false;
+        };
+        if !matches!(self.token_at(self.pos + 2), Some(PhpDocToken::RAngle)) {
+            return false;
+        }
+        let mut i = self.pos + 3;
+        loop {
+            match self.token_at(i) {
+                None | Some(PhpDocToken::Eof) => return false,
+                Some(PhpDocToken::LAngle)
+                    if matches!(self.token_at(i + 1), Some(PhpDocToken::Unknown('/')))
+                        && matches!(self.token_at(i + 2), Some(PhpDocToken::Identifier(s)) if s == tag_name)
+                        && matches!(self.token_at(i + 3), Some(PhpDocToken::RAngle)) =>
+                {
+                    return true;
+                }
+                _ => i += 1,
+            }
+        }
     }
 
     fn try_parse_int_range(&mut self) -> Option<TypeNode> {
@@ -660,6 +754,15 @@ impl TagParser {
                 let ty = self.parse_type();
                 let by_ref = self.eat(&PhpDocToken::Amp);
                 let variadic = self.eat(&PhpDocToken::Ellipsis);
+                // A callable parameter's own name is real, legal,
+                // optional syntax (`callable(Node $firstNode): bool`,
+                // real text from Rector's own docblocks) - purely
+                // documentation, per `vendor/phpstan/phpdoc-parser`'s
+                // own `parseCallableParameter` (`CallableTypeParameterNode`
+                // keeps it, this grammar has no use for it and just
+                // discards it) - consumed here so it doesn't break the
+                // rest of this parameter list's own parse.
+                self.eat_variable();
                 let optional = self.eat(&PhpDocToken::Equals);
                 params.push(CallableParam {
                     ty,
