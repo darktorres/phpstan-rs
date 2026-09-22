@@ -4,13 +4,13 @@
 //! `@internal` checks, one function per event, each opening with a fast
 //! `is_empty()` bail.
 
-use crate::ast::{Arg, ClassKind, Expr, FunctionDecl, Param};
+use crate::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
 use crate::checker::internal_usage::class_type_word;
 use crate::checker::internal_usage::collect_referenced_class_names;
 use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::ignore_errors::glob_matches;
 use crate::restricted_symbols::{
-    ParamCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
+    ParamCondition, ParamFlagsCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
 };
 use crate::token::Span;
 use crate::types::Type;
@@ -126,7 +126,93 @@ fn scalar_value_matches(ty: &Type, value: &ParamScalarValue, case_insensitive: b
     }
 }
 
+/// Every `Type::IntLiteral`-shaped member reachable from `ty` - a bare
+/// literal, or each member of a `Union` (real `typeString: 1 | 2`'s own
+/// parsed shape). Anything else contributes nothing, never a guess.
+fn int_literal_members(ty: &Type) -> Vec<i64> {
+    match ty {
+        Type::IntLiteral(n) => vec![*n],
+        Type::Union(members) => members.iter().flat_map(int_literal_members).collect(),
+        _ => Vec::new(),
+    }
+}
+
 impl<'a> Checker<'a> {
+    /// Best-effort literal-preserving constant fold for the `ParamFlags`
+    /// family only - ordinary type inference for `BinOp::{BitOr,BitAnd,
+    /// BitXor}` deliberately widens two folded int literals to plain
+    /// `Type::Int` (confirmed via direct grep, `checker/expr.rs:5101`),
+    /// so a flag mask like `JSON_HEX_TAG | JSON_HEX_APOS` needs its own
+    /// literal-preserving evaluator here instead. Recognizes exactly the
+    /// shapes a real PHP flag mask is built from: an int literal, a
+    /// unary minus of one, a bare `Name` resolving through `Registry::
+    /// global_constants` (already a literal `Type::IntLiteral` for a
+    /// stub's `define('JSON_HEX_APOS', 4)` - confirmed live against the
+    /// vendored phpstorm-stubs), and a bitwise combination of two
+    /// foldable operands. `None` for anything else, including a class
+    /// constant (real flag families like `JSON_HEX_*`/`PREG_*` are
+    /// always global constants, never class constants) - a disclosed,
+    /// narrower scope, not a guess.
+    fn fold_int_flags(&self, e: &Expr) -> Option<i64> {
+        match &e.kind {
+            ExprKind::Literal(Literal::Int(n)) => Some(*n),
+            ExprKind::Unary(UnaryOp::Neg, inner) => self.fold_int_flags(inner).map(|n| -n),
+            ExprKind::Grouping(inner) => self.fold_int_flags(inner),
+            ExprKind::Name(name) => {
+                let bare = name.rsplit('\\').next().unwrap_or(name);
+                match self.registry.global_constants.get(bare) {
+                    Some(Type::IntLiteral(n)) => Some(*n),
+                    _ => None,
+                }
+            }
+            ExprKind::Binary(crate::ast::BinOp::BitOr, l, r) => {
+                Some(self.fold_int_flags(l)? | self.fold_int_flags(r)?)
+            }
+            ExprKind::Binary(crate::ast::BinOp::BitAnd, l, r) => {
+                Some(self.fold_int_flags(l)? & self.fold_int_flags(r)?)
+            }
+            ExprKind::Binary(crate::ast::BinOp::BitXor, l, r) => {
+                Some(self.fold_int_flags(l)? ^ self.fold_int_flags(r)?)
+            }
+            _ => None,
+        }
+    }
+
+    /// One `ParamFlagsCondition`'s own match - the argument's own
+    /// resolved integer value must have every bit of `value` (a single
+    /// flag) set, or every bit of *any one* member of `type_string`'s
+    /// own parsed union set (real docs: "if you want to (dis)allow a
+    /// parameter when either the flag `1` or `2` is set, use
+    /// `typeString: 1 | 2`" - this `|` is a PHPDoc union, not PHP's own
+    /// bitwise-or). An argument that can't be resolved, or can't be
+    /// constant-folded to an integer at all, never matches.
+    fn param_flags_condition_matches(&self, cond: &ParamFlagsCondition, args: &[Arg]) -> bool {
+        let Some(expr) = resolve_arg(args, cond.position, cond.name.as_deref()) else {
+            return false;
+        };
+        let Some(actual) = self.fold_int_flags(expr) else {
+            return false;
+        };
+        if let Some(type_string) = &cond.type_string {
+            let configured = crate::types::parse_type_string(type_string);
+            return int_literal_members(&configured)
+                .iter()
+                .any(|flag| (actual & flag) == *flag);
+        }
+        if let Some(value) = cond.value {
+            return (actual & value) == value;
+        }
+        false
+    }
+
+    /// `all_conditions_match`'s own `ParamFlagsCondition` sibling.
+    fn all_flags_conditions_match(&self, conditions: &[ParamFlagsCondition], args: &[Arg]) -> bool {
+        !conditions.is_empty()
+            && conditions
+                .iter()
+                .all(|c| self.param_flags_condition_matches(c, args))
+    }
+
     /// One `ParamCondition`'s own match against the real call site -
     /// `class_pattern` takes precedence over `type_string`, which takes
     /// precedence over `value` (confirmed against the real docs: "If
@@ -211,16 +297,19 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> bool {
         let has_allow = !entry.allow_params_anywhere.is_empty()
-            || !entry.allow_params_anywhere_any_value.is_empty();
+            || !entry.allow_params_anywhere_any_value.is_empty()
+            || !entry.allow_param_flags_anywhere.is_empty();
         if has_allow
             && (self.all_conditions_match(&entry.allow_params_anywhere, args, locals, false)
-                || self.all_refs_present(&entry.allow_params_anywhere_any_value, args))
+                || self.all_refs_present(&entry.allow_params_anywhere_any_value, args)
+                || self.all_flags_conditions_match(&entry.allow_param_flags_anywhere, args))
         {
             return true;
         }
         let has_disallow_gate = !entry.allow_except_params_anywhere.is_empty()
             || !entry.allow_except_params_any_value.is_empty()
-            || !entry.allow_except_case_insensitive_params.is_empty();
+            || !entry.allow_except_case_insensitive_params.is_empty()
+            || !entry.allow_except_param_flags.is_empty();
         if has_disallow_gate {
             let disallowed_here =
                 self.all_conditions_match(&entry.allow_except_params_anywhere, args, locals, false)
@@ -230,7 +319,8 @@ impl<'a> Checker<'a> {
                         args,
                         locals,
                         true,
-                    );
+                    )
+                    || self.all_flags_conditions_match(&entry.allow_except_param_flags, args);
             return !disallowed_here;
         }
         false
@@ -251,20 +341,26 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Option<bool> {
-        if !entry.allow_except_params_in_allowed.is_empty() {
-            return Some(!self.all_conditions_match(
+        if !entry.allow_except_params_in_allowed.is_empty()
+            || !entry.allow_except_param_flags_in_allowed.is_empty()
+        {
+            let disallow_matched = self.all_conditions_match(
                 &entry.allow_except_params_in_allowed,
                 args,
                 locals,
                 false,
-            ));
+            ) || self
+                .all_flags_conditions_match(&entry.allow_except_param_flags_in_allowed, args);
+            return Some(!disallow_matched);
         }
         if !entry.allow_params_in_allowed.is_empty()
             || !entry.allow_params_in_allowed_any_value.is_empty()
+            || !entry.allow_param_flags_in_allowed.is_empty()
         {
             return Some(
                 self.all_conditions_match(&entry.allow_params_in_allowed, args, locals, false)
-                    || self.all_refs_present(&entry.allow_params_in_allowed_any_value, args),
+                    || self.all_refs_present(&entry.allow_params_in_allowed_any_value, args)
+                    || self.all_flags_conditions_match(&entry.allow_param_flags_in_allowed, args),
             );
         }
         None

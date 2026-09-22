@@ -3,8 +3,8 @@
 
 use super::helpers::*;
 use crate::restricted_symbols::{
-    ParamCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry, RestrictedSymbolKind,
-    RestrictedSymbols,
+    ParamCondition, ParamFlagsCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
+    RestrictedSymbolKind, RestrictedSymbols,
 };
 
 fn with_entries(src: &str, entries: Vec<RestrictedSymbolEntry>) -> Vec<crate::checker::Diagnostic> {
@@ -49,6 +49,10 @@ fn entry(
         allow_params_in_allowed: Vec::new(),
         allow_params_in_allowed_any_value: Vec::new(),
         allow_except_params_in_allowed: Vec::new(),
+        allow_param_flags_in_allowed: Vec::new(),
+        allow_param_flags_anywhere: Vec::new(),
+        allow_except_param_flags_in_allowed: Vec::new(),
+        allow_except_param_flags: Vec::new(),
     }
 }
 
@@ -1312,4 +1316,102 @@ fn allow_except_params_in_allowed_combined_with_allow_except_in_instance_of() {
         .collect();
     assert_eq!(flagged.len(), 1, "got: {d:?}");
     assert!(flagged[0].location.contains("MyHandler"));
+}
+
+// `allowParamFlagsAnywhere`/`allowExceptParamFlags` - the `ParamFlags`
+// bitmask sibling of the plain `Params` family: matches when specific
+// bits are *set* in the resolved integer, not on exact equality, and
+// needs its own literal-preserving constant fold since ordinary type
+// inference widens a `BinOp::BitOr` of two literals to plain `Type::Int`.
+
+#[test]
+fn allow_param_flags_anywhere_matches_a_bit_set_anywhere_in_a_bitwise_or_expression() {
+    let d = with_entries(
+        r#"<?php
+            define('MY_HEX_TAG', 1);
+            define('MY_HEX_APOS', 4);
+            function f($flags) {}
+            f(MY_HEX_TAG | MY_HEX_APOS);
+            f(MY_HEX_TAG);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "f",
+            "no bare calls",
+            |e| {
+                e.allow_param_flags_anywhere = vec![ParamFlagsCondition {
+                    position: Some(1),
+                    value: Some(4),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_param_flags_anywhere_type_string_union_matches_either_flag() {
+    let d = with_entries(
+        r#"<?php
+            function f($flags) {}
+            f(1);
+            f(2);
+            f(3);
+            f(4);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "f",
+            "no bare calls",
+            |e| {
+                e.allow_param_flags_anywhere = vec![ParamFlagsCondition {
+                    position: Some(1),
+                    type_string: Some("1 | 2".to_string()),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_except_param_flags_disallows_only_when_the_configured_bit_is_set() {
+    let d = with_entries(
+        r#"<?php
+            function f($flags) {}
+            f(4);
+            f(5);
+            f(1);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "f",
+            "debug flag is forbidden",
+            |e| {
+                e.allow_except_param_flags = vec![ParamFlagsCondition {
+                    position: Some(1),
+                    value: Some(4),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 2, "got: {d:?}");
 }

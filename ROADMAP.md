@@ -4987,8 +4987,22 @@ Recommended sequencing, each its own commit (small/medium as noted):
    docs' own two worked examples directly (`Controller::redirect()`/
    `handleRequest()`/`SafeUrl`; `dispatch()`/`HandlerInterface`/
    `DangerousEvent`), both now passing tests.
-5. The `ParamFlags` family (medium - needs the new constant folder
-   above; otherwise reuses step 3/4's engine).
+5. The `ParamFlags` family - **done**: `allowParamFlagsInAllowed`/
+   `allowParamFlagsAnywhere`/`allowExceptParamFlagsInAllowed`/
+   `allowExceptParamFlags` (aliases `disallowParamFlagsInAllowed`/
+   `disallowParamFlags`), a new `ParamFlagsCondition` type, reusing
+   step 3/4's own zone/gate plumbing verbatim - the only genuinely new
+   piece is `Checker::fold_int_flags`, a small best-effort AST-level
+   constant folder (`Literal`/unary-minus/`Name`-via-`Registry::
+   global_constants`/`BinOp::{BitOr,BitAnd,BitXor}`), needed because
+   ordinary type inference for a bitwise expression (`checker/expr.rs:
+   5101`) deliberately widens two folded int literals to plain
+   `Type::Int` - confirmed via direct grep, exactly the gap the
+   investigation flagged. Matching is a bit-submask test
+   (`(actual & configured) == configured`), not equality; `type_string`
+   (real docs: `1 | 2`) parses to a `Type::Union` whose members are
+   tried as independent alternatives (`typeString: 1 | 2` means "either
+   flag 1 or flag 2 is set," not a bitwise-or of the two).
 6. First-class-callable interaction for the `*InAllowed` family (small
    - the `*Anywhere` family's own share of this is already done, see
    step 3).

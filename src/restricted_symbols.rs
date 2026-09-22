@@ -105,6 +105,22 @@ pub struct ParamRef {
     pub name: Option<String>,
 }
 
+/// `ParamCondition`'s own bitmask sibling, for the real `ParamFlags`
+/// directive family - matches when the argument's own resolved integer
+/// value has every bit of `value` (a single flag) set, or every bit of
+/// *any one* member of `type_string`'s own parsed union set (real docs:
+/// "if you want to (dis)allow a parameter when either the flag `1` or
+/// `2` is set, use `typeString: 1 | 2`" - note this `|` is a PHPDoc
+/// union, not PHP's own bitwise-or operator). No `class_pattern`
+/// sibling here - a flag mask is always an integer, never an object.
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct ParamFlagsCondition {
+    pub position: Option<u32>,
+    pub name: Option<String>,
+    pub value: Option<i64>,
+    pub type_string: Option<String>,
+}
+
 /// One `[[restricted_symbols]]` entry.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RestrictedSymbolEntry {
@@ -300,12 +316,30 @@ pub struct RestrictedSymbolEntry {
     /// worked example).
     #[serde(default)]
     pub allow_except_params_in_allowed: Vec<ParamCondition>,
+    /// `allow_params_in_allowed`'s bitmask sibling (real
+    /// `allowParamFlagsInAllowed`).
+    #[serde(default)]
+    pub allow_param_flags_in_allowed: Vec<ParamFlagsCondition>,
+    /// `allow_params_anywhere`'s bitmask sibling (real
+    /// `allowParamFlagsAnywhere`).
+    #[serde(default)]
+    pub allow_param_flags_anywhere: Vec<ParamFlagsCondition>,
+    /// `allow_except_params_in_allowed`'s bitmask sibling (real
+    /// `allowExceptParamFlagsInAllowed`, alias
+    /// `disallowParamFlagsInAllowed`).
+    #[serde(default)]
+    pub allow_except_param_flags_in_allowed: Vec<ParamFlagsCondition>,
+    /// `allow_except_params_anywhere`'s bitmask sibling (real
+    /// `allowExceptParamFlags`, alias `disallowParamFlags`).
+    #[serde(default)]
+    pub allow_except_param_flags: Vec<ParamFlagsCondition>,
 }
 
 impl RestrictedSymbolEntry {
-    /// Whether this entry configures any `*ParamsInAllowed` field at
-    /// all - `checker::restricted_symbol_usage`'s own unconditional
-    /// zone checks (`is_allowed_by_calling_context`/`is_allowed_by_
+    /// Whether this entry configures any `*ParamsInAllowed`/
+    /// `*ParamFlagsInAllowed` field at all -
+    /// `checker::restricted_symbol_usage`'s own unconditional zone
+    /// checks (`is_allowed_by_calling_context`/`is_allowed_by_
     /// instance_of_context`) defer to the params-aware combined check
     /// instead of evaluating `allow_in_methods`/`allow_in_instance_of`/
     /// their `allow_except_in_*` siblings on their own whenever this is
@@ -315,6 +349,8 @@ impl RestrictedSymbolEntry {
         !self.allow_params_in_allowed.is_empty()
             || !self.allow_params_in_allowed_any_value.is_empty()
             || !self.allow_except_params_in_allowed.is_empty()
+            || !self.allow_param_flags_in_allowed.is_empty()
+            || !self.allow_except_param_flags_in_allowed.is_empty()
     }
 }
 
@@ -554,6 +590,10 @@ mod tests {
             allow_params_in_allowed: Vec::new(),
             allow_params_in_allowed_any_value: Vec::new(),
             allow_except_params_in_allowed: Vec::new(),
+            allow_param_flags_in_allowed: Vec::new(),
+            allow_param_flags_anywhere: Vec::new(),
+            allow_except_param_flags_in_allowed: Vec::new(),
+            allow_except_param_flags: Vec::new(),
         }
     }
 
