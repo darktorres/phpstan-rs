@@ -937,7 +937,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         },
         "null" => Type::Null,
         "void" => Type::Void,
-        "mixed" => Type::Mixed(false),
+        // The one genuine source of explicit `mixed` (Phase 84's own
+        // `Type::Mixed`'s doc comment, `types.rs`) - the literal keyword
+        // was written somewhere in this type expression, real PHPStan's
+        // own `ParserNodeTypeToPHPStanType`/`TypeNodeResolver` both
+        // resolving it to `MixedType(true)` too (confirmed directly
+        // against `vendor/phpstan-src`).
+        "mixed" => Type::Mixed(true),
         "never" | "noreturn" => Type::Never,
         // `array<K, V>`'s key argument is real
         // (`Type::Array`'s own key slot), not discarded. Bare `array`

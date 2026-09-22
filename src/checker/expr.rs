@@ -3501,10 +3501,13 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if body_ty != Type::Mixed(false)
-                        && !self
-                            .registry
-                            .accepts_at_configured_level(&body_ty, &expected)
+                    // See `checker::calls`' own identical comment:
+                    // `accepts_at_configured_level` already accepts a
+                    // `Mixed` body type unconditionally below real
+                    // PHPStan's own level 9/10.
+                    if !self
+                        .registry
+                        .accepts_at_configured_level(&body_ty, &expected)
                     {
                         self.report(
                             label.to_string(),

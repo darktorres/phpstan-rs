@@ -1,6 +1,6 @@
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder, Locals, MemberVisibilityCheck, UsageTokenKind};
-use crate::types::{self, Type};
+use crate::types;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_property_assignment(
@@ -118,10 +118,14 @@ impl<'a> Checker<'a> {
                 .or_default()
                 .push(actual.clone());
         }
-        if actual == Type::Mixed(false)
-            || self
-                .registry
-                .accepts_at_configured_level(&actual, &expected)
+        // See `checker::calls`' own identical comment: `accepts_at_
+        // configured_level` already accepts a `Mixed` actual value
+        // unconditionally below real PHPStan's own level 9/10, so no
+        // separate bail-out is needed (and one here would wrongly skip
+        // this check once either is enabled).
+        if self
+            .registry
+            .accepts_at_configured_level(&actual, &expected)
         {
             return;
         }

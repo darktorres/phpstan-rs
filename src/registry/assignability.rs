@@ -2,6 +2,17 @@ use crate::ast::ClassKind;
 use crate::registry::Registry;
 use crate::types::{self, Type, Variance};
 
+// Real PHPStan's own level-gated `RuleLevelHelper` behaviors
+// (`accepts_at_configured_level`/`accepts_at_configured_level_rec`/
+// `is_assignable_at_level`, below) - named here, at module scope, so
+// `accepts_at_configured_level`'s own unconfigured-level fallback can
+// reference `NULLABLES_CHECK_LEVEL` directly rather than duplicating the
+// literal `8`.
+const UNION_TYPES_CHECK_LEVEL: u8 = 7;
+const NULLABLES_CHECK_LEVEL: u8 = 8;
+const EXPLICIT_MIXED_CHECK_LEVEL: u8 = 9;
+const IMPLICIT_MIXED_CHECK_LEVEL: u8 = 10;
+
 impl Registry {
     /// Type-compatibility check that consults the class hierarchy for
     /// `Object` types; every other case defers to `types::is_subtype`,
@@ -558,36 +569,46 @@ impl Registry {
     /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
     /// switch.
     pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
-        let Some(level) = self.configured_level else {
-            return self.is_assignable(sub, sup);
-        };
+        // Never configured means "assume the strictest threshold for
+        // `checkNullables`/`checkUnionTypes`" (`NULLABLES_CHECK_LEVEL`,
+        // matching this method's own pre-existing behavior exactly - the
+        // safe default for every caller/test that never opts in) - but
+        // NOT the strictest threshold for the newer `checkExplicitMixed`/
+        // `checkImplicitMixed` (9/10, strictly above 8): those are real
+        // PHPStan's own always-off-unless-opted-in checks, so an
+        // unconfigured level must keep accepting `Mixed` unconditionally,
+        // exactly like every other caller already did before either
+        // existed. `NULLABLES_CHECK_LEVEL` sits below both, so passing it
+        // through `accepts_at_configured_level_rec` gets both properties
+        // at once rather than needing its own separate branch.
+        let level = self.configured_level.unwrap_or(NULLABLES_CHECK_LEVEL);
         self.accepts_at_configured_level_rec(sub, sup, level)
     }
 
     fn accepts_at_configured_level_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
-        const UNION_TYPES_CHECK_LEVEL: u8 = 7;
-        const NULLABLES_CHECK_LEVEL: u8 = 8;
-
         // Fast path: both real gates already at their strict threshold -
-        // byte-identical to plain `is_assignable`, the safe default for
-        // a project explicitly configured at (or above) real PHPStan's
-        // own strictest level for this behavior. `NULLABLES_CHECK_LEVEL`
-        // (8) is strictly above `UNION_TYPES_CHECK_LEVEL` (7), so
-        // `level >= NULLABLES_CHECK_LEVEL` alone already implies the
-        // other - both consts are still named here (rather than one bare
-        // `8`) so this reads as "both real gates," matching real
-        // PHPStan's own two separately-named flags.
+        // byte-identical to `is_assignable_at_level` (which still applies
+        // `checkExplicitMixed`/`checkImplicitMixed`, real PHPStan's own
+        // level 9/10 - unlike `checkNullables`/`checkUnionTypes`, neither
+        // is subsumed by this fast path, since 9/10 sit *above* 8), the
+        // safe default for a project explicitly configured at (or above)
+        // real PHPStan's own strictest level for *this* behavior.
+        // `NULLABLES_CHECK_LEVEL` (8) is strictly above
+        // `UNION_TYPES_CHECK_LEVEL` (7), so `level >= NULLABLES_CHECK_LEVEL`
+        // alone already implies the other - both consts are still named
+        // here (rather than one bare `8`) so this reads as "both real
+        // gates," matching real PHPStan's own two separately-named flags.
         if level >= NULLABLES_CHECK_LEVEL {
             debug_assert!(level >= UNION_TYPES_CHECK_LEVEL);
-            return self.is_assignable(sub, sup);
+            return self.is_assignable_at_level(sub, sup, level);
         }
         // Fast path: neither side is a `Union` at all - nothing for
         // either level-gated behavior to touch, so this collapses to
-        // plain `is_assignable` too (the `Union` arms below are the only
-        // ones this method ever needs to diverge from `is_assignable`
-        // on).
+        // `is_assignable_at_level` too (the `Union` arms below are the
+        // only ones this method ever needs to diverge from plain
+        // assignability on).
         if !matches!(sub, Type::Union(_)) && !matches!(sup, Type::Union(_)) {
-            return self.is_assignable(sub, sup);
+            return self.is_assignable_at_level(sub, sup, level);
         }
 
         // `checkNullables` (real PHPStan's own `transformAcceptedType`,
@@ -648,7 +669,49 @@ impl Registry {
             (_, Type::Union(members)) => members
                 .iter()
                 .any(|m| self.accepts_at_configured_level_rec(sub, m, level)),
-            _ => self.is_assignable(sub, sup),
+            _ => self.is_assignable_at_level(sub, sup, level),
         }
+    }
+
+    /// `is_assignable`, additionally aware of real PHPStan's own level
+    /// 9/10 `checkExplicitMixed`/`checkImplicitMixed`.
+    ///
+    /// This project's `is_subtype`/`is_assignable` never actually gave
+    /// `Mixed` a blanket "accepted anywhere" structural rule the way real
+    /// PHPStan's own `MixedType::isAcceptedBy()` unconditionally does
+    /// (confirmed directly: there is no `(Type::Mixed(_), _) => true` arm
+    /// in `types::is_subtype`, only the mirror-image `(_, Type::Mixed(_))
+    /// => true`, a different direction entirely) - every one of dozens of
+    /// existing call sites instead bails out ad hoc, on its own, whenever
+    /// its *own* actual type happens to be `Mixed`. Rather than widen
+    /// `is_subtype` itself with a new unconditional arm (real, foundational
+    /// surgery with unknown blast radius across every existing caller,
+    /// not something this one opt-in feature should force), this method
+    /// supplies that same "accepted anywhere below the matching strict
+    /// level" leniency directly and only here - self-contained, so
+    /// nothing outside a caller that opts into `accepts_at_configured_
+    /// level` ever sees a behavior change. Once at or past the matching
+    /// level, `sub` only survives when `sup` itself accepts `Mixed` too -
+    /// mirrors `RuleLevelHelper::transformCommonType`/`accepts` wrapping
+    /// a matching `MixedType` as `StrictMixedType` before the real
+    /// `accepts()` call, whose own `isAcceptedBy()` (`vendor/phpstan-src/
+    /// src/Type/StrictMixedType.php`) returns Yes only when the accepting
+    /// type is itself `(Strict)MixedType`, Maybe otherwise - collapsed to
+    /// a plain `false` here, this method's own boolean-only API (see
+    /// `accepts_at_configured_level`'s own doc comment on why a full
+    /// trinary rewrite isn't attempted).
+    fn is_assignable_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+        if let Type::Mixed(is_explicit) = sub {
+            let strict_level = if *is_explicit {
+                EXPLICIT_MIXED_CHECK_LEVEL
+            } else {
+                IMPLICIT_MIXED_CHECK_LEVEL
+            };
+            if level < strict_level {
+                return true;
+            }
+            return matches!(sup, Type::Mixed(_));
+        }
+        self.is_assignable(sub, sup)
     }
 }

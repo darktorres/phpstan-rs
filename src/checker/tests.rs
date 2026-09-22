@@ -32,6 +32,7 @@ mod duplicate_operands;
 mod duplicates;
 mod dynamic_properties_strict;
 mod enums;
+mod explicit_and_implicit_mixed;
 mod foreach_iterables;
 mod generator_types;
 mod generics_and_templates;

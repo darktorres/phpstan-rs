@@ -102,6 +102,17 @@ impl<'a> Checker<'a> {
                         // PHPStan\Type\Type`, would read as violating a
                         // bound this project has no way to verify either
                         // way.
+                        // Real PHPStan's own `GenericObjectTypeCheck`
+                        // calls `$boundType->isSuperTypeOf(...)` directly
+                        // (`vendor/phpstan-src/src/Rules/Generics/
+                        // GenericObjectTypeCheck.php`), never
+                        // `RuleLevelHelper::accepts()` - `checkExplicitMixed`/
+                        // `checkImplicitMixed` never applies to a generic
+                        // bound check in real PHPStan either, so this
+                        // stays on plain `is_assignable`, not
+                        // `accepts_at_configured_level` (see that
+                        // method's own doc comment, which already
+                        // disclosed this exact exclusion).
                         if *checked_arg != Type::Mixed(false)
                             && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)

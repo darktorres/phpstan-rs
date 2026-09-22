@@ -279,10 +279,13 @@ impl<'a> Checker<'a> {
                             3,
                             "return.void",
                         );
-                    } else if actual != Type::Mixed(false)
-                        && !self
-                            .registry
-                            .accepts_at_configured_level(&actual, &expected)
+                    // See `checker::calls`' own identical comment:
+                    // `accepts_at_configured_level` already accepts a
+                    // `Mixed` actual value unconditionally below real
+                    // PHPStan's own level 9/10.
+                    } else if !self
+                        .registry
+                        .accepts_at_configured_level(&actual, &expected)
                     {
                         // `DiscriminantArrayFactsMap`'s own doc comment -
                         // before reporting a real mismatch, retry against
@@ -370,8 +373,14 @@ impl<'a> Checker<'a> {
                             3,
                             "return.never",
                         );
+                    // A declared `mixed` return type already accepts
+                    // `Type::Null` unconditionally via ordinary
+                    // structural subtyping (`Type::Null` is never itself
+                    // `Mixed`, so this call site's own new level 9/10
+                    // gate - keyed on the *sub* side being `Mixed` - never
+                    // applies here regardless) - no separate `expected
+                    // != Mixed` guard needed.
                     } else if expected != Type::Void
-                        && expected != Type::Mixed(false)
                         && !self
                             .registry
                             .accepts_at_configured_level(&Type::Null, &expected)

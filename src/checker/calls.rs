@@ -446,9 +446,11 @@ impl<'a> Checker<'a> {
                 }
             }
             let arg_ty = self.infer_expr(arg, locals);
-            if arg_ty == Type::Mixed(false) {
-                continue;
-            }
+            // `accepts_at_configured_level` already accepts a `Mixed`
+            // argument unconditionally below real PHPStan's own level
+            // 9/10 `checkExplicitMixed`/`checkImplicitMixed` threshold -
+            // no separate early bail-out needed, and one here would
+            // wrongly skip this check entirely once either is enabled.
             let param_ty = match defining_class {
                 Some(c) => self.resolve_pseudo(&param.ty, c),
                 None => param.ty.clone(),
@@ -552,9 +554,9 @@ impl<'a> Checker<'a> {
                 },
             };
             let arg_ty = self.infer_expr(&a.value, locals);
-            if arg_ty == Type::Mixed(false) {
-                continue;
-            }
+            // See the identical, earlier comment in this file's own
+            // ordinary-call argument check for why no separate `Mixed`
+            // bail-out is needed here.
             if !self
                 .registry
                 .accepts_at_configured_level(&arg_ty, &param.ty)
@@ -637,7 +639,7 @@ impl<'a> Checker<'a> {
                 .position(|p| std::ptr::eq(p, param))
                 .and_then(|pos| resolved.get(pos))
                 .is_some_and(|s| s.is_some());
-            if already_filled || *field_ty == Type::Mixed(false) {
+            if already_filled {
                 continue;
             }
             let param_ty = match defining_class {

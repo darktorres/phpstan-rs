@@ -4,6 +4,24 @@ use super::super::*;
 use super::helpers::*;
 
 #[test]
+fn a_native_mixed_parameter_hint_resolves_to_explicit_mixed() {
+    // Phase 84's own `Type::Mixed(bool)` - the literal `mixed` keyword,
+    // written natively here, is real PHPStan's own definition of
+    // *explicit* mixed (`vendor/phpstan-src/src/Type/
+    // ParserNodeTypeToPHPStanType.php`).
+    let r = build_registry(r#"<?php function g(mixed $m): void {}"#);
+    let sig = r.functions.get("g").unwrap();
+    assert!(matches!(sig.params[0].ty, Type::Mixed(true)));
+}
+
+#[test]
+fn an_untyped_parameter_resolves_to_implicit_mixed() {
+    let r = build_registry(r#"<?php function g($m): void {}"#);
+    let sig = r.functions.get("g").unwrap();
+    assert!(matches!(sig.params[0].ty, Type::Mixed(false)));
+}
+
+#[test]
 fn the_object_type_hint_is_not_namespace_qualified() {
     // `object` is a PHP-reserved word - no real class can ever be
     // named that, so `Type::Object("object")` (parse_type_string's

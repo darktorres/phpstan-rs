@@ -91,9 +91,10 @@ impl<'a> Checker<'a> {
         let Some(declared) = self.current_function_by_ref_params.get(name).cloned() else {
             return;
         };
-        if *actual == Type::Mixed(false)
-            || self.registry.accepts_at_configured_level(actual, &declared)
-        {
+        // See `checker::calls`' own identical comment: `accepts_at_
+        // configured_level` already accepts a `Mixed` actual value
+        // unconditionally below real PHPStan's own level 9/10.
+        if self.registry.accepts_at_configured_level(actual, &declared) {
             return;
         }
         self.report(
@@ -156,10 +157,9 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
                 continue;
             };
-            if actual == Type::Mixed(false)
-                || self
-                    .registry
-                    .accepts_at_configured_level(&actual, &declared)
+            if self
+                .registry
+                .accepts_at_configured_level(&actual, &declared)
             {
                 continue;
             }

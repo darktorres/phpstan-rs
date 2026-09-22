@@ -335,6 +335,71 @@ fn a_union_vs_union_pair_recurses_correctly_below_the_strict_threshold() {
     assert!(!r.accepts_at_configured_level(&nullable_string, &nullable_int));
 }
 
+// `checkExplicitMixed`/`checkImplicitMixed` - real PHPStan's own level
+// 9/10 (`accepts_at_configured_level`'s own `is_assignable_at_level`).
+
+#[test]
+fn below_level_nine_an_explicit_mixed_value_is_accepted_by_a_concrete_declared_type() {
+    let mut r = build_registry("<?php");
+    for level in 0..9 {
+        r.configured_level = Some(level);
+        assert!(
+            r.accepts_at_configured_level(&Type::Mixed(true), &Type::String),
+            "level {level} should still accept an explicit mixed value"
+        );
+    }
+}
+
+#[test]
+fn at_level_nine_an_explicit_mixed_value_is_rejected_by_a_concrete_declared_type() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(9);
+    assert!(!r.accepts_at_configured_level(&Type::Mixed(true), &Type::String));
+}
+
+#[test]
+fn at_level_nine_an_implicit_mixed_value_is_still_accepted() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(9);
+    // Level 9 is `checkExplicitMixed` only - `checkImplicitMixed` needs
+    // level 10, real PHPStan's own cumulative-but-distinct pair.
+    assert!(r.accepts_at_configured_level(&Type::Mixed(false), &Type::String));
+}
+
+#[test]
+fn at_level_ten_both_explicit_and_implicit_mixed_values_are_rejected() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(10);
+    assert!(!r.accepts_at_configured_level(&Type::Mixed(true), &Type::String));
+    assert!(!r.accepts_at_configured_level(&Type::Mixed(false), &Type::String));
+}
+
+#[test]
+fn at_level_ten_a_mixed_value_is_still_accepted_by_a_mixed_declared_type() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(10);
+    assert!(r.accepts_at_configured_level(&Type::Mixed(true), &Type::Mixed(false)));
+    assert!(r.accepts_at_configured_level(&Type::Mixed(false), &Type::Mixed(true)));
+}
+
+#[test]
+fn at_level_ten_a_mixed_value_inside_a_union_is_still_rejected_by_a_concrete_type() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(10);
+    let string_or_mixed = Type::Union(vec![Type::String, Type::Mixed(false)]);
+    assert!(!r.accepts_at_configured_level(&string_or_mixed, &Type::String));
+}
+
+#[test]
+fn at_level_ten_ordinary_rejection_is_unaffected() {
+    let mut r = build_registry("<?php");
+    r.configured_level = Some(10);
+    // A real mismatch (not mixed-driven at all) must still be rejected -
+    // this mechanism only ever turns an acceptance into a rejection,
+    // never masks a genuine one.
+    assert!(!r.accepts_at_configured_level(&Type::Int, &Type::String));
+}
+
 #[test]
 fn variance_composes_through_a_nested_covariant_generic_argument() {
     let r = build_registry(
