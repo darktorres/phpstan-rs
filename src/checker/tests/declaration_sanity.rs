@@ -671,3 +671,124 @@ fn ordinary_parameter_ordering_is_never_flagged_required_after_optional() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+fn promotion_errors(d: &[crate::Diagnostic]) -> Vec<&str> {
+    d.iter()
+        .filter(|x| {
+            x.identifier == "property.invalidPromoted"
+                || x.identifier == "property.promotedNotSupported"
+        })
+        .map(|x| x.message.as_str())
+        .collect()
+}
+
+#[test]
+fn promoted_parameter_outside_a_constructor_is_flagged_everywhere() {
+    let d = diagnostics_for(
+        r#"<?php
+            function plain(private int $a) {}
+            class Host {
+                public function method(public int $b) {}
+                public function make() {
+                    $f = function (protected int $c) {};
+                    $g = fn (readonly int $d) => 1;
+                    return new class {
+                        public function inner(private int $e) {}
+                    };
+                }
+            }
+        "#,
+    );
+    assert_eq!(
+        promotion_errors(&d),
+        vec!["Promoted properties can be in constructor only."; 5],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn promoted_parameter_in_abstract_or_interface_constructor_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class AbsHost {
+                abstract public function __construct(private int $a);
+            }
+            interface IfaceHost {
+                public function __construct(public int $b);
+            }
+        "#,
+    );
+    assert_eq!(
+        promotion_errors(&d),
+        vec!["Promoted properties are not allowed in abstract constructors."; 2],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn variadic_promoted_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class VarHost {
+                public function __construct(private int $a, public int ...$rest) {}
+            }
+        "#,
+    );
+    assert_eq!(
+        promotion_errors(&d),
+        vec!["Promoted property parameter $rest can not be variadic."],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn well_formed_promotion_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class OkHost {
+                public function __construct(
+                    private int $a,
+                    readonly int $b,
+                    private(set) string $c,
+                    int ...$plain,
+                ) {}
+            }
+            trait InitTrait {
+                public function init(private int $x) {}
+            }
+            class AliasHost {
+                use InitTrait { init as __construct; }
+            }
+        "#,
+    );
+    assert!(promotion_errors(&d).is_empty(), "got: {d:?}");
+}
+
+#[test]
+fn promotion_is_gated_on_the_configured_php_version() {
+    let src = r#"<?php
+        class GateHost {
+            public function __construct(private int $a, final public int $b) {}
+        }
+    "#;
+    let d = diagnostics_for_with(src, |r| r.php_version = Some((7, 4)));
+    assert_eq!(
+        promotion_errors(&d),
+        vec!["Promoted properties are supported only on PHP 8.0 and later."],
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "property.promotedNotSupported")
+    );
+
+    let d = diagnostics_for_with(src, |r| r.php_version = Some((8, 4)));
+    assert_eq!(
+        promotion_errors(&d),
+        vec!["Final promoted properties are supported only on PHP 8.5 and later."],
+        "got: {d:?}"
+    );
+
+    let d = diagnostics_for_with(src, |r| r.php_version = Some((8, 5)));
+    assert!(promotion_errors(&d).is_empty(), "got: {d:?}");
+}

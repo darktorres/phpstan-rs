@@ -193,6 +193,51 @@ pub fn stmt_children(s: &Stmt) -> Vec<&Stmt> {
     }
 }
 
+/// This statement's own direct expression fields (not nested statements -
+/// `stmt_children` already covers those). Mirrors `deps::collect_stmt`'s
+/// own match shape: each `StmtKind` variant's non-statement fields need
+/// their own handling, a generic child-list can't express them.
+pub fn stmt_own_exprs(stmt: &Stmt) -> Vec<&Expr> {
+    match &stmt.kind {
+        StmtKind::Expression(e) | StmtKind::Throw(e) => vec![e],
+        StmtKind::Return(e) => e.iter().collect(),
+        StmtKind::Echo(exprs) => exprs.iter().collect(),
+        StmtKind::If { cond, .. }
+        | StmtKind::While { cond, .. }
+        | StmtKind::DoWhile { cond, .. } => {
+            vec![cond]
+        }
+        StmtKind::For {
+            init, cond, step, ..
+        } => init.iter().chain(cond).chain(step).collect(),
+        StmtKind::Foreach {
+            subject,
+            key,
+            value,
+            ..
+        } => {
+            let mut v = vec![subject];
+            if let Some(k) = key {
+                v.push(k);
+            }
+            v.push(value);
+            v
+        }
+        StmtKind::Switch { subject, cases } => {
+            let mut v = vec![subject];
+            for case in cases {
+                if let Some(t) = &case.test {
+                    v.push(t);
+                }
+            }
+            v
+        }
+        StmtKind::GlobalConst(consts) => consts.iter().map(|c| &c.value).collect(),
+        StmtKind::StaticVar(vars) => vars.iter().filter_map(|(_, d)| d.as_ref()).collect(),
+        _ => vec![],
+    }
+}
+
 /// Non-allocating counterpart to `expr_children(e).into_iter().any(f)` -
 /// mirrors the exact same match arms (verified arm-by-arm against
 /// `expr_children`'s own source, not just assumed - including the same

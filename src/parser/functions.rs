@@ -25,11 +25,12 @@ impl Parser {
             let doc_comment = self.take_doc_comment();
             // A visibility modifier here means constructor property
             // promotion (`public function __construct(private int $id) {}`)
-            // - `readonly` can appear alongside it but doesn't itself imply
-            // promotion, so it's still just consumed and dropped.
+            // - `readonly`/`final` can appear alongside it, and each also
+            // promotes on its own.
             let mut promoted_visibility = None;
             let mut promoted_readonly = false;
             let mut promoted_final = false;
+            let mut saw_set_visibility = false;
             loop {
                 // PHP 8.4 asymmetric visibility on a promoted property
                 // (`public public(set) string $a`) - see the identical
@@ -43,6 +44,7 @@ impl Parser {
                     self.skip();
                     self.expect_ident()?;
                     self.expect(&Token::RParen)?;
+                    saw_set_visibility = true;
                     continue;
                 }
                 match self.peek() {
@@ -64,6 +66,14 @@ impl Parser {
                     _ => break,
                 }
                 self.skip();
+            }
+            // `readonly`, `final`, or a set-visibility modifier alone
+            // (`private(set) string $a`) still promotes, with implicit
+            // `public` visibility.
+            if promoted_visibility.is_none()
+                && (saw_set_visibility || promoted_readonly || promoted_final)
+            {
+                promoted_visibility = Some(Visibility::Public);
             }
 
             let type_hint_start = self.current_pos();

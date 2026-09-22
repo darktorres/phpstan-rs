@@ -501,7 +501,13 @@ target checked against the kind of symbol it resolves to
 `classImplements.*`, `enumImplements.*`, `interfaceExtends.*`,
 `traitUse.*`, `interface.traitUse`), plus `class.extendsFinalByPhpDoc`
 and `class.readOnly`/`.nonReadOnly` parent readonly-parity, anonymous
-classes included.
+classes included. `InvalidPromotedPropertiesRule`'s promotion
+legality (`property.invalidPromoted` outside a non-abstract constructor,
+on a variadic parameter, or `final` below PHP 8.5;
+`property.promotedNotSupported` below PHP 8.0), on every function-like
+including closures, arrow functions, and a trait method aliased as
+`__construct`; a `readonly`/`final`/set-visibility-only parameter now
+promotes with implicit `public` visibility.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3506,9 +3512,6 @@ against this list, and added the real gaps the audit had missed.
   Still missing: `new.enum`, `new.trait`, `new.nonObject`,
   `new.noConstructor`, `class.noParent`, and
   `outOfClass.self`/`.static`/`.parent`.
-- `InvalidPromotedPropertiesRule` — promotion legality (only inside
-  `__construct`, never abstract, never variadic, PHP-8.0-gated, `final`
-  promotion additionally gated).
 - `ReadOnlyClassRule` — the PHP-version-gate data already exists
   (`PhpFeature::ReadOnlyClasses`/`ReadOnlyAnonymousClasses`,
   `php_version.rs`) but is never consumed by any checker call site.

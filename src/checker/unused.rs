@@ -29,10 +29,9 @@ use var_usage::collect_var_usage;
 impl<'a> Checker<'a> {
     /// Flags a `__construct` parameter never referenced anywhere in the
     /// constructor's own body - scoped to constructors only, not a
-    /// general "unused parameter" rule. A promoted parameter (any
-    /// visibility/`readonly`/`final` modifier) is exempt: the promotion
-    /// itself is an implicit `$this->id = $id` assignment, a real use,
-    /// even when the body never reads `$id` again. An attribute class, or
+    /// general "unused parameter" rule. A promoted parameter is exempt:
+    /// the promotion itself is an implicit `$this->id = $id` assignment,
+    /// a real use, even when the body never reads `$id` again. An attribute class, or
     /// a class implementing an interface that declares `__construct`, is
     /// exempt entirely, since its constructor signature is dictated from
     /// outside the class.
@@ -51,9 +50,7 @@ impl<'a> Checker<'a> {
         let candidates: Vec<&Param> = f
             .params
             .iter()
-            .filter(|p| {
-                p.promoted_visibility.is_none() && !p.promoted_readonly && !p.promoted_final
-            })
+            .filter(|p| p.promoted_visibility.is_none())
             .collect();
         if candidates.is_empty() {
             return;
