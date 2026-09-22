@@ -214,6 +214,23 @@ two structurally different `Array(key, val)` members into one
 `Array(key1|key2, val1|val2)` instead of keeping them as separate,
 redundant members.
 
+**Class-constant types and constant type references.** A class
+constant's value is typed exactly: an array literal is an exact shape
+(real PHPStan's `ConstantArrayType`), and a reference to another
+constant (`self::A`, `Foo::BAR`, inside an array too) resolves through
+a fixpoint pre-pass of the deferred-type pass. A cycle, or a missing
+constant, ends up as `mixed`. The PHPDoc constant-type syntax
+(`Foo::BAR`, `Foo::PREFIX_*`, `Foo::*`, `self::X`,
+`value-of<Foo::CONST>`) resolves to the union of the matching
+constants' types (inherited and interface constants included, own
+declarations first) instead of collapsing the whole union to `mixed`.
+`Foo::class` is a class-string. Conditional return types resolve
+trinarily like `ConditionalTypeForParameter` (a maybe-subject keeps
+both branches, deduplicated). A template-typed conditional survives
+reconciliation with a nullable native hint, and a native `?` is never
+unioned onto one. `array<T>` binds `T` from `list`/`non-empty-array`
+intersections and from array shapes.
+
 **String accessory case-tracking** (Phase 75). New `AccessoryKind`
 variants `LowercaseString`/`UppercaseString`/`DecimalIntegerString`,
 produced by `strtolower`/`strtoupper`/`ucfirst`/`mb_convert_case`/etc. A
@@ -567,7 +584,13 @@ target resolution** (`$obj::method()`, Phase 158):
 inference, and LSP hover/go-to-definition all now work through
 `$obj::method()`, not just `Foo::method()`. A closure/arrow-fn literal's own value carries its declared
 signature too - an unhinted, non-generator arrow fn's return is its
-body expression's own inferred type (`Type::closure_literal`: an `Object("Closure") &
+body expression's own inferred type, and an unhinted closure's is its
+own return statements' union (`void` with none, `null` added when it
+can fall off its end), computed from the closure body's own return
+points, which no longer leak into the enclosing function's too-wide-
+return accumulator. A literal passed to a shaped parameter is typed
+in that context, with its unhinted parameters taken from the shape
+(`Type::closure_literal`: an `Object("Closure") &
 Callable(Some(sig))` intersection, displayed `Closure(int): string` the
 way real PHPStan displays a `ClosureType`). That means invoking a
 closure-valued variable checks its arguments and infers its declared
@@ -636,9 +659,14 @@ rules the corpus needed:
   can't start with `|`/`&`.
 - `T[K]` (no space before `[`) is an offset-access type.
 
-On piwigo16, 154 of real `vendor/bin/phpstan`'s 155 hits match with
-zero false positives. The one miss is a Doctrine-annotation-style
-generic tag.
+A tag phpdoc-parser has no dedicated parser for, whose value opens
+with `(`, is validated as a Doctrine annotation argument list, the way
+it is there (`@url (image.jpg) ...` is invalid, `@ORM\Column(...)` isn't).
+An invalid tag contributes no type at all, matching real PHPStan's
+`InvalidTagValueNode`. PHPDoc `//` comments end at their own line, so
+URLs in descriptions survive. On piwigo16 this matched all 155 of real
+`vendor/bin/phpstan`'s hits with zero false positives, at the time of
+the corpus comparison (the Doctrine case was the last one added).
 
 **`@psalm-*`/`@phan-*` tag spellings** (Phase 179). `docblock::parse`
 now reads real PHPStan's `PhpDocNodeResolver` spelling set, not just
@@ -3513,13 +3541,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 130 — PhpDoc (`Rules/PhpDoc/` gaps)
 
-- `InvalidPhpDocTagValueRule` remainder — `phpDoc.parseError` itself is
-  built (see Done). Two gaps remain. First, real PHPStan ignores an
-  invalid tag entirely (it's an `InvalidTagValueNode`, so no type is
-  taken from it), while `docblock::parse` still applies whatever its
-  grammar recovered (`@return array(width, height)` still yields
-  `array`). Second, the Doctrine-annotation-style generic-tag parse
-  behind `@url (image.jpg) ...` (1 piwigo16 hit) isn't modeled.
 - `IncompatiblePhpDocTypeRule` family (param/property/property-hook/
   class-constant) — a PHPDoc type incompatible with its own native type
   hint; phpstan-rs silently reconciles/coerces instead of diagnosing.
@@ -4959,15 +4980,6 @@ a specific, corpus-checked reason to stay deferred.
   materially larger change (value-keyed, not name-keyed, narrowing) than
   a corpus-cleanup pass should take on, and each finding it produces
   today is sound, not a false positive to chase down.
-- **An unhinted full closure literal's signature has a `mixed` return
-  type, not its inferred body return type.** The declared half is built
-  for both literal kinds, and so is the inferred half for arrow fns: an
-  unhinted, non-generator arrow fn takes its body expression's own type
-  (see Done's structural Callable/Closure entry). An unhinted `function
-  () { return ...; }` is still `Closure(...): mixed`, where real PHPStan
-  (confirmed via `\PHPStan\dumpType()`) reports the union of every
-  `return` statement's type. `check_expr` computes those as it walks the
-  body, but `infer_expr`, which has to agree with it, doesn't.
 - **Correlated-narrowing family** (`ConditionalExpressionHolder`): the
   *general*, unbounded mechanism (an arbitrary boolean-formula memory
   over recorded facts) stays declined - no natural stopping point,

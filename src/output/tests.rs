@@ -167,3 +167,16 @@ fn render_checkstyle_omits_files_with_zero_diagnostics() {
 fn output_format_default_is_text() {
     assert_eq!(OutputFormat::default(), OutputFormat::Text);
 }
+
+#[test]
+fn a_multi_line_message_stays_one_line_in_text_but_intact_in_json_and_checkstyle() {
+    let d = diag("f", "value (first\nsecond\r\nthird): bad", 1, 1, 2);
+    assert_eq!(
+        diagnostic_line(&d),
+        "1:1: f: value (first second third): bad (variable.undefined)"
+    );
+    let mut results = HashMap::new();
+    results.insert(PathBuf::from("a.php"), vec![d]);
+    assert!(render_json(&results, 1).contains(r#"value (first\nsecond\r\nthird): bad"#));
+    assert!(render_checkstyle(&results).contains("value (first&#10;second&#13;&#10;third): bad"));
+}

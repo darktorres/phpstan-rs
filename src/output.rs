@@ -50,12 +50,29 @@ pub enum OutputFormat {
 /// drift out of sync as independently hand-written `println!`s. Matches
 /// what all three already printed before this module existed.
 /// `check-project` (the only one of the three that reports on more than
-/// one file) prepends the path itself.
+/// one file) prepends the path itself. Always exactly one line: a message
+/// that itself spans lines (a `phpDoc.parseError` quoting a wrapped tag's
+/// value, the same text real PHPStan reports) has each line break shown as
+/// a space here, so one diagnostic stays one line for grep and editor
+/// problem matchers. The JSON and checkstyle formats keep it intact.
 pub fn diagnostic_line(d: &Diagnostic) -> String {
     format!(
         "{}:{}: {}: {} ({})",
-        d.span.start.line, d.span.start.col, d.location, d.message, d.identifier
+        d.span.start.line,
+        d.span.start.col,
+        d.location,
+        single_line(&d.message),
+        d.identifier
     )
+}
+
+/// `text` with every `\r\n`/`\n`/`\r` line break replaced by one space.
+fn single_line(text: &str) -> std::borrow::Cow<'_, str> {
+    if text.contains(['\n', '\r']) {
+        std::borrow::Cow::Owned(text.replace("\r\n", " ").replace(['\n', '\r'], " "))
+    } else {
+        std::borrow::Cow::Borrowed(text)
+    }
 }
 
 #[derive(Serialize)]
@@ -185,7 +202,9 @@ pub fn render_checkstyle(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String 
     out
 }
 
-/// Escapes the five characters XML requires escaped in attribute values.
+/// Escapes the five characters XML requires escaped in attribute values,
+/// plus line breaks and tabs, which an XML parser would otherwise
+/// normalize to spaces inside an attribute value (XML 1.0 §3.3.3).
 /// Hand-rolled rather than a new dependency - `serde`/`serde_json` (used
 /// for the `json` format above and already a real dependency via the
 /// baseline/LSP work) has no XML counterpart in this project, and five
@@ -199,6 +218,9 @@ fn xml_escape(s: &str) -> String {
             '>' => out.push_str("&gt;"),
             '"' => out.push_str("&quot;"),
             '\'' => out.push_str("&apos;"),
+            '\n' => out.push_str("&#10;"),
+            '\r' => out.push_str("&#13;"),
+            '\t' => out.push_str("&#9;"),
             _ => out.push(c),
         }
     }
