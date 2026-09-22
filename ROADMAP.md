@@ -566,7 +566,7 @@ object) checks the resolved signature's arity and argument types, plus
 `ImplodeParameterCastableToStringRule`/`SortParameterCastableToStringRule`,
 flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
 (`function.impossibleHaystackValue` for `in_array()`/`array_search()`/
-`array_keys()` against a constant-array haystack).
+`array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3554,12 +3554,6 @@ identifier diff, direct `vendor/bin/phpstan analyse` (level 10) against
 `phpstan-rs check-project` on `~/piwigo16`, took every real identifier
 with no matching literal anywhere in this project's source, checked it
 against this list, and added the real gaps the audit had missed.
-
-### Phase 129 — Comparison (`Rules/Comparison/` gaps)
-
-- `UsageOfVoidMatchExpressionRule` — using the result of a `match`
-  whose every arm is a void-returning call; phpstan-rs's `Match`
-  handling has no void-result-usage check at all.
 
 ### Phase 130 — PhpDoc (`Rules/PhpDoc/` gaps)
 

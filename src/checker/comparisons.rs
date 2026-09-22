@@ -1,7 +1,9 @@
-//! `in_array()`/`array_search()`/`array_keys()` against a constant-array
-//! haystack holding a finite value the needle can never match, mirroring
-//! real PHPStan's `ImpossibleInArrayHaystackFiniteTypesRule`
-//! (`function.impossibleHaystackValue`, level 4).
+//! Two `Rules/Comparison/` checks: `in_array()`/`array_search()`/
+//! `array_keys()` against a constant-array haystack holding a finite
+//! value the needle can never match
+//! (`ImpossibleInArrayHaystackFiniteTypesRule`,
+//! `function.impossibleHaystackValue`, level 4), and a void `match` used
+//! as a value (`UsageOfVoidMatchExpressionRule`).
 
 use crate::ast::Arg;
 use crate::checker::expr::ranges::loose_compare_literals;
@@ -131,6 +133,36 @@ impl<'a> Checker<'a> {
                 span,
                 4,
                 "function.impossibleHaystackValue",
+            );
+        }
+    }
+
+    /// `UsageOfVoidMatchExpressionRule` (`match.void`, level 2): a
+    /// `match` used as a value while every arm that can produce one is
+    /// `void`.
+    pub(crate) fn check_void_match_usage(
+        &mut self,
+        arms: &[(Vec<crate::ast::Expr>, crate::ast::Expr)],
+        default: Option<&crate::ast::Expr>,
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
+        let mut saw_void = false;
+        for result in arms.iter().map(|(_, r)| r).chain(default) {
+            match self.infer_expr(result, locals) {
+                Type::Void => saw_void = true,
+                Type::Never => {}
+                _ => return,
+            }
+        }
+        if saw_void {
+            self.report(
+                label.to_string(),
+                "Result of match expression (void) is used.".to_string(),
+                span,
+                2,
+                "match.void",
             );
         }
     }
