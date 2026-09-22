@@ -566,7 +566,9 @@ object) checks the resolved signature's arity and argument types, plus
 `ImplodeParameterCastableToStringRule`/`SortParameterCastableToStringRule`,
 flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
 (`function.impossibleHaystackValue` for `in_array()`/`array_search()`/
-`array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule` (`foreach.emptyArray`).
+`array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule` (`foreach.emptyArray`). `OffsetAccessWithoutDimForReadingRule`
+(`offsetAccess.noDim`; a by-reference argument slot and `$r = &$a[]`
+legally create the element).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3615,8 +3617,6 @@ against this list, and added the real gaps the audit had missed.
   non-iterable-spread half (`arrayUnpacking.nonIterable`/`argument.
   unpackNonIterable`) is now built (receiver-type-checks phase); only
   the PHP-8.1-string-key-support gating remains.
-- `OffsetAccessWithoutDimForReadingRule` — `$x[]` used in read position
-  (a real PHP compile-time fatal), non-ignorable.
 - `NonexistentOffsetInArrayDimFetchRule` remainder — the "isn't offset-
   accessible at all" half is now built (`shapeAccess.notFound` for the
   shape case, receiver-type-checks phase); general-array/constant-array

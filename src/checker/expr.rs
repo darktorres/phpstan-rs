@@ -1865,7 +1865,14 @@ impl<'a> Checker<'a> {
                     self.check_nullsafe_byref_target(rhs, label);
                     self.check_property_assign_by_ref(rhs, locals, label);
                 }
-                let rhs_ty = self.check_expr(rhs, locals, label);
+                // `$r = &$a[];` legally creates the new element it refers to.
+                let rhs_ty = match &rhs.kind {
+                    ExprKind::Index(base, None) if matches!(&e.kind, ExprKind::AssignRef(..)) => {
+                        self.check_expr(base, locals, label);
+                        Type::Mixed(false)
+                    }
+                    _ => self.check_expr(rhs, locals, label),
+                };
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
                 // `list($a, $b) = $x;` (both desugar to the same
                 // `ExprKind::ArrayLiteral` target - no separate
@@ -1941,6 +1948,18 @@ impl<'a> Checker<'a> {
                 // `$x = $x ?? $default;` - the same quiet-left-side
                 // exemption as plain `??` applies to its own left side.
                 let lhs_ty = if *op == BinOp::Coalesce {
+                    if matches!(lhs.kind, ExprKind::Index(_, None)) {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                "Cannot use [] for reading.".to_string(),
+                                lhs.span,
+                                0,
+                                "offsetAccess.noDim",
+                            )
+                            .non_ignorable(),
+                        );
+                    }
                     let ty = self.check_expr_quiet_root(lhs, locals, label);
                     self.check_pointless_null_probe(
                         lhs,
@@ -2112,7 +2131,25 @@ impl<'a> Checker<'a> {
                         // `infer_expr`'s identical read does.
                         index_result_type(base_ty, literal_string_key(i).as_deref())
                     }
-                    None => Type::Mixed(false),
+                    // `OffsetAccessWithoutDimForReadingRule` - every
+                    // write target routes around this arm, and a
+                    // by-reference argument slot is recorded ahead of it.
+                    None => {
+                        if self.by_ref_empty_dim_args.borrow().contains(&e.span) {
+                            return Type::Mixed(false);
+                        }
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                "Cannot use [] for reading.".to_string(),
+                                e.span,
+                                0,
+                                "offsetAccess.noDim",
+                            )
+                            .non_ignorable(),
+                        );
+                        Type::Mixed(false)
+                    }
                 }
             }
             ExprKind::New(class_expr, args) => {
@@ -2285,6 +2322,9 @@ impl<'a> Checker<'a> {
             }
             ExprKind::NewAnonymousClass(decl, args) => {
                 for a in args {
+                    if matches!(a.value.kind, ExprKind::Index(_, None)) {
+                        self.by_ref_empty_dim_args.borrow_mut().insert(a.value.span);
+                    }
                     self.check_expr(&a.value, locals, label);
                 }
                 // The anonymous class's own methods are still worth

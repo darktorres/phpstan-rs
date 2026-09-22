@@ -1892,3 +1892,34 @@ fn deep_nested_writes_auto_vivify_every_missing_level() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn empty_dim_in_read_position_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function byRef(&$r) {}
+            function byVal($v) {}
+            function f(array $a, array $items, string $s): void {
+                byRef($a[]);
+                preg_match('/x/', $s, $a[]);
+                byVal($a[]);
+                $a[] = 1;
+                $a[][] = 2;
+                $a[]['k'] = 3;
+                foreach ($items as $a[]) {}
+                [$a[], $a[]] = [1, 2];
+                $r = &$a[];
+                $a[] ??= 5;
+                $a[] .= 'x';
+                echo $a[];
+            }
+        "#,
+    );
+    assert_eq!(
+        d.iter()
+            .filter(|x| x.identifier == "offsetAccess.noDim")
+            .count(),
+        4,
+        "got: {d:?}"
+    );
+}

@@ -897,6 +897,12 @@ pub struct Checker<'a> {
     // which never resolves against the registry. `None` outside an
     // anonymous class's methods, or when its span has no entry.
     pub(crate) current_anonymous_class: Option<String>,
+    // `$a[]` argument spans bound to a by-reference (or unknown)
+    // parameter, recorded by `predefine_byref_or_unknown_args` before the
+    // arguments are checked - the one read-looking position where PHP
+    // accepts an empty dim, since it creates the element.
+    pub(crate) by_ref_empty_dim_args:
+        std::cell::RefCell<std::collections::HashSet<crate::token::Span>>,
     // Every private property write's own assigned type, discovered
     // anywhere in this file's own `check_program` run - keyed by
     // (declaring class fqn, property name), never reset per-class:
@@ -1285,6 +1291,7 @@ impl<'a> Checker<'a> {
             pest_hook_properties: HashSet::new(),
             anonymous_class_names: HashMap::new(),
             current_anonymous_class: None,
+            by_ref_empty_dim_args: Default::default(),
             property_assign_facts: HashMap::new(),
             named_argument_call_facts: HashMap::new(),
             renamed_parameter_override_facts: Vec::new(),

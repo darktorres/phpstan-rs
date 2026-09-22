@@ -82,6 +82,30 @@ impl<'a> Checker<'a> {
         resolved: &[Option<&Expr>],
         locals: &mut Locals,
     ) {
+        {
+            let mut empty_dims = self.by_ref_empty_dim_args.borrow_mut();
+            for (i, arg) in args.iter().enumerate() {
+                if !matches!(arg.value.kind, ExprKind::Index(_, None)) {
+                    continue;
+                }
+                let by_ref = match sig {
+                    None => true,
+                    Some(sig) => resolved
+                        .iter()
+                        .position(|slot| slot.is_some_and(|e| std::ptr::eq(e, &arg.value)))
+                        .or(Some(i))
+                        .and_then(|p| {
+                            sig.params
+                                .get(p)
+                                .or_else(|| sig.params.last().filter(|param| param.variadic))
+                        })
+                        .is_some_and(|param| param.by_ref),
+                };
+                if by_ref {
+                    empty_dims.insert(arg.value.span);
+                }
+            }
+        }
         let Some(sig) = sig else {
             for arg in args {
                 let ExprKind::Variable(name) = &arg.value.kind else {
