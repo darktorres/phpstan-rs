@@ -3861,7 +3861,7 @@ synthetic `Token::InterpString` containing a `ComplexExpr` with garbage
 root-caused. Dev-only, an ongoing local workflow (`cargo +nightly fuzz
 run`), not a CI gate.
 
-**Extension API, Axis 1 + Axis 2** (Phase 18). Axis 1 (declarative,
+**Extension API, all 3 axes** (Phase 18). Axis 1 (declarative,
 config-driven symbol restriction) is `restricted_symbols`, above. Axis
 2: a new public `ReflectionRule` trait (`src/reflection_rule.rs`) over
 already-latent-public reflection data (`Project::registry()`/
@@ -3874,8 +3874,50 @@ PHPStan's own `Rule<TNodeType>`: no inferred per-expression type, no
 flow-sensitive narrowing, no `Locals` visibility. Axis 3 Stage 1 (an
 internal `Vec<Box<dyn InternalRule>>` trait-object dispatch mechanism,
 proving the pattern for a future public `Rule<TNode>` equivalent) is
-also done - see Pending for Stage 2, gated on this Stage's own corpus
-diff (confirmed exactly clean).
+done too, its own mandatory corpus diff confirmed exactly clean (a pure
+internal refactor, zero behavior change) - which is what unblocked
+Stage 2 rather than assuming it would.
+
+Axis 3 Stage 2, the real parity gap Axis 2's own doc comment named, is
+now built: `src/rule.rs`'s public `trait Rule` mirrors real PHPStan's
+own `Rule<TNodeType>`/`Scope` pair. `Rule::wants_expr`/`wants_stmt`
+declare which `ExprKind`/`StmtKind` variants a rule cares about (real
+PHPStan's own `getNodeType()` filtering), checked before `check_expr`/
+`check_stmt` - now thin wrappers over the unchanged, renamed
+`check_expr_impl`/`check_stmt_impl` - ever dispatch into it, at every
+recursion depth for free (the wrapper sits at the one recursive call
+site every internal `self.check_expr(...)`/`self.check_stmt(...)`
+already shares). `Scope` is a read-only facade over `Checker`'s
+flow-sensitive state, with an explicit expose-or-omit call made for
+each of `Locals`' own eight fact-map fields, not just the two simplest:
+exposed are `label`/`current_class`/`current_method` (a free function's
+own identity threaded through the pre-existing `label` parameter
+mechanism, deliberately not a new persistent `Checker` field -
+`current_function` never existed as one to begin with), `local_type`,
+and `is_function_guarded`/`is_method_guarded`/`is_property_guarded`
+(boolean queries over `GuardedFunctionSet`/`GuardedMemberSet`, not the
+raw sets, so this facade's own shape stays stable regardless of their
+internal representation). Deliberately omitted, disclosed: `provenance`
+(blocked on Phase 84's own not-yet-built explicit/implicit-`Mixed`
+semantics, likely to reshape this field before it's worth a public
+contract) and `condition_aliases`/`branch_implied_facts`/
+`query_builder_aliases`/`container_field_facts`/
+`discriminant_array_facts` (internal narrowing-mechanism bookkeeping
+specific to how this checker's own engine works, not a general-purpose
+fact a third-party rule needs). Registration mirrors Axis 2's own
+already-shipped shape rather than inventing a TOML-driven registry: an
+embedder builds a `Vec<Box<dyn Rule>>` and passes it to `Checker::
+set_external_rules` (empty by default at every one of this project's
+own ~31 `Checker::new` call sites, so this costs nothing unused) -
+compile-time-registered, same-binary rules only. `dlopen`/`cdylib`
+dynamic loading and a NEON-style registration syntax both stay declined
+outright, unchanged by this landing: no stable Rust ABI for the former
+without a large separate FFI project; no Rust-binary primitive
+corresponds to "name a PHP class for a DI container to instantiate" for
+the latter, and this project's own config format is TOML by design
+regardless. Zero behavior change to any existing check - an API-only
+addition, one of this whole area's own disclosed exceptions to needing
+a corpus diff of its own.
 
 ---
 
@@ -3890,27 +3932,6 @@ of this project's development, retired once every edge it tracked
 became satisfied, then reinstated after this session's reevaluation of
 the boundaries/won't-port lists produced new phases (158-175) with live
 dependency edges among them.
-
-**18 - Extension/plugin API, Axis 3 Stage 2 (PARTIAL).** Split into 3
-axes: Axis 1 (declarative `restricted_symbols`) and Axis 2 (a public
-`ReflectionRule` trait over already-public reflection data) are fully
-done (see Done). Axis 3 (a flow-sensitive, AST-node-dispatched
-`Rule<TNode>` equivalent) is staged: Stage 1 - migrating `Method
-ThrowTypeCovarianceRule` off its hardcoded call site onto a real
-internal `Vec<Box<dyn InternalRule>>` trait-object dispatch mechanism -
-is done and its own mandatory full corpus diff came back exactly clean
-(a pure internal refactor, zero behavior change), which is what actually
-unblocks Stage 2 rather than assuming it. Stage 2 - exposing a public
-`trait Rule`/`Scope`-equivalent, now that Stage 1 has proven the
-dispatch pattern - is not yet built: still needs a public-API-stable
-`Scope` facade over `Checker`'s currently `pub(crate)`/module-private
-flow-sensitive state (`Locals`, `ProvenanceMap`, `GuardedMemberSet`) and
-a real per-node-kind injection point into `check_program`'s single-pass
-traversal, both real, disclosed engineering work rather than a size/
-demand call. Declined outright, not staged: any `dlopen`/`cdylib`
-dynamic-loading mechanism (no stable Rust ABI without a large separate
-FFI project) and a NEON registration syntax (no parser exists project-
-wide for NEON, already declined elsewhere for the same reason).
 
 **48 - Symbol-existence pipeline, remaining stretch goals (PARTIAL).**
 The existence-check MVP, typed-class-constant validation, multi-
