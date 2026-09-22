@@ -13,9 +13,10 @@
 use crate::ast::*;
 use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::checker::calls::contains_nullsafe_access;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::php_version::PhpFeature;
 use crate::token::Span;
+use crate::types::Type;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PromotionSite {
@@ -69,12 +70,16 @@ impl<'a> Checker<'a> {
             }
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
+                let previous_class = self.current_class.replace(fqn.clone());
                 self.check_promoted_in_methods(&fqn, c.kind, &c.methods);
                 self.walk_promoted_in_property_hooks(&fqn, &c.properties);
+                self.current_class = previous_class;
             }
             StmtKind::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
+                let previous_class = self.current_class.replace(fqn.clone());
                 self.check_promoted_in_methods(&fqn, ClassKind::Enum, &e.methods);
+                self.current_class = previous_class;
             }
             _ => {
                 for e in stmt_own_exprs(stmt) {
@@ -108,6 +113,7 @@ impl<'a> Checker<'a> {
                     Some(ReturnSource::Body(body)),
                     label,
                 );
+                self.check_literal_default_parameter_types(params, "anonymous function", label);
                 self.walk_promoted_in_body(body, label);
             }
             ExprKind::ArrowFn {
@@ -123,14 +129,19 @@ impl<'a> Checker<'a> {
                     Some(ReturnSource::Arrow(body)),
                     label,
                 );
+                self.check_literal_default_parameter_types(params, "arrow function", label);
                 self.walk_promoted_in_expr(body, label);
             }
             ExprKind::NewAnonymousClass(decl, args) => {
                 for a in args {
                     self.walk_promoted_in_expr(&a.value, label);
                 }
+                let registry_name = self.anonymous_class_names.get(&e.span).cloned();
+                let previous_class =
+                    std::mem::replace(&mut self.current_class, registry_name.clone());
                 self.check_promoted_in_methods(&decl.name, decl.kind, &decl.methods);
                 self.walk_promoted_in_property_hooks(&decl.name, &decl.properties);
+                self.current_class = previous_class;
             }
             _ => {
                 any_expr_child(e, &mut |child| {
@@ -257,6 +268,49 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
+        }
+    }
+
+    /// `IncompatibleClosureDefaultParameterTypeRule`/
+    /// `IncompatibleArrowFunctionDefaultParameterTypeRule` - a closure or
+    /// arrow function has no `FunctionSig`, so each parameter's native
+    /// hint is resolved here. A `null` default makes a typed parameter
+    /// implicitly nullable, never a mismatch.
+    fn check_literal_default_parameter_types(&mut self, params: &[Param], kind: &str, label: &str) {
+        for (i, p) in params.iter().enumerate() {
+            let Some(default) = &p.default else {
+                continue;
+            };
+            if p.variadic || p.type_hint.is_none() {
+                continue;
+            }
+            if matches!(default.kind, ExprKind::Literal(Literal::Null)) {
+                continue;
+            }
+            let param_ty = self.resolve_type_hint(p.type_hint.as_deref());
+            let param_ty = match &param_ty {
+                Type::TemplateParam(tp) => tp.bound.as_ref().clone(),
+                other => other.clone(),
+            };
+            let param_ty = match &self.current_class {
+                Some(class) => self.resolve_pseudo(&param_ty, &class.clone()),
+                None => param_ty,
+            };
+            let default_ty = self.infer_expr(default, &Locals::default());
+            if self.registry.is_assignable(&default_ty, &param_ty) {
+                continue;
+            }
+            self.report(
+                label.to_string(),
+                format!(
+                    "Default value of the parameter #{} ${} ({default_ty}) of {kind} is incompatible with type {param_ty}.",
+                    i + 1,
+                    p.name,
+                ),
+                default.span,
+                2,
+                "parameter.defaultValue",
+            );
         }
     }
 

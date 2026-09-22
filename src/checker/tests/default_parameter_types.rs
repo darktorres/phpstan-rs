@@ -146,3 +146,31 @@ fn a_default_of_unknown_type_is_never_reported() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn closure_and_arrow_function_default_values_are_checked_against_their_hints() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Holder {
+                const NAME = 'n';
+                public function make(): void {
+                    $a = function (int $x = 'str', ?int $y = null, int $z = null, $u = 1) {};
+                    $b = fn (string $s = self::NAME, bool $flag = 0) => 1;
+                }
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "parameter.defaultValue")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Default value of the parameter #1 $x ('str') of anonymous function is incompatible with type int.",
+            "Default value of the parameter #2 $flag (0) of arrow function is incompatible with type bool.",
+        ],
+        "got: {d:?}"
+    );
+}

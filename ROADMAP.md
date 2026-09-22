@@ -552,7 +552,9 @@ is_readable`/`is_writable`), and `property.assignByRef`/
 function-like (function, method, closure, arrow function, hook `set`
 parameter): `parameter.superglobal`/`.this`/`.duplicate`/
 `.variadicNotLast`, and `nullsafe.byRef` for a by-ref function-like
-returning through `?->` (`FunctionDecl`/`ArrowFn` now record `by_ref`).
+returning through `?->` (`FunctionDecl`/`ArrowFn` now record `by_ref`). `parameter.defaultValue` for closure and arrow-function
+literals (`IncompatibleClosureDefaultParameterTypeRule`/
+`IncompatibleArrowFunctionDefaultParameterTypeRule`).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3548,9 +3550,6 @@ against this list, and added the real gaps the audit had missed.
   `callable.inaccessibleMethod` and full arity/parameter-type checking
   against a resolved `[$obj, 'method']`/`'Foo::bar'`-shaped callable's
   own signature are still open.
-- `IncompatibleDefaultParameterTypeRule` closure/arrow-fn remainder — the
-  function/method halves are now built (`parameter.defaultValue`, see
-  Done); only the closure/arrow-fn literal variants remain.
 - `return.missing` imprecision — `FunctionReturnTypeCheck`'s bare-
   `return;` check (`return.empty`) is done (see Done), but its sibling
   `return.missing` (falling off the end with no `return` at all) still
