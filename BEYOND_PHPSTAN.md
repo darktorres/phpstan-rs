@@ -567,10 +567,11 @@ new producer.
 
 ## V. Whole-program structural duplication
 
-Extends D3 (duplicate branch bodies within one function) and D7
-(structurally-identical operands within one expression, both in Part 3
-below) to duplication *across* declarations project-wide - a different
-AST scope neither existing item touches.
+Extends D3 (duplicate branch bodies within one function, Part 3 below)
+and the now-shipped D7 (structurally-identical operands within one
+expression, ROADMAP's Done section - "duplicate-operand detection") to
+duplication *across* declarations project-wide - a different AST scope
+neither one touches.
 
 ### V1. Whole-program duplicate function/method body detection
 
@@ -975,35 +976,12 @@ safer than an interprocedural one, and should stay that way.
 
 **Effort: medium.**
 
-D5 (`@see` PHPDoc tag reference validation) and D6 (swapped-adjacent-
-argument-name detection) are both now shipped - see ROADMAP's Done
-section, "@see tag target validation" and "opt-in swapped-adjacent-
-argument-name detection."
-
-### D7. Flag structurally-identical operands on both sides of a comparison, subtraction/division, or self-assignment
-
-Detect `$x === $x`, `$a - $a`, `$a / $a`, `$a % $a`, `$a ^ $a`, `$a = $a`
-where both operands are the exact same syntactic expression (same
-variable, or same property/array-index chain with no intervening side
-effects) - almost always a copy-paste bug where one side should reference
-a different variable, and for `-`/`/`/`^` a redundant computation that
-always yields the same constant regardless of runtime value. PHPStan's
-`Rules/Comparison/` family reasons entirely from each operand's inferred
-*type*, never from whether the two operand *expressions* are the same
-syntax tree - `$x === $x` with `$x: mixed` is type-sound on both sides and
-produces no diagnostic; `phpstan-strict-rules`' `Rules/Operators/` family
-has the same gap (numeric-strictness only, never identity-driven).
-phpstan-rs already threads a recursive, `Span`-ignoring structural-match
-helper through exactly this kind of AST-shape check for a related purpose
-(`is_switch_break_equivalent`, `checker/control_flow.rs:48-64`) - the same
-technique one level down, over `ExprKind::Binary`/`Assign`
-(`src/ast.rs:614-616`) via the generic `expr_children` walker
-(`ast_walk.rs:39`), gives a reusable `exprs_structurally_equal` with no
-runtime-value dependency. Distinct from D3 (duplicate *branch bodies*,
-`Stmt`-level): this operates one AST level down, on a single expression's
-own two operands.
-
-**Effort: medium.**
+D5 (`@see` PHPDoc tag reference validation), D6 (swapped-adjacent-
+argument-name detection), and D7 (structurally-identical operands on
+both sides of a comparison/subtraction/division/self-assignment) are all
+now shipped - see ROADMAP's Done section, "@see tag target validation,"
+"opt-in swapped-adjacent-argument-name detection," and "duplicate-operand
+detection."
 
 D8 (a computed edit-distance "did you mean?" tip for `method.notFound`)
 is now shipped - see ROADMAP's Done section, "method.notFound 'did you
@@ -1213,9 +1191,9 @@ assertion-less-test (risky test) detection."
 
 ## AF. Opt-in algorithmic-complexity heuristic: linear lookup into a pre-built array from inside an unrelated loop
 
-Explicitly heuristic, like D7 before it (D6, the other original
-precedent for this framing, has since shipped - see ROADMAP's Done
-section). Inside a loop body (`self.
+Explicitly heuristic, the same acknowledged low-confidence framing D6
+and D7 established before both shipped (see ROADMAP's Done section).
+Inside a loop body (`self.
 loop_depth > 0`, already-live infrastructure - `checker.rs:728`, already
 consulted directly by other heuristic checks at
 `checker/expr/probe_checks.rs:154,209,379,454`), when the checker sees a
@@ -1230,18 +1208,15 @@ pattern), emit a low-confidence `loop.quadraticLookup` diagnostic:
 iteration - O(n*m); consider `array_flip()`/`isset()` or building an
 index before the loop." Ships strictly opt-in with an explicit
 false-positive caveat that a small-but-unbounded-at-runtime haystack
-makes this a non-issue the check can't resolve - the same acknowledged
-low-confidence framing D7 (and D6, before it shipped) already establish
-as acceptable for this category. PHPStan's entire `Rules/` catalog
-reasons about types, existence, and soundness, never runtime execution
-cost - grepping both vendored trees for "complexity"/"quadratic"/
-"performance" as a rule concept returns nothing; there is no rule keyed
-on a lookup's placement relative to a loop, or on an array's role as a
-repeatedly-scanned lookup table. Distinct from D1 (which reasons about a
-function's own control-flow shape, never a variable's role as a
-collection) and D7 (a single-expression check with no loop-context or
-collection-role reasoning at all) - keyed on a loop's own iteration
-relationship to a separate collection's construction site.
+makes this a non-issue the check can't resolve. PHPStan's entire
+`Rules/` catalog reasons about types, existence, and soundness, never
+runtime execution cost - grepping both vendored trees for "complexity"/
+"quadratic"/"performance" as a rule concept returns nothing; there is no
+rule keyed on a lookup's placement relative to a loop, or on an array's
+role as a repeatedly-scanned lookup table. Distinct from D1 (which
+reasons about a function's own control-flow shape, never a variable's
+role as a collection) - keyed on a loop's own iteration relationship to
+a separate collection's construction site.
 
 **Effort: medium.**
 

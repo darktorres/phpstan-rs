@@ -50,6 +50,20 @@ with a status tag flipped.
 source-document position, not urgency. Pick items the same way any
 other Pending/partial phase gets picked up.
 
+A later audit pass (grepping the real `src/` tree per item, not
+trusting this file's own prose) found a second batch had also shipped
+without ever being pruned back out, this time from Phases 125-139
+(triaged from ROADMAP's own "Newly identified gaps," which had moved on
+without this file's own copy being updated) and one item each from
+Phases 123/165 (a genuine accidental duplicate - both described the
+same now-shipped anonymous-class synthetic-naming work independently).
+Fully-shipped items were removed outright; partially-shipped ones
+(`CallCallablesRule`, `IncompatibleDefaultParameterTypeRule`,
+`ArrayDestructuringRule`, `ArrayUnpackingRule`,
+`NonexistentOffsetInArrayDimFetchRule`) were narrowed to their real
+remaining scope in place, per the same "fold DONE phases into Done, not
+just flip a tag" convention as the twenty-two exceptions above.
+
 **Numbering:** 85-124 = BEYOND_PHPSTAN.md's 40 lettered sections, one
 phase each, in that document's own Part 1-9 order (sub-items keep their
 original letter+number, e.g. 85's own "A1"-"A6"). 125-139 = ROADMAP.md's
@@ -536,8 +550,8 @@ editing source + a full CLI re-run.
 
 # Part 6 (BEYOND_PHPSTAN): Codemods
 
-Four fixes attaching to an existing (or Phase 101 E3-proposed)
-diagnostic via the already-built `textDocument/codeAction` wiring
+Four fixes attaching to an existing diagnostic via the already-built
+`textDocument/codeAction` wiring
 (`Diagnostic.fix: Option<DiagnosticFix>`, `Server::code_actions`) — the
 wiring itself has zero production call sites populating a real `fix`
 yet, which is exactly what each item below does. Real PHPStan's entire
@@ -546,9 +560,9 @@ autofix surface is used by only 4 rule files project-wide.
 ## Phase 111 — Codemods attached to diagnostics phpstan-rs already ships (§I)
 
 - **I1 (small).** Byte-exact same-length splice for every `*.nameCase`
-  mismatch (`class.nameCase`, and Phase 101's E4 once built) —
-  identifier casing changes never change byte count, the safest
-  codemod shape possible.
+  mismatch (`class.nameCase`, and the now-built `method.nameCase`,
+  Phase 101's former E4) — identifier casing changes never change byte
+  count, the safest codemod shape possible.
 - **I2 (small).** Delete-attribute-group codemod for the already-
   shipped invalid-`#[Override]` diagnostic — a pure span deletion,
   strictly smaller/safer than real PHPStan's own whole-node-reprint
@@ -771,106 +785,42 @@ section) was correct given what phpstan-rs had available, but that real
 PHPStan solves the identical case with a specific technique phpstan-rs's
 attempt never used.
 
-- **O1 (medium).** Foreach's zero-iteration merge needs real PHPStan's
-  *asymmetric*, certainty-downgrading join (`processAlwaysIterable
-  ForeachScopeWithoutPollute` — keeps the post-loop type, only
-  downgrades certainty, never re-unions the pre-loop type), not
-  `merge_scopes`'s symmetric `union_types` — the exact self-mutating-
-  iteratee idiom (`foreach ($items as $day => $data) { $items[$day][...]
-  = ...; }`) both of phpstan-rs's prior attempts regressed on. Real
-  PHPStan's `while`/`for` use the symmetric join fine — only `foreach`
-  needs the asymmetric one, and phpstan-rs could adopt it
-  unconditionally (PHPStan carries a legacy BC flag phpstan-rs doesn't
-  need to).
+- **O1 (medium, narrowed and partly shipped - see below).** Foreach's
+  zero-iteration merge needs real PHPStan's *asymmetric*, certainty-
+  downgrading join (`processAlwaysIterableForeachScopeWithoutPollute` —
+  keeps the post-loop type, only downgrades certainty, never re-unions
+  the pre-loop type), not `merge_scopes`'s symmetric `union_types` — the
+  exact self-mutating-iteratee idiom (`foreach ($items as $day => $data)
+  { $items[$day][...] = ...; }`) both of phpstan-rs's prior attempts
+  regressed on.
 
-  **UPDATE — the corpus-driven investigation below found the real fix
-  is narrower than this item's own original framing, and it has now
-  shipped; O1 itself (the general `converge_loop_body` merge algorithm)
-  was never touched and stays open on its own remaining merits, if any
-  survive after this.** Real-PHPStan A/B testing (a minimal `$counter =
-  []; foreach ($keys as $k) { $counter[$k] = 1; } ... $counter[$someKey]
-  ...` reproduction, confirmed via `\PHPStan\dumpType()` that real
-  PHPStan's own post-loop type is the plain `array<string, 1>`, no
-  `array{}` alternative at all) traced the actual defect one level
-  *below* the loop-merge algorithm this item names: `union_types`
-  itself never simplified a genuinely-*empty* `ArrayShape` (`array{}`)
-  away when a general `Array(key, val)` member was already present in
-  the same union — a plain, redundant-subtype absorption a sound type
-  system should already do unconditionally (an empty array vacuously
-  satisfies "every key/value is `key`/`val`-typed" for *any* `key`/
-  `val`), matching what real PHPStan's own `TypeCombinator::union()`
-  evidently already does. Fixed directly in `union_types`
-  (`checker/type_union.rs`) — **`converge_loop_body`'s own merge
-  algorithm needed no change at all**; the `array{}` branch is still
-  computed and unioned in exactly as before, it just no longer survives
-  as a separate, redundant member once a compatible general array is
-  also present. This is a materially safer fix than O1's own proposed
-  asymmetric-join redesign: it never touches the symmetric
-  `LoopZeroIterations::Possible` merge at all, so the documented past
-  regression (the self-mutating-iteratee idiom) and its own
-  `subject_exempt` carve-out are both completely unaffected — confirmed
-  by a dedicated regression test (`a_whole_variable_reassigned_inside_a_
-  foreach_still_keeps_its_null_alternative`) pinning that a *non*-array
-  redundant case (`Null` vs `String`, not a subtype relationship) still
-  keeps its full union, matching real PHPStan's own `dumpType()` output
-  for that shape too (`string|null`).
+  A corpus-driven investigation found the *specific* false-positive
+  pattern this item was scoped to fix (a loop-accumulator array read
+  back as `T|null` instead of `T`) had a narrower real cause one level
+  below the merge algorithm itself: `union_types` never simplified away
+  a genuinely-empty `ArrayShape` (`array{}`) once a compatible general
+  `Array(key, val)` member was already present in the same union - a
+  plain redundant-subtype absorption real PHPStan's own
+  `TypeCombinator::union()` already does. Fixed directly in
+  `union_types` (`checker/type_union.rs`); `converge_loop_body`'s own
+  merge algorithm was untouched, so the documented self-mutating-
+  iteratee regression this item's own asymmetric-join proposal exists to
+  avoid stays unaffected. 16 of the pattern's 70 known scoped-corpus
+  findings were fully removed by this fix alone; O1's own general
+  asymmetric-join proposal above remains open for whatever the
+  narrower fix didn't reach. Along the way, this also root-caused a
+  separate `int|string` array-key-type-imprecision cluster to a missing
+  `BenevolentUnionType` marker on `Type[]`-shorthand-derived key types -
+  not built here, folds into Phase 85's A4/`checkBenevolentUnionTypes`
+  item instead of getting its own. Full corpus citations and the
+  by-ref-foreach-mutation trade-off this fix's own verification
+  surfaced: ROADMAP's "Known but not yet scheduled" entry.
 
-  Real corpus impact, verified via a full before/after scoped+unscoped
-  Piwigo diff: **16 of 70** `argument.type`/`return.type` findings in
-  the scoped run were fully removed (`ActivityRepository`,
-  `HistoryRepository` ×4, `ImageRepository`, `CategoryService` ×2,
-  `DerivativeImage`, `SiteUpdateSubController`, `CatPermPageRenderer`,
-  `RatingPageRenderer`, `UserService::getBrowserLanguage` ×2, plus the
-  two Reflection/backtrace sites the sibling fix below independently
-  also fixes), and several more had their own `array{}`/`array{}|`
-  alternative stripped without the whole finding disappearing (their
-  own root cause is separate and unrelated - `SearchService` ×2,
-  `SectionPopulator`). This also corrects ROADMAP.md's own "Known but
-  not yet scheduled" entry blaming `isset()`/`array_key_exists()`
-  dynamic-key narrowing for several of these same sites — narrowing was
-  never the real cause (confirmed: an `array_key_exists()`-guarded read
-  against an *explicitly*-PHPDoc'd `array<K,V>` parameter already
-  infers correctly today, with zero gap) — the corruption happened one
-  level upstream, in the union-simplification gap fixed here.
-
-  **One real, disclosed trade-off found during verification, not a
-  regression this fix introduced**: the scoped diff also showed 4 new
-  findings (`ConfigurationSubController::processSizes` ×3,
-  `openApiOperations`'s own `narrowingExpr()` call ×1) that a byte-for-
-  byte isolated reproduction of each confirms were already latent,
-  independent of this fix — the *by-ref foreach array-mutation still
-  isn't tracked* gap (ROADMAP.md's own "Known but not yet scheduled",
-  now updated with this second corpus site) and the `int|string` array-
-  key-type-imprecision cluster were both simply reached for the first
-  time once this fix removed an unrelated masking effect elsewhere in
-  the same merge pipeline - the same "surfaced only once a separate fix
-  stopped masking it" pattern this project's own history already has
-  several instances of, not new bugs. **The `int|string` cluster is now
-  fully root-caused** (a follow-up round, not this one): real PHPStan's
-  own `Type[]` PHPDoc-shorthand resolution keys the result with a
-  `BenevolentUnionType([Integer, String])`, not a plain `Union` - and
-  `RuleLevelHelper::accepts()` treats a Benevolent union specially,
-  silently skipping the strict per-member check a plain `Union` gets
-  (confirmed directly: `dumpType()` even displays it distinctly,
-  parenthesized). This project's `Type::unknown_array_key()` has no such
-  marker, so every `Type[]`-shorthand-derived key type - and, separately,
-  the array `+` operator's own key-type fallback below - gets treated as
-  a strict `Union` instead, a confirmed source of real false positives
-  (`BlockManager::apply`, `CategoryAvailableListController::__invoke`,
-  `SpecStructureTest`, `openapi-generate-input-dto.php`'s
-  `narrowingExpr()` - see ROADMAP.md's own "Known but not yet scheduled"
-  entry for the full citation). Not built this round: a real fix needs a
-  genuine `Union`-adjacent "benevolent" marker threaded through parsing,
-  the `+` operator, and every `is_assignable`/`accepts_at_configured_
-  level` call site that should respect it - correctly the same future
-  phase this document's own Phase 84 entry already reserves for
-  `checkBenevolentUnionTypes`, not a new one.
-- **O2 (medium).** Register each anonymous class under a real, stable
-  synthetic name (`file:line[:index]`-keyed, mirroring real PHPStan's
-  own `AnonymousClassNameHelper`) with a full independent registry
-  entry, instead of the discarded ancestor-aliasing shortcut — unlocks
-  full member-set checking against every implemented interface/extended
-  parent at once, not just one ad hoc directly-named fallback.
+(O2 — registering each anonymous class under a real, stable synthetic
+name instead of the discarded ancestor-aliasing shortcut — is now built;
+see ROADMAP's Done section, "Anonymous class stable synthetic naming."
+The former Phase 165 described the identical shipped work
+independently; removed for the same reason.)
 
 ## Phase 124 — Whole-program public-API backward-compatibility diffing (§Q)
 
@@ -939,13 +889,15 @@ this section.
 
 ## Phase 126 — Functions (`Rules/Functions/` gaps)
 
-- `CallCallablesRule` (+ `FunctionCallableRule`'s dynamic-target half) —
-  a dynamic call `$callable(...)`'s own non-callable/inaccessible-
-  method/arity/param-type checking.
-- `IncompatibleDefaultParameterTypeRule` family (functions, closures,
-  arrow functions) — a parameter's default-value expression checked
-  against its own declared type hint; phpstan-rs's AST carries
-  `default: Option<Expr>` but nothing validates it anywhere.
+- `CallCallablesRule` remainder — `callable.nonCallable` for a dynamic-
+  callee call is now built (receiver-type-checks phase, see ROADMAP's
+  Done section); `callable.inaccessibleMethod` and full arity/
+  parameter-type checking against a resolved callable's own signature
+  are still open.
+- `IncompatibleDefaultParameterTypeRule` closure/arrow-fn remainder — the
+  function/method halves are now built (`parameter.defaultValue`, see
+  ROADMAP's Done section); only the closure/arrow-fn literal variants
+  remain.
 - `ReturnNullsafeByRefRule` family — "nullsafe cannot be returned by
   reference" when a by-ref function/arrow-fn's return passes through
   `?->`; the existing `contains_nullsafe_access` helper is unused for
@@ -962,8 +914,6 @@ this section.
 
 ## Phase 127 — Methods (`Rules/Methods/` gaps)
 
-- `IncompatibleDefaultParameterTypeRule` (method half of Phase 126's
-  same family).
 - `MissingMagicSerializationMethodsRule` — a non-abstract `Serializable`
   class lacking `__serialize()`/`__unserialize()`.
 - `AbstractMethodInNonAbstractClassRule`'s second half — a non-abstract,
@@ -976,8 +926,6 @@ this section.
 
 ## Phase 128 — Properties (`Rules/Properties/` gaps)
 
-- `DefaultValueTypesAssignedToPropertiesRule` (level 3) — a typed
-  property's own literal default checked against its declared type.
 - `ExistingClassesInPropertiesRule`'s `property.trait`/two further
   identifiers — the `class.notFound` half is built (Phase 48); the
   "wrong kind of symbol" half isn't.
@@ -998,9 +946,6 @@ this section.
 
 ## Phase 129 — Comparison (`Rules/Comparison/` gaps)
 
-- `StrictComparisonOfDifferentTypesRule` — a `===`/`!==` comparison
-  whose outcome is provably constant (disjoint or provably-equal
-  operand types).
 - `ImpossibleInArrayHaystackFiniteTypesRule` — `in_array()`/
   `array_search()`/`array_keys()` where a needle's finite type can never
   match any constant-array-haystack value (level 4).
@@ -1052,21 +997,24 @@ this section.
 
 ## Phase 132 — Arrays (`Rules/Arrays/` gaps)
 
-- `IterableInForeachRule` — `foreach` over a provably non-iterable
-  subject; phpstan-rs's `Foreach` handling never validates the subject
-  type at all, just falls back to `Mixed`.
 - `DeadForeachRule` — `foreach` over a provably always-empty array,
-  level 4.
-- `ArrayDestructuringRule` — `list()`/`[]` destructuring's own
-  RHS-is-array-like and per-key-existence checks.
-- `ArrayUnpackingRule`/`UnpackIterableInArrayRule` — `[...$arr]`'s
-  PHP-8.1-string-key-support gating and non-iterable-spread checking;
-  spread items (`item.spread`) aren't specially checked at all today.
+  level 4. (`IterableInForeachRule`'s own non-iterable-subject half,
+  `foreach.nonIterable`, is now built - receiver-type-checks phase, see
+  ROADMAP's Done section.)
+- `ArrayDestructuringRule` remainder — the RHS-is-array-like half
+  (`offsetAccess.nonArray`) is now built (receiver-type-checks phase);
+  the per-key-existence half is still open.
+- `ArrayUnpackingRule`'s `arrayUnpacking.stringOffset` remainder — the
+  non-iterable-spread half (`arrayUnpacking.nonIterable`/`argument.
+  unpackNonIterable`) is now built (receiver-type-checks phase); only
+  the PHP-8.1-string-key-support gating remains.
 - `OffsetAccessWithoutDimForReadingRule` — `$x[]` used in read position
   (a real PHP compile-time fatal), non-ignorable.
-- `NonexistentOffsetInArrayDimFetchRule` — reading a nonexistent key
-  across constant arrays/general arrays (opt-in)/shapes, plus indexing
-  a non-offset-accessible type. (Ties into Phase 85's A3 sizing note.)
+- `NonexistentOffsetInArrayDimFetchRule` remainder — the "isn't offset-
+  accessible at all" half is now built (`shapeAccess.notFound` for the
+  shape case, receiver-type-checks phase); general-array/constant-array
+  key-existence checking beyond shapes is still open. (Ties into Phase
+  85's A3 sizing note.)
 - `OffsetAccessAssignmentRule`/`OffsetAccessAssignOpRule` — an illegal
   key type for `$arr[$key] = $v`/compound-assign.
 - `OffsetAccessValueAssignmentRule` — assigning a wrong-typed value into
@@ -1108,9 +1056,9 @@ this section.
 - `UnsetRule` — five distinct `unset(...)`-target diagnostics
   (undefined variable, illegal/nonexistent offset, readonly-property
   variants, hooked/possibly-hooked property).
-- `VariableCloningRule` — `clone $expr` on a non-cloneable (non-object)
-  type; phpstan-rs infers a type for `Clone` but performs zero
-  cloneability validation.
+
+(`VariableCloningRule` — `clone.nonObject` — is now built; see
+ROADMAP's Done section, receiver-type-checks phase.)
 
 ## Phase 136 — Traits+InternalTag (`Rules/Traits/` gaps)
 
@@ -1719,34 +1667,6 @@ database with no pure-PHP trigger to justify vendoring it);
 mechanism at all); and `phpstan/phpstan-php-parser`'s self-analysis
 stub-precision package (not a rule/check package). Full per-package
 detail and citations: `TOP100_RESEARCH_NOTES.md`.
-
-## Phase 165 — Anonymous-class synthetic per-declaration-site identity
-
-Reevaluated out of "Permanent design boundaries" - that entry's own
-wording ("a materially bigger feature than a one-line type change, not
-attempted here") already describes disclosed, buildable engineering
-work, not an architectural impossibility, so it belongs in the backlog
-proper rather than the permanent-boundary list.
-
-`parser/classes.rs`'s `parse_anonymous_class_new` gives every anonymous
-class in a program the identical literal name `"class@anonymous"`,
-never indexed into the registry. A real fix needs each anonymous class
-declaration site to register as its own synthetic class (a
-deterministic name keyed by file+span, e.g.
-`"class@anonymous:<file>:<span>"`, registered into `Registry::classes`
-with its own real `extends`/`implements` edges exactly like a named
-class) instead of only being parsed inline. Every consumer that
-currently keys off a class's own literal name for identity/hierarchy
-lookups then works unchanged - the fix is entirely in registration,
-not in `is_assignable`/hierarchy-check logic, which already does the
-right thing once each anonymous class has a real, unique registry
-entry.
-
-**Effort: large** — real registry-architecture work (new identity
-scheme, indexing pass over every anonymous-class declaration site,
-verifying no consumer assumes class names are only ever parsed from
-top-level/nested named declarations) rather than a contained function
-addition like the phases above.
 
 ## Phase 173 — Same-function parallel dynamically-keyed array correlation
 
