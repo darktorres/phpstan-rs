@@ -1722,6 +1722,7 @@ impl<'a> Checker<'a> {
                         self.check_class_generic_bounds(&fqn, c);
                         self.check_class_completeness(&fqn, c.span);
                         self.check_inheritance_target_kinds(&fqn, false, &fqn, c.span);
+                        self.check_readonly_class_version(c.is_readonly, false, &fqn, c.name_span);
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
                         self.check_restricted_class_inheritance(&fqn, c.span);

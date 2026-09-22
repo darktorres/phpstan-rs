@@ -845,6 +845,48 @@ impl<'a> Checker<'a> {
         self.current_class = previous_class;
     }
 
+    /// `readonly class` needs PHP 8.2+, a `readonly` anonymous class PHP
+    /// 8.3+ (`ReadOnlyClassRule`). Reported under real PHPStan's own
+    /// identifier for this rule, `classConstant.nativeTypeNotSupported`.
+    pub(crate) fn check_readonly_class_version(
+        &mut self,
+        is_readonly: bool,
+        is_anonymous: bool,
+        label: &str,
+        span: Span,
+    ) {
+        if !is_readonly {
+            return;
+        }
+        let Some(version) = self.registry.php_version else {
+            return;
+        };
+        let (feature, message) = if is_anonymous {
+            (
+                crate::php_version::PhpFeature::ReadOnlyAnonymousClasses,
+                "Anonymous readonly classes are supported only on PHP 8.3 and later.",
+            )
+        } else {
+            (
+                crate::php_version::PhpFeature::ReadOnlyClasses,
+                "Readonly classes are supported only on PHP 8.2 and later.",
+            )
+        };
+        if feature.is_available(version) {
+            return;
+        }
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                message.to_string(),
+                span,
+                0,
+                "classConstant.nativeTypeNotSupported",
+            )
+            .non_ignorable(),
+        );
+    }
+
     /// Four small, independent PHP-version/modifier-consistency checks
     /// on a class constant's declaration, matching real PHPStan's
     /// identifiers:

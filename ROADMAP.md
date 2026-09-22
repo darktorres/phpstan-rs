@@ -507,7 +507,8 @@ on a variadic parameter, or `final` below PHP 8.5;
 `property.promotedNotSupported` below PHP 8.0), on every function-like
 including closures, arrow functions, and a trait method aliased as
 `__construct`; a `readonly`/`final`/set-visibility-only parameter now
-promotes with implicit `public` visibility.
+promotes with implicit `public` visibility. `ReadOnlyClassRule`'s version gate
+(`readonly class` below PHP 8.2, an anonymous one below 8.3).
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3512,9 +3513,6 @@ against this list, and added the real gaps the audit had missed.
   Still missing: `new.enum`, `new.trait`, `new.nonObject`,
   `new.noConstructor`, `class.noParent`, and
   `outOfClass.self`/`.static`/`.parent`.
-- `ReadOnlyClassRule` — the PHP-version-gate data already exists
-  (`PhpFeature::ReadOnlyClasses`/`ReadOnlyAnonymousClasses`,
-  `php_version.rs`) but is never consumed by any checker call site.
 
 ### Phase 126 — Functions (`Rules/Functions/` gaps)
 

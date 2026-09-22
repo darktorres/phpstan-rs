@@ -412,3 +412,32 @@ fn self_referencing_a_trait_constant_from_inside_the_trait_is_never_flagged_notf
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn readonly_class_is_gated_on_php_8_2_and_anonymous_on_8_3() {
+    let src = r#"<?php
+        readonly class Frozen {}
+        function make(): object {
+            return new readonly class {};
+        }
+    "#;
+    let gate = |v| {
+        let d = diagnostics_for_with(src, |r| r.php_version = Some(v));
+        d.into_iter()
+            .filter(|x| x.identifier == "classConstant.nativeTypeNotSupported")
+            .map(|x| x.message)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        gate((8, 1)),
+        vec![
+            "Readonly classes are supported only on PHP 8.2 and later.",
+            "Anonymous readonly classes are supported only on PHP 8.3 and later.",
+        ]
+    );
+    assert_eq!(
+        gate((8, 2)),
+        vec!["Anonymous readonly classes are supported only on PHP 8.3 and later."]
+    );
+    assert!(gate((8, 3)).is_empty());
+}
