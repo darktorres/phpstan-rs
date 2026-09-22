@@ -1,0 +1,138 @@
+//! Invoking a value that names a function or method rather than carrying
+//! a callable signature of its own - `'strlen'`, `'Foo::bar'`,
+//! `[$obj, 'method']`, `['Foo', 'bar']`, or an object with `__invoke()` -
+//! mirroring real PHPStan's `CallCallablesRule`: the resolved signature's
+//! arity and argument types, and `callable.inaccessibleMethod` for a
+//! method the calling scope can't see.
+
+use crate::ast::{Arg, Visibility};
+use crate::checker::calls::{CheckArgsCall, resolve_call_args};
+use crate::checker::{Checker, Locals};
+use crate::registry::FunctionSig;
+use crate::token::Span;
+use crate::types::Type;
+
+/// The function or method a callable value names.
+struct NamedCallable<'r> {
+    description: String,
+    sig: &'r FunctionSig,
+    /// `(owner, method)` for a method, `None` for a plain function.
+    method: Option<(String, String)>,
+    defining_class: Option<String>,
+}
+
+impl<'a> Checker<'a> {
+    fn resolve_named_callable(&self, ty: &Type) -> Option<NamedCallable<'a>> {
+        match ty {
+            Type::StringLiteral(s) => {
+                if let Some((class, method)) = s.split_once("::") {
+                    return self.resolve_callable_method(class, method, format!("callable '{s}'"));
+                }
+                let (_, sig) = self
+                    .registry
+                    .lookup_function_with_name(s.trim_start_matches('\\'))?;
+                Some(NamedCallable {
+                    description: format!("callable '{s}'"),
+                    sig,
+                    method: None,
+                    defining_class: None,
+                })
+            }
+            Type::ArrayShape(fields) => {
+                let [
+                    (k0, target, false),
+                    (k1, Type::StringLiteral(method), false),
+                ] = fields.as_slice()
+                else {
+                    return None;
+                };
+                if k0 != "0" || k1 != "1" {
+                    return None;
+                }
+                let class = match target {
+                    Type::Object(class, _) => class.clone(),
+                    Type::ClassString(inner) => match inner.as_ref() {
+                        Type::Object(class, _) => class.clone(),
+                        _ => return None,
+                    },
+                    Type::StringLiteral(class) => class.clone(),
+                    _ => return None,
+                };
+                self.resolve_callable_method(&class, method, format!("callable {ty}"))
+            }
+            Type::Object(class, _) => {
+                let (owner, sig) = self.registry.lookup_method_with_owner(class, "__invoke")?;
+                Some(NamedCallable {
+                    description: format!("callable {ty}"),
+                    sig,
+                    method: Some((owner.to_string(), "__invoke".to_string())),
+                    defining_class: Some(class.clone()),
+                })
+            }
+            _ => None,
+        }
+    }
+
+    fn resolve_callable_method(
+        &self,
+        class: &str,
+        method: &str,
+        description: String,
+    ) -> Option<NamedCallable<'a>> {
+        if method.contains("::") {
+            return None;
+        }
+        let class = class.trim_start_matches('\\');
+        let (canonical, _) = self.registry.lookup_class(class)?;
+        let (owner, sig) = self.registry.lookup_method_with_owner(canonical, method)?;
+        Some(NamedCallable {
+            description,
+            sig,
+            method: Some((owner.to_string(), method.to_string())),
+            defining_class: Some(canonical.to_string()),
+        })
+    }
+
+    /// Checks invoking `callee_ty` with `args` when it names a function
+    /// or method.
+    pub(crate) fn check_named_callable_invocation(
+        &mut self,
+        callee_ty: &Type,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(named) = self.resolve_named_callable(callee_ty) else {
+            return;
+        };
+        if let Some((owner, method)) = &named.method
+            && named.sig.visibility != Visibility::Public
+            && !self.is_member_access_visible(owner, &named.sig.visibility, method, "method")
+        {
+            let word = if named.sig.visibility == Visibility::Private {
+                "private"
+            } else {
+                "protected"
+            };
+            self.report(
+                label.to_string(),
+                format!("Call to {word} method {method}() of class {owner}."),
+                span,
+                2,
+                "callable.inaccessibleMethod",
+            );
+        }
+        let resolved = resolve_call_args(args, &named.sig.params);
+        self.check_args(CheckArgsCall {
+            callee_label: &named.description,
+            sig: named.sig,
+            args,
+            resolved: &resolved,
+            locals,
+            label,
+            defining_class: named.defining_class.as_deref(),
+            span,
+        });
+    }
+}

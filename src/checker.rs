@@ -1154,6 +1154,7 @@ pub struct Checker<'a> {
 
 mod assignment;
 mod by_ref_params;
+mod callable_values;
 mod calls;
 mod coercion;
 mod control_flow;

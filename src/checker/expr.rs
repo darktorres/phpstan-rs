@@ -874,6 +874,10 @@ impl<'a> Checker<'a> {
                             label,
                             e.span,
                         );
+                    } else {
+                        self.check_named_callable_invocation(
+                            &callee_ty, args, locals, e.span, label,
+                        );
                     }
                     // A `Closure(...)`-shaped PHPDoc callable carries no
                     // `@throws` info of its own, and any other dynamic-

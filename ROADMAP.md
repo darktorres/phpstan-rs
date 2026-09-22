@@ -557,7 +557,11 @@ literals (`IncompatibleClosureDefaultParameterTypeRule`/
 `IncompatibleArrowFunctionDefaultParameterTypeRule`). `return.missing` now follows
 `MissingReturnRule` exactly: a nullable type is owed a return too (level 2
 when PHPDoc-only, `checkPhpDocMissingReturn`), a native `mixed` is owed
-one, and closures with a native return type are checked.
+one, and closures with a native return type are checked. `CallCallablesRule`'s
+remainder: invoking a value that names a function or method (`'strlen'`,
+`'Foo::bar'`, `[$obj, 'method']`, `['Foo', 'bar']`, an `__invoke`
+object) checks the resolved signature's arity and argument types, plus
+`callable.inaccessibleMethod`.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3548,11 +3552,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 126 — Functions (`Rules/Functions/` gaps)
 
-- `CallCallablesRule` remainder — `callable.nonCallable` for a dynamic-
-  callee call is now built (receiver-type-checks phase, see Done);
-  `callable.inaccessibleMethod` and full arity/parameter-type checking
-  against a resolved `[$obj, 'method']`/`'Foo::bar'`-shaped callable's
-  own signature are still open.
 - `ParameterCastableToStringRule`/`...ToNumberRule` family — array-
   argument values passed to `implode`/`array_combine`/`sort`/etc.
   actually castable to string/number, since these implicitly cast at

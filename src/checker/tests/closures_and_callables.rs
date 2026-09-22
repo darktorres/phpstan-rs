@@ -837,3 +837,50 @@ fn first_class_callable_syntax_is_gated_on_php_8_1() {
     assert_eq!(gated((8, 0)), 3);
     assert_eq!(gated((8, 1)), 0);
 }
+
+#[test]
+fn invoking_a_value_that_names_a_function_or_method_checks_its_signature() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Svc {
+                public function run(int $n): void {}
+                public static function make(string $s): void {}
+                private function secret(): void {}
+                public function __invoke(int $x): void {}
+            }
+            function f(Svc $svc): void {
+                $a = 'strlen';
+                $a();
+                $b = [$svc, 'run'];
+                $b('x');
+                $c = 'Svc::make';
+                $c();
+                $d = ['Svc', 'make'];
+                $d('ok');
+                $e = [$svc, 'secret'];
+                $e();
+                $svc('nope');
+            }
+        "#,
+    );
+    let ids: Vec<_> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("arguments.")
+                || x.identifier.starts_with("argument.")
+                || x.identifier == "callable.inaccessibleMethod"
+        })
+        .map(|x| x.identifier.as_str())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![
+            "arguments.count",
+            "argument.type",
+            "arguments.count",
+            "callable.inaccessibleMethod",
+            "argument.type",
+        ],
+        "got: {d:?}"
+    );
+}
