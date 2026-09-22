@@ -122,12 +122,9 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// left unflagged - matching real PHPStan's own permissive default for
 /// `Mixed` below level 9 and vacuous-`Never` behavior
 /// (`NeverType` itself overrides `canCallMethods` to unconditionally
-/// return "yes"). `checkExplicitMixed`/`checkImplicitMixed` are honored
-/// only for type acceptance (`Registry::is_assignable_at_level`), not
-/// here: real PHPStan's `RuleLevelHelper::findTypeToCheck` also turns a
-/// level-9/10 `Mixed` receiver into a `StrictMixedType` that can't have
-/// methods called or properties read on it, so at those levels this
-/// check stays more lenient than real PHPStan.
+/// return "yes"). A level-9/10 `Mixed` receiver (`checkExplicitMixed`/
+/// `checkImplicitMixed`) is handled separately at each call site, via
+/// `Registry::strict_mixed_receiver_level`, not by this predicate.
 ///
 /// A `Union` is flagged the moment *any* **non-`Null`** member is
 /// confirmed closed; an `Intersection` only when *every* member is - the
@@ -1143,6 +1140,19 @@ impl<'a> Checker<'a> {
                         format!("call to method {method}() on a non-object type {recv_ty}"),
                         e.span,
                         0,
+                        "method.nonObject",
+                    );
+                    for a in args {
+                        self.check_expr(&a.value, locals, label);
+                    }
+                    return Type::Mixed(false);
+                }
+                if let Some(level) = self.registry.strict_mixed_receiver_level(&nonobject_ty) {
+                    self.report(
+                        label.to_string(),
+                        format!("Cannot call method {method}() on mixed."),
+                        e.span,
+                        level,
                         "method.nonObject",
                     );
                     for a in args {
@@ -2839,6 +2849,15 @@ impl<'a> Checker<'a> {
                         format!("access to property ${prop} on a non-object type {base_ty}"),
                         e.span,
                         0,
+                        "property.nonObject",
+                    );
+                } else if let Some(level) = self.registry.strict_mixed_receiver_level(&nonobject_ty)
+                {
+                    self.report(
+                        label.to_string(),
+                        format!("Cannot access property ${prop} on mixed."),
+                        e.span,
+                        level,
                         "property.nonObject",
                     );
                 } else if !property_exists_guarded

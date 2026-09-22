@@ -721,6 +721,26 @@ impl Registry {
     /// a plain `false` here, this method's own boolean-only API (see
     /// `accepts_at_configured_level`'s own doc comment on why a full
     /// trinary rewrite isn't attempted).
+    /// The level at which real PHPStan's `RuleLevelHelper::
+    /// findTypeToCheck` turns `ty` into a `StrictMixedType` receiver -
+    /// one that can't have a method called, a property read, or an
+    /// offset taken on it (`Cannot call method foo() on mixed.`) - or
+    /// `None` when `ty` isn't `Mixed` or the configured level is below
+    /// that threshold. An unconfigured level never triggers it, the same
+    /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
+    /// into" default `accepts_at_configured_level` documents.
+    pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
+        let Type::Mixed(is_explicit) = ty else {
+            return None;
+        };
+        let threshold = if *is_explicit {
+            EXPLICIT_MIXED_CHECK_LEVEL
+        } else {
+            IMPLICIT_MIXED_CHECK_LEVEL
+        };
+        (self.configured_level? >= threshold).then_some(threshold)
+    }
+
     fn is_assignable_at_level(&self, sub: &Type, sup: &Type, level: u8) -> bool {
         if let Type::Mixed(is_explicit) = sub {
             let strict_level = if *is_explicit {

@@ -190,3 +190,75 @@ fn at_level_nine_a_superglobal_element_is_explicit_mixed() {
         "got: {d:?}"
     );
 }
+
+// `RuleLevelHelper::findTypeToCheck`'s `StrictMixedType` receiver half:
+// the same two toggles also reject calling a method, reading a property,
+// or taking an offset on a `mixed` value.
+
+const MIXED_RECEIVER_SRC: &str = r#"<?php
+    function f(mixed $m): void {
+        $m->run();
+        echo $m->name;
+        echo $m['key'];
+    }
+"#;
+
+#[test]
+fn below_level_nine_a_mixed_receiver_is_not_flagged() {
+    let d = diagnostics_for_with(MIXED_RECEIVER_SRC, |r| r.configured_level = Some(8));
+    assert!(
+        !d.iter().any(|x| x.message.contains("on mixed")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unconfigured_level_never_flags_a_mixed_receiver() {
+    let d = diagnostics_for_with(MIXED_RECEIVER_SRC, |_| {});
+    assert!(
+        !d.iter().any(|x| x.message.contains("on mixed")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn at_level_nine_an_explicit_mixed_receiver_is_flagged_for_every_access_kind() {
+    let d = diagnostics_for_with(MIXED_RECEIVER_SRC, |r| r.configured_level = Some(9));
+    for (identifier, message) in [
+        ("method.nonObject", "Cannot call method run() on mixed."),
+        (
+            "property.nonObject",
+            "Cannot access property $name on mixed.",
+        ),
+        (
+            "offsetAccess.nonOffsetAccessible",
+            "Cannot access offset on mixed.",
+        ),
+    ] {
+        assert!(
+            d.iter()
+                .any(|x| x.identifier == identifier && x.message == message),
+            "missing {identifier}, got: {d:?}"
+        );
+    }
+}
+
+#[test]
+fn an_implicit_mixed_receiver_needs_level_ten() {
+    let src = r#"<?php
+        function f($m): void {
+            $m->run();
+        }
+    "#;
+    let at_nine = diagnostics_for_with(src, |r| r.configured_level = Some(9));
+    assert!(
+        !at_nine.iter().any(|x| x.identifier == "method.nonObject"),
+        "got: {at_nine:?}"
+    );
+    let at_ten = diagnostics_for_with(src, |r| r.configured_level = Some(10));
+    assert!(
+        at_ten.iter().any(|x| x.identifier == "method.nonObject"
+            && x.message == "Cannot call method run() on mixed."),
+        "got: {at_ten:?}"
+    );
+}

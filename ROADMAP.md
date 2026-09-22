@@ -234,7 +234,12 @@ of `.all()`). `checkExplicitMixed`/`checkImplicitMixed` (real level
 (explicit vs. implicit provenance, matching real PHPStan's own
 `MixedType::isExplicitMixed()`, with `PartialEq` staying provenance-
 blind), plus a full per-site explicit-vs-implicit construction audit
-against every real `new MixedType(true)` site in `vendor/phpstan-src`.
+against every real `new MixedType(true)` site in `vendor/phpstan-src`. The receiver half (Phase 139, `RuleLevelHelper::findTypeToCheck`'s
+`StrictMixedType` branch) is built too: at level 9 (explicit `mixed`)
+or 10 (implicit), calling a method, reading a property, or taking an
+offset on a `mixed` value reports `Cannot call method foo() on mixed.`
+and its siblings, via `Registry::strict_mixed_receiver_level`. An
+unconfigured level never triggers it.
 `checkBenevolentUnionTypes` is done too - confirmed real PHPStan's own
 default (`false`) matches this project's pre-existing lenient
 `AccessoryKind::Benevolent` behavior already; the flag opts *into* real
@@ -3658,15 +3663,6 @@ receiver-type-checks phase.)
   malformed `@phpstan-ignore` identifier-list syntax; phpstan-rs's own
   `ignore_comments.rs` deliberately swallows this with no diagnostic at
   all today (confirmed by its own test name).
-- `RuleLevelHelper::findTypeToCheck`'s `StrictMixedType` — at level 9/10
-  (`checkExplicitMixed`/`checkImplicitMixed`), real PHPStan turns a
-  `mixed` receiver into a `StrictMixedType`, so calling a method,
-  reading a property, or taking an offset on it is reported
-  (`method.nonObject` and siblings). Phase 84 applies those two toggles
-  only to type acceptance (`Registry::is_assignable_at_level`). The
-  receiver-type checks in `checker/expr.rs` still skip `Mixed` at every
-  level. Wiring the toggles in is small: consult `configured_level` and
-  the explicit/implicit `Type::Mixed(bool)` flag at the same sites.
 
 ## Part 10 — Top-100 Packagist `phpstan-extension` survey (new phases)
 
