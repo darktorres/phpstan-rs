@@ -4,10 +4,11 @@ use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
     TemplateBindings, UsageTokenKind, body_contains_yield, collect_goto_targets,
-    expr_contains_yield, generator_template_param, is_language_construct, is_real_variable_key,
-    is_superglobal, literal_string_key, literal_string_value, merge_scopes, narrow_type_excluding,
-    narrowing_key, propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
-    resolve_concat_type, string_type_has_accessory, superglobal_default_type, to_bitwise_not,
+    expr_contains_yield, generator_template_param, is_known_single_value, is_language_construct,
+    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
+    narrow_type_excluding, narrowing_key, propagate_container_field_facts,
+    purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
+    superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -2967,10 +2968,26 @@ impl<'a> Checker<'a> {
                 // is checked with `===` - treat the arm's condition
                 // itself as an `if`-style condition in that case;
                 // otherwise narrow via an implicit `subject === cond`
-                // equality, the same as an ordinary `switch` case. Only
-                // attempted for a single-condition arm - multi-value arms
-                // (`1, 2 => ...`) fall back to unnarrowed, rather than
-                // guessing at a combined "or" narrowing.
+                // equality, the same as an ordinary `switch` case.
+                // `match_true`'s own arm-condition exclusion stays
+                // restricted to a single-condition arm - a multi-
+                // condition `match(true)` arm's own conditions combine
+                // via OR, and narrowing each one's own false-branch in
+                // sequence would need the same "AND of each condition's
+                // own false branch" reasoning `narrow_match_arm_
+                // conditions` already gives the arm *body*, not attempted
+                // here for `accumulated`. The equality-exclusion side
+                // loops over every condition in the arm (not just a
+                // single one) - each exclusion is independent (excluding
+                // value A never depends on whether value B was also
+                // excluded), so there's no "combined OR" ambiguity the
+                // way narrowing *in* would have. Feeds every later arm's
+                // own body-narrowing precision (e.g. `default`'s body
+                // seeing `subject` with every earlier arm's value already
+                // excluded) - the `match.unhandled` exhaustiveness check
+                // further below is a deliberately separate, independent
+                // computation, not read from `accumulated` at all (see
+                // its own doc comment for why).
                 let match_true = matches!(&subject.kind, ExprKind::Literal(Literal::Bool(true)));
                 let mut accumulated = locals.clone();
                 let mut merged: Option<Locals> = None;
@@ -2986,17 +3003,68 @@ impl<'a> Checker<'a> {
                         Some(m) => merge_scopes(&m, &arm_locals),
                         None => arm_locals.clone(),
                     });
-                    if let [only_cond] = conds.as_slice() {
-                        if match_true {
+                    if match_true {
+                        if let [only_cond] = conds.as_slice() {
                             self.apply_narrowing(only_cond, &mut accumulated, false);
-                        } else {
-                            self.apply_equality_narrowing(
-                                subject,
-                                only_cond,
-                                &mut accumulated,
-                                false,
-                            );
                         }
+                    } else {
+                        for c in conds {
+                            self.apply_equality_narrowing(subject, c, &mut accumulated, false);
+                        }
+                    }
+                }
+                // `match.unhandled` - real PHPStan's own `MatchExpressionRule`
+                // (`vendor/phpstan-src/src/Rules/Comparison/MatchExpressionRule.php:160-181`).
+                // A deliberately independent computation from `accumulated`
+                // above (which also carries every OTHER variable's own
+                // narrowing, threaded through for arm-BODY precision) -
+                // this re-derives `subject`'s own original type fresh and
+                // excludes every arm condition's own known-single-value
+                // type from it directly, so a bug in some unrelated
+                // narrowing fact can't accidentally suppress or misfire
+                // this diagnostic. `expand_enum_cases` first, since a
+                // plain enum-typed subject (`Type::Object(EnumClass, _)`,
+                // the overwhelmingly common real shape) has no case list
+                // of its own for `narrow_type_excluding` to filter against
+                // otherwise - only its already-`Union`-shaped form (every
+                // real case as its own member) lets that function's
+                // existing "filter out excluded members, `Never` once
+                // none remain" `Union` handling do the actual work. If
+                // anything is still left once every arm's condition has
+                // been excluded and there's no `default`, some real value
+                // would fall through to a runtime `UnhandledMatchError`.
+                // Scoped to the ordinary (non-`match(true)`) case only -
+                // proving a `match(true)` chain of arbitrary boolean
+                // conditions exhaustive would need real boolean-SAT-style
+                // reasoning this project's type system doesn't attempt,
+                // so it's left unchecked there rather than risk a false
+                // positive on a genuinely-exhaustive `$x < 0 => ...,
+                // $x >= 0 => ...` chain. Doesn't yet replicate real
+                // PHPStan's own `UnhandledMatchError`-catch/`@throws`-tag
+                // exemptions (`isUnhandledMatchErrorCaught`/
+                // `hasUnhandledMatchErrorThrowsTag`) - a disclosed,
+                // narrower scope for a first pass, not an oversight.
+                if default.is_none() && !match_true {
+                    let subject_ty = self.infer_expr(subject, locals);
+                    let mut remaining = self.expand_enum_cases(&subject_ty);
+                    for (conds, _) in arms.iter() {
+                        for c in conds {
+                            let cond_ty = self.infer_expr(c, locals);
+                            if is_known_single_value(&cond_ty) {
+                                remaining = narrow_type_excluding(&remaining, &cond_ty);
+                            }
+                        }
+                    }
+                    if remaining != Type::Never {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "Match expression does not handle remaining value: {remaining}"
+                            ),
+                            e.span,
+                            4,
+                            "match.unhandled",
+                        );
                     }
                 }
                 if let Some(d) = default {
@@ -5402,6 +5470,67 @@ impl<'a> Checker<'a> {
                 .map(narrow_one)
                 .reduce(|a, b| merge_scopes(&a, &b))
                 .unwrap_or_else(|| base.clone()),
+        }
+    }
+
+    /// `match.unhandled`'s own case-expansion step: a plain enum-typed
+    /// `Type::Object(EnumClass, _)` has no case list of its own for
+    /// `narrow_type_excluding`'s existing `Union`-member-filtering to
+    /// work against - only the fully-expanded `Union` of every real case
+    /// (`Type::EnumCase(EnumClass, CaseName)`, already how a case is
+    /// represented everywhere else in this checker - `ClassInfo::
+    /// from_enum_decl` folds each case into `consts` with exactly that
+    /// type) lets excluding each arm's own case value reduce it all the
+    /// way to `Type::Never` once every case is covered. Recurses into a
+    /// `Union` member-by-member (real shape: `Status|null`, a nullable
+    /// enum parameter - without this, a fully-exhaustive `Status::A =>
+    /// ..., Status::B => ..., null => ...` match false-positived
+    /// `match.unhandled` on the un-expanded `Status` member, since
+    /// excluding each individual case can never prove a *generic* enum
+    /// `Object` redundant, only a real `EnumCase` sitting directly in
+    /// the union already can). A member that isn't a bare `Object`
+    /// naming a real, currently-registered enum (an interface/non-enum
+    /// class, an unresolved name) is kept unchanged - this project's own
+    /// "don't guess" precedent: the exhaustiveness check simply won't
+    /// fire for that narrower shape, rather than report something
+    /// unproven.
+    fn expand_enum_cases(&self, ty: &Type) -> Type {
+        match ty {
+            Type::Union(members) => {
+                let mut expanded = Vec::new();
+                for m in members {
+                    match self.expand_enum_cases(m) {
+                        Type::Union(inner) => expanded.extend(inner),
+                        other => expanded.push(other),
+                    }
+                }
+                match expanded.len() {
+                    0 => Type::Never,
+                    1 => expanded.into_iter().next().unwrap(),
+                    _ => Type::Union(expanded),
+                }
+            }
+            Type::Object(class_name, _) => {
+                let Some(info) = self.registry.classes.get(class_name.as_str()) else {
+                    return ty.clone();
+                };
+                let cases: Vec<Type> = info
+                    .consts
+                    .values()
+                    .filter_map(|c| match &c.ty {
+                        Type::EnumCase(cls, case) if cls == class_name => {
+                            Some(Type::EnumCase(cls.clone(), case.clone()))
+                        }
+                        _ => None,
+                    })
+                    .collect();
+                match cases.len() {
+                    0 => ty.clone(),
+                    1 => cases.into_iter().next().unwrap(),
+                    _ => Type::Union(cases),
+                }
+            }
+            other => other.clone(),
         }
     }
 }

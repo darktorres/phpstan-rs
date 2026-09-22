@@ -246,6 +246,19 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         {
             Type::Object("IteratorAggregate".to_string(), Vec::new())
         }
+        // Plain `bool` is exactly the two-element set `{true, false}` -
+        // unlike the general "a type covering multiple distinct values
+        // proves nothing when excluded" caution this function's own
+        // callers already apply (`apply_equality_narrowing`'s doc
+        // comment), excluding *from* `Bool` is always sound: `True`/
+        // `False` are each already `is_known_single_value`, so knowing
+        // one is ruled out leaves exactly the other, unconditionally -
+        // no case this could ever get wrong. Without this, `match ($b)
+        // { true => ..., false => ... }` (or a bare `if ($b !== true)`)
+        // never narrows `$b` down to `false` at all, since `Type::Bool`
+        // isn't itself represented as `Union([True, False])`.
+        Type::Bool if *excluded == Type::True => Type::False,
+        Type::Bool if *excluded == Type::False => Type::True,
         other if other == excluded => Type::Never,
         other => other.clone(),
     }

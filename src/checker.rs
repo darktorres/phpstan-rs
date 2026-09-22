@@ -1194,10 +1194,10 @@ pub(crate) use named_argument_renames::{
     NamedArgumentCallFacts, RenamedParameterOverride, RenamedParameterOverrideFacts,
 };
 pub(crate) use narrowing::{
-    array_value_type_for_key, count_call_operand, is_real_variable_key, is_unsealed_shape,
-    narrow_array_shape_by_key_presence, narrow_type_excluding, narrow_type_excluding_falsy,
-    narrow_type_to, narrowing_key, propagate_container_field_facts, purge_stale_narrowing_for,
-    resolve_concat_type, string_type_has_accessory,
+    array_value_type_for_key, count_call_operand, is_known_single_value, is_real_variable_key,
+    is_unsealed_shape, narrow_array_shape_by_key_presence, narrow_type_excluding,
+    narrow_type_excluding_falsy, narrow_type_to, narrowing_key, propagate_container_field_facts,
+    purge_stale_narrowing_for, resolve_concat_type, string_type_has_accessory,
 };
 pub(crate) use oop::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION,

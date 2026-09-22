@@ -1491,6 +1491,50 @@ was 5) and a regression test
 `src/checker/tests/closures_and_callables.rs`); full suite (4376 lib
 tests) still green.
 
+**`match.unhandled` - a `match` with no `default` whose condition isn't
+fully covered by its arms** (real PHPStan's own `MatchExpressionRule`,
+`vendor/phpstan-src/src/Rules/Comparison/MatchExpressionRule.php:160-181` -
+the real `UnhandledMatchError` PHP itself throws at runtime; found as a
+genuine, previously-undocumented gap during a Psalm-catalog research
+pass, unrelated to that pass's own Psalm-specific findings). A
+deliberately independent computation (`checker/expr.rs`'s `Match` arm),
+not read from the arm-narrowing loop's own `accumulated` state (which
+also carries every *other* variable's own narrowing, threaded through
+for arm-body precision, so a bug there could otherwise accidentally
+suppress or misfire this diagnostic): re-derives the subject's own
+original type, then excludes every arm condition's own known-single-value
+type from it directly, reporting whenever anything is still left. Needed
+two real gaps fixed first, both found only once the naive version
+false-positived on genuinely exhaustive matches: (1) `narrow_type_
+excluding` (`checker/narrowing/type_ops.rs`) had no arm for plain `Bool`
+excluding `True`/`False` at all - unlike its existing `Union`-member
+filtering, a bare `Type::Bool` isn't itself represented as `Union([True,
+False])`, so excluding one side never left the other; (2) a new
+`expand_enum_cases` helper (`checker/expr.rs`, registry-aware) expands a
+plain enum-typed `Type::Object(EnumClass, _)` - the overwhelmingly
+common real subject shape - into the `Union` of its own real cases
+(`Type::EnumCase`, exactly how `ClassInfo::from_enum_decl` already
+represents one in `consts`) first, since `narrow_type_excluding`'s
+`Union`-filtering can only ever remove an already-present member, never
+expand an unnarrowed `Object` into one; recurses member-by-member into
+an existing `Union` too (real shape: `Status|null`, a nullable enum
+parameter - without this, a fully-exhaustive match covering every case
+*and* `null` still false-positived on the un-expanded `Status` member
+alone). Also extended the same arm-narrowing loop's exclusion side to
+cover every condition in a multi-condition arm (`1, 2 => ...`), not just
+a single-condition arm as before - both a correctness prerequisite for
+this check and a real precision improvement for every later arm/`default`
+body's own narrowing. Deliberately scoped away from the `match(true)`
+idiom (proving an arbitrary boolean-condition chain exhaustive needs
+real SAT-style reasoning this project's type system doesn't attempt) and
+from real PHPStan's own `UnhandledMatchError`-catch/`@throws`-tag
+exemptions (a disclosed narrower scope, not an oversight). Verified
+against an unbounded int subject (never flagged exhaustive by finitely
+many literals, matching real PHPStan), a `Mixed` subject (still flagged,
+also matching real PHPStan), and 8 regression tests covering enum/bool/
+default/nullable-enum/match(true) (`src/checker/tests/narrowing.rs`);
+full suite (4384 lib tests) still green.
+
 ## Rule catalog (checker)
 
 Symbol existence (classes/functions/use-imports/typehints, catch
@@ -4396,7 +4440,7 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 - **`Rules/Comparison/StrictComparisonOfDifferentTypesRule.php`**: Real PHPStan flags a `===`/`!==` comparison whose outcome is provably constant (operands' types disjoint => always false, or provably equal => always true) with identical.alwaysFalse/alwaysTrue and notIdentical.alwaysFalse/alwaysTrue.
 - **`Rules/Comparison/ImpossibleInArrayHaystackFiniteTypesRule.php`**: Real PHPStan flags a call to in_array()/array_search()/array_keys() where a needle's finite type can never match any value in a constant-array haystack (function.impossibleHaystackValue, registered at level 4 via conf/config.level4.neon).
 - **`Rules/Comparison/UsageOfVoidMatchExpressionRule.php`**: Real PHPStan flags using the result of a match expression whose every arm's result is a void-returning call (match.void). phpstan-rs's Match handling (both the statement-checking arm in checker/expr.rs and the type-inference arm) has no void-result-usage check at all, and this identifier/feature appears nowhere in src/ or ROADMAP.md.
-- **`Rules/Comparison/MatchExpressionRule.php`** (level 4, `#[RegisteredRule]`): Real PHPStan's own `match`-exhaustiveness check - flags a `match` with no `default` arm whose condition's type isn't fully covered by the arm conditions present (`match.unhandled`, `MatchExpressionRule.php:179` - the real `UnhandledMatchError` PHP itself throws at runtime), plus two dead-arm variants: a later arm whose own condition can never be reached because an earlier arm already covers its whole type (`match.alwaysTrue`, line 146) or is disjoint from the subject's remaining type (`match.alwaysFalse`, line 119). Confirmed absent from phpstan-rs entirely - no `match.unhandled`/`match.alwaysTrue`/`match.alwaysFalse` (or any other `match.*` identifier) exists anywhere in `src/`, and both of phpstan-rs's own `Match` handling sites (`checker/expr.rs:2929`, the statement-checking arm, and `:3774`, the type-inference arm) only ever compute the match's *result type* from its arms, never validate arm coverage against the subject's type at all. Distinct from the neighboring `UsageOfVoidMatchExpressionRule` gap above (that one's about a match's *result* being misused; this one's about the match itself never completing). A common real-world regression shape (add an enum case, forget to add its `match` arm) makes this one of the highest-value single gaps in this whole "Newly identified gaps" list.
+- **`Rules/Comparison/MatchExpressionRule.php`** (level 4, `#[RegisteredRule]`): real PHPStan's own `match`-exhaustiveness check. The `match.unhandled` half - a `match` with no `default` arm whose condition's type isn't fully covered by the arm conditions present, the real `UnhandledMatchError` PHP itself throws at runtime - is now done, see Done's own entry under "Narrowing engine". Still open: the two dead-arm variants from the same rule, a later arm whose own condition can never be reached because an earlier arm already covers its whole type (`match.alwaysTrue`, `MatchExpressionRule.php:146`) or is disjoint from the subject's remaining type (`match.alwaysFalse`, line 119) - genuinely distinct from exhaustiveness (these are about a *redundant* arm, not a *missing* one), not attempted alongside `match.unhandled`.
 
 ## PhpDoc
 

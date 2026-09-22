@@ -30,7 +30,7 @@ pub(crate) use predicates::{
     propagate_container_field_facts, purge_stale_narrowing_for,
 };
 use type_ops::narrow_instanceof_true;
-pub(crate) use type_ops::{narrow_type_excluding, narrow_type_to};
+pub(crate) use type_ops::{is_known_single_value, narrow_type_excluding, narrow_type_to};
 
 /// `count($x)`'s own operand-order detection for the count-comparison
 /// narrowing below - same shape as `int_comparison_operands`, but keyed

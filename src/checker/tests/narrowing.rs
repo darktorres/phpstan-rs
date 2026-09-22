@@ -3260,6 +3260,168 @@ fn match_on_a_real_subject_narrows_via_implicit_equality() {
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
+#[test]
+fn match_unhandled_flags_an_enum_case_missing_no_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit { case Hearts; case Diamonds; case Clubs; case Spades; }
+            function color(Suit $s): string {
+                return match ($s) {
+                    Suit::Hearts, Suit::Diamonds => "red",
+                    Suit::Clubs => "black",
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "match.unhandled" && x.message.contains("Suit::Spades")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_never_flagged_when_every_enum_case_is_covered() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit { case Hearts; case Diamonds; case Clubs; case Spades; }
+            function color(Suit $s): string {
+                return match ($s) {
+                    Suit::Hearts, Suit::Diamonds => "red",
+                    Suit::Clubs, Suit::Spades => "black",
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_never_flagged_when_a_nullable_enum_is_fully_covered() {
+    // Regression: `expand_enum_cases` must recurse into a `Union`
+    // member-by-member - a bare enum `Object` sitting directly inside
+    // `Status|null` (not yet expanded to its own cases) can never be
+    // proven redundant against an individual `EnumCase` exclusion,
+    // only a real per-case member already sitting in the union can.
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case Active; case Inactive; }
+            function f(Status|null $s): string {
+                return match ($s) {
+                    Status::Active => "active",
+                    Status::Inactive => "inactive",
+                    null => "none",
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_flags_a_bool_subject_missing_the_false_arm() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $b): string {
+                return match ($b) {
+                    true => "yes",
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "match.unhandled" && x.message.contains("false")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_never_flagged_when_both_bool_arms_are_covered() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $b): string {
+                return match ($b) {
+                    true => "yes",
+                    false => "no",
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_never_flagged_when_a_default_arm_is_present() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit { case Hearts; case Diamonds; case Clubs; case Spades; }
+            function color(Suit $s): string {
+                return match ($s) {
+                    Suit::Hearts => "red",
+                    default => "other",
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_flags_an_unbounded_int_subject_covered_by_finitely_many_literals() {
+    // No finite set of int literal arms can ever exhaust `int` itself -
+    // matches real PHPStan's own identical behavior here.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $n): string {
+                return match ($n) {
+                    1 => "one",
+                    2 => "two",
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "match.unhandled"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_never_checked_for_the_match_true_idiom() {
+    // Proving a `match(true)` chain of arbitrary boolean conditions
+    // exhaustive would need real boolean-SAT-style reasoning this
+    // project's type system doesn't attempt - deliberately unchecked
+    // rather than risk a false positive on a genuinely-exhaustive
+    // `$x < 0 => ..., $x >= 0 => ...` chain.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): string {
+                return match (true) {
+                    $x > 5 => "big",
+                    $x <= 5 => "small",
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // `??`/`??=`'s left side must not be checked for "undefined
 // variable"/"undefined property" like an ordinary read - both are
 // specifically designed to be warning-free for a variable/property
