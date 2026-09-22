@@ -508,7 +508,11 @@ on a variadic parameter, or `final` below PHP 8.5;
 including closures, arrow functions, and a trait method aliased as
 `__construct`; a `readonly`/`final`/set-visibility-only parameter now
 promotes with implicit `public` visibility. `ReadOnlyClassRule`'s version gate
-(`readonly class` below PHP 8.2, an anonymous one below 8.3).
+(`readonly class` below PHP 8.2, an anonymous one below 8.3). `InstantiationRule` end to end: `new.trait`/`.enum`/
+`.interface`/`.abstract` (never for `new static`, nor a dynamic
+`new $expr()`), `new.noConstructor`, `new.privateConstructor`/
+`.protectedConstructor`, `new.nonObject`, `class.noParent`, and
+`outOfClass.self`/`.static`/`.parent`.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3508,11 +3512,6 @@ against this list, and added the real gaps the audit had missed.
 - `InstantiationCallableRule` — `new Foo(...)` (first-class-callable
   syntax on `new`) is syntactically legal but a real semantic error;
   `callable.notSupported`.
-- `InstantiationRule`'s remaining sub-checks — phpstan-rs's `new`
-  checking covers `new.interface`/`new.abstract` (plus `class.notFound`).
-  Still missing: `new.enum`, `new.trait`, `new.nonObject`,
-  `new.noConstructor`, `class.noParent`, and
-  `outOfClass.self`/`.static`/`.parent`.
 
 ### Phase 126 — Functions (`Rules/Functions/` gaps)
 

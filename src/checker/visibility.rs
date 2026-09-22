@@ -56,7 +56,7 @@ impl<'a> Checker<'a> {
     /// allowed. Not perfectly precise (two same-named, genuinely
     /// unrelated protected members in unconnected hierarchies would also
     /// pass), but strictly more accurate than the direct check alone.
-    fn is_member_access_visible(
+    pub(crate) fn is_member_access_visible(
         &self,
         owner: &str,
         visibility: &Visibility,

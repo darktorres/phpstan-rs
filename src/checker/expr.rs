@@ -2213,33 +2213,20 @@ impl<'a> Checker<'a> {
                     // This constructor's own throw contribution.
                     let dynamic_throw = self.dynamic_new_throw_type(class, args);
                     self.record_call_throw_point(dynamic_throw, ctor_sig);
-                    // Case-insensitive lookup: instantiating a
-                    // differently-cased reference to a real class needs
-                    // `lookup_class`, not the raw, case-sensitive
-                    // `registry.classes.get`.
-                    if let Some((_, info)) = self.registry.lookup_class(class) {
-                        if info.kind == ClassKind::Interface {
-                            self.report(
-                                label.to_string(),
-                                format!("cannot instantiate interface {class}"),
-                                e.span,
-                                0,
-                                "new.interface",
-                            );
-                        } else if info.is_abstract {
-                            self.report_builder(
-                                DiagnosticBuilder::new(
-                                    label.to_string(),
-                                    format!("cannot instantiate abstract class {class}"),
-                                    e.span,
-                                    0,
-                                    "new.abstract",
-                                )
-                                .tip(
-                                    "either implement every inherited abstract method, or instantiate a concrete subclass instead",
-                                ),
-                            );
-                        } else if let Some(sig) = ctor_sig {
+                    let (is_name, is_static) = match &class_expr.kind {
+                        ExprKind::Name(raw) => (true, raw.eq_ignore_ascii_case("static")),
+                        _ => (false, false),
+                    };
+                    if self.registry.lookup_class(class).is_some() {
+                        if self.check_instantiated_class(
+                            class,
+                            is_name,
+                            is_static,
+                            !args.is_empty(),
+                            e.span,
+                            label,
+                        ) && let Some(sig) = ctor_sig
+                        {
                             // See the identical comment on the plain-
                             // function Call arm above - `check_args` is
                             // spread-aware, so it's always worth calling.
@@ -2262,6 +2249,16 @@ impl<'a> Checker<'a> {
                             0,
                             "class.notFound",
                         );
+                    }
+                } else {
+                    match &class_expr.kind {
+                        ExprKind::Name(raw) => {
+                            self.check_new_pseudo_target(raw, class_expr.span, label);
+                        }
+                        _ => {
+                            let target_ty = self.infer_expr(class_expr, locals);
+                            self.check_new_on_non_class_name(&target_ty, class_expr.span, label);
+                        }
                     }
                 }
                 new_ty

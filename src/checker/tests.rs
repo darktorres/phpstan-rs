@@ -41,6 +41,7 @@ mod global_constants;
 mod global_vars;
 mod helpers;
 mod inline_var_validation;
+mod instantiation;
 mod int_range_arithmetic;
 mod internal_usage;
 mod invalid_assignment_targets;
