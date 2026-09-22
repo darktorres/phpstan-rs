@@ -49,10 +49,11 @@ impl<'a> Checker<'a> {
         // property) makes every property of the class - and any subclass,
         // via `class_is_immutable`'s `extends`-walk - behave as if
         // individually `readonly`.
+        let in_declaring_class = self.current_class.as_deref() == Some(owner.as_ref());
         if (prop_sig.is_readonly || self.registry.class_is_immutable(&owner))
             && !in_clone_reinit
-            && (self.current_class.as_deref() != Some(owner.as_ref())
-                || self.current_method.as_deref() != Some("__construct"))
+            && !(in_declaring_class && prop_sig.allows_private_mutation)
+            && (!in_declaring_class || self.current_method.as_deref() != Some("__construct"))
         {
             self.report_builder(
                 DiagnosticBuilder::new(

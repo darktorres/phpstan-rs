@@ -3436,3 +3436,37 @@ fn overriding_a_tentative_return_type_incompatibly_is_flagged() {
     );
     assert!(tentative((8, 0)).is_empty());
 }
+
+#[test]
+fn phpdoc_readonly_with_allowed_private_mutation_is_writable_only_inside_its_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Counter {
+                /** @phpstan-readonly-allow-private-mutation */
+                public int $count = 0;
+                /** @readonly */
+                public int $strict;
+                public function __construct() { $this->strict = 1; }
+                public function bump(): void {
+                    $this->count++;
+                    $this->count = 2;
+                    $this->strict = 3;
+                }
+            }
+            function outside(Counter $c): void { $c->count = 5; }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "property.readOnlyAssignNotInConstructor")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Counter::$strict is readonly and cannot be modified here",
+            "Counter::$count is readonly and cannot be modified here",
+        ],
+        "got: {d:?}"
+    );
+}

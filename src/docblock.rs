@@ -77,9 +77,12 @@ pub struct DocBlock {
     // `PropertySig::is_readonly` at `ClassInfo::from_decl` time so it
     // flows through the same enforcement/variance/override machinery a
     // native `readonly` property gets.
-    // `@phpstan-readonly-allow-private-mutation`'s narrower exemption
-    // isn't modeled.
+    // `@phpstan-readonly-allow-private-mutation` sets this too, along
+    // with `allow_private_mutation` below.
     pub readonly: bool,
+    // `@phpstan-allow-private-mutation`/`@phpstan-readonly-allow-private-
+    // mutation` - a `@readonly` property its own class may still write.
+    pub allow_private_mutation: bool,
     // `@phpstan-immutable` - class-level only. `ClassReflection::
     // isImmutable()` treats this OR `@phpstan-readonly` on the class
     // identically; `ClassInfo::from_decl`/`from_enum_decl` compute
@@ -638,11 +641,7 @@ const PREFIXED_ONLY_TAGS_PHPSTAN_PARSES: &[&str] = &[
 /// prefixes is Psalm/Phan-only vocabulary with no PHPStan meaning
 /// (`@psalm-suppress`, `@psalm-internal` - a namespace argument, not
 /// `@internal`'s no-argument form - `@psalm-mutation-free`, ...) and is
-/// skipped. `@psalm-readonly-allow-private-mutation`/`@psalm-allow-
-/// private-mutation` are deliberately not mapped: real PHPStan treats
-/// them as readonly *plus* a private-mutation exemption this project
-/// doesn't model, so mapping them to plain `readonly` would flag the
-/// very private writes the tag exists to allow. `@psalm-this-out`/
+/// skipped. `@psalm-this-out`/
 /// `-self-out` aren't mapped because `apply_tag` has no self-out arm to
 /// map them onto yet.
 fn foreign_tag_canonical_name(prefix: &str, tag: &str) -> Option<&'static str> {
@@ -670,6 +669,8 @@ fn foreign_tag_canonical_name(prefix: &str, tag: &str) -> Option<&'static str> {
         ("psalm-", "require-implements") => "require-implements",
         ("psalm-", "inheritors") => "sealed",
         ("psalm-", "readonly") => "readonly",
+        ("psalm-", "allow-private-mutation") => "allow-private-mutation",
+        ("psalm-", "readonly-allow-private-mutation") => "readonly-allow-private-mutation",
         ("psalm-", "consistent-constructor") => "consistent-constructor",
         _ => return None,
     };
@@ -1088,6 +1089,13 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
             }
             "readonly" => {
                 block.readonly = true;
+            }
+            "allow-private-mutation" => {
+                block.allow_private_mutation = true;
+            }
+            "readonly-allow-private-mutation" => {
+                block.readonly = true;
+                block.allow_private_mutation = true;
             }
             "immutable" => {
                 block.immutable = true;

@@ -32,6 +32,10 @@ pub struct PropertySig {
     pub ty: Type,
     pub is_static: bool,
     pub is_readonly: bool,
+    // `@readonly`-by-PHPDoc (never native `readonly`) with
+    // `@phpstan-allow-private-mutation`: the declaring class may still
+    // write it outside its constructor.
+    pub allows_private_mutation: bool,
     // `public`/`private`/`protected`. A magic `@property` tag and an
     // enum's built-in `name`/`value` are always `Visibility::Public` -
     // real PHP has no way to declare either any other way.
@@ -647,6 +651,10 @@ impl ClassInfo {
                         // `readonly` sets - both flow through identical
                         // downstream enforcement.
                         is_readonly: p.is_readonly || doc_ty.as_ref().is_some_and(|d| d.readonly),
+                        allows_private_mutation: !p.is_readonly
+                            && doc_ty
+                                .as_ref()
+                                .is_some_and(|d| d.readonly && d.allow_private_mutation),
                         set_ty,
                         is_virtual,
                         visibility: p.visibility.clone(),
@@ -730,11 +738,10 @@ impl ClassInfo {
                 // A promoted param's own inline `@readonly` - cheap to
                 // support given `p.doc_comment` is already parsed above
                 // for `@var`'s fallback.
-                let doc_readonly = p
-                    .doc_comment
-                    .as_deref()
-                    .map(docblock::parse)
-                    .is_some_and(|d| d.readonly);
+                let param_doc = p.doc_comment.as_deref().map(docblock::parse);
+                let doc_readonly = param_doc.as_ref().is_some_and(|d| d.readonly);
+                let doc_allows_private_mutation =
+                    param_doc.as_ref().is_some_and(|d| d.allow_private_mutation);
                 // A promoted constructor property can carry its own
                 // inline PHP 8.4 hooks (`Param::hooks`) exactly like a
                 // plain property declaration can - resolved through the
@@ -754,6 +761,9 @@ impl ClassInfo {
                         has_native_type: p.type_hint.is_some(),
                         is_static: false,
                         is_readonly: p.promoted_readonly || doc_readonly,
+                        allows_private_mutation: !p.promoted_readonly
+                            && doc_readonly
+                            && doc_allows_private_mutation,
                         set_ty,
                         is_virtual,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
@@ -805,6 +815,7 @@ impl ClassInfo {
                         has_native_type: false,
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
+                        allows_private_mutation: false,
                         set_ty: None,
                         is_virtual: false,
                         visibility: Visibility::Public,
@@ -1403,6 +1414,7 @@ impl ClassInfo {
                 has_native_type: true,
                 is_static: false,
                 is_readonly: false,
+                allows_private_mutation: false,
                 set_ty: None,
                 is_virtual: false,
                 visibility: Visibility::Public,
@@ -1462,6 +1474,7 @@ impl ClassInfo {
                     has_native_type: true,
                     is_static: false,
                     is_readonly: false,
+                    allows_private_mutation: false,
                     set_ty: None,
                     is_virtual: false,
                     visibility: Visibility::Public,

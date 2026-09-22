@@ -103,12 +103,24 @@ fn psalm_only_vocabulary_is_ignored() {
         r#"/**
          * @psalm-suppress MixedAssignment
          * @psalm-internal App\Internal
-         * @psalm-allow-private-mutation
-         * @psalm-readonly-allow-private-mutation
          */"#,
     );
     assert!(!block.internal);
+}
+
+#[test]
+fn psalm_private_mutation_tags_map_onto_their_phpstan_meaning() {
+    let block = parse("/** @psalm-allow-private-mutation */");
+    assert!(block.allow_private_mutation);
     assert!(!block.readonly);
+
+    let block = parse("/** @psalm-readonly-allow-private-mutation */");
+    assert!(block.allow_private_mutation);
+    assert!(block.readonly);
+
+    let block = parse("/** @phpstan-readonly-allow-private-mutation */");
+    assert!(block.allow_private_mutation);
+    assert!(block.readonly);
 }
 
 #[test]
