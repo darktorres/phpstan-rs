@@ -3626,14 +3626,23 @@ receiver-type-checks phase.)
   all today (confirmed by its own test name).
 - `MissingTypehintCheck`'s `missingType.callable` — a `callable`/
   `Closure` type with no signature, gated behind real PHPStan's opt-in
-  `checkMissingCallableSignature` (off by default). `checker/
-  missing_typehint.rs`'s module doc says this is impossible because a
-  bare `callable` and a signature-carrying `callable(int): string`
-  parse to the same `Type::Callable`. That stopped being true when Phase
-  53 made it `Type::Callable(Option<Arc<CallableSig>>)` (see Done), so
-  `None` now means exactly "no signature written". Buildable as an
-  opt-in `Registry` flag. The same predicate also covers the
-  `missingType.callable` half of Phase 130's assert-type item.
+  `checkMissingCallableSignature` (off by default). This used to be
+  unbuildable because a bare `callable` and a signature-carrying
+  `callable(int): string` parsed to the same `Type::Callable`. Phase 53
+  made it `Type::Callable(Option<Arc<CallableSig>>)` (see Done), so
+  `None` now means exactly "no signature written". A bare `Closure`
+  resolves to a plain object class reference, so it needs its own case.
+  Buildable as an opt-in `Registry` flag. The same predicate also covers
+  the `missingType.callable` half of Phase 130's assert-type item.
+- `RuleLevelHelper::findTypeToCheck`'s `StrictMixedType` — at level 9/10
+  (`checkExplicitMixed`/`checkImplicitMixed`), real PHPStan turns a
+  `mixed` receiver into a `StrictMixedType`, so calling a method,
+  reading a property, or taking an offset on it is reported
+  (`method.nonObject` and siblings). Phase 84 applies those two toggles
+  only to type acceptance (`Registry::is_assignable_at_level`). The
+  receiver-type checks in `checker/expr.rs` still skip `Mixed` at every
+  level. Wiring the toggles in is small: consult `configured_level` and
+  the explicit/implicit `Type::Mixed(bool)` flag at the same sites.
 
 ### Phase 179 — `@psalm-*`/`@phan-*` PHPDoc tag spellings (`PhpDocNodeResolver` parity)
 

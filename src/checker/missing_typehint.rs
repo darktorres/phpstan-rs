@@ -19,20 +19,16 @@
 //!   `array_map`'s callback), so inventing that check here would be new,
 //!   false-positive-prone behavior with no real rule to model it on.
 //!
-//! - **No `missingType.callable` ("callable has no signature") check.**
+//! - **No `missingType.callable` ("callable has no signature") check yet.**
 //!   Real PHPStan gates this sub-check behind `checkMissingCallableSignature`,
-//!   `false` by default in its own `conf/config.neon` - real PHPStan
-//!   itself doesn't run this check on an ordinary project either. More
-//!   fundamentally, this project's own `types::parse_type_string` collapses
-//!   both a bare `callable`/`Closure` and a signature-carrying
-//!   `callable(int): string`/`Closure(self): T` down to the exact same
-//!   `Type::Callable` at parse time (see its own doc comment) - there is no
-//!   way to tell "genuinely signature-less" apart from "had a signature
-//!   PHPDoc wrote out" once a `Type` exists, so implementing this
-//!   sub-check here would flag every callable-typed declaration in the
-//!   project uniformly, a systematic false-positive generator this
-//!   project's own stated philosophy treats as seriously as a missed
-//!   detection.
+//!   `false` by default in its own `conf/config.neon`, so real PHPStan
+//!   itself doesn't run it on an ordinary project either. It is buildable
+//!   as an opt-in check: `Type::Callable(None)` is exactly a bare
+//!   `callable`/`Closure` with no signature written, while
+//!   `callable(int): string`/`Closure(self): T` parse to
+//!   `Type::Callable(Some(sig))`. A bare `Closure` (native hint or PHPDoc)
+//!   resolves to a plain `Type::Object` class reference instead, so that
+//!   spelling needs its own case.
 use crate::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use crate::checker::{Checker, DiagnosticBuilder};
 use crate::docblock;

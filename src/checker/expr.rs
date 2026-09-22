@@ -120,10 +120,14 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// away by `Checker::resolve_pseudo` well before reaching a real
 /// expression's type in valid code), and `Type::Mixed(false)`/`Never` are all
 /// left unflagged - matching real PHPStan's own permissive default for
-/// `Mixed` (`checkExplicitMixed`/`checkImplicitMixed` are opt-in toggles
-/// this project doesn't implement) and vacuous-`Never` behavior
+/// `Mixed` below level 9 and vacuous-`Never` behavior
 /// (`NeverType` itself overrides `canCallMethods` to unconditionally
-/// return "yes").
+/// return "yes"). `checkExplicitMixed`/`checkImplicitMixed` are honored
+/// only for type acceptance (`Registry::is_assignable_at_level`), not
+/// here: real PHPStan's `RuleLevelHelper::findTypeToCheck` also turns a
+/// level-9/10 `Mixed` receiver into a `StrictMixedType` that can't have
+/// methods called or properties read on it, so at those levels this
+/// check stays more lenient than real PHPStan.
 ///
 /// A `Union` is flagged the moment *any* **non-`Null`** member is
 /// confirmed closed; an `Intersection` only when *every* member is - the
