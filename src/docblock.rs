@@ -179,6 +179,23 @@ pub struct DocBlock {
     // rule - collected here so a future rule can be, without another
     // parsing pass.
     pub parse_errors: Vec<PhpDocParseError>,
+    // One entry per plain/`@phpstan-` tag whose value produced at least one
+    // `parse_errors` entry - the tag-level view real PHPStan's
+    // `InvalidPhpDocTagValueRule` (`phpDoc.parseError`) reports. Foreign
+    // `@psalm-`/`@phan-` tags never land here: an unparsable one is skipped
+    // outright (`foreign_tag_has_invalid_type`), and real PHPStan's rule
+    // skips those prefixes too.
+    pub invalid_tag_values: Vec<InvalidTagValue>,
+}
+
+/// One tag whose value failed to parse - see `DocBlock::invalid_tag_values`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct InvalidTagValue {
+    // The tag name exactly as written, `@` excluded (`param`,
+    // `phpstan-return`).
+    pub tag: String,
+    pub value: String,
+    pub message: String,
 }
 
 /// One parsed `@phpstan-import-type` tag - see `DocBlock::type_imports`'s
@@ -333,7 +350,7 @@ pub fn parse(raw: &str) -> DocBlock {
             continue;
         }
         let (tag, rest) = split_tag(tag_body);
-        apply_tag(&mut block, tag, rest);
+        apply_tag_recording_errors(&mut block, tag, tag, rest);
     }
     // The assert family is the one exception to "later spelling
     // overwrites": `resolveAssertTags` takes the first prefix among
@@ -361,14 +378,14 @@ pub fn parse(raw: &str) -> DocBlock {
         }
     }
     for line in &tag_lines {
-        let Some(tag_body) = line
-            .strip_prefix('@')
-            .and_then(|b| b.strip_prefix("phpstan-"))
-        else {
+        let Some(written) = line.strip_prefix('@') else {
+            continue;
+        };
+        let Some(tag_body) = written.strip_prefix("phpstan-") else {
             continue;
         };
         let (tag, rest) = split_tag(tag_body);
-        apply_tag(&mut block, tag, rest);
+        apply_tag_recording_errors(&mut block, split_tag(written).0, tag, rest);
     }
     let has_assert = |b: &DocBlock| {
         !(b.assert.is_empty() && b.assert_if_true.is_empty() && b.assert_if_false.is_empty())
@@ -383,6 +400,56 @@ pub fn parse(raw: &str) -> DocBlock {
 
     block
 }
+
+/// `apply_tag`, plus one `DocBlock::invalid_tag_values` entry when this
+/// tag's value added any new `parse_errors`. `written` is the tag name as
+/// it appears in the source (prefix included), `tag` the name `apply_tag`
+/// dispatches on.
+fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, rest: &str) {
+    let errors_before = block.parse_errors.len();
+    apply_tag(block, tag, rest);
+    let parsed_by_phpstan =
+        written.starts_with("phpstan-") || PLAIN_TAGS_PHPSTAN_PARSES.contains(&tag);
+    if parsed_by_phpstan && let Some(first) = block.parse_errors.get(errors_before) {
+        block.invalid_tag_values.push(InvalidTagValue {
+            tag: written.to_string(),
+            value: rest.to_string(),
+            message: first.message.clone(),
+        });
+    }
+}
+
+/// The plain (unprefixed) tag names real phpdoc-parser's `parseTagValue`
+/// gives a structured value, and can therefore report as invalid. A plain
+/// `@type`/`@assert`/`@import-type`/`@require-extends`/`@sealed` (which
+/// `apply_tag` still honors, for other tools' conventions) is only ever a
+/// generic tag to real PHPStan, never a parse error - only its
+/// `@phpstan-` spelling is parsed.
+const PLAIN_TAGS_PHPSTAN_PARSES: &[&str] = &[
+    "param",
+    "param-out",
+    "param-immediately-invoked-callable",
+    "param-later-invoked-callable",
+    "param-closure-this",
+    "var",
+    "return",
+    "throws",
+    "mixin",
+    "deprecated",
+    "property",
+    "property-read",
+    "property-write",
+    "method",
+    "template",
+    "template-covariant",
+    "template-contravariant",
+    "extends",
+    "template-extends",
+    "implements",
+    "template-implements",
+    "use",
+    "template-use",
+];
 
 fn split_tag(tag_body: &str) -> (&str, &str) {
     let mut parts = tag_body.splitn(2, char::is_whitespace);

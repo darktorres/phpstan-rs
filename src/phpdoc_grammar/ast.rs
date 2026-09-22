@@ -118,6 +118,10 @@ pub enum TypeNode {
     /// per node, same as real PHPStan's own `ArrayShapeType`-adjacent
     /// sugar.
     ArrayOf(Box<TypeNode>),
+    /// `Base[Offset]` - phpdoc-parser's `OffsetAccessTypeNode`, written
+    /// with no whitespace before the `[` (with whitespace, a `[` starts a
+    /// description instead).
+    OffsetAccess(Box<TypeNode>, Box<TypeNode>),
     /// `array{...}`/`list{...}`/`object{...}` - `keyword` is whichever of
     /// those three introduced it (also accepted, disclosed-lenient: any
     /// other bare identifier immediately followed by `{`, so a real
@@ -229,6 +233,9 @@ impl TypeNode {
                     .join(", ")
             ),
             TypeNode::ArrayOf(inner) => format!("{}[]", inner.to_source_string()),
+            TypeNode::OffsetAccess(base, offset) => {
+                format!("{}[{}]", base.to_source_string(), offset.to_source_string())
+            }
             TypeNode::ArrayShape {
                 keyword,
                 fields,

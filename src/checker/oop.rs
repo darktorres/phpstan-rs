@@ -513,7 +513,8 @@ impl<'a> Checker<'a> {
     }
 
     /// Mirrors real PHPStan's `InvalidPHPStanDocTagRule`
-    /// (`phpDoc.phpstanTag`) - a `@phpstan-*` tag real PHPStan doesn't
+    /// (`phpDoc.phpstanTag`) and its sibling `InvalidPhpDocTagValueRule`
+    /// (`phpDoc.parseError`) - a `@phpstan-*` tag real PHPStan doesn't
     /// recognize at all (catches a typo, e.g. `@phpstan-parm`, that
     /// would otherwise silently do nothing). Scoped to a class's own
     /// docblock plus every one of its methods'/properties'/consts' -
@@ -560,7 +561,30 @@ impl<'a> Checker<'a> {
                 "phpDoc.phpstanTag",
             );
         }
+        self.report_invalid_doc_tag_values(label, doc, span);
         self.check_doc_see_tag_targets(label, doc, span);
+    }
+
+    /// `InvalidPhpDocTagValueRule` (`phpDoc.parseError`), level 2: a tag
+    /// whose value this project's PHPDoc grammar couldn't parse. A
+    /// type-alias tag names its alias instead of repeating the whole value,
+    /// matching real PHPStan's own two message shapes.
+    pub(crate) fn report_invalid_doc_tag_values(&mut self, label: &str, doc: &str, span: Span) {
+        for invalid in docblock::parse(doc).invalid_tag_values {
+            let message = if invalid.tag == "type" || invalid.tag == "phpstan-type" {
+                let alias = invalid.value.split_whitespace().next().unwrap_or("");
+                format!(
+                    "PHPDoc tag @{} {alias} has invalid value: {}",
+                    invalid.tag, invalid.message
+                )
+            } else {
+                format!(
+                    "PHPDoc tag @{} has invalid value ({}): {}",
+                    invalid.tag, invalid.value, invalid.message
+                )
+            };
+            self.report(label.to_string(), message, span, 2, "phpDoc.parseError");
+        }
     }
 
     /// Checks a `@see` value shaped like a bare class name or a

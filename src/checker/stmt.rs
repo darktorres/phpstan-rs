@@ -93,6 +93,32 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `phpDoc.parseError` for a statement's own docblock - the
+    /// statement-level half of real PHPStan's `InvalidPhpDocTagValueRule`
+    /// (the declaration-level half runs from
+    /// `check_unknown_phpstan_tags_on`). Real PHPStan checks every
+    /// statement's docblock except an expression statement that isn't an
+    /// assignment; a function/class/enum declaration's own docblock is
+    /// skipped here, since the declaration-level half already covers it.
+    fn check_statement_doc_tag_values(&mut self, stmt: &Stmt, label: &str) {
+        let Some(doc) = stmt.doc_comment.as_deref() else {
+            return;
+        };
+        match &stmt.kind {
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => return,
+            StmtKind::Expression(e)
+                if !matches!(
+                    e.kind,
+                    ExprKind::Assign(..) | ExprKind::AssignRef(..) | ExprKind::CompoundAssign(..)
+                ) =>
+            {
+                return;
+            }
+            _ => {}
+        }
+        self.report_invalid_doc_tag_values(label, doc, stmt.span);
+    }
+
     fn dispatch_stmt_rules(&mut self, stmt: &Stmt, locals: &Locals, label: &str) {
         let rules = self.external_rules;
         let mut found = Vec::new();
@@ -113,6 +139,7 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
+        self.check_statement_doc_tag_values(stmt, label);
         let inline_var = self.inline_var_annotation(stmt);
         if let Some((name, ty)) = &inline_var {
             purge_stale_narrowing_for(locals, name);

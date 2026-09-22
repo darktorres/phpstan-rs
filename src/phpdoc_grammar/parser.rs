@@ -103,6 +103,21 @@ impl TagParser {
         matches!(self.peek(), PhpDocToken::Eof)
     }
 
+    /// phpdoc-parser's own `Unexpected token "X", expected Y` wording,
+    /// without its trailing byte-offset/line suffix (this project's
+    /// tokens don't keep a docblock-relative offset).
+    fn error_unexpected_token(&mut self, expected: &str) {
+        let message = if self.at_eof() {
+            format!("Unexpected end of tag, expected {expected}")
+        } else {
+            format!(
+                "Unexpected token \"{}\", expected {expected}",
+                token_text(self.peek())
+            )
+        };
+        self.error(message);
+    }
+
     fn error(&mut self, message: impl Into<String>) {
         self.errors.push(PhpDocParseError {
             message: message.into(),
@@ -173,10 +188,13 @@ impl TagParser {
         let bare = name.strip_prefix("phpstan-").unwrap_or(name);
         let lower = bare.to_ascii_lowercase();
         if TYPED_VAR_TAGS.contains(&lower.as_str()) {
-            return self.parse_typed_var();
+            return self.parse_typed_var(&lower);
         }
         if TYPE_ONLY_TAGS.contains(&lower.as_str()) {
             let ty = self.try_parse_type();
+            if ty.is_some() {
+                self.check_description_start_after_type();
+            }
             let description = self.remaining_description();
             return PhpDocTagValue::Type { ty, description };
         }
@@ -188,8 +206,17 @@ impl TagParser {
         }
     }
 
-    fn parse_typed_var(&mut self) -> PhpDocTagValue {
+    /// phpdoc-parser's own `parseParamTagValue`/`parseParamOutTagValue`/
+    /// `parsePropertyTagValue` require a `$variable` (`parseRequired
+    /// VariableName`), and `parseVarTagValue` requires a type (the
+    /// variable is optional there) - a tag missing its required half is an
+    /// `InvalidTagValueNode` in real PHPStan (`phpDoc.parseError`), not a
+    /// tag with an absent field. `tag` is the lowercased, un-prefixed name.
+    fn parse_typed_var(&mut self, tag: &str) -> PhpDocTagValue {
         let ty = self.try_parse_type_if_present();
+        if tag == "var" && ty.is_none() {
+            self.error_unexpected_token("type");
+        }
         let mut by_ref = self.eat(&PhpDocToken::Amp);
         let variadic = self.eat(&PhpDocToken::Ellipsis);
         if !by_ref {
@@ -200,6 +227,11 @@ impl TagParser {
             self.advance();
             Some(v)
         } else {
+            if tag != "var" {
+                self.error_unexpected_token("variable");
+            } else if ty.is_some() {
+                self.check_description_start_after_type();
+            }
             None
         };
         let description = self.remaining_description();
@@ -407,23 +439,69 @@ impl TagParser {
         }
     }
 
+    /// `T[]` array shorthand, and phpdoc-parser's `tryParseArrayOrOffset
+    /// Access` offset-access form `T[K]` - only when the `[` directly
+    /// follows the type (preceded by whitespace, it starts a description).
+    /// An offset that doesn't parse up to its `]` rolls back, leaving the
+    /// `[` for the caller, the same as phpdoc-parser's own savepoint.
     fn parse_array_suffixed(&mut self) -> TypeNode {
         let mut ty = self.parse_atom();
         loop {
-            if matches!(self.peek(), PhpDocToken::LBracket)
-                && matches!(
-                    self.tokens.get(self.pos + 1).map(|(t, _)| t),
-                    Some(PhpDocToken::RBracket)
-                )
-            {
+            if !matches!(self.peek(), PhpDocToken::LBracket) {
+                break;
+            }
+            if matches!(
+                self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                Some(PhpDocToken::RBracket)
+            ) {
                 self.advance();
                 self.advance();
                 ty = TypeNode::ArrayOf(Box::new(ty));
+                continue;
+            }
+            if self.preceded_by_whitespace() {
+                break;
+            }
+            let checkpoint = self.pos;
+            let errors_checkpoint = self.errors.len();
+            self.advance();
+            let offset = self.parse_type();
+            if self.errors.len() == errors_checkpoint && self.eat(&PhpDocToken::RBracket) {
+                ty = TypeNode::OffsetAccess(Box::new(ty), Box::new(offset));
             } else {
+                self.pos = checkpoint;
+                self.errors.truncate(errors_checkpoint);
                 break;
             }
         }
         ty
+    }
+
+    /// Whether the current token is separated from the previous one by
+    /// whitespace - phpdoc-parser's `isPrecededByHorizontalWhitespace`.
+    fn preceded_by_whitespace(&self) -> bool {
+        self.pos == 0
+            || self
+                .tokens
+                .get(self.pos)
+                .zip(self.tokens.get(self.pos - 1))
+                .is_none_or(|((_, cur), (_, prev))| prev.end != cur.start)
+    }
+
+    /// phpdoc-parser's `parseOptionalDescription(..., limitStartToken:
+    /// true)`, called right after a tag's type: a description can't start
+    /// with `|`/`&` (a dangling union/intersection operator), and has to be
+    /// whitespace-separated from the type (`array(width, height)` after
+    /// the callable parse rolls back, `array<array><string>`).
+    fn check_description_start_after_type(&mut self) {
+        if self.at_eof() {
+            return;
+        }
+        if matches!(self.peek(), PhpDocToken::Pipe | PhpDocToken::Amp) {
+            self.error_unexpected_token("TOKEN_OTHER");
+        } else if !self.preceded_by_whitespace() {
+            self.error_unexpected_token("TOKEN_HORIZONTAL_WS");
+        }
     }
 
     fn parse_atom(&mut self) -> TypeNode {
@@ -433,6 +511,13 @@ impl TagParser {
                 self.parse_paren_or_conditional()
             }
             PhpDocToken::Variable(name) => {
+                // `$this` is a real type (phpdoc-parser's
+                // `TOKEN_THIS_VARIABLE`); any other variable where a type
+                // is expected is a parse error there. Kept as a node for
+                // recovery either way.
+                if &*name != "this" {
+                    self.error_unexpected_token("type");
+                }
                 self.advance();
                 TypeNode::Identifier(format!("${name}"))
             }

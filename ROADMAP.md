@@ -622,6 +622,24 @@ message is its rule's iterable-value sentence with "no value type
 specified in" swapped for "no signature specified for", which is how
 real PHPStan's six rules word it.
 
+**`phpDoc.parseError`** (Phase 130, `InvalidPhpDocTagValueRule`, level
+2). It covers declaration docblocks (via `check_unknown_phpstan_tags_on`)
+and every statement docblock except a non-assignment expression
+statement, and only tags phpdoc-parser itself parses: a plain `@type`/
+`@assert`/`@import-type` is never reported, and neither is a
+`@psalm-`/`@phan-` tag. The PHPDoc grammar gained the phpdoc-parser
+rules the corpus needed:
+- `@param`/`@param-out`/`@property*` require a `$variable`, and `@var`
+  requires a type.
+- A type can't start with a non-`$this` variable.
+- A description right after a type must be whitespace-separated and
+  can't start with `|`/`&`.
+- `T[K]` (no space before `[`) is an offset-access type.
+
+On piwigo16, 154 of real `vendor/bin/phpstan`'s 155 hits match with
+zero false positives. The one miss is a Doctrine-annotation-style
+generic tag.
+
 **`@psalm-*`/`@phan-*` tag spellings** (Phase 179). `docblock::parse`
 now reads real PHPStan's `PhpDocNodeResolver` spelling set, not just
 plain and `@phpstan-` tags, in its precedence order: plain, then
@@ -3495,12 +3513,13 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 130 — PhpDoc (`Rules/PhpDoc/` gaps)
 
-- `InvalidPhpDocTagValueRule` — `phpDoc.parseError` for a
-  syntactically malformed PHPDoc tag value. The grammar-level PHPDoc
-  parser already produces `DocBlock.parse_errors` (see Done), but no
-  rule reads them yet. This one has a high corpus count (155 hits on
-  piwigo16), spread across Piwigo's own code rather than one vendored
-  file, so it's worth a closer look.
+- `InvalidPhpDocTagValueRule` remainder — `phpDoc.parseError` itself is
+  built (see Done). Two gaps remain. First, real PHPStan ignores an
+  invalid tag entirely (it's an `InvalidTagValueNode`, so no type is
+  taken from it), while `docblock::parse` still applies whatever its
+  grammar recovered (`@return array(width, height)` still yields
+  `array`). Second, the Doctrine-annotation-style generic-tag parse
+  behind `@url (image.jpg) ...` (1 piwigo16 hit) isn't modeled.
 - `IncompatiblePhpDocTypeRule` family (param/property/property-hook/
   class-constant) — a PHPDoc type incompatible with its own native type
   hint; phpstan-rs silently reconciles/coerces instead of diagnosing.
@@ -3676,6 +3695,25 @@ receiver-type-checks phase.)
   malformed `@phpstan-ignore` identifier-list syntax; phpstan-rs's own
   `ignore_comments.rs` deliberately swallows this with no diagnostic at
   all today (confirmed by its own test name).
+
+### Phase 180 — `treatPhpDocTypesAsCertain: false`
+
+Real PHPStan's `treatPhpDocTypesAsCertain` parameter (default `true`)
+decides whether always-true/always-false checks
+(`instanceof.alwaysTrue`, `function.alreadyNarrowedType`,
+`identical.alwaysTrue`, the whole constant-condition family) trust a
+PHPDoc-only type as certain. Set to `false`, they only fire on what the
+*native* types alone prove. Composer and Monolog both ship with it set
+to `false`, and a Lane B corpus run found it explains most of their
+remaining `instanceof.always*` hits. phpstan-rs has no such option:
+every consumer sees the PHPDoc-refined type only. Building it needs the
+native-only type alongside the refined one at those decision points
+(real PHPStan's `Scope::getNativeType`), plus a config key and the
+per-rule "because the type is coming from a PHPDoc" tip real PHPStan
+adds when the option is on.
+
+**Effort: large** (a second, native-only type channel through the
+narrowing engine).
 
 ## Part 10 — Top-100 Packagist `phpstan-extension` survey (new phases)
 
