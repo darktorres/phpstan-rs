@@ -528,7 +528,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                     ExprKind::Index(..) => {
-                        let current_base_ty = self.infer_expr(base, locals);
+                        let current_base_ty = self.nested_write_container_type(base, locals);
                         // A nested write's own container isn't a bare
                         // variable name `in_range_index_writes` could
                         // ever match against - out of scope for this
@@ -548,6 +548,55 @@ impl<'a> Checker<'a> {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// The current type of a nested write's intermediate container
+    /// (`$x['a']` in `$x['a']['b'] = 1`). An offset provably absent from
+    /// its own container - an append, a literal key the shape doesn't
+    /// have, or any key on an empty shape - is auto-vivified by PHP into
+    /// a fresh array, at any depth, rather than read back as `mixed`.
+    fn nested_write_container_type(&self, e: &Expr, locals: &Locals) -> Type {
+        let ExprKind::Index(inner, idx) = &e.kind else {
+            return self.infer_expr(e, locals);
+        };
+        let inner_ty = match &inner.kind {
+            ExprKind::Index(..) => self.nested_write_container_type(inner, locals),
+            _ => self.infer_expr(inner, locals),
+        };
+        let shapes: Vec<&Vec<(String, Type, bool)>> = match &inner_ty {
+            Type::ArrayShape(fields) => vec![fields],
+            Type::Union(members) => {
+                let shapes: Vec<_> = members
+                    .iter()
+                    .filter_map(|m| match m {
+                        Type::ArrayShape(fields) => Some(fields),
+                        _ => None,
+                    })
+                    .collect();
+                if shapes.len() != members.len() {
+                    return self.infer_expr(e, locals);
+                }
+                shapes
+            }
+            _ => return self.infer_expr(e, locals),
+        };
+        if shapes.iter().any(|fields| is_unsealed_shape(fields)) {
+            return self.infer_expr(e, locals);
+        }
+        let absent = match idx.as_deref() {
+            None => true,
+            Some(i) => match literal_string_key(i) {
+                Some(key) => !shapes
+                    .iter()
+                    .any(|fields| fields.iter().any(|(name, _, _)| *name == key)),
+                None => shapes.iter().all(|fields| fields.is_empty()),
+            },
+        };
+        if absent {
+            Type::ArrayShape(vec![])
+        } else {
+            self.infer_expr(e, locals)
         }
     }
 

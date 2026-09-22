@@ -1870,3 +1870,25 @@ fn writes_to_the_same_literal_key_across_both_branches_of_an_if_else_union_their
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn deep_nested_writes_auto_vivify_every_missing_level() {
+    let d = diagnostics_for(
+        r#"<?php
+            function straight(): void {
+                $x = [];
+                $x['a']['b'][] = 1;
+                \PHPStan\Testing\assertType('array{a: array{b: non-empty-list<1>}}', $x);
+            }
+            function nested(array $items): void {
+                $x = [];
+                foreach ($items as $i) { foreach ($items as $j) { $x[$i][$j][] = 1; } }
+                \PHPStan\Testing\assertType('array<(int|string), array<(int|string), non-empty-list<1>>>', $x);
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpstanRs.assertType"),
+        "got: {d:?}"
+    );
+}
