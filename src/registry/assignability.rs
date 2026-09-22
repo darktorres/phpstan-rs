@@ -370,6 +370,21 @@ impl Registry {
                     })
                     .is_some_and(|u| u.iter().any(|m| self.is_assignable(m, sup)))
             }
+            // A closure literal (`Type::closure_literal`) checked against a
+            // shaped `callable(...)`/`Closure(...)`: only its own
+            // signature decides. The generic "any member satisfies" rule
+            // just below would otherwise accept it through the `Closure`
+            // object member alone (`Closure` declares `__invoke`, which
+            // satisfies every callable shape), skipping the structural
+            // comparison entirely.
+            (Type::Intersection(members), Type::Callable(Some(_)))
+                if members.iter().any(|m| matches!(m, Type::Callable(Some(_)))) =>
+            {
+                members
+                    .iter()
+                    .filter(|m| matches!(m, Type::Callable(Some(_))))
+                    .any(|m| self.is_assignable(m, sup))
+            }
             (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
             (_, Type::Intersection(members)) => members.iter().all(|m| self.is_assignable(sub, m)),
             // Deliberately more lenient here than types::is_subtype's pure

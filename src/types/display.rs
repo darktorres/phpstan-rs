@@ -1,7 +1,32 @@
 use std::fmt;
 
 use crate::types::parse::display_shape_key;
-use crate::types::{AccessoryKind, Type};
+use crate::types::{AccessoryKind, CallableSig, Type};
+
+/// `keyword(params): return` - shared by a shaped `callable(...)`/
+/// `Closure(...)` PHPDoc type and a closure literal's own
+/// `Type::closure_literal` intersection.
+fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableSig) -> fmt::Result {
+    let parts: Vec<String> = sig
+        .params
+        .iter()
+        .map(|p| {
+            let mut s = String::new();
+            if p.by_ref {
+                s.push('&');
+            }
+            s.push_str(&p.ty.to_string());
+            if p.variadic {
+                s.push_str("...");
+            }
+            if p.optional {
+                s.push('=');
+            }
+            s
+        })
+        .collect();
+    write!(f, "{keyword}({}): {}", parts.join(", "), sig.return_type)
+}
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -78,27 +103,7 @@ impl fmt::Display for Type {
             }
             Type::EnumCase(fqn, case) => write!(f, "{fqn}::{case}"),
             Type::Callable(None) => write!(f, "callable"),
-            Type::Callable(Some(sig)) => {
-                let parts: Vec<String> = sig
-                    .params
-                    .iter()
-                    .map(|p| {
-                        let mut s = String::new();
-                        if p.by_ref {
-                            s.push('&');
-                        }
-                        s.push_str(&p.ty.to_string());
-                        if p.variadic {
-                            s.push_str("...");
-                        }
-                        if p.optional {
-                            s.push('=');
-                        }
-                        s
-                    })
-                    .collect();
-                write!(f, "callable({}): {}", parts.join(", "), sig.return_type)
-            }
+            Type::Callable(Some(sig)) => write_callable_sig(f, "callable", sig),
             Type::SelfRef => write!(f, "self"),
             Type::ParentRef => write!(f, "parent"),
             Type::StaticRef => write!(f, "static"),
@@ -110,6 +115,12 @@ impl fmt::Display for Type {
             Type::Intersection(members) => {
                 if let Some(name) = describe_accessory_intersection(members) {
                     return write!(f, "{name}");
+                }
+                if let [Type::Object(class, args), Type::Callable(Some(sig))] = members.as_slice()
+                    && class == "Closure"
+                    && args.is_empty()
+                {
+                    return write_callable_sig(f, "Closure", sig);
                 }
                 let parts: Vec<String> = members.iter().map(Type::to_string).collect();
                 write!(f, "{}", parts.join("&"))

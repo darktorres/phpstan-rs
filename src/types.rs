@@ -298,6 +298,32 @@ pub struct CallableSig {
 }
 
 impl Type {
+    /// A closure/arrow-fn literal's own value: a real `Closure` instance
+    /// (so `->bindTo()`/`->call()`/`instanceof Closure` keep resolving
+    /// against the `Closure` class) that also carries the literal's own
+    /// signature - real PHPStan's `ClosureType`, which is both at once.
+    /// `Display` renders this exact pair as `Closure(params): return`.
+    pub(crate) fn closure_literal(sig: CallableSig) -> Type {
+        Type::Intersection(vec![
+            Type::Object("Closure".to_string(), Vec::new()),
+            Type::Callable(Some(Arc::new(sig))),
+        ])
+    }
+
+    /// The signature a value of this type can be invoked with, when one
+    /// is known: a shaped `Closure(...)`/`callable(...)` PHPDoc type, or a
+    /// closure literal's `closure_literal` intersection.
+    pub(crate) fn callable_sig(&self) -> Option<&Arc<CallableSig>> {
+        match self {
+            Type::Callable(Some(sig)) => Some(sig),
+            Type::Intersection(members) => members.iter().find_map(|m| match m {
+                Type::Callable(Some(sig)) => Some(sig),
+                _ => None,
+            }),
+            _ => None,
+        }
+    }
+
     /// PHP's full legal-array-key domain (`int|string`) - the default for
     /// a bare `array`/`array<V>` with no key argument given.
     pub(crate) fn unknown_array_key() -> Type {

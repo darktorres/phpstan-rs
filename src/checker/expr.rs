@@ -864,7 +864,7 @@ impl<'a> Checker<'a> {
                             "callable.nonCallable",
                         );
                     }
-                    if let Type::Callable(Some(callable_sig)) = callee_ty {
+                    if let Some(callable_sig) = callee_ty.callable_sig().cloned() {
                         self.check_dynamic_callable_args(
                             &callable_sig,
                             args,
@@ -3718,7 +3718,7 @@ impl<'a> Checker<'a> {
                         locals.insert(u.name.to_string(), mutated);
                     }
                 }
-                Type::Object("Closure".to_string(), Vec::new())
+                self.closure_literal_type(params, return_type.as_deref())
             }
             ExprKind::ArrowFn {
                 params,
@@ -3878,7 +3878,7 @@ impl<'a> Checker<'a> {
                     current_class_for_internal_check.as_deref(),
                     label,
                 );
-                Type::Object("Closure".to_string(), Vec::new())
+                self.closure_literal_type(params, return_type.as_deref())
             }
             // `foo(...)`/`$obj->method(...)`/`Class::method(...)` (PHP 8.1
             // first-class-callable syntax) always wraps a
@@ -4152,17 +4152,26 @@ impl<'a> Checker<'a> {
                 .cloned()
                 .unwrap_or_else(|| superglobal_default_type(name)),
             ExprKind::Grouping(inner) | ExprKind::Clone(inner, _) => self.infer_expr(inner, locals),
-            // A closure/arrow-fn literal, and first-class-callable syntax
-            // (`strlen(...)`, `$obj->method(...)`), all produce a real
-            // `Closure` instance at runtime in PHP - infer the same
-            // `Object("Closure", ...)` the native `Closure` type hint
-            // resolves to (rather than the broader `Type::Callable`,
-            // which `callable`-hinted parameters accept via
-            // `is_assignable`'s separate leniency), so a strictly
-            // `Closure`-typed parameter correctly accepts them.
-            ExprKind::FirstClassCallable(_)
-            | ExprKind::Closure { .. }
-            | ExprKind::ArrowFn { .. } => Type::Object("Closure".to_string(), Vec::new()),
+            // First-class-callable syntax (`strlen(...)`, `$obj->
+            // method(...)`) produces a real `Closure` instance at runtime
+            // - infer the same `Object("Closure", ...)` the native
+            // `Closure` type hint resolves to (rather than the broader
+            // `Type::Callable`, which `callable`-hinted parameters accept
+            // via `is_assignable`'s separate leniency), so a strictly
+            // `Closure`-typed parameter correctly accepts it. A closure/
+            // arrow-fn literal additionally carries its own signature
+            // (`closure_literal_type`).
+            ExprKind::FirstClassCallable(_) => Type::Object("Closure".to_string(), Vec::new()),
+            ExprKind::Closure {
+                params,
+                return_type,
+                ..
+            }
+            | ExprKind::ArrowFn {
+                params,
+                return_type,
+                ..
+            } => self.closure_literal_type(params, return_type.as_deref()),
             ExprKind::Match {
                 subject,
                 arms,
@@ -5611,11 +5620,40 @@ impl<'a> Checker<'a> {
             // has no special case for either, which would otherwise
             // silently collapse to `Mixed`.
             ExprKind::Name(name) if name == "isset" || name == "empty" => Type::Bool,
-            _ => match self.infer_expr(callee, locals) {
-                Type::Callable(Some(sig)) => (*sig.return_type).clone(),
-                _ => Type::Mixed(false),
-            },
+            _ => self
+                .infer_expr(callee, locals)
+                .callable_sig()
+                .map_or(Type::Mixed(false), |sig| (*sig.return_type).clone()),
         }
+    }
+
+    /// A closure/arrow-fn literal's own type (`Type::closure_literal`):
+    /// its declared native parameter types and return type, `self`/
+    /// `static` resolved against the enclosing class. An unhinted
+    /// parameter or return is `mixed`, which the callable-shape
+    /// comparison treats as "any" - real PHPStan would use the body's own
+    /// inferred return type there instead, a further precision step not
+    /// taken yet.
+    pub(crate) fn closure_literal_type(&self, params: &[Param], return_type: Option<&str>) -> Type {
+        let resolve = |hint: Option<&str>| {
+            let ty = self.resolve_type_hint(hint);
+            match &self.current_class {
+                Some(c) => self.resolve_pseudo(&ty, c),
+                None => ty,
+            }
+        };
+        Type::closure_literal(types::CallableSig {
+            params: params
+                .iter()
+                .map(|p| types::CallableParam {
+                    ty: resolve(p.type_hint.as_deref()),
+                    variadic: p.variadic,
+                    optional: p.default.is_some(),
+                    by_ref: p.by_ref,
+                })
+                .collect(),
+            return_type: Box::new(resolve(return_type)),
+        })
     }
 }
 

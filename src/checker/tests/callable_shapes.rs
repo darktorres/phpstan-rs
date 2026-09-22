@@ -288,7 +288,19 @@ fn an_already_hinted_closure_literal_parameter_keeps_its_own_hint_over_the_shape
             });
         "#,
     );
-    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+    // The body sees the literal's own `string` hint, not the shape's
+    // `int`. Passing a `Closure(string)` where `Closure(int)` is
+    // expected is itself a real type error, reported the way real
+    // PHPStan reports it.
+    assert!(
+        !d.iter().any(|x| x.message.contains("assertType")),
+        "assertType() mismatch(es): {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"
+            && x.message.contains("Closure(string): mixed given")),
+        "got: {d:?}"
+    );
 }
 
 #[test]
@@ -382,6 +394,112 @@ fn a_named_argument_to_a_dynamic_callable_call_is_not_type_checked() {
             /** @param Closure(int $x): string $fn */
             function test($fn): void {
                 $fn(x: 'not an int');
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+// A closure/arrow-fn literal's own value carries its declared signature
+// (`Type::closure_literal`) while staying a real `Closure` object.
+
+#[test]
+fn a_closure_literal_is_displayed_with_its_own_declared_signature() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(): void {
+                $f = function (int $x, string ...$rest): string { return ''; };
+                assertType('Closure(int, string...): string', $f);
+                $g = fn (?int $y = null) => $y;
+                assertType('Closure(int|null=): mixed', $g);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn invoking_a_closure_literal_variable_infers_its_declared_return_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function test(): void {
+                $f = fn (int $x): string => (string) $x;
+                assertType('string', $f(1));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn invoking_a_closure_literal_variable_with_a_wrong_argument_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(): void {
+                $f = function (int $x): void {};
+                $f('not an int');
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_closure_literal_whose_parameter_is_too_narrow_for_a_shaped_parameter_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            class Bar {}
+            /** @param Closure(Foo): void $fn */
+            function takesFooCallback($fn): void {}
+            function test(): void {
+                takesFooCallback(function (Bar $b): void {});
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_unhinted_or_fewer_parameter_closure_literal_fits_a_shaped_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int, string): string $fn */
+            function takesCallback($fn): void {}
+            function test(): void {
+                takesCallback(function ($x) { return 'a'; });
+                takesCallback(fn () => 'b');
+                takesCallback(fn (int $x, string $y): string => $y);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_closure_literal_still_resolves_closure_class_methods_and_instanceof() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class C {}
+            function takesClosure(Closure $c): void {}
+            function takesCallable(callable $c): void {}
+            function test(): void {
+                $f = function (): int { return 1; };
+                $bound = $f->bindTo(new C());
+                takesClosure($f);
+                takesCallable($f);
+                if ($f instanceof Closure) {
+                    takesClosure($f);
+                }
             }
         "#,
     );
