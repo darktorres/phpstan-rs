@@ -73,6 +73,7 @@ pub(crate) fn method_tag_sig(
                 ty_native: ty,
                 variadic: p.variadic,
                 has_default: p.has_default,
+                default_ty: None,
                 by_ref: p.by_ref,
                 has_own_doc: true,
                 explicit_mixed_hint: false,

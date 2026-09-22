@@ -27,7 +27,7 @@ use std::collections::{HashMap, HashSet};
 use crate::checker::Checker;
 use crate::registry::ClassInfo;
 use crate::token::Span;
-use crate::types::{self, TemplateParam, Type, Variance};
+use crate::types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// Entry point - called once per class/interface/enum declaration
@@ -221,29 +221,7 @@ impl<'a> Checker<'a> {
 fn identity_template_bindings(info: &ClassInfo, class: &str) -> HashMap<String, Type> {
     info.templates
         .iter()
-        .map(|name| {
-            let variance = if info.covariant_templates.contains(name) {
-                Variance::Covariant
-            } else if info.contravariant_templates.contains(name) {
-                Variance::Contravariant
-            } else {
-                Variance::Invariant
-            };
-            (
-                name.to_string(),
-                Type::TemplateParam(TemplateParam {
-                    name: name.to_string(),
-                    bound: Box::new(
-                        info.template_bounds
-                            .get(name)
-                            .cloned()
-                            .unwrap_or(Type::Mixed(false)),
-                    ),
-                    variance,
-                    scope: Some(class.to_string()),
-                    default: info.template_defaults.get(name).cloned().map(Box::new),
-                }),
-            )
-        })
+        .map(|name| name.to_string())
+        .zip(info.own_template_args(class))
         .collect()
 }

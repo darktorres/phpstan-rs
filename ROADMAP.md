@@ -175,13 +175,21 @@ coercion method surface. `Type::Array` carries a real key type, not just
 a value type; `ArrayShape`'s own int-vs-string key precision
 (`types::shape_key_type`) is wired into assignability/subtyping - an
 all-string-keyed shape no longer silently satisfies `array<int, string>`.
-`object{...}` shapes (including a genuinely unsealed `array{..., ...}`),
+`object{...}` shapes (including a genuinely unsealed `array{..., ...}`,
+whose `...<K, V>`/list `...<V>` tail the PHPDoc grammar parses as
+phpdoc-parser does; `non-empty-array{}`/`non-empty-list{}` shapes too,
+and `object{}` rejects unkeyed items and a `...` tail),
 `value-of<T>`/`key-of<T>`, `OffsetAccessType` (`SomeShape['key']`), and
 conditional PHPDoc return types are all parsed and resolved. A
 conditional return type now resolves to a specific call site's real
 branch (`Type::Conditional`, `types::resolve_conditional`) rather than
 always widening to the union of both branches, with a safe union
-fallback when no bound argument exists to resolve against.
+fallback when no bound argument exists to resolve against. Resolution is
+trinary: provably-distinct literals (and enum cases, `true`/`false`,
+out-of-range ints) pick the false branch, an omitted argument resolves
+against its parameter's default value, and a call's own templates that
+no argument inferred resolve to their bounds (`resolveToBounds`), while
+an erased receiver's class templates stay the `Mixed` wildcard.
 `enum-string`/`callable-string`/`interface-string`/`trait-string` all
 get real content verification, stricter than real PHPStan draws for the
 latter two. Enum cases have their own singleton `Type::EnumCase`
@@ -201,6 +209,10 @@ through that tag, including through anonymous classes and promoted-
 constructor-property inline `@var` tags, with real explicit-vs-implicit
 `mixed` provenance surviving the hop and the backfilled type reconciled
 against the child's own native type hint (not cloned verbatim) - this
+maps the inheriting class's own templates through the ancestor binding
+(an interface's `list<T>` under `@template-implements Factory<M>`
+becomes `list<M>`, then the subclass's `@extends` binding), recursing
+into callable shapes and conditional types too - this
 now also fires for an ancestor type mentioning a method-scoped `@template`
 (not just a class-scoped one), verified safe since call-site binding is
 purely name-keyed. Generic template richness: real bound/variance/
@@ -601,7 +613,14 @@ resolving through the object member. Callable-shape comparison follows
 real PHPStan's `CallableTypeHelper::isParametersAcceptorSuperTypeOf`
 accepts rules: fewer parameters on the passed callable is fine, an
 optional accepting parameter paired with a required passed one isn't,
-and `mixed` counts as any.
+and `mixed` counts as any. Each parameter/return comparison is
+class-hierarchy-aware, and an accepting shape's still-unbound method
+template (`callable(T): T` on a generic method) is inferred from the
+passed closure, so only its bound constrains the parameter. A hinted
+closure's return is narrowed by what its body returns (real PHPStan's
+`intersectButNotNever`: `function (): array { return ['a' => 1]; }` is
+`Closure(): array{a: int}`), keeping the native type when the two are
+disjoint.
 
 **Unreachable-code / constant-condition family**: the full, inferred-
 type-trusting family - `if`/`elseif` (with real PHPStan's own
@@ -886,7 +905,9 @@ every purely-semantic consumer (narrowing, `infer_binary`) widened to
 treat both spellings identically. **`parameter.defaultValue`**/
 **`property.defaultValue`**: a parameter's/property's own default value
 must be assignable to its declared type, resolving a bare top-level
-`@template`-typed parameter to its own bound first; the property check
+`@template`-typed parameter to its own bound first, and never
+reporting a default of unknown (`mixed`) type, which real PHPStan's
+direct `accepts()` call always accepts; the property check
 replicates real PHPStan's own untyped-property `null`-default exemption
 exactly. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is

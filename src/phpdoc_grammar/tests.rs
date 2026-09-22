@@ -170,6 +170,7 @@ fn an_array_shape_parses_keyed_and_optional_fields() {
             keyword,
             fields,
             sealed,
+            ..
         } => {
             assert_eq!(keyword, "array");
             assert!(sealed);
@@ -196,6 +197,59 @@ fn an_unsealed_array_shape_parses() {
             assert_eq!(fields.len(), 1);
         }
         other => panic!("got: {other:?}"),
+    }
+}
+
+#[test]
+fn an_unsealed_array_shape_takes_a_key_and_value_type() {
+    let node = parse("/** @return array{a: int, ...<string, mixed>} */");
+    assert!(node.errors.is_empty(), "got: {node:?}");
+    match type_of("/** @return array{a: int, ...<string, mixed>} */") {
+        TypeNode::ArrayShape {
+            sealed,
+            fields,
+            unsealed_type: Some((Some(key), value)),
+            ..
+        } => {
+            assert!(!sealed);
+            assert_eq!(fields.len(), 1);
+            assert_eq!(*key, TypeNode::Identifier("string".to_string()));
+            assert_eq!(*value, TypeNode::Identifier("mixed".to_string()));
+        }
+        other => panic!("got: {other:?}"),
+    }
+}
+
+#[test]
+fn an_unsealed_list_shape_takes_only_a_value_type() {
+    let ok = parse("/** @return list{int, ...<string>,} */");
+    assert!(ok.errors.is_empty(), "got: {ok:?}");
+    let err = parse("/** @return list{int, ...<int, string>} */");
+    assert!(!err.errors.is_empty(), "got: {err:?}");
+}
+
+#[test]
+fn non_empty_array_and_list_shapes_parse() {
+    for raw in [
+        "/** @return non-empty-array{a: int} */",
+        "/** @return non-empty-list{int, string} */",
+    ] {
+        let node = parse(raw);
+        assert!(node.errors.is_empty(), "{raw}: {node:?}");
+        assert!(matches!(type_of(raw), TypeNode::ArrayShape { .. }));
+    }
+}
+
+#[test]
+fn an_object_shape_needs_keys_and_has_no_unsealed_tail() {
+    let ok = parse("/** @return object{a: int, 'b'?: string} */");
+    assert!(ok.errors.is_empty(), "got: {ok:?}");
+    for raw in [
+        "/** @return object{a: int, ...} */",
+        "/** @return object{int} */",
+    ] {
+        let node = parse(raw);
+        assert!(!node.errors.is_empty(), "{raw}: {node:?}");
     }
 }
 

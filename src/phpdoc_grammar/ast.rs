@@ -122,17 +122,16 @@ pub enum TypeNode {
     /// with no whitespace before the `[` (with whitespace, a `[` starts a
     /// description instead).
     OffsetAccess(Box<TypeNode>, Box<TypeNode>),
-    /// `array{...}`/`list{...}`/`object{...}` - `keyword` is whichever of
-    /// those three introduced it (also accepted, disclosed-lenient: any
-    /// other bare identifier immediately followed by `{`, so a real
-    /// corpus's occasional `SomeShape{...}`-style custom keyword still
-    /// parses rather than erroring). `sealed` is `false` when the shape
-    /// ends in `, ...}` (real PHPStan's own "open" shape marker,
-    /// unsealed - more fields may exist at runtime).
+    /// `array{...}`/`list{...}`/`non-empty-array{...}`/
+    /// `non-empty-list{...}`/`object{...}` - `keyword` is whichever of
+    /// those introduced it. `sealed` is `false` when the shape ends in
+    /// `, ...}` (more fields may exist at runtime), and `unsealed_type`
+    /// carries that tail's optional `...<V>`/`...<K, V>` as `(key, value)`.
     ArrayShape {
         keyword: String,
         fields: Vec<ArrayShapeField>,
         sealed: bool,
+        unsealed_type: Option<(Option<Box<TypeNode>>, Box<TypeNode>)>,
     },
     /// `callable(...)`/`Closure(...)` (`keyword` distinguishes the two,
     /// both parsed identically otherwise) `: ReturnType`.
@@ -240,6 +239,7 @@ impl TypeNode {
                 keyword,
                 fields,
                 sealed,
+                unsealed_type,
             } => {
                 let mut parts: Vec<String> = fields
                     .iter()
@@ -260,7 +260,15 @@ impl TypeNode {
                     })
                     .collect();
                 if !*sealed {
-                    parts.push("...".to_string());
+                    parts.push(match unsealed_type {
+                        Some((Some(key), value)) => format!(
+                            "...<{}, {}>",
+                            key.to_source_string(),
+                            value.to_source_string()
+                        ),
+                        Some((None, value)) => format!("...<{}>", value.to_source_string()),
+                        None => "...".to_string(),
+                    });
                 }
                 format!("{keyword}{{{}}}", parts.join(", "))
             }

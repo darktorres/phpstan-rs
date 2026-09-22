@@ -12,6 +12,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::regex_groups;
+use crate::registry::Registry;
 use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
@@ -3742,7 +3743,7 @@ impl<'a> Checker<'a> {
                         locals.insert(u.name.to_string(), mutated);
                     }
                 }
-                let inferred_return = (return_type.is_none() && !closure_is_generator).then(|| {
+                let inferred_return = (!closure_is_generator).then(|| {
                     closure_inferred_return_type(
                         closure_return_points,
                         closure_saw_explicit_return,
@@ -3912,7 +3913,7 @@ impl<'a> Checker<'a> {
                 self.closure_literal_type(
                     params,
                     return_type.as_deref(),
-                    (return_type.is_none() && !expr_contains_yield(body)).then(|| body_ty.clone()),
+                    (!expr_contains_yield(body)).then(|| body_ty.clone()),
                     None,
                 )
             }
@@ -4206,11 +4207,8 @@ impl<'a> Checker<'a> {
                 return_type,
                 ..
             } => {
-                let inferred = if return_type.is_none() {
-                    self.closure_syntactic_return_type(params, uses, body, *is_static, locals, None)
-                } else {
-                    None
-                };
+                let inferred = self
+                    .closure_syntactic_return_type(params, uses, body, *is_static, locals, None);
                 self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::ArrowFn {
@@ -4219,13 +4217,7 @@ impl<'a> Checker<'a> {
                 body,
                 ..
             } => {
-                let inferred = self.arrow_fn_inferred_return(
-                    params,
-                    return_type.as_deref(),
-                    body,
-                    locals,
-                    None,
-                );
+                let inferred = self.arrow_fn_inferred_return(params, body, locals, None);
                 self.closure_literal_type(params, return_type.as_deref(), inferred, None)
             }
             ExprKind::Match {
@@ -5685,10 +5677,12 @@ impl<'a> Checker<'a> {
 
     /// A closure/arrow-fn literal's own type (`Type::closure_literal`):
     /// its declared native parameter types and return type, `self`/
-    /// `static` resolved against the enclosing class. An unhinted return
-    /// takes `inferred_return` when the caller has one (an arrow fn's own
-    /// body-expression type, which is what real PHPStan's `ClosureType`
-    /// reports), and is `mixed` otherwise; an unhinted parameter is
+    /// `static` resolved against the enclosing class. `inferred_return`
+    /// (what the body actually returns, when the caller has it) is the
+    /// return of an unhinted literal, and narrows a hinted one's native
+    /// return through `intersect_but_not_never` - what real PHPStan's
+    /// `ClosureType` reports either way. An unhinted return with nothing
+    /// inferred is `mixed`; an unhinted parameter is
     /// `mixed`, unless `overrides` supplies the type the surrounding
     /// context expects there (see `closure_param_type`). The
     /// callable-shape comparison treats `mixed` as "any".
@@ -5722,13 +5716,16 @@ impl<'a> Checker<'a> {
                 .collect(),
             return_type: Box::new(match (return_type, inferred_return) {
                 (None, Some(inferred)) => inferred,
-                (hint, _) => resolve(hint),
+                (Some(hint), Some(inferred)) => {
+                    intersect_but_not_never(self.registry, &resolve(Some(hint)), inferred)
+                }
+                (hint, None) => resolve(hint),
             }),
         })
     }
 
-    /// `infer_expr`'s (read-only, no body walk) view of an unhinted,
-    /// non-generator closure literal's return type: each `return`
+    /// `infer_expr`'s (read-only, no body walk) view of a non-generator
+    /// closure literal's inferred return type: each `return`
     /// statement in the body (nested functions/classes excluded, and a
     /// nested closure's statements are never reached - they live inside an
     /// expression) inferred against a scope holding the parameters and the
@@ -5793,18 +5790,17 @@ impl<'a> Checker<'a> {
         ))
     }
 
-    /// An unhinted, non-generator arrow fn's own return type: its body
+    /// A non-generator arrow fn's own inferred return type: its body
     /// expression inferred against the enclosing scope (captured by
     /// value, the same as `check_expr`'s arm) with its parameters bound.
     fn arrow_fn_inferred_return(
         &self,
         params: &[Param],
-        return_type: Option<&str>,
         body: &Expr,
         locals: &Locals,
         overrides: Option<&[Type]>,
     ) -> Option<Type> {
-        if return_type.is_some() || expr_contains_yield(body) {
+        if expr_contains_yield(body) {
             return None;
         }
         let mut arrow_locals = locals.clone();
@@ -5858,13 +5854,8 @@ impl<'a> Checker<'a> {
                 body,
                 ..
             } => {
-                let inferred = self.arrow_fn_inferred_return(
-                    params,
-                    return_type.as_deref(),
-                    body,
-                    locals,
-                    Some(&overrides),
-                );
+                let inferred =
+                    self.arrow_fn_inferred_return(params, body, locals, Some(&overrides));
                 Some(self.closure_literal_type(
                     params,
                     return_type.as_deref(),
@@ -5880,18 +5871,14 @@ impl<'a> Checker<'a> {
                 return_type,
                 ..
             } => {
-                let inferred = if return_type.is_none() {
-                    self.closure_syntactic_return_type(
-                        params,
-                        uses,
-                        body,
-                        *is_static,
-                        locals,
-                        Some(&overrides),
-                    )
-                } else {
-                    None
-                };
+                let inferred = self.closure_syntactic_return_type(
+                    params,
+                    uses,
+                    body,
+                    *is_static,
+                    locals,
+                    Some(&overrides),
+                );
                 Some(self.closure_literal_type(
                     params,
                     return_type.as_deref(),
@@ -6156,7 +6143,55 @@ pub(crate) fn postfix_chain_has_nullsafe(base: &Expr) -> bool {
     }
 }
 
-/// An unhinted, non-generator closure literal's own return type, from the
+/// Real PHPStan's `MutatingScope::intersectButNotNever`: a hinted
+/// closure's return is its native type narrowed by what the body
+/// actually returns. An inferred type the native one can't hold at all
+/// (a fall-off-the-end `void` under `: array`) leaves the native type
+/// as-is, and a nullable native type keeps its `null`. An `int` returned
+/// under `: float` is coerced at runtime, so it reads as the `float`.
+fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -> Type {
+    let native_members: Vec<&Type> = match native {
+        Type::Union(ms) => ms.iter().collect(),
+        other => vec![other],
+    };
+    let inferred_members = match inferred {
+        Type::Union(ms) => ms,
+        other => vec![other],
+    };
+    let mut kept: Vec<Type> = Vec::new();
+    for m in inferred_members {
+        if matches!(m, Type::Mixed(_)) {
+            return native.clone();
+        }
+        let int_like = matches!(m, Type::Int | Type::IntLiteral(_) | Type::IntRange(..));
+        let fits = !matches!(m, Type::Void)
+            && native_members
+                .iter()
+                .any(|n| !(int_like && matches!(n, Type::Float)) && registry.is_assignable(&m, n));
+        if fits {
+            kept.push(m);
+            continue;
+        }
+        kept.extend(
+            native_members
+                .iter()
+                .filter(|n| !matches!(n, Type::Null) && registry.is_assignable(n, &m))
+                .map(|n| (*n).clone()),
+        );
+    }
+    if kept.is_empty() {
+        return native.clone();
+    }
+    if native_members.iter().any(|n| matches!(n, Type::Null)) {
+        kept.push(Type::Null);
+    }
+    kept.sort_by_key(|m| *m == Type::Null);
+    kept.into_iter()
+        .reduce(union_types)
+        .unwrap_or_else(|| native.clone())
+}
+
+/// A non-generator closure literal's inferred return type, from the
 /// types its `return` statements produced - real PHPStan's `ClosureType`
 /// return: no `return` at all is `void`; explicit returns are unioned,
 /// with `null` added when the body can also fall off its end; a bare

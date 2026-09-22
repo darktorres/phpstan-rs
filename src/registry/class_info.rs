@@ -1227,6 +1227,7 @@ impl ClassInfo {
                 ty_native: backing_ty,
                 variadic: false,
                 has_default: false,
+                default_ty: None,
                 by_ref: false,
                 has_own_doc: true,
                 explicit_mixed_hint: false,

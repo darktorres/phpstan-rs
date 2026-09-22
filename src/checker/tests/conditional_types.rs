@@ -168,3 +168,51 @@ fn an_undecidable_conditional_subject_keeps_both_branches() {
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
+
+// Real Piwigo shapes, from a corpus-verification pass.
+
+#[test]
+fn a_distinct_literal_argument_picks_the_false_branch_and_an_omitted_one_uses_its_default() {
+    // `NotificationByMailSender::sendMailNotifications`'s own shape.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Notification {}
+            class Sender {
+                /** @return ($action is 'send' ? list<string> : list<Notification>) */
+                public function send(string $action = 'list_to_send'): array { return []; }
+            }
+            function f(Sender $s): void {
+                assertType('list<Notification>', $s->send('list_to_send'));
+                assertType('list<Notification>', $s->send());
+                assertType('list<string>', $s->send('send'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn an_uninferred_template_in_a_conditional_branch_resolves_to_its_bound() {
+    // Doctrine DBAL's `DriverManager::getConnection`, called without a
+    // `wrapperClass` - real PHPStan's `resolveToBounds` gives `Connection`.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Connection {}
+            class DriverManager {
+                /**
+                 * @param array<string, mixed> $params
+                 * @template T of Connection
+                 * @return ($params is array{wrapperClass: class-string<T>} ? T : Connection)
+                 */
+                public static function getConnection(array $params): Connection { return new Connection(); }
+            }
+            /** @param array<string, mixed> $params */
+            function f(array $params): void {
+                assertType('Connection', DriverManager::getConnection($params));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

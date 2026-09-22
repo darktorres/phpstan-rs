@@ -37,6 +37,13 @@ pub struct ParamSig {
     pub ty_native: Type,
     pub variadic: bool,
     pub has_default: bool,
+    // The default value's own inferred type (`infer_const_type` - a
+    // literal, or `Mixed` for anything it can't read), when there is one.
+    // Lets a conditional return type resolve against an omitted
+    // argument's default the way real PHPStan does
+    // (`sendMailNotifications()` with `$action = 'list_to_send'` picks the
+    // `$action is 'send'` false branch).
+    pub default_ty: Option<Type>,
     pub by_ref: bool,
     // True when this parameter's own `@param` tag was present on this
     // declaration's docblock; `false` marks it eligible for
@@ -494,6 +501,7 @@ impl FunctionSig {
                     ty_native,
                     variadic: p.variadic,
                     has_default,
+                    default_ty: p.default.as_ref().map(infer_const_type),
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
                     explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
@@ -638,6 +646,10 @@ impl FunctionSig {
                     // A position required by only one real overload can't
                     // be required in a callable meant to accept either.
                     has_default: a.has_default || b.has_default,
+                    // Only a default both overloads agree on is known.
+                    default_ty: (a.default_ty == b.default_ty)
+                        .then(|| a.default_ty.clone())
+                        .flatten(),
                     // Unlike the above, NOT permissive: `by_ref` is a
                     // restriction placed on the *caller* (an lvalue is
                     // required), not something being accepted - OR-ing it

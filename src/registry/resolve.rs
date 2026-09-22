@@ -7,7 +7,7 @@ use crate::ast::{ClassKind, Visibility};
 use crate::registry::Registry;
 use crate::registry::function_sig;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig, substitute_type_aliases};
-use crate::types::Type;
+use crate::types::{self, Type};
 
 impl Registry {
     /// PHP resolves class/interface/trait/enum names case-insensitively
@@ -857,6 +857,37 @@ impl Registry {
                     )
                 })
             }
+            Type::Callable(Some(sig)) => sig
+                .params
+                .iter()
+                .map(|p| &p.ty)
+                .chain([&*sig.return_type])
+                .all(|t| {
+                    Registry::template_param_scopes_all_safe_to_backfill(
+                        t,
+                        method_name,
+                        ancestor_bindings,
+                    )
+                }),
+            Type::Conditional {
+                target,
+                if_true,
+                if_false,
+                ..
+            } => [target, if_true, if_false].into_iter().all(|t| {
+                Registry::template_param_scopes_all_safe_to_backfill(
+                    t,
+                    method_name,
+                    ancestor_bindings,
+                )
+            }),
+            Type::HasOffsetValue(_, inner) | Type::ReflectedMember(inner, _) => {
+                Registry::template_param_scopes_all_safe_to_backfill(
+                    inner,
+                    method_name,
+                    ancestor_bindings,
+                )
+            }
             _ => true,
         }
     }
@@ -973,6 +1004,12 @@ impl Registry {
                     // backfill`'s doc comment for why this must be the
                     // real resolved bindings, not merely "is this
                     // ancestor name reachable at all.""
+                    // `class_name`'s own templates stay templates (scoped
+                    // to it) through the ancestor mapping, so an inherited
+                    // `list<T>` becomes `list<CMTemplate>` for a
+                    // `@template-implements Factory<CMTemplate>` class
+                    // rather than losing `T` to `Mixed`.
+                    let own_args = info.own_template_args(class_name);
                     let ancestor_bindings: HashMap<Arc<str>, HashMap<String, Type>> = registry
                         .all_ancestor_names(class_name)
                         .into_iter()
@@ -983,7 +1020,8 @@ impl Registry {
                                 .is_some_and(|c| !c.templates.is_empty())
                         })
                         .map(|a| {
-                            let bindings = registry.class_template_bindings(class_name, &[], &a);
+                            let bindings =
+                                registry.class_template_bindings(class_name, &own_args, &a);
                             (a, bindings)
                         })
                         .collect();
@@ -1566,5 +1604,37 @@ fn resolve_deferred_value_of_with_native_fallback(
         native.clone()
     } else {
         resolved
+    }
+}
+
+impl ClassInfo {
+    /// This class's own templates as `TemplateParam` arguments scoped to
+    /// `class_name` - the identity binding, which `class_template_bindings`
+    /// maps through to an ancestor without erasing them.
+    pub(crate) fn own_template_args(&self, class_name: &str) -> Vec<Type> {
+        self.templates
+            .iter()
+            .map(|name| {
+                let variance = if self.covariant_templates.contains(name) {
+                    types::Variance::Covariant
+                } else if self.contravariant_templates.contains(name) {
+                    types::Variance::Contravariant
+                } else {
+                    types::Variance::Invariant
+                };
+                Type::TemplateParam(types::TemplateParam {
+                    name: name.to_string(),
+                    bound: Box::new(
+                        self.template_bounds
+                            .get(name)
+                            .cloned()
+                            .unwrap_or(Type::Mixed(false)),
+                    ),
+                    variance,
+                    scope: Some(class_name.to_string()),
+                    default: self.template_defaults.get(name).cloned().map(Box::new),
+                })
+            })
+            .collect()
     }
 }

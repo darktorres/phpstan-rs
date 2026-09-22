@@ -12,9 +12,13 @@ pub(crate) use parse::{canonical_int_key, strip_call_site_variance};
 pub use subtype::is_subtype;
 pub(crate) use subtype::types_definitely_disjoint;
 pub(crate) use subtype::{
-    is_numeric_string_literal, shape_fields_are_list_like, shape_key_type, types_equal_for_union,
+    callable_sig_is_subtype, is_numeric_string_literal, shape_fields_are_list_like, shape_key_type,
+    types_equal_for_union,
 };
-pub use templates::{bind_template_param, promote_class_string_literals, substitute_template};
+pub use templates::{
+    bind_template_param, promote_class_string_literals, substitute_template,
+    substitute_template_resolving_to_bounds,
+};
 
 // A slice of PHPStan's type system covering what the parser captures as
 // type-hint strings, plus self/parent/static and `@template` generics.

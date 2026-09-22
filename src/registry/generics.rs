@@ -283,6 +283,54 @@ impl Registry {
                     })
                     .collect(),
             ),
+            Type::Callable(Some(sig)) => {
+                let sub = |t: &Type| {
+                    Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
+                };
+                Type::Callable(Some(Arc::new(types::CallableSig {
+                    params: sig
+                        .params
+                        .iter()
+                        .map(|p| types::CallableParam {
+                            ty: sub(&p.ty),
+                            ..p.clone()
+                        })
+                        .collect(),
+                    return_type: Box::new(sub(&sig.return_type)),
+                })))
+            }
+            Type::Conditional {
+                subject,
+                target,
+                if_true,
+                if_false,
+                negated,
+            } => {
+                let sub = |t: &Type| {
+                    Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
+                };
+                Type::Conditional {
+                    subject: subject.clone(),
+                    target: Box::new(sub(target)),
+                    if_true: Box::new(sub(if_true)),
+                    if_false: Box::new(sub(if_false)),
+                    negated: *negated,
+                }
+            }
+            Type::HasOffsetValue(key, inner) => Type::HasOffsetValue(
+                key.clone(),
+                Box::new(Registry::substitute_class_scoped_ancestor_templates(
+                    inner,
+                    ancestor_bindings,
+                )),
+            ),
+            Type::ReflectedMember(owner, member) => Type::ReflectedMember(
+                Box::new(Registry::substitute_class_scoped_ancestor_templates(
+                    owner,
+                    ancestor_bindings,
+                )),
+                member.clone(),
+            ),
             other => other.clone(),
         }
     }

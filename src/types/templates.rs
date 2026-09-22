@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::types::{CallableParam, CallableSig, Type};
+use crate::types::{CallableParam, CallableSig, TemplateParam, Type};
 
 /// Unifies a template-bearing param type against an actual argument type,
 /// recording the binding it implies. Only the two shapes that come up in
@@ -161,46 +161,78 @@ pub fn promote_class_string_literals(
 /// class-level substitution path (an "erased" - too-few-arguments, or
 /// bare - generic class reference).
 pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
+    substitute(ty, bindings, &|_| false)
+}
+
+/// `substitute_template`, except that an unbound template `to_bound`
+/// selects falls back to its declared bound when it has no default
+/// (`@template T of Connection` gives `Connection`) - real PHPStan's
+/// `resolveToBounds` for a call's own templates that no argument
+/// inferred, e.g. Doctrine DBAL's `DriverManager::getConnection`
+/// conditional return `T` when no `wrapperClass` is passed. Class-level
+/// templates of an erased receiver stay `Mixed`, the wildcard argument
+/// an erased class's arguments compare as.
+pub fn substitute_template_resolving_to_bounds(
+    ty: &Type,
+    bindings: &HashMap<String, Type>,
+    to_bound: &dyn Fn(&TemplateParam) -> bool,
+) -> Type {
+    substitute(ty, bindings, to_bound)
+}
+
+fn substitute(
+    ty: &Type,
+    bindings: &HashMap<String, Type>,
+    to_bound: &dyn Fn(&TemplateParam) -> bool,
+) -> Type {
     match ty {
         Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
-            tp.default
-                .as_ref()
-                .map(|d| substitute_template(d, bindings))
-                .unwrap_or(Type::Mixed(false))
+            let fallback = match tp.default.as_deref() {
+                Some(default) => default,
+                None if to_bound(tp) && !matches!(*tp.bound, Type::Mixed(_)) => &tp.bound,
+                None => return Type::Mixed(false),
+            };
+            // The template's own name is bound to `Mixed` while its
+            // fallback is substituted, so a self-referential bound
+            // (`@template T of Foo<T>`), or two templates bounded by each
+            // other, can't recurse forever.
+            let mut guarded = bindings.clone();
+            guarded.insert(tp.name.clone(), Type::Mixed(false));
+            substitute(fallback, &guarded, to_bound)
         }),
         // Substitutes through the key type too (not just reset to
         // "unknown" every time) - a real, if rare, `array<TKey, TValue>`
         // bound key shouldn't be lost on every substitution pass.
         Type::Array(key, inner) => Type::Array(
-            Box::new(substitute_template(key, bindings)),
-            Box::new(substitute_template(inner, bindings)),
+            Box::new(substitute(key, bindings, to_bound)),
+            Box::new(substitute(inner, bindings, to_bound)),
         ),
         Type::ClassString(inner) => {
-            Type::ClassString(Box::new(substitute_template(inner, bindings)))
+            Type::ClassString(Box::new(substitute(inner, bindings, to_bound)))
         }
         Type::Union(members) => Type::Union(
             members
                 .iter()
-                .map(|m| substitute_template(m, bindings))
+                .map(|m| substitute(m, bindings, to_bound))
                 .collect(),
         ),
         Type::Intersection(members) => Type::Intersection(
             members
                 .iter()
-                .map(|m| substitute_template(m, bindings))
+                .map(|m| substitute(m, bindings, to_bound))
                 .collect(),
         ),
         Type::ArrayShape(fields) => Type::ArrayShape(
             fields
                 .iter()
-                .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .map(|(k, t, opt)| (k.clone(), substitute(t, bindings, to_bound), *opt))
                 .collect(),
         ),
         // `object{...}`'s own field types need substituting too.
         Type::ObjectShape(fields) => Type::ObjectShape(
             fields
                 .iter()
-                .map(|(k, t, opt)| (k.clone(), substitute_template(t, bindings), *opt))
+                .map(|(k, t, opt)| (k.clone(), substitute(t, bindings, to_bound), *opt))
                 .collect(),
         ),
         // `Object`'s own generic argument list must be recursed into
@@ -214,7 +246,7 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
         Type::Object(name, args) => Type::Object(
             name.clone(),
             args.iter()
-                .map(|a| substitute_template(a, bindings))
+                .map(|a| substitute(a, bindings, to_bound))
                 .collect(),
         ),
         // Mirrors the other three walkers' own equivalent arms - a
@@ -226,13 +258,13 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
                 .params
                 .iter()
                 .map(|p| CallableParam {
-                    ty: substitute_template(&p.ty, bindings),
+                    ty: substitute(&p.ty, bindings, to_bound),
                     variadic: p.variadic,
                     optional: p.optional,
                     by_ref: p.by_ref,
                 })
                 .collect(),
-            return_type: Box::new(substitute_template(&sig.return_type, bindings)),
+            return_type: Box::new(substitute(&sig.return_type, bindings, to_bound)),
         }))),
         // Recurses into `target`/`if_true`/`if_false` -
         // `subject` is a raw parameter name, not a `Type`, so there's
@@ -249,9 +281,9 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
             negated,
         } => Type::Conditional {
             subject: subject.clone(),
-            target: Box::new(substitute_template(target, bindings)),
-            if_true: Box::new(substitute_template(if_true, bindings)),
-            if_false: Box::new(substitute_template(if_false, bindings)),
+            target: Box::new(substitute(target, bindings, to_bound)),
+            if_true: Box::new(substitute(if_true, bindings, to_bound)),
+            if_false: Box::new(substitute(if_false, bindings, to_bound)),
             negated: *negated,
         },
         other => other.clone(),

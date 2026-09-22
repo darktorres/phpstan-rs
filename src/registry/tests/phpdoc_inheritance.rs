@@ -465,3 +465,33 @@ fn an_ancestors_doc_param_type_incompatible_with_the_native_param_type_is_reconc
         sig.params[0].ty
     );
 }
+
+#[test]
+fn an_inherited_return_keeps_the_implementors_own_template_in_place_of_the_interfaces() {
+    let r = build_registry(
+        r#"<?php
+            interface Meta {}
+            /** @template T of Meta */
+            interface Factory {
+                /** @return list<T> */
+                public function all(): array;
+            }
+            /**
+             * @template M of Meta
+             * @template-implements Factory<M>
+             */
+            abstract class BaseFactory implements Factory {
+                /** {@inheritDoc} */
+                public function all(): array { return []; }
+            }
+            "#,
+    );
+    let sig = &r.classes["BaseFactory"].methods["all"];
+    match list_item_type(&sig.return_type) {
+        Type::TemplateParam(tp) => {
+            assert_eq!(tp.name, "M");
+            assert_eq!(tp.scope.as_deref(), Some("BaseFactory"));
+        }
+        other => panic!("expected BaseFactory's own M, got {other:?}"),
+    }
+}

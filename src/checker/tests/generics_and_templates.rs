@@ -3245,3 +3245,58 @@ fn a_trait_string_parameter_rejects_a_plain_class_string() {
     );
     assert!(!d.is_empty(), "expected a diagnostic, got none");
 }
+
+#[test]
+fn an_inherited_template_return_resolves_through_two_levels_of_bindings() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface Meta {}
+            class OrmMeta implements Meta { public function table(): string { return ''; } }
+            /** @template T of Meta */
+            interface Factory {
+                /** @return list<T> */
+                public function all(): array;
+            }
+            /**
+             * @template M of Meta
+             * @template-implements Factory<M>
+             */
+            abstract class BaseFactory implements Factory {
+                /** {@inheritDoc} */
+                public function all(): array { return []; }
+            }
+            /** @extends BaseFactory<OrmMeta> */
+            class OrmFactory extends BaseFactory {}
+            function f(OrmFactory $f): void {
+                assertType('list<OrmMeta>', $f->all());
+                foreach ($f->all() as $m) { $m->table(); }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_uninferred_class_template_on_a_new_expression_stays_assignable_to_any_arguments() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @template TKey of array-key
+             *  @template T */
+            interface Coll {}
+            /** @template TKey of array-key
+             *  @template T
+             *  @template-implements Coll<TKey, T> */
+            class ArrColl implements Coll {
+                /** @param array<TKey, T> $elements */
+                public function __construct(array $elements = []) {}
+            }
+            class Holder {
+                /** @var Coll<int, string> */
+                public Coll $c;
+                public function __construct() { $this->c = new ArrColl(); }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

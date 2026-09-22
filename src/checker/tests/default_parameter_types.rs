@@ -133,3 +133,16 @@ fn a_default_violating_a_templates_own_bound_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_default_of_unknown_type_is_never_reported() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $a = UNDEFINED_CONSTANT_XYZ): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}

@@ -591,7 +591,14 @@ impl<'a> Checker<'a> {
         let mut param_bindings: std::collections::HashMap<String, Type> =
             std::collections::HashMap::new();
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
-            let Some(arg) = slot else { continue };
+            let Some(arg) = slot else {
+                // An omitted argument's conditional-return subject is its
+                // default value, as in real PHPStan.
+                if let Some(default_ty) = &param.default_ty {
+                    param_bindings.insert(param.name.to_string(), default_ty.clone());
+                }
+                continue;
+            };
             let arg_ty = self.infer_expr(arg, locals);
             // Same literal-class-string promotion as
             // the `ExprKind::New` constructor-binding arm - only for
@@ -604,7 +611,16 @@ impl<'a> Checker<'a> {
             types::bind_template_param(&param.ty, &promoted, &mut bindings);
             param_bindings.insert(param.name.to_string(), arg_ty);
         }
-        let substituted = types::substitute_template(&sig.return_type, &bindings);
+        // The call's own templates (scoped to this function or method,
+        // not to a class) that no argument inferred resolve to their
+        // bounds; a class template left unbound here belongs to an
+        // erased receiver and stays `Mixed`.
+        let substituted =
+            types::substitute_template_resolving_to_bounds(&sig.return_type, &bindings, &|tp| {
+                tp.scope
+                    .as_deref()
+                    .is_some_and(|scope| !self.registry.classes.contains_key(scope))
+            });
         types::resolve_conditional(&substituted, &param_bindings)
     }
 

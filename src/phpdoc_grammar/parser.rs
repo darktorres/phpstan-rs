@@ -739,7 +739,10 @@ impl TagParser {
         // recognized the same as their unqualified spelling.
         let lower = name.trim_start_matches('\\').to_ascii_lowercase();
         if matches!(self.peek(), PhpDocToken::LBrace)
-            && matches!(lower.as_str(), "array" | "list" | "object" | "shape")
+            && matches!(
+                lower.as_str(),
+                "array" | "list" | "non-empty-array" | "non-empty-list" | "object"
+            )
         {
             return self.parse_array_shape(name);
         }
@@ -897,14 +900,25 @@ impl TagParser {
         None
     }
 
+    /// `object{...}` follows phpdoc-parser's separate object-shape
+    /// grammar: every item needs a `key:` and there is no `...` tail.
+    /// Only `array{...}` takes a two-argument `...<K, V>` tail; the list
+    /// and `non-empty-array` kinds take a single `...<V>`.
     fn parse_array_shape(&mut self, keyword: String) -> TypeNode {
         self.advance(); // consume '{'
+        let lower = keyword.trim_start_matches('\\').to_ascii_lowercase();
+        let is_object = lower == "object";
         let mut fields = Vec::new();
         let mut sealed = true;
+        let mut unsealed_type = None;
         if !matches!(self.peek(), PhpDocToken::RBrace) {
             loop {
-                if self.eat(&PhpDocToken::Ellipsis) {
+                if !is_object && self.eat(&PhpDocToken::Ellipsis) {
                     sealed = false;
+                    if matches!(self.peek(), PhpDocToken::LAngle) {
+                        unsealed_type = Some(self.parse_unsealed_shape_type(lower == "array"));
+                    }
+                    self.eat(&PhpDocToken::Comma);
                     break;
                 }
                 let checkpoint = self.pos;
@@ -913,6 +927,18 @@ impl TagParser {
                 let has_colon = key.is_some() && self.eat(&PhpDocToken::Colon);
                 let (key, optional, ty) = if has_colon {
                     (key, optional, self.parse_type())
+                } else if is_object {
+                    self.pos = checkpoint;
+                    if key.is_some() {
+                        self.advance();
+                        if optional {
+                            self.advance();
+                        }
+                        self.error_unexpected_token("TOKEN_COLON");
+                    } else {
+                        self.error_unexpected_token("TOKEN_IDENTIFIER");
+                    }
+                    break;
                 } else {
                     // Wasn't actually `key: Type` - backtrack and this
                     // whole field is just a bare, unkeyed type
@@ -934,7 +960,27 @@ impl TagParser {
             keyword,
             fields,
             sealed,
+            unsealed_type,
         }
+    }
+
+    /// `<V>` or (when `with_key`) `<K, V>` after a shape's `...`, returned
+    /// as `(key, value)`.
+    fn parse_unsealed_shape_type(
+        &mut self,
+        with_key: bool,
+    ) -> (Option<Box<TypeNode>>, Box<TypeNode>) {
+        self.advance(); // consume '<'
+        let first = self.parse_type();
+        let result = if with_key && self.eat(&PhpDocToken::Comma) {
+            (Some(Box::new(first)), Box::new(self.parse_type()))
+        } else {
+            (None, Box::new(first))
+        };
+        if !self.eat(&PhpDocToken::RAngle) {
+            self.error_unexpected_token("TOKEN_CLOSE_ANGLE_BRACKET");
+        }
+        result
     }
 
     fn try_parse_shape_key(&mut self) -> Option<ShapeKey> {

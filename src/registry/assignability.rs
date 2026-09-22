@@ -370,6 +370,12 @@ impl Registry {
                     })
                     .is_some_and(|u| u.iter().any(|m| self.is_assignable(m, sup)))
             }
+            // Each parameter/return comparison consults the class
+            // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
+            // Animal`, and `Event` fits a `T of object` template's bound.
+            (Type::Callable(Some(a)), Type::Callable(Some(b))) => {
+                types::callable_sig_is_subtype(a, b, &|x, y| self.is_assignable(x, y))
+            }
             // A closure literal (`Type::closure_literal`) checked against a
             // shaped `callable(...)`/`Closure(...)`: only its own
             // signature decides. The generic "any member satisfies" rule

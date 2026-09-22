@@ -120,7 +120,9 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // already has for generic template arguments (parameters
         // contravariant, return type covariant is that same pattern's
         // textbook motivating example, not a new concept).
-        (Type::Callable(Some(a)), Type::Callable(Some(b))) => callable_sig_is_subtype(a, b),
+        (Type::Callable(Some(a)), Type::Callable(Some(b))) => {
+            callable_sig_is_subtype(a, b, &is_subtype)
+        }
 
         (Type::IntLiteral(_), Type::Int) => true,
         (Type::StringLiteral(_), Type::String) => true,
@@ -432,9 +434,17 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
 /// - `mixed` on either side of a parameter or return comparison is
 ///   treated as "any", the same leniency an ordinary argument check gets
 ///   below level 9.
-fn callable_sig_is_subtype(a: &CallableSig, b: &CallableSig) -> bool {
+///
+/// `is_sub` decides each individual parameter/return comparison, so the
+/// registry can supply its hierarchy-aware relation while this module
+/// passes its own structural one.
+pub(crate) fn callable_sig_is_subtype(
+    a: &CallableSig,
+    b: &CallableSig,
+    is_sub: &dyn Fn(&Type, &Type) -> bool,
+) -> bool {
     let mixed_as_any = |sub: &Type, sup: &Type| {
-        matches!(sub, Type::Mixed(_)) || matches!(sup, Type::Mixed(_)) || is_subtype(sub, sup)
+        matches!(sub, Type::Mixed(_)) || matches!(sup, Type::Mixed(_)) || is_sub(sub, sup)
     };
     if !mixed_as_any(&a.return_type, &b.return_type) {
         return false;
@@ -455,6 +465,17 @@ fn callable_sig_is_subtype(a: &CallableSig, b: &CallableSig) -> bool {
         };
         if (bp.optional || bp.variadic) && !ap.optional && !ap.variadic {
             return false;
+        }
+        // A still-unresolved template in the accepting shape's parameter
+        // (`callable(T): ...` on a generic method) is inferred from the
+        // passed callable itself in real PHPStan - `T` becomes `ap`'s own
+        // parameter type - so the only real constraint is that type
+        // fitting within `T`'s bound.
+        if let Type::TemplateParam(tp) = &bp.ty {
+            if !(matches!(*tp.bound, Type::Mixed(_)) || mixed_as_any(&ap.ty, &tp.bound)) {
+                return false;
+            }
+            continue;
         }
         if !mixed_as_any(&bp.ty, &ap.ty) {
             return false;
@@ -505,25 +526,39 @@ pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
     s.parse::<i64>().is_ok_and(|n| n.to_string() == s)
 }
 
-/// A narrow, conservative type-
-/// disjointness primitive. Only ever declares
-/// two types disjoint when each resolves to one of a handful of coarse,
-/// mutually-exclusive "scalar families" (`scalar_family` below) and those
-/// families differ - e.g. `string` vs `int`, or `array` vs `object`.
+/// A narrow, conservative type-disjointness primitive. Declares two types
+/// disjoint in exactly two situations: two different values of one
+/// literal kind (`'send'` vs `'list_to_send'`, `1` vs `2`, `true` vs
+/// `false`, two cases of one enum, an int literal outside an int range),
+/// or two types in different coarse, mutually-exclusive "scalar families"
+/// (`scalar_family` below - `string` vs `int`, `array` vs `object`).
 /// Recurses into `Union` on either side (every member of a union side
 /// must be disjoint from the other side for the whole comparison to
 /// count - the same "stay on the lenient side" direction this project's
 /// own union-legality check already established).
 /// Returns `false` (not confidently disjoint - "don't guess") for
-/// anything not covered: `Mixed`/`Never`/`Void`, two same-family types
-/// (e.g. two unrelated object types - real PHPStan's own object-vs-object
-/// disjointness needs a `final`-class/no-subtype-relation check this
-/// primitive deliberately doesn't attempt), `Intersection`, `Callable`,
-/// `Accessory`, templates, and every pseudo-type.
+/// anything else: `Mixed`/`Never`/`Void`, two non-literal same-family
+/// types (e.g. two unrelated object types - real PHPStan's own
+/// object-vs-object disjointness needs a `final`-class/no-subtype-relation
+/// check this primitive deliberately doesn't attempt), `Intersection`,
+/// `Callable`, `Accessory`, templates, and every pseudo-type.
 pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Union(members), _) => members.iter().all(|m| types_definitely_disjoint(m, b)),
         (_, Type::Union(members)) => members.iter().all(|m| types_definitely_disjoint(a, m)),
+        // Two different values of the same kind can never overlap - real
+        // PHPStan's `ConstantStringType('send')->isSuperTypeOf(
+        // 'list_to_send')` is a definite no, not a maybe.
+        (Type::StringLiteral(x), Type::StringLiteral(y)) => x != y,
+        (Type::IntLiteral(x), Type::IntLiteral(y)) => x != y,
+        (Type::True, Type::False) | (Type::False, Type::True) => true,
+        (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
+            class_a == class_b && case_a != case_b
+        }
+        (Type::IntLiteral(n), Type::IntRange(min, max))
+        | (Type::IntRange(min, max), Type::IntLiteral(n)) => {
+            min.is_some_and(|m| *n < m) || max.is_some_and(|m| *n > m)
+        }
         _ => match (scalar_family(a), scalar_family(b)) {
             (Some(fa), Some(fb)) => fa != fb,
             _ => false,

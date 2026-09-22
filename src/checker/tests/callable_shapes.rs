@@ -410,7 +410,7 @@ fn a_closure_literal_is_displayed_with_its_own_declared_signature() {
             use function PHPStan\Testing\assertType;
             function test(): void {
                 $f = function (int $x, string ...$rest): string { return ''; };
-                assertType('Closure(int, string...): string', $f);
+                assertType("Closure(int, string...): ''", $f);
                 $g = fn (?int $y = null) => $y;
                 assertType('Closure(int|null=): int|null', $g);
             }
@@ -530,4 +530,73 @@ fn an_unhinted_closure_literal_infers_its_return_type_from_its_returns() {
         "#,
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn a_closure_literal_fits_a_shape_whose_parameter_is_a_method_template() {
+    // Piwigo's `EventDispatcher::addTypedHandler` shape: real PHPStan
+    // infers `T` from the closure itself.
+    let d = diagnostics_for(
+        r#"<?php
+            class Event {}
+            class Dispatcher {
+                /**
+                 * @template T of object
+                 * @param class-string<T> $class
+                 * @param callable(T): (T|void) $handler
+                 */
+                public function addTypedHandler(string $class, callable $handler): void {}
+            }
+            function f(Dispatcher $d): void {
+                $d->addTypedHandler(Event::class, function (Event $e): Event { return $e; });
+                $d->addTypedHandler(Event::class, function (Event $e): void {});
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_template_bound_still_constrains_the_closure_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Event {}
+            class Other {}
+            class Dispatcher {
+                /**
+                 * @template T of Event
+                 * @param callable(T): void $handler
+                 */
+                public function on(callable $handler): void {}
+            }
+            function f(Dispatcher $d): void {
+                $d->on(function (Other $e): void {});
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|m| m.identifier == "argument.type"),
+        "expected an argument.type diagnostic, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_hinted_closure_return_is_narrowed_by_what_it_returns() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return Closure(): array{status: int, body: string} */
+            function make(): Closure {
+                $f = static function (): array {
+                    return ['status' => 200, 'body' => 'ok'];
+                };
+                return $f;
+            }
+            /** @return Closure(): int */
+            function coerced(): Closure {
+                return fn(): float => 1;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert!(d[0].message.contains("Closure(): float"), "got: {d:?}");
 }

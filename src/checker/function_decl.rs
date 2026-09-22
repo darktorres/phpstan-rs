@@ -1474,6 +1474,10 @@ impl<'a> Checker<'a> {
     /// is overwhelmingly a scalar literal/array/`null`, where a *nested*
     /// unresolved template essentially never actually decides whether
     /// that literal is assignable to it.
+    ///
+    /// The real rule calls `Type::accepts` directly rather than through
+    /// `RuleLevelHelper`, and a `mixed` value is accepted everywhere
+    /// there, so a default whose type isn't known is never reported.
     fn check_default_parameter_types(
         &mut self,
         f: &FunctionDecl,
@@ -1496,7 +1500,9 @@ impl<'a> Checker<'a> {
                 other => other,
             };
             let default_ty = self.infer_expr(default, &Locals::default());
-            if self.registry.is_assignable(&default_ty, param_ty) {
+            if matches!(default_ty, Type::Mixed(_))
+                || self.registry.is_assignable(&default_ty, param_ty)
+            {
                 continue;
             }
             let target = match class_name {
