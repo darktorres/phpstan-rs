@@ -275,7 +275,8 @@ impl<'a> Checker<'a> {
     /// `IncompatibleArrowFunctionDefaultParameterTypeRule` - a closure or
     /// arrow function has no `FunctionSig`, so each parameter's native
     /// hint is resolved here. A `null` default makes a typed parameter
-    /// implicitly nullable, never a mismatch.
+    /// implicitly nullable, and a default of unknown type is always
+    /// accepted, so neither is a mismatch.
     fn check_literal_default_parameter_types(&mut self, params: &[Param], kind: &str, label: &str) {
         for (i, p) in params.iter().enumerate() {
             let Some(default) = &p.default else {
@@ -297,7 +298,9 @@ impl<'a> Checker<'a> {
                 None => param_ty,
             };
             let default_ty = self.infer_expr(default, &Locals::default());
-            if self.registry.is_assignable(&default_ty, &param_ty) {
+            if matches!(default_ty, Type::Mixed(_))
+                || self.registry.is_assignable(&default_ty, &param_ty)
+            {
                 continue;
             }
             self.report(

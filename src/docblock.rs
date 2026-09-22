@@ -495,6 +495,7 @@ impl DocBlock {
             internal,
             consistent_constructor,
             readonly,
+            allow_private_mutation,
             immutable,
             is_final,
             pure,
@@ -549,6 +550,7 @@ impl DocBlock {
         self.internal |= internal;
         self.consistent_constructor |= consistent_constructor;
         self.readonly |= readonly;
+        self.allow_private_mutation |= allow_private_mutation;
         self.immutable |= immutable;
         self.is_final |= is_final;
         self.pure |= pure;
