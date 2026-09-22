@@ -36,6 +36,7 @@ impl<'a> Checker<'a> {
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_promoted_in_methods(&fqn, c.kind, &c.methods);
+                self.walk_promoted_in_property_hooks(&fqn, &c.properties);
             }
             StmtKind::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
@@ -73,6 +74,7 @@ impl<'a> Checker<'a> {
                     self.walk_promoted_in_expr(&a.value, label);
                 }
                 self.check_promoted_in_methods(&decl.name, decl.kind, &decl.methods);
+                self.walk_promoted_in_property_hooks(&decl.name, &decl.properties);
             }
             _ => {
                 any_expr_child(e, &mut |child| {
@@ -98,6 +100,26 @@ impl<'a> Checker<'a> {
             };
             self.check_promoted_params(&m.function.params, site, &label);
             self.walk_promoted_in_body(&m.function.body, &label);
+        }
+    }
+
+    fn walk_promoted_in_property_hooks(&mut self, fqn: &str, properties: &[PropertyDecl]) {
+        for p in properties {
+            let Some(hooks) = &p.hooks else {
+                continue;
+            };
+            let label = format!("{fqn}::${}", p.name);
+            let bodies = hooks
+                .get
+                .iter()
+                .chain(hooks.set.iter().map(|(_, body)| body));
+            for body in bodies {
+                match body {
+                    PropertyHookBody::Arrow(e) => self.walk_promoted_in_expr(e, &label),
+                    PropertyHookBody::Block(stmts) => self.walk_promoted_in_body(stmts, &label),
+                    PropertyHookBody::Abstract => {}
+                }
+            }
         }
     }
 

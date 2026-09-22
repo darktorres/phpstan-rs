@@ -828,3 +828,19 @@ fn bodiless_non_abstract_method_is_flagged_outside_interfaces() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn promoted_parameter_on_a_closure_inside_a_property_hook_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Hooked {
+                public int $n { get => (fn (private int $x) => $x)(1); }
+            }
+        "#,
+    );
+    assert_eq!(
+        promotion_errors(&d),
+        vec!["Promoted properties can be in constructor only."],
+        "got: {d:?}"
+    );
+}
