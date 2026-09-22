@@ -779,6 +779,24 @@ pub struct Checker<'a> {
     // assignment rule (`check_by_ref_value`) which happily falls back to
     // the native type. Consulted by `check_by_ref_execution_end` only.
     pub(crate) current_function_by_ref_params_with_tag: std::collections::HashMap<Arc<str>, Type>,
+    // Every name `record_by_ref_exit_snapshot` should snapshot at each
+    // real execution-end point - a superset of `current_function_by_ref_
+    // params`'s own keys (kept as a separate set, not folded into that
+    // map, since that map's mere non-emptiness also gates real
+    // `parameterByRef.type` checking, which a closure's own `use (&$x)`
+    // capture must NOT trigger - real PHP has no "declared type" for a
+    // captured variable the way a real by-ref parameter does). Populated
+    // from `current_function_by_ref_params`'s own keys wherever that map
+    // is (function_decl.rs), plus every closure `use (&$x)` capture name
+    // (checker/expr.rs's `Closure` arm) - the latter is what actually
+    // lets `mutated` (that same arm, computing what a `use (&$x)`
+    // capture becomes in the declaring scope once the closure returns)
+    // properly union every real exit point's own state instead of only
+    // ever seeing `closure_locals`'s state at whichever statement the
+    // body happened to fall off the end at - which, for the common
+    // `if (cond) { $x[] = ...; return ...; } return ...;` guard-clause
+    // shape, is never the branch that actually mutated `$x` at all.
+    pub(crate) current_function_byref_snapshot_names: std::collections::HashSet<Arc<str>>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (see
     // `collect_goto_targets`'s doc comment for the real corpus false
@@ -1215,6 +1233,7 @@ impl<'a> Checker<'a> {
             current_function_by_ref_params: std::collections::HashMap::new(),
             current_function_by_ref_exit_snapshots: std::collections::HashMap::new(),
             current_function_by_ref_params_with_tag: std::collections::HashMap::new(),
+            current_function_byref_snapshot_names: std::collections::HashSet::new(),
             current_function_goto_targets: std::collections::HashSet::new(),
             in_bare_statement_position: false,
             in_condition_position: false,

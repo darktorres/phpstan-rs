@@ -1452,6 +1452,45 @@ own `narrowing_key`-format synthetic entry directly, independent of
 `CategoryAvailableListController::__invoke` and, incidentally, 3 more
 findings in the wider unscoped corpus (Latte `Tracer`, PHP-CS-Fixer x2).
 
+**A `use (&$x)` closure capture mutated only on an early-return path lost
+that mutation entirely once the closure returned.** Found via an erp-web
+corpus round (`shapeAccess.notFound` false positives - the original
+symptom's own hypothesis, "an int/string array-key representation
+mismatch," turned out to be wrong once traced against the real source;
+the real cause is structurally unrelated). Real shape:
+`Http::fake(function ($request) use (&$calls) { if (cond) { $calls[] =
+$body; return X; } return Y; })`, then `$calls[0]` read afterward - the
+append only ever happens right before an early `return`, so `closure_
+locals`'s own state at the *last* statement the closure body falls
+through to (the trailing `return Y;`) never reflects it: every path
+that mutates `$calls` also returns before reaching there. The `use
+(&$x)` write-back logic (`checker/expr.rs`'s `Closure` arm) read
+`closure_locals.get(&u.name)` - a single snapshot of wherever the body's
+sequential walk happened to end up - instead of merging every real exit
+point's own state, the way `checker/by_ref_params.rs`'s existing
+`current_function_by_ref_exit_snapshots` mechanism already does for a
+real by-ref *parameter* (populated at each `StmtKind::Return` and the
+falls-off-the-end point, then unioned via `union_types` for `parameterByRef.
+executionEnd`/`too_wide` checking) - that exact mechanism just wasn't
+wired up for a closure's own `use (&$x)` captures at all. Fixed by
+extending it: a new `current_function_byref_snapshot_names` set (kept
+separate from `current_function_by_ref_params`, since that map's
+non-emptiness also gates real `parameterByRef.type` checking, which a
+captured variable with no declared type of its own must never trigger)
+is populated with every `use (&$x)` name when a closure literal's body
+starts being checked, so the existing `record_by_ref_exit_snapshot` call
+sites (already firing at every `Return` inside the body, previously a
+no-op there since nothing was ever registered to snapshot) now populate
+real data; one further unconditional snapshot right after the body's own
+loop-convergence pass covers the falls-off-the-end/never-invoked case
+too. The write-back site now unions every recorded snapshot instead of
+reading `closure_locals` directly. Verified against the real
+`MetaCampaignManagementGatewayTest.php` (0 `shapeAccess.notFound` left,
+was 5) and a regression test
+(`a_conditional_by_ref_append_before_an_early_return_still_widens_the_outer_variable`,
+`src/checker/tests/closures_and_callables.rs`); full suite (4376 lib
+tests) still green.
+
 ## Rule catalog (checker)
 
 Symbol existence (classes/functions/use-imports/typehints, catch
@@ -4725,10 +4764,11 @@ section used to carry:
 against `app`/`tests`/`database`, `php_version = "8.5"`; 2803 files
 checked, 2730 diagnostics, 1 parse-error skip).** Four genuine engine
 bugs found, independent of the Laravel-specific gap documented
-separately below - three now fixed, see Done's own `break`/`continue`-
+separately below - all four now fixed, see Done's own `break`/`continue`-
 with-a-parenthesized-level entry under "Parser, lexer, AST", "PHP
-8.2+ trait constants" entry under "Registry / symbol resolution", and
-`mixed`-union-collapsing entry under "Type system": the original
+8.2+ trait constants" entry under "Registry / symbol resolution",
+`mixed`-union-collapsing entry under "Type system", and the `use (&$x)`
+closure-capture entry under "Narrowing engine": the original
 heredoc/dense-PCRE-braces hypothesis for the parse-error skip turned out
 to be a red herring once bisected down to a minimal repro; the real
 cause (`continue (2);` later in the same method) was unrelated to the
@@ -4741,32 +4781,31 @@ skip), and `Style.php` in the same directory (156 diagnostics, no skip)
 confirms the skip really was isolated to `Stylesheet.php` alone, not a
 directory-wide issue.
 
-One still open - three of the four are now fixed (the trait-constant
-one, see Done's own "PHP 8.2+ trait constants" entry under "Registry /
-symbol resolution" - the original hypothesis there, that `self::`
-resolution itself was at fault, was half right and half wrong:
-`current_class` was already correctly set to the composing class by
-`check_trait_methods`, but the trait's constants were never reachable
-through that class's registry entry to begin with, since
-`flatten_traits_one_pass` never merged `consts` the way it already
-merges `methods`/`properties`; and the `mixed`-union-normalization one,
-see Done's own entry under "Type system" - two related gaps, a real
-construction bug in `?mixed`'s own parsing plus a robustness gap in
-`union_types_impl` that let any similarly-shaped union slip through
-undetected):
+All four are now fixed - see Done's own entries: "`break`/`continue`
+with a parenthesized level expression" under "Parser, lexer, AST"; "PHP
+8.2+ trait constants" under "Registry / symbol resolution"; the
+`mixed`-union-collapsing entry under "Type system"; and the `use (&$x)`
+closure-capture entry under "Narrowing engine". Every one of the four
+had an original hypothesis (from the initial symptom-only Windows run)
+that turned out to be wrong once traced against real source - worth
+noting since two are genuinely surprising misdiagnoses, not just
+imprecise phrasing:
 
-- **`shapeAccess.notFound` false-positives on a plain integer-keyed list
-  built via `$arr[] = $x;` - 5 occurrences, apparent int/string key
-  representation mismatch.** `array{...} has no key '0'` reported against
-  accessing `$arr[0]` (a literal PHP int `0`) on an array shape built
-  purely through `$arr[] = $x;` push-appends inside a closure
-  (`tests/Feature/Marketing/Ads/MetaCampaignManagementGatewayTest.php:
-  228,234,236`). Looks like the shape's own key gets tracked one way
-  internally (as an int key from the push-append) while the literal-`0`
-  offset-access comparison happens another way (as a string, or some
-  other representation that doesn't compare equal) - needs tracing
-  through wherever `$arr[] = ...`'s key-tracking and `$arr[0]`'s
-  offset-lookup comparison diverge in representation.
+- The `shapeAccess.notFound` false positives (5 occurrences,
+  `tests/Feature/Marketing/Ads/MetaCampaignManagementGatewayTest.php:
+  228,234,236` and 2 more elsewhere in the same file) were originally
+  guessed as "an int/string array-key representation mismatch." The real
+  cause was structurally unrelated: a `use (&$calls)` closure capture
+  mutated only on an early-`return` path (`if (cond) { $calls[] = $x;
+  return A; } return B;`) lost that mutation entirely once the closure
+  returned, since the write-back logic only ever read the closure body's
+  *last*-reached state, never merging in every real exit point's own
+  snapshot the way the identical, already-existing by-ref-*parameter*
+  mechanism does. See the Done entry for the full fix.
+- The parse-error skip's "dense heredoc/PCRE-brace interpolation"
+  hypothesis was also wrong - see Done's own entry under "Parser, lexer,
+  AST" for the real cause (`continue (2);`, unrelated to the heredoc
+  entirely).
 
 **Design question, not a bug**: `arrayValues.list` (26 occurrences, all
 in this corpus technically correct on inspection - e.g.

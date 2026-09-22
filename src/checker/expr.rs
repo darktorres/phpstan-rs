@@ -3281,6 +3281,22 @@ impl<'a> Checker<'a> {
                     std::mem::take(&mut self.current_function_by_ref_exit_snapshots);
                 let previous_by_ref_params_with_tag =
                     std::mem::take(&mut self.current_function_by_ref_params_with_tag);
+                // Every `use (&$x)` capture needs its own exit-snapshot
+                // recorded (see `current_function_byref_snapshot_names`'s
+                // own doc comment) - unlike `current_function_by_ref_
+                // params` just above, this must NOT stay empty for a
+                // closure, or the write-back loop below has nothing but
+                // `closure_locals`'s single end-of-body snapshot to work
+                // from, silently losing any mutation that happened on an
+                // early-return path (the common `if (cond) { $x[] =
+                // ...; return ...; } return ...;` guard-clause shape).
+                let previous_byref_snapshot_names =
+                    std::mem::take(&mut self.current_function_byref_snapshot_names);
+                self.current_function_byref_snapshot_names = uses
+                    .iter()
+                    .filter(|u| u.by_ref)
+                    .map(|u| u.name.clone())
+                    .collect();
                 // A closure's own throw points never belong to the
                 // enclosing function's count (calling the closure, not
                 // merely declaring it, is what would matter, and this
@@ -3321,6 +3337,25 @@ impl<'a> Checker<'a> {
                     },
                 );
                 closure_locals = converged;
+                // One final snapshot from the fully-converged post-body
+                // state - covers both "falls off the end with no
+                // explicit return" and "never actually invoked"
+                // uniformly, on top of whatever mid-body `StmtKind::
+                // Return` sites already recorded via `check_block`
+                // above (`stmt.rs`'s own `record_by_ref_exit_snapshot`
+                // call sites, which fire for a closure body exactly the
+                // same as a named function's, no special-casing needed
+                // there).
+                self.record_by_ref_exit_snapshot(&closure_locals);
+                // Captured before the restore below overwrites the live
+                // field back to the *outer* scope's own snapshots - the
+                // write-back loop further down needs this closure's own
+                // accumulated data, not whatever the enclosing function
+                // had going into this closure literal.
+                let closure_byref_exit_snapshots = std::mem::replace(
+                    &mut self.current_function_by_ref_exit_snapshots,
+                    previous_by_ref_exit_snapshots,
+                );
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_function_throw_points = previous_throw_points;
@@ -3328,8 +3363,8 @@ impl<'a> Checker<'a> {
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
                 self.current_function_by_ref_params = previous_by_ref_params;
-                self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
                 self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
+                self.current_function_byref_snapshot_names = previous_byref_snapshot_names;
                 // A `use(...)` capture never referenced anywhere in the
                 // closure's own body. `ClosureUse` carries no span of its
                 // own (see its doc comment), so every finding here
@@ -3339,21 +3374,34 @@ impl<'a> Checker<'a> {
                 // A `use (&$x)` capture is a real reference - any
                 // mutation the closure body makes to `$x` is visible in
                 // the declaring scope too, from the closure literal's
-                // own point onward. `mutated` (read from `closure_locals`
-                // *after* the `converge_loop_body` call above) is already
-                // the fixed-point-converged result unioned with the
-                // pre-closure entry state - `LoopZeroIterations::Possible`
-                // performed that same "never called" merge a manual
-                // `union_types(original, mutated)` used to do by hand, so
-                // no second union is needed here.
+                // own point onward. `mutated` is the union of every real
+                // exit point's own snapshot (`closure_byref_exit_
+                // snapshots`, captured just above) - NOT just `closure_
+                // locals`'s own single post-convergence state, which
+                // only ever reflects whichever statement the body last
+                // fell through to. For the common `if (cond) { $x[] =
+                // ...; return ...; } return ...;` guard-clause shape,
+                // that's never the branch that actually mutated `$x` -
+                // every real mutation happened right before an early
+                // `return`, invisible to a single end-of-body read. Falls
+                // back to the old single-snapshot read only if somehow
+                // nothing was recorded (shouldn't happen - the post-
+                // convergence snapshot above is unconditional - but this
+                // project's own "don't guess wrong" precedent prefers a
+                // graceful degrade here over an `unwrap()`).
                 for u in uses {
                     if !u.by_ref {
                         continue;
                     }
-                    let mutated = closure_locals
+                    let mutated = closure_byref_exit_snapshots
                         .get(&u.name)
-                        .cloned()
-                        .unwrap_or(Type::Mixed(false));
+                        .and_then(|snapshots| snapshots.iter().cloned().reduce(union_types))
+                        .unwrap_or_else(|| {
+                            closure_locals
+                                .get(&u.name)
+                                .cloned()
+                                .unwrap_or(Type::Mixed(false))
+                        });
                     if !locals.contains_key(&u.name) {
                         // Real PHP auto-vivifies `$x` in the outer/
                         // declaring scope the moment `use (&$x)` captures

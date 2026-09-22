@@ -687,6 +687,46 @@ fn array_map_with_a_by_ref_use_capture_still_widens_the_outer_variable() {
 }
 
 #[test]
+fn a_conditional_by_ref_append_before_an_early_return_still_widens_the_outer_variable() {
+    // Real shape (erp-web's own `MetaCampaignManagementGatewayTest`,
+    // found via a corpus round): `Http::fake(function ($request) use
+    // (&$calls) { if (cond) { $calls[] = $body; return X; } return Y;
+    // })`, then `$calls[0]` read afterward. The append only ever happens
+    // right before an early `return` - `closure_locals`'s own state at
+    // the *last* statement the closure body falls through to (the
+    // trailing `return Y;`) never reflects it, since every path that
+    // mutates `$calls` also returns before reaching there. Without
+    // properly unioning every real exit point's own snapshot (not just
+    // the final one), the outer `$calls` stays the stale, empty
+    // `array{}` it started as, and `$calls[0]` false-positives
+    // `shapeAccess.notFound`.
+    let d = diagnostics_for(
+        r#"<?php
+            function fakeHttp(callable $cb): void {}
+
+            function test(bool $cond): void {
+                $calls = [];
+                fakeHttp(function () use (&$calls, $cond) {
+                    if ($cond) {
+                        $calls[] = 'a';
+
+                        return 1;
+                    }
+
+                    return 2;
+                });
+
+                echo $calls[0];
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
 fn use_of_a_never_defined_outer_variable_is_flagged_as_undefined() {
     let d = diagnostics_for(
         r#"<?php
