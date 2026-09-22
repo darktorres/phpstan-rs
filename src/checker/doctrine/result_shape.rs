@@ -197,13 +197,15 @@ fn select_item_type(
     item: &SelectItem,
 ) -> Type {
     match &item.kind {
-        SelectItemKind::Field(r) => field_ref_type(checker, aliases, r).unwrap_or(Type::Mixed),
+        SelectItemKind::Field(r) => {
+            field_ref_type(checker, aliases, r).unwrap_or(Type::Mixed(false))
+        }
         SelectItemKind::Aggregate { func, operand } => match func {
             AggregateFn::Count => Type::IntRange(Some(0), None),
             AggregateFn::Sum | AggregateFn::Avg | AggregateFn::Min | AggregateFn::Max => operand
                 .as_ref()
                 .and_then(|r| field_ref_type(checker, aliases, r))
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
         },
         SelectItemKind::Case {
             then_arms,
@@ -212,12 +214,12 @@ fn select_item_type(
             let arm_types = then_arms
                 .iter()
                 .chain(else_arm.iter())
-                .map(|r| field_ref_type(checker, aliases, r).unwrap_or(Type::Mixed));
+                .map(|r| field_ref_type(checker, aliases, r).unwrap_or(Type::Mixed(false)));
             // `then_arms` always has at least one entry (168c's own
             // `parse_case` requires at least one `WHEN ... THEN ...`
             // before accepting `END`), so this always has a first
             // element to reduce from.
-            arm_types.reduce(union_types).unwrap_or(Type::Mixed)
+            arm_types.reduce(union_types).unwrap_or(Type::Mixed(false))
         }
         // Real Doctrine constructs the named class from the query's own
         // positional results directly - exact once the class is named,
@@ -236,7 +238,7 @@ fn select_item_type(
             .doctrine_custom_functions
             .get(&name.to_ascii_lowercase())
             .map(|kind| doctrine_custom_function_type(*kind))
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         // A scalar subquery (PHASE_BACKLOG Phase 168 168k) - its own
         // `FROM`/`JOIN` scope is entirely independent of the outer
         // query's own `aliases` map (only an uncorrelated subquery is
@@ -247,7 +249,8 @@ fn select_item_type(
         // (168f) already have - a scalar subquery is only valid DQL
         // when it resolves to exactly one scalar column.
         SelectItemKind::Subquery(inner_chain, inner_items) => {
-            single_scalar_column_type(checker, inner_chain, inner_items).unwrap_or(Type::Mixed)
+            single_scalar_column_type(checker, inner_chain, inner_items)
+                .unwrap_or(Type::Mixed(false))
         }
     }
 }
@@ -280,7 +283,7 @@ pub(crate) fn build_result_row_type(
         },
     ] = items
     {
-        return Some(field_ref_type(checker, &aliases, alias_ref).unwrap_or(Type::Mixed));
+        return Some(field_ref_type(checker, &aliases, alias_ref).unwrap_or(Type::Mixed(false)));
     }
 
     // Every other shape (an entity plus scalars, or scalar-only, single
@@ -376,7 +379,7 @@ pub(crate) fn raw_scalar_column_type(
 /// known real false-positive/negative to trace yet.
 fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
     let Some(de) = entity_info(checker, entity).and_then(|i| i.doctrine_entity.as_ref()) else {
-        return Type::Mixed;
+        return Type::Mixed(false);
     };
     let mut fields: Vec<(String, Type, bool)> = de
         .fields
@@ -395,10 +398,10 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
                 let id_ty = target
                     .and_then(|t| t.fields.get(id_field))
                     .cloned()
-                    .unwrap_or(Type::Mixed);
+                    .unwrap_or(Type::Mixed(false));
                 Type::ObjectShape(vec![(id_field.to_string(), id_ty, false)])
             })
-            .unwrap_or(Type::Mixed);
+            .unwrap_or(Type::Mixed(false));
         fields.push((name.to_string(), shape, false));
     }
     // Deterministic order - a `HashMap`'s own iteration order is
@@ -477,13 +480,13 @@ pub(crate) fn build_scalar_result_row_type(
         match &item.kind {
             SelectItemKind::Field(FieldRef::Alias(entity_alias)) => {
                 let Some(entity) = aliases.get(entity_alias) else {
-                    fields.push((i.to_string(), Type::Mixed, false));
+                    fields.push((i.to_string(), Type::Mixed(false), false));
                     continue;
                 };
                 let Some(de) =
                     entity_info(checker, entity).and_then(|e| e.doctrine_entity.as_ref())
                 else {
-                    fields.push((i.to_string(), Type::Mixed, false));
+                    fields.push((i.to_string(), Type::Mixed(false), false));
                     continue;
                 };
                 let mut scalar_fields: Vec<(&std::sync::Arc<str>, &Type)> = de

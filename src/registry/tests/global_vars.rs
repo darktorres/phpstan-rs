@@ -274,7 +274,7 @@ fn coalesce_assign_contributes_the_rhs_type_but_compound_concat_assign_is_mixed(
             let a = &fields.iter().find(|(k, _, _)| k == "a").expect("a field").1;
             let b = &fields.iter().find(|(k, _, _)| k == "b").expect("b field").1;
             assert_eq!(a, &Type::StringLiteral("default".to_string()));
-            assert_eq!(b, &Type::Mixed);
+            assert_eq!(b, &Type::Mixed(false));
         }
         other => panic!("expected an ArrayShape, got: {other:?}"),
     }
@@ -308,7 +308,7 @@ fn exceeding_the_shape_field_cap_degrades_to_array_mixed_not_mixed() {
     let registry = build_with_files(&[("a.php", &src)]);
     match global_type(&registry, "g") {
         Some(Type::Array(_, value)) => {
-            assert_eq!(**value, Type::Mixed);
+            assert_eq!(**value, Type::Mixed(false));
         }
         other => panic!("expected a plain Array(Mixed) after overflow, got: {other:?}"),
     }
@@ -487,7 +487,7 @@ fn a_nested_append_write_still_records_its_outermost_key() {
 fn a_bare_top_level_append_contributes_nothing() {
     let registry = build_with_files(&[("a.php", "<?php $g[] = 'x';")]);
     match global_type(&registry, "g") {
-        None | Some(Type::Mixed) => {}
+        None | Some(Type::Mixed(false)) => {}
         other => panic!("expected no contribution from a bare append, got: {other:?}"),
     }
 }

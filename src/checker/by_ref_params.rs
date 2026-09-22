@@ -91,7 +91,9 @@ impl<'a> Checker<'a> {
         let Some(declared) = self.current_function_by_ref_params.get(name).cloned() else {
             return;
         };
-        if *actual == Type::Mixed || self.registry.accepts_at_configured_level(actual, &declared) {
+        if *actual == Type::Mixed(false)
+            || self.registry.accepts_at_configured_level(actual, &declared)
+        {
             return;
         }
         self.report(
@@ -110,7 +112,7 @@ impl<'a> Checker<'a> {
     /// A parameter missing from `locals` entirely (shouldn't happen -
     /// every parameter is declared into `locals` up front - but this
     /// project's own "don't guess" precedent prefers a `Mixed` fallback
-    /// over a panic here) falls back to `Type::Mixed`, matching
+    /// over a panic here) falls back to `Type::Mixed(false)`, matching
     /// `check_by_ref_value`'s own "never flag a `Mixed` value" leniency.
     pub(crate) fn record_by_ref_exit_snapshot(&mut self, locals: &crate::checker::Locals) {
         if self.current_function_by_ref_params.is_empty() {
@@ -122,7 +124,7 @@ impl<'a> Checker<'a> {
             .cloned()
             .collect();
         for name in names {
-            let ty = locals.get(&name).cloned().unwrap_or(Type::Mixed);
+            let ty = locals.get(&name).cloned().unwrap_or(Type::Mixed(false));
             self.current_function_by_ref_exit_snapshots
                 .entry(name)
                 .or_default()
@@ -154,7 +156,7 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
                 continue;
             };
-            if actual == Type::Mixed
+            if actual == Type::Mixed(false)
                 || self
                     .registry
                     .accepts_at_configured_level(&actual, &declared)
@@ -200,7 +202,7 @@ impl<'a> Checker<'a> {
             let Some(actual) = snapshots.iter().cloned().reduce(union_types) else {
                 continue;
             };
-            if actual == Type::Mixed {
+            if actual == Type::Mixed(false) {
                 continue;
             }
             let actual_members = flatten_union(&actual);
@@ -209,7 +211,7 @@ impl<'a> Checker<'a> {
                 .filter(|m| {
                     !actual_members
                         .iter()
-                        .any(|a| **a == Type::Mixed || self.registry.is_assignable(a, m))
+                        .any(|a| **a == Type::Mixed(false) || self.registry.is_assignable(a, m))
                 })
                 .map(|m| m.to_string())
                 .collect();

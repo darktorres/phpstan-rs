@@ -703,7 +703,7 @@ impl<'a> Checker<'a> {
         // other existence check in this function.
         let subject = format!("return type of {label}()");
         self.check_type_class_names_exist(
-            declared_return.as_ref().unwrap_or(&Type::Mixed),
+            declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
             &subject,
             f.span,
             &label,
@@ -711,7 +711,7 @@ impl<'a> Checker<'a> {
         self.check_type_class_name_case(&declared_return_case_refs, &label, f.span);
         self.check_type_internal_usage(&declared_return_case_refs, &label, f.span);
         self.check_type_trait_refs(
-            declared_return.as_ref().unwrap_or(&Type::Mixed),
+            declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
             &subject,
             f.span,
             &label,
@@ -724,7 +724,7 @@ impl<'a> Checker<'a> {
         // could meaningfully reference.
         if let Some(c) = class_name {
             let resolved_return =
-                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), c);
+                self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed(false)), c);
             self.check_no_parent_ref(
                 &resolved_return,
                 &subject,
@@ -817,7 +817,7 @@ impl<'a> Checker<'a> {
                 }
             }
             self.check_generic_bounds(
-                declared_return.as_ref().unwrap_or(&Type::Mixed),
+                declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                 &label,
                 f.span,
             );
@@ -1043,7 +1043,7 @@ impl<'a> Checker<'a> {
                         "return.never",
                     );
                 } else if expected != Type::Void
-                    && expected != Type::Mixed
+                    && expected != Type::Mixed(false)
                     && !self.registry.is_assignable(&Type::Null, &expected)
                 {
                     self.report(
@@ -1065,7 +1065,7 @@ impl<'a> Checker<'a> {
                 && !self.current_function_is_generator
                 && !body_falls_off_end
                 && !self.current_function_saw_explicit_return
-                && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed))
+                && matches!(declared_return, Some(Type::Void) | Some(Type::Mixed(_)))
             {
                 self.report(
                     label.clone(),

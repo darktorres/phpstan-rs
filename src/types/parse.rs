@@ -30,8 +30,8 @@ pub fn parse_type_string(raw: &str) -> Type {
         // doc text with no such normalization; a stray non-`Mixed`
         // member would otherwise fail an ordinary compatibility check
         // even though the whole union is vacuously satisfiable.
-        if members.contains(&Type::Mixed) {
-            return Type::Mixed;
+        if members.contains(&Type::Mixed(false)) {
+            return Type::Mixed(false);
         }
         Type::Union(members)
     } else if amp_parts.len() > 1 {
@@ -269,12 +269,12 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
         // too. Recorded as a sentinel field (`"..."`, impossible to
         // collide with any real key this grammar could parse) rather
         // than tracking the unsealed portion's value type precisely
-        // (`Type::Mixed`, matching a plain `array`'s unknown-value-type
+        // (`Type::Mixed(false)`, matching a plain `array`'s unknown-value-type
         // default) - see `is_unsealed_shape`/
         // `narrowing::narrow_array_shape_by_key_presence` for how this
         // gets consumed.
         if field_str.starts_with("...") {
-            fields.push(("...".to_string(), Type::Mixed, false));
+            fields.push(("...".to_string(), Type::Mixed(false), false));
             continue;
         }
         // A *positional* (unkeyed) field (`array{int, string}`, real
@@ -418,17 +418,17 @@ fn offset_access_type(base: &Type, key: &str) -> Type {
             .iter()
             .find(|(k, _, _)| k == key)
             .map(|(_, v, _)| v.clone())
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         Type::Array(_, value_ty) => (**value_ty).clone(),
         Type::Union(members) => {
             let resolved: Vec<Type> = members.iter().map(|m| offset_access_type(m, key)).collect();
             match resolved.len() {
-                0 => Type::Mixed,
+                0 => Type::Mixed(false),
                 1 => resolved.into_iter().next().unwrap(),
                 _ => Type::Union(resolved),
             }
         }
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     }
 }
 
@@ -671,7 +671,7 @@ fn parse_type_atom(s: &str) -> Type {
         // branch below, which would otherwise namespace-qualify it as a
         // literal class name (real shape: monolog/monolog's own
         // `@param self::RFC_* $rfc`).
-        Type::Mixed
+        Type::Mixed(false)
     } else {
         parse_type_keyword_or_class(bare, original, &generic_args)
     };
@@ -908,9 +908,9 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                 Type::Object(name, args) if args.is_empty() => {
                     Type::Object("$$valueof".to_string(), vec![Type::Object(name, args)])
                 }
-                _ => Type::Mixed,
+                _ => Type::Mixed(false),
             },
-            _ => Type::Mixed,
+            _ => Type::Mixed(false),
         },
         "key-of" => match generic_args {
             [single] => match parse_type_string(single) {
@@ -931,13 +931,13 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                         ),
                     }
                 }
-                _ => Type::Mixed,
+                _ => Type::Mixed(false),
             },
-            _ => Type::Mixed,
+            _ => Type::Mixed(false),
         },
         "null" => Type::Null,
         "void" => Type::Void,
-        "mixed" => Type::Mixed,
+        "mixed" => Type::Mixed(false),
         "never" | "noreturn" => Type::Never,
         // `array<K, V>`'s key argument is real
         // (`Type::Array`'s own key slot), not discarded. Bare `array`
@@ -954,7 +954,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // PHPStan precedent to check a 1-arg form against) keeps the
         // plain, non-benevolent default it always had.
         "array" | "class-string-map" => match generic_args.len() {
-            0 => Type::array_of(Type::Mixed),
+            0 => Type::array_of(Type::Mixed(false)),
             1 if bare == "array" => Type::Array(
                 Box::new(Type::benevolent_array_key()),
                 Box::new(parse_type_string(generic_args[0])),
@@ -979,7 +979,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // AccessoryArrayListType/NonEmptyArrayType])`.
         "list" | "non-empty-array" | "non-empty-list" => {
             let elem_ty = match generic_args.len() {
-                0 => Type::Mixed,
+                0 => Type::Mixed(false),
                 1 => parse_type_string(generic_args[0]),
                 _ => parse_type_string(generic_args[1]),
             };
@@ -1015,7 +1015,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `iterable`-hinted parameter.
         "iterable" => {
             let element_ty = match generic_args.len() {
-                0 => Type::Mixed,
+                0 => Type::Mixed(false),
                 1 => parse_type_string(generic_args[0]),
                 _ => parse_type_string(generic_args[1]),
             };

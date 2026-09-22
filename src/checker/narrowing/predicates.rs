@@ -333,13 +333,16 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_bool" | "is_boolean" => Some(Type::Bool),
         "is_array" => Some(Type::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed),
+            Box::new(Type::Mixed(false)),
         )),
         // `is_countable($x)` is true for exactly
         // `array|Countable` - guards `count($x)` in a correct PHP 8+
         // idiom (`count()` on anything else is a `TypeError`).
         "is_countable" => Some(Type::Union(vec![
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+            Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::Mixed(false)),
+            ),
             Type::Object("Countable".to_string(), Vec::new()),
         ])),
         // Real PHP's own native `iterable` type hint, defined
@@ -348,7 +351,10 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         // the native type hint to, kept in sync deliberately (both are
         // "what does `iterable` actually mean" in one place each).
         "is_iterable" => Some(Type::Union(vec![
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+            Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::Mixed(false)),
+            ),
             Type::Object("Traversable".to_string(), Vec::new()),
         ])),
         "is_null" => Some(Type::Null),
@@ -435,7 +441,7 @@ impl<'a> Checker<'a> {
                     (None, Some(key)) => (key, r, self.infer_expr(l, locals)),
                     (None, None) => return None,
                 };
-                if target_ty == Type::Mixed {
+                if target_ty == Type::Mixed(false) {
                     return None;
                 }
                 Some((key, target_ty, narrowed_expr))

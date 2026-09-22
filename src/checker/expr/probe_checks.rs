@@ -89,14 +89,14 @@ impl<'a> Checker<'a> {
                 // Deliberately not `check_expr` - a bare variable here is
                 // exactly the "might not be defined" case `??` exists to
                 // handle safely.
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::Index(base, idx) => {
                 self.check_expr_quiet_root(base, locals, label);
                 if let Some(i) = idx {
                     self.check_expr(i, locals, label);
                 }
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::PropertyAccess(base, prop, _) => {
                 self.check_expr_quiet_root(base, locals, label);
@@ -125,12 +125,12 @@ impl<'a> Checker<'a> {
                         );
                     }
                 }
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::DynamicPropertyAccess(base, name_expr) => {
                 self.check_expr_quiet_root(base, locals, label);
                 self.check_expr(name_expr, locals, label);
-                Type::Mixed
+                Type::Mixed(false)
             }
             _ => self.check_expr(e, locals, label),
         }

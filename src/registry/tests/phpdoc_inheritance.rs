@@ -64,13 +64,13 @@ fn a_param_type_is_inherited_from_an_interface_and_ty_native_is_left_alone() {
     let Type::Array(_, value) = &sig.params[0].ty_native else {
         panic!("expected Type::Array, got {:?}", sig.params[0].ty_native);
     };
-    assert_eq!(**value, Type::Mixed);
+    assert_eq!(**value, Type::Mixed(false));
 }
 
 #[test]
 fn inheritance_applies_even_when_the_native_return_hint_is_already_non_mixed() {
     // The corrected-algorithm case: a bare `array` native hint resolves
-    // to `Type::Array(_, Mixed)`, not `Type::Mixed` itself - real
+    // to `Type::Array(_, Mixed)`, not `Type::Mixed(false)` itself - real
     // PHPStan's own trigger is "no own `@return` tag at all", never
     // gated on the resolved type being `Mixed`.
     let r = build_registry(
@@ -248,7 +248,7 @@ fn an_ancestors_mixed_tag_is_never_inherited() {
     let sig = &r.classes["StringVoType9"].methods["convertToPHPValue"];
     assert_ne!(
         sig.return_type,
-        Type::Mixed,
+        Type::Mixed(false),
         "a Mixed ancestor tag must never overwrite a concrete native return type"
     );
 }
@@ -277,7 +277,7 @@ fn an_ancestors_template_parameterized_type_is_never_inherited() {
     let sig = &r.classes["ConcreteContainer10"].methods["get"];
     assert_eq!(
         sig.return_type,
-        Type::Mixed,
+        Type::Mixed(false),
         "a template-parameterized ancestor type must never be inherited verbatim, got {:?}",
         sig.return_type
     );

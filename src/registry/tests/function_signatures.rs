@@ -472,7 +472,7 @@ fn an_array_doc_member_with_a_plain_class_key_is_also_kept() {
 }
 
 // A `mixed`-native case must still trust the doc fully, now via the
-// general `is_subtype(_, Type::Mixed)` rule falling out for free
+// general `is_subtype(_, Type::Mixed(false))` rule falling out for free
 // rather than a dedicated `mixed`/`object` branch.
 #[test]
 fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
@@ -611,7 +611,7 @@ fn an_inline_var_tag_survives_an_attribute_between_it_and_the_parameter() {
     );
     let ty = &r.lookup_property("Entity93", "details").unwrap().ty;
     assert!(
-        matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Array(_, v) if **v == Type::Mixed))),
+        matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Array(_, v) if **v == Type::Mixed(false)))),
         "got: {ty:?}"
     );
 }

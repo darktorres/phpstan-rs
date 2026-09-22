@@ -180,7 +180,7 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
         ExprKind::Unary(crate::ast::UnaryOp::Neg, inner) => match &inner.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(-n),
             ExprKind::Literal(Literal::Float(_)) => Type::Float,
-            _ => Type::Mixed,
+            _ => Type::Mixed(false),
         },
         // A real, common shape (`AppInfo::URL = 'https://' . self::DOMAIN;`)
         // - a const's own value referencing *another* const via `self::`
@@ -193,7 +193,7 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
         // widen every array literal/argument this const then feeds
         // into.
         ExprKind::Binary(crate::ast::BinOp::Concat, ..) => Type::String,
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     }
 }
 
@@ -346,7 +346,7 @@ impl FunctionSig {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.unwrap_or(Type::Mixed);
+                    let native_only = native_parsed.unwrap_or(Type::Mixed(false));
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -426,7 +426,7 @@ impl FunctionSig {
         let return_type_native = if return_shared {
             return_type.clone()
         } else {
-            let native_only = native_return_parsed.unwrap_or(Type::Mixed);
+            let native_only = native_return_parsed.unwrap_or(Type::Mixed(false));
             let t = mark_template_params(native_only, &template_params);
             resolve_names_in_type(t, ctx)
         };

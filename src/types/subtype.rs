@@ -97,7 +97,7 @@ pub(crate) fn types_equal_for_union(a: &Type, b: &Type) -> bool {
 
 pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
     match (sub, sup) {
-        (_, Type::Mixed) => true,
+        (_, Type::Mixed(_)) => true,
         (Type::Never, _) => true,
         // `Type` derives plain structural `PartialEq`, so the
         // `a == b` fast path just below is `false` for `FloatLiteral
@@ -229,7 +229,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // its own `map()`/`filter()`/`partition()` `@phpstan-return`
         // tags).
         (Type::TemplateParam(tp), _) => {
-            matches!(*tp.bound, Type::Mixed) || is_subtype(&tp.bound, sup)
+            matches!(*tp.bound, Type::Mixed(_)) || is_subtype(&tp.bound, sup)
         }
         // An unresolved `Conditional` - either it leaked into a
         // position `resolve_conditional` never runs against (a
@@ -358,7 +358,7 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // `array{name: string}` (all-string-keyed) must never satisfy
         // `array<int, mixed>` just because the value side is lenient.
         (Type::ArrayShape(fields), Type::Array(key, b)) => {
-            matches!(**b, Type::Mixed) && is_subtype(&shape_key_type(fields), key)
+            matches!(**b, Type::Mixed(_)) && is_subtype(&shape_key_type(fields), key)
         }
 
         // An object shape is structurally an object, so it

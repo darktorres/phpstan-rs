@@ -1,7 +1,7 @@
 //! An anonymous class (`new class { ... }`) instance registered into the
 //! registry under its own stable synthetic name
 //! (`registry::collect_anonymous_classes`), instead of inferred as bare
-//! `Type::Mixed` - the exact `tests/Unit/Http/Middleware/
+//! `Type::Mixed(false)` - the exact `tests/Unit/Http/Middleware/
 //! ApiIdempotencyMiddlewareTest.php:51`/`SentryMiddlewareTest.php:119`
 //! corpus shape (an anonymous-class instance placed into a typed array
 //! shape/argument whose declared type names an interface it implements).

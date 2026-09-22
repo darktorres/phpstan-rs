@@ -513,7 +513,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether `ty` could ever satisfy `target` - deliberately not a
-    /// direct `self.registry.is_assignable(ty, target)` call. `Type::Mixed`
+    /// direct `self.registry.is_assignable(ty, target)` call. `Type::Mixed(false)`
     /// (an untyped parameter) must satisfy anything (real PHPStan's own
     /// `mixed.isCallable()`/`isSuperTypeOf()` is always `maybe`, never
     /// `no`) - `is_subtype(Mixed, _)` has no such arm and would wrongly
@@ -527,7 +527,7 @@ impl<'a> Checker<'a> {
     /// classes, not hypothetical ones.
     pub(crate) fn param_type_could_satisfy(&self, ty: &Type, target: &Type) -> bool {
         match ty {
-            Type::Mixed => true,
+            Type::Mixed(_) => true,
             Type::Union(members) => members
                 .iter()
                 .any(|m| self.param_type_could_satisfy(m, target)),

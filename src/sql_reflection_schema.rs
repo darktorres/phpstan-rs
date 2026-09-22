@@ -227,9 +227,9 @@ fn schema_column(
 /// returned as its declared label) or a driver-level fetch-format fact
 /// (confirmed live against real MySQL/PDO where noted) - never a guess
 /// dressed up as either. A declared type this table has no confident
-/// answer for degrades to `Type::Mixed`, matching this project's own
+/// answer for degrades to `Type::Mixed(false)`, matching this project's own
 /// established "honest, not invented" precedent elsewhere (see
-/// `array_keys()`'s own `Type::Mixed` fallback,
+/// `array_keys()`'s own `Type::Mixed(false)` fallback,
 /// `checker/expr/builtin_calls.rs`).
 fn data_type_to_type(data_type: &DataType) -> Type {
     match data_type {
@@ -361,7 +361,7 @@ fn data_type_to_type(data_type: &DataType) -> Type {
         // translation for (native arrays, geometric types, tuples,
         // custom/domain types, ...) - genuinely undecidable from a
         // static definition alone.
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     }
 }
 

@@ -80,7 +80,7 @@ impl<'a> Checker<'a> {
                         .zip(args.iter().map(|a| {
                             types::strip_call_site_variance(a)
                                 .cloned()
-                                .unwrap_or(Type::Mixed)
+                                .unwrap_or(Type::Mixed(false))
                         }))
                         .collect();
                     for (name, arg) in info.templates.iter().zip(args.iter()) {
@@ -102,7 +102,7 @@ impl<'a> Checker<'a> {
                         // PHPStan\Type\Type`, would read as violating a
                         // bound this project has no way to verify either
                         // way.
-                        if *checked_arg != Type::Mixed
+                        if *checked_arg != Type::Mixed(false)
                             && self.is_type_fully_known(checked_arg)
                             && self.is_type_fully_known(&bound)
                             && !self.registry.is_assignable(checked_arg, &bound)
@@ -668,7 +668,7 @@ impl<'a> Checker<'a> {
 fn is_supported_generic_bound(ty: &Type) -> bool {
     matches!(
         ty,
-        Type::Mixed
+        Type::Mixed(_)
             | Type::Null
             | Type::Array(_, _)
             | Type::ArrayShape(_)

@@ -17,10 +17,16 @@ fn array_shape_is_subtype_of_bare_array_but_not_the_reverse() {
     let shape = parse_type_string("array{name: string}");
     assert!(is_subtype(
         &shape,
-        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+        &Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false))
+        )
     ));
     assert!(!is_subtype(
-        &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+        &Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false))
+        ),
         &shape
     ));
 }
@@ -36,7 +42,7 @@ fn a_string_keyed_shape_is_a_subtype_of_a_matching_string_keyed_mixed_valued_arr
     let shape = parse_type_string("array{name: string}");
     assert!(is_subtype(
         &shape,
-        &Type::Array(Box::new(Type::String), Box::new(Type::Mixed))
+        &Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)))
     ));
 }
 
@@ -45,7 +51,7 @@ fn a_string_keyed_shape_is_not_a_subtype_of_an_int_keyed_mixed_valued_array() {
     let shape = parse_type_string("array{name: string}");
     assert!(!is_subtype(
         &shape,
-        &Type::Array(Box::new(Type::Int), Box::new(Type::Mixed))
+        &Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false)))
     ));
 }
 
@@ -57,10 +63,10 @@ fn literal_is_subtype_of_its_general_type() {
 
 #[test]
 fn everything_is_subtype_of_mixed() {
-    assert!(is_subtype(&Type::String, &Type::Mixed));
+    assert!(is_subtype(&Type::String, &Type::Mixed(false)));
     assert!(is_subtype(
         &Type::Object("Foo".to_string(), Vec::new()),
-        &Type::Mixed
+        &Type::Mixed(false)
     ));
 }
 
@@ -135,7 +141,7 @@ fn a_bounded_template_param_still_accepts_anything_as_a_sink() {
 #[test]
 fn never_is_subtype_of_everything() {
     assert!(is_subtype(&Type::Never, &Type::String));
-    assert!(is_subtype(&Type::Never, &Type::Mixed));
+    assert!(is_subtype(&Type::Never, &Type::Mixed(false)));
 }
 
 #[test]
@@ -257,11 +263,17 @@ fn array_accessory_subtype_rules() {
     // `is_subtype`'s) - using `Array(Mixed)` here isolates the new
     // accessory logic from that pre-existing, unrelated asymmetry.
     let list_ty = Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
         Type::Accessory(AccessoryKind::ArrayList),
     ]);
     let non_empty_ty = Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
         Type::Accessory(AccessoryKind::NonEmptyArray),
     ]);
     let list_shape = Type::ArrayShape(vec![
@@ -302,7 +314,10 @@ fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
     // ignore each field's `optional` flag and answer `true`
     // unconditionally here.
     let list_ty = Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+        Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
         Type::Accessory(AccessoryKind::ArrayList),
     ]);
     let non_trailing_optional = Type::ArrayShape(vec![
@@ -334,7 +349,10 @@ fn nullable_string_accepts_null_and_string() {
 #[test]
 fn array_subtyping_is_covariant_on_value_type() {
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
-    let mixed_arr = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
+    let mixed_arr = Type::Array(
+        Box::new(Type::unknown_array_key()),
+        Box::new(Type::Mixed(false)),
+    );
     assert!(is_subtype(&ints, &mixed_arr));
     assert!(!is_subtype(&mixed_arr, &ints));
 }

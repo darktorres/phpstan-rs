@@ -109,9 +109,9 @@ pub struct PropertySig {
     // `.missingNativeType`/`.extraNativeType` family, which real PHPStan
     // checks purely at the native level. `resolve_type(None, native_hint)`
     // collapses "no native hint" and an explicit `mixed` hint into the
-    // same `Type::Mixed` value, which is why `has_native_type` below must
+    // same `Type::Mixed(false)` value, which is why `has_native_type` below must
     // be a separate boolean rather than testing this field against
-    // `Type::Mixed`.
+    // `Type::Mixed(false)`.
     pub ty_native: Type,
     pub has_native_type: bool,
     // `ParamSig::case_refs`'s property-position equivalent. Populated
@@ -607,7 +607,7 @@ impl ClassInfo {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.unwrap_or(Type::Mixed);
+                    let native_only = native_parsed.unwrap_or(Type::Mixed(false));
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -699,7 +699,7 @@ impl ClassInfo {
                 let ty_native = if shared {
                     ty.clone()
                 } else {
-                    let native_only = native_parsed.unwrap_or(Type::Mixed);
+                    let native_only = native_parsed.unwrap_or(Type::Mixed(false));
                     let t = mark_template_params(native_only, &template_params);
                     resolve_names_in_type(t, ctx)
                 };
@@ -778,7 +778,7 @@ impl ClassInfo {
                         // declaration to check against - `false`,
                         // matching every other synthetic-property field
                         // here.
-                        ty_native: Type::Mixed,
+                        ty_native: Type::Mixed(false),
                         has_native_type: false,
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,

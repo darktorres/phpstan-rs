@@ -279,7 +279,7 @@ fn mysql_column_to_type(col: &mysql::Column, schema: Option<&SchemaCatalog>) -> 
         // translation for - genuinely undecidable, matching this
         // project's own "honest, not invented" precedent (see
         // `sql_reflection_schema`'s own doc comment).
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     };
     if nullable && base != Type::Null {
         Type::Union(vec![base, Type::Null])
@@ -455,7 +455,7 @@ fn postgres_column_to_type(pg_type: &postgres::types::Type, nullable: bool) -> T
         // translation for (native arrays, ranges, geometric types,
         // custom/domain types, ...) - genuinely undecidable, matching
         // this project's own "honest, not invented" precedent.
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     };
     if nullable && base != Type::Null {
         Type::Union(vec![base, Type::Null])
@@ -578,7 +578,7 @@ fn sqlite_affinity_to_type(affinity: SqliteAffinity, nullable: bool) -> Type {
 /// no `column_metadata()` entry at all - degrades to a bare declared
 /// type from `columns()`/`column_decltype()` when SQLite's own query
 /// planner still infers one (real for e.g. `CAST(x AS INTEGER)`), or all
-/// the way to `Type::Mixed` when it can't, rather than guessing.
+/// the way to `Type::Mixed(false)` when it can't, rather than guessing.
 fn sqlite_column_to_type(stmt: &rusqlite::Statement<'_>, idx: usize) -> Type {
     if let Ok(Some((_, _, _, data_type, _, not_null, primary_key, _))) = stmt.column_metadata(idx) {
         let decl = data_type.and_then(|s| s.to_str().ok()).unwrap_or("");
@@ -587,7 +587,7 @@ fn sqlite_column_to_type(stmt: &rusqlite::Statement<'_>, idx: usize) -> Type {
     }
     match stmt.columns().get(idx).and_then(|c| c.decl_type()) {
         Some(decl) => sqlite_affinity_to_type(sqlite_affinity(decl), true),
-        None => Type::Mixed,
+        None => Type::Mixed(false),
     }
 }
 

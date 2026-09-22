@@ -19,9 +19,25 @@ pub use templates::{bind_template_param, promote_class_string_literals, substitu
 // type-hint strings, plus self/parent/static and `@template` generics.
 // Inheritance-chain substitution (a subclass fixing its parent's own type
 // parameter via `@extends Base<Concrete>`) is not modeled.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Type {
-    Mixed,
+    // Real PHPStan's own `MixedType::isExplicitMixed()` (Phase 84):
+    // `true` when a type-resolution process completed and its own
+    // deliberate, definitive answer is `mixed` (the literal `mixed`
+    // keyword written somewhere in a type expression; an unbounded
+    // `@template T` with no `of` clause, which real PHPStan's own
+    // `TemplateTypeFactory`/`PhpDocNodeResolver` both resolve to
+    // `MixedType(true)`, not `false`, confirmed directly against
+    // `vendor/phpstan-src`); `false` for a genuine "we have no type
+    // information at all" fallback (an unresolvable expression, a
+    // missing-typehint default, an error-recovery path). Real PHPStan's
+    // own `MixedType::equals()` ignores this flag entirely (`vendor/
+    // phpstan-src/src/Type/MixedType.php`, confirmed directly) - `Type`'s
+    // own `PartialEq` impl below (deliberately not derived) does the
+    // same, so every one of this project's own pre-existing `==
+    // Type::Mixed(false)`-shaped comparisons keeps working unchanged regardless
+    // of which flag either side carries.
+    Mixed(bool),
     Never,
     Void,
     Null,
@@ -138,6 +154,74 @@ pub enum Type {
     },
 }
 
+/// Deliberately not derived - see `Type::Mixed`'s own doc comment: every
+/// arm below mirrors exactly what `#[derive(PartialEq)]` would generate,
+/// except `Mixed`, whose own `bool` this comparison ignores entirely
+/// (matching real PHPStan's own `MixedType::equals()`), so every one of
+/// this codebase's pre-existing `== Type::Mixed`-shaped comparisons keeps
+/// its exact old meaning regardless of which side's `Mixed` is explicit.
+impl PartialEq for Type {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Type::Mixed(_), Type::Mixed(_)) => true,
+            (Type::Never, Type::Never) => true,
+            (Type::Void, Type::Void) => true,
+            (Type::Null, Type::Null) => true,
+            (Type::Bool, Type::Bool) => true,
+            (Type::True, Type::True) => true,
+            (Type::False, Type::False) => true,
+            (Type::Int, Type::Int) => true,
+            (Type::IntLiteral(a), Type::IntLiteral(b)) => a == b,
+            (Type::Float, Type::Float) => true,
+            (Type::String, Type::String) => true,
+            (Type::StringLiteral(a), Type::StringLiteral(b)) => a == b,
+            (Type::Array(ak, av), Type::Array(bk, bv)) => ak == bk && av == bv,
+            (Type::ClassString(a), Type::ClassString(b)) => a == b,
+            (Type::ArrayShape(a), Type::ArrayShape(b)) => a == b,
+            (Type::ObjectShape(a), Type::ObjectShape(b)) => a == b,
+            (Type::Object(an, aa), Type::Object(bn, ba)) => an == bn && aa == ba,
+            (Type::EnumCase(ae, ac), Type::EnumCase(be, bc)) => ae == be && ac == bc,
+            (Type::Callable(a), Type::Callable(b)) => a == b,
+            (Type::SelfRef, Type::SelfRef) => true,
+            (Type::ParentRef, Type::ParentRef) => true,
+            (Type::StaticRef, Type::StaticRef) => true,
+            (Type::TemplateParam(a), Type::TemplateParam(b)) => a == b,
+            (Type::Union(a), Type::Union(b)) => a == b,
+            (Type::Intersection(a), Type::Intersection(b)) => a == b,
+            (Type::IntRange(amin, amax), Type::IntRange(bmin, bmax)) => {
+                amin == bmin && amax == bmax
+            }
+            (Type::FloatLiteral(a), Type::FloatLiteral(b)) => a == b,
+            (Type::Accessory(a), Type::Accessory(b)) => a == b,
+            (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
+            (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
+            (
+                Type::Conditional {
+                    subject: a_subject,
+                    target: a_target,
+                    if_true: a_if_true,
+                    if_false: a_if_false,
+                    negated: a_negated,
+                },
+                Type::Conditional {
+                    subject: b_subject,
+                    target: b_target,
+                    if_true: b_if_true,
+                    if_false: b_if_false,
+                    negated: b_negated,
+                },
+            ) => {
+                a_subject == b_subject
+                    && a_target == b_target
+                    && a_if_true == b_if_true
+                    && a_if_false == b_if_false
+                    && a_negated == b_negated
+            }
+            _ => false,
+        }
+    }
+}
+
 // Whether a class's own `@template` may vary co-/contravariantly with a
 // subclass relationship, or must stay exactly fixed (`Invariant`, the
 // default). `checker::generics::check_variance` composes this through
@@ -178,7 +262,12 @@ impl TemplateParam {
     pub fn unbounded(name: String) -> TemplateParam {
         TemplateParam {
             name,
-            bound: Box::new(Type::Mixed),
+            // An unbounded `@template` has no `of`/`as` clause at all -
+            // real PHPStan's own `TemplateTypeFactory`/`PhpDocNodeResolver`
+            // both resolve this exact shape to `MixedType(true)`
+            // (explicit), not `false` (confirmed directly against
+            // `vendor/phpstan-src`).
+            bound: Box::new(Type::Mixed(true)),
             variance: Variance::Invariant,
             scope: None,
             default: None,

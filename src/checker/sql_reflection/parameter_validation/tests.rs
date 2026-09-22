@@ -39,5 +39,5 @@ fn value_is_definitely_array_recognizes_both_array_type_shapes() {
         false
     )])));
     assert!(!value_is_definitely_array(&Type::String));
-    assert!(!value_is_definitely_array(&Type::Mixed));
+    assert!(!value_is_definitely_array(&Type::Mixed(false)));
 }

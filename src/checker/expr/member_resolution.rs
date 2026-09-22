@@ -264,7 +264,7 @@ impl<'a> Checker<'a> {
     /// Both `check_expr`'s and `infer_expr`'s own `PropertyAccess` arms
     /// must not match `base_ty` against `Object`/`EnumCase`/`ObjectShape`
     /// directly with no `Union`/`Intersection` arm - falling to the
-    /// `_ => Type::Mixed` catch-all would discard every bit of type
+    /// `_ => Type::Mixed(false)` catch-all would discard every bit of type
     /// information whenever the base's own type happens to be a
     /// `Union`/`Intersection` (a common shape: `narrow_instanceof_true`'s
     /// own deliberate design intersects an unrelated-looking `instanceof`
@@ -297,7 +297,7 @@ impl<'a> Checker<'a> {
                     if self.registry.is_subclass_of(class, "SimpleXMLElement") {
                         union_types(Type::Object(class.clone(), Vec::new()), Type::Null)
                     } else {
-                        Type::Mixed
+                        Type::Mixed(false)
                     }
                 }),
             Type::EnumCase(_, case) if prop == "name" => Type::StringLiteral(case.clone()),
@@ -310,17 +310,17 @@ impl<'a> Checker<'a> {
                         .lookup_property(fqn, "value")
                         .map(|p| p.ty.clone())
                 })
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             Type::EnumCase(fqn, _) => self
                 .registry
                 .lookup_property_with_owner(fqn, prop)
                 .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             Type::ObjectShape(fields) => fields
                 .iter()
                 .find(|(name, _, _)| name == prop)
                 .map(|(_, ty, _)| ty.clone())
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             // An `Intersection` value genuinely is every member type
             // simultaneously, so the first member whose declaration
             // actually resolves the property names its one real type
@@ -355,23 +355,23 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| {
                     let ty = self.property_access_type(m, prop);
-                    (ty != Type::Mixed).then_some(ty)
+                    (ty != Type::Mixed(false)).then_some(ty)
                 })
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.property_access_type(m, prop))
-                .filter(|ty| *ty != Type::Mixed)
+                .filter(|ty| *ty != Type::Mixed(false))
                 .reduce(union_types)
-                .unwrap_or(Type::Mixed),
-            _ => Type::Mixed,
+                .unwrap_or(Type::Mixed(false)),
+            _ => Type::Mixed(false),
         }
     }
 
     /// `infer_expr`'s own `ExprKind::MethodCall` return-type resolution -
     /// extracted so it can recurse through `Union`/`Intersection`, rather
     /// than silently collapsing any method call's own return type to
-    /// `Type::Mixed` whenever the receiver is one. `infer_expr` is the
+    /// `Type::Mixed(false)` whenever the receiver is one. `infer_expr` is the
     /// core type-inference path (used whenever a method call's result
     /// type needs computing without also running full diagnostics, e.g.
     /// as a sub-expression of a larger one). `Intersection` keeps "first
@@ -523,22 +523,22 @@ impl<'a> Checker<'a> {
                             .unwrap_or_else(doctrine_query_result_list_type),
                         // The other hydration modes need 168f's own
                         // per-mode transforms, not yet built.
-                        _ => Type::Mixed,
+                        _ => Type::Mixed(false),
                     },
                     "toIterable" => match resolve_hydration_mode_arg(args, 0) {
                         HydrationMode::Object => Type::Union(vec![
                             Type::Array(
                                 Box::new(Type::unknown_array_key()),
-                                Box::new(row_type.cloned().unwrap_or(Type::Mixed)),
+                                Box::new(row_type.cloned().unwrap_or(Type::Mixed(false))),
                             ),
                             Type::Object("Traversable".to_string(), Vec::new()),
                         ]),
-                        _ => Type::Mixed,
+                        _ => Type::Mixed(false),
                     },
                     "getOneOrNullResult" => {
-                        union_types(row_type.cloned().unwrap_or(Type::Mixed), Type::Null)
+                        union_types(row_type.cloned().unwrap_or(Type::Mixed(false)), Type::Null)
                     }
-                    "getSingleResult" => row_type.cloned().unwrap_or(Type::Mixed),
+                    "getSingleResult" => row_type.cloned().unwrap_or(Type::Mixed(false)),
                     _ => unreachable!(),
                 }
             }
@@ -611,7 +611,7 @@ impl<'a> Checker<'a> {
                         crate::checker::doctrine::result_shape::single_scalar_column_type(
                             self, &chain, &items,
                         )
-                        .unwrap_or(Type::Mixed)
+                        .unwrap_or(Type::Mixed(false))
                     }
                     ("getScalarResult", Some((chain, items))) => {
                         crate::checker::doctrine::result_shape::build_scalar_result_row_type(
@@ -620,7 +620,7 @@ impl<'a> Checker<'a> {
                         .map(doctrine_query_result_list_type_of)
                         .unwrap_or_else(doctrine_query_result_list_type)
                     }
-                    _ => Type::Mixed,
+                    _ => Type::Mixed(false),
                 }
             }
             // `DateTimeInterface::format()`'s own already-
@@ -705,13 +705,16 @@ impl<'a> Checker<'a> {
                 let base =
                     self.generic_object_method_return_type(class, type_args, method, args, locals);
                 // An erased receiver `T` (`substitute_class_templates`'s
-                // own unbound-template fallback, `Type::Mixed`) can never
+                // own unbound-template fallback, `Type::Mixed(false)`) can never
                 // resolve a real member type either - skip the wrap
                 // entirely rather than attach a fact that can only ever
                 // stay unresolved, matching `Type::ReflectedMember`'s own
                 // "don't guess" leniency for a not-genuinely-concrete
                 // owner.
-                let owner_ty = type_args.first().cloned().filter(|t| *t != Type::Mixed);
+                let owner_ty = type_args
+                    .first()
+                    .cloned()
+                    .filter(|t| *t != Type::Mixed(false));
                 let name = args
                     .first()
                     .and_then(|a| match literal_string_value(&a.value) {
@@ -747,7 +750,7 @@ impl<'a> Checker<'a> {
                     Type::Object(class, type_args) => {
                         self.generic_object_property_type(class, type_args, name)
                     }
-                    _ => Type::Mixed,
+                    _ => Type::Mixed(false),
                 }
             }
             Type::ReflectedMember(owner_ty, name) if method == "invoke" => {
@@ -758,7 +761,7 @@ impl<'a> Checker<'a> {
                             class, type_args, name, forwarded, locals,
                         )
                     }
-                    _ => Type::Mixed,
+                    _ => Type::Mixed(false),
                 }
             }
             // Sub-phase D of the live SQL query reflection phase (see
@@ -899,7 +902,7 @@ impl<'a> Checker<'a> {
                     let resolved = self.infer_call_return_type(sig, &resolved_args, locals);
                     self.resolve_pseudo(&resolved, &owner)
                 })
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             // The same shape as `property_access_type`'s own
             // identical handling: the narrower, just-`instanceof`-checked
             // type is always the last member `narrow_instanceof_true`
@@ -911,16 +914,16 @@ impl<'a> Checker<'a> {
                 .rev()
                 .find_map(|m| {
                     let ty = self.method_call_return_type(recv, m, method, args, locals);
-                    (ty != Type::Mixed).then_some(ty)
+                    (ty != Type::Mixed(false)).then_some(ty)
                 })
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             Type::Union(members) => members
                 .iter()
                 .map(|m| self.method_call_return_type(recv, m, method, args, locals))
-                .filter(|ty| *ty != Type::Mixed)
+                .filter(|ty| *ty != Type::Mixed(false))
                 .reduce(union_types)
-                .unwrap_or(Type::Mixed),
-            _ => Type::Mixed,
+                .unwrap_or(Type::Mixed(false)),
+            _ => Type::Mixed(false),
         }
     }
 
@@ -930,7 +933,7 @@ impl<'a> Checker<'a> {
     /// type the normal way. Every special-cased arm above that can fail
     /// to resolve a more precise answer (an unfoldable SQL string, an
     /// undecidable chain, ...) falls back to calling this directly,
-    /// rather than returning `Type::Mixed` and silently discarding a
+    /// rather than returning `Type::Mixed(false)` and silently discarding a
     /// real declared return type the ordinary path would have found.
     fn generic_object_method_return_type(
         &self,
@@ -948,7 +951,7 @@ impl<'a> Checker<'a> {
                 let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
                 self.resolve_pseudo(&resolved, class)
             })
-            .unwrap_or(Type::Mixed)
+            .unwrap_or(Type::Mixed(false))
     }
 
     /// `generic_object_method_return_type`'s property-typed sibling -
@@ -962,7 +965,7 @@ impl<'a> Checker<'a> {
                     self.substitute_class_template_property_type(&sig.ty, class, type_args, &owner);
                 self.resolve_pseudo(&ty, class)
             })
-            .unwrap_or(Type::Mixed)
+            .unwrap_or(Type::Mixed(false))
     }
 
     /// The SQL text a DBAL fetch*/`executeQuery` call actually runs -

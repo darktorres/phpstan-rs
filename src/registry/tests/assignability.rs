@@ -53,7 +53,10 @@ fn any_class_instance_is_assignable_to_the_native_object_type() {
 #[test]
 fn is_assignable_treats_unknown_array_element_type_as_compatible() {
     let r = Registry::default();
-    let unknown_elements = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
+    let unknown_elements = Type::Array(
+        Box::new(Type::unknown_array_key()),
+        Box::new(Type::Mixed(false)),
+    );
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
     // The lenient direction that types::is_subtype deliberately does
     // NOT take (see its own array-covariance test) - is_assignable is
@@ -68,7 +71,10 @@ fn is_assignable_treats_unknown_array_element_type_as_compatible() {
 #[test]
 fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
     let r = Registry::default();
-    let unknown = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
+    let unknown = Type::Array(
+        Box::new(Type::unknown_array_key()),
+        Box::new(Type::Mixed(false)),
+    );
     let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
     assert!(r.is_assignable(&unknown, &shape));
     // A genuinely known, homogeneous array still doesn't satisfy an
@@ -85,7 +91,7 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
 #[test]
 fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
     let r = Registry::default();
-    let strings = Type::Array(Box::new(Type::String), Box::new(Type::Mixed));
+    let strings = Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
     let shape = Type::ArrayShape(vec![("0".to_string(), Type::Int, false)]);
     assert!(!r.is_assignable(&strings, &shape));
 }
@@ -93,7 +99,7 @@ fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
 #[test]
 fn an_int_keyed_array_type_is_not_assignable_to_a_string_keyed_shape() {
     let r = Registry::default();
-    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::Mixed));
+    let ints = Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false)));
     let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
     assert!(!r.is_assignable(&ints, &shape));
 }
@@ -120,7 +126,10 @@ fn strict_mixed_arrays_opts_out_of_the_unknown_array_element_leniency() {
         strict_mixed_arrays: true,
         ..Registry::default()
     };
-    let unknown_elements = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
+    let unknown_elements = Type::Array(
+        Box::new(Type::unknown_array_key()),
+        Box::new(Type::Mixed(false)),
+    );
     let ints = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Int));
     assert!(!r.is_assignable(&unknown_elements, &ints));
     // Still correctly permissive when the element types genuinely
@@ -141,7 +150,10 @@ fn strict_mixed_arrays_opts_out_of_the_unknown_array_shape_leniency() {
         strict_mixed_arrays: true,
         ..Registry::default()
     };
-    let unknown = Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed));
+    let unknown = Type::Array(
+        Box::new(Type::unknown_array_key()),
+        Box::new(Type::Mixed(false)),
+    );
     let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
     assert!(!r.is_assignable(&unknown, &shape));
 }

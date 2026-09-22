@@ -587,7 +587,7 @@ impl DiagnosticBuilder {
 
 /// Walks function/method bodies, inferring a best-effort type for each
 /// expression and flagging argument/return type mismatches against the
-/// registry. Deliberately conservative: `Type::Mixed` is overloaded here to
+/// registry. Deliberately conservative: `Type::Mixed(false)` is overloaded here to
 /// mean both PHP's real `mixed` type AND "we don't know" for anything this
 /// prototype can't infer (property access, closures, dynamic calls, ...) -
 /// so every check below treats an inferred `Mixed` as inconclusive and
@@ -827,7 +827,7 @@ pub struct Checker<'a> {
     // `PestConfig::resolve_this_type`) before `check_program` runs, then
     // possibly overridden by a file-local `uses(...)` call `check_program`
     // itself finds (real Pest's resolution order: file-local wins over
-    // directory-scoped). Defaults to `Type::Mixed`, so any call site never
+    // directory-scoped). Defaults to `Type::Mixed(false)`, so any call site never
     // exercising an `is_this_binding_call`-recognized closure argument is
     // unaffected.
     pub(crate) pest_this_type: Type,
@@ -847,7 +847,7 @@ pub struct Checker<'a> {
     // than recomputing the name itself. Empty (not populated) in every
     // existing test, the same "no signal, stay quiet" leniency
     // `pest_this_type`'s own default gets - a lookup miss just falls back
-    // to `Type::Mixed`, matching today's unconditional behavior.
+    // to `Type::Mixed(false)`, matching today's unconditional behavior.
     pub(crate) anonymous_class_names: HashMap<crate::token::Span, String>,
     // Every private property write's own assigned type, discovered
     // anywhere in this file's own `check_program` run - keyed by
@@ -1219,7 +1219,7 @@ impl<'a> Checker<'a> {
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
-            pest_this_type: Type::Mixed,
+            pest_this_type: Type::Mixed(false),
             pest_hook_properties: HashSet::new(),
             anonymous_class_names: HashMap::new(),
             property_assign_facts: HashMap::new(),

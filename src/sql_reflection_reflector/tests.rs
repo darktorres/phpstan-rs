@@ -260,7 +260,7 @@ fn postgres_a_nullable_column_wraps_the_base_type_in_a_union_with_null() {
 fn postgres_an_unrecognized_type_degrades_to_mixed() {
     assert_eq!(
         postgres_column_to_type(&postgres::types::Type::INT4_ARRAY, false),
-        Type::Mixed
+        Type::Mixed(false)
     );
 }
 
@@ -492,8 +492,11 @@ fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
     // `id + 1` has no real backing column - `column_metadata()` returns
     // `None` for it, and SQLite's own query planner gives a computed
     // arithmetic expression no declared type either, so this degrades
-    // all the way to `Type::Mixed`, not a guess.
-    assert_eq!(fields[1], ("next_id".to_string(), Type::Mixed, false));
+    // all the way to `Type::Mixed(false)`, not a guess.
+    assert_eq!(
+        fields[1],
+        ("next_id".to_string(), Type::Mixed(false), false)
+    );
     let _ = std::fs::remove_file(&path);
 }
 

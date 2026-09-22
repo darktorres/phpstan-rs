@@ -354,7 +354,7 @@ impl Registry {
             for sig in info.methods.values_mut() {
                 for param in &mut sig.params {
                     if type_contains_deferred_value_of(&param.ty) {
-                        let ty = std::mem::replace(&mut param.ty, Type::Mixed);
+                        let ty = std::mem::replace(&mut param.ty, Type::Mixed(false));
                         param.ty = resolve_deferred_value_of_with_native_fallback(
                             ty,
                             &param.ty_native,
@@ -363,7 +363,7 @@ impl Registry {
                     }
                 }
                 if type_contains_deferred_value_of(&sig.return_type) {
-                    let ty = std::mem::replace(&mut sig.return_type, Type::Mixed);
+                    let ty = std::mem::replace(&mut sig.return_type, Type::Mixed(false));
                     sig.return_type = resolve_deferred_value_of_with_native_fallback(
                         ty,
                         &sig.return_type_native,
@@ -373,7 +373,7 @@ impl Registry {
             }
             for prop in info.properties.values_mut() {
                 if type_contains_deferred_value_of(&prop.ty) {
-                    let ty = std::mem::replace(&mut prop.ty, Type::Mixed);
+                    let ty = std::mem::replace(&mut prop.ty, Type::Mixed(false));
                     prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
                 if let Some(set_ty) = &prop.set_ty
@@ -385,13 +385,13 @@ impl Registry {
             }
             for c in info.consts.values_mut() {
                 if type_contains_deferred_value_of(&c.ty) {
-                    let ty = std::mem::replace(&mut c.ty, Type::Mixed);
+                    let ty = std::mem::replace(&mut c.ty, Type::Mixed(false));
                     c.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
             }
             for bound in info.template_bounds.values_mut() {
                 if type_contains_deferred_value_of(bound) {
-                    let ty = std::mem::replace(bound, Type::Mixed);
+                    let ty = std::mem::replace(bound, Type::Mixed(false));
                     *bound = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
             }
@@ -400,7 +400,7 @@ impl Registry {
         for sig in self.functions.values_mut() {
             for param in &mut sig.params {
                 if type_contains_deferred_value_of(&param.ty) {
-                    let ty = std::mem::replace(&mut param.ty, Type::Mixed);
+                    let ty = std::mem::replace(&mut param.ty, Type::Mixed(false));
                     param.ty = resolve_deferred_value_of_with_native_fallback(
                         ty,
                         &param.ty_native,
@@ -409,7 +409,7 @@ impl Registry {
                 }
             }
             if type_contains_deferred_value_of(&sig.return_type) {
-                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed);
+                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed(false));
                 sig.return_type = resolve_deferred_value_of_with_native_fallback(
                     ty,
                     &sig.return_type_native,
@@ -489,21 +489,21 @@ impl Registry {
             let aliases = by_class.remove(&class_name).unwrap_or_default();
             for sig in info.methods.values_mut() {
                 for param in &mut sig.params {
-                    let ty = std::mem::replace(&mut param.ty, Type::Mixed);
+                    let ty = std::mem::replace(&mut param.ty, Type::Mixed(false));
                     param.ty = substitute_type_aliases(ty, &aliases);
                 }
-                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed);
+                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed(false));
                 sig.return_type = substitute_type_aliases(ty, &aliases);
             }
             for prop in info.properties.values_mut() {
-                let ty = std::mem::replace(&mut prop.ty, Type::Mixed);
+                let ty = std::mem::replace(&mut prop.ty, Type::Mixed(false));
                 prop.ty = substitute_type_aliases(ty, &aliases);
                 if let Some(set_ty) = prop.set_ty.take() {
                     prop.set_ty = Some(substitute_type_aliases(set_ty, &aliases));
                 }
             }
             for c in info.consts.values_mut() {
-                let ty = std::mem::replace(&mut c.ty, Type::Mixed);
+                let ty = std::mem::replace(&mut c.ty, Type::Mixed(false));
                 c.ty = substitute_type_aliases(ty, &aliases);
             }
             info.type_aliases.extend(aliases);
@@ -767,7 +767,7 @@ impl Registry {
     /// was deliberately written, rather than leaving the position
     /// looking entirely undocumented.
     pub(crate) fn safe_to_backfill_mixed(ancestor_ty: &Type, native_ty: &Type) -> bool {
-        *ancestor_ty != Type::Mixed || *native_ty == Type::Mixed
+        *ancestor_ty != Type::Mixed(false) || *native_ty == Type::Mixed(false)
     }
 
     /// One pass of `flatten_phpdoc_inheritance` - see its doc comment.
@@ -1092,7 +1092,7 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
     match ty {
         Type::Object(name, mut args) if name == "$$valueof" => {
             let Some(Type::Object(target_fqn, _)) = args.pop() else {
-                return Type::Mixed;
+                return Type::Mixed(false);
             };
             resolve_value_of_target(&target_fqn, classes)
         }
@@ -1148,10 +1148,10 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
 /// PHPStan computes independently - reused directly, not recomputed.
 fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
     let Some(info) = classes.get(target_fqn) else {
-        return Type::Mixed;
+        return Type::Mixed(false);
     };
     if info.kind != ClassKind::Enum {
-        return Type::Mixed;
+        return Type::Mixed(false);
     }
     match info.properties.get("value") {
         Some(sig) => sig.ty.clone(),
@@ -1160,7 +1160,7 @@ fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<Arc<str>, Class
 }
 
 /// Resolves `ty` (a param/return type that may contain the `"$$valueof"`
-/// sentinel) and, if the result is bare `Type::Mixed`, falls back to
+/// sentinel) and, if the result is bare `Type::Mixed(false)`, falls back to
 /// `native` instead when that's itself something more useful - restores
 /// `function_sig::reconcile_with_native` behavior for a `value-of<T>`
 /// that turns out unresolvable (`T` not a real, registered enum): without
@@ -1179,7 +1179,7 @@ fn resolve_deferred_value_of_with_native_fallback(
     classes: &FxHashMap<Arc<str>, ClassInfo>,
 ) -> Type {
     let resolved = resolve_deferred_value_of_in_type(ty, classes);
-    if resolved == Type::Mixed && *native != Type::Mixed {
+    if resolved == Type::Mixed(false) && *native != Type::Mixed(false) {
         native.clone()
     } else {
         resolved

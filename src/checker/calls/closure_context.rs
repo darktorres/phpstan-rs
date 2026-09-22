@@ -144,7 +144,7 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if body_ty != Type::Mixed
+                    if body_ty != Type::Mixed(false)
                         && !self
                             .registry
                             .accepts_at_configured_level(&body_ty, &expected)
@@ -225,7 +225,7 @@ impl<'a> Checker<'a> {
                             "variable.undefined",
                         );
                     }
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
                     let provenance = locals.get_provenance(&u.name).cloned().unwrap_or_default();
                     if self.probe_span.get() == Some(u.span) {
                         *self.probe_var_provenance.borrow_mut() =
@@ -263,13 +263,13 @@ impl<'a> Checker<'a> {
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     closure_expr.span,
                     &closure_label,
                 );
                 self.check_type_trait_refs(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     closure_expr.span,
                     &closure_label,
@@ -281,8 +281,10 @@ impl<'a> Checker<'a> {
                     closure_expr.span,
                 );
                 if let Some(c) = self.current_class.clone() {
-                    let resolved_return =
-                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), &c);
+                    let resolved_return = self.resolve_pseudo(
+                        declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                        &c,
+                    );
                     self.check_no_parent_ref(
                         &resolved_return,
                         "return type of anonymous function",
@@ -343,7 +345,10 @@ impl<'a> Checker<'a> {
                     // with the pre-closure entry state - see the
                     // identical fix's own comment at `checker::expr`'s
                     // `ExprKind::Closure` arm.
-                    let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    let mutated = closure_locals
+                        .get(&u.name)
+                        .cloned()
+                        .unwrap_or(Type::Mixed(false));
                     if !locals.contains_key(&u.name) {
                         // See the identical fix's own comment at
                         // `checker::expr`'s `ExprKind::Closure` arm.

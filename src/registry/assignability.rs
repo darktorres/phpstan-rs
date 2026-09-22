@@ -93,12 +93,20 @@ impl Registry {
                     info_b
                         .templates
                         .iter()
-                        .map(|name| bindings.get(name.as_ref()).cloned().unwrap_or(Type::Mixed))
+                        .map(|name| {
+                            bindings
+                                .get(name.as_ref())
+                                .cloned()
+                                .unwrap_or(Type::Mixed(false))
+                        })
                         .collect()
                 };
                 for (i, _name) in info_b.templates.iter().enumerate() {
-                    let a_i = effective_args_a.get(i).cloned().unwrap_or(Type::Mixed);
-                    let b_i = args_b.get(i).cloned().unwrap_or(Type::Mixed);
+                    let a_i = effective_args_a
+                        .get(i)
+                        .cloned()
+                        .unwrap_or(Type::Mixed(false));
+                    let b_i = args_b.get(i).cloned().unwrap_or(Type::Mixed(false));
                     // A call-site variance marker on `sup`'s own argument
                     // (`Collection<covariant Foo>`) overrides `b`'s own
                     // declared slot variance for this one comparison,
@@ -112,10 +120,10 @@ impl Registry {
                     };
                     let a_i = types::strip_call_site_variance(&a_i)
                         .cloned()
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     let b_i = types::strip_call_site_variance(&b_i)
                         .cloned()
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     // Either side unresolved/erased - don't know, don't
                     // guess, matches this project's leniency everywhere
                     // else a generic argument can't be verified. A raw,
@@ -140,8 +148,8 @@ impl Registry {
                     // is bound," which this project's own call-argument
                     // binding is simply never invoked for at this nested
                     // position.
-                    if a_i == Type::Mixed
-                        || b_i == Type::Mixed
+                    if a_i == Type::Mixed(false)
+                        || b_i == Type::Mixed(false)
                         || matches!(a_i, Type::TemplateParam(_))
                         || matches!(b_i, Type::TemplateParam(_))
                     {
@@ -236,7 +244,7 @@ impl Registry {
             // extends `Node` only via `Expr`, a multi-level ancestor
             // chain plain name-equality can't see).
             (Type::TemplateParam(tp), _) => {
-                matches!(*tp.bound, Type::Mixed) || self.is_assignable(&tp.bound, sup)
+                matches!(*tp.bound, Type::Mixed(_)) || self.is_assignable(&tp.bound, sup)
             }
             // Mirrors `types::is_subtype`'s own identically-placed
             // `Type::Conditional` arm exactly (see that arm's own doc
@@ -364,7 +372,7 @@ impl Registry {
             // real PHPStan's own level-9-style "be strict about values
             // with mixed type" philosophy.
             (Type::Array(_, a), Type::Array(_, b)) => {
-                (!self.strict_mixed_arrays && matches!(**a, Type::Mixed))
+                (!self.strict_mixed_arrays && matches!(**a, Type::Mixed(_)))
                     || self.is_assignable(a, b)
             }
             // Same leniency, same reason, for an array of unknown structure
@@ -390,7 +398,7 @@ impl Registry {
             // `Type::String`) is held to the real subtyping check.
             (Type::Array(key, a), Type::ArrayShape(fields)) => {
                 !self.strict_mixed_arrays
-                    && matches!(**a, Type::Mixed)
+                    && matches!(**a, Type::Mixed(_))
                     && (**key == Type::unknown_array_key()
                         || self.is_assignable(key, &types::shape_key_type(fields)))
             }
@@ -418,7 +426,7 @@ impl Registry {
                         .iter()
                         .filter(|(name, _, _)| name != "...")
                         .all(|(_, ty, _)| {
-                            (!self.strict_mixed_arrays && matches!(ty, Type::Mixed))
+                            (!self.strict_mixed_arrays && matches!(ty, Type::Mixed(_)))
                                 || self.is_assignable(ty, b)
                         })
             }

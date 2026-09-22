@@ -158,7 +158,10 @@ fn two_unconditional_function_declarations_with_different_arities_merge() {
         sig.params[1].ty,
         Type::Union(vec![
             Type::String,
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
+            Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::Mixed(false))
+            )
         ])
     );
     assert!(!sig.params[1].has_default);
@@ -455,7 +458,7 @@ fn a_stub_slot_is_not_claimed_by_a_less_precisely_typed_conditional_declaration(
     let program = Parser::new(tokens).parse_program().unwrap();
     r.index(&program, false);
     assert_eq!(r.functions["ctype_punct"].return_type, Type::Bool);
-    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::Mixed);
+    assert_eq!(r.functions["ctype_punct"].params[0].ty, Type::Mixed(false));
 }
 
 // A vendored, unconditional, bare (guard-free) duplicate of a stub

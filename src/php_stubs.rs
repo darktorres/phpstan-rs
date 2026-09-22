@@ -365,7 +365,7 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassIn
             info.template_bounds
                 .get("T")
                 .cloned()
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(true)),
         ),
         variance: if info.covariant_templates.contains("T") {
             crate::types::Variance::Covariant
@@ -485,7 +485,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
                     info.template_bounds
                         .get("T")
                         .cloned()
-                        .unwrap_or(Type::Mixed),
+                        .unwrap_or(Type::Mixed(true)),
                 ),
                 variance: if info.covariant_templates.contains("T") {
                     crate::types::Variance::Covariant
@@ -558,7 +558,10 @@ fn backtrace_frame_list_type() -> Type {
         (
             "args".to_string(),
             Type::Intersection(vec![
-                Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+                Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(Type::Mixed(false)),
+                ),
                 Type::Accessory(AccessoryKind::ArrayList),
             ]),
             true,

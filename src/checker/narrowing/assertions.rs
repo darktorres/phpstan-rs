@@ -10,7 +10,7 @@ use crate::types::Type;
 impl<'a> Checker<'a> {
     /// The type to narrow *from* for a synthetic `narrowing_key` (a
     /// property chain or literal-key array-index chain, never a bare
-    /// variable) - `locals.get(key)` alone, defaulting to `Type::Mixed`
+    /// variable) - `locals.get(key)` alone, defaulting to `Type::Mixed(false)`
     /// when absent, is wrong for these: unlike a bare variable (already
     /// tracked in `locals` by ordinary assignment/definition), a
     /// property/index chain's key only ever exists in `locals` as the
@@ -30,7 +30,7 @@ impl<'a> Checker<'a> {
     /// correct for a bare variable too (`infer_expr` on a `Variable`
     /// just reads the same `locals` entry), so every `apply_narrowing`
     /// call site uses this instead of a raw `locals.get(key).unwrap_or
-    /// (Type::Mixed)`.
+    /// (Type::Mixed(false))`.
     /// `Cow`, not an owned `Type` - every one of this function's ~19 call
     /// sites in `checker/narrowing.rs` only ever reads the result as
     /// `&current` afterward (feeding it into `narrow_type_to`/
@@ -133,7 +133,7 @@ impl<'a> Checker<'a> {
         let Some((key, narrowed_expr, target_ty)) = pair else {
             return;
         };
-        if target_ty == Type::Mixed {
+        if target_ty == Type::Mixed(false) {
             return;
         }
         let current = self.current_narrowed_type(narrowed_expr, &key, locals);
@@ -289,7 +289,10 @@ impl<'a> Checker<'a> {
             "assertIsArray" => narrow_to(
                 locals,
                 0,
-                &Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+                &Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(Type::Mixed(false)),
+                ),
             ),
             "assertIsInt" | "assertIsInteger" => narrow_to(locals, 0, &Type::Int),
             "assertIsFloat" => narrow_to(locals, 0, &Type::Float),

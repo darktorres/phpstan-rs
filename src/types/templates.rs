@@ -46,7 +46,7 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
                     | Type::False
                     | Type::Null
             );
-            if *arg_ty != Type::Mixed && !(bound_requires_object && arg_is_definite_scalar) {
+            if *arg_ty != Type::Mixed(false) && !(bound_requires_object && arg_is_definite_scalar) {
                 bindings
                     .entry(tp.name.clone())
                     .or_insert_with(|| arg_ty.clone());
@@ -142,7 +142,7 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
             tp.default
                 .as_ref()
                 .map(|d| substitute_template(d, bindings))
-                .unwrap_or(Type::Mixed)
+                .unwrap_or(Type::Mixed(false))
         }),
         // Substitutes through the key type too (not just reset to
         // "unknown" every time) - a real, if rare, `array<TKey, TValue>`

@@ -763,7 +763,7 @@ fn an_untagged_ancestor_still_exempts_the_constructor_as_before() {
 
 #[test]
 fn an_override_with_no_declared_type_is_not_flagged_as_narrowing() {
-    // Type::Mixed here means "nothing declared, native or docblock",
+    // Type::Mixed(false) here means "nothing declared, native or docblock",
     // not a genuinely explicit `mixed` - real PHP doesn't enforce
     // override compatibility for an omitted type at all.
     let d = diagnostics_for(

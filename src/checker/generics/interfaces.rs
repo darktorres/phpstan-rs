@@ -237,7 +237,7 @@ fn identity_template_bindings(info: &ClassInfo, class: &str) -> HashMap<String, 
                         info.template_bounds
                             .get(name)
                             .cloned()
-                            .unwrap_or(Type::Mixed),
+                            .unwrap_or(Type::Mixed(false)),
                     ),
                     variance,
                     scope: Some(class.to_string()),

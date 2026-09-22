@@ -93,7 +93,7 @@ impl<'a> Checker<'a> {
                 // `declare`, not `insert`, matching
                 // `bind_assignment_target`'s own index-write treatment.
                 if !locals.contains_key(name) {
-                    locals.declare(name.to_string(), Type::Mixed, arg.value.span);
+                    locals.declare(name.to_string(), Type::Mixed(false), arg.value.span);
                 }
             }
             return;
@@ -120,7 +120,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             if !locals.contains_key(name) {
-                locals.declare(name.to_string(), Type::Mixed, arg_expr.span);
+                locals.declare(name.to_string(), Type::Mixed(false), arg_expr.span);
                 continue;
             }
             // Real PHPStan models the sort() family's own dynamic
@@ -131,7 +131,7 @@ impl<'a> Checker<'a> {
             // known); asort/arsort/ksort/krsort/uasort/uksort/natsort/
             // natcasesort preserve the exact key structure unchanged.
             if let Some(fn_name) = call_name {
-                let current = locals.get(name).cloned().unwrap_or(Type::Mixed);
+                let current = locals.get(name).cloned().unwrap_or(Type::Mixed(false));
                 match fn_name {
                     "sort" | "rsort" | "usort" | "shuffle" => {
                         if let Some(elem_ty) = Checker::array_element_type(&current) {
@@ -249,7 +249,8 @@ impl<'a> Checker<'a> {
                                 Some(r) => (
                                     union_types(
                                         elem_ty,
-                                        Checker::array_element_type(r).unwrap_or(Type::Mixed),
+                                        Checker::array_element_type(r)
+                                            .unwrap_or(Type::Mixed(false)),
                                     ),
                                     Checker::is_known_non_empty_array(r),
                                 ),
@@ -274,7 +275,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // An already-defined variable passed by-ref widens to the
-            // declared parameter's own type, not a blanket `Type::Mixed`
+            // declared parameter's own type, not a blanket `Type::Mixed(false)`
             // - `array &$errors` becomes `Type::Array(Mixed)`, preserving
             // the type-hint-guaranteed "still an array" information.
             // `substitute_template` with empty bindings replaces any
@@ -300,7 +301,7 @@ impl<'a> Checker<'a> {
             let widened = if Checker::is_array_like(&substituted) {
                 substituted
             } else {
-                Type::Mixed
+                Type::Mixed(false)
             };
             // A by-ref call argument is exactly as much a "this variable
             // now holds something else" event as a direct assignment -
@@ -445,7 +446,7 @@ impl<'a> Checker<'a> {
                 }
             }
             let arg_ty = self.infer_expr(arg, locals);
-            if arg_ty == Type::Mixed {
+            if arg_ty == Type::Mixed(false) {
                 continue;
             }
             let param_ty = match defining_class {
@@ -551,7 +552,7 @@ impl<'a> Checker<'a> {
                 },
             };
             let arg_ty = self.infer_expr(&a.value, locals);
-            if arg_ty == Type::Mixed {
+            if arg_ty == Type::Mixed(false) {
                 continue;
             }
             if !self
@@ -636,7 +637,7 @@ impl<'a> Checker<'a> {
                 .position(|p| std::ptr::eq(p, param))
                 .and_then(|pos| resolved.get(pos))
                 .is_some_and(|s| s.is_some());
-            if already_filled || *field_ty == Type::Mixed {
+            if already_filled || *field_ty == Type::Mixed(false) {
                 continue;
             }
             let param_ty = match defining_class {
@@ -769,7 +770,7 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(&param_b.ty, c),
                 None => param_b.ty.clone(),
             };
-            if ty_a == Type::Mixed || ty_a != ty_b {
+            if ty_a == Type::Mixed(false) || ty_a != ty_b {
                 continue;
             }
             self.report(

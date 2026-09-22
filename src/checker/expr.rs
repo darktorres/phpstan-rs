@@ -80,13 +80,13 @@ fn negate_numeric_literal(ty: Type) -> Type {
 /// namespace-prefixing transform rewrites every unqualified global name
 /// to its fully-qualified form, including these three, so without this,
 /// such a name stayed `Mixed` and silently skipped narrowing through
-/// `apply_equality_narrowing`'s `target_ty == Type::Mixed` bail-out.
+/// `apply_equality_narrowing`'s `target_ty == Type::Mixed(false)` bail-out.
 fn bare_name_literal_type(name: &str) -> Type {
     match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
         "true" => Type::True,
         "false" => Type::False,
         "null" => Type::Null,
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     }
 }
 
@@ -98,7 +98,7 @@ fn bare_name_literal_type(name: &str) -> Type {
 /// elsewhere in this file): if removing `null` changes nothing, `ty`
 /// never carried it to begin with.
 pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
-    !matches!(ty, Type::Mixed | Type::Never) && narrow_type_excluding(ty, &Type::Null) == *ty
+    !matches!(ty, Type::Mixed(_) | Type::Never) && narrow_type_excluding(ty, &Type::Null) == *ty
 }
 
 /// Whether `ty`'s value-space can never include a PHP object - real
@@ -117,7 +117,7 @@ pub(crate) fn type_definitely_excludes_null(ty: &Type) -> bool {
 /// fallback), `Type::ObjectShape` (a structural bag with no class name to
 /// rule anything out), `Type::SelfRef`/`ParentRef`/`StaticRef` (resolved
 /// away by `Checker::resolve_pseudo` well before reaching a real
-/// expression's type in valid code), and `Type::Mixed`/`Never` are all
+/// expression's type in valid code), and `Type::Mixed(false)`/`Never` are all
 /// left unflagged - matching real PHPStan's own permissive default for
 /// `Mixed` (`checkExplicitMixed`/`checkImplicitMixed` are opt-in toggles
 /// this project doesn't implement) and vacuous-`Never` behavior
@@ -209,14 +209,14 @@ impl<'a> Checker<'a> {
     /// by `registry::collect_anonymous_classes` - see that module's own
     /// doc comment) rather than recomputing its synthetic name here, so
     /// the checker and the registry entry it resolves against always
-    /// agree by construction. Falls back to `Type::Mixed` when the span
+    /// agree by construction. Falls back to `Type::Mixed(false)` when the span
     /// isn't found - every existing test (which never calls
     /// `set_anonymous_class_names`) keeps today's behavior unchanged.
     fn anonymous_class_type(&self, span: Span) -> Type {
         self.anonymous_class_names
             .get(&span)
             .map(|name| Type::Object(name.clone(), Vec::new()))
-            .unwrap_or(Type::Mixed)
+            .unwrap_or(Type::Mixed(false))
     }
 
     /// Thin wrapper over `check_expr_impl` - the real work - so every
@@ -281,7 +281,7 @@ impl<'a> Checker<'a> {
                             self.check_expr(&a.value, locals, label);
                         }
                     }
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 }
                 // `PHPStan\Testing\assertType('expected type string', $expr)`
                 // is PHPStan's own testing-DSL function, used to pin down
@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
                             ), actual_arg.value.span, 0, "phpstanRs.assertType");
                     }
                     self.check_expr(&actual_arg.value, locals, label);
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 }
                 if let ExprKind::Name(name) = &callee.kind
                     && (name == "extract" || name == "eval")
@@ -1037,7 +1037,7 @@ impl<'a> Checker<'a> {
                     let this_ty = args
                         .first()
                         .map(|a| self.infer_expr(&a.value, locals))
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     let scope_class = args
                         .get(1)
                         .and_then(|a| self.literal_class_name_from_expr(&a.value));
@@ -1127,7 +1127,7 @@ impl<'a> Checker<'a> {
                     for a in args {
                         self.check_expr(&a.value, locals, label);
                     }
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 }
                 // `sig` (and every class-name-dependent decision below
                 // it - argument-type checking, visibility/`@internal`/
@@ -1351,7 +1351,7 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed(false) {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -1650,12 +1650,13 @@ impl<'a> Checker<'a> {
                     "float" => Type::Float,
                     "string" => Type::String,
                     "bool" => Type::Bool,
-                    "array" => {
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
-                    }
+                    "array" => Type::Array(
+                        Box::new(Type::unknown_array_key()),
+                        Box::new(Type::Mixed(false)),
+                    ),
                     "object" => Type::Object("object".to_string(), Vec::new()),
                     "unset" => Type::Null,
-                    _ => Type::Mixed,
+                    _ => Type::Mixed(false),
                 }
             }
             // See `ExprKind::ShellExec`'s own doc comment - a thin
@@ -1740,7 +1741,7 @@ impl<'a> Checker<'a> {
                 self.current_declared_return_type
                     .as_ref()
                     .map(|t| generator_template_param(t, self.registry, "TSend"))
-                    .unwrap_or(Type::Mixed)
+                    .unwrap_or(Type::Mixed(false))
             }
             ExprKind::Instanceof(inner, target) => {
                 self.check_expr(inner, locals, label);
@@ -1782,7 +1783,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 }
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
                 self.check_nullsafe_assignment_target(lhs, label);
@@ -1903,7 +1904,7 @@ impl<'a> Checker<'a> {
                 // compound operation's own real result.
                 self.check_param_out_assignment(lhs, &ty, label);
                 self.bind_assignment_target(lhs, ty, locals);
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 self.in_condition_position = true;
@@ -1978,7 +1979,7 @@ impl<'a> Checker<'a> {
                 // `false` member.
                 match then_ty {
                     Some(then_ty) => union_types(then_ty, else_ty),
-                    None => Type::Mixed,
+                    None => Type::Mixed(false),
                 }
             }
             ExprKind::ArrayLiteral(items) => {
@@ -2037,7 +2038,7 @@ impl<'a> Checker<'a> {
                         // `infer_expr`'s identical read does.
                         index_result_type(base_ty, literal_string_key(i).as_deref())
                     }
-                    None => Type::Mixed,
+                    None => Type::Mixed(false),
                 }
             }
             ExprKind::New(class_expr, args) => {
@@ -2337,7 +2338,7 @@ impl<'a> Checker<'a> {
                     let this_ty = args
                         .get(1)
                         .map(|a| self.infer_expr(&a.value, locals))
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     let scope_class = args
                         .get(2)
                         .and_then(|a| self.literal_class_name_from_expr(&a.value));
@@ -2516,7 +2517,7 @@ impl<'a> Checker<'a> {
                         }
                         self.resolve_pseudo(&resolved_ty, class)
                     }
-                    _ => Type::Mixed,
+                    _ => Type::Mixed(false),
                 }
             }
             ExprKind::StaticAccess(class_name, member) => {
@@ -2549,7 +2550,7 @@ impl<'a> Checker<'a> {
                     {
                         self.record_enum_escape(canonical);
                     }
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 }
                 // A static property (`self::$prop`) can be narrowed the
                 // same way an instance property already is - check for a
@@ -2562,7 +2563,7 @@ impl<'a> Checker<'a> {
                     return narrowed.clone();
                 }
                 let Some(class) = self.resolve_static_class_name(class_name) else {
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 };
                 // Rebind to the registry's canonical-case spelling up
                 // front, same as `ExprKind::New`'s identical fix - without
@@ -2593,7 +2594,7 @@ impl<'a> Checker<'a> {
                         0,
                         "class.notFound",
                     );
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 }
                 // `class.nameCase` - `class_name` is the raw, as-written
                 // text (`resolve_static_class_name` above already
@@ -2662,7 +2663,7 @@ impl<'a> Checker<'a> {
                     }
                     prop_with_owner
                         .map(|(_, p)| self.resolve_pseudo(&p.ty, &class))
-                        .unwrap_or(Type::Mixed)
+                        .unwrap_or(Type::Mixed(false))
                 } else {
                     let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
                     let const_ty = const_with_owner.as_ref().map(|(_, cs)| cs.ty.clone());
@@ -2705,12 +2706,12 @@ impl<'a> Checker<'a> {
                     }
                     const_ty
                         .map(|ty| self.resolve_pseudo(&ty, &class))
-                        .unwrap_or(Type::Mixed)
+                        .unwrap_or(Type::Mixed(false))
                 }
             }
             ExprKind::DynamicVariable(name_expr) => {
                 self.check_expr(name_expr, locals, label);
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::PropertyAccess(base, prop, nullsafe) => {
                 // Unlike a write (check_property_assignment, and the
@@ -2860,7 +2861,7 @@ impl<'a> Checker<'a> {
                 // comment.
                 let result =
                     self.property_access_type(&narrow_type_excluding(&base_ty, &Type::Null), prop);
-                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed(false) {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -2893,7 +2894,7 @@ impl<'a> Checker<'a> {
                         self.record_member_class_escape(&class);
                     }
                 }
-                Type::Mixed
+                Type::Mixed(false)
             }
             // Same literal-name-is-real-usage/genuinely-dynamic-name-
             // escapes split as `DynamicPropertyAccess` just above.
@@ -2912,7 +2913,7 @@ impl<'a> Checker<'a> {
                         self.record_member_class_escape(&class);
                     }
                 }
-                Type::Mixed
+                Type::Mixed(false)
             }
             ExprKind::Interpolated(parts) => {
                 // Mirrors real PHPStan's `InvalidPartOfEncapsedStringRule`
@@ -3105,7 +3106,7 @@ impl<'a> Checker<'a> {
                             "variable.undefined",
                         );
                     }
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
                     // A captured variable's real declaration is wherever
                     // the outer scope already says it is - copied across,
                     // not fabricated fresh at this `use (...)` clause.
@@ -3194,13 +3195,13 @@ impl<'a> Checker<'a> {
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     e.span,
                     &closure_label,
                 );
                 self.check_type_trait_refs(
-                    declared_return.as_ref().unwrap_or(&Type::Mixed),
+                    declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
                     "return type of anonymous function",
                     e.span,
                     &closure_label,
@@ -3215,8 +3216,10 @@ impl<'a> Checker<'a> {
                 // closure has no signature of its own) is needed here
                 // too.
                 if let Some(c) = self.current_class.clone() {
-                    let resolved_return =
-                        self.resolve_pseudo(declared_return.as_ref().unwrap_or(&Type::Mixed), &c);
+                    let resolved_return = self.resolve_pseudo(
+                        declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                        &c,
+                    );
                     self.check_no_parent_ref(
                         &resolved_return,
                         "return type of anonymous function",
@@ -3347,7 +3350,10 @@ impl<'a> Checker<'a> {
                     if !u.by_ref {
                         continue;
                     }
-                    let mutated = closure_locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    let mutated = closure_locals
+                        .get(&u.name)
+                        .cloned()
+                        .unwrap_or(Type::Mixed(false));
                     if !locals.contains_key(&u.name) {
                         // Real PHP auto-vivifies `$x` in the outer/
                         // declaring scope the moment `use (&$x)` captures
@@ -3495,7 +3501,7 @@ impl<'a> Checker<'a> {
                             "return.noParent",
                         );
                     }
-                    if body_ty != Type::Mixed
+                    if body_ty != Type::Mixed(false)
                         && !self
                             .registry
                             .accepts_at_configured_level(&body_ty, &expected)
@@ -3851,10 +3857,13 @@ impl<'a> Checker<'a> {
                 "float" => Type::Float,
                 "string" => Type::String,
                 "bool" => Type::Bool,
-                "array" => Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+                "array" => Type::Array(
+                    Box::new(Type::unknown_array_key()),
+                    Box::new(Type::Mixed(false)),
+                ),
                 "object" => Type::Object("object".to_string(), Vec::new()),
                 "unset" => Type::Null,
-                _ => Type::Mixed,
+                _ => Type::Mixed(false),
             },
             ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
             // Real PHP's unary minus/plus convert a numeric string
@@ -3969,13 +3978,18 @@ impl<'a> Checker<'a> {
                                 .unwrap_or(0);
                             let bound_args = templates[..last_bound]
                                 .iter()
-                                .map(|t| bindings.get(t.as_ref()).cloned().unwrap_or(Type::Mixed))
+                                .map(|t| {
+                                    bindings
+                                        .get(t.as_ref())
+                                        .cloned()
+                                        .unwrap_or(Type::Mixed(false))
+                                })
                                 .collect();
                             Type::Object(canonical, bound_args)
                         }
                     }
                 },
-                _ => Type::Mixed,
+                _ => Type::Mixed(false),
             },
             ExprKind::Call(callee, args) => match &callee.kind {
                 ExprKind::Name(name) if !is_language_construct(name) => {
@@ -4009,7 +4023,7 @@ impl<'a> Checker<'a> {
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
                 // carry.
-                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(recv)) && result != Type::Mixed(false) {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -4056,7 +4070,7 @@ impl<'a> Checker<'a> {
                             self.resolve_pseudo(&resolved, &class)
                         })
                     })
-                    .unwrap_or(Type::Mixed)
+                    .unwrap_or(Type::Mixed(false))
             }
             ExprKind::StaticAccess(class_name, member) => {
                 if member == "class" {
@@ -4119,7 +4133,7 @@ impl<'a> Checker<'a> {
                             .lookup_const(&class, member)
                             .map(|cs| self.resolve_pseudo(&cs.ty, &class)),
                     })
-                    .unwrap_or(Type::Mixed)
+                    .unwrap_or(Type::Mixed(false))
             }
             ExprKind::Ternary(cond, then_, else_) => {
                 let mut else_locals = locals.clone();
@@ -4135,7 +4149,7 @@ impl<'a> Checker<'a> {
                         // `Type::Union(vec![...])`.
                         union_types(then_ty, else_ty)
                     }
-                    None => Type::Mixed,
+                    None => Type::Mixed(false),
                 }
             }
             ExprKind::ArrayLiteral(items) => self.infer_array_literal_type(items, locals),
@@ -4166,7 +4180,7 @@ impl<'a> Checker<'a> {
                 let result = self.property_access_type(&base_ty, prop);
                 // Same implicit nullability as `?->method()` just above,
                 // for `$x?->prop`.
-                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed {
+                if (*nullsafe || postfix_chain_has_nullsafe(base)) && result != Type::Mixed(false) {
                     union_types(result, Type::Null)
                 } else {
                     result
@@ -4206,11 +4220,11 @@ impl<'a> Checker<'a> {
                 .current_declared_return_type
                 .as_ref()
                 .map(|t| generator_template_param(t, self.registry, "TSend"))
-                .unwrap_or(Type::Mixed),
+                .unwrap_or(Type::Mixed(false)),
             ExprKind::YieldFrom(inner) => {
                 generator_template_param(&self.infer_expr(inner, locals), self.registry, "TReturn")
             }
-            _ => Type::Mixed,
+            _ => Type::Mixed(false),
         }
     }
 
@@ -4237,7 +4251,7 @@ impl<'a> Checker<'a> {
             return inferred;
         };
         let declared = self.resolve_type_hint(Some(hint));
-        if inferred != Type::Mixed && self.registry.is_assignable(&inferred, &declared) {
+        if inferred != Type::Mixed(false) && self.registry.is_assignable(&inferred, &declared) {
             inferred
         } else {
             declared
@@ -4299,7 +4313,7 @@ impl<'a> Checker<'a> {
                 }
                 let mut closure_locals: Locals = Locals::default();
                 for u in uses {
-                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed);
+                    let ty = locals.get(&u.name).cloned().unwrap_or(Type::Mixed(false));
                     closure_locals.insert(u.name.to_string(), ty);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {
@@ -4741,8 +4755,8 @@ impl<'a> Checker<'a> {
                         (None, None) => Type::benevolent_array_key(),
                     };
                     let val_ty = union_types(
-                        Self::array_element_type(&lt).unwrap_or(Type::Mixed),
-                        Self::array_element_type(&rt).unwrap_or(Type::Mixed),
+                        Self::array_element_type(&lt).unwrap_or(Type::Mixed(false)),
+                        Self::array_element_type(&rt).unwrap_or(Type::Mixed(false)),
                     );
                     let mut result = Type::Array(Box::new(key_ty), Box::new(val_ty));
                     let has_accessory = |ty: &Type, kind: AccessoryKind| matches!(ty, Type::Intersection(members) if members.contains(&Type::Accessory(kind)));
@@ -4955,7 +4969,7 @@ impl<'a> Checker<'a> {
             // type depends on resolving whatever expression `callable` is
             // (a string, a closure, a first-class callable reference...)
             // to a real signature, which this checker doesn't attempt.
-            BinOp::Pipe => Type::Mixed,
+            BinOp::Pipe => Type::Mixed(false),
         }
     }
 }
@@ -5036,7 +5050,7 @@ fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
             .iter()
             .map(|m| advance_incdec_type(m, is_increment))
             .reduce(union_types)
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         other => other.clone(),
     }
 }
@@ -5077,12 +5091,12 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
         Type::ArrayShape(fields) => key
             .and_then(|k| fields.into_iter().find(|(name, _, _)| name == k))
             .map(|(_, ty, _)| ty)
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         Type::Union(members) => members
             .into_iter()
             .map(|m| index_result_type(m, key))
             .reduce(union_types)
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         // A `list<T>`/`non-empty-array<T>`-typed value is a real
         // `Intersection([Array(T), Accessory(_)])`, not plain
         // `Array(T)` - without this, indexing into one (`$listArg[0]`)
@@ -5108,10 +5122,10 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
                 members
                     .into_iter()
                     .find_map(|m| Checker::array_element_type(&m))
-                    .unwrap_or(Type::Mixed)
+                    .unwrap_or(Type::Mixed(false))
             })
         }
-        _ => Type::Mixed,
+        _ => Type::Mixed(false),
     }
 }
 
@@ -5239,7 +5253,7 @@ impl<'a> Checker<'a> {
             ExprKind::Name(name) if name == "isset" || name == "empty" => Type::Bool,
             _ => match self.infer_expr(callee, locals) {
                 Type::Callable(Some(sig)) => (*sig.return_type).clone(),
-                _ => Type::Mixed,
+                _ => Type::Mixed(false),
             },
         }
     }
@@ -5277,7 +5291,7 @@ fn is_true_literal(e: &Expr) -> bool {
 /// explicit) always produces a real, sequentially-keyed list - true
 /// regardless of whether PHASE_BACKLOG Phase 168's own DQL-aware row-
 /// type inference (168b-168d) managed to resolve a real element type,
-/// in which case `element_ty` is that resolved `Type`; `Type::Mixed`
+/// in which case `element_ty` is that resolved `Type`; `Type::Mixed(false)`
 /// when it didn't (matches this project's pre-Phase-168 fallback
 /// exactly, so an undecidable chain regresses nothing).
 pub(crate) fn doctrine_query_result_list_type_of(element_ty: Type) -> Type {
@@ -5288,7 +5302,7 @@ pub(crate) fn doctrine_query_result_list_type_of(element_ty: Type) -> Type {
 }
 
 pub(crate) fn doctrine_query_result_list_type() -> Type {
-    doctrine_query_result_list_type_of(Type::Mixed)
+    doctrine_query_result_list_type_of(Type::Mixed(false))
 }
 
 /// Peels through any `(...)`-grouping wrapper(s) to the real expression

@@ -20,7 +20,7 @@ fn pest_it_closure_this_is_not_flagged_as_undefined_variable() {
     // test files - `it('...', function (): void { ... $this ... })`
     // at true top-level file scope, no enclosing class/method. No
     // `uses()` call at all here, so `$this` resolves to the default
-    // fallback (`Type::Mixed`, since `PHPUnit\Framework\TestCase`
+    // fallback (`Type::Mixed(false)`, since `PHPUnit\Framework\TestCase`
     // isn't registered in this bare snippet) - the core fix under
     // test is that it's recognized as *defined* at all, not flagged
     // as an undefined variable the way it would be with no special

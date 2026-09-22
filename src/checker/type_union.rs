@@ -40,8 +40,8 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     if types::types_equal_for_union(&a, &b) {
         return a;
     }
-    if a == Type::Mixed || b == Type::Mixed {
-        return Type::Mixed;
+    if a == Type::Mixed(false) || b == Type::Mixed(false) {
+        return Type::Mixed(false);
     }
     if let Some(merged) = merge_has_offset_value_pair(&a, &b) {
         return merged;
@@ -162,7 +162,7 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
         members = generalize_by_key_set(members);
     }
     if members.len() > MAX_UNION_MEMBERS {
-        return Type::Mixed;
+        return Type::Mixed(false);
     }
     if members.len() == 1 {
         members.into_iter().next().unwrap()
@@ -438,7 +438,7 @@ fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
         }
     }
     if has_dotdotdot {
-        merged.push(("...".to_string(), Type::Mixed, false));
+        merged.push(("...".to_string(), Type::Mixed(false), false));
     }
     Some(Type::ArrayShape(merged))
 }

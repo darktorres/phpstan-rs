@@ -119,7 +119,7 @@ fn union_types_caps_runaway_member_growth_instead_of_hanging() {
         .unwrap();
     assert_eq!(
         result,
-        Type::Mixed,
+        Type::Mixed(false),
         "expected the cap to collapse a >12-member union to Mixed, got {result:?}"
     );
 }

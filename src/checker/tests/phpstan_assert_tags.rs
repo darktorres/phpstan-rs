@@ -158,7 +158,7 @@ fn an_unconditional_assert_tag_narrows_through_an_intersection_receiver() {
 // `AssertTarget::ThisProp`'s "not already narrowed" fallback
 // (`assert_target_key_and_current`, `checker/narrowing.rs`) must not
 // match the receiver's type against `Type::Object` directly, or it
-// silently falls to `Type::Mixed` (discarding the property's real
+// silently falls to `Type::Mixed(false)` (discarding the property's real
 // declared type entirely) for a `Union`/`Intersection` receiver -
 // reachable even through the already-correct `ThisSelf`/
 // branch-conditional call site above, since this fallback re-infers the
@@ -166,7 +166,7 @@ fn an_unconditional_assert_tag_narrows_through_an_intersection_receiver() {
 #[test]
 fn assert_if_true_narrows_a_this_property_through_a_union_typed_receiver() {
     // Asserts the narrowed *type* directly (`assertType`), not merely the
-    // absence of diagnostics - `Type::Mixed` (the bug's own fallback) is
+    // absence of diagnostics - `Type::Mixed(false)` (the bug's own fallback) is
     // itself permissive enough to pass a plain `string $s` argument
     // without complaint, so a bare "no diagnostics" check would pass
     // vacuously whether or not the fix is in place.

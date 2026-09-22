@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
                 // catch-type order, which real PHP itself doesn't
                 // care about at all.
                 let ty = match c.types.as_slice() {
-                    [] => Type::Mixed,
+                    [] => Type::Mixed(false),
                     [single] => self.resolve_name_expr(single),
                     multiple => {
                         Type::Union(multiple.iter().map(|t| self.resolve_name_expr(t)).collect())

@@ -531,7 +531,7 @@ impl<'a> Checker<'a> {
                 let value_ty = args
                     .get(1)
                     .map(|a| self.infer_expr(&a.value, locals))
-                    .unwrap_or(Type::Mixed);
+                    .unwrap_or(Type::Mixed(false));
                 let expects_array = args
                     .get(2)
                     .is_some_and(|a| is_array_parameter_type(self, &a.value));

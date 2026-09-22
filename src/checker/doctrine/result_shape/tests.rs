@@ -134,7 +134,7 @@ fn sum_falls_back_to_mixed_when_its_operand_alias_never_resolves() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(vec![("0".to_string(), Type::Mixed, false)])
+        Type::ArrayShape(vec![("0".to_string(), Type::Mixed(false), false)])
     );
 }
 
@@ -186,7 +186,7 @@ fn identity_falls_back_to_mixed_never_the_targets_own_id_field_type() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(vec![("tagId".to_string(), Type::Mixed, false)])
+        Type::ArrayShape(vec![("tagId".to_string(), Type::Mixed(false), false)])
     );
 }
 
@@ -251,7 +251,7 @@ fn a_reference_to_an_unknown_alias_falls_back_to_mixed_for_that_field() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(vec![("field".to_string(), Type::Mixed, false)])
+        Type::ArrayShape(vec![("field".to_string(), Type::Mixed(false), false)])
     );
 }
 
@@ -267,7 +267,7 @@ fn a_bare_alias_select_on_an_unknown_alias_falls_back_to_plain_mixed() {
     };
     let items = parse_select_items(&["nope".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
-    assert_eq!(ty, Type::Mixed);
+    assert_eq!(ty, Type::Mixed(false));
 }
 
 #[test]
@@ -460,7 +460,7 @@ fn an_undeclared_custom_function_falls_back_to_mixed() {
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ArrayShape(vec![("x".to_string(), Type::Mixed, false)])
+        Type::ArrayShape(vec![("x".to_string(), Type::Mixed(false), false)])
     );
 }
 

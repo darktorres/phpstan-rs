@@ -23,7 +23,7 @@ pub(crate) fn apply_implicit_nullable_default(ty: Type, default: Option<&Expr>) 
         return ty;
     }
     let already_nullable = match &ty {
-        Type::Null | Type::Mixed => true,
+        Type::Null | Type::Mixed(_) => true,
         Type::Union(members) => members.contains(&Type::Null),
         _ => false,
     };
@@ -54,7 +54,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     native_ty: Option<&Type>,
 ) -> Type {
     let Some(doc) = doc_type else {
-        return native_ty.cloned().unwrap_or(Type::Mixed);
+        return native_ty.cloned().unwrap_or(Type::Mixed(false));
     };
     let ty = types::parse_type_string(doc);
     // A docblock type is trusted as the complete picture and otherwise
@@ -68,7 +68,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     // unless the docblock type already says so itself.
     let native_is_nullable = native_hint.is_some_and(|h| h.trim_start().starts_with('?'));
     let already_nullable = match &ty {
-        Type::Null | Type::Mixed => true,
+        Type::Null | Type::Mixed(_) => true,
         Type::Union(members) => members.contains(&Type::Null),
         _ => false,
     };
@@ -97,7 +97,7 @@ pub(crate) fn resolve_type_with_parsed_native(
     // types something `mixed`/`object` *because* PHP has no native
     // `resource` type to declare, leaning on the docblock to carry the
     // only real type information. A `mixed` native doesn't need its own
-    // exclusion here: `is_subtype(_, Type::Mixed)` is unconditionally
+    // exclusion here: `is_subtype(_, Type::Mixed(false))` is unconditionally
     // `true`, so `reconcile_with_native` already keeps every doc member
     // when native is `mixed`, for free. `object`'s own subtyping is
     // name-equality-only (see `types::is_subtype`'s own doc comment), so
@@ -152,7 +152,7 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     // separate "resolved to bare `Mixed`? use the native type instead"
     // swap once the sentinel's real value is known - unioning native
     // members in early would corrupt that later check's own `resolved ==
-    // Type::Mixed` test (a real regression caught by this project's own
+    // Type::Mixed(false)` test (a real regression caught by this project's own
     // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
     // test).
     if let Type::Union(native_members) = &native_ty

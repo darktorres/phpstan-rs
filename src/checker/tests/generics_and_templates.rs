@@ -2882,7 +2882,7 @@ fn reflection_class_get_method_leaves_t_erased_when_the_receiver_s_own_t_is_eras
     // `substitute_class_templates`'s own generic `substitute_scoped`
     // fallback (used pervasively for every other generic method-return
     // substitution project-wide) always fills an unbound `TemplateParam`
-    // with a literal `Type::Mixed` argument, unlike `ExprKind::New`'s own
+    // with a literal `Type::Mixed(false)` argument, unlike `ExprKind::New`'s own
     // *separate*, special-cased "trim trailing unbound template
     // arguments" logic for a freshly-constructed object's own type
     // (which is what makes `new ReflectionClass($erased)` itself render

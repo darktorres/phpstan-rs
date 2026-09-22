@@ -230,7 +230,7 @@ impl<'a> Checker<'a> {
         // `Mixed | non-numeric-literal` fails *both* of `BitAnd`'s own
         // legal combinations even though either one might hold at
         // runtime.
-        if matches!(l_ty, Type::Mixed) || matches!(r_ty, Type::Mixed) {
+        if matches!(l_ty, Type::Mixed(_)) || matches!(r_ty, Type::Mixed(_)) {
             return;
         }
         let Some(valid) = self.binary_operand_validity(op, l_ty, r_ty) else {
@@ -256,7 +256,7 @@ impl<'a> Checker<'a> {
 
     /// Flags a condition whose type isn't confidently `bool` at all,
     /// regardless of its value - distinct from `inferred_constant_
-    /// condition`'s always-true/false check. `Type::Mixed` is always
+    /// condition`'s always-true/false check. `Type::Mixed(false)` is always
     /// exempted: this project has no explicit-vs-implicit-mixed
     /// provenance on an inferred expression type, so it reads as "don't
     /// know, may be bool" rather than a confirmed non-bool.
@@ -271,7 +271,7 @@ impl<'a> Checker<'a> {
         if !self.registry.check_boolean_conditions {
             return;
         }
-        if matches!(ty, Type::Mixed) || is_definitely_bool(ty) {
+        if matches!(ty, Type::Mixed(_)) || is_definitely_bool(ty) {
             return;
         }
         self.report(
@@ -300,7 +300,7 @@ impl<'a> Checker<'a> {
         if !self.registry.check_boolean_conditions {
             return;
         }
-        if matches!(ty, Type::Mixed) || is_definitely_bool(ty) {
+        if matches!(ty, Type::Mixed(_)) || is_definitely_bool(ty) {
             return;
         }
         self.report(
@@ -480,7 +480,7 @@ impl<'a> Checker<'a> {
         let Some(identifier) = comparison_identifier(op) else {
             return;
         };
-        if matches!(l_ty, Type::Mixed) || matches!(r_ty, Type::Mixed) {
+        if matches!(l_ty, Type::Mixed(_)) || matches!(r_ty, Type::Mixed(_)) {
             return;
         }
         let l_num = self.is_strictly_number(l_ty);

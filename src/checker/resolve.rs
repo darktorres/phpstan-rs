@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
                 let ty = registry::resolve_names_in_type(ty, &self.name_ctx);
                 (self.registry.resolve_deferred_value_of_now(ty), case_refs)
             }
-            None => (Type::Mixed, Vec::new()),
+            None => (Type::Mixed(false), Vec::new()),
         }
     }
 
@@ -151,7 +151,10 @@ impl<'a> Checker<'a> {
                             info.template_bounds
                                 .get(name)
                                 .cloned()
-                                .unwrap_or(Type::Mixed),
+                                // No `of`/`as` clause at all - explicit
+                                // mixed, matching `TemplateParam::
+                                // unbounded`'s own identical reasoning.
+                                .unwrap_or(Type::Mixed(true)),
                         ),
                         variance,
                         scope: Some(class.clone()),

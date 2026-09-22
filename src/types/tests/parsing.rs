@@ -23,8 +23,8 @@ fn union_parses_flat() {
 // is vacuously satisfiable.
 #[test]
 fn a_union_containing_mixed_collapses_to_plain_mixed() {
-    assert_eq!(parse_type_string("mixed|false"), Type::Mixed);
-    assert_eq!(parse_type_string("mixed|null"), Type::Mixed);
+    assert_eq!(parse_type_string("mixed|false"), Type::Mixed(false));
+    assert_eq!(parse_type_string("mixed|null"), Type::Mixed(false));
 }
 
 #[test]
@@ -264,7 +264,7 @@ fn offset_access_type_accepts_a_bare_unquoted_key() {
 fn offset_access_type_on_a_missing_key_degrades_to_mixed() {
     assert_eq!(
         parse_type_string("array{name: string}['missing']"),
-        Type::Mixed
+        Type::Mixed(false)
     );
 }
 
@@ -318,15 +318,15 @@ fn class_constant_reference_types_degrade_to_mixed() {
     // generic-class branch and became a literal class literally
     // named "self::RFC_*", then got nonsensically namespace-qualified
     // once that existed (`Monolog\Handler\self::RFC*`).
-    assert_eq!(parse_type_string("self::RFC_*"), Type::Mixed);
-    assert_eq!(parse_type_string("Foo::BAR"), Type::Mixed);
+    assert_eq!(parse_type_string("self::RFC_*"), Type::Mixed(false));
+    assert_eq!(parse_type_string("Foo::BAR"), Type::Mixed(false));
     // The array-wrapping/nullable machinery around parse_type_atom
     // still has to apply correctly around this degraded case.
     assert_eq!(
         parse_type_string("self::RFC_*[]"),
         Type::Array(
             Box::new(Type::benevolent_array_key()),
-            Box::new(Type::Mixed)
+            Box::new(Type::Mixed(false))
         )
     );
 }

@@ -58,7 +58,7 @@ pub(crate) fn method_tag_sig(
         .return_type
         .as_deref()
         .map(resolve)
-        .unwrap_or((Type::Mixed, Vec::new()));
+        .unwrap_or((Type::Mixed(false), Vec::new()));
     let params = tag
         .params
         .iter()
@@ -66,7 +66,7 @@ pub(crate) fn method_tag_sig(
             let (ty, case_refs) =
                 p.ty.as_deref()
                     .map(resolve)
-                    .unwrap_or((Type::Mixed, Vec::new()));
+                    .unwrap_or((Type::Mixed(false), Vec::new()));
             ParamSig {
                 name: intern(&p.name),
                 ty: ty.clone(),

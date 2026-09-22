@@ -18,7 +18,7 @@ fn list_is_treated_as_a_real_refinement_not_a_class_reference() {
     assert_eq!(
         parse_type_string("list"),
         Type::Intersection(vec![
-            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed)),
+            Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false))),
             Type::Accessory(AccessoryKind::ArrayList),
         ])
     );
@@ -365,7 +365,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     // `?` must not propagate a None out of the whole function and
     // silently fail the ENTIRE shape parse over one unmodeled marker.
     // The marker is recorded as a real sentinel field
-    // (`("...".to_string(), Type::Mixed, false)`, see `types::
+    // (`("...".to_string(), Type::Mixed(false), false)`, see `types::
     // is_unsealed_shape`'s own doc comment), consumed by
     // `checker::narrowing`'s "never prove an unsealed shape's key is
     // absent" gate and `checker::assignment`'s matching
@@ -375,7 +375,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
         shape,
         Type::ArrayShape(vec![
             ("items".to_string(), Type::Int, false),
-            ("...".to_string(), Type::Mixed, false),
+            ("...".to_string(), Type::Mixed(false), false),
         ])
     );
     // A bare `...` (no generic args) is valid too.
@@ -384,7 +384,7 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
         shape2,
         Type::ArrayShape(vec![
             ("items".to_string(), Type::Int, false),
-            ("...".to_string(), Type::Mixed, false),
+            ("...".to_string(), Type::Mixed(false), false),
         ])
     );
 }

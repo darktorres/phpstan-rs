@@ -36,7 +36,7 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) ->
             if_false,
             negated,
         } => match param_bindings.get(subject) {
-            Some(bound) if *bound != Type::Mixed => {
+            Some(bound) if *bound != Type::Mixed(false) => {
                 let picked = if crate::types::is_subtype(bound, target) != *negated {
                     if_true
                 } else {

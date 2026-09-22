@@ -168,7 +168,7 @@ impl<'a> Checker<'a> {
                     _ => {
                         return Type::Array(
                             Box::new(Type::unknown_array_key()),
-                            Box::new(Type::Mixed),
+                            Box::new(Type::Mixed(false)),
                         );
                     }
                 },
@@ -238,7 +238,8 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if degraded {
-                    elem_types.push(Self::array_element_type(&value_ty).unwrap_or(Type::Mixed));
+                    elem_types
+                        .push(Self::array_element_type(&value_ty).unwrap_or(Type::Mixed(false)));
                     // `is_list_like` alone (the original check) wrongly
                     // treats an *unmarked* int-keyed source
                     // (`array<int, int>`, list-ness never proven, only
@@ -312,7 +313,7 @@ impl<'a> Checker<'a> {
         let elem_ty = elem_types
             .into_iter()
             .reduce(union_types)
-            .unwrap_or(Type::Mixed);
+            .unwrap_or(Type::Mixed(false));
         let mut members = vec![Type::Array(
             Box::new(Type::unknown_array_key()),
             Box::new(elem_ty),
@@ -782,7 +783,7 @@ impl<'a> Checker<'a> {
                     .filter(|(name, _, _)| name != "...")
                     .map(|(_, t, _)| t.clone())
                     .reduce(union_types)
-                    .unwrap_or(Type::Mixed),
+                    .unwrap_or(Type::Mixed(false)),
             ),
             // A `list<T>`/`non-empty-array<T>`-typed value is a
             // real `Intersection([Array(T), Accessory(_)])`, not
@@ -816,7 +817,7 @@ impl<'a> Checker<'a> {
                     elem_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed),
+                        .unwrap_or(Type::Mixed(false)),
                 )
             }
             _ => None,
@@ -871,7 +872,7 @@ impl<'a> Checker<'a> {
                     key_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed),
+                        .unwrap_or(Type::Mixed(false)),
                 )
             }
             _ => None,

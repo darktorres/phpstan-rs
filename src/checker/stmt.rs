@@ -126,7 +126,7 @@ impl<'a> Checker<'a> {
                 if self.collect_inlay_hints
                     && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
                     && let ExprKind::Variable(name) = &lhs.kind
-                    && ty != Type::Mixed
+                    && ty != Type::Mixed(false)
                     && !inline_var
                         .as_ref()
                         .is_some_and(|(n, _)| n.as_str() == name.as_ref())
@@ -279,7 +279,7 @@ impl<'a> Checker<'a> {
                             3,
                             "return.void",
                         );
-                    } else if actual != Type::Mixed
+                    } else if actual != Type::Mixed(false)
                         && !self
                             .registry
                             .accepts_at_configured_level(&actual, &expected)
@@ -371,7 +371,7 @@ impl<'a> Checker<'a> {
                             "return.never",
                         );
                     } else if expected != Type::Void
-                        && expected != Type::Mixed
+                        && expected != Type::Mixed(false)
                         && !self
                             .registry
                             .accepts_at_configured_level(&Type::Null, &expected)
@@ -484,7 +484,7 @@ impl<'a> Checker<'a> {
                             .global_variables
                             .get(name.as_str())
                             .cloned()
-                            .unwrap_or(Type::Mixed);
+                            .unwrap_or(Type::Mixed(false));
                         self.probe_hit_at(stmt.span, &ty);
                         locals.declare(name.clone(), ty, stmt.span);
                     }
@@ -507,7 +507,7 @@ impl<'a> Checker<'a> {
                     let ty = default
                         .as_ref()
                         .map(|e| self.check_expr(e, locals, label))
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     purge_stale_narrowing_for(locals, name);
                     // Real declaration - no per-name span exists on
                     // `StaticVar` (only the whole statement's), same as
@@ -998,7 +998,7 @@ impl<'a> Checker<'a> {
     /// assumption check) - deliberately not replicated, a disclosed scope
     /// trim matching this project's own simpler type system (no native/
     /// docblock type split at this granularity) and "favor false
-    /// negatives" precedent throughout. `Type::Mixed` on either side is
+    /// negatives" precedent throughout. `Type::Mixed(false)` on either side is
     /// never flagged - it means "no type declared at all" as often as
     /// real `mixed` in this project's own overloaded convention (see
     /// this file's own module doc comment), so a mismatch there is
@@ -1023,11 +1023,11 @@ impl<'a> Checker<'a> {
         if **lhs_name != *name {
             return;
         }
-        if matches!(declared_ty, Type::Mixed) {
+        if matches!(declared_ty, Type::Mixed(_)) {
             return;
         }
         let rhs_ty = self.infer_expr(rhs, locals);
-        if matches!(rhs_ty, Type::Mixed) {
+        if matches!(rhs_ty, Type::Mixed(_)) {
             return;
         }
         // `is_assignable(&rhs_ty, declared_ty)` alone would flag the most

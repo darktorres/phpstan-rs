@@ -670,7 +670,7 @@ fn define_call_constant(e: &Expr) -> Option<(Arc<str>, Type)> {
     // exists purely so the declaration type-checks, and was never meant
     // to be read literally. This project has no dedicated magic-constant
     // `Expr` kind (a bare `__DIR__`/`__LINE__`/... reference parses as
-    // an ordinary `ExprKind::Name`, already `Type::Mixed` via
+    // an ordinary `ExprKind::Name`, already `Type::Mixed(false)` via
     // `bare_name_literal_type`'s default arm) - excluding them here
     // protects that existing, already-correct "don't know" behavior
     // from being overwritten by the stub's placeholder.
@@ -746,9 +746,9 @@ pub(crate) fn register_global_constant(
         None => {
             map.insert(name, ty);
         }
-        Some(existing) if *existing == ty && ty != Type::Mixed => {}
+        Some(existing) if *existing == ty && ty != Type::Mixed(false) => {}
         Some(_) => {
-            map.insert(name, Type::Mixed);
+            map.insert(name, Type::Mixed(false));
         }
     }
 }
@@ -781,14 +781,14 @@ fn conditional_declaration_may_replace_stub(new_sig: &FunctionSig, existing: &Fu
     if new_sig.params.len() != existing.params.len() {
         return false;
     }
-    if existing.return_type != Type::Mixed && new_sig.return_type == Type::Mixed {
+    if existing.return_type != Type::Mixed(false) && new_sig.return_type == Type::Mixed(false) {
         return false;
     }
     existing
         .params
         .iter()
         .zip(&new_sig.params)
-        .all(|(old, new)| !(old.ty != Type::Mixed && new.ty == Type::Mixed))
+        .all(|(old, new)| !(old.ty != Type::Mixed(false) && new.ty == Type::Mixed(false)))
 }
 
 /// The identical question as `conditional_declaration_may_replace_stub`

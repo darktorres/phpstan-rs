@@ -246,7 +246,7 @@ impl<'a> Checker<'a> {
                     // on a not-provably-array input falls through to the
                     // generic stub below, unchanged.
                     if require_array && !Self::is_array_like(&value_ty) {
-                        return Type::Mixed;
+                        return Type::Mixed(false);
                     }
                     // The fallback is unioned into the *element* type
                     // first, and only that gets wrapped in the array -
@@ -297,7 +297,7 @@ impl<'a> Checker<'a> {
                     contains_flag_name_with_options(e, "FILTER_REQUIRE_ARRAY")
                         || contains_flag_name_with_options(e, "FILTER_FORCE_ARRAY")
                 }) {
-                    return Type::Mixed;
+                    return Type::Mixed(false);
                 }
                 if let ExprKind::Name(filter_name) = &args[2].value.kind
                     && let Some((element_ty, fallback, throw_on_failure)) = filter_validate_result(
@@ -335,7 +335,7 @@ impl<'a> Checker<'a> {
                     return arg_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                 }
             }
             // PHP 8.4's `array_find`/`array_find_key`, mirroring real
@@ -555,7 +555,7 @@ impl<'a> Checker<'a> {
                     && a.spread
                 {
                     let spread_ty = self.infer_expr(&a.value, locals);
-                    Self::array_element_type(&spread_ty).unwrap_or(Type::Mixed)
+                    Self::array_element_type(&spread_ty).unwrap_or(Type::Mixed(false))
                 } else {
                     self.infer_expr(&args[0].value, locals)
                 };
@@ -612,7 +612,7 @@ impl<'a> Checker<'a> {
                 if Self::is_array_like(&arr_ty) {
                     let key_ty =
                         Self::array_key_type(&arr_ty).unwrap_or_else(Type::unknown_array_key);
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed);
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed(false));
                     let flipped = Type::Array(Box::new(elem_ty), Box::new(key_ty));
                     return if Self::is_known_non_empty_array(&arr_ty) {
                         Type::Intersection(vec![
@@ -824,14 +824,14 @@ impl<'a> Checker<'a> {
             "reset" | "current" | "end" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed);
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed(false));
                     return Self::array_pointer_result(&arr_ty, elem_ty, Type::False, false);
                 }
             }
             "next" | "prev" if args.len() == 1 => {
                 let arr_ty = self.infer_expr(&args[0].value, locals);
                 if Self::is_array_like(&arr_ty) {
-                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed);
+                    let elem_ty = Self::array_element_type(&arr_ty).unwrap_or(Type::Mixed(false));
                     return Self::array_pointer_result(&arr_ty, elem_ty, Type::False, true);
                 }
             }
@@ -954,7 +954,7 @@ impl<'a> Checker<'a> {
                                         // argument reaching this branch
                                         // was already sealed, so this
                                         // never fired.
-                                        fields.push(("...".to_string(), Type::Mixed, false));
+                                        fields.push(("...".to_string(), Type::Mixed(false), false));
                                     }
                                 }
                             }
@@ -968,14 +968,14 @@ impl<'a> Checker<'a> {
                                 // change the *value*, never remove a key
                                 // array_merge never touches).
                                 let elem_ty =
-                                    Self::array_element_type(arg_ty).unwrap_or(Type::Mixed);
+                                    Self::array_element_type(arg_ty).unwrap_or(Type::Mixed(false));
                                 for (_, t, _) in fields.iter_mut() {
                                     *t = union_types(t.clone(), elem_ty.clone());
                                 }
                                 // Mark unsealed - the plain array may also
                                 // contribute keys this shape never had.
                                 if !fields.iter().any(|(k, _, _)| k == "...") {
-                                    fields.push(("...".to_string(), Type::Mixed, false));
+                                    fields.push(("...".to_string(), Type::Mixed(false), false));
                                 }
                                 // On top of the coarse widening above, a
                                 // `hasOffsetValue`-tracked key gets
@@ -1094,7 +1094,7 @@ impl<'a> Checker<'a> {
                     let elem_ty = elem_types
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     let key_ty = match (key_could_be_int, key_could_be_string) {
                         (true, false) => Type::Int,
                         (false, true) => Type::String,
@@ -1216,7 +1216,10 @@ impl<'a> Checker<'a> {
                 // falls back to `Mixed` rather than guess beyond it.
                 if Self::is_array_like(&arg_ty) {
                     return Type::Intersection(vec![
-                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed)),
+                        Type::Array(
+                            Box::new(Type::unknown_array_key()),
+                            Box::new(Type::Mixed(false)),
+                        ),
                         Type::Accessory(AccessoryKind::ArrayList),
                     ]);
                 }
@@ -2033,7 +2036,7 @@ fn extract_array_shape_fields(ty: &Type) -> Option<&Vec<(String, Type, bool)>> {
 /// that can't itself become a real, precisely-named result field.
 fn push_unsealed_tail(fields: &mut Vec<(String, Type, bool)>) {
     if !fields.iter().any(|(k, _, _)| k == "...") {
-        fields.push(("...".to_string(), Type::Mixed, false));
+        fields.push(("...".to_string(), Type::Mixed(false), false));
     }
 }
 
@@ -2402,12 +2405,12 @@ fn strip_accessory_markers(ty: Type) -> Type {
         Type::Intersection(members) => members
             .into_iter()
             .find(|m| !matches!(m, Type::Accessory(_)))
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         Type::Union(members) => members
             .into_iter()
             .map(strip_accessory_markers)
             .reduce(union_types)
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         other => other,
     }
 }
@@ -2475,12 +2478,12 @@ fn strip_array_member(ty: Type) -> Type {
                 .filter(|m| !matches!(m, Type::Array(_, _) | Type::ArrayShape(_)))
                 .collect();
             match kept.len() {
-                0 => Type::Mixed,
+                0 => Type::Mixed(false),
                 1 => kept.into_iter().next().unwrap(),
                 _ => Type::Union(kept),
             }
         }
-        Type::Array(_, _) | Type::ArrayShape(_) => Type::Mixed,
+        Type::Array(_, _) | Type::ArrayShape(_) => Type::Mixed(false),
         other => other,
     }
 }
@@ -2497,12 +2500,12 @@ fn strip_type_member(ty: Type, target: &Type) -> Type {
         Type::Union(members) => {
             let kept: Vec<Type> = members.into_iter().filter(|m| m != target).collect();
             match kept.len() {
-                0 => Type::Mixed,
+                0 => Type::Mixed(false),
                 1 => kept.into_iter().next().unwrap(),
                 _ => Type::Union(kept),
             }
         }
-        other if other == *target => Type::Mixed,
+        other if other == *target => Type::Mixed(false),
         other => other,
     }
 }
@@ -2619,7 +2622,7 @@ fn curl_getinfo_component_type(name: &str) -> Option<Type> {
         | "CURLINFO_HTTPAUTH_USED"
         | "CURLINFO_PROXYAUTH_USED"
         | "CURLINFO_CONN_ID" => int_false,
-        "CURLINFO_PRIVATE" => Type::Mixed,
+        "CURLINFO_PRIVATE" => Type::Mixed(false),
         _ => return None,
     })
 }

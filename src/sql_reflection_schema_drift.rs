@@ -101,7 +101,7 @@ fn live_columns_for_table(
                     let base = members
                         .into_iter()
                         .find(|t| *t != Type::Null)
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     SchemaColumn {
                         name,
                         ty: base,

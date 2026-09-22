@@ -143,7 +143,7 @@ impl<'s, 'r> Scope<'s, 'r> {
     /// path, if this checker has ever bound it - `None` for a variable
     /// this checker hasn't seen assigned/narrowed at all (real PHPStan's
     /// own `Scope::hasVariableType()->no()` case), not the same as
-    /// `Some(Type::Mixed)`.
+    /// `Some(Type::Mixed(false))`.
     pub fn local_type(&self, name: &str) -> Option<&Type> {
         self.locals.get(name)
     }

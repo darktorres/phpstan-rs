@@ -279,7 +279,9 @@ impl<'a> Checker<'a> {
         match body {
             PropertyHookBody::Arrow(e) => {
                 let body_ty = self.check_expr(e, &mut locals, &label);
-                if body_ty != Type::Mixed && !self.registry.is_assignable(&body_ty, &prop_sig.ty) {
+                if body_ty != Type::Mixed(false)
+                    && !self.registry.is_assignable(&body_ty, &prop_sig.ty)
+                {
                     self.report(
                         label.clone(),
                         format!(
@@ -300,7 +302,7 @@ impl<'a> Checker<'a> {
                 if !stmts.is_empty()
                     && !stmts.iter().any(|s| self.always_terminates(s, &locals))
                     && !self.current_function_is_generator
-                    && prop_sig.ty != Type::Mixed
+                    && prop_sig.ty != Type::Mixed(false)
                 {
                     self.report(
                         label.clone(),

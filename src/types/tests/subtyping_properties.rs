@@ -19,7 +19,7 @@ use proptest::prelude::*;
 
 fn leaf_type() -> impl Strategy<Value = Type> {
     prop_oneof![
-        Just(Type::Mixed),
+        Just(Type::Mixed(false)),
         Just(Type::Never),
         Just(Type::Void),
         Just(Type::Null),
@@ -69,11 +69,11 @@ proptest! {
         prop_assert!(types::is_subtype(&t, &t));
     }
 
-    /// `(_, Type::Mixed) => true` is `is_subtype`'s own first arm -
+    /// `(_, Type::Mixed(false)) => true` is `is_subtype`'s own first arm -
     /// `Mixed` accepts everything.
     #[test]
     fn mixed_is_top(t in any_type()) {
-        prop_assert!(types::is_subtype(&t, &Type::Mixed));
+        prop_assert!(types::is_subtype(&t, &Type::Mixed(false)));
     }
 
     /// `(Type::Never, _) => true` is `is_subtype`'s own second arm -

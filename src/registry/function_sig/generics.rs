@@ -311,11 +311,13 @@ pub(crate) fn build_template_params(
     doc.templates
         .iter()
         .map(|name| {
+            // No `of`/`as` clause at all - explicit mixed, matching
+            // `TemplateParam::unbounded`'s own identical reasoning.
             let bound = doc
                 .template_bounds
                 .get(name)
                 .map(|raw| resolve(raw))
-                .unwrap_or(Type::Mixed);
+                .unwrap_or(Type::Mixed(true));
             let default = doc.template_defaults.get(name).map(|raw| resolve(raw));
             let variance = if doc.covariant_templates.contains(name) {
                 types::Variance::Covariant

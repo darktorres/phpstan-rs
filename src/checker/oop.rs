@@ -670,14 +670,14 @@ impl<'a> Checker<'a> {
             };
             let declared_ty = self.resolve_type_hint(Some(raw_hint));
             let value_ty = self.infer_expr(&c.value, &Locals::default());
-            // `Type::Mixed` here almost always means "this checker
+            // `Type::Mixed(false)` here almost always means "this checker
             // couldn't resolve it" (an unrecognized global constant,
             // e.g. `DEBUG_BACKTRACE_IGNORE_ARGS`, a real PHP builtin,
             // reads as `Mixed`), not a genuinely `mixed`-typed value -
             // the same "don't guess wrong on Mixed" leniency
             // `check_method_overrides`'s parameter-narrowing check
             // applies for the identical reason.
-            if value_ty == Type::Mixed {
+            if value_ty == Type::Mixed(false) {
                 continue;
             }
             if !self.registry.is_assignable(&value_ty, &declared_ty) {

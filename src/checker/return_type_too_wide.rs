@@ -117,7 +117,7 @@ impl<'a> Checker<'a> {
             // widens to `Mixed`.
             let is_used = actual_members
                 .iter()
-                .any(|a| **a == Type::Mixed || self.registry.is_assignable(a, member));
+                .any(|a| **a == Type::Mixed(false) || self.registry.is_assignable(a, member));
             if is_used {
                 continue;
             }

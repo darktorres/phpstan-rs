@@ -30,7 +30,7 @@ impl<'a> Checker<'a> {
     /// Scoped to only `TemplateParam`s whose own `scope` field is
     /// genuinely `owner` itself - not merely same-named as one of
     /// `owner`'s declared templates. `types::substitute_template`'s own
-    /// fallback for a name absent from `bindings` is `Type::Mixed`,
+    /// fallback for a name absent from `bindings` is `Type::Mixed(false)`,
     /// correct for a genuinely class-level template referenced with no or
     /// fewer type arguments than it declares (e.g. a bare `Collection`
     /// with no `<T>` at all), but that would wipe out every method's own
@@ -246,7 +246,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                     tp.default
                         .as_ref()
                         .map(|d| substitute_scoped(d, bindings, scope))
-                        .unwrap_or(Type::Mixed)
+                        .unwrap_or(Type::Mixed(false))
                 })
             } else {
                 ty.clone()

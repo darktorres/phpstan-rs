@@ -1190,7 +1190,7 @@ fn foreach_mutating_its_own_subject_via_the_loop_key_does_not_regress() {
 }
 
 // An unassigned superglobal must default to Array(Mixed), not
-// Type::Mixed - real phpstorm-stubs' own bootstrap file declares
+// Type::Mixed(false) - real phpstorm-stubs' own bootstrap file declares
 // $_SESSION with a literal `= []`, which real PHPStan generalizes to a
 // bare `array`. Because `widen_coalesce_result`'s "keep the left side's
 // real array type" rule only fires for an already-known Type::Array, a

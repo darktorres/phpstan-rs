@@ -6,7 +6,7 @@ use crate::types::{AccessoryKind, Type};
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Type::Mixed => write!(f, "mixed"),
+            Type::Mixed(_) => write!(f, "mixed"),
             Type::Never => write!(f, "never"),
             Type::Void => write!(f, "void"),
             Type::Null => write!(f, "null"),
@@ -21,7 +21,7 @@ impl fmt::Display for Type {
             Type::Array(key, value) => {
                 let known_key = **key != Type::unknown_array_key();
                 match (known_key, value.as_ref()) {
-                    (false, Type::Mixed) => write!(f, "array"),
+                    (false, Type::Mixed(_)) => write!(f, "array"),
                     (false, v) => write!(f, "array<{v}>"),
                     (true, v) => write!(f, "array<{key}, {v}>"),
                 }
@@ -215,7 +215,7 @@ fn describe_accessory_intersection(members: &[Type]) -> Option<String> {
         let known_key = !is_list && *key != Type::unknown_array_key();
         let elem_str = if known_key {
             format!("<{key}, {elem}>")
-        } else if *elem == Type::Mixed {
+        } else if *elem == Type::Mixed(false) {
             String::new()
         } else {
             format!("<{elem}>")

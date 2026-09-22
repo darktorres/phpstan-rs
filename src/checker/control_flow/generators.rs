@@ -29,7 +29,7 @@ pub(crate) fn body_contains_yield(stmts: &[Stmt]) -> bool {
 /// unresolved/undeclared type.
 pub(crate) fn type_allows_generator_return(ty: &Type, registry: &Registry) -> bool {
     match ty {
-        Type::Mixed => true,
+        Type::Mixed(_) => true,
         Type::Object(name, _) => registry.is_subclass_of(name, "Traversable"),
         Type::Union(members) | Type::Intersection(members) => members
             .iter()
@@ -54,7 +54,7 @@ pub(crate) fn generator_missing_return_type(
     registry: &Registry,
 ) -> Option<Type> {
     match declared.map(|t| generator_template_param(t, registry, "TReturn"))? {
-        Type::Mixed | Type::Void => None,
+        Type::Mixed(_) | Type::Void => None,
         treturn => Some(treturn),
     }
 }
@@ -76,15 +76,15 @@ pub(crate) fn generator_template_param(ty: &Type, registry: &Registry, param: &s
             .class_template_bindings(name, args, "Generator")
             .get(param)
             .cloned()
-            .unwrap_or(Type::Mixed),
+            .unwrap_or(Type::Mixed(false)),
         Type::Union(members) | Type::Intersection(members) => members
             .iter()
             .find_map(|m| match generator_template_param(m, registry, param) {
-                Type::Mixed => None,
+                Type::Mixed(_) => None,
                 found => Some(found),
             })
-            .unwrap_or(Type::Mixed),
-        _ => Type::Mixed,
+            .unwrap_or(Type::Mixed(false)),
+        _ => Type::Mixed(false),
     }
 }
 
@@ -176,7 +176,7 @@ impl<'a> Checker<'a> {
         let Some(enclosing) = self.current_declared_return_type.clone() else {
             return;
         };
-        if enclosing == Type::Mixed {
+        if enclosing == Type::Mixed(false) {
             return;
         }
         // Real PHPStan's own `generator.void` check: the `yield from`
@@ -205,14 +205,23 @@ impl<'a> Checker<'a> {
         if inner_bindings.is_empty() {
             return;
         }
-        let inner_key = inner_bindings.get("TKey").cloned().unwrap_or(Type::Mixed);
-        let inner_value = inner_bindings.get("TYield").cloned().unwrap_or(Type::Mixed);
-        let inner_send = inner_bindings.get("TSend").cloned().unwrap_or(Type::Mixed);
+        let inner_key = inner_bindings
+            .get("TKey")
+            .cloned()
+            .unwrap_or(Type::Mixed(false));
+        let inner_value = inner_bindings
+            .get("TYield")
+            .cloned()
+            .unwrap_or(Type::Mixed(false));
+        let inner_send = inner_bindings
+            .get("TSend")
+            .cloned()
+            .unwrap_or(Type::Mixed(false));
         let enclosing_key = generator_template_param(&enclosing, self.registry, "TKey");
         let enclosing_value = generator_template_param(&enclosing, self.registry, "TYield");
         let enclosing_send = generator_template_param(&enclosing, self.registry, "TSend");
-        if enclosing_key != Type::Mixed
-            && inner_key != Type::Mixed
+        if enclosing_key != Type::Mixed(false)
+            && inner_key != Type::Mixed(false)
             && !self
                 .registry
                 .accepts_at_configured_level(&inner_key, &enclosing_key)
@@ -227,8 +236,8 @@ impl<'a> Checker<'a> {
                 "generator.keyType",
             );
         }
-        if enclosing_value != Type::Mixed
-            && inner_value != Type::Mixed
+        if enclosing_value != Type::Mixed(false)
+            && inner_value != Type::Mixed(false)
             && !self
                 .registry
                 .accepts_at_configured_level(&inner_value, &enclosing_value)
@@ -247,8 +256,8 @@ impl<'a> Checker<'a> {
         // the delegated generator's own TSend must accept everything the
         // enclosing one does (a caller `->send()`ing into the outer
         // generator delegates that same value into the inner one).
-        if enclosing_send != Type::Mixed
-            && inner_send != Type::Mixed
+        if enclosing_send != Type::Mixed(false)
+            && inner_send != Type::Mixed(false)
             && !self.registry.is_assignable(&enclosing_send, &inner_send)
         {
             self.report(
@@ -272,7 +281,7 @@ impl<'a> Checker<'a> {
 /// half the time, so only report when *no* member could possibly be.
 fn yield_from_arg_not_iterable(ty: &Type, registry: &Registry) -> bool {
     match ty {
-        Type::Mixed => false,
+        Type::Mixed(_) => false,
         Type::Array(_, _) | Type::ArrayShape(_) => false,
         Type::Object(class, _) => !registry.is_subclass_of(class, "Traversable"),
         Type::Union(members) | Type::Intersection(members) => members

@@ -517,8 +517,14 @@ impl<'a> Checker<'a> {
                     }
                     if !agg_bindings.is_empty() {
                         return Some((
-                            agg_bindings.get("TKey").cloned().unwrap_or(Type::Mixed),
-                            agg_bindings.get("TValue").cloned().unwrap_or(Type::Mixed),
+                            agg_bindings
+                                .get("TKey")
+                                .cloned()
+                                .unwrap_or(Type::Mixed(false)),
+                            agg_bindings
+                                .get("TValue")
+                                .cloned()
+                                .unwrap_or(Type::Mixed(false)),
                         ));
                     }
                 }
@@ -529,8 +535,11 @@ impl<'a> Checker<'a> {
                     return None;
                 }
                 Some((
-                    bindings.get("TKey").cloned().unwrap_or(Type::Mixed),
-                    bindings.get("TValue").cloned().unwrap_or(Type::Mixed),
+                    bindings.get("TKey").cloned().unwrap_or(Type::Mixed(false)),
+                    bindings
+                        .get("TValue")
+                        .cloned()
+                        .unwrap_or(Type::Mixed(false)),
                 ))
             }
             Type::Union(members) => {
@@ -542,11 +551,13 @@ impl<'a> Checker<'a> {
                     values.push(v);
                 }
                 Some((
-                    keys.into_iter().reduce(union_types).unwrap_or(Type::Mixed),
+                    keys.into_iter()
+                        .reduce(union_types)
+                        .unwrap_or(Type::Mixed(false)),
                     values
                         .into_iter()
                         .reduce(union_types)
-                        .unwrap_or(Type::Mixed),
+                        .unwrap_or(Type::Mixed(false)),
                 ))
             }
             _ => None,
@@ -610,7 +621,7 @@ impl<'a> Checker<'a> {
         // (`Traversable`/`Iterator`/`Generator`/`IteratorAggregate`).
         let (key_ty, element_ty) = match Self::array_element_type(&subject_ty) {
             Some(elem) => (
-                Self::array_key_type(&subject_ty).unwrap_or(Type::Mixed),
+                Self::array_key_type(&subject_ty).unwrap_or(Type::Mixed(false)),
                 elem,
             ),
             None => match self.iterable_element_type(&subject_ty) {
@@ -636,7 +647,7 @@ impl<'a> Checker<'a> {
                             "foreach.nonIterable",
                         );
                     }
-                    (Type::Mixed, Type::Mixed)
+                    (Type::Mixed(false), Type::Mixed(false))
                 }
             },
         };

@@ -1064,7 +1064,7 @@ fn instanceof_against_an_unrelated_interface_also_narrows_to_the_new_interface()
 // call's own return type needs computing without also running full
 // diagnostics) needs the identical `Union`/`Intersection` handling too,
 // or it silently collapses the whole call's return type to
-// `Type::Mixed`.
+// `Type::Mixed(false)`.
 #[test]
 fn a_method_call_on_an_intersection_receiver_infers_its_real_return_type() {
     let d = diagnostics_for(
@@ -1168,7 +1168,7 @@ fn a_method_call_on_a_union_of_two_classes_unions_their_return_types() {
 // `Union`/`Intersection` arm, not just `Object`/`EnumCase`/`ObjectShape`
 // - a property access (unlike the `MethodCall` case just above) on the
 // same kind of `View&HasPageAssets` intersection must not fall
-// straight to `Type::Mixed` just because the receiver was narrowed via
+// straight to `Type::Mixed(false)` just because the receiver was narrowed via
 // `instanceof` from an interface.
 #[test]
 fn instanceof_against_an_unrelated_class_also_resolves_a_property_on_the_intersection() {
@@ -2468,8 +2468,8 @@ fn identity_comparison_narrows_an_unparenthesized_assignment_nested_in_an_if_con
 // their fully-qualified form). A fully-qualified `\false` parses as a
 // plain `ExprKind::Name`, not the `Literal(Bool(false))` a bare `false`
 // gets via `parse_primary`'s own `Keyword::False` match, so it must not
-// silently read as `Type::Mixed` and fall into
-// `apply_equality_narrowing`'s own `target_ty == Type::Mixed` bail-out,
+// silently read as `Type::Mixed(false)` and fall into
+// `apply_equality_narrowing`'s own `target_ty == Type::Mixed(false)` bail-out,
 // skipping the guard's own narrowing entirely.
 #[test]
 fn identity_comparison_narrows_through_a_fully_qualified_false_literal() {

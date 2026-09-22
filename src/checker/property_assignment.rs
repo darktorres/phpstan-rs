@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
                 .or_default()
                 .push(actual.clone());
         }
-        if actual == Type::Mixed
+        if actual == Type::Mixed(false)
             || self
                 .registry
                 .accepts_at_configured_level(&actual, &expected)

@@ -239,7 +239,7 @@ impl<'a> Checker<'a> {
                     let matches_backing = match ty {
                         Type::IntLiteral(_) => backing_type_word == Some("int"),
                         Type::StringLiteral(_) => backing_type_word == Some("string"),
-                        Type::Mixed => true,
+                        Type::Mixed(_) => true,
                         _ => false,
                     };
                     if !matches_backing {

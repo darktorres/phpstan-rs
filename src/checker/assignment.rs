@@ -250,13 +250,13 @@ impl<'a> Checker<'a> {
                     let element_ty = field_key
                         .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
                         .map(|(_, t, _)| t.clone())
-                        .unwrap_or(Type::Mixed);
+                        .unwrap_or(Type::Mixed(false));
                     self.check_param_out_assignment(&item.value, &element_ty, label);
                     self.check_by_ref_destructuring(&item.value, &element_ty, label);
                 }
             }
             Type::Array(..) | Type::Intersection(_) => {
-                let element_ty = Self::array_element_type(ty).unwrap_or(Type::Mixed);
+                let element_ty = Self::array_element_type(ty).unwrap_or(Type::Mixed(false));
                 for item in items {
                     self.check_param_out_assignment(&item.value, &element_ty, label);
                     self.check_by_ref_destructuring(&item.value, &element_ty, label);
@@ -264,8 +264,8 @@ impl<'a> Checker<'a> {
             }
             _ => {
                 for item in items {
-                    self.check_param_out_assignment(&item.value, &Type::Mixed, label);
-                    self.check_by_ref_destructuring(&item.value, &Type::Mixed, label);
+                    self.check_param_out_assignment(&item.value, &Type::Mixed(false), label);
+                    self.check_by_ref_destructuring(&item.value, &Type::Mixed(false), label);
                 }
             }
         }
@@ -338,7 +338,7 @@ impl<'a> Checker<'a> {
                         let element_ty = field_key
                             .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
                             .map(|(_, t, _)| t.clone())
-                            .unwrap_or(Type::Mixed);
+                            .unwrap_or(Type::Mixed(false));
                         self.bind_assignment_target(&item.value, element_ty, locals);
                     }
                 }
@@ -347,14 +347,14 @@ impl<'a> Checker<'a> {
                 // without it, destructuring one (`[$a, $b] = $listTypedVar`)
                 // would lose its real element type down to `Mixed`.
                 Type::Array(..) | Type::Intersection(_) => {
-                    let element_ty = Self::array_element_type(&ty).unwrap_or(Type::Mixed);
+                    let element_ty = Self::array_element_type(&ty).unwrap_or(Type::Mixed(false));
                     for item in items {
                         self.bind_assignment_target(&item.value, element_ty.clone(), locals);
                     }
                 }
                 _ => {
                     for item in items {
-                        self.bind_assignment_target(&item.value, Type::Mixed, locals);
+                        self.bind_assignment_target(&item.value, Type::Mixed(false), locals);
                     }
                 }
             },
@@ -880,7 +880,7 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
 /// `superglobals/_superglobals.php` bootstrap file declares every one of
 /// these (bar `argc`) with a literal `= []` assignment, which is exactly
 /// what real PHPStan's own global-variable seeding generalizes to a bare
-/// `array`, never `null`/`mixed`. Reusing the generic `Type::Mixed`
+/// `array`, never `null`/`mixed`. Reusing the generic `Type::Mixed(false)`
 /// fallback here (as if a superglobal's pre-assignment type were
 /// "unknown/could be anything") broke `$_SESSION ??= [];` specifically:
 /// `widen_coalesce_result`'s own "keep the left side's real array type
@@ -891,10 +891,11 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
 pub(crate) fn superglobal_default_type(name: &str) -> Type {
     match name {
         "argc" => Type::Int,
-        _ if is_superglobal(name) => {
-            Type::Array(Box::new(Type::unknown_array_key()), Box::new(Type::Mixed))
-        }
-        _ => Type::Mixed,
+        _ if is_superglobal(name) => Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
+        _ => Type::Mixed(false),
     }
 }
 
@@ -1079,7 +1080,7 @@ fn write_index_into(
                 updated
                     .into_iter()
                     .reduce(union_types)
-                    .unwrap_or(Type::Mixed),
+                    .unwrap_or(Type::Mixed(false)),
             )
         }
         // A `list<T>`/`non-empty-array<T>` container is an

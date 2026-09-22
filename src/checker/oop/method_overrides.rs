@@ -478,7 +478,7 @@ impl<'a> Checker<'a> {
             // this project's narrower scope elsewhere in this function
             // (`parameter.missing` above explicitly skips the fuller
             // variadic-contravariance treatment too). Neither is gated on
-            // either side being `Type::Mixed` - both are about calling-
+            // either side being `Type::Mixed(false)` - both are about calling-
             // convention compatibility, not type compatibility.
             if own_param.by_ref != ancestor_param.by_ref {
                 let (message, identifier) = if own_param.by_ref {
@@ -522,7 +522,7 @@ impl<'a> Checker<'a> {
                     "parameter.notVariadic",
                 );
             }
-            // `Type::Mixed` is overloaded throughout this project to
+            // `Type::Mixed(false)` is overloaded throughout this project to
             // mean both real PHP `mixed` and "no type declared at all,
             // native or docblock" - and real PHP explicitly does not
             // enforce override compatibility for a parameter/return
@@ -546,7 +546,9 @@ impl<'a> Checker<'a> {
             // alone while leaving a wide native hint unchanged, as an
             // LSP violation real PHPStan doesn't, by default, check at
             // all.
-            if own_param.ty_native == Type::Mixed || ancestor_param.ty_native == Type::Mixed {
+            if own_param.ty_native == Type::Mixed(false)
+                || ancestor_param.ty_native == Type::Mixed(false)
+            {
                 continue;
             }
             // A bare `self`/`static` in either signature means "an
@@ -606,8 +608,8 @@ impl<'a> Checker<'a> {
         // faithfully keeps the ancestor's native `array` while the
         // ancestor's interface had separately narrowed it to `list<...>`
         // via docblock alone.
-        if own_sig.return_type_native != Type::Mixed
-            && ancestor_sig.return_type_native != Type::Mixed
+        if own_sig.return_type_native != Type::Mixed(false)
+            && ancestor_sig.return_type_native != Type::Mixed(false)
             && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
             && !self.registry.is_assignable(
                 &own_sig.return_type_native,
