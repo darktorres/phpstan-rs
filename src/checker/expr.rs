@@ -935,7 +935,7 @@ impl<'a> Checker<'a> {
                     // Unioned with an empty shape for the real
                     // `0`-return/no-match case (real PHP genuinely sets
                     // `$matches = []` then) - sound on its own only
-                    // because `check_shape_key_access`/`infer_expr`'s
+                    // because `check_offset_existence`/`infer_expr`'s
                     // `Index` arm are `Union`-aware, and precision for the
                     // common `if (preg_match(...)) { use $matches }`
                     // idiom is recovered by `apply_narrowing`'s
@@ -1878,6 +1878,11 @@ impl<'a> Checker<'a> {
                 // `ExprKind::ArrayLiteral` target - no separate
                 // `ExprKind::List` variant exists) destructuring a value
                 // confirmed to never be array-like at all.
+                if let ExprKind::ArrayLiteral(items) = &lhs.kind
+                    && !self.type_confirmed_not_destructurable(&rhs_ty)
+                {
+                    self.check_destructuring_offsets(items, &rhs_ty, locals, label);
+                }
                 if matches!(&lhs.kind, ExprKind::ArrayLiteral(_))
                     && self.type_confirmed_not_destructurable(&rhs_ty)
                 {
@@ -2107,7 +2112,7 @@ impl<'a> Checker<'a> {
                     Some(i) => {
                         self.check_expr(i, locals, label);
                         self.check_offset_accessibility(&base_ty, i, label);
-                        self.check_shape_key_access(base, i, locals, label);
+                        self.check_offset_existence(base, i, locals, label);
                         self.check_dim_fetch_key_type(base, i, locals, label);
                         // The `Index` counterpart of `PropertyAccess`'s
                         // "check the narrowed key first" handling above -
@@ -4876,7 +4881,7 @@ impl<'a> Checker<'a> {
                     closure_locals.insert(p.name.to_string(), ty.clone());
                 }
                 // Only the common single-implicit-return-statement body
-                // shape is handled (mirrors check_shape_key_access's
+                // shape is handled (mirrors check_offset_existence's
                 // "only handle the shape that actually comes up, don't
                 // guess at the rest" precedent) - a closure with a more
                 // complex body falls back to the declared hint (still
@@ -5620,7 +5625,7 @@ fn advance_incdec_type(ty: &Type, is_increment: bool) -> Type {
 /// `Union` whose members agree on a key's type, not what recovers
 /// precision for `preg_match`'s common case (that's `apply_narrowing`'s
 /// `preg_match_condition` recognizer, `checker/narrowing.rs`).
-fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
+pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
     match container_ty {
         Type::Array(_, inner) => *inner,
         // A genuinely empty shape has zero possible keys, so a dynamic
@@ -5640,7 +5645,7 @@ fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
         // forcing every unnarrowed `$matches[N]` access to handle a null
         // case most callers never bother to. A literal key miss already
         // has its own "key not found" diagnostic path
-        // (`check_shape_key_access`) regardless of what this function
+        // (`check_offset_existence`) regardless of what this function
         // returns.
         Type::ArrayShape(fields) if fields.is_empty() && key.is_none() => Type::Null,
         Type::ArrayShape(fields) => key

@@ -4,7 +4,7 @@
 //! `argument.unpackNonIterable` - flags a receiver/operand whose type is
 //! confirmed to never support the attempted operation at all, closing the
 //! gap the existing `method.notFound`/`property.notFound`/
-//! `shapeAccess.notFound` family leaves for a non-object/non-iterable/
+//! `offsetAccess.notFound` family leaves for a non-object/non-iterable/
 //! non-array-like value (see `registry::global_vars`'s own sibling
 //! feature for the "already resolved to a real class" half of this
 //! story).
@@ -375,7 +375,7 @@ mod offset_non_accessible {
     fn a_write_onto_a_null_or_scalar_base_is_not_flagged_by_this_check() {
         // Real PHP auto-vivifies `null` into an array on write - this
         // check is deliberately read-only, mirroring
-        // `check_shape_key_access`'s own identical write-side exclusion.
+        // `check_offset_existence`'s own identical write-side exclusion.
         let d = diagnostics_for(
             r#"<?php
                 function f() {

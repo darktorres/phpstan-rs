@@ -506,7 +506,7 @@ fn handle_assignment_target<'a>(
                 // = $lang_info;`). The precise nested value type isn't
                 // tracked, but the outermost key's own *existence* is
                 // real and must be recorded - missing it here is exactly
-                // what produced a real false `shapeAccess.notFound`/
+                // what produced a real false `offsetAccess.notFound`/
                 // `isset.offset` on `$switch_lang['language']` reads
                 // elsewhere before this arm existed (confirmed via a
                 // piwigo16 corpus diff, not hypothesized).

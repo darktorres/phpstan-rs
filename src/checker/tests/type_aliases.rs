@@ -29,7 +29,7 @@ fn a_return_type_referencing_a_local_alias_is_expanded() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+    assert_eq!(d[0].identifier, "offsetAccess.notFound");
 }
 
 #[test]
@@ -129,7 +129,7 @@ fn an_inline_var_annotation_referencing_a_local_alias_is_expanded() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+    assert_eq!(d[0].identifier, "offsetAccess.notFound");
 }
 
 #[test]
@@ -190,7 +190,7 @@ fn a_type_imported_from_another_class_is_expanded_the_same_as_a_local_alias() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+    assert_eq!(d[0].identifier, "offsetAccess.notFound");
 }
 
 #[test]
@@ -220,7 +220,7 @@ fn an_import_can_rename_the_alias_via_as() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+    assert_eq!(d[0].identifier, "offsetAccess.notFound");
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn an_import_resolves_correctly_across_namespaces() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+    assert_eq!(d[0].identifier, "offsetAccess.notFound");
 }
 
 #[test]

@@ -1,7 +1,7 @@
 //! `Registry::global_variables` - a `global $x;`-declared variable now
 //! resolves to its own inferred type instead of unconditionally falling
 //! back to `Mixed`, so checks that already exist (`method.notFound`,
-//! `isset.offset`/`shapeAccess.notFound`) start firing correctly on it.
+//! `isset.offset`/`offsetAccess.notFound`) start firing correctly on it.
 use super::helpers::*;
 
 #[test]

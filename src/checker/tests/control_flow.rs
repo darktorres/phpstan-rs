@@ -1162,8 +1162,8 @@ fn a_bare_break_inside_a_switch_inside_a_loop_does_not_leak_to_the_loop() {
 // `For`'s "may run zero times" treatment, for consistency) would be
 // wrong here: every key iterated over really does get the loop's own
 // treatment, so unioning in the stale pre-loop shape as an "also
-// possible" alternative would produce a false "array{...} has no key
-// 'derivative'" the real code never risks. `Foreach` deliberately keeps
+// possible" alternative would produce a false "Offset 'derivative' does
+// not exist" the real code never risks. `Foreach` deliberately keeps
 // checking its body once directly
 // against the real `locals`, gaining only the `break`-state capture.
 #[test]
@@ -1237,14 +1237,14 @@ fn a_coalesce_assign_on_a_property_target_rebinds_it() {
 }
 
 // isset()/empty()'s own direct argument must not go through the
-// ordinary check_expr, hitting the same check_shape_key_access a bare
+// ordinary check_expr, hitting the same check_offset_existence a bare
 // read would - probing a possibly-absent key is exactly what
 // isset()/empty() are for, and real PHP/PHPStan never flag it that way.
 //
 // Real PHPStan's own `checkAdvancedIsset` (live at level 4+) genuinely
 // does flag `isset($shaped['b'])` here - `b` is provably absent from
 // `array{a: string}`, a real, distinct diagnostic (`isset.offset`,
-// "does not exist") from the check_shape_key_access shape above.
+// "does not exist") from the check_offset_existence shape above.
 // `empty()` gets the identical offset/property treatment as `isset()`
 // (both funnel through the same real PHPStan `IssetCheck`) -
 // `empty($x['c'])` is flagged too, `empty.offset`, since `c` is just as
@@ -1260,8 +1260,8 @@ fn isset_and_empty_on_a_shape_s_missing_key_never_hit_the_old_shape_key_bug() {
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
-        "the old check_shape_key_access bug reappeared: {d:?}"
+        !d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
+        "the old check_offset_existence bug reappeared: {d:?}"
     );
     assert_eq!(d.len(), 2, "expected isset.offset and empty.offset: {d:?}");
     assert!(d.iter().any(|x| x.identifier == "isset.offset"));

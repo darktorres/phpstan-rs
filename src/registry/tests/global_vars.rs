@@ -444,7 +444,7 @@ fn a_multi_level_nested_index_write_still_records_its_outermost_key() {
     // doesn't match the single-level `$name['key'] = value` shape at
     // all, but the outermost key's own existence is still real and must
     // be recorded - missing it produced a genuine false
-    // `shapeAccess.notFound` on `$switch_lang['language']` reads
+    // `offsetAccess.notFound` on `$switch_lang['language']` reads
     // elsewhere, confirmed via a piwigo16 corpus diff before this test
     // was written.
     let registry = build_with_files(&[(

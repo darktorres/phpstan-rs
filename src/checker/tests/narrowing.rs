@@ -1783,7 +1783,7 @@ fn reassigning_the_subscript_variable_invalidates_the_narrowed_entry() {
 fn reassigning_an_intermediate_property_link_invalidates_a_deeper_narrowed_entry() {
     // Reassigning $foo->bar to a fresh literal that *keeps* key 'k'
     // (just with a different value type) sidesteps the unrelated
-    // "array{...} has no key" check (`check_shape_key_access` runs
+    // "Offset ... does not exist" check (`check_offset_existence` runs
     // unconditionally, independent of narrowing) while still
     // exercising this fix directly: without it, the stale
     // `int`-narrowed `"foo->bar[k]"` entry would still win over the

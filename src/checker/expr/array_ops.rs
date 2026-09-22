@@ -729,7 +729,7 @@ impl<'a> Checker<'a> {
     /// one, exactly the leniency a still-generic key type needs.
     ///
     /// Fires on both a read (`$arr[$key]`) and a write (`$arr[$key] =
-    /// ...`) - unlike `check_shape_key_access` (which deliberately skips
+    /// ...`) - unlike `check_offset_existence` (which deliberately skips
     /// the write side: a *missing* shape key isn't a bug on write, real
     /// PHP auto-vivifies it), this rule is about the key's own *type*,
     /// exactly as illegal on a write as a read regardless of whether the

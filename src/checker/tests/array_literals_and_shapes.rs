@@ -136,7 +136,7 @@ fn destructuring_a_swap_from_an_inline_array_literal_gets_real_per_position_type
 #[test]
 fn building_an_array_progressively_via_index_assignment_is_not_flagged() {
     // `$x = []; $x['a'] = ...;` is one of the most common ways to
-    // build an array in real PHP - check_shape_key_access must not
+    // build an array in real PHP - check_offset_existence must not
     // treat the literal's own
     // starting shape as a sealed contract the array can never grow
     // past, either at the write site itself or at a later read.
@@ -193,7 +193,7 @@ fn reading_a_key_never_assigned_after_building_an_array_progressively_is_still_f
     );
     assert!(
         d.iter()
-            .any(|x| x.message.contains("array{...} has no key 'b'")),
+            .any(|x| x.message.contains("Offset 'b' does not exist on")),
         "expected a missing-key diagnostic, got: {d:?}"
     );
 }
@@ -241,7 +241,7 @@ fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {
     // A real, deliberate cost of this design, pinned down as a test
     // rather than left as prose: once `$x` is widened away from
     // `Type::ArrayShape` by an append/dynamic-key write anywhere in
-    // its lifetime, `check_shape_key_access` (which only fires on
+    // its lifetime, `check_offset_existence` (which only fires on
     // `Type::ArrayShape`) stops catching a genuine typo on *any* key
     // of that variable from that point on - not just the new one.
     let d = diagnostics_for(
@@ -402,7 +402,7 @@ fn a_foreach_mutating_its_own_subject_array_that_a_prior_maybe_empty_loop_built_
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        !d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
         "unexpected diagnostics: {d:?}"
     );
 }
@@ -436,7 +436,7 @@ fn a_foreach_writing_into_a_by_ref_value_variable_widens_the_subjects_own_elemen
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        !d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
         "unexpected diagnostics: {d:?}"
     );
 }
@@ -463,8 +463,8 @@ fn a_foreach_writing_into_a_plain_by_value_variable_does_not_widen_the_subject()
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
-        "expected shapeAccess.notFound, got: {d:?}"
+        d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
+        "expected offsetAccess.notFound, got: {d:?}"
     );
 }
 
@@ -526,7 +526,7 @@ fn a_flat_write_into_a_union_of_array_shapes_updates_every_member() {
 // (`$info['updates'][] = ...`), never a flat `$info['updates'] = [];`
 // first. `check_assignment_target`'s `Index` arm must not route the
 // inner `$info['updates']` sub-expression through `check_expr`, which
-// would wrongly check it as a genuine read via `check_shape_key_access`.
+// would wrongly check it as a genuine read via `check_offset_existence`.
 #[test]
 fn a_nested_append_creating_a_brand_new_key_on_a_union_typed_container_is_not_flagged() {
     let d = diagnostics_for(
@@ -1070,7 +1070,7 @@ fn shape_key_typo_is_flagged() {
     );
     assert_eq!(d.len(), 1);
     assert!(d[0].message.contains("'agee'"));
-    assert_eq!(d[0].level, 2);
+    assert_eq!(d[0].level, 3);
 }
 
 #[test]
@@ -1263,7 +1263,7 @@ fn accessing_an_undeclared_key_of_an_unsealed_shape_is_never_flagged() {
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        !d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
         "unexpected diagnostics: {d:?}"
     );
 }
@@ -1284,7 +1284,7 @@ fn a_quoted_shape_key_with_a_hyphen_is_parsed_and_looked_up_correctly() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert_eq!(d[0].identifier, "shapeAccess.notFound");
+    assert_eq!(d[0].identifier, "offsetAccess.notFound");
 }
 
 #[test]
@@ -1959,4 +1959,75 @@ fn unpacking_string_keys_is_gated_on_php_8_1() {
         ]
     );
     assert!(found((8, 1)).is_empty());
+}
+
+#[test]
+fn offsets_a_general_array_or_list_can_never_have_are_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param array<int, string> $byInt
+             * @param array<string, int> $byName
+             * @param list<int> $list
+             */
+            function f(array $byInt, array $byName, array $list): void {
+                echo $byInt['name'];
+                echo $byInt[3];
+                echo $byInt['3'];
+                echo $byName[0];
+                echo $byName['x'];
+                echo $list[-1];
+                echo $list['k'];
+                echo $list[0];
+                $empty = [];
+                echo $empty['gone'];
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "offsetAccess.notFound")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Offset 'name' does not exist on array<int, string>.",
+            "Offset 0 does not exist on array<string, int>.",
+            "Offset -1 does not exist on list<int>.",
+            "Offset 'k' does not exist on list<int>.",
+            "Offset 'gone' does not exist on array{}.",
+        ],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn destructuring_a_missing_key_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param array{0: int, name: string, nested: array{a: int}} $row */
+            function f(array $row): void {
+                [$a, $b] = $row;
+                ['name' => $n, 'age' => $age] = $row;
+                ['nested' => ['a' => $x, 'b' => $y]] = $row;
+                [, , $third] = $row;
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "offsetAccess.notFound")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Offset 1 does not exist on array{0: int, name: string, nested: array{a: int}}.",
+            "Offset 'age' does not exist on array{0: int, name: string, nested: array{a: int}}.",
+            "Offset 'b' does not exist on array{a: int}.",
+            "Offset 2 does not exist on array{0: int, name: string, nested: array{a: int}}.",
+        ],
+        "got: {d:?}"
+    );
 }

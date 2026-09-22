@@ -8,7 +8,7 @@ impl<'a> Checker<'a> {
     /// Validates a `sprintf`/`printf`/`fprintf`/`vsprintf`/`vprintf`
     /// call's format string against the arguments actually passed - only
     /// when the format string is a
-    /// literal (mirrors `check_shape_key_access`'s own "only a literal,
+    /// literal (mirrors `check_offset_existence`'s own "only a literal,
     /// never a dynamic value" precedent). `fprintf`'s format string is
     /// its *second* argument (`fprintf(resource $stream, string
     /// $format, mixed ...$values)`), not its first - otherwise identical

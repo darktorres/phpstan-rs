@@ -699,7 +699,7 @@ fn a_conditional_by_ref_append_before_an_early_return_still_widens_the_outer_var
     // properly unioning every real exit point's own snapshot (not just
     // the final one), the outer `$calls` stays the stale, empty
     // `array{}` it started as, and `$calls[0]` false-positives
-    // `shapeAccess.notFound`.
+    // `offsetAccess.notFound`.
     let d = diagnostics_for(
         r#"<?php
             function fakeHttp(callable $cb): void {}
@@ -721,7 +721,7 @@ fn a_conditional_by_ref_append_before_an_early_return_still_widens_the_outer_var
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "shapeAccess.notFound"),
+        !d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
         "unexpected diagnostics: {d:?}"
     );
 }

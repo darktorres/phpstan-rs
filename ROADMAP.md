@@ -569,7 +569,11 @@ flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
 `array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule` (`foreach.emptyArray`). `OffsetAccessWithoutDimForReadingRule`
 (`offsetAccess.noDim`; a by-reference argument slot and `$r = &$a[]`
 legally create the element). `ArrayUnpackingRule`'s
-`arrayUnpacking.stringOffset` below PHP 8.1.
+`arrayUnpacking.stringOffset` below PHP 8.1. `NonexistentOffsetInArrayDimFetchCheck`'s
+definite half as `offsetAccess.notFound` (replacing this project's own
+`shapeAccess.notFound`): a literal key missing from a sealed shape, or
+ruled out by a general array's/list's key type, on reads and on every
+destructured key (`ArrayDestructuringRule`'s per-key half).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3611,14 +3615,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 132 — Arrays (`Rules/Arrays/` gaps)
 
-- `ArrayDestructuringRule` remainder — the RHS-is-array-like half
-  (`offsetAccess.nonArray`) is now built (receiver-type-checks phase);
-  the per-key-existence half is still open.
-- `NonexistentOffsetInArrayDimFetchRule` remainder — the "isn't offset-
-  accessible at all" half is now built (`shapeAccess.notFound` for the
-  shape case, receiver-type-checks phase); general-array/constant-array
-  key-existence checking beyond shapes is still open. (Ties into Phase
-  85's A3 sizing note.)
 - `OffsetAccessAssignmentRule`/`OffsetAccessAssignOpRule` — an illegal
   key type for `$arr[$key] = $v`/compound-assign.
 - `OffsetAccessValueAssignmentRule` — assigning a wrong-typed value into

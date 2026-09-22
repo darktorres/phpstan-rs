@@ -169,7 +169,7 @@ impl<'a> Checker<'a> {
             // Same reasoning as PropertyAccess just above, for the exact
             // same reason: `$x['newKey'] = ...` defines that key, it
             // doesn't read it - routing the full Index expression through
-            // check_expr's own Index arm would call check_shape_key_access
+            // check_expr's own Index arm would call check_offset_existence
             // and wrongly flag the ordinary "start from an array literal,
             // build it up one key at a time" idiom as accessing a
             // nonexistent key of an already-fully-known shape (Finding
@@ -182,7 +182,7 @@ impl<'a> Checker<'a> {
             // must recurse through `check_assignment_target` for that
             // inner base too, not `check_expr`: `$piwigoInfos['updates']`
             // is itself part of this same write's path, not a value
-            // being read, so `check_shape_key_access` must not run on it
+            // being read, so `check_offset_existence` must not run on it
             // either. Generalizes over any nesting depth, the same way
             // `bind_assignment_target`'s `Index` arm does for the write
             // side.
@@ -207,7 +207,7 @@ impl<'a> Checker<'a> {
                 }
                 if let Some(i) = idx {
                     self.check_expr(i, locals, label);
-                    // Unlike `check_shape_key_access` (deliberately
+                    // Unlike `check_offset_existence` (deliberately
                     // skipped on the write side just above - a *missing*
                     // shape key isn't a bug on write, PHP auto-vivifies
                     // it), a key's own *illegal type* is exactly as real
@@ -610,69 +610,90 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Flags `$x['key']` when `$x`'s type is a known `ArrayShape` and 'key'
-    /// isn't one of its declared fields - a real typo-catcher, not a guess:
-    /// only fires when the shape is fully known and the key is a literal,
-    /// so a dynamic key or an unknown array type is never flagged. Reading
-    /// a genuinely *optional* field is not flagged either - that's a
-    /// possibly-undefined-index warning, a different (and noisier) check
-    /// this prototype doesn't attempt.
-    ///
-    /// Also handles a `Type::Union` of `ArrayShape`s (e.g. `preg_match`'s
-    /// `$matches`, unioned with an empty shape for the no-match case) -
-    /// present in any member is enough not to flag, generalizing the
-    /// same per-shape `optional`-field leniency across the whole `Union`
-    /// rather than only within one shape. A member that isn't an
-    /// `ArrayShape` at all means "don't know" for at least part of the
-    /// type, so the whole check backs off.
-    pub(crate) fn check_shape_key_access(
+    /// `NonexistentOffsetInArrayDimFetchCheck`'s definite half
+    /// (`offsetAccess.notFound`): a read of an offset `$x`'s type proves
+    /// can never exist - a literal key missing from a known sealed shape
+    /// (a union of shapes only when every member lacks it; an optional
+    /// field counts as present), or a literal key whose kind a general
+    /// array's key type rules out (a
+    /// non-numeric string on int keys or a list, an int on string keys,
+    /// a negative int on a list).
+    pub(crate) fn check_offset_existence(
         &mut self,
         base: &Expr,
         idx: &Expr,
         locals: &Locals,
         label: &str,
     ) {
-        let Some(key) = literal_string_key(idx) else {
-            return;
-        };
-        let ty = self.infer_expr(base, locals);
-        let members: Vec<Type> = match ty {
-            Type::Union(m) => m,
-            other => vec![other],
-        };
-        let shapes: Vec<&Vec<(String, Type, bool)>> = members
-            .iter()
-            .filter_map(|m| match m {
-                Type::ArrayShape(fields) => Some(fields),
-                _ => None,
-            })
-            .collect();
-        if shapes.is_empty() || shapes.len() != members.len() {
-            return;
+        let container = self.infer_expr(base, locals);
+        let dim = self.infer_expr(idx, locals);
+        self.report_missing_offset(&container, &dim, idx.span, label);
+    }
+
+    /// `ArrayDestructuringRule`'s per-key half: every destructured key
+    /// (a position, or an explicit key) checked against the destructured
+    /// value, recursing into a nested destructuring target.
+    pub(crate) fn check_destructuring_offsets(
+        &mut self,
+        items: &[ArrayItem],
+        container: &Type,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let mut position: i64 = 0;
+        for item in items {
+            if item.spread {
+                continue;
+            }
+            if item.key.is_none() && matches!(item.value.kind, ExprKind::Literal(Literal::Null)) {
+                position += 1;
+                continue;
+            }
+            let (dim, span) = match &item.key {
+                Some(k) => (self.infer_expr(k, locals), k.span),
+                None => {
+                    position += 1;
+                    (Type::IntLiteral(position - 1), item.value.span)
+                }
+            };
+            if self.report_missing_offset(container, &dim, span, label) {
+                continue;
+            }
+            if let ExprKind::ArrayLiteral(inner) = &item.value.kind {
+                let key = normalized_literal_key(&dim).map(|(k, _)| k);
+                let inner_container =
+                    crate::checker::expr::index_result_type(container.clone(), key.as_deref());
+                self.check_destructuring_offsets(inner, &inner_container, locals, label);
+            }
         }
-        // An unsealed shape (`is_unsealed_shape`'s doc comment) may
-        // carry the key even though it isn't one of its declared fields -
-        // the same "any union member could plausibly have it" leniency
-        // this check extends to a key genuinely declared on only one arm
-        // of the union, just for a different reason.
-        if shapes.iter().any(|fields| {
-            fields.iter().any(|(name, _, _)| *name == key) || is_unsealed_shape(fields)
-        }) {
-            return;
+    }
+
+    /// Reports `offsetAccess.notFound` when `container` provably lacks
+    /// `dim`. Returns whether it did.
+    pub(crate) fn report_missing_offset(
+        &mut self,
+        container: &Type,
+        dim: &Type,
+        span: crate::token::Span,
+        label: &str,
+    ) -> bool {
+        if offset_verdict(container, dim) != Some(false) {
+            return false;
         }
         self.report(
             label.to_string(),
-            format!("array{{...}} has no key '{key}'"),
-            idx.span,
-            2,
-            "shapeAccess.notFound",
+            format!("Offset {dim} does not exist on {container}."),
+            span,
+            3,
+            "offsetAccess.notFound",
         );
+        true
     }
 
     /// Flags `$x[...]` (a read) when `$x`'s type is confirmed to never be
     /// offset-accessible at all (`offsetAccess.nonOffsetAccessible`) -
     /// mirrors real PHPStan's `Type::isOffsetAccessible()`. **Read-only**,
-    /// mirroring `check_shape_key_access`'s own explicit write-side
+    /// mirroring `check_offset_existence`'s own explicit write-side
     /// exclusion: `$x = null; $x['a'] = 1;` legally auto-vivifies `$x`
     /// into an array on write, so this is only ever wired into a read
     /// site, never `check_assignment_target`'s.
@@ -1311,4 +1332,93 @@ pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>
         }
         _ => None,
     }
+}
+
+/// A literal array key's normalized form: an int key as its decimal
+/// text, a numeric-integer string likewise, any other string as-is.
+fn normalized_literal_key(dim: &Type) -> Option<(String, bool)> {
+    match dim {
+        Type::IntLiteral(n) => Some((n.to_string(), true)),
+        Type::StringLiteral(s) if s.parse::<i64>().is_ok_and(|n| n.to_string() == *s) => {
+            Some((s.clone(), true))
+        }
+        Type::StringLiteral(s) => Some((s.clone(), false)),
+        Type::True => Some(("1".to_string(), true)),
+        Type::False => Some(("0".to_string(), true)),
+        Type::Null => Some((String::new(), false)),
+        _ => None,
+    }
+}
+
+/// Whether `container` definitely has (`Some(true)`), definitely lacks
+/// (`Some(false)`), or might have (`None`) the offset `dim`.
+pub(crate) fn offset_verdict(container: &Type, dim: &Type) -> Option<bool> {
+    match container {
+        Type::ArrayShape(fields) => {
+            if is_unsealed_shape(fields) {
+                return None;
+            }
+            let (key, _) = normalized_literal_key(dim)?;
+            match fields.iter().find(|(name, _, _)| *name == key) {
+                Some((_, _, false)) => Some(true),
+                Some((_, _, true)) => None,
+                None => Some(false),
+            }
+        }
+        Type::Array(key_ty, _) => general_array_offset_verdict(key_ty, false, dim),
+        Type::Intersection(members) => {
+            let is_list = members
+                .iter()
+                .any(|m| matches!(m, Type::Accessory(crate::types::AccessoryKind::ArrayList)));
+            let key_ty = members.iter().find_map(|m| match m {
+                Type::Array(k, _) => Some(k.as_ref()),
+                _ => None,
+            })?;
+            general_array_offset_verdict(key_ty, is_list, dim)
+        }
+        Type::Union(members) => {
+            let verdicts: Vec<Option<bool>> =
+                members.iter().map(|m| offset_verdict(m, dim)).collect();
+            if verdicts.iter().all(|v| *v == Some(false)) {
+                Some(false)
+            } else if verdicts.iter().all(|v| *v == Some(true)) {
+                Some(true)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+fn general_array_offset_verdict(key_ty: &Type, is_list: bool, dim: &Type) -> Option<bool> {
+    let (key, is_int_key) = normalized_literal_key(dim)?;
+    let key_kinds = |t: &Type| -> (bool, bool) {
+        match t {
+            Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => (true, false),
+            Type::String | Type::StringLiteral(_) | Type::ClassString(_) => (false, true),
+            _ => (true, true),
+        }
+    };
+    let (may_be_int, may_be_string) = match key_ty {
+        Type::Union(members) => members
+            .iter()
+            .map(key_kinds)
+            .fold((false, false), |a, b| (a.0 || b.0, a.1 || b.1)),
+        Type::Intersection(members) => members
+            .iter()
+            .map(key_kinds)
+            .fold((true, true), |a, b| (a.0 && b.0, a.1 && b.1)),
+        other => key_kinds(other),
+    };
+    if is_list {
+        return (!is_int_key || key.starts_with('-')).then_some(false);
+    }
+    if is_int_key && !may_be_int {
+        return Some(false);
+    }
+    if !is_int_key && !may_be_string {
+        return Some(false);
+    }
+    None
 }

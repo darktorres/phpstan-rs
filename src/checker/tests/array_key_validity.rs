@@ -205,7 +205,7 @@ fn a_dim_fetch_with_an_object_typed_key_is_flagged() {
 
 #[test]
 fn a_dim_fetch_write_with_an_object_typed_key_is_also_flagged() {
-    // Unlike `check_shape_key_access` (which deliberately skips the
+    // Unlike `check_offset_existence` (which deliberately skips the
     // write side - auto-vivification), this rule fires just as much on
     // a write: the key's own type is exactly as illegal regardless of
     // whether the array grows.
