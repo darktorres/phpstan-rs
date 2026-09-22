@@ -412,7 +412,7 @@ fn a_closure_literal_is_displayed_with_its_own_declared_signature() {
                 $f = function (int $x, string ...$rest): string { return ''; };
                 assertType('Closure(int, string...): string', $f);
                 $g = fn (?int $y = null) => $y;
-                assertType('Closure(int|null=): mixed', $g);
+                assertType('Closure(int|null=): int|null', $g);
             }
         "#,
     );
@@ -427,6 +427,11 @@ fn invoking_a_closure_literal_variable_infers_its_declared_return_type() {
             function test(): void {
                 $f = fn (int $x): string => (string) $x;
                 assertType('string', $f(1));
+                $g = fn (int $x) => $x > 0;
+                assertType('Closure(int): bool', $g);
+                assertType('bool', $g(1));
+                $h = function (int $x) { return $x; };
+                assertType('Closure(int): mixed', $h);
             }
         "#,
     );

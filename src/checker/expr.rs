@@ -3718,7 +3718,7 @@ impl<'a> Checker<'a> {
                         locals.insert(u.name.to_string(), mutated);
                     }
                 }
-                self.closure_literal_type(params, return_type.as_deref())
+                self.closure_literal_type(params, return_type.as_deref(), None)
             }
             ExprKind::ArrowFn {
                 params,
@@ -3878,7 +3878,11 @@ impl<'a> Checker<'a> {
                     current_class_for_internal_check.as_deref(),
                     label,
                 );
-                self.closure_literal_type(params, return_type.as_deref())
+                self.closure_literal_type(
+                    params,
+                    return_type.as_deref(),
+                    (return_type.is_none() && !expr_contains_yield(body)).then(|| body_ty.clone()),
+                )
             }
             // `foo(...)`/`$obj->method(...)`/`Class::method(...)` (PHP 8.1
             // first-class-callable syntax) always wraps a
@@ -4166,12 +4170,17 @@ impl<'a> Checker<'a> {
                 params,
                 return_type,
                 ..
-            }
-            | ExprKind::ArrowFn {
+            } => self.closure_literal_type(params, return_type.as_deref(), None),
+            ExprKind::ArrowFn {
                 params,
                 return_type,
+                body,
                 ..
-            } => self.closure_literal_type(params, return_type.as_deref()),
+            } => {
+                let inferred =
+                    self.arrow_fn_inferred_return(params, return_type.as_deref(), body, locals);
+                self.closure_literal_type(params, return_type.as_deref(), inferred)
+            }
             ExprKind::Match {
                 subject,
                 arms,
@@ -5629,12 +5638,17 @@ impl<'a> Checker<'a> {
 
     /// A closure/arrow-fn literal's own type (`Type::closure_literal`):
     /// its declared native parameter types and return type, `self`/
-    /// `static` resolved against the enclosing class. An unhinted
-    /// parameter or return is `mixed`, which the callable-shape
-    /// comparison treats as "any" - real PHPStan would use the body's own
-    /// inferred return type there instead, a further precision step not
-    /// taken yet.
-    pub(crate) fn closure_literal_type(&self, params: &[Param], return_type: Option<&str>) -> Type {
+    /// `static` resolved against the enclosing class. An unhinted return
+    /// takes `inferred_return` when the caller has one (an arrow fn's own
+    /// body-expression type, which is what real PHPStan's `ClosureType`
+    /// reports), and is `mixed` otherwise; an unhinted parameter is
+    /// `mixed`. The callable-shape comparison treats `mixed` as "any".
+    pub(crate) fn closure_literal_type(
+        &self,
+        params: &[Param],
+        return_type: Option<&str>,
+        inferred_return: Option<Type>,
+    ) -> Type {
         let resolve = |hint: Option<&str>| {
             let ty = self.resolve_type_hint(hint);
             match &self.current_class {
@@ -5652,8 +5666,37 @@ impl<'a> Checker<'a> {
                     by_ref: p.by_ref,
                 })
                 .collect(),
-            return_type: Box::new(resolve(return_type)),
+            return_type: Box::new(match (return_type, inferred_return) {
+                (None, Some(inferred)) => inferred,
+                (hint, _) => resolve(hint),
+            }),
         })
+    }
+
+    /// An unhinted, non-generator arrow fn's own return type: its body
+    /// expression inferred against the enclosing scope (captured by
+    /// value, the same as `check_expr`'s arm) with its parameters bound.
+    fn arrow_fn_inferred_return(
+        &self,
+        params: &[Param],
+        return_type: Option<&str>,
+        body: &Expr,
+        locals: &Locals,
+    ) -> Option<Type> {
+        if return_type.is_some() || expr_contains_yield(body) {
+            return None;
+        }
+        let mut arrow_locals = locals.clone();
+        for p in params {
+            let ty = self.resolve_type_hint(p.type_hint.as_deref());
+            let ty = if p.variadic {
+                Type::Array(Box::new(Type::unknown_array_key()), Box::new(ty))
+            } else {
+                ty
+            };
+            arrow_locals.insert(p.name.to_string(), ty);
+        }
+        Some(self.infer_expr(body, &arrow_locals))
     }
 }
 

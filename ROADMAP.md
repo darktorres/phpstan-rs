@@ -566,7 +566,8 @@ target resolution** (`$obj::method()`, Phase 158):
 `"?"` sentinel - existence, visibility, arg-type checking, return-type
 inference, and LSP hover/go-to-definition all now work through
 `$obj::method()`, not just `Foo::method()`. A closure/arrow-fn literal's own value carries its declared
-signature too (`Type::closure_literal`: an `Object("Closure") &
+signature too - an unhinted, non-generator arrow fn's return is its
+body expression's own inferred type (`Type::closure_literal`: an `Object("Closure") &
 Callable(Some(sig))` intersection, displayed `Closure(int): string` the
 way real PHPStan displays a `ClosureType`). That means invoking a
 closure-valued variable checks its arguments and infers its declared
@@ -4920,18 +4921,15 @@ a specific, corpus-checked reason to stay deferred.
   materially larger change (value-keyed, not name-keyed, narrowing) than
   a corpus-cleanup pass should take on, and each finding it produces
   today is sound, not a false positive to chase down.
-- **A closure/arrow-fn literal's signature uses its declared return
-  hint, not its inferred body return type.** The declared half is built
-  (see Done's structural Callable/Closure entry): a literal's value is
-  `Type::closure_literal`, carrying its native parameter types and
-  declared return type. An *unhinted* return is still `mixed`, where real
-  PHPStan (confirmed via `\PHPStan\dumpType()`) uses the body's own
-  inferred return type. So `$f = fn(int $x) => (string) $x; $f(1)`
-  infers `mixed` here instead of `string`. For an arrow fn it's one
-  `infer_expr` of the body expression against a scope with the
-  parameters bound. For a full closure it needs the union of every
-  `return` statement's type, which `check_expr` computes as it walks the
-  body but `infer_expr` (which has to agree with it) doesn't.
+- **An unhinted full closure literal's signature has a `mixed` return
+  type, not its inferred body return type.** The declared half is built
+  for both literal kinds, and so is the inferred half for arrow fns: an
+  unhinted, non-generator arrow fn takes its body expression's own type
+  (see Done's structural Callable/Closure entry). An unhinted `function
+  () { return ...; }` is still `Closure(...): mixed`, where real PHPStan
+  (confirmed via `\PHPStan\dumpType()`) reports the union of every
+  `return` statement's type. `check_expr` computes those as it walks the
+  body, but `infer_expr`, which has to agree with it, doesn't.
 - **Correlated-narrowing family** (`ConditionalExpressionHolder`): the
   *general*, unbounded mechanism (an arbitrary boolean-formula memory
   over recorded facts) stays declined - no natural stopping point,
