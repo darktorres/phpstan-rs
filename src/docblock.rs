@@ -401,17 +401,137 @@ pub fn parse(raw: &str) -> DocBlock {
 /// tag's value added any new `parse_errors`. `written` is the tag name as
 /// it appears in the source (prefix included), `tag` the name `apply_tag`
 /// dispatches on.
+///
+/// A tag real PHPStan parses and finds invalid is an `InvalidTagValueNode`
+/// there - it contributes nothing, not whatever a recovering parser could
+/// salvage from it (`@return array(width, height)` gives no return type,
+/// not `array`). So the tag is applied to a scratch block first and only
+/// merged in when it parsed cleanly; its errors are kept either way.
 fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, rest: &str) {
-    let errors_before = block.parse_errors.len();
-    apply_tag(block, tag, rest);
+    let mut scratch = DocBlock::default();
+    apply_tag(&mut scratch, tag, rest);
     let parsed_by_phpstan =
         written.starts_with("phpstan-") || PLAIN_TAGS_PHPSTAN_PARSES.contains(&tag);
-    if parsed_by_phpstan && let Some(first) = block.parse_errors.get(errors_before) {
+    if parsed_by_phpstan && let Some(first) = scratch.parse_errors.first() {
         block.invalid_tag_values.push(InvalidTagValue {
             tag: written.to_string(),
             value: rest.to_string(),
             message: first.message.clone(),
         });
+        block.parse_errors.append(&mut scratch.parse_errors);
+        return;
+    }
+    block.merge_from(scratch);
+}
+
+impl DocBlock {
+    /// Folds one tag's own scratch block (`apply_tag_recording_errors`)
+    /// into `self` with exactly the semantics `apply_tag` would have had
+    /// applying the tag to `self` directly: a single-valued field is
+    /// overwritten when the tag set it, a map/set gains the tag's entries,
+    /// a list is appended (templates deduplicated by name), a flag is
+    /// OR-ed. Destructured exhaustively so a new `DocBlock` field is a
+    /// compile error here until it's handled.
+    fn merge_from(&mut self, other: DocBlock) {
+        let DocBlock {
+            params,
+            param_out,
+            return_type,
+            var_type,
+            var_name,
+            templates,
+            template_bounds,
+            template_defaults,
+            covariant_templates,
+            contravariant_templates,
+            optional_params,
+            extends,
+            implements,
+            uses,
+            properties,
+            api,
+            api_do_not_implement,
+            internal,
+            consistent_constructor,
+            readonly,
+            immutable,
+            is_final,
+            pure,
+            impure,
+            deprecated,
+            throws,
+            see,
+            assert_if_true,
+            assert_if_false,
+            assert,
+            type_aliases,
+            type_imports,
+            require_extends,
+            require_implements,
+            sealed,
+            method_tags,
+            mixins,
+            param_immediately_invoked_callable,
+            param_closure_this,
+            parse_errors,
+            invalid_tag_values,
+        } = other;
+        self.params.extend(params);
+        self.param_out.extend(param_out);
+        if return_type.is_some() {
+            self.return_type = return_type;
+        }
+        if var_type.is_some() {
+            self.var_type = var_type;
+        }
+        if var_name.is_some() {
+            self.var_name = var_name;
+        }
+        for name in templates {
+            if !self.templates.contains(&name) {
+                self.templates.push(name);
+            }
+        }
+        self.template_bounds.extend(template_bounds);
+        self.template_defaults.extend(template_defaults);
+        self.covariant_templates.extend(covariant_templates);
+        self.contravariant_templates.extend(contravariant_templates);
+        self.optional_params.extend(optional_params);
+        if extends.is_some() {
+            self.extends = extends;
+        }
+        self.implements.extend(implements);
+        self.uses.extend(uses);
+        self.properties.extend(properties);
+        self.api |= api;
+        self.api_do_not_implement |= api_do_not_implement;
+        self.internal |= internal;
+        self.consistent_constructor |= consistent_constructor;
+        self.readonly |= readonly;
+        self.immutable |= immutable;
+        self.is_final |= is_final;
+        self.pure |= pure;
+        self.impure |= impure;
+        if deprecated.is_some() {
+            self.deprecated = deprecated;
+        }
+        self.throws.extend(throws);
+        self.see.extend(see);
+        self.assert_if_true.extend(assert_if_true);
+        self.assert_if_false.extend(assert_if_false);
+        self.assert.extend(assert);
+        self.type_aliases.extend(type_aliases);
+        self.type_imports.extend(type_imports);
+        self.require_extends.extend(require_extends);
+        self.require_implements.extend(require_implements);
+        self.sealed.extend(sealed);
+        self.method_tags.extend(method_tags);
+        self.mixins.extend(mixins);
+        self.param_immediately_invoked_callable
+            .extend(param_immediately_invoked_callable);
+        self.param_closure_this.extend(param_closure_this);
+        self.parse_errors.extend(parse_errors);
+        self.invalid_tag_values.extend(invalid_tag_values);
     }
 }
 

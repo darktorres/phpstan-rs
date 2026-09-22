@@ -138,3 +138,24 @@ fn a_psalm_prefixed_tag_with_an_invalid_value_is_not_reported() {
     );
     assert!(errors.is_empty(), "got: {errors:?}");
 }
+
+#[test]
+fn an_invalid_tag_contributes_no_type_at_all() {
+    // Real PHPStan's `InvalidTagValueNode` is ignored entirely - the
+    // recoverable `array` in `array(width, height)` is not a return type,
+    // so returning a string isn't a `return.type` mismatch.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return array(width, height) */
+            function f() { return 'not an array'; }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "phpDoc.parseError"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.type"),
+        "got: {d:?}"
+    );
+}
