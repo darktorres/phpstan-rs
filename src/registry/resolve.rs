@@ -380,12 +380,22 @@ impl Registry {
     /// already allows without help.
     #[hotpath::measure]
     pub(crate) fn resolve_deferred_value_of(&mut self) {
+        self.resolve_class_constant_references();
         let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
         for class_name in class_names {
+            // Only a class with a deferred sentinel somewhere needs its
+            // inherited-constant view (the overwhelming majority, stubs
+            // included, have none).
+            let own_consts = match self.classes.get(&class_name) {
+                Some(info) if class_has_deferred_type(info) => {
+                    visible_class_consts(&class_name, &self.classes)
+                }
+                Some(_) => continue,
+                None => continue,
+            };
             let Some(mut info) = self.classes.remove(&class_name) else {
                 continue;
             };
-            let own_consts = info.consts.clone();
             for sig in info.methods.values_mut() {
                 for param in &mut sig.params {
                     if type_contains_deferred_value_of(&param.ty) {
@@ -474,6 +484,66 @@ impl Registry {
                     &sig.return_type_native,
                     &self.classes,
                 );
+            }
+        }
+    }
+
+    /// Resolves every `"$$classconst"` sentinel inside class constants'
+    /// own types (`const B = self::A;`, `const ALL = [self::A,
+    /// Other::B];` - `infer_class_const_type`'s output) before anything
+    /// else reads them. Iterated to a fixpoint so a chain (`A = self::B`,
+    /// `B = Other::C`, ...) resolves whatever its length, each round a
+    /// read-only computation against the current map followed by an
+    /// apply. A reference still unresolved once nothing changes, or after
+    /// `MAX_ROUNDS` (a cycle, `A = self::B` / `B = self::A`, never stops
+    /// changing), becomes `Mixed` - real PHP itself rejects such a cycle.
+    fn resolve_class_constant_references(&mut self) {
+        const MAX_ROUNDS: usize = 16;
+        for _ in 0..MAX_ROUNDS {
+            let mut updates: Vec<(Arc<str>, Arc<str>, Type)> = Vec::new();
+            for (class_name, info) in &self.classes {
+                if !info
+                    .consts
+                    .values()
+                    .any(|sig| type_contains_deferred_value_of(&sig.ty))
+                {
+                    continue;
+                }
+                let own_consts = visible_class_consts(class_name, &self.classes);
+                for (const_name, sig) in &info.consts {
+                    if !type_contains_deferred_value_of(&sig.ty) {
+                        continue;
+                    }
+                    let step = resolve_deferred_value_of_in_type(
+                        bind_class_const_self(sig.ty.clone(), class_name, &own_consts),
+                        &self.classes,
+                    );
+                    if step != sig.ty {
+                        updates.push((class_name.clone(), const_name.clone(), step));
+                    }
+                }
+            }
+            if updates.is_empty() {
+                break;
+            }
+            for (class_name, const_name, ty) in updates {
+                if let Some(sig) = self
+                    .classes
+                    .get_mut(&class_name)
+                    .and_then(|info| info.consts.get_mut(&const_name))
+                {
+                    sig.ty = ty;
+                }
+            }
+        }
+        for info in self.classes.values_mut() {
+            for sig in info.consts.values_mut() {
+                if type_contains_deferred_value_of(&sig.ty) {
+                    sig.ty = unresolved_class_const_to_mixed(std::mem::replace(
+                        &mut sig.ty,
+                        Type::Mixed(false),
+                    ));
+                }
             }
         }
     }
@@ -1217,10 +1287,66 @@ fn resolve_class_const_type(args: &[Type], classes: &FxHashMap<Arc<str>, ClassIn
     let [Type::Object(fqn, _), Type::StringLiteral(pattern)] = args else {
         return Type::Mixed(false);
     };
-    let Some(info) = classes.get(fqn.trim_start_matches('\\')) else {
+    let fqn = fqn.trim_start_matches('\\');
+    if !classes.contains_key(fqn) {
         return Type::Mixed(false);
-    };
-    matching_class_const_type(&info.consts, pattern)
+    }
+    matching_class_const_type(&visible_class_consts(fqn, classes), pattern)
+}
+
+/// Whether any type `resolve_deferred_value_of` rewrites on `info`
+/// contains a deferred sentinel - lets that pass skip a class outright.
+fn class_has_deferred_type(info: &ClassInfo) -> bool {
+    info.methods.values().any(|sig| {
+        type_contains_deferred_value_of(&sig.return_type)
+            || sig
+                .params
+                .iter()
+                .any(|p| type_contains_deferred_value_of(&p.ty))
+    }) || info.properties.values().any(|p| {
+        type_contains_deferred_value_of(&p.ty)
+            || p.set_ty
+                .as_ref()
+                .is_some_and(type_contains_deferred_value_of)
+    }) || info
+        .consts
+        .values()
+        .any(|c| type_contains_deferred_value_of(&c.ty))
+        || info
+            .template_bounds
+            .values()
+            .any(type_contains_deferred_value_of)
+}
+
+/// Every constant visible on `fqn` - its own, then each parent's and
+/// interface's not already shadowed - the set real PHPStan's
+/// `ClassReflection::getConstants()` resolves a `Foo::*` against. Walked
+/// breadth-first, a class's own declaration winning over an inherited one
+/// of the same name.
+fn visible_class_consts(
+    fqn: &str,
+    classes: &FxHashMap<Arc<str>, ClassInfo>,
+) -> HashMap<Arc<str>, ConstSig> {
+    let mut consts: HashMap<Arc<str>, ConstSig> = HashMap::new();
+    let mut seen: HashSet<Arc<str>> = HashSet::new();
+    let mut queue: std::collections::VecDeque<Arc<str>> = std::collections::VecDeque::new();
+    queue.push_back(Arc::from(fqn));
+    while let Some(name) = queue.pop_front() {
+        if !seen.insert(name.clone()) {
+            continue;
+        }
+        let Some(info) = classes.get(&name) else {
+            continue;
+        };
+        for (const_name, sig) in &info.consts {
+            consts
+                .entry(const_name.clone())
+                .or_insert_with(|| sig.clone());
+        }
+        queue.extend(info.extends.iter().cloned());
+        queue.extend(info.implements.iter().cloned());
+    }
+    consts
 }
 
 /// The union of every constant in `consts` whose name matches `pattern` -
@@ -1302,7 +1428,21 @@ fn value_of_type(ty: Type) -> Type {
 /// `resolve_deferred_value_of_in_type` can't find a class's own constants
 /// there - this runs first, for the one class that's missing.
 fn bind_class_const_self(ty: Type, class: &str, own_consts: &HashMap<Arc<str>, ConstSig>) -> Type {
-    let recurse = |t: Type| bind_class_const_self(t, class, own_consts);
+    bind_class_const_self_at(ty, class, own_consts, 0)
+}
+
+/// `bind_class_const_self`'s body. A substituted constant type can itself
+/// hold a further own-class reference (`A = self::B`), so each
+/// substitution is walked again, `depth` bounding a reference cycle
+/// (`A = self::B`, `B = self::A`), which degrades to `Mixed`.
+fn bind_class_const_self_at(
+    ty: Type,
+    class: &str,
+    own_consts: &HashMap<Arc<str>, ConstSig>,
+    depth: usize,
+) -> Type {
+    const MAX_DEPTH: usize = 16;
+    let recurse = |t: Type| bind_class_const_self_at(t, class, own_consts, depth);
     match ty {
         Type::Object(name, args) if name == "$$classconst" => {
             let names_self = match args.first() {
@@ -1311,9 +1451,13 @@ fn bind_class_const_self(ty: Type, class: &str, own_consts: &HashMap<Arc<str>, C
                 _ => false,
             };
             match (names_self, args.get(1)) {
-                (true, Some(Type::StringLiteral(pattern))) => {
-                    matching_class_const_type(own_consts, pattern)
-                }
+                (true, Some(Type::StringLiteral(_))) if depth >= MAX_DEPTH => Type::Mixed(false),
+                (true, Some(Type::StringLiteral(pattern))) => bind_class_const_self_at(
+                    matching_class_const_type(own_consts, pattern),
+                    class,
+                    own_consts,
+                    depth + 1,
+                ),
                 _ => Type::Object(name, args),
             }
         }
@@ -1323,6 +1467,55 @@ fn bind_class_const_self(ty: Type, class: &str, own_consts: &HashMap<Arc<str>, C
         Type::Intersection(members) => {
             Type::Intersection(members.into_iter().map(recurse).collect())
         }
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, recurse(t), opt))
+                .collect(),
+        ),
+        Type::ObjectShape(fields) => Type::ObjectShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, recurse(t), opt))
+                .collect(),
+        ),
+        other => other,
+    }
+}
+
+/// Replaces every `"$$classconst"` sentinel still left in `ty` with
+/// `Mixed` - see `resolve_class_constant_references`.
+fn unresolved_class_const_to_mixed(ty: Type) -> Type {
+    match ty {
+        Type::Object(name, _) if name == "$$classconst" => Type::Mixed(false),
+        Type::Object(name, args) => Type::Object(
+            name,
+            args.into_iter()
+                .map(unresolved_class_const_to_mixed)
+                .collect(),
+        ),
+        Type::Array(key, inner) => Type::Array(
+            Box::new(unresolved_class_const_to_mixed(*key)),
+            Box::new(unresolved_class_const_to_mixed(*inner)),
+        ),
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(unresolved_class_const_to_mixed)
+                .collect(),
+        ),
+        Type::Intersection(members) => Type::Intersection(
+            members
+                .into_iter()
+                .map(unresolved_class_const_to_mixed)
+                .collect(),
+        ),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .map(|(k, t, opt)| (k, unresolved_class_const_to_mixed(t), opt))
+                .collect(),
+        ),
         other => other,
     }
 }

@@ -173,6 +173,35 @@ pub struct FunctionSig {
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
 pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
+    infer_const_type_with(value, &|_, _| None)
+}
+
+/// `infer_const_type` for a *class* constant's own value, which may also
+/// reference another constant (`self::A`, `Foo::BAR`): that reference
+/// becomes a `"$$classconst"` sentinel (the same one a `Foo::BAR` PHPDoc
+/// type parses to), resolved once every class's constants exist by
+/// `Registry::resolve_deferred_value_of`'s constant pre-pass. Only class
+/// constants go through that pass, so only they get this; a global
+/// constant keeps plain `infer_const_type`.
+pub(crate) fn infer_class_const_type(value: &crate::ast::Expr) -> Type {
+    infer_const_type_with(value, &|class, name| {
+        Some(Type::Object(
+            "$$classconst".to_string(),
+            vec![
+                types::parse_type_string(class),
+                Type::StringLiteral(name.to_string()),
+            ],
+        ))
+    })
+}
+
+/// The shared body of `infer_const_type`/`infer_class_const_type`.
+/// `class_const_ref` decides what a `Class::NAME` reference inside the
+/// value becomes (`None` falls back to `Mixed`).
+fn infer_const_type_with(
+    value: &crate::ast::Expr,
+    class_const_ref: &dyn Fn(&str, &str) -> Option<Type>,
+) -> Type {
     use crate::ast::Literal;
     match &value.kind {
         ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
@@ -203,6 +232,65 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
         // widen every array literal/argument this const then feeds
         // into.
         ExprKind::Binary(crate::ast::BinOp::Concat, ..) => Type::String,
+        ExprKind::Grouping(inner) => infer_const_type_with(inner, class_const_ref),
+        ExprKind::StaticAccess(class, name) if !name.starts_with('$') => {
+            class_const_ref(class, name).unwrap_or(Type::Mixed(false))
+        }
+        // A constant array literal is a real, exact array shape in
+        // real PHPStan (`ConstantArrayType`): keys as written, or the
+        // next auto-index; PHP canonicalizes a decimal-integer string
+        // key to an int. A spread, or a key that isn't a literal, can't
+        // be laid out as a shape, so the value degrades to a plain
+        // `array` of the values' union.
+        ExprKind::ArrayLiteral(items) => {
+            let mut fields: Vec<(String, Type, bool)> = Vec::new();
+            let mut next_index: i64 = 0;
+            let mut exact = true;
+            for item in items {
+                let value_ty = infer_const_type_with(&item.value, class_const_ref);
+                let key = if item.spread {
+                    None
+                } else {
+                    match item.key.as_ref().map(|k| &k.kind) {
+                        None => Some(next_index.to_string()),
+                        Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
+                        Some(ExprKind::Literal(Literal::String(s))) => Some(
+                            types::canonical_int_key(s)
+                                .map_or_else(|| s.to_string(), |n| n.to_string()),
+                        ),
+                        _ => None,
+                    }
+                };
+                let Some(key) = key else {
+                    exact = false;
+                    fields.push((String::new(), value_ty, false));
+                    continue;
+                };
+                if let Some(n) = types::canonical_int_key(&key) {
+                    next_index = next_index.max(n.saturating_add(1));
+                }
+                match fields.iter_mut().find(|(k, _, _)| *k == key) {
+                    Some(existing) => existing.1 = value_ty,
+                    None => fields.push((key, value_ty, false)),
+                }
+            }
+            if exact {
+                Type::ArrayShape(fields)
+            } else {
+                let mut values: Vec<Type> = Vec::new();
+                for (_, t, _) in fields {
+                    if !values.contains(&t) {
+                        values.push(t);
+                    }
+                }
+                let value = match values.len() {
+                    0 => Type::Mixed(false),
+                    1 => values.pop().expect("len checked"),
+                    _ => Type::Union(values),
+                };
+                Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
+            }
+        }
         _ => Type::Mixed(false),
     }
 }

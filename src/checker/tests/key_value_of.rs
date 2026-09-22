@@ -319,3 +319,62 @@ fn value_of_a_typed_class_constant_resolves_its_value_type() {
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
+
+// A class constant's own value is typed exactly (real PHPStan's
+// `ConstantArrayType`), including references to other constants,
+// resolved through chains; a reference cycle degrades to `mixed`.
+#[test]
+fn class_constant_values_are_typed_exactly_including_references() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Level: int {
+                case Debug = 100;
+                case Info = 200;
+                const VALUES = [100, 200];
+                const NAMES = ['debug' => self::Debug, 'info' => self::Info];
+            }
+            class Other { const C = 'c'; }
+            class Consts {
+                const A = self::B;
+                const B = Other::C;
+                const LIST = [self::A, 'x', 7 => true, false];
+                const EMPTY = [];
+                const LOOP_A = self::LOOP_B;
+                const LOOP_B = self::LOOP_A;
+            }
+            /** @param value-of<Level::VALUES> $level */
+            function f(int $level): void { assertType('100|200', $level); }
+            function g(): void {
+                assertType("'c'", Consts::A);
+                assertType("array{0: 'c', 1: 'x', 7: true, 8: false}", Consts::LIST);
+                assertType('array{}', Consts::EMPTY);
+                assertType("array{debug: Level::Debug, info: Level::Info}", Level::NAMES);
+                assertType('mixed', Consts::LOOP_A);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn a_class_constant_wildcard_sees_inherited_and_interface_constants() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface HasCodes { const CODE_I = 'i'; }
+            class Base { const CODE_A = 'a'; const CODE_B = 'b'; }
+            class Child extends Base implements HasCodes {
+                const CODE_B = 'overridden';
+                const CODE_C = 'c';
+                /** @param self::CODE_* $code */
+                public function f($code): void {
+                    assertType("'a'|'overridden'|'c'|'i'", $code);
+                }
+            }
+            /** @param Child::CODE_* $code */
+            function g($code): void { assertType("'a'|'overridden'|'c'|'i'", $code); }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

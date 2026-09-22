@@ -6,8 +6,8 @@ use crate::docblock::{self, DocBlock};
 use crate::intern::intern;
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
-    build_type_aliases, infer_const_type, mark_template_params, resolve_type_with_parsed_native,
-    substitute_type_aliases,
+    build_type_aliases, infer_class_const_type, mark_template_params,
+    resolve_type_with_parsed_native, substitute_type_aliases,
 };
 use crate::registry::name_context::{
     NameContext, collect_class_name_case_refs, resolve_names_in_type,
@@ -851,7 +851,7 @@ impl ClassInfo {
                         let ty = resolve_names_in_type(ty, ctx);
                         substitute_type_aliases(ty, &type_aliases)
                     }
-                    None => infer_const_type(&cc.value),
+                    None => resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                 };
                 (
                     cc.name.clone(),
@@ -1300,7 +1300,7 @@ impl ClassInfo {
                 (
                     cc.name.clone(),
                     ConstSig {
-                        ty: infer_const_type(&cc.value),
+                        ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         visibility: cc.visibility.clone(),
                         is_internal: doc.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
