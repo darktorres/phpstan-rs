@@ -340,7 +340,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         Type::Object(name, args)
             if matches!(
                 name.as_str(),
-                "$$valueof" | "$$covariant" | "$$contravariant" | "$$bivariant"
+                "$$valueof" | "$$classconst" | "$$covariant" | "$$contravariant" | "$$bivariant"
             ) =>
         {
             Type::Object(
@@ -467,7 +467,12 @@ pub(crate) fn collect_class_name_case_refs(
         Type::Object(name, args)
             if matches!(
                 name.as_str(),
-                "$$valueof" | "$$covariant" | "$$contravariant" | "$$bivariant" | "Traversable"
+                "$$valueof"
+                    | "$$classconst"
+                    | "$$covariant"
+                    | "$$contravariant"
+                    | "$$bivariant"
+                    | "Traversable"
             ) =>
         {
             for a in args {

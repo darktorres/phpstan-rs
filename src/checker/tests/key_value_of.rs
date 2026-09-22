@@ -273,3 +273,49 @@ fn value_of_on_a_backed_enum_resolves_in_a_property_type_too() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// A class-constant type reference (`Foo::BAR`, `Foo::PREFIX_*`, `Foo::*`)
+// resolves to the union of the matching constants' own types, instead of
+// collapsing the whole PHPDoc union to `mixed` (Monolog's
+// `Logger::toMonologLevel` `@phpstan-param Level|LogLevel::* $level`).
+#[test]
+fn a_class_constant_wildcard_keeps_its_sibling_union_members() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Level: int { case Debug = 100; case Info = 200; }
+            class LogLevel { const DEBUG = 'debug'; const INFO = 'info'; const OTHER = 1; }
+            /** @phpstan-param Level|LogLevel::* $level */
+            function b(string|Level $level): void {
+                assertType("Level|'debug'|'info'|1", $level);
+            }
+            /** @param LogLevel::D* $level */
+            function c($level): void { assertType("'debug'", $level); }
+            /** @param Level::Debug|LogLevel::INFO $level */
+            function d($level): void { assertType("Level::Debug|'info'", $level); }
+            class Self_ {
+                const RFC_A = 'a';
+                const RFC_B = 'b';
+                /** @param self::RFC_* $rfc */
+                public function e($rfc): void { assertType("'a'|'b'", $rfc); }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn value_of_a_typed_class_constant_resolves_its_value_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Level {
+                /** @var list<100|200> */
+                const VALUES = [100, 200];
+            }
+            /** @param value-of<Level::VALUES> $level */
+            function f(int $level): void { assertType('100|200', $level); }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

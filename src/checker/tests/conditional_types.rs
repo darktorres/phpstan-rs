@@ -112,3 +112,59 @@ fn a_class_reference_inside_a_conditional_branch_resolves_correctly_in_a_namespa
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+// Composer's `PackageSorter::getMostCurrentVersion` shape: a template-
+// typed conditional return reconciled with a nullable native hint.
+const TEMPLATE_CONDITIONAL_SRC: &str = r#"<?php
+    use function PHPStan\Testing\assertType;
+    interface Pkg {}
+    interface CompletePkg extends Pkg {}
+    class Sorter {
+        /** @template T of Pkg
+         *  @param array<T> $packages
+         *  @return ($packages is non-empty-array<T> ? T : T|null) */
+        public static function most(array $packages): ?Pkg { return null; }
+    }
+    interface Repo {
+        /** @return Pkg[] */ public function find(): array;
+        /** @return non-empty-array<Pkg> */ public function findSome(): array;
+        /** @return array<CompletePkg> */ public function findComplete(): array;
+    }
+    function f(Repo $r): void {
+        assertType('Pkg|null', Sorter::most($r->find()));
+        assertType('Pkg', Sorter::most($r->findSome()));
+        assertType('CompletePkg|null', Sorter::most($r->findComplete()));
+    }
+"#;
+
+#[test]
+fn a_template_conditional_return_with_a_nullable_native_hint_resolves_per_call() {
+    let d = diagnostics_for(TEMPLATE_CONDITIONAL_SRC);
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn an_undecidable_conditional_subject_keeps_both_branches() {
+    // A possibly-empty `Pkg[]` is neither a subtype of nor disjoint from
+    // `non-empty-array<T>` - real PHPStan's `maybe`, so both branches.
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            interface Pkg {}
+            class S {
+                /** @param array<Pkg> $p
+                 *  @return ($p is non-empty-array ? int : string) */
+                public static function f(array $p) { return 1; }
+                /** @param int|string $p
+                 *  @return ($p is array ? int : string) */
+                public static function g($p) { return ''; }
+            }
+            /** @return Pkg[] */ function find(): array { return []; }
+            function t(): void {
+                assertType('int|string', S::f(find()));
+                assertType('string', S::g(1));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}

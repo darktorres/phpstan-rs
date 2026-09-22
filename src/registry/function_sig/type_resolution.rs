@@ -67,8 +67,11 @@ pub(crate) fn resolve_type_with_parsed_native(
     // legitimate `null` argument a false positive - union `Null` in
     // unless the docblock type already says so itself.
     let native_is_nullable = native_hint.is_some_and(|h| h.trim_start().starts_with('?'));
+    // A conditional return type states its nullability per branch
+    // (`($p is non-empty-array ? T : T|null)`), so a native `?` must not
+    // be unioned onto every resolution of it.
     let already_nullable = match &ty {
-        Type::Null | Type::Mixed(_) => true,
+        Type::Null | Type::Mixed(_) | Type::Conditional { .. } => true,
         Type::Union(members) => members.contains(&Type::Null),
         _ => false,
     };
@@ -155,8 +158,18 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     // Type::Mixed(false)` test (a real regression caught by this project's own
     // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
     // test).
+    //
+    // Also skipped when nothing survived the filter at all (the
+    // `0 => native_ty` fallback below is the answer then - backfilling
+    // here would instead leave only the native union's non-object
+    // leftovers, e.g. a bare `null` out of `?Pkg`), and when a kept member
+    // is a conditional return type: it resolves per call site, and a
+    // backfilled native alternative would survive every resolution,
+    // turning a `non-empty-array` call's `T` into `T|null`.
     if let Type::Union(native_members) = &native_ty
+        && !kept.is_empty()
         && !kept.iter().any(type_contains_deferred_value_of)
+        && !kept.iter().any(|k| matches!(k, Type::Conditional { .. }))
     {
         for nm in native_members {
             if native_member_addable(nm) && !kept.iter().any(|k| types::is_subtype(k, nm)) {
@@ -328,6 +341,19 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // resolving to bare `null` once the `Closure(...)`-shaped member
         // is filtered out).
         Type::Callable(_) => true,
+        // A conditional return type (`($p is X ? A : B)`) is possible if
+        // either branch is - each call site picks (or unions) its own.
+        // Checked branch-wise through this same function, so a branch
+        // naming a still-unmarked `@template` (a bare `Object("T")` this
+        // early, see the `Array` arm below) is trusted the same way a
+        // plain one is, instead of failing `is_subtype`'s name-equality
+        // object check against the native class.
+        Type::Conditional {
+            if_true, if_false, ..
+        } => {
+            member_possible_given_native(if_true, native_ty)
+                || member_possible_given_native(if_false, native_ty)
+        }
         // An array's own *key* type must not be checked against
         // `native_ty` the same way every other member is - fine for a
         // concrete key (`array<string, int>`'s `string` really is a

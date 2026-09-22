@@ -52,11 +52,35 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMa
                     .or_insert_with(|| arg_ty.clone());
             }
         }
-        Type::Array(_, inner) => {
-            if let Type::Array(_, arg_inner) = arg_ty {
-                bind_template_param(inner, arg_inner, bindings);
+        Type::Array(_, inner) => match arg_ty {
+            Type::Array(_, arg_inner) => bind_template_param(inner, arg_inner, bindings),
+            // `list<V>`/`non-empty-array<V>`/`non-empty-list<V>` - an
+            // `Array` member alongside accessory markers.
+            Type::Intersection(members) => {
+                if let Some(Type::Array(_, arg_inner)) =
+                    members.iter().find(|m| matches!(m, Type::Array(..)))
+                {
+                    bind_template_param(inner, arg_inner, bindings);
+                }
             }
-        }
+            // An array shape's element type is the union of its real
+            // fields' value types (the `"..."` unsealed-tail sentinel
+            // excluded).
+            Type::ArrayShape(fields) => {
+                let values: Vec<Type> = fields
+                    .iter()
+                    .filter(|(k, _, _)| k != "...")
+                    .map(|(_, v, _)| v.clone())
+                    .collect();
+                let element = match values.len() {
+                    0 => return,
+                    1 => values.into_iter().next().expect("len checked"),
+                    _ => Type::Union(values),
+                };
+                bind_template_param(inner, &element, bindings);
+            }
+            _ => {}
+        },
         Type::ClassString(inner) => {
             if let Type::ClassString(arg_inner) = arg_ty {
                 bind_template_param(inner, arg_inner, bindings);

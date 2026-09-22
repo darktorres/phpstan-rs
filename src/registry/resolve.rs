@@ -385,10 +385,15 @@ impl Registry {
             let Some(mut info) = self.classes.remove(&class_name) else {
                 continue;
             };
+            let own_consts = info.consts.clone();
             for sig in info.methods.values_mut() {
                 for param in &mut sig.params {
                     if type_contains_deferred_value_of(&param.ty) {
-                        let ty = std::mem::replace(&mut param.ty, Type::Mixed(false));
+                        let ty = bind_class_const_self(
+                            std::mem::replace(&mut param.ty, Type::Mixed(false)),
+                            &class_name,
+                            &own_consts,
+                        );
                         param.ty = resolve_deferred_value_of_with_native_fallback(
                             ty,
                             &param.ty_native,
@@ -397,7 +402,11 @@ impl Registry {
                     }
                 }
                 if type_contains_deferred_value_of(&sig.return_type) {
-                    let ty = std::mem::replace(&mut sig.return_type, Type::Mixed(false));
+                    let ty = bind_class_const_self(
+                        std::mem::replace(&mut sig.return_type, Type::Mixed(false)),
+                        &class_name,
+                        &own_consts,
+                    );
                     sig.return_type = resolve_deferred_value_of_with_native_fallback(
                         ty,
                         &sig.return_type_native,
@@ -407,25 +416,41 @@ impl Registry {
             }
             for prop in info.properties.values_mut() {
                 if type_contains_deferred_value_of(&prop.ty) {
-                    let ty = std::mem::replace(&mut prop.ty, Type::Mixed(false));
+                    let ty = bind_class_const_self(
+                        std::mem::replace(&mut prop.ty, Type::Mixed(false)),
+                        &class_name,
+                        &own_consts,
+                    );
                     prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
                 if let Some(set_ty) = &prop.set_ty
                     && type_contains_deferred_value_of(set_ty)
                 {
-                    let ty = prop.set_ty.take().unwrap();
+                    let ty = bind_class_const_self(
+                        prop.set_ty.take().unwrap(),
+                        &class_name,
+                        &own_consts,
+                    );
                     prop.set_ty = Some(resolve_deferred_value_of_in_type(ty, &self.classes));
                 }
             }
             for c in info.consts.values_mut() {
                 if type_contains_deferred_value_of(&c.ty) {
-                    let ty = std::mem::replace(&mut c.ty, Type::Mixed(false));
+                    let ty = bind_class_const_self(
+                        std::mem::replace(&mut c.ty, Type::Mixed(false)),
+                        &class_name,
+                        &own_consts,
+                    );
                     c.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
             }
             for bound in info.template_bounds.values_mut() {
                 if type_contains_deferred_value_of(bound) {
-                    let ty = std::mem::replace(bound, Type::Mixed(false));
+                    let ty = bind_class_const_self(
+                        std::mem::replace(bound, Type::Mixed(false)),
+                        &class_name,
+                        &own_consts,
+                    );
                     *bound = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
             }
@@ -1099,7 +1124,9 @@ fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
 pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
     match ty {
         Type::Object(name, args) => {
-            name == "$$valueof" || args.iter().any(type_contains_deferred_value_of)
+            name == "$$valueof"
+                || name == "$$classconst"
+                || args.iter().any(type_contains_deferred_value_of)
         }
         Type::Array(key, inner) => {
             type_contains_deferred_value_of(key) || type_contains_deferred_value_of(inner)
@@ -1124,11 +1151,15 @@ pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
 /// sentinel is produced.
 fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
     match ty {
-        Type::Object(name, mut args) if name == "$$valueof" => {
-            let Some(Type::Object(target_fqn, _)) = args.pop() else {
-                return Type::Mixed(false);
-            };
-            resolve_value_of_target(&target_fqn, classes)
+        Type::Object(name, mut args) if name == "$$valueof" => match args.pop() {
+            Some(Type::Object(target, inner)) if target == "$$classconst" => value_of_type(
+                resolve_deferred_value_of_in_type(Type::Object(target, inner), classes),
+            ),
+            Some(Type::Object(target_fqn, _)) => resolve_value_of_target(&target_fqn, classes),
+            _ => Type::Mixed(false),
+        },
+        Type::Object(name, args) if name == "$$classconst" => {
+            resolve_class_const_type(&args, classes)
         }
         Type::Object(name, args) => Type::Object(
             name,
@@ -1167,6 +1198,131 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
                 .map(|(k, t, opt)| (k, resolve_deferred_value_of_in_type(t, classes), opt))
                 .collect(),
         ),
+        other => other,
+    }
+}
+
+/// A `"$$classconst"` sentinel's value: the union of every matching
+/// constant's own type (an enum case's `Type::EnumCase`, a literal
+/// constant's literal type), mirroring real PHPStan's `TypeNodeResolver`
+/// for a `ConstTypeNode` - a `*` in the name matches any run of
+/// characters. Matches are ordered by name for a deterministic union
+/// (real PHPStan uses declaration order, which `ClassInfo::consts` doesn't
+/// keep). An unknown class, or no match, degrades to `Mixed`. Only the
+/// class's own constants are consulted, not inherited ones. A `self`/
+/// `static` reference has already been bound to the owning class by
+/// `bind_class_const_self`, or stays unresolved (`Mixed`) where no owning
+/// class exists.
+fn resolve_class_const_type(args: &[Type], classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
+    let [Type::Object(fqn, _), Type::StringLiteral(pattern)] = args else {
+        return Type::Mixed(false);
+    };
+    let Some(info) = classes.get(fqn.trim_start_matches('\\')) else {
+        return Type::Mixed(false);
+    };
+    matching_class_const_type(&info.consts, pattern)
+}
+
+/// The union of every constant in `consts` whose name matches `pattern` -
+/// see `resolve_class_const_type`.
+fn matching_class_const_type(consts: &HashMap<Arc<str>, ConstSig>, pattern: &str) -> Type {
+    let mut names: Vec<&Arc<str>> = consts
+        .keys()
+        .filter(|name| glob_matches(pattern, name))
+        .collect();
+    names.sort();
+    let mut members: Vec<Type> = Vec::new();
+    for name in names {
+        let ty = consts[name].ty.clone();
+        if !members.contains(&ty) {
+            members.push(ty);
+        }
+    }
+    match members.len() {
+        0 => Type::Mixed(false),
+        1 => members.pop().expect("len checked"),
+        _ => Type::Union(members),
+    }
+}
+
+/// `pattern` with `*` matching any (possibly empty) run of characters -
+/// the only wildcard real PHPStan's constant-type syntax has.
+fn glob_matches(pattern: &str, name: &str) -> bool {
+    let mut parts = pattern.split('*');
+    let first = parts.next().unwrap_or("");
+    let Some(mut rest) = name.strip_prefix(first) else {
+        return false;
+    };
+    let remaining: Vec<&str> = parts.collect();
+    let Some((last, middle)) = remaining.split_last() else {
+        return rest.is_empty();
+    };
+    for part in middle {
+        let Some(idx) = rest.find(part) else {
+            return false;
+        };
+        rest = &rest[idx + part.len()..];
+    }
+    rest.ends_with(last)
+}
+
+/// `value-of<T>` for an already-resolved `T` that isn't a bare enum
+/// reference (`value-of<Foo::VALUES>`, a constant holding an array): the
+/// array's value type, the union of an array shape's real fields, or
+/// `Mixed` for anything else.
+fn value_of_type(ty: Type) -> Type {
+    match ty {
+        Type::Array(_, value) => *value,
+        // `list<V>`/`non-empty-array<V>` - the `Array` member carries `V`.
+        Type::Intersection(members) => members
+            .into_iter()
+            .find(|m| matches!(m, Type::Array(..)))
+            .map_or(Type::Mixed(false), value_of_type),
+        Type::ArrayShape(fields) => {
+            let mut members: Vec<Type> = Vec::new();
+            for (name, t, _) in fields {
+                if name != "..." && !members.contains(&t) {
+                    members.push(t);
+                }
+            }
+            match members.len() {
+                0 => Type::Never,
+                1 => members.pop().expect("len checked"),
+                _ => Type::Union(members),
+            }
+        }
+        _ => Type::Mixed(false),
+    }
+}
+
+/// Resolves every `"$$classconst"` sentinel in `ty` that names `class`
+/// itself (`self::X`, `static::X`, or `class`'s own name) straight from
+/// `own_consts`. `resolve_deferred_value_of` takes the class being
+/// rewritten out of the registry's class map while rewriting it, so
+/// `resolve_deferred_value_of_in_type` can't find a class's own constants
+/// there - this runs first, for the one class that's missing.
+fn bind_class_const_self(ty: Type, class: &str, own_consts: &HashMap<Arc<str>, ConstSig>) -> Type {
+    let recurse = |t: Type| bind_class_const_self(t, class, own_consts);
+    match ty {
+        Type::Object(name, args) if name == "$$classconst" => {
+            let names_self = match args.first() {
+                Some(Type::SelfRef | Type::StaticRef) => true,
+                Some(Type::Object(fqn, _)) => fqn.trim_start_matches('\\') == class,
+                _ => false,
+            };
+            match (names_self, args.get(1)) {
+                (true, Some(Type::StringLiteral(pattern))) => {
+                    matching_class_const_type(own_consts, pattern)
+                }
+                _ => Type::Object(name, args),
+            }
+        }
+        Type::Object(name, args) => Type::Object(name, args.into_iter().map(recurse).collect()),
+        Type::Array(key, inner) => Type::Array(Box::new(recurse(*key)), Box::new(recurse(*inner))),
+        Type::Union(members) => Type::Union(members.into_iter().map(recurse).collect()),
+        Type::Intersection(members) => {
+            Type::Intersection(members.into_iter().map(recurse).collect())
+        }
         other => other,
     }
 }

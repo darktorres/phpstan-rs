@@ -674,17 +674,26 @@ fn parse_type_atom(s: &str) -> Type {
     let (base, generic_args) = split_generic_args(s);
     let original = base.trim();
     let bare = original.trim_start_matches('\\');
-    let mut ty = if bare.contains("::") {
-        // A class-constant-reference type (`self::RFC_*`, `Foo::BAR`,
-        // PHPStan's own wildcard-constant convention) isn't a class name,
-        // even though it's shaped like one syntactically - resolving it
-        // for real would mean looking up the named constant on the
-        // referenced class, which this project doesn't model. Left as
-        // `Mixed` rather than falling through to the generic-class
-        // branch below, which would otherwise namespace-qualify it as a
-        // literal class name (real shape: monolog/monolog's own
-        // `@param self::RFC_* $rfc`).
-        Type::Mixed(false)
+    let mut ty = if let Some((class_part, const_part)) = original.split_once("::") {
+        // A class-constant-reference type (`Foo::BAR`, `self::RFC_*`,
+        // `Foo::*` - real PHPStan's `ConstTypeNode`, a `*` matching any
+        // run of characters) isn't a class name even though it's shaped
+        // like one. Resolving it means reading the referenced class's own
+        // constants, which only exist once the registry is built, so it's
+        // encoded as a `"$$classconst"` sentinel (the class reference plus
+        // the name pattern) and resolved by `Registry::
+        // resolve_deferred_value_of`/`resolve_deferred_value_of_now`,
+        // alongside `value-of<T>`'s own sentinel. `Foo::class` is just a
+        // class-string.
+        let class_ty = parse_type_string(class_part);
+        if const_part.eq_ignore_ascii_case("class") {
+            Type::ClassString(Box::new(class_ty))
+        } else {
+            Type::Object(
+                "$$classconst".to_string(),
+                vec![class_ty, Type::StringLiteral(const_part.to_string())],
+            )
+        }
     } else {
         parse_type_keyword_or_class(bare, original, &generic_args)
     };
@@ -918,7 +927,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                         _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
                     }
                 }
-                Type::Object(name, args) if args.is_empty() => {
+                Type::Object(name, args) if args.is_empty() || name == "$$classconst" => {
                     Type::Object("$$valueof".to_string(), vec![Type::Object(name, args)])
                 }
                 _ => Type::Mixed(false),

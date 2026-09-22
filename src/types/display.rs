@@ -87,6 +87,15 @@ impl fmt::Display for Type {
             // resolved away before display, these persist in the type
             // tree as a permanent annotation.
             Type::Object(name, args) if name == "$$bivariant" => write!(f, "*"),
+            // Normally resolved away before display; shown in its source
+            // form if it ever isn't (an unknown class).
+            Type::Object(name, args) if name == "$$classconst" && args.len() == 2 => {
+                let pattern = match &args[1] {
+                    Type::StringLiteral(s) => s.as_str(),
+                    _ => "*",
+                };
+                write!(f, "{}::{pattern}", args[0])
+            }
             Type::Object(name, args) if name == "$$covariant" => {
                 write!(f, "covariant {}", args[0])
             }

@@ -22,11 +22,9 @@ use crate::types::{CallableParam, CallableSig, Type};
 /// bound to `Mixed` (the "genuinely unknown argument type" sentinel this
 /// project uses throughout) - falls back to the safe two-branch union
 /// (also, itself, recursively resolved - a real, if rarer, nested-
-/// conditional shape). A real bound picks `if_true`/`if_false` via
-/// `is_subtype(bound, target) != negated`, then recurses into *only* the
-/// picked branch (never both) - the eager-union fallback (`types::parse`'s
-/// own, for an unrepresentable subject) is deliberately the less precise
-/// path.
+/// conditional shape). A real bound resolves trinarily: a subtype of
+/// `target` picks one branch, a provably disjoint one the other, and
+/// anything else keeps both (see the arm's own comment).
 pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Conditional {
@@ -37,17 +35,33 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) ->
             negated,
         } => match param_bindings.get(subject) {
             Some(bound) if *bound != Type::Mixed(false) => {
-                let picked = if crate::types::is_subtype(bound, target) != *negated {
-                    if_true
+                // Real PHPStan's `ConditionalTypeForParameter::resolve` is
+                // trinary: `target->isSuperTypeOf(subject)` yes picks one
+                // branch, no picks the other, and maybe (a possibly-empty
+                // `array<T>` checked against `non-empty-array<T>`) keeps
+                // both. "No" here is `types_definitely_disjoint`'s
+                // conservative answer; anything it can't prove disjoint
+                // stays "maybe" rather than guessing a branch.
+                let matches = if crate::types::is_subtype(bound, target) {
+                    Some(true)
+                } else if crate::types::types_definitely_disjoint(bound, target) {
+                    Some(false)
                 } else {
-                    if_false
+                    None
                 };
-                resolve_conditional(picked, param_bindings)
+                match matches.map(|m| m != *negated) {
+                    Some(true) => resolve_conditional(if_true, param_bindings),
+                    Some(false) => resolve_conditional(if_false, param_bindings),
+                    None => union_of_branches(
+                        resolve_conditional(if_true, param_bindings),
+                        resolve_conditional(if_false, param_bindings),
+                    ),
+                }
             }
-            _ => Type::Union(vec![
+            _ => union_of_branches(
                 resolve_conditional(if_true, param_bindings),
                 resolve_conditional(if_false, param_bindings),
-            ]),
+            ),
         },
         Type::Array(key, inner) => Type::Array(
             Box::new(resolve_conditional(key, param_bindings)),
@@ -100,5 +114,30 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) ->
             return_type: Box::new(resolve_conditional(&sig.return_type, param_bindings)),
         }))),
         other => other.clone(),
+    }
+}
+
+/// Both branches of an undecided conditional, flattened and deduplicated
+/// (`T` and `T|null` give `T|null`, not `T|T|null`), collapsing to the
+/// single member when both branches agree.
+fn union_of_branches(a: Type, b: Type) -> Type {
+    let mut members: Vec<Type> = Vec::new();
+    for ty in [a, b] {
+        let parts = match ty {
+            Type::Union(inner) => inner,
+            other => vec![other],
+        };
+        for p in parts {
+            if !members
+                .iter()
+                .any(|m| crate::types::types_equal_for_union(m, &p))
+            {
+                members.push(p);
+            }
+        }
+    }
+    match members.len() {
+        1 => members.pop().expect("len checked"),
+        _ => Type::Union(members),
     }
 }

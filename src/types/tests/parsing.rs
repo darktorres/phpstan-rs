@@ -358,25 +358,39 @@ fn dollar_this_phpdoc_pseudo_type_is_treated_as_static() {
 }
 
 #[test]
-fn class_constant_reference_types_degrade_to_mixed() {
-    // `self::RFC_*` / `Foo::BAR` (PHPStan's wildcard-constant
-    // convention, real example: monolog/monolog's own
-    // `@param self::RFC_* $rfc`) look like a class name syntactically
-    // but aren't one - resolving them for real would mean looking up
-    // the referenced constant('s value), which this project doesn't
-    // model. Without this check they fell through to the
-    // generic-class branch and became a literal class literally
-    // named "self::RFC_*", then got nonsensically namespace-qualified
-    // once that existed (`Monolog\Handler\self::RFC*`).
-    assert_eq!(parse_type_string("self::RFC_*"), Type::Mixed(false));
-    assert_eq!(parse_type_string("Foo::BAR"), Type::Mixed(false));
-    // The array-wrapping/nullable machinery around parse_type_atom
-    // still has to apply correctly around this degraded case.
+fn class_constant_reference_types_parse_to_a_deferred_sentinel() {
+    // `self::RFC_*` / `Foo::BAR` (PHPStan's constant-type convention,
+    // real example: monolog/monolog's own `@param self::RFC_* $rfc`)
+    // look like a class name syntactically but aren't one. They parse to
+    // a `"$$classconst"` sentinel carrying the class reference and the
+    // name pattern, resolved against real constants once the registry
+    // exists (`registry::resolve`'s `resolve_class_const_type`) - never a
+    // literal class named "self::RFC_*".
+    let sentinel = |class: Type, pattern: &str| {
+        Type::Object(
+            "$$classconst".to_string(),
+            vec![class, Type::StringLiteral(pattern.to_string())],
+        )
+    };
+    assert_eq!(
+        parse_type_string("self::RFC_*"),
+        sentinel(Type::SelfRef, "RFC_*")
+    );
+    assert_eq!(
+        parse_type_string("Foo::BAR"),
+        sentinel(Type::Object("Foo".to_string(), vec![]), "BAR")
+    );
+    // `Foo::class` is a class-string, not a constant reference.
+    assert_eq!(
+        parse_type_string("Foo::class"),
+        Type::ClassString(Box::new(Type::Object("Foo".to_string(), vec![])))
+    );
+    // The array-wrapping machinery still applies around it.
     assert_eq!(
         parse_type_string("self::RFC_*[]"),
         Type::Array(
             Box::new(Type::benevolent_array_key()),
-            Box::new(Type::Mixed(false))
+            Box::new(sentinel(Type::SelfRef, "RFC_*"))
         )
     );
 }

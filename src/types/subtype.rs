@@ -504,3 +504,55 @@ pub(crate) fn is_numeric_string_literal(s: &str) -> bool {
 pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
     s.parse::<i64>().is_ok_and(|n| n.to_string() == s)
 }
+
+/// A narrow, conservative type-
+/// disjointness primitive. Only ever declares
+/// two types disjoint when each resolves to one of a handful of coarse,
+/// mutually-exclusive "scalar families" (`scalar_family` below) and those
+/// families differ - e.g. `string` vs `int`, or `array` vs `object`.
+/// Recurses into `Union` on either side (every member of a union side
+/// must be disjoint from the other side for the whole comparison to
+/// count - the same "stay on the lenient side" direction this project's
+/// own union-legality check already established).
+/// Returns `false` (not confidently disjoint - "don't guess") for
+/// anything not covered: `Mixed`/`Never`/`Void`, two same-family types
+/// (e.g. two unrelated object types - real PHPStan's own object-vs-object
+/// disjointness needs a `final`-class/no-subtype-relation check this
+/// primitive deliberately doesn't attempt), `Intersection`, `Callable`,
+/// `Accessory`, templates, and every pseudo-type.
+pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
+    match (a, b) {
+        (Type::Union(members), _) => members.iter().all(|m| types_definitely_disjoint(m, b)),
+        (_, Type::Union(members)) => members.iter().all(|m| types_definitely_disjoint(a, m)),
+        _ => match (scalar_family(a), scalar_family(b)) {
+            (Some(fa), Some(fb)) => fa != fb,
+            _ => false,
+        },
+    }
+}
+
+#[derive(PartialEq)]
+enum ScalarFamily {
+    Int,
+    Float,
+    String,
+    Bool,
+    Null,
+    Array,
+    Object,
+}
+
+fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
+    match ty {
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some(ScalarFamily::Int),
+        Type::Float | Type::FloatLiteral(_) => Some(ScalarFamily::Float),
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => Some(ScalarFamily::String),
+        Type::Bool | Type::True | Type::False => Some(ScalarFamily::Bool),
+        Type::Null => Some(ScalarFamily::Null),
+        Type::Array(_, _) | Type::ArrayShape(_) => Some(ScalarFamily::Array),
+        Type::Object(_, _) | Type::EnumCase(_, _) | Type::ObjectShape(_) => {
+            Some(ScalarFamily::Object)
+        }
+        _ => None,
+    }
+}
