@@ -8,10 +8,13 @@ below cites the actual PHPStan source it's grounded in
 (`vendor/phpstan-src/src`, `vendor/phpstan-strict-rules/src`) and the actual
 phpstan-rs source (`src/`) that would implement it - every citation has been
 checked directly against the vendored/working trees, not taken on an
-agent's word. 116 findings total, grouped below by what they're actually
-about rather than by when they were found. Nothing here is scheduled; it's
-a grounded idea backlog, same status as ROADMAP's own "Newly identified
-gaps" until triaged into a numbered phase. Part 10 draws on a second
+agent's word. 76 findings remain open as of this writing (a 3rd of the
+original 116 have since shipped - each closed item now just points at
+its own ROADMAP Done entry rather than staying duplicated here),
+grouped below by what they're actually about rather than by when they
+were found. Nothing here is scheduled; it's a grounded idea backlog,
+same status as ROADMAP's own "Newly identified gaps" until triaged into
+a numbered phase. Part 10 draws on a second
 reference project, Psalm - not `vendor/psalm` (the pinned submodule used
 elsewhere in this project purely as a corpus-validation target), but a
 separate, ad hoc `git clone https://github.com/vimeo/psalm.git` one
@@ -208,8 +211,9 @@ parent direction - adding a reverse (parent-to-children) index and treating
 a subclass-free non-final class/interface as implicitly closed would let
 phpstan-rs narrow `instanceof`/`class-string<T>` chains that real PHPStan,
 run on the identical codebase with the identical missing annotation,
-cannot. (The same reverse index is reused directly by P1, U1, and AJ
-below.)
+cannot. (The same reverse index is reused directly by P1 and U1 below -
+and was exactly the mechanism the now-shipped dead-abstract-class check,
+ROADMAP's Phase 93, ended up building.)
 
 **Effort: large.**
 
@@ -244,114 +248,20 @@ arithmetic operators.
 
 ---
 
-## B. Whole-program analysis PHPStan's own architecture can't cheaply do
-
-Real PHPStan computes real dependency graphs (`Dependency/DependencyResolver.php`),
-but only to decide what to re-check next run - the graph is discarded per
-run, never kept as one persistent structure a rule queries. phpstan-rs
-already keeps exactly that structure live, for a different purpose
-(incremental recheck), and it's already in memory before/during checking.
-
-### B1. Whole-application unused protected/public member detection
-
-`UnusedPrivateMethodRule` (and its Property/Constant siblings) explicitly
-gate on `isPrivate()` (`Rules/DeadCode/UnusedPrivateMethodRule.php:59`) -
-it's the *only* dead-member rule PHPStan ships (`find vendor/phpstan-src/src
--iname '*Unused*'` turns up no protected/public equivalent anywhere),
-because verifying no *other file* (a subclass override caller, a sibling
-class using a parent's protected API) reaches a protected/public member
-would need PHPStan's 14-collector `CollectedDataNode` machinery, built
-specifically to reconcile state across its own parallel worker processes
-(ROADMAP.md:812-825, "Phase 82" note) - a cost real PHPStan's process model
-forces on it. phpstan-rs is single-process with one whole-project `Registry`
-merged before checking starts (`Project::load_file`, `src/project.rs:69-72`)
-- no parallel-worker reconciliation problem to begin with. The same
-registry-build-time fixed-point shape Phase 41's transitive-purity model
-already uses (`src/registry/purity.rs`) could extend
-`checker/unused/member_usage.rs`'s existing private-member tracker
-(`MemberUsage`) to walk every class's protected/public member accesses
-project-wide, resolving each receiver's declared/inherited class through
-the registry instead of assuming `self`.
-
-Not just theoretical: Psalm ships almost exactly this feature in
-production (`consolidateAnalyzedData`/`checkMethodReferences`/
-`checkPropertyReferences`, `vendor-adjacent` reference,
-`Internal/Codebase/ClassLikes.php:824-863`), gated the same
-whole-program way this item proposes - a class's members are checked
-for real usage only once the class itself is confirmed referenced
-somewhere (`$classlike_storage->public_api ||
-$this->file_reference_provider->isClassReferenced(...)`, `ClassLikes.php:847-849`).
-Worth carrying over as prior art for this item's own exemption list: a
-`public_api`-equivalent flag (already close to this project's own
-`@api`/`is_internal` tracking) plus the magic-method/entry-point
-exemptions this item already lists.
-
-**Effort: large.**
-
-### B2. Dead top-level function / never-instantiated class detection
-
-There is no `UnusedFunctionRule`/`UnusedClassRule` anywhere in PHPStan
-(`find vendor/phpstan-src/src -iname '*Unused*'` returns only
-parameter/private-member/label/closure-use variants, never a top-level
-symbol). PHPStan does build a whole-project dependency graph
-(`Dependency/DependencyResolver.php`), but only to feed
-`ResultCacheManager`'s `$invertedDependencies`
-(`Analyser/ResultCache/ResultCacheManager.php:438`) for cache invalidation -
-never turned into a "referenced nowhere" diagnostic. phpstan-rs already
-builds and keeps, in one process, both directions of this exact graph:
-`Project.dependents: FxHashMap<String, HashSet<PathBuf>>`
-(`src/project.rs:70`, populated in `load_file`) is a live reverse-reference
-index built from `deps::referenced_names`'s deliberately over-approximating
-name collection (`src/deps.rs:27-30`). A symbol with zero entries in
-`dependents` (and not an entry point/magic method/attribute target) is
-provably dead project-wide - a query against data phpstan-rs already
-computes for cache invalidation, not a new cross-process aggregation step.
-Ship opt-in, matching this project's own "don't discard correct checks,
-ship opt-in" precedent, since libraries/entry points need an exclusion
-path. (AJ below reuses the same graph for a narrower, class-specific case:
-an abstract class that's referenced but never subclassed concretely.)
-
-Psalm's own version of the top-level-symbol half of this
-(`UnusedClass`/`UnusedMethod`/`PossiblyUnusedMethod`,
-`ClassLikes.php:1922-1953` for the method-return-value-shaped sibling
-described under H2 below) independently confirms the exemption shape
-this item already proposes, and adds one refinement worth folding in:
-severity split by visibility rather than a single "referenced nowhere"
-bar - `private`/whole-call-site-visible members get the harder
-diagnostic, broader-visibility ones the softer "possibly unused" one,
-since external/reflection-based callers could still exist for the
-latter even in phpstan-rs's closed-world model.
-
-**Effort: medium.**
-
-### B3. Circular class/namespace dependency-cycle detection
-
-PHPStan has no circular-class/namespace-dependency rule at all - its only
-"circular" concept is `CircularTypeAliasErrorType`/
-`CircularTypeAliasDefinitionException` (self-referential `@phpstan-type`
-alias *definitions*, not class/namespace reference cycles). Its
-`DependencyResolver`/`ExportedNode` machinery computes the edges a
-cycle-detector would need but discards the graph per-run rather than
-keeping it live for a rule to query. phpstan-rs's `Project.dependents`
-(`src/project.rs:70`) is already a persistent, whole-project, in-memory
-graph kept live across incremental updates - `update_file`'s
-`transitive_affected_files` (`src/project.rs:395-435`) already walks it
-transitively on every edit. Running SCC-based cycle detection (Tarjan's) over
-that graph, aggregated to namespace level via the existing
-`registry::NameContext`, is querying an already-live structure rather than
-building new cross-file infrastructure.
-
-**Effort: medium.**
-
----
-
 ## H. Whole-program value-flow diagnostics
 
-Distinct from section B above: B reuses the `dependents` graph for
-*existence*/dead-code questions. These reuse the same whole-project
-registry-fixed-point architecture (Phase 41's purity model, cited
-throughout section B) for questions about the *values* flowing through the
-program instead.
+Whole-program unused-member detection, dead-function/dead-class detection,
+namespace-cycle detection, dead-enum-case detection, and dead-abstract-
+class detection (all originally proposed here) are now shipped - see
+ROADMAP's Done section, Phase 86's B1/B2/B3 and Phases 92/93, and their
+own `circular_namespace_deps.rs`/`dead_code.rs`/`dead_members.rs`/
+`dead_enum_cases.rs`/`dead_abstract_classes.rs` modules.
+
+Distinct from the now-shipped whole-program dead-code family noted above,
+which reuses the `dependents` graph for *existence*/dead-code questions:
+these reuse the same whole-project registry-fixed-point architecture
+(Phase 41's purity model) for questions about the *values* flowing
+through the program instead.
 
 ### H1. "Dead flexibility" parameter detection (always the same literal argument, project-wide)
 
@@ -404,8 +314,9 @@ and its implementation has two refinements worth folding into this
 item when it's built: it exempts "probably fluent" methods (a
 `return $this;` builder-chain method) from the check entirely
 (`!$method_storage->probably_fluent`, `ClassLikes.php:1928`), and it
-splits severity by visibility the same way the B1/B2 amendments above
-do - `private` (the whole call-site universe is visible, so "unused" is
+splits severity by visibility the same way phpstan-rs's own now-shipped
+whole-application unused-member family (ROADMAP's Phase 86 B1/B2) does -
+`private` (the whole call-site universe is visible, so "unused" is
 definite) versus broader visibility (softer "possibly unused," since an
 external/reflection-based caller could exist).
 
@@ -415,8 +326,8 @@ external/reflection-based caller could exist).
 
 A project-wide pass walks every `$this->prop = rhs` assignment across
 every file that declares or extends a given class (via the registry's
-subclass-aware hierarchy, the same walk B1 already proposes extending for
-member *usage*), recording the RHS type `checker/expr.rs`'s
+subclass-aware hierarchy, the same walk ROADMAP's now-shipped Phase 86 B1
+already runs for member *usage*), recording the RHS type `checker/expr.rs`'s
 `ExprKind::Assign` arm already infers at that site (`expr.rs:1486`)
 immediately before `check_property_assignment` (`expr.rs:1509`). If every
 recorded site project-wide is a strict subtype of the property's declared
@@ -465,7 +376,8 @@ whole-program `Registry.classes: FxHashMap<String, ClassInfo>`
 (`src/registry.rs:38`) where every `ClassInfo` carries real, typed
 `methods`/`properties` (`registry/class_info.rs:151-152`), not reflection
 stand-ins. Inverting that into a member-name -> declaring-classes reverse
-index (the same additive move A5/B1/P1 already make from structures
+index (the same additive move A5/P1 already make, and the now-shipped
+Phase 86 B1 already made, from structures
 built for other reasons) lets a literal-string `method_exists($x, 'foo')`
 guard narrow `$x` to the union of every real class anywhere in the closed
 project+vendor universe declaring `foo` - a sound, computable, finite
@@ -836,84 +748,6 @@ project-wide retain-and-aggregate step (mirroring X1's own design) is.
 
 ---
 
-## AD. Whole-program dead-enum-case detection
-
-A new opt-in check flagging a declared enum case (backed or pure) as dead
-when, project-wide, it's never referenced via `EnumName::CaseName`, never
-appears as a `match`/`switch` arm value, and is never provably produced
-by a literal argument to `::from()`/`::tryFrom()`. Real PHPStan's only
-two case-scoped rules are non-usage-based (`EnumCaseAttributesRule` just
-forwards attribute groups for target validity; `EnumSanityRule` only
-flags duplicate backing values/constructors/native-method redeclaration -
-neither cross-references a case against the rest of the project). More
-fundamentally, its only dead-code family (`UnusedPrivateMethodRule` and
-siblings, cited for B1) gates on `isPrivate()` - but a PHP enum case has
-no visibility syntax at all (phpstan-rs's own registration comment,
-`registry/class_info.rs:1010`, notes this directly: "always public"), so
-PHPStan's existing privacy-gated technique structurally has no
-`isPrivate()` case to ever match, even by extension. phpstan-rs already
-carries every piece as existing, unconnected infrastructure: cases are
-pre-registered per-FQN as `Type::EnumCase` in `ClassInfo.consts`
-(`registry/class_info.rs:1002-1024`), a reverse literal-value-to-case
-lookup already exists for a different purpose
-(`Registry::enum_case_for_value`, `registry/hierarchy.rs:604-611`, built
-for Phase 79's `::from()`/`::tryFrom()` narrowing), and the whole
-project's `Registry` is built once, single-process, before checking
-starts. A real gotcha the implementation must handle: `Match` arm
-conditions are walked generically by `expr_children`, but a `Switch`
-case's own `test` expression is *not* covered by generic `stmt_children`
-(`ast_walk.rs:174` only flat-maps each case's body) - `switch(){ case
-Suit::Hearts: }` needs the same manual special-case `member_usage.rs`/
-`var_usage.rs` already apply for `Switch` elsewhere. A non-literal
-`::from()`/`::tryFrom()` argument, a dynamic `Suit::{$expr}` access, or
-any call to `::cases()` marks the *whole enum* escaped, matching
-`MemberUsage.escaped`'s own conservative all-or-nothing precedent, since
-iterating `::cases()` is a legitimate, common way to use every case
-without ever spelling one out by name.
-
-**Effort: medium.**
-
----
-
-## AJ. Whole-program dead abstract-class detection
-
-For every class with `is_abstract == true`, walk the reverse (parent-to-
-children) subclass index A5/P1/U1 already propose building and confirm
-no path from it reaches any *concrete* class anywhere in the closed
-project+vendor universe - a plain reachability walk over the same graph
-(a direct subclass can itself be abstract, so this needs to walk to the
-first concrete descendant, not just one hop). Zero such reachable
-concrete descendant means the class can provably never be instantiated
-as an object anywhere this analysis can see, ever - not "currently
-unused," a permanent structural fact. PHPStan's own dead-code family
-gates on `isPrivate()`; there is no `isAbstract`-plus-descendant-
-enumeration rule anywhere (grepped `Rules/DeadCode/` and `Rules/Classes/`
-for "abstract" - only `InstantiationRule.php`, which flags a *syntactic*
-`new AbstractClass()` attempt, not a whole-program zero-subclass fact).
-More fundamentally, PHPStan's `Reflection/` layer has no descendant-
-enumeration API of any kind (grepped the whole vendored tree for
-`getSubclasses`/`descendantClasses`/`getKnownSubclasses` - zero hits) -
-because PHPStan must stay sound for a library's downstream consumers who
-can add real subclasses it never sees, the identical open-world
-constraint A5 already documents. phpstan-rs's `is_abstract` is already a
-plain struct field on every registered class, and it already flags
-direct syntactic instantiation of an abstract class - confirming the
-registry already fully distinguishes abstract from concrete; only a
-project-wide reachability walk over the (not-yet-built) reverse index is
-new. Distinct from A5 (whose reverse index only ever drives instanceof/
-class-string narrowing, never a dead-code diagnostic) and from B2 (whose
-`dependents` graph is built from bare *name* references - an abstract
-class referenced only via a parameter/property type hint for polymorphic
-dispatch, or via `static::`/`self::` calls to its own static methods,
-accumulates non-zero dependents and so is invisible to B2's "referenced
-nowhere" test even with zero real subclasses anywhere - verified directly
-against `deps.rs`'s `collect_class` implementation, which unconditionally
-inserts every `extends`/`implements`/type-hint name it sees).
-
-**Effort: medium.**
-
----
-
 ## P. Closed-world precision the "Pending / partial" section's own techniques can unlock, beyond just finishing them
 
 Two cases where finishing an in-progress phase using phpstan-rs's own
@@ -950,8 +784,9 @@ in one process with one frozen `Registry`, the identical property that
 already lets A5 treat "zero subclasses found" as sound. Given the
 identical source and the identical missing `final` keyword, phpstan-rs
 could resolve what real PHPStan is architecturally forced to treat as
-unknowable. Distinct consumer from A5 (narrowing) and B1/H2 (unused-member
-detection, NoDiscard inference) - this one drives the purity
+unknowable. Distinct consumer from A5 (narrowing), the now-shipped Phase
+86 B1 (unused-member detection), and H2 (NoDiscard inference) - this one
+drives the purity
 dependency-resolution fixed point and `@phpstan-pure` validation
 specifically.
 
@@ -1025,33 +860,6 @@ Turbo-tier win by default, no opt-in extension, no build matrix.
 
 **Effort: large.**
 
-### C2. Parallelize `check_project`'s per-file loop across native threads sharing one `Registry`
-
-Real PHPStan is a PHP process; PHP gives it no way to share a live object
-graph across cores, so any parallelism requires separate OS processes
-(`ParallelAnalyser`), each independently paying to materialize PHPStan's
-own read-mostly data. Real PHPStan's team built an entire shared-memory
-arena subsystem just to claw that duplication back -
-`ArenaCache`'s PHP twin "shares nothing... lookups always miss", its native
-counterpart a POSIX-shm/Windows-pagefile arena the master process creates
-before spawning workers (`src/Cache/ArenaCache.php:8-19`), with fork-guard/
-process-restart machinery (`TurboProcessRestarter.php`) layered on top.
-phpstan-rs's `check-project` command runs sequentially today
-(`run_check_project`'s `analyze_files.iter().map(...)`,
-`src/main/check_project.rs:140-143`) even though `Project::check_file`
-only needs `&self` (`src/project.rs:444`) and neither `Project` nor
-`Registry` has interior mutability blocking cross-thread sharing. Rust's
-ownership model gets phpstan-rs exactly the property `ArenaCache` was
-purpose-built to bolt on - one shared registry, no per-worker duplication -
-for free, via ordinary borrowed references across `std::thread::scope`.
-The sibling parse-only `check` command already proves the pattern
-(`src/main/check.rs:51-65`); it just hasn't been applied to
-`check_project`'s semantic-analysis loop, the one that actually dominates a
-real run's cost. (C4 below is a scheduling refinement for exactly this
-parallelization, not an alternative to it.)
-
-**Effort: small.**
-
 ### C3. Memoize class-hierarchy member lookups
 
 Real PHPStan's own July-2026 performance write-up names member-lookup
@@ -1074,49 +882,13 @@ even with a compiled extension in hand.
 
 **Effort: medium.**
 
-### C4. Use a work-stealing thread pool for `check_project`'s per-file loop, not a static size-sorted partition
-
-Real PHPStan's `Scheduler::scheduleWork` solves the straggler problem
-(one worker stuck with a run of the project's largest files while
-siblings finish early and idle) by computing each file's size, sorting
-files descending by size, then dealing them round-robin into N job
-buckets so every bucket mixes large and small files - a static partition
-computed once, upfront, before any worker starts. This is the right
-technique for PHPStan's own constraint: its workers are separate OS
-*processes* with no shared memory, so real work-stealing (a worker
-asking a coordinator "give me the next file" every time it goes idle)
-means an IPC round-trip per request - expensive enough that precomputing
-a size-based heuristic partition is cheaper than measuring real
-imbalance live. C2 proposes native threads sharing one process and one
-`Registry`, where that constraint doesn't hold: a work-stealing queue's
-per-item cost there is a plain pop (an atomic op or an uncontended
-lock), so there's no reason to pay for a *heuristic proxy* for balance
-(file size) when real, measured imbalance can be resolved for free as it
-happens - a `Vec<PathBuf>` behind a work-stealing deque (`crossbeam-
-deque`, or `analyze_files.par_iter()` via `rayon` for the same effect
-with far less code) load-balances any actual file-to-file cost variance,
-not just the size-correlated portion of it. It also sidesteps a
-complication PHPStan's own technique has to solve for: PHPStan re-sorts
-each bucket back into original file order after striping specifically
-because "analysis results can be sensitive to" per-job file order in its
-own model - but C2's own premise is that `Project::check_file` needs
-only `&self`, no shared mutable state carried across files within a
-thread, so phpstan-rs's per-file checks are already order-independent;
-there is nothing to preserve in the first place, and no reordering step
-to write. `check_project` currently has no file-partitioning-across-
-workers logic at all (`analyze_files.iter().map(...)` is strictly
-sequential today), so there's no existing behavior to regress from
-either way - but building C2 via the sibling parse-only `check`
-command's own `chunks()`-based `std::thread::scope` pattern (its cited
-proof-of-pattern) would reintroduce the exact static-partition imbalance
-this item exists to avoid; a work-stealing pool is the smaller, not just
-different, fix. Neither `rayon` nor `crossbeam-deque` is a dependency
-today (`grep -n 'rayon\|crossbeam' Cargo.toml` - nothing), so this adds
-one new dependency either way, same as PHPStan's own `Scheduler` needed
-no new dependency for its process-based equivalent - the honest tradeoff
-of doing this with threads instead of processes.
-
-**Effort: small.**
+C2 (parallelizing `check_project` across native threads sharing one
+`Registry`) and C4 (a work-stealing pool over a static size-sorted
+partition for that same loop) are both now shipped - see ROADMAP's Done
+section, "shared rayon thread pool for `check-project`," and commit
+`020db7b`'s own correction settling on work-stealing over the
+size-sorted-partition approach this part originally proposed porting
+from real PHPStan's `Scheduler`.
 
 ---
 
@@ -1150,24 +922,8 @@ threshold mirroring how other opt-in thresholds already read from
 
 **Effort: medium.**
 
-### D2. Boolean-trap / ambiguous positional-literal-argument detection
-
-PHPStan's argument-checking rules (`FunctionCallParametersCheck.php`,
-`CallToFunctionParametersRule.php` machinery) only ever validate a passed
-argument's *type* against the declared parameter type - a literal `true`
-passed to a `bool` parameter is always type-correct, so
-`setVisible(true, false)`-style calls (unreadable, easy to transpose) are
-structurally invisible to that entire rule family; no rule anywhere
-inspects literal-ness combined with parameter name/position ambiguity.
-phpstan-rs already resolves the callee's full `FunctionSig` (per-parameter
-types) at every call site (`src/checker/calls.rs`) and already has a
-working literal-recognition helper reused elsewhere
-(`literal_string_value`, used by the format-string checker,
-`src/checker/calls/format_string.rs:2`) - flagging a bare literal
-`true`/`false` passed positionally (not via named arguments) into a `bool`
-parameter is additive to logic that already exists.
-
-**Effort: small.**
+D2 (boolean-trap / ambiguous positional-literal-argument detection) is
+now shipped - see ROADMAP's Done section, "boolean-trap detection."
 
 ### D3. Identical-branch / structurally-duplicate conditional-body detection
 
@@ -1219,59 +975,10 @@ safer than an interprocedural one, and should stay that way.
 
 **Effort: medium.**
 
-### D5. Validate `@see` PHPDoc tag references actually resolve to a real symbol
-
-When a docblock carries `@see SomeClass::someMethod()` (or `@see
-\Fqcn\Class`, `@see functionName()`), resolve the referenced element
-through the registry the same way an ordinary code reference is resolved;
-emit `phpDoc.seeTagInvalidReference` when it doesn't resolve anywhere in
-the closed-world project+vendor universe - the "renamed the method,
-forgot the `@see` cross-reference" drift that has zero tooling today.
-Real PHPStan's underlying `phpstan/phpdoc-parser` library has no
-`SeeTagValueNode` at all, so `@see` falls through to a fully generic,
-unstructured tag node - not an approximation PHPStan chose for
-architectural reasons, the capability to check it simply doesn't exist
-upstream (even its structurally closest tag, `@deprecated`, only captures
-a free-text description with no parsed replacement-symbol field,
-`PhpDoc/Tag/DeprecatedTag.php:9-19`). phpstan-rs already has a clean,
-single dispatch point for a new structured tag: `DocBlock`'s tag-name
-match arms in `src/docblock.rs` (`"deprecated"` at line 728, `"throws"` at
-731, `"param"`/`"return"`/`"var"` at 451/482/502) - a `"see"` arm is
-additive to a pattern already used for every other tag, and symbol
-resolution against the registry is infrastructure the checker already
-runs for real code references. (Deliberately targets `@see`, not `@uses`
-- PHPStan's own `@uses` already means something different, a `Type`
-checked above a `use Trait;` statement.)
-
-**Effort: small.**
-
-### D6. Flag adjacent same-typed positional arguments whose variable names suggest a swapped call order
-
-At a resolved call site, when two adjacent parameters share the same type
-(e.g. `function resize(int $width, int $height)`) and the corresponding
-positional arguments are plain variables/properties whose names are a
-case-insensitive/substring match for a *different* parameter than the one
-they landed on (`resize($height, $width)`), emit a low-confidence, opt-in
-`argument.possiblySwapped` diagnostic - the classic "both correct types,
-wrong order" copy-paste bug. `FunctionCallParametersCheck.php` (the shared
-engine behind every argument rule) resolves and checks each argument
-purely by *type* - grepping it for any variable-name-vs-parameter-name
-comparison for ordinary positional arguments returns nothing; the only
-name-based matching anywhere in PHPStan's rules is for *named* arguments,
-which are correct by construction. PHPStan's type system has no way to
-represent "these two `int` parameters are semantically different roles",
-so a type-sound call with swapped same-typed arguments is invisible to
-its entire architecture, not merely unimplemented. phpstan-rs already
-resolves the full `FunctionSig` (`ParamSig { name, ty, .. }`,
-`registry/function_sig.rs:24-30`) at every call site and matches
-positionally (`calls.rs:369,509,751`); `ExprKind::Variable(String)`
-already exposes the argument's own source-level name with no extra
-plumbing. Distinct from D2 (boolean-trap): D2 only concerns a bare literal
-`true`/`false`; this concerns two *variables* of a shared non-bool type
-whose *names* suggest transposition - D2 is inert once both arguments are
-variables.
-
-**Effort: medium.**
+D5 (`@see` PHPDoc tag reference validation) and D6 (swapped-adjacent-
+argument-name detection) are both now shipped - see ROADMAP's Done
+section, "@see tag target validation" and "opt-in swapped-adjacent-
+argument-name detection."
 
 ### D7. Flag structurally-identical operands on both sides of a comparison, subtraction/division, or self-assignment
 
@@ -1298,37 +1005,16 @@ own two operands.
 
 **Effort: medium.**
 
-### D8. Computed edit-distance suggestion for `method.notFound`, the one undefined-symbol diagnostic real PHPStan never attaches a tip to
-
-Real PHPStan attaches *some* tip to three of the four "not found"
-diagnostic families, but never a *computed* one: `AccessPropertiesCheck.php`
-calls `->tip(...)` directly in its `property.notFound` branch (a computed
-tip when available, else a fixed help URL); `class.notFound`/
-`function.notFound` sites overwhelmingly attach `RuleErrorBuilder::
-discoveringSymbolsTip()` (`RuleErrorBuilder.php:202-205`, a fixed "Learn
-more" URL) via `RuleLevelHelper.php:245-246` and ~25 other call sites.
-`MethodCallCheck.php`'s `method.notFound` builder (line 144), by
-contrast, is a bare `->identifier('method.notFound')` with no tip call at
-all (`grep -n "tip(" vendor/phpstan-src/src/Rules/Methods/
-MethodCallCheck.php` returns nothing) - confirmed clean, matching
-phpstan-rs's own `method.notFound` sites (`src/checker/expr.rs:
-1030-1036,2837-2842`, plain `self.report(...)`, no `.tip`). The
-opportunity: a *computed* edit-distance suggestion ("did you mean
-`foo`?") over the already-resident whole-project `Registry`
-(`Registry.classes: FxHashMap<String, ClassInfo>`, `src/registry.rs:38`;
-`ClassInfo.methods`, `registry/class_info.rs:151`), using the already-built
-but mostly-unused `DiagnosticBuilder::tip()` (`src/checker.rs:407`) -
-specifically for `method.notFound`, since class/function/property already
-carry *some* tip (static, not computed) and method genuinely has none in
-either codebase.
-
-**Effort: small.**
+D8 (a computed edit-distance "did you mean?" tip for `method.notFound`)
+is now shipped - see ROADMAP's Done section, "method.notFound 'did you
+mean' tip."
 
 ---
 
 ## AA. Whole-program design-pattern suggestion rules
 
-Opt-in suggestions in the shape B1/B2/H-section items already establish: a
+Opt-in suggestions in the shape ROADMAP's now-shipped Phase 86 B1/B2 and
+this document's own H-section items already establish: a
 whole-program fact PHPStan's architecture can't cheaply compute (would
 need its 14-collector `CollectedDataNode` machinery to reconcile across
 parallel workers) that phpstan-rs's single-process, closed-world registry
@@ -1394,7 +1080,8 @@ vendored trees for "factory"/"named constructor" - nothing but an
 unrelated `StaticTypeFactory` import); more fundamentally, its only
 whole-application member-usage rule gates on `isPrivate()` specifically
 because determining every call site of anything non-private needs its
-own cross-process collector reconciliation (cited already for B1) - the
+own cross-process collector reconciliation (the same cost ROADMAP's
+now-shipped Phase 86 B1 already had to pay around) - the
 same cost applies identically to aggregating every `new ClassName(...)`
 call site's enclosing method across the whole project. phpstan-rs
 already does the two things this needs simultaneously during ordinary
@@ -1406,32 +1093,9 @@ existing walk.
 
 **Effort: medium.**
 
-### AA3. Suggest constructor property promotion for a trivially-forwarding constructor
-
-For a class's `__construct()`, when every statement is exactly
-`$this->prop = $param;` where `prop_name == param_name`, each such param
-is non-variadic/non-by-ref and matches a sibling `PropertyDecl` with an
-identical declared type and no conflicting default, the property isn't
-itself already promoted/static/hooked, and every constructor param is
-consumed by exactly one such assignment (no leftover statement, no unmatched
-param) - suggest rewriting the whole constructor to use PHP 8.0
-constructor property promotion, using each property's visibility/
-`is_readonly` as the promoted modifiers. Real PHPStan's promoted-property
-machinery is entirely about *validating* declarations already promoted
-(`isPromoted()`/`isPromotedFromTrait()` reflection flags,
-`Node/ClassPropertyNode.php:29-65`) - it never reasons in the reverse
-direction; grepping both vendored trees for "promot" turns up ~30 hits in
-phpstan-src, all reflection/scope-flag machinery for already-promoted
-code, and zero in phpstan-strict-rules - the closest ecosystem tool for
-this codemod, Rector, is a separate non-PHPStan project. phpstan-rs's
-`Param` already fully represents promoted-parameter syntax
-(`promoted_visibility`/`promoted_readonly`/`promoted_final`, since it
-already supports parsing/checking promoted constructors elsewhere) - this
-only proposes a new detector recognizing the unpromoted mirror-image
-shape and reusing the same `Param`/`PropertyDecl` fields to build the
-suggested rewrite, no new AST or parser plumbing.
-
-**Effort: small.**
+AA3 (constructor-property-promotion suggestion for a trivially-forwarding
+constructor) is now shipped - see ROADMAP's Done section, "opt-in
+constructor-property-promotion suggestion."
 
 ### AA4. Class-level `readonly class` shorthand when every property independently qualifies under AA1
 
@@ -1463,45 +1127,9 @@ declared properties and checking all of them qualified.
 
 **Effort: small.**
 
-### AA5. Suggest declaring `never` when a body provably never returns normally
-
-Real PHPStan has this exact suggest-direction rule already *built* -
-`NeverRuleHelper::shouldReturnNever()` walks a function's execution ends
-and classifies each always-terminating one as a throw vs. "terminates
-script execution" (an infinite loop, or a call to an already-`never`
-function/method) - but the rules that consume it,
-`FunctionNeverRule`/`MethodNeverRule`, are registered only in
-`vendor/phpstan-src/issue-bot/playground.neon`, phpstan.org's own private
-issue-reproduction bot config (confirmed: grepping every `conf/*.neon`
-for "Playground" returns zero rule-registration hits, no installable
-package/level config/strict-rules extension ever turns them on). Every
-*other* `never`-related identifier in real PHPStan - `return.never` in
-`FunctionReturnTypeCheck.php` and `MissingReturnRule.php` - is
-exclusively the *validate* direction (a body that already declares
-`never` but returns/falls through), confirming the same directional
-asymmetry AA1/AA3/AA4 already established for readonly/promotion:
-PHPStan never proposes adding `never` to a project shipping to real
-users, only checks it once present. phpstan-rs already computes the
-exact "this call never returns" fact generically, unconnected to any
-suggestion: `always_terminates` treats any call whose callee registry
-signature declares `never` as a terminating statement - already reused
-today for guard-clause narrowing, `deadCode.unreachable`, and Phase 61's
-own `return.never`/`return.missing` validation. Add a new opt-in
-suggestion pass right next to that existing validation block: for a
-declared function/method whose return type isn't already `never` (or
-generator), contains zero `return` statements anywhere in its body (a
-distinct, stricter gate than `always_terminates`'s own broader notion,
-which also treats a plain `return;`/`return $x;` as terminating - that
-must NOT count here), where every real execution end is either a `throw`
-or a statement inferred as `Type::Never`, suggest the stricter type -
-distinguishing "always throws" from "always terminates script execution"
-the same way real PHPStan's own message text does. Since phpstan-rs
-ships one binary/config surface to every user rather than gating a
-working rule behind a private internal-only demo tier, this is additive
-wiring onto an already-built, already-tested primitive, not new analysis
-machinery.
-
-**Effort: medium.**
+AA5 (suggesting `never` when a body provably never returns normally) is
+now shipped - see ROADMAP's Done section, "opt-in never-return-type
+suggestion."
 
 ### AA6. Suggest `@template-covariant`/`@template-contravariant` when actual usage already proves it safe
 
@@ -1538,13 +1166,15 @@ matching real PHP variance soundness exactly, and mirroring AA1's
 
 ---
 
-## AB. Two PHP 8.4 rough edges - one PHPStan hasn't caught up to itself, one it structurally can't
+## AB1. Purity/impure-point enforcement for property hooks
+
+(AB2, dead-write detection for `public private(set)` properties, is now
+shipped - see ROADMAP's Done section, "a PHP 8.4 asymmetric-visibility
+property's own narrower dead-write check.")
 
 Real PHPStan's newest feature support (asymmetric visibility, property
 hooks) is exactly where self-inconsistencies would be expected, unlike
 its decade-old core mechanisms.
-
-### AB1. Purity/impure-point enforcement for property hooks
 
 Real PHPStan's own `PropertyHooksProcessor::processPropertyHooks`
 (`Analyser/PropertyHooksProcessor.php:113-158`) explicitly gathers
@@ -1573,76 +1203,19 @@ PHPStan's own source shows it gathers the data for but never consumes.
 
 **Effort: medium.**
 
-### AB2. Dead-write detection for `public private(set)` properties
-
-`UnusedPrivatePropertyRule::processNode`
-(`Rules/DeadCode/UnusedPrivatePropertyRule.php:68`) gates entry into the
-entire rule on `if (!$property->isPrivate()) { continue; }`, checking
-only the base `Modifiers::PRIVATE` bit - entirely independent of
-`Modifiers::PRIVATE_SET`/`PROTECTED_SET`, which back separate methods on
-the very same class. So a PHP 8.4 property declared
-`public private(set) string $x` is skipped from the very first line, even
-though its write access is exactly as restricted to the declaring class
-as a fully-private property's - the "never written, only read"
-diagnostic this same rule already computes for plain-private properties
-is structurally unreachable for its asymmetric-visibility sibling.
-phpstan-rs's own mirrored scan currently has the identical gate
-(`if p.visibility != Visibility::Private { continue; }`,
-`checker/unused.rs:216`) - but its `PropertySig` already carries
-`write_visibility` as a field entirely separate from `visibility`
-(`registry/class_info.rs:41`), already consulted independently for real
-property-assignment access-checking and generic variance elsewhere in the
-same codebase. Extending `unused.rs`'s entry gate to also admit
-`p.write_visibility == Visibility::Private` needs no new data at all -
-unlike B1 (which needs a whole new cross-file usage-graph aggregation,
-effort: large), this is same-file, needing only a field phpstan-rs
-already computes and already uses elsewhere, just never consulted by
-this one check.
-
-**Effort: small.**
-
 ---
 
-## AE. Assertion-less test method detection ("risky test," as a static check)
-
-A new checker module flags any PHPUnit-style test method (a public method
-on a class where `is_subclass_of(class, "PHPUnit\Framework\TestCase")`,
-named `test*` or carrying a `#[Test]` attribute) or Pest test closure (an
-`it(...)`/`test(...)` call, detected the same way `pest_config.rs::
-is_this_binding_call` already recognizes Pest's hook functions) whose
-body contains zero assertion-shaped calls anywhere, recursively - no
-`assert*` MethodCall/StaticCall, no explicit `Assert::assert*`, and for
-Pest no `expect(...)` call. A disclosed narrowing to ship first: exclude
-a body that calls `expectException*`/`markTestSkipped`/
-`markTestIncomplete`/`addToAssertionCount`, matching real PHPUnit's own
-runtime notion that these also count toward "not risky." Grepping every
-rule file under both vendored trees case-insensitively for "risky",
-"EmptyTest", or "assertion" returns zero hits - the concept doesn't exist
-anywhere in either ruleset (PHPStan's own `PhpDoc/{Method,Function}
-AssertRule.php` is about unrelated `@phpstan-assert` PHPDoc narrowing
-tags, not test-runner assertion-call auditing). This is normally caught
-only by PHPUnit's own `--fail-on-risky`/`beStrictAboutTestsThatDoNotTest
-Anything` *runtime* flag - PHPStan itself has no static rule for it.
-phpstan-rs already has every piece this needs, built for unrelated
-features: `is_subclass_of` already answers the TestCase question (the
-same call `pest_config.rs`'s default-`$this`-type fallback already
-relies on, backed by a real vendored `PHPUnit\Framework\TestCase` stub);
-`checker/narrowing/assertions.rs::apply_phpunit_assertion_narrowing`
-already maintains and matches against the full real PHPUnit `assert*`
-method-name set, directly reusable as the "is this call assertion-shaped"
-predicate; the recursive whole-body scan pattern already exists twice
-over (`checker/uninitialized_dataflow.rs`'s `walk_stmts`/`walk_expr`,
-`checker/noop.rs`'s conservative subtree scan). A composition of four
-already-proven, already-vendored-and-grounded mechanisms, no new
-architecture needed.
-
-**Effort: medium.**
+Section AE (assertion-less/"risky" PHPUnit-and-Pest test method
+detection) is now shipped - see ROADMAP's Done section, "opt-in
+assertion-less-test (risky test) detection."
 
 ---
 
 ## AF. Opt-in algorithmic-complexity heuristic: linear lookup into a pre-built array from inside an unrelated loop
 
-Explicitly heuristic, like D6/D7 before it. Inside a loop body (`self.
+Explicitly heuristic, like D7 before it (D6, the other original
+precedent for this framing, has since shipped - see ROADMAP's Done
+section). Inside a loop body (`self.
 loop_depth > 0`, already-live infrastructure - `checker.rs:728`, already
 consulted directly by other heuristic checks at
 `checker/expr/probe_checks.rs:154,209,379,454`), when the checker sees a
@@ -1658,15 +1231,15 @@ iteration - O(n*m); consider `array_flip()`/`isset()` or building an
 index before the loop." Ships strictly opt-in with an explicit
 false-positive caveat that a small-but-unbounded-at-runtime haystack
 makes this a non-issue the check can't resolve - the same acknowledged
-low-confidence framing D6/D7 already establish as acceptable for this
-category. PHPStan's entire `Rules/` catalog reasons about types,
-existence, and soundness, never runtime execution cost - grepping both
-vendored trees for "complexity"/"quadratic"/"performance" as a rule
-concept returns nothing; there is no rule keyed on a lookup's placement
-relative to a loop, or on an array's role as a repeatedly-scanned lookup
-table. Distinct from D1 (which reasons about a function's own
-control-flow shape, never a variable's role as a collection) and D6/D7
-(single-call-site/single-expression checks with no loop-context or
+low-confidence framing D7 (and D6, before it shipped) already establish
+as acceptable for this category. PHPStan's entire `Rules/` catalog
+reasons about types, existence, and soundness, never runtime execution
+cost - grepping both vendored trees for "complexity"/"quadratic"/
+"performance" as a rule concept returns nothing; there is no rule keyed
+on a lookup's placement relative to a loop, or on an array's role as a
+repeatedly-scanned lookup table. Distinct from D1 (which reasons about a
+function's own control-flow shape, never a variable's role as a
+collection) and D7 (a single-expression check with no loop-context or
 collection-role reasoning at all) - keyed on a loop's own iteration
 relationship to a separate collection's construction site.
 
@@ -1683,33 +1256,8 @@ resolves to real, on-disk source, not an assumed API.
 
 ## E. Ecosystem checks ported from `phpstan-strict-rules`
 
-### E1. Non-boolean value used directly as a condition
-
-`BooleanRuleHelper::passesAsBoolean`
-(`vendor/phpstan-strict-rules/src/Rules/BooleansInConditions/BooleanRuleHelper.php:22-40`)
-backs eight rules (`BooleanInIfConditionRule`, `BooleanInWhileConditionRule`,
-`BooleanInDoWhileConditionRule`, `BooleanInElseIfConditionRule`,
-`BooleanInTernaryOperatorRule`, `BooleanInBooleanAndRule`,
-`BooleanInBooleanOrRule`, `BooleanInBooleanNotRule`) that flag a condition
-whose *inferred type* isn't exactly `bool` (an `int`, `string`, nullable
-object, etc. used directly as an `if`/`while`/ternary/`&&`/`||`/`!`
-condition without an explicit boolean cast or comparison) - distinct from,
-and not offered by, core PHPStan at any level. This is a genuinely
-different check from phpstan-rs's existing `boolean_conditions.rs`, which
-only ports core PHPStan's *constant*-condition family
-(`ConstantConditionRuleHelper`/`BooleanAndConstantConditionRule`/
-`BooleanOrConstantConditionRule` - flagging a condition whose value is
-*always* true or *always* false, regardless of its declared type). A
-condition that's genuinely `int`-typed and could be either truthy or falsy
-at runtime is invisible to phpstan-rs's current check family entirely
-(confirmed: `inferred_constant_condition` only ever matches
-`Type::True`/`Type::False`, never "not `Type::Bool`"). phpstan-rs already
-has every piece this needs in hand at the same call sites
-`boolean_conditions.rs` already instruments (`Checker::in_condition_position`,
-`infer_expr`) - it's a type-kind check (`!= Type::Bool`), not new
-inference.
-
-**Effort: small.**
+E1 (non-boolean value used directly as a condition) is now shipped - see
+ROADMAP's Done section, "opt-in 'only booleans in condition' family."
 
 ### E2. `array_filter()` without an explicit callback, for an ambiguous element type
 
@@ -1734,87 +1282,25 @@ same variable-type-tracking gaps that killed its siblings.
 **Effort: medium**, and gate it on revisiting `array_ops.rs:395-416`'s two
 documented false positives first.
 
-### E3. A concrete constructor that never calls `parent::__construct()`
-
-`RequireParentConstructCallRule::processNode`
-(`vendor/phpstan-strict-rules/src/Rules/Classes/RequireParentConstructCallRule.php:29-68`)
-flags a non-abstract `__construct()` (skipping traits, interfaces,
-anonymous classes) that doesn't call `parent::__construct()`
-(`callsParentConstruct`, recursing through statements and unwrapping `@`
-error-suppression, lines 70-99) when a real, callable parent constructor
-exists - walking the ancestor chain past any abstract/private/deprecated
-constructor to find one (`getParentConstructorClass`, lines 105-131).
-Core PHPStan has no equivalent (`grep -rli parentconstruct
-vendor/phpstan-src/src/Rules/` - nothing). phpstan-rs's registry already
-walks the ancestor chain for method resolution
-(`Registry::lookup_ancestor_method_with_owner`,
-`src/registry/hierarchy.rs:175`) and already reasons about
-`parent::__construct()`'s property-initialization effect elsewhere
-(`src/checker/uninitialized.rs:114`) - this rule is a direct, additive
-combination of both: find the nearest real ancestor constructor via the
-existing hierarchy walk, then check the current constructor's own body for
-a `parent::__construct()` call, matching `RequireParentConstructCallRule`'s
-own abstract/private/deprecated-skip logic. (I4 in Part 6 is the codemod
-that attaches to this once it ships.)
-
-**Effort: small.**
-
-### E4. Inherited method whose declared name-casing mismatches its parent/interface
-
-`WrongCaseOfInheritedMethodRule::findMethod`
-(`vendor/phpstan-strict-rules/src/Rules/Methods/WrongCaseOfInheritedMethodRule.php:61-84`)
-walks a class's parent and every implemented interface
-(`processNode`, lines 25-59) and flags `method.nameCase` when an
-overriding method's declared name differs only in case from the ancestor
-method it overrides (PHP itself is case-insensitive for method calls, so
-this is purely a readability/consistency signal, never a soundness one).
-phpstan-rs already has a `.nameCase` diagnostic family, but only for
-import/reference casing (`class.nameCase`,
-`src/registry/name_context.rs:117`, `src/checker/resolve.rs:351`) - grep
-confirms no inherited-*method*-name-casing check exists anywhere in the
-checker. phpstan-rs's existing override-checking pass
-(`check_method_overrides`/`check_one_method_override`,
-`src/checker/oop/method_overrides.rs`) already visits every
-overriding-method/ancestor-method pair via
-`lookup_ancestor_method_with_owner` (`src/registry/hierarchy.rs:175`) for
-signature-compatibility checking - a string case-comparison on the method
-names already in hand at that call site is additive, not a new pass. (I1
-in Part 6 is a shared codemod covering this and every other `.nameCase`
-diagnostic.)
-
-**Effort: small.**
+E3 (a concrete constructor that never calls `parent::__construct()`) and
+E4 (an inherited method whose declared name-casing mismatches its
+parent/interface) are both now shipped - see ROADMAP's Done section,
+"opt-in constructor.missingParentCall" and the override-compatibility
+family's "an overriding method's own casing mismatch."
 
 ---
 
 ## W. More `phpstan-strict-rules` "stricter defaults" config flags
 
-A distinct axis from section E's custom Rule classes: three gaps where a
+A distinct axis from section E's custom Rule classes: a gap where a
 `phpstan-strict-rules` config flag's stricter behavior has no phpstan-rs
-equivalent at all, opt-in or otherwise - each confirmed against the real
-gating mechanism, not assumed.
+equivalent at all, opt-in or otherwise - confirmed against the real
+gating mechanism, not assumed. (Two sibling gaps in this same axis, W1
+and W3, have since shipped - see ROADMAP's Done section.)
 
-### W1. Opt-in strict `checkDynamicProperties` behavior inside `isset()`/`empty()`/`??`
-
-Real PHPStan's `AccessPropertiesCheck::processSingleProperty` only
-reaches its undefined-property leniency branch when `hasInstanceProperty`
-answers "maybe" (the common case for any non-final class without the
-property declared, `Type/ObjectType.php:212-231`); when the access is an
-`isset()`/`empty()`/`??`/`??=` root, the check returns `[]` outright
-unless `checkDynamicProperties` is true - default `false`
-(`Rules/Properties/AccessPropertiesCheck.php:135-151`,
-`phpstan-strict-rules/rules.neon:6`). phpstan-rs's
-`check_expr_quiet_root` (`checker/expr/probe_checks.rs:79-115`) and the
-isset/empty existence-probe handling (`checker/expr.rs:319-348`) already
-unconditionally suppress this check for every such root, matching
-PHPStan's *default* leniency - but there is no config flag or code path
-that ever runs the check in that context, so phpstan-rs cannot currently
-reproduce strict-rules' stricter behavior at all, even opt-in. A project
-toggle routing an isset-root `PropertyAccess` through the normal
-`member_confirmed_missing` check (`checker/expr.rs:2295-2308`) instead of
-the blanket skip is small and additive, reusing machinery that already
-exists.
-
-**Effort: small.**
+W1 (opt-in strict `checkDynamicProperties` behavior inside
+`isset()`/`empty()`/`??`) is now shipped - see ROADMAP's Done section,
+"opt-in strict checkDynamicProperties in isset/empty."
 
 ### W2. Opt-in strict printf/sprintf placeholder-type checking
 
@@ -1837,65 +1323,13 @@ alongside the existing lenient one.
 
 **Effort: medium.**
 
-### W3. Opt-in call-site function/method name-case checking
-
-phpstan-rs's own comment (`checker/imports.rs:66-70`) already traces
-`checkFunctionNameCase`'s upstream default (`false`) to
-`conf/*.neon`, so building nothing by default already matches - but
-strict-rules flips it on (`rules.neon:8`) across five rule files
-(`CallToNonExistentFunctionRule.php:63-79`, `MethodCallCheck.php:168`,
-`StaticMethodCallCheck.php:336`, `FunctionCallableRule.php:61`,
-`ExistingNamesInUseRule.php:110`/`ExistingNamesInGroupUseRule.php:109`),
-flagging a *call* whose written name-casing differs from the resolved
-declaration - distinct from E4's `WrongCaseOfInheritedMethodRule` (which
-flags a *declaration* whose casing mismatches its ancestor's declaration;
-E4's own text confirms "no inherited-method-name-casing check exists
-anywhere," leaving the call-site family entirely untouched). phpstan-rs's
-function/class lookups are already deliberately case-insensitive with a
-documented rationale (`Registry::lookup_function`,
-`registry/hierarchy.rs:623-630`) - exactly the precondition a
-case-mismatch diagnostic needs (resolve first, compare resolved canonical
-name against as-written name), the identical pattern the existing
-`class.nameCase` check already implements end-to-end
-(`checker/resolve.rs:323-352`, `registry/name_context.rs:117-124`).
-Extending that same mechanism to function calls, method calls, static
-calls, and `use function` imports is additive.
-
-**Effort: medium.**
-
----
-
-## Z. `Won't-port`-mis-bucketed rules: registered only for phpstan.org's own issue-reproduction bot
-
-### Z1. Standalone numeric-string/float/bool array-key cast warnings
-
-Real PHPStan's `LiteralArrayKeyCastRule` (array-literal keys) and
-`ArrayDimCastRule` (`$arr['5']` read/write dim-fetch on any array-typed
-expression) are fully working, general-purpose, and need no third-party
-config to activate - but both live under `Rules/Playground/` and are
-registered *only* in `vendor/phpstan-src/issue-bot/playground.neon`,
-phpstan.org's own private issue-reproduction bot config. Grepping every
-`conf/*.neon` file (`config.neon`, `parametersSchema.neon`) for
-"Playground" returns zero rule-registration hits - no installable
-package, level config, or strict-rules extension ever turns these on for
-a real project. A pure product-distribution constraint, not a technical
-one: whenever a constant scalar array key's PHP-coerced form differs from
-what's written (`'5'` -> int `5`, `'08'` stays string since not
-canonical, `1.5` -> int `1` truncated, `true`/`false` -> `1`/`0`), these
-rules flag the silent cast - standalone, not only when it happens to
-collide with another key in the same literal. phpstan-rs's existing
-`array.duplicateKey` check (`checker/tests/array_key_validity.rs:
-404-419`) only fires on an actual collision; it never fires standalone
-and has no dim-fetch counterpart. phpstan-rs ships one binary/config
-surface to every user - there's no separate "internal demo" tier
-withholding a check from the shipped CLI - and already has the exact
-primitive needed: `is_canonical_int_key` (`checker/expr.rs:4092-4096`)
-plus constant-key tracking already threaded through array-literal
-building (`checker/expr/array_ops.rs:276,754`). (AA5 above is the same
-Playground-only mis-bucketing, for `never`-return-type suggestions
-instead of array-key casts.)
-
-**Effort: small.**
+W3 (opt-in call-site function/method name-case checking) and Z1
+(standalone numeric-string/float/bool array-key cast warnings,
+`Won't-port`-mis-bucketed since both real-PHPStan rules live under
+`Rules/Playground/`, the same mis-bucketing the now-shipped AA5 shared)
+are both now shipped - see ROADMAP's Done section, "opt-in call-site
+function/method-name-case checking" and "opt-in array-key cast
+warnings."
 
 ---
 
@@ -1912,83 +1346,16 @@ is the cluster most directly relevant to a future VSCode extension for
 realtime incremental analysis (the LSP server's own trustworthiness/
 concurrency/protocol gaps, and the VSCode extension client itself, were
 a separate, now-fully-done initiative - see ROADMAP's "Performance &
-tooling" Done section).
-
-## F. Single-cursor request/response capabilities
-
-### F1. Live, flow-narrowed hover type for local variables (already implemented)
-
-`Checker::probe_span`/`probe_hit` (`src/checker.rs:758-776`) stash a
-matched span's inferred type during an ordinary `check_expr` pass for
-`MethodCall`/`PropertyAccess` receivers, and `ExprKind::Variable`
-(`src/checker/expr.rs:1249-1273`) already does the same for a plain
-variable read (`self.probe_hit_at(e.span, &ty)`, right after populating
-`probe_var_provenance` for the identical span) - not a gap, contrary to
-this section's own prior text. Every real binding-site shape stashes into
-`probe_hit` too: `bind_assignment_target`'s `Variable` arm
-(`src/checker/assignment.rs:142`, covering a plain/compound assignment's
-LHS, every destructuring leaf, and a `foreach` loop's value binding via
-`loops.rs:722`), `bind_simple_target` for a `foreach` key
-(`assignment.rs:372-379`, its own doc comment: "target is a foreach key's
-bare `$var` expression"), plus parameter/promoted-parameter
-(`function_decl.rs:449,555`), `global`/`static` declaration
-(`stmt.rs:443,470`), and `catch` binding (`stmt/try_catch.rs:184`) sites -
-all exercised by `src/lsp/tests/variable_definitions.rs`. Real PHPStan's
-only way to inspect an inferred type at a point remains
-`PHPStan\dumpType($expr)` (`Rules/Debug/DumpTypeRule.php:1-50`) - editing
-the analyzed source to insert the call, then re-running the whole CLI;
-phpstan-rs's LSP already does this live, for every binding-site shape,
-with no source edit required.
-
-### F2. Wire the already-typed `DiagnosticFix` plumbing into `textDocument/codeAction`
-
-`Diagnostic`/`DiagnosticBuilder` already carry a fully-typed `fix:
-Option<DiagnosticFix>` field shaped exactly like an LSP `TextEdit`
-(`DiagnosticFix { span, replacement, description }`, `src/checker.rs:
-342-354`, builder at `checker.rs:422-431`) - but no production call site
-uses it (only a synthetic test, `src/checker/tests/diagnostic_identifiers.rs:
-214`), and `lsp.rs`'s `ServerCapabilities` never advertises
-`code_action_provider`, nor does `handle_request` have a
-`textDocument/codeAction` arm. Real PHPStan's `RuleErrorBuilder::
-fixNode()` (`RuleErrorBuilder.php:296-302`) feeds a wholly separate,
-proprietary subsystem instead: `Command/FixerApplication.php`/
-`FixerWorkerCommand.php`, labeled "(Internal) Support for PHPStan Pro" -
-a paid-tier, signed-phar, out-of-process batch rewriter, never a
-per-diagnostic in-editor quick-fix. phpstan-rs's `Diagnostic` already
-models the fix in exactly the shape an LSP `WorkspaceEdit` needs, computed
-in the same in-process pass that raised the diagnostic - only the emission
-(per-check) and the LSP-side exposure are missing. Pairs naturally with
-Part 6 below, which lists exactly which existing diagnostics are safe
-to populate `.fix(...)` for first.
-
-**Effort: small** (the wiring); populating individual checks is Part 6.
-
-### F3. Whole-project "Find All References" / rename-safe refactoring, on a new use-site span index
-
-Neither `textDocument/references` nor `textDocument/rename` exists in
-`handle_request` (`src/lsp.rs:548-625`), and the data doesn't fully exist
-yet either: `Project.dependents` (`project.rs:71`) tracks only *which
-files* reference a bare symbol name (file granularity, for re-check
-invalidation, built from `deps::referenced_names`'s flat `HashSet<String>`
-per file, `src/deps.rs:1-30`); `DeclLocations` (`project/decl_locations.rs:
-18-22`) stores only one declaration-site span per symbol, never use-site
-spans. Real PHPStan has no reference-finding or rename capability of any
-kind (no LSP module anywhere in `vendor/phpstan-src/src`; its dependency
-graph exists only to feed cache invalidation, never a queryable "every use
-of X" index). A new, additive per-file use-site index, resolved through
-the same `NameContext`/registry hierarchy walk `resolve_member_owners`
-already uses for hover/definition (`lsp.rs:81-110`), would let
-`references` enumerate every real use across the whole project and
-`rename` batch those into one `WorkspaceEdit` - safe specifically because
-it resolves each use through the live, whole-project `Registry`
-(inheritance-aware, same-name-different-class disambiguation) rather than
-a textual grep. The resolution logic already exists and is already
-exercised by `definition`; only the use-site span recording is missing.
-(AH3 and AO1 below both depend on this same index.)
-
-**Effort: large.**
-
----
+tooling" Done section). Most of what this part originally proposed has
+since shipped too: live flow-narrowed hover, `codeAction`/`DiagnosticFix`
+wiring, whole-project `references`/`rename`, `semanticTokens`,
+`inlayHint`, `documentSymbol`, `workspace/symbol`, `signatureHelp`,
+`typeDefinition`, and `documentHighlight` are all in ROADMAP's Done
+section now (its "LSP hover/go-to-definition" and "LSP completeness"
+entries) - see that section for what each one actually covers. What's
+left here is real, narrower residual work: finer-grained incremental
+re-check (G), two still-open single-file/whole-project stragglers
+(`codeLens`, `willRenameFiles`), and derivation-trace explainability (T).
 
 ## G. Finer-grained incremental re-check than real PHPStan's file-level result cache
 
@@ -2055,219 +1422,48 @@ drive re-check scheduling.
 
 ---
 
-## Y. Passive LSP rendering: `semanticTokens` and `inlayHint`
+Section Y (`semanticTokens`/`inlayHint` passive rendering), AH1
+(`documentSymbol`), and AH2 (`workspace/symbol`) are all now shipped -
+see ROADMAP's Done section, "LSP completeness." What remains from the
+original AH section:
 
-Distinct from section F (single-cursor request/response) - these are
-request/response-free, editor-painted continuously rather than triggered
-by user action.
-
-### Y1. `textDocument/semanticTokens` push-highlighting for deprecated/internal symbol usage
-
-Advertise `semanticTokensProvider` and, at every call/property/const-
-access/instantiation site, emit a token modifier (LSP's standard
-"deprecated" modifier, plus a custom "internal" one) whenever the
-resolved target's `FunctionSig`/`PropertySig`/`ConstSig.deprecated` is
-`Some(_)` or `is_internal` is true - computed *unconditionally*, not
-gated behind `Registry::check_deprecated_usage`/`check_internal_usage`
-(both default `false`, `src/registry.rs:102-111`): the checker already
-looks up the callee's sig at every such site for ordinary type-checking
-regardless of those flags, so the deprecated/internal *fact* is a free
-byproduct of resolution already happening; only the diagnostic-emission
-call is gated. This gives continuous strike-through/coloring in the
-editor even for a project that (like most real ones, per `registry.rs`'s
-own comment) never turns the corresponding diagnostic on. Real PHPStan
-has no LSP and no push-rendering channel at all - deprecation warnings
-surface only via `phpstan/phpstan-deprecation-rules`, "a separate,
-opt-in Composer package, not even part of core phpstan/phpstan"
-(`registry.rs:102-106`), and even then only as a batch CLI diagnostic on
-the next full run, never a live per-keystroke visual cue.
-
-**Effort: medium.**
-
-### Y2. `textDocument/inlayHint`: parameter-name hints (near-free) vs. inferred-type hints on unannotated locals (materially new work)
-
-Two sub-features, honestly different costs. **(a) Parameter-name hints**
-before each call argument: `resolve_call_args` already resolves every
-argument (positional/named/spread/variadic) to its exact declaring
-`ParamSig` - including `ParamSig.name` (`registry/function_sig.rs:24-25`)
-- as part of ordinary call-argument checking; exposing that already-
-computed name/span pairing as an `inlayHint` response is close to free,
-no new inference. **(b) Inferred-type hints** after an unannotated
-`$x = ...`: this is *not* a small extension of F1's `probe_hit`
-mechanism - `probe_hit`/`probe_var_provenance` are single-target
-(`Checker::probe_span: Option<Span>`, an exact equality check at a
-handful of call sites, `checker.rs:775-776`), built for one throwaway
-re-check per user click. `inlayHint` needs every relevant span's type
-across the whole open file, continuously (re-rendered on every
-`didChange`, not once per click) - a genuinely new collection mode (an
-unconditional `Vec<(Span, Type)>` populated at every assignment during
-one ordinary pass), paying a full-file cost on every edit rather than the
-probe's near-zero per-site cost. Real PHPStan's only way to inspect an
-inferred type at all is editing the source to insert `PHPStan\dumpType()`
-and re-running the whole CLI - no channel, on-demand or continuous, for
-rendering a type or resolved parameter name without modifying source,
-since it has no LSP and no editor-facing rendering concept at all.
-
-**Effort: medium.**
-
----
-
-## AH. Whole-file/whole-project symbol lists: `documentSymbol`, `workspace/symbol`, `codeLens`
-
-Distinct from section F (single-cursor-position request/response) and
-section Y (per-token passive painting) - these operate over whole-file/
-whole-project symbol *lists*, keyed by no cursor position at all.
-
-### AH1. `textDocument/documentSymbol`: per-file hierarchical outline
-
-Advertise `document_symbol_provider` and add a `"textDocument/
-documentSymbol"` arm to `handle_request`. Resolve the file's `&[Stmt]`
-via `Project::ast(path)` - already used by `lsp::navigation`, and
-notably *not* gated behind `retain_source` unlike `decl_locations`/
-`source` - then walk its top-level `ClassDecl`/`EnumDecl`/`FunctionDecl`
-variants, emitting one `DocumentSymbol` per declaration using fields
-every declaration node already carries: `name_span` (for
-`selectionRange`) and the whole-declaration `span` (for `range`), both
-present on `FunctionDecl`, `ClassDecl`, `PropertyDecl`, `EnumDecl`/
-`EnumCase`. A class's own `methods`/`properties`/`consts`/`cases` fields
-become nested `children`. This is exactly the declaration set
-`DeclLocations::index` already extracts per-file into two flat global
-maps - the same walk, restructured into one file's hierarchical response
-instead of a project-wide flat index. Real PHPStan ships no LSP, outline,
-or resident symbol-list capability of any kind - `FileAnalyser::
-analyseFile` is its sole entry point, always a fresh whole-file CLI
-invocation with no persisted per-file symbol list to query interactively.
-`lsp-types = "0.97.0"` (already a dependency) already exposes
-`DocumentSymbol`/`document_symbol_provider`.
-
-**Effort: small.**
-
-### AH2. `workspace/symbol`: project-wide fuzzy symbol search
-
-Advertise `workspace_symbol_provider` and add a `"workspace/symbol"` arm,
-reading the query string and matching it (case-insensitive substring, or
-a light fuzzy/subsequence match) against every entry in `Project::
-decl_locations()` - its `classes`/`functions`/`members` maps already
-cover every declared class/function/method/property/const project-wide,
-each already carrying a real `(PathBuf, Span)`. Two genuinely new pieces:
-(a) the query/filter mechanism itself - no substring/fuzzy-match helper
-exists anywhere in the codebase today; (b) each match's `SymbolKind`,
-since `DeclLocations` stores only `(path, span)`, never a kind - resolved
-via `registry.classes.get(fqn).kind` for a class entry, or the same
-three-way `lookup_method_with_owner`/`lookup_property_with_owner`/
-`lookup_const_with_owner` probe `format_member_hover` already performs
-for a member entry. Unlike `documentSymbol`'s `FileState.ast`,
-`DeclLocations` *is* gated behind `retain_source` - but `lsp::Server::
-new()` unconditionally turns that gate on before any request can arrive,
-so by the time a `workspace/symbol` request is possible the index is
-already in the right mode, with no separate prerequisite gap to close
-(worth stating explicitly: this relies on a gate that happens to already
-be unconditionally on for this server, not on ungated-by-construction
-data the way `documentSymbol` is). Distinct from F3 (find-references/
-rename, which needs a brand-new use-site span index `DeclLocations`
-doesn't have and never will for that purpose) - `workspace/symbol` only
-ever needs declaration-site spans, which already exist, plus a
-name-matching query layer, which doesn't.
-
-**Effort: medium.**
-
-### AH3. `textDocument/codeLens` reference-count annotations above declarations
+## AH3. `textDocument/codeLens` reference-count annotations above declarations
 
 Advertise `code_lens_provider` and add a `"textDocument/codeLens"` arm to
 `handle_request`. For each declaration in the requested file (walked the
-same way AH1's `documentSymbol` walks `Project::ast(path)`), emit one
-`CodeLens` whose title is a use-site count (e.g. "3 references") sourced
-by aggregating F3's *proposed* use-site span index - grouping its
-per-symbol spans by declaration and taking the count. This genuinely
-depends on F3 (not yet built). Two pieces are new work beyond
-what F3 itself builds: per-declaration count aggregation (F3's own
-description only frames its index as enumeration for `references`/
-`rename`, never as a rollup count), and the `CodeLens` response
-serialization/wiring itself, which touches none of F3's existing code
-paths. Real PHPStan ships no LSP or resident analysis server of any kind
-- `FileAnalyser::analyseFile` is its sole entry point, always a fresh
-whole-file CLI invocation with no persisted cross-file use-site index and
-no channel to push editor-rendered annotations without modifying the
-analyzed source. Distinct from F1-F3 (single-cursor request/response,
-none of which render anything above a declaration without a cursor
-action), AH1/AH2 (whole-file/whole-project symbol *lists* returned as a
-flat/hierarchical response, never an inline per-declaration annotation),
-and Y1/Y2 (per-token/per-argument decorations painted continuously during
-editing, not a per-declaration summary line above it) - `codeLens` is a
-fourth, structurally separate LSP request type none of them address.
+same way the now-shipped `documentSymbol` walks `Project::ast(path)`),
+emit one `CodeLens` whose title is a use-site count (e.g. "3 references")
+sourced by aggregating the two-tier use-site index the now-shipped
+`references`/`rename` support already built (ROADMAP's Done section) -
+grouping its per-symbol spans by declaration and taking the count. This
+was originally proposed as depending on a not-yet-built index; that index
+now exists, so this item is strictly smaller than it was. Two pieces are
+still new work: per-declaration count aggregation (the existing index is
+built for enumeration, not as a rollup count), and the `CodeLens`
+response serialization/wiring itself. Real PHPStan ships no LSP or
+resident analysis server of any kind - `FileAnalyser::analyseFile` is its
+sole entry point, always a fresh whole-file CLI invocation with no
+persisted cross-file use-site index and no channel to push
+editor-rendered annotations without modifying the analyzed source.
 
 **Effort: medium.**
 
 ---
 
-## AM. `signatureHelp` and `typeDefinition`
-
-### AM1. `textDocument/signatureHelp`: active-parameter tooltip while typing inside a call's parentheses
-
-Distinct from Y2 (inlayHint's parameter-name hints, which render
-statically before an already-*complete* argument once `resolve_call_args`
-has already resolved it) - this is the first item in this document keyed
-on cursor position relative to argument-list boundaries during *active
-typing*, including the not-yet-typed-argument case none of the
-already-complete-expression mechanisms (F1, Y2, X1) ever need to handle.
-At the request position, find the innermost enclosing call node whose
-own span *contains* the cursor - a genuinely different query shape than
-`navigation::resolve_at`'s existing per-child-span match, which only
-fires when the cursor lands exactly on an already-parsed sub-expression's
-own span, since the cursor here is typically in the gap between two
-argument spans, or a trailing empty slot after a comma with no argument
-expression there at all yet. Resolve the callee's `FunctionSig`/
-`ParamSig` list the same way an ordinary call-argument check already
-does, then respond with one `SignatureInformation` per parameter plus an
-`active_parameter` index computed by counting paren-depth-aware commas
-in the argument-list source text preceding the cursor. Two honest scope
-notes: this needs a genuinely new query mode (span-containment/gap
-search, not the exact-span-equality matching `resolve_at`/`probe_span`
-already do); and the parser is single-pass with no error recovery
-(`ParseError` aborts the *whole file's* parse, confirmed no partial/
-error-node AST exists anywhere) and `Project::update_file` skips applying
-an edit entirely when the new text fails to parse (its own comment:
-"momentarily-invalid syntax is the normal state while a file is being
-typed") - so a robust implementation must serve signature help from the
-last-successfully-parsed AST still held, not assume the just-typed
-keystroke's own text parsed at all, which is the common case right when a
-user is mid-way through inserting a new argument after a fresh comma.
-
-**Effort: medium.**
-
-### AM2. `textDocument/typeDefinition`: jump from an expression's inferred type to that type's own declaration
-
-Distinct from plain `textDocument/definition` (which jumps to the thing
-being *referenced* - a variable's assignment site, a called method's own
-declaration) and from F1 (which never navigates anywhere, only renders
-text) - typeDefinition jumps from an already-resolved `Type` to that
-type's *own* declaring symbol. Two genuinely different cost tiers
-depending on what's under the cursor. **(a)** Cursor on a member-access
-receiver (`$x->foo()`/`$x->prop`): `probe_hit` is already populated for
-exactly this case, so `probe_receiver_type` already returns the real
-`Type` with zero checker-side changes - only new LSP-side work is
-feeding that `Type` through the already-defined `type_to_classes` helper
-and looking each resulting class name up in `decl_locations().classes`
-for its own declaration span. **(b)** Cursor on a bare local variable not
-used as a receiver: `probe_hit` is already populated here too (see F1,
-now corrected) - `ExprKind::Variable`'s arm already stashes both
-`probe_var_provenance` and `probe_hit` at the same span, so this sub-case
-needs only the same `type_to_classes`/`decl_locations().classes` wiring
-as (a), not a second, F1-blocked gap.
-
-**Effort: small** (revised down - both sub-cases need only the same LSP-side wiring, with no checker-side prerequisite left).
+Section AM (`signatureHelp` and `typeDefinition`) is now shipped in
+full - see ROADMAP's Done section, "LSP completeness."
 
 ---
 
-## AO. `willRenameFiles` and `documentHighlight`
+## AO1. `workspace/willRenameFiles`: PSR-4-consistent rename-file refactoring across the whole project
 
-### AO1. `workspace/willRenameFiles`: PSR-4-consistent rename-file refactoring across the whole project
+(AO2, `textDocument/documentHighlight`, is now shipped - see ROADMAP's
+Done section, "LSP completeness.")
 
-Distinct from F3 (a cursor-triggered `textDocument/rename` for a symbol,
-which - as F3 itself discloses - doesn't exist yet either): this is
-triggered by a file-explorer drag/move with no cursor position at all,
-and its core computation (deriving a new expected FQN from a new file
-path) is the *reverse* direction of what F3 does - F3 only ever resolves
+Distinct from the now-shipped `textDocument/rename`: this is triggered by
+a file-explorer drag/move with no cursor position at all, and its core
+computation (deriving a new expected FQN from a new file path) is the
+*reverse* direction of what `rename` does - `rename` only ever resolves
 symbols already named in source text, never infers a name from a path.
 Also distinct from R1 in Part 8 (which flags a path/FQN mismatch as a
 diagnostic on files that already sit where they are - it never fires on
@@ -2285,42 +1481,10 @@ with one `WorkspaceEdit` rewriting the moved file's own `namespace`/
 `class` declaration plus every project-wide use-site span of the old FQN.
 Real PHPStan ships no LSP or IDE-integration module of any kind - the
 same structural absence this whole part documents. Honestly disclosed as
-depending on two other proposed, not-yet-built items - R1's PSR-4
-prefix-map access and F3's use-site span index.
+depending on two things: R1's PSR-4 prefix-map access (not yet built) and
+the use-site span index the now-shipped `rename` support already built.
 
 **Effort: large.**
-
-### AO2. `textDocument/documentHighlight`: same-file occurrence highlighting, needing none of F3's dependency
-
-Highlights every occurrence of the symbol under the cursor *within the
-current file only* - deliberately distinct from F3's whole-project
-find-references, which needs a brand-new use-site span index that isn't
-built yet. This is a small, self-contained generalization of code that
-already exists and works today: `navigation::resolve_at` already walks
-one file's already-parsed AST with a `Walker` that, for every name
-reference/declaration, resolves it to a concrete symbol identity via the
-same `NameContext`/`Registry` machinery hover and definition already
-share, and keeps only the single match whose span contains the cursor
-(`Walker::record` replaces `best` unconditionally on every contained
-span). `documentHighlight` needs the identical traversal and resolution,
-just run twice: once at the cursor position to get the target identity
-(exactly today's `resolve_at`), then a second full walk of the same file
-collecting every span whose resolved identity equals that target (same
-class FQN, same owner+member via the existing `resolve_member_owners`
-probe, or - for a local variable - every read/write reachable from the
-same enclosing scope `ProbeScope` already delimits). No new resolution
-logic, no new index, no cross-file plumbing at all: it's the existing
-`Walker::record` single-best-match pattern turned into a `Vec`
-accumulator, run against the one file already resident in `Project`.
-Unlike F3 (and unlike several other LSP findings above), this genuinely
-needs none of F3's use-site index - `documentHighlight`'s LSP contract is
-explicitly single-file by spec, so the current file's AST, walked once,
-already carries every occurrence hover/definition would each individually
-resolve to the same identity. Real PHPStan ships no LSP or interactive
-query API of any kind, the same structural absence established
-throughout this part.
-
-**Effort: medium.**
 
 ---
 
@@ -2332,10 +1496,10 @@ computes and prints one final type per call site via a plain `sprintf`
 each `Scope::getType()` call that fed it is discarded the instant the
 message string is built, and it requires editing the analyzed source and
 re-running the whole CLI, since PHPStan ships no LSP or resident process
-to query interactively at all. Distinct from F1 (a single inferred `Type`
-wired into hover for one span, computed fresh each probe): both items
-below trace the *chain* of operations that produced a type, an entirely
-different data shape.
+to query interactively at all. Distinct from the now-shipped live hover
+(a single inferred `Type` wired into hover for one span, computed fresh
+each probe): both items below trace the *chain* of operations that
+produced a type, an entirely different data shape.
 
 ### T1. Interactive branch-narrowing derivation trace for a diagnostic
 
@@ -2400,9 +1564,10 @@ statement's worth of scope, not computing anything new.
 
 # Part 6: Codemods
 
-Four concrete fixes, each attaching to an existing (or, for one, an
-E-section-proposed) diagnostic via the `DiagnosticFix` plumbing F2
-wires up. Real PHPStan's entire autofix surface (`RuleErrorBuilder::
+Four concrete fixes, each attaching to an existing diagnostic via the
+already-shipped `DiagnosticFix`/`codeAction` plumbing (ROADMAP's Done
+section) - only the per-check `.fix()` population below remains open.
+Real PHPStan's entire autofix surface (`RuleErrorBuilder::
 fixNode`) is used by only 4 rule files project-wide (`grep -rl fixNode
 vendor/phpstan-src/src/Rules/` -> two `Overriding*Rule.php`, `Operators/
 BacktickRule.php`, `Playground/PromoteParameterRule.php`) - none of the
@@ -2418,8 +1583,8 @@ use-import table (`registry/name_context.rs:100-124`). Because identifier
 casing changes never change byte count, this is the safest codemod shape
 possible: overwrite `[span.start, span.end)` with the canonical-cased
 string in place, zero length delta, zero downstream-span invalidation.
-Scales directly to E4's not-yet-built inherited-method-casing check with
-the same mechanism. Real PHPStan's nameCase rule family has zero
+Scales directly to the now-shipped `method.nameCase` inherited-casing
+check with the same mechanism. Real PHPStan's nameCase rule family has zero
 `fixNode` usage anywhere.
 
 **Effort: small.**
@@ -2457,18 +1622,18 @@ immediately-preceding doc-comment text before deleting.
 
 **Effort: medium.**
 
-### I4. Conditional single-line insertion codemod for E3 (`parent::__construct()` never called)
+### I4. Conditional single-line insertion codemod for the now-shipped `constructor.missingParentCall` check
 
-Once E3 ships, the fix is inserting `parent::__construct();` as the
-constructor body's first statement - but only when the resolved parent
-constructor's `FunctionSig.params` has zero required entries; otherwise
-the correct call needs argument values the checker can't invent, and the
-codemod must decline rather than guess. `phpstan-strict-rules` has zero
+The fix is inserting `parent::__construct();` as the constructor body's
+first statement - but only when the resolved parent constructor's
+`FunctionSig.params` has zero required entries; otherwise the correct
+call needs argument values the checker can't invent, and the codemod
+must decline rather than guess. `phpstan-strict-rules` has zero
 `fixNode` usage anywhere (`grep -rl fixNode vendor/phpstan-strict-rules/src/`
 - empty), confirming this fix was never attempted upstream despite being
 as mechanically simple as I2's.
 
-**Effort: small** (once E3 itself ships).
+**Effort: small.**
 
 ---
 
@@ -2632,8 +1797,9 @@ author's laptop, breaks in the Linux/Docker production container" bug
 class, one real PHPStan structurally cannot report on because its own
 contributors and test infrastructure run on the same case-insensitive-by-
 default platforms that make the bug invisible to observe. Distinct from
-the existing `class.nameCase`/E4 checks, which compare an in-source
-*reference*'s casing against its own declaration's casing within PHP text
+the existing `class.nameCase`/`method.nameCase` checks, which compare an
+in-source *reference*'s casing against its own declaration's casing
+within PHP text
 - this compares a declaration's casing against the real filesystem, a
 cross-domain (source-vs-disk) comparison neither touches.
 
@@ -3147,44 +2313,10 @@ of PHPStan's two.
 
 **Effort: medium.**
 
-### O2. Register each anonymous class under a real, stable synthetic name, instead of the discarded ancestor-aliasing shortcut
-
-Real PHPStan never infers an anonymous class's type as an alias of its
-extended/implemented type. `AnonymousClassNameHelper::
-getAnonymousClassName()` (`Broker/AnonymousClassNameHelper.php:30-55`)
-gives every anonymous class a real, deterministic synthetic name -
-`AnonymousClass<md5(file:start-line[:line-index])>`, where `line-index`
-(`AnonymousClassVisitor::ATTRIBUTE_LINE_INDEX`,
-`Parser/AnonymousClassVisitor.php:16-56`) disambiguates multiple
-anonymous classes starting on the same line - then registers a full,
-independent `ClassReflection` under it: own methods, own extra members,
-its own `extends`/`implements` as real supertypes. `instanceof`, member
-lookups, and inferred-type checks against it work exactly like a named
-class, with no risk of conflating its own extra members with whatever it
-happens to implement. phpstan-rs currently gives every anonymous class
-the identical literal placeholder name `"class@anonymous"`
-(`src/parser/classes.rs:93-96`, the parser's own comment noting multiple
-anonymous classes in one file "could not share this name safely - never
-indexed into the registry by this name"), and `checker/expr.rs:1816-1861`'s
-`NewAnonymousClass` handling confirms the consequence in its own Phase 90
-comment: an anonymous class's body is only checked ad hoc against one
-directly-named ancestor method signature as a narrow fallback, with no
-real registry entry and no full member-set checking. ROADMAP's own
-Reverted entry (~lines 1058-1066) for the prior ancestor-aliasing attempt
-independently arrives at the identical conclusion real PHPStan already
-implements: "a real fix needs registering the anonymous class's own full
-declaration under some stable synthetic name, not a type-inference
-tweak." Because phpstan-rs's registry is a single whole-program pass over
-every parsed file (no separate BetterReflection SourceLocator/dynamic-name
-layer to thread a synthetic name through), assigning a
-`file:line[:index]`-keyed name mirroring `AnonymousClassNameHelper`'s own
-scheme and indexing the anonymous `ClassDecl` the way a named class is
-indexed is structurally smaller here than in real PHPStan - and unlocks
-full type-checking against every implemented interface/extended parent's
-declared members at once, a strictly larger win than PHPStan's own
-per-name lookup.
-
-**Effort: medium.**
+O2 (registering each anonymous class under a real, stable synthetic name
+mirroring real PHPStan's own `AnonymousClassNameHelper`, instead of the
+discarded ancestor-aliasing shortcut) is now shipped - see ROADMAP's Done
+section, "Anonymous class stable synthetic naming."
 
 ---
 
@@ -3306,7 +2438,9 @@ needs in the closed-world, single-`Registry` shape Part 1's own thesis
 argues for repeatedly: `all_ancestor_names`
 (`registry/hierarchy.rs:105`) gives the parent-direction walk, and A5's
 proposed reverse (parent-to-children) index - already called for by A5,
-P1, U1, and AJ elsewhere in this document - is exactly the "is this
+P1, and U1 elsewhere in this document, and the exact mechanism the
+now-shipped Phase 93 dead-abstract-class check ended up building - is
+exactly the "is this
 class ever extended" query this item also needs. A `public_api`-
 equivalent gate is already close at hand too (`is_internal`/`@api`
 tracking this project already carries per `FunctionSig`/`ClassInfo`).
