@@ -1308,11 +1308,37 @@ fn bare_return_is_flagged_against_a_non_nullable_return_type() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    assert!(d[0].message.contains("got null"), "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.empty", "got: {d:?}");
+    assert!(
+        d[0].message.contains("empty return statement found"),
+        "got: {d:?}"
+    );
+}
+
+// Real PHP's bare `return;` is not the same thing as `return null;` for
+// a *typed* return position - a declared `?int`/`int|null` return type
+// still requires an explicit `return null;` (a real runtime type error
+// otherwise: "Return value must be of type ?int, none returned"), so
+// real PHPStan's own `return.empty` flags this shape too, not just a
+// non-nullable one.
+#[test]
+fn bare_return_is_flagged_against_a_nullable_return_type_too() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $c): ?int {
+                if ($c) {
+                    return;
+                }
+                return 5;
+            }
+        "#,
+    );
+    assert_eq!(d.len(), 1, "got: {d:?}");
+    assert_eq!(d[0].identifier, "return.empty", "got: {d:?}");
 }
 
 #[test]
-fn bare_return_is_not_flagged_against_void_or_nullable() {
+fn bare_return_is_not_flagged_against_void_or_mixed() {
     let d = diagnostics_for(
         r#"<?php
             function f(bool $c): void {
@@ -1326,7 +1352,7 @@ fn bare_return_is_not_flagged_against_void_or_nullable() {
 
     let d = diagnostics_for(
         r#"<?php
-            function f(bool $c): ?int {
+            function f(bool $c): mixed {
                 if ($c) {
                     return;
                 }
@@ -1345,8 +1371,8 @@ fn falling_off_the_end_is_flagged_against_a_non_nullable_return_type() {
         "#,
     );
     assert_eq!(d.len(), 1, "got: {d:?}");
-    // Distinct from `return.type` (`bare_return_is_flagged_against_a_
-    // non_nullable_return_type`'s own "returned literal null" case just
+    // Distinct from `return.empty` (`bare_return_is_flagged_against_a_
+    // non_nullable_return_type`'s own "explicit bare `return;`" case just
     // above) - falling off the end never explicitly returns anything at
     // all, real PHPStan's own dedicated `return.missing`.
     assert_eq!(d[0].identifier, "return.missing", "got: {d:?}");

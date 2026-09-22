@@ -373,24 +373,36 @@ impl<'a> Checker<'a> {
                             3,
                             "return.never",
                         );
-                    // A declared `mixed` return type already accepts
-                    // `Type::Null` unconditionally via ordinary
-                    // structural subtyping (`Type::Null` is never itself
-                    // `Mixed`, so this call site's own new level 9/10
-                    // gate - keyed on the *sub* side being `Mixed` - never
-                    // applies here regardless) - no separate `expected
-                    // != Mixed` guard needed.
-                    } else if expected != Type::Void
-                        && !self
-                            .registry
-                            .accepts_at_configured_level(&Type::Null, &expected)
-                    {
+                    // Real PHPStan's own `FunctionReturnTypeCheck::
+                    // checkReturnType` - `return.empty`. Deliberately
+                    // NOT keyed on whether `null` happens to be
+                    // assignable to `expected` (this project's own
+                    // former condition here, before this fix): real
+                    // PHP's bare `return;` is not the same thing as
+                    // `return null;` for a *typed* return position - a
+                    // declared `?int`/`int|null` return type still
+                    // requires an explicit `return null;`, exactly the
+                    // way a real PHP runtime type error confirms
+                    // (`Return value must be of type ?int, none
+                    // returned`) - real PHPStan's own `Type::isVoid()`
+                    // this check ports answers "does this type accept
+                    // the special *void* marker," never "does it accept
+                    // the *value* null," and every nullable/union type
+                    // this project's own `Type` can represent answers
+                    // that `No` the identical way a plain `Type::Null`
+                    // itself does (confirmed directly against `vendor/
+                    // phpstan-src`'s own `JustNullableTypeTrait`/
+                    // `NullType::isVoid`) - only `Type::Void` (`Yes`) and
+                    // `Type::Mixed` (`Maybe`, matching `MixedType::
+                    // isVoid`, no explicit/implicit distinction there
+                    // either) are exempt.
+                    } else if !matches!(expected, Type::Void | Type::Mixed(_)) {
                         self.report(
                             label.to_string(),
-                            format!("return type mismatch: expected {expected}, got null"),
+                            format!("should return {expected} but empty return statement found"),
                             stmt.span,
                             3,
-                            "return.type",
+                            "return.empty",
                         );
                     }
                 }

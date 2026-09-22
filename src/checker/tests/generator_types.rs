@@ -169,16 +169,16 @@ fn generator_function_declared_bare_generator_with_no_type_args_is_not_flagged()
 }
 
 #[test]
-fn generator_function_with_concrete_treturn_and_a_bare_return_gets_return_type_mismatch() {
+fn generator_function_with_concrete_treturn_and_a_bare_return_gets_return_empty() {
     // Not `return.missing`: a bare `return;` is a real, explicit
     // statement that unconditionally sets `Generator::getReturn()` to
     // `null` (the same real PHP semantics an ordinary function's own
     // bare `return;` has) - for a non-nullable, concrete TReturn like
-    // `bool`, that's a genuine wrong-value mismatch (`return.type`,
-    // "expected bool, got null"), the same category `check_stmt`'s own
-    // `Return(Some(e))` arm already reports for an explicit-but-wrong
-    // value. `return.missing` is reserved for a path that never reaches
-    // any `return` statement at all.
+    // `bool`, that's real PHPStan's own `return.empty`, the same
+    // category `check_stmt`'s own `Return(None)` arm already reports for
+    // an ordinary (non-generator) function's bare `return;` against a
+    // non-void/non-mixed type. `return.missing` is reserved for a path
+    // that never reaches any `return` statement at all.
     let d = diagnostics_for(
         r#"<?php
             /** @return \Generator<int, string, mixed, bool> */
@@ -189,8 +189,9 @@ fn generator_function_with_concrete_treturn_and_a_bare_return_gets_return_type_m
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "return.type"
-            && x.message.contains("expected bool, got null")),
+        d.iter().any(|x| x.identifier == "return.empty"
+            && x.message
+                .contains("should return bool but empty return statement found")),
         "got: {d:?}"
     );
 }

@@ -4135,6 +4135,48 @@ purpose-built guard that only treats a real `Foo::$bar` static-property
 read as mutable). 13 new regression tests (`src/checker/tests/
 operator_validity.rs`); full suite green, clippy clean.
 
+**`return.empty` - a bare `return;` (no value) against a return type
+that requires one** (real PHPStan's own `FunctionReturnTypeCheck.php`,
+level 3). This project's `checker/stmt.rs` already had the right shape
+of check for this in its `StmtKind::Return(None)` arm - it was just
+reporting under the wrong identifier/message (`return.type`, "return
+type mismatch: expected {type}, got null") and, worse, using the wrong
+*condition*: gated on whether `null` happens to be assignable to the
+declared return type, exempting every nullable/union return type
+entirely. Real PHP's bare `return;` is not the same thing as `return
+null;` for a *typed* return position - a declared `?int`/`int|null`
+still requires an explicit `return null;` (a real runtime type error
+otherwise: "Return value must be of type ?int, none returned"); real
+PHPStan's own condition asks `Type::isVoid()`, "does this type accept
+the special *void* marker," never "does it accept the value null" -
+confirmed directly against `vendor/phpstan-src` that every nullable/
+union type answers that `No` the identical way a plain `null` type does,
+so only `void` (`Yes`) and `mixed` (`Maybe`, no explicit/implicit
+distinction) are actually exempt. Fixed both: renamed to real PHPStan's
+own `return.empty` identifier and message ("should return {type} but
+empty return statement found," dropping the "Function X()"/"Method
+X()" prefix real PHPStan's own per-caller-type message templates use,
+matching this project's own already-established house style for the
+whole return-diagnostic family - `return.never`/`return.void`/`return.
+missing` are all worded generically too, with no function/method/
+closure-detection state this project doesn't otherwise track), and
+widened the condition to `!matches!(expected, Type::Void | Type::
+Mixed(_))`, now correctly catching a nullable/union return type too.
+Verified manually against a concrete type, a nullable type, `mixed`,
+`void`, a method, a `never`-typed function (unaffected, still `return.
+never`), and a generator with a concrete `TReturn` (a bare `return;`
+inside one still sets `Generator::getReturn()`, checked against the
+declared `TReturn` the same way `check_stmt`'s existing generator-aware
+substitution already handles for an ordinary value return - now
+`return.empty` too, not `return.type`). Fixing the condition surfaced 2
+pre-existing tests asserting the old, imprecise behavior (a nullable-
+return-type bare `return;` expected to be silent, and a generator's own
+`TReturn`-mismatch test expecting the old identifier) - both updated to
+assert the corrected, real-PHPStan-matching behavior instead of reverting
+the fix to keep them passing. 1 new plus 3 updated regression tests
+(`src/checker/tests/control_flow.rs`, `src/checker/tests/
+generator_types.rs`); full suite green, clippy clean.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4950,15 +4992,16 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 
 ## Functions
 
-- **`FunctionReturnTypeCheck.php`'s bare-`return;` validity check**:
-  `return.empty` flags a bare `return;` (no value) inside a function/
-  method whose declared return type requires one (i.e. isn't `void`/
-  `never`, and isn't an implicitly-nullable type). Distinct from the
-  already-covered `return.missing` (a code path falling off the end
-  with no `return` at all) and the already-tracked `return.never`
-  (Done, `FunctionReturnTypeCheck.php`/`MissingReturnRule.php`'s own
-  validate-direction check) - phpstan-rs has neither this specific check nor any mention
-  of it (5 corpus hits on piwigo16 at level 10).
+- **`FunctionReturnTypeCheck.php`'s bare-`return;` validity check - now
+  done**, see Done's own entry under "Rule catalog (checker)". Found
+  along the way: this project's own sibling `return.missing` check
+  (falling off the end with no `return` at all, `function_decl.rs`) has
+  the exact same pre-existing imprecision `return.empty` itself had
+  before this fix - keyed on whether `null` happens to be assignable to
+  the declared return type, not real PHPStan's own `Type::isVoid()`
+  question, so a nullable/union return type currently silently exempts
+  falling off the end too. Not fixed here (out of this item's own
+  scope) - a real, disclosed follow-up.
 - **`Functions/CallCallablesRule.php (and the related dynamic-target half of FunctionCallableRule.php's callable.nonCallable check)`**: Real PHPStan's CallCallablesRule checks a dynamic call `$callable(...)` (callee is an arbitrary expression, not a plain function name): flags a non-callable value (callable.nonCallable), an inaccessible private/protected array-callable method (callable.inaccessibleMethod), and runs full arity/parameter-type checking against the resolved callable's signature.
   **Partially closed**: the receiver-type-checks phase (Done) built
   `callable.nonCallable` for exactly this dynamic-callee shape
