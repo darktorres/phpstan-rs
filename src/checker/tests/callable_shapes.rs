@@ -144,6 +144,58 @@ fn a_closure_with_an_extra_optional_parameter_is_still_assignable() {
 }
 
 #[test]
+fn a_closure_taking_fewer_parameters_than_the_expected_shape_is_assignable() {
+    // PHP silently drops extra arguments passed to a user-defined
+    // callable, so a zero-argument closure stands in for a one-argument
+    // shape - real PHPStan's `CallableTypeHelper` only walks the passed
+    // callable's own parameters.
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int, string): void $fn */
+            function needsTwoArgs($fn): void {}
+            /** @param Closure(int): void $fn */
+            function test($fn): void {
+                needsTwoArgs($fn);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_required_parameter_where_the_expected_shape_is_optional_is_rejected() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int=): void $fn */
+            function mayOmitArg($fn): void {}
+            /** @param Closure(int): void $fn */
+            function test($fn): void {
+                mayOmitArg($fn);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "the accepting side may call it with no argument - got: {d:?}"
+    );
+}
+
+#[test]
+fn a_mixed_return_or_parameter_type_is_treated_as_any() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @param Closure(int): string $fn */
+            function needsString($fn): void {}
+            /** @param Closure(mixed): mixed $fn */
+            function test($fn): void {
+                needsString($fn);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
 fn a_template_param_inside_a_closure_shape_is_marked_not_left_as_a_bogus_class_reference() {
     // Not full call-site template *substitution* - `check_expr`'s arm
     // reads the callee's own raw, unsubstituted

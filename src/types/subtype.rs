@@ -415,45 +415,49 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
 /// itself promises to accept - the same "textbook motivating example"
 /// `registry/assignability.rs`'s own generic-template variance
 /// composition already models for `Covariant`/`Contravariant` positions,
-/// not a new concept. Walks every position either signature has
-/// anything to say about (`effective_callable_param_at`'s own variadic-
-/// tail absorption on both sides), so it never needs an "arity doesn't
-/// resolve, stay lenient" escape hatch - a real mismatch (`a` lacking a
-/// required parameter `b`'s own callers could supply, or `b` lacking a
-/// position `a` requires) is a genuine, confident rejection, not a
-/// "don't know."
+/// not a new concept. Mirrors real PHPStan's `CallableTypeHelper::
+/// isParametersAcceptorSuperTypeOf` on its `accepts` path
+/// (`treatMixedAsAny = true`), with `a` as "theirs" (the passed callable)
+/// and `b` as "ours" (the accepting one):
+///
+/// - Only `a`'s own positions are walked (a variadic last parameter of
+///   `a` first expanded to cover every extra position of `b`). `a` having
+///   *fewer* parameters than `b` is fine: PHP silently drops extra
+///   arguments passed to a user-defined callable, so `fn() => 1` stands
+///   in for `Closure(int): int`.
+/// - A position `b` doesn't have is fine only when `a`'s parameter there
+///   is optional or variadic - a required one would never be supplied.
+/// - `b` optional where `a` is required is a rejection: `b`'s callers may
+///   omit the argument `a` needs.
+/// - `mixed` on either side of a parameter or return comparison is
+///   treated as "any", the same leniency an ordinary argument check gets
+///   below level 9.
 fn callable_sig_is_subtype(a: &CallableSig, b: &CallableSig) -> bool {
-    if !is_subtype(&a.return_type, &b.return_type) {
+    let mixed_as_any = |sub: &Type, sup: &Type| {
+        matches!(sub, Type::Mixed(_)) || matches!(sup, Type::Mixed(_)) || is_subtype(sub, sup)
+    };
+    if !mixed_as_any(&a.return_type, &b.return_type) {
         return false;
     }
-    let positions = a.params.len().max(b.params.len());
-    for i in 0..positions {
-        let a_param = effective_callable_param_at(&a.params, i);
-        let b_param = effective_callable_param_at(&b.params, i);
-        match (a_param, b_param) {
-            // Both signatures speak to this position - the ordinary
-            // contravariant per-parameter check.
-            (Some(ap), Some(bp)) => {
-                if !is_subtype(&bp.ty, &ap.ty) {
-                    return false;
-                }
+    let a_positions = match a.params.last() {
+        Some(last) if last.variadic => a.params.len().max(b.params.len()),
+        _ => a.params.len(),
+    };
+    for i in 0..a_positions {
+        let Some(ap) = effective_callable_param_at(&a.params, i) else {
+            continue;
+        };
+        let Some(bp) = b.params.get(i) else {
+            if !ap.optional && !ap.variadic {
+                return false;
             }
-            // `b`'s own callers could supply an argument here (it's
-            // part of `b`'s own signature), but `a` has nothing at this
-            // position at all (no parameter, no variadic tail) - `a`
-            // genuinely can't stand in for `b`.
-            (None, Some(_)) => return false,
-            // `a` has a real parameter here that `b`'s own signature
-            // never reaches - only safe when `a`'s own caller (matching
-            // `b`'s shape) could simply omit it, i.e. it's optional or
-            // variadic; a required extra parameter `b`'s callers would
-            // never supply is a genuine mismatch.
-            (Some(ap), None) => {
-                if !ap.optional && !ap.variadic {
-                    return false;
-                }
-            }
-            (None, None) => {}
+            continue;
+        };
+        if (bp.optional || bp.variadic) && !ap.optional && !ap.variadic {
+            return false;
+        }
+        if !mixed_as_any(&bp.ty, &ap.ty) {
+            return false;
         }
     }
     true
