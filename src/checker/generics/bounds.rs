@@ -391,24 +391,41 @@ impl<'a> Checker<'a> {
     }
 
     /// `GenericObjectTypeCheck`'s own arity/well-formedness half
-    /// (`generics.lessTypes`/`.moreTypes`) - a genuinely different rule
-    /// than `check_generic_bounds`'s bound-checking, which silently
-    /// truncates via `zip` (an extra argument beyond
+    /// (`generics.lessTypes`/`.moreTypes`/`.notGeneric`) - a genuinely
+    /// different rule than `check_generic_bounds`'s bound-checking, which
+    /// silently truncates via `zip` (an extra argument beyond
     /// `info.templates.len()` is never looked at) rather than flagging
     /// the mismatch. Called pervasively from
     /// `check_generic_bounds_and_arity`, matching real PHPStan's
     /// `IncompatiblePhpDocTypeCheck`. Every template with its own
     /// `@template T = Default` (`template_defaults`) is optional - only
     /// a template with *no* default is "required" for `lessTypes`
-    /// purposes. Real PHPStan's third case, `generics.notGeneric` (a
-    /// reference supplying args to a class with *no* templates at all),
-    /// is deliberately not built here: this project can't always tell
-    /// "genuinely not generic" apart from "this project's own
-    /// template-tag parsing has a gap for this class," and misfiring on
-    /// the latter across *every* `extends`/`implements` in the corpus is
-    /// a broad false-positive risk the narrower arity-only checks below
-    /// don't share (`0 < args.len()` on a class with zero known
-    /// templates is already caught as `moreTypes` instead).
+    /// purposes.
+    ///
+    /// `generics.notGeneric` was previously left unbuilt here over a
+    /// worry that "genuinely not generic" and "this project's own
+    /// `@template`-tag parsing has a gap for this class" are
+    /// indistinguishable - concretely, a project's own custom stub file
+    /// retroactively granting templates onto a real builtin with none of
+    /// its own (real shape: Piwigo's own `phpstan-stubs/
+    /// LatteCachingIterator.stub.php`, whose own `@extends
+    /// \CachingIterator<TKey, TValue, Iterator<TKey, TValue>>` supplies 3
+    /// type arguments to real PHP's own `\CachingIterator`, which has no
+    /// `@template` tag anywhere). That worry doesn't actually apply:
+    /// confirmed directly (`main/check_project.rs`'s own `analyze_files`/
+    /// `context_files` split, `lsp/workspace_config.rs`'s own
+    /// `extra_context_dirs`, which `stub_paths` feeds into) that a
+    /// project's own configured stub file is always loaded as *context*
+    /// (`analyzed: false`) - its own class declarations, `@extends`
+    /// clause included, are never run through this checker's own
+    /// diagnostic pass at all, exactly mirroring real PHPStan's own
+    /// `stubFiles` semantics (also reflection-only, never analysed). The
+    /// Piwigo stub above is the concrete confirming case: real,
+    /// currently-installed `vendor/bin/phpstan` (Piwigo's own
+    /// `phpstan.neon`, `stubFiles: [...LatteCachingIterator.stub.php]`)
+    /// never runs any rule against that file's own content either - only
+    /// ordinary application code, whose registry state already reflects
+    /// every stub-granted template correctly, ever reaches this check.
     fn check_generic_reference_arity(&mut self, ty: &Type, label: &str, span: Span) {
         let Type::Object(class, args) = ty else {
             return;
@@ -419,17 +436,14 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return;
         };
-        // A referenced class with *no* declared templates at all is
-        // real PHPStan's own `generics.notGeneric` territory - a
-        // different check, deliberately not built (see this function's
-        // doc comment) since "genuinely non-generic" and "this project's
-        // `@template`-tag parsing has a gap for this class" (real shape:
-        // Piwigo's own custom `phpstan-stubs/LatteCachingIterator.stub.php`,
-        // where Latte's `CachingIterator` retroactively "restores"
-        // generics onto real PHP's own `\CachingIterator` via
-        // `@extends \CachingIterator<TKey, TValue, Iterator<TKey, TValue>>`
-        // alone) are indistinguishable from here.
         if info.templates.is_empty() {
+            self.report(
+                label.to_string(),
+                format!("Generic type {ty} is invalid because class {class} is not generic."),
+                span,
+                6,
+                "generics.notGeneric",
+            );
             return;
         }
         // Real PHPStan hardcodes a parse-time special case

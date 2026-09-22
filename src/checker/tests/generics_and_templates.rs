@@ -1935,6 +1935,38 @@ fn extending_a_two_template_class_with_one_type_argument_is_flagged() {
 }
 
 #[test]
+fn extending_a_plain_non_generic_class_with_a_type_argument_is_flagged_not_generic() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Plain {}
+            /**
+             * @extends Plain<int>
+             */
+            class Sub extends Plain {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.notGeneric"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_parameter_type_naming_a_plain_non_generic_class_generically_is_flagged_not_generic() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Plain {}
+            /** @param Plain<int> $p */
+            function f($p): void {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "generics.notGeneric"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn extending_with_the_exact_declared_arity_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php

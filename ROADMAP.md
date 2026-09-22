@@ -4415,17 +4415,79 @@ are built - only each rule's own real-PHPStan-specific residual stays
 disclosed-open (bound/default existence-checking against this
 project's inherently partial registry; `UsedTraitsRule`'s own separate
 tag-validity diagnostics and its call-site-variance-never-allowed
-rule). Declined, each for a verified reason: real PHPStan's `Static`
-call-site/internal variance kind (pure internal control-flow plumbing,
-no user-observable gap); the ~19-concrete-subclass internal type
-representation real PHPStan uses internally (no independently
-observable behavior this project's single-variant-plus-sentinel
-representation doesn't already produce); `generics.notGeneric`
-(indistinguishable, in this project's own `@template`-tag model, from a
-legitimate stub-granted-generics case on a real zero-`@template`
-built-in); a `@method` tag's own inline generic template syntax (zero
-corpus value, and this project's `@method`-tag parser has no
-template-syntax support to build on at all).
+rule). `generics.notGeneric` is built now too, reversing an earlier
+decline. Its own worry (indistinguishable, in this project's own
+`@template`-tag model, from a legitimate stub-granted-generics case on
+a real zero-`@template` built-in - real shape: Piwigo's own
+`phpstan-stubs/LatteCachingIterator.stub.php`, whose `@extends
+\CachingIterator<TKey, TValue, Iterator<TKey, TValue>>` supplies 3
+type arguments to real PHP's own template-less `\CachingIterator`)
+turned out not to apply: confirmed directly (`main/check_project.rs`'s
+own `analyze_files`/`context_files` split; `stub_paths` feeds
+`extra_context_dirs`, `lsp/workspace_config.rs`) that a project's own
+configured stub file is always loaded as *context* - its own class
+declarations are never run through this checker's own diagnostic pass
+at all, mirroring real PHPStan's own `stubFiles` semantics exactly.
+Corpus-verified two ways: the full Piwigo *scoped* run (which respects
+this exact split) comes back byte-identical, zero new findings,
+including at the Latte stub's own real trigger case; a direct real,
+installed `vendor/bin/phpstan` probe (`ArrayObject::getIterator()`'s
+own `ArrayIterator<TKey, TValue>` return type, a different but related
+concern - see below) confirms real PHPStan doesn't flag it either, for
+an unrelated reason. One real, disclosed residual, found only by the
+*unscoped* (`--no-composer`) verification run, which deliberately
+drops the analyzed/context split to scan `vendor/` as ordinary code:
+several common SPL iterator classes (`ArrayIterator`, `RegexIterator`,
+`RecursiveIterator`, `RecursiveFilterIterator`, `FilterIterator`,
+`RecursiveIteratorIterator`, `RecursiveDirectoryIterator`) get parsed
+straight out of whatever third-party dev-tooling stub package (e.g.
+`jetbrains/phpstorm-stubs`) happens to be vendored, which doesn't
+`@template`-tag them the way real PHPStan's own internal, separately-
+bundled reflection stubber does (confirmed: the exact same
+`ArrayObject::getIterator()` case above produces zero errors from real,
+installed PHPStan) - a real gap in this project's own built-in SPL
+stub coverage (`php_stubs.rs` doesn't declare any of these classes at
+all today), not a defect in the check itself, and not reachable in
+this project's own real, production `check-project` usage (scoped
+mode) at all, confirmed by the zero-diff scoped run. The
+`Doctrine\ORM\Query`/`PhpParser\Node\Stmt\Expression`/`PhpBench\Data\
+DataFrames` findings in that same unscoped run are the identical
+pattern one level up (a downstream *tool* - `phpstan-doctrine`,
+Rector - assuming a *different* vendored package's class is generic
+without that class's own declaration saying so).
+
+Declined, each for a verified reason (both freshly re-verified against
+`vendor/phpstan-src` directly this session, not carried over
+unexamined): real PHPStan's own `TemplateTypeVariance::createStatic()`
+(`vendor/phpstan-src/src/Type/Generic/TemplateTypeVariance.php`) is
+never queried by its own `compose()`/`isValidVariance()` for any actual
+decision - `compose()` falls through to returning the *other* side
+unchanged whenever `$this` is `Static` (none of its own specific arms
+match), and `isValidVariance()` has no `static()` case at all, so
+reaching it with `Static` would throw; traced its own 7 real production
+sites (`GenericObjectTypeCheck.php`/`GenericAncestorsCheck.php`/
+`ClassReflection.php`/`FileTypeMapper.php`/`TemplateTypeTrait.php`) and
+all of them use it purely as an inert "don't apply variance-based
+projection, just substitute directly" signal to
+`TemplateTypeHelper::resolveTemplateTypes` - a whole-type template-
+substitution helper this project has no architectural analogue of at
+all. Confirmed pure internal control-flow plumbing with zero
+independently observable behavior, not assumed. `Bivariant` needs no
+new declaration-side `Variance` variant either, confirmed the same way:
+`TemplateTypeVariance::createBivariant()`'s only production site
+anywhere in real PHPStan (`PhpDoc/TypeNodeResolver.php`) is resolving a
+call-site `*` marker's own `GenericTypeNode::VARIANCE_BIVARIANT` - real
+PHPStan itself has no `@template-bivariant`-style declaration syntax
+producing it either, so this project's own existing call-site-only
+`"$$bivariant"` sentinel (`types/parse.rs`) is already the complete,
+correct port, not a partial one needing reconciliation with some
+missing declaration-side counterpart. The ~19-concrete-subclass
+internal type representation real PHPStan uses internally (no
+independently observable behavior this project's single-variant-plus-
+sentinel representation doesn't already produce); a `@method` tag's own
+inline generic template syntax (zero corpus value, and this project's
+`@method`-tag parser has no template-syntax support to build on at
+all).
 
 Phase 54/77 follow-up (now fully done, see Done): constructor-argument-
 driven class-level `@template` binding, including a bare-string-literal
