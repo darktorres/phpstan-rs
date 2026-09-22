@@ -340,6 +340,12 @@ pub struct Registry {
     // exactly - unconditional, independent of `configured_level`, matching
     // how real PHPStan's own flag isn't level-gated either.
     pub check_benevolent_union_types: bool,
+    // Mirrors real PHPStan's own `checkMissingCallableSignature`
+    // parameter (`false` by default in `conf/config.neon`, not tied to
+    // any level): `missingType.callable` for a `callable`/`Closure`
+    // written with no `(params): return` signature, at every position
+    // the `missingType.iterableValue` family already checks.
+    pub check_missing_callable_signature: bool,
     // Whether this project consumes real PHPStan as a dependency at all
     // (set once from `composer::detect_phpstan_dependency` before any
     // file is checked). Gates the main `MethodCall` arm's own

@@ -99,7 +99,10 @@ pub(super) fn all_diagnostics_for(src: &str) -> Vec<Diagnostic> {
     all_diagnostics_for_with(src, |_| {})
 }
 
-fn all_diagnostics_for_with(src: &str, configure: impl FnOnce(&mut Registry)) -> Vec<Diagnostic> {
+pub(super) fn all_diagnostics_for_with(
+    src: &str,
+    configure: impl FnOnce(&mut Registry),
+) -> Vec<Diagnostic> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     let program = Parser::new(tokens).parse_program().unwrap();
     let mut registry = Registry::build(&program);

@@ -593,6 +593,17 @@ whitelist; `@param-immediately-invoked-callable`/`-later-invoked-
 callable`/`-closure-this` declaration-time validation plus real `$this`
 injection at call sites.
 
+**Opt-in `missingType.callable`** (Phase 139). A `callable`/`Closure`
+written with no `(params): return` signature, at every
+`missingType.iterableValue` position (property, class constant,
+function/method parameter and return), behind
+`check_missing_callable_signature`, real PHPStan's own
+`checkMissingCallableSignature` (off by default there too). It recurses
+into a written signature's own parameter/return types, and each
+message is its rule's iterable-value sentence with "no value type
+specified in" swapped for "no signature specified for", which is how
+real PHPStan's six rules word it.
+
 **`@psalm-*`/`@phan-*` tag spellings** (Phase 179). `docblock::parse`
 now reads real PHPStan's `PhpDocNodeResolver` spelling set, not just
 plain and `@phpstan-` tags, in its precedence order: plain, then
@@ -3647,16 +3658,6 @@ receiver-type-checks phase.)
   malformed `@phpstan-ignore` identifier-list syntax; phpstan-rs's own
   `ignore_comments.rs` deliberately swallows this with no diagnostic at
   all today (confirmed by its own test name).
-- `MissingTypehintCheck`'s `missingType.callable` — a `callable`/
-  `Closure` type with no signature, gated behind real PHPStan's opt-in
-  `checkMissingCallableSignature` (off by default). This used to be
-  unbuildable because a bare `callable` and a signature-carrying
-  `callable(int): string` parsed to the same `Type::Callable`. Phase 53
-  made it `Type::Callable(Option<Arc<CallableSig>>)` (see Done), so
-  `None` now means exactly "no signature written". A bare `Closure`
-  resolves to a plain object class reference, so it needs its own case.
-  Buildable as an opt-in `Registry` flag. The same predicate also covers
-  the `missingType.callable` half of Phase 130's assert-type item.
 - `RuleLevelHelper::findTypeToCheck`'s `StrictMixedType` — at level 9/10
   (`checkExplicitMixed`/`checkImplicitMixed`), real PHPStan turns a
   `mixed` receiver into a `StrictMixedType`, so calling a method,

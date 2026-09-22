@@ -29,6 +29,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     pub(crate) check_method_throw_type_covariance: bool,
     pub(crate) check_benevolent_union_types: bool,
+    pub(crate) check_missing_callable_signature: bool,
     pub(crate) check_duplicate_function_declarations: bool,
     pub(crate) check_duplicate_class_declarations: bool,
     pub(crate) check_boolean_trap: bool,
@@ -198,6 +199,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
             .check_method_throw_type_covariance
             .unwrap_or(false),
         check_benevolent_union_types: config.check_benevolent_union_types.unwrap_or(false),
+        check_missing_callable_signature: config.check_missing_callable_signature.unwrap_or(false),
         check_duplicate_function_declarations: config
             .check_duplicate_function_declarations
             .unwrap_or(false),

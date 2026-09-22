@@ -387,6 +387,8 @@ impl Server {
             .set_check_method_throw_type_covariance(resolved.check_method_throw_type_covariance);
         self.project
             .set_check_benevolent_union_types(resolved.check_benevolent_union_types);
+        self.project
+            .set_check_missing_callable_signature(resolved.check_missing_callable_signature);
         self.project.set_check_duplicate_function_declarations(
             resolved.check_duplicate_function_declarations,
         );

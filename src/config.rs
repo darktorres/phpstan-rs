@@ -109,6 +109,9 @@ pub struct Config {
     /// Mirrors real PHPStan's own standalone `checkBenevolentUnionTypes`
     /// parameter - see `registry::Registry::check_benevolent_union_types`.
     pub check_benevolent_union_types: Option<bool>,
+    /// Mirrors real PHPStan's own `checkMissingCallableSignature`
+    /// parameter - see `registry::Registry::check_missing_callable_signature`.
+    pub check_missing_callable_signature: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
     /// this project has no NEON parser (see `baseline.rs`), so a
     /// project's real `phpstan.neon` config is manually re-typed here.

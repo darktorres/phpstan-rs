@@ -145,6 +145,11 @@ enum Command {
         /// unconditionally lenient, matching this checker's status quo.
         #[arg(long)]
         check_benevolent_union_types: bool,
+        /// Mirrors real PHPStan's own `checkMissingCallableSignature`
+        /// parameter (`missingType.callable`) - see
+        /// `registry::Registry::check_missing_callable_signature`.
+        #[arg(long)]
+        check_missing_callable_signature: bool,
         /// Enables opt-in whole-project duplicate top-level-function-
         /// declaration detection (`function.duplicate`). Off by default:
         /// real PHPStan's own `DuplicateFunctionDeclarationRule` is
@@ -391,6 +396,7 @@ fn main() {
             check_too_wide_by_ref_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
             check_benevolent_union_types,
+            check_missing_callable_signature,
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
             check_boolean_trap,
@@ -436,6 +442,7 @@ fn main() {
             check_too_wide_by_ref_type_in_protected_and_public_methods,
             check_method_throw_type_covariance,
             check_benevolent_union_types,
+            check_missing_callable_signature,
             check_duplicate_function_declarations,
             check_duplicate_class_declarations,
             check_boolean_trap,

@@ -391,6 +391,12 @@ impl Project {
         self.registry.check_benevolent_union_types = enabled;
     }
 
+    /// Opts into real PHPStan's own `checkMissingCallableSignature`
+    /// behavior - see `registry::Registry::check_missing_callable_signature`.
+    pub fn set_check_missing_callable_signature(&mut self, enabled: bool) {
+        self.registry.check_missing_callable_signature = enabled;
+    }
+
     /// Corrected from unconditional to opt-in - see `registry::Registry::
     /// check_duplicate_function_declarations`'s own doc comment for the
     /// real false positive that motivated this.

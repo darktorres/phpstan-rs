@@ -3,8 +3,8 @@
 //! parameters/properties/returns, a bare `array`/`iterable` with no value
 //! type, and a bare reference to a class with its own `@template`s given
 //! no type arguments. See `checker/missing_typehint.rs`'s own module doc
-//! comment for what's deliberately out of scope (closures/arrow-fns, and
-//! a signature-less-`callable` check).
+//! comment for what's deliberately out of scope (closures/arrow-fns) and
+//! what's opt-in (a signature-less-`callable` check).
 
 use super::helpers::*;
 
@@ -650,4 +650,88 @@ fn fully_typed_class_produces_no_missing_typehint_diagnostics() {
         "#,
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_signature_less_callable_is_not_flagged_by_default() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            /** @param callable $cb */
+            function test(callable $cb): void {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "missingType.callable"),
+        "unexpected: {d:?}"
+    );
+}
+
+#[test]
+fn a_signature_less_callable_and_closure_are_flagged_when_opted_in() {
+    let d = all_diagnostics_for_with(
+        r#"<?php
+            function test(callable $cb, \Closure $fn): callable {
+                return $cb;
+            }
+        "#,
+        |r| r.check_missing_callable_signature = true,
+    );
+    let messages: Vec<&str> = d
+        .iter()
+        .filter(|x| x.identifier == "missingType.callable")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert!(
+        messages.contains(
+            &"Function test() has parameter $cb with no signature specified for callable."
+        ),
+        "got: {messages:?}"
+    );
+    assert!(
+        messages.contains(
+            &"Function test() has parameter $fn with no signature specified for Closure."
+        ),
+        "got: {messages:?}"
+    );
+    assert!(
+        messages.contains(&"Function test() return type has no signature specified for callable."),
+        "got: {messages:?}"
+    );
+}
+
+#[test]
+fn a_callable_with_a_signature_is_not_flagged_even_when_opted_in() {
+    let d = all_diagnostics_for_with(
+        r#"<?php
+            /**
+             * @param callable(int): string $cb
+             * @param \Closure(string): void $fn
+             */
+            function test(callable $cb, \Closure $fn): void {}
+        "#,
+        |r| r.check_missing_callable_signature = true,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "missingType.callable"),
+        "unexpected: {d:?}"
+    );
+}
+
+#[test]
+fn a_signature_less_callable_nested_in_a_signature_is_flagged() {
+    let d = all_diagnostics_for_with(
+        r#"<?php
+            class C {
+                /** @param callable(callable): void $cb */
+                public function test(callable $cb): void {}
+            }
+        "#,
+        |r| r.check_missing_callable_signature = true,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "missingType.callable"
+            && x.message
+                == "Method C::test() has parameter $cb with no signature specified for callable."),
+        "got: {d:?}"
+    );
 }

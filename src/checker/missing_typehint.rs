@@ -7,28 +7,19 @@
 //! declaration is technically typed, but not usefully so": an implicit
 //! `mixed` (no hint at all), a bare `array`/`iterable`/`list`/... with no
 //! element type, and a bare reference to a class with its own required
-//! `@template`s given no type arguments.
+//! `@template`s given no type arguments. A fourth shape, a `callable`/
+//! `Closure` with no signature (`missingType.callable`), is opt-in
+//! (`Registry::check_missing_callable_signature`), matching real
+//! PHPStan's own `checkMissingCallableSignature`, `false` by default in
+//! its own `conf/config.neon`.
 //!
-//! Deliberately narrower than real PHPStan in two ways:
-//!
-//! - **No closure/arrow-fn call site.** Real PHPStan has no
-//!   `MissingClosureParameterTypehintRule`/equivalent at all: exactly the
-//!   six rules named above are registered at level 6, none closure-shaped.
-//!   Real PHPStan deliberately doesn't nag on a closure/arrow-fn's own
-//!   untyped parameters (they're routinely inferred from context, e.g.
-//!   `array_map`'s callback), so inventing that check here would be new,
-//!   false-positive-prone behavior with no real rule to model it on.
-//!
-//! - **No `missingType.callable` ("callable has no signature") check yet.**
-//!   Real PHPStan gates this sub-check behind `checkMissingCallableSignature`,
-//!   `false` by default in its own `conf/config.neon`, so real PHPStan
-//!   itself doesn't run it on an ordinary project either. It is buildable
-//!   as an opt-in check: `Type::Callable(None)` is exactly a bare
-//!   `callable`/`Closure` with no signature written, while
-//!   `callable(int): string`/`Closure(self): T` parse to
-//!   `Type::Callable(Some(sig))`. A bare `Closure` (native hint or PHPDoc)
-//!   resolves to a plain `Type::Object` class reference instead, so that
-//!   spelling needs its own case.
+//! No closure/arrow-fn call site: real PHPStan has no
+//! `MissingClosureParameterTypehintRule`/equivalent at all - exactly the
+//! six rules named above are registered at level 6, none closure-shaped.
+//! Real PHPStan deliberately doesn't nag on a closure/arrow-fn's own
+//! untyped parameters (they're routinely inferred from context, e.g.
+//! `array_map`'s callback), so inventing that check here would be new,
+//! false-positive-prone behavior with no real rule to model it on.
 use crate::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use crate::checker::{Checker, DiagnosticBuilder};
 use crate::docblock;
@@ -306,6 +297,53 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
     }
 }
 
+/// Mirrors real PHPStan's `MissingTypehintCheck::
+/// getCallablesWithMissingSignature`: every `callable`/`Closure` in `ty`
+/// written with no `(params): return` signature. `Type::Callable(None)`
+/// is exactly a bare `callable` (a written signature parses to
+/// `Type::Callable(Some(sig))`, whose own parameter/return types are
+/// still walked); a bare `Closure` resolves to a plain class reference
+/// instead. Each finding is the type's own display text.
+fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
+    match ty {
+        Type::Callable(None) => out.push(ty.to_string()),
+        Type::Callable(Some(sig)) => {
+            for p in &sig.params {
+                collect_callables_with_missing_signature(&p.ty, out);
+            }
+            collect_callables_with_missing_signature(&sig.return_type, out);
+        }
+        Type::Object(name, args) => {
+            if args.is_empty()
+                && name
+                    .trim_start_matches('\\')
+                    .eq_ignore_ascii_case("Closure")
+            {
+                out.push("Closure".to_string());
+            }
+            for a in args {
+                collect_callables_with_missing_signature(a, out);
+            }
+        }
+        Type::Array(key, inner) => {
+            collect_callables_with_missing_signature(key, out);
+            collect_callables_with_missing_signature(inner, out);
+        }
+        Type::ClassString(inner) => collect_callables_with_missing_signature(inner, out),
+        Type::Union(members) | Type::Intersection(members) => {
+            for m in members {
+                collect_callables_with_missing_signature(m, out);
+            }
+        }
+        Type::ArrayShape(fields) => {
+            for (_, t, _) in fields {
+                collect_callables_with_missing_signature(t, out);
+            }
+        }
+        _ => {}
+    }
+}
+
 impl<'a> Checker<'a> {
     /// Walks `ty` for every bare reference (no `<...>` type arguments at
     /// all) to a class this project knows has its own `@template`s -
@@ -410,6 +448,26 @@ impl<'a> Checker<'a> {
                 6,
                 "missingType.generics",
             );
+        }
+        if self.registry.check_missing_callable_signature {
+            let mut callables = Vec::new();
+            collect_callables_with_missing_signature(ty, &mut callables);
+            // Real PHPStan's own `missingType.callable` wording is each
+            // rule's `missingType.iterableValue` sentence with "no value
+            // type specified in" swapped for "no signature specified
+            // for", in all six rules - derived here rather than threading
+            // a third per-kind message closure through every caller.
+            for desc in callables {
+                let message = iterable_message(&desc)
+                    .replace("no value type specified in", "no signature specified for");
+                self.report(
+                    location.to_string(),
+                    message,
+                    span,
+                    6,
+                    "missingType.callable",
+                );
+            }
         }
     }
 

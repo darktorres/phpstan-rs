@@ -122,6 +122,7 @@ fn run_check_project(
     check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
     check_benevolent_union_types: bool,
+    check_missing_callable_signature: bool,
     check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
     check_boolean_trap: bool,
@@ -194,6 +195,7 @@ fn run_check_project(
     );
     project.set_check_method_throw_type_covariance(check_method_throw_type_covariance);
     project.set_check_benevolent_union_types(check_benevolent_union_types);
+    project.set_check_missing_callable_signature(check_missing_callable_signature);
     project.set_check_duplicate_function_declarations(check_duplicate_function_declarations);
     project.set_check_duplicate_class_declarations(check_duplicate_class_declarations);
     project.set_check_boolean_trap(check_boolean_trap);
@@ -577,6 +579,7 @@ pub(crate) fn run_check_project_command(
     check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
     check_method_throw_type_covariance: bool,
     check_benevolent_union_types: bool,
+    check_missing_callable_signature: bool,
     check_duplicate_function_declarations: bool,
     check_duplicate_class_declarations: bool,
     check_boolean_trap: bool,
@@ -690,6 +693,8 @@ pub(crate) fn run_check_project_command(
         || config.check_method_throw_type_covariance.unwrap_or(false);
     let check_benevolent_union_types =
         check_benevolent_union_types || config.check_benevolent_union_types.unwrap_or(false);
+    let check_missing_callable_signature = check_missing_callable_signature
+        || config.check_missing_callable_signature.unwrap_or(false);
     let check_duplicate_function_declarations = check_duplicate_function_declarations
         || config
             .check_duplicate_function_declarations
@@ -855,6 +860,7 @@ pub(crate) fn run_check_project_command(
         check_too_wide_by_ref_type_in_protected_and_public_methods,
         check_method_throw_type_covariance,
         check_benevolent_union_types,
+        check_missing_callable_signature,
         check_duplicate_function_declarations,
         check_duplicate_class_declarations,
         check_boolean_trap,
