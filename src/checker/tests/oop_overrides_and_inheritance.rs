@@ -3190,3 +3190,181 @@ fn an_unrelated_method_with_no_ancestor_at_all_is_not_flagged_name_case() {
         "got: {d:?}"
     );
 }
+
+fn identifiers_of(d: &[crate::Diagnostic]) -> Vec<&str> {
+    d.iter().map(|x| x.identifier.as_str()).collect()
+}
+
+#[test]
+fn class_extending_a_non_class_is_flagged_by_target_kind() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface KindI {}
+            trait KindT {}
+            enum KindE {}
+            class ExtI extends KindI {}
+            class ExtT extends KindT {}
+            class ExtE extends KindE {}
+        "#,
+    );
+    let ids = identifiers_of(&d);
+    for id in [
+        "class.extendsInterface",
+        "class.extendsTrait",
+        "class.extendsEnum",
+    ] {
+        assert!(ids.contains(&id), "missing {id}: {d:?}");
+    }
+    assert!(
+        !ids.contains(&"class.extendsFinal"),
+        "enum parent is not a final class: {d:?}"
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message == "class ExtI cannot extend interface KindI"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn implementing_a_non_interface_is_flagged_for_classes_and_enums() {
+    let d = diagnostics_for(
+        r#"<?php
+            class ImplC {}
+            trait ImplT {}
+            enum ImplE {}
+            class A1 implements ImplC, ImplT, ImplE {}
+            enum E1 implements ImplC, ImplT, ImplE {}
+        "#,
+    );
+    let ids = identifiers_of(&d);
+    for id in [
+        "classImplements.class",
+        "classImplements.trait",
+        "classImplements.enum",
+        "enumImplements.class",
+        "enumImplements.trait",
+        "enumImplements.enum",
+    ] {
+        assert!(ids.contains(&id), "missing {id}: {d:?}");
+    }
+    assert!(
+        d.iter()
+            .any(|x| x.message == "enum E1 cannot implement class ImplC"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn interface_extending_a_non_interface_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class IxC {}
+            trait IxT {}
+            enum IxE {}
+            interface IxOk {}
+            interface Ix extends IxOk, IxC, IxT, IxE {}
+        "#,
+    );
+    let ids = identifiers_of(&d);
+    for id in [
+        "interfaceExtends.class",
+        "interfaceExtends.trait",
+        "interfaceExtends.enum",
+    ] {
+        assert!(ids.contains(&id), "missing {id}: {d:?}");
+    }
+    assert_eq!(
+        d.iter()
+            .filter(|x| x.identifier.starts_with("interfaceExtends."))
+            .count(),
+        3,
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn using_a_non_trait_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class UseC {}
+            interface UseI {}
+            enum UseE {}
+            trait UseT {}
+            class U1 { use UseC, UseI, UseE, UseT; }
+        "#,
+    );
+    let ids = identifiers_of(&d);
+    for id in ["traitUse.class", "traitUse.interface", "traitUse.enum"] {
+        assert!(ids.contains(&id), "missing {id}: {d:?}");
+    }
+    assert!(
+        d.iter()
+            .any(|x| x.message == "class U1 cannot use interface UseI as a trait"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn extending_a_phpdoc_final_class_is_flagged_separately() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @final */
+            class SoftSealed {}
+            class SoftSub extends SoftSealed {}
+        "#,
+    );
+    let ids = identifiers_of(&d);
+    assert!(ids.contains(&"class.extendsFinalByPhpDoc"), "got: {d:?}");
+    assert!(!ids.contains(&"class.extendsFinal"), "got: {d:?}");
+}
+
+#[test]
+fn readonly_mismatch_between_class_and_parent_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Mutable1 {}
+            readonly class Frozen1 {}
+            readonly class FrozenSub extends Mutable1 {}
+            class MutableSub extends Frozen1 {}
+            readonly class FrozenOk extends Frozen1 {}
+        "#,
+    );
+    let read_only: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "class.readOnly")
+        .collect();
+    let non_read_only: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "class.nonReadOnly")
+        .collect();
+    assert_eq!(read_only.len(), 1, "got: {d:?}");
+    assert!(read_only[0].message.contains("FrozenSub"), "got: {d:?}");
+    assert_eq!(non_read_only.len(), 1, "got: {d:?}");
+    assert!(
+        non_read_only[0].message.contains("MutableSub"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn well_formed_inheritance_reports_no_kind_errors() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface OkI {}
+            interface OkJ extends OkI {}
+            trait OkT {}
+            abstract class OkBase implements OkJ {}
+            class OkSub extends OkBase { use OkT; }
+            enum OkE implements OkI { use OkT; }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("class.extends")
+            || x.identifier.starts_with("classImplements.")
+            || x.identifier.starts_with("enumImplements.")
+            || x.identifier.starts_with("interfaceExtends.")
+            || x.identifier.starts_with("traitUse.")),
+        "got: {d:?}"
+    );
+}

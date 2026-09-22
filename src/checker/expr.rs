@@ -2292,6 +2292,9 @@ impl<'a> Checker<'a> {
                     &mut self.current_anonymous_class,
                     self.anonymous_class_names.get(&e.span).cloned(),
                 );
+                if let Some(name) = self.current_anonymous_class.clone() {
+                    self.check_inheritance_target_kinds(&name, true, label, e.span);
+                }
                 for m in &decl.methods {
                     let ancestor_sig =
                         decl.extends

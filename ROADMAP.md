@@ -495,7 +495,13 @@ methods and properties, and native-type property-override variance
 (`property.nativeType`/`.missingNativeType`/`.extraNativeType`). Nine
 declaration-site modifier-consistency checks plus the class-constant
 `final`/native-type-modifier trio. Enum sanity and generic-bound
-checking wired to enums.
+checking wired to enums. Every `extends`/`implements`/trait-`use`
+target checked against the kind of symbol it resolves to
+(`class.extendsInterface`/`.extendsTrait`/`.extendsEnum`,
+`classImplements.*`, `enumImplements.*`, `interfaceExtends.*`,
+`traitUse.*`, `interface.traitUse`), plus `class.extendsFinalByPhpDoc`
+and `class.readOnly`/`.nonReadOnly` parent readonly-parity, anonymous
+classes included.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3500,17 +3506,6 @@ against this list, and added the real gaps the audit had missed.
   Still missing: `new.enum`, `new.trait`, `new.nonObject`,
   `new.noConstructor`, `class.noParent`, and
   `outOfClass.self`/`.static`/`.parent`.
-- `ExistingClassesInClassImplementsRule`/`ExistingClassInClassExtendsRule`/
-  `ExistingClassesInInterfaceExtendsRule` — phpstan-rs's `extends`/
-  `implements`/trait-use check is existence-only (plus
-  `class.extendsFinal`). It never confirms the target is the *right kind*
-  of symbol: `class.extendsInterface`/`.extendsTrait`/`.extendsEnum`,
-  `classImplements.class`/`.trait`/`.enum`, and
-  `interfaceExtends.class`/`.trait`/`.enum` are all unbuilt. So are
-  `class.extendsFinalByPhpDoc` (an `@final`-tagged parent; the
-  method/property `...FinalByPhpDoc` checks are built, the class-level
-  one isn't) and `class.readOnly`/`class.nonReadOnly` (readonly-ness has
-  to match between a class and its parent).
 - `InvalidPromotedPropertiesRule` — promotion legality (only inside
   `__construct`, never abstract, never variadic, PHP-8.0-gated, `final`
   promotion additionally gated).

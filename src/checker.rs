@@ -1717,7 +1717,7 @@ impl<'a> Checker<'a> {
                     if !self.facts_only {
                         self.check_class_generic_bounds(&fqn, c);
                         self.check_class_completeness(&fqn, c.span);
-                        self.check_final_class_extension(&fqn, c.span);
+                        self.check_inheritance_target_kinds(&fqn, false, &fqn, c.span);
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
                         self.check_restricted_class_inheritance(&fqn, c.span);
@@ -1853,6 +1853,7 @@ impl<'a> Checker<'a> {
                     if !self.facts_only {
                         self.check_class_completeness(&fqn, e.span);
                         self.check_class_references_exist(&fqn, e.span);
+                        self.check_inheritance_target_kinds(&fqn, false, &fqn, e.span);
                         self.check_internal_inheritance(&fqn, ClassKind::Enum, e.span);
                         self.check_restricted_class_inheritance(&fqn, e.span);
                         for (i, iface) in e.implements.iter().enumerate() {

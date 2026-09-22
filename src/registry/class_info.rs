@@ -151,6 +151,9 @@ pub struct ClassInfo {
     pub kind: ClassKind,
     pub is_abstract: bool,
     pub is_final: bool,
+    // `@final`/`@phpstan-final` on this class's own docblock, without
+    // the native `final` keyword (which `is_final` covers).
+    pub is_final_by_phpdoc: bool,
     // `readonly class` (PHP 8.2). Always `false` for an enum (real PHP
     // rejects `readonly enum` at parse time) or a trait composed in (a
     // trait has no `readonly`-ness of its own to inherit; `readonly
@@ -1075,6 +1078,7 @@ impl ClassInfo {
             kind: c.kind,
             is_abstract: c.is_abstract,
             is_final: c.is_final,
+            is_final_by_phpdoc: !c.is_final && class_doc.as_ref().is_some_and(|d| d.is_final),
             is_readonly: c.is_readonly,
             extends: c.extends.iter().map(|s| intern(&ctx.resolve(s))).collect(),
             implements,
@@ -1524,6 +1528,7 @@ impl ClassInfo {
             kind: ClassKind::Enum,
             is_abstract: false,
             is_final: true,
+            is_final_by_phpdoc: false,
             // Real PHP rejects `readonly enum` at parse time - an enum
             // can never be `readonly`.
             is_readonly: false,

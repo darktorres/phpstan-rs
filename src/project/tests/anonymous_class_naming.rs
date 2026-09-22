@@ -164,3 +164,36 @@ fn anonymous_class_constructor_dictated_by_an_interface_is_not_flagged_unused() 
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn anonymous_class_extending_an_interface_is_flagged_by_target_kind() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("src/Handler.php"),
+            "<?php interface Handler {} final class Sealed {}",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/build.php"),
+            "<?php
+            function build(): object {
+                $a = new class extends Handler {};
+                return new class extends Sealed {};
+            }",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    let d = project.check_file(&PathBuf::from("src/build.php"));
+    assert!(
+        d.iter().any(|x| x.identifier == "class.extendsInterface"
+            && x.message == "anonymous class cannot extend interface Handler"),
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.extendsFinal"),
+        "got: {d:?}"
+    );
+}

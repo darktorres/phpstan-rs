@@ -23,30 +23,158 @@ pub(crate) use attributes::{
 };
 
 impl<'a> Checker<'a> {
-    /// Extending a class declared `final` is a real, unconditional
-    /// fatal error in PHP at class-declaration time, regardless of
-    /// whether the subclass overrides anything at all. The method-level
-    /// half (overriding a `final` method) lives in
-    /// `check_method_overrides`, sharing that function's own
-    /// per-method ancestor walk instead of a second one here.
-    pub(crate) fn check_final_class_extension(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+    /// Every `extends`/`implements`/trait-`use` target of `registry_name`
+    /// checked against the kind of symbol it actually resolves to: a class
+    /// may only extend a non-final class, implement interfaces and use
+    /// traits; an interface may only extend interfaces and use nothing; an
+    /// enum may only implement interfaces and use traits; a trait may only
+    /// use traits. Extending a `final` class is a real, unconditional fatal
+    /// error in PHP at class-declaration time, regardless of whether the
+    /// subclass overrides anything; extending an `@final` one is the
+    /// docblock-only convention. `readonly`-ness must match between a class
+    /// and its parent class. `label` is the diagnostic's location. The method-level
+    /// finality half (overriding a `final` method) lives in
+    /// `check_method_overrides`. An unresolvable target is
+    /// `check_class_references_exist`'s concern, never reported here.
+    pub(crate) fn check_inheritance_target_kinds(
+        &mut self,
+        registry_name: &str,
+        is_anonymous: bool,
+        label: &str,
+        span: Span,
+    ) {
+        let Some(info) = self.registry.classes.get(registry_name) else {
             return;
         };
-        let Some(parent) = info.extends.first() else {
-            return;
+        let kind = info.kind;
+        let subject = if is_anonymous {
+            "anonymous class".to_string()
+        } else {
+            format!("{} {registry_name}", class_kind_identifier(&kind))
         };
-        let Some(parent_info) = self.registry.classes.get(parent) else {
-            return;
+        let bare_name = if is_anonymous {
+            "anonymous class".to_string()
+        } else {
+            format!("class {registry_name}")
         };
-        if parent_info.is_final {
-            self.report(
-                fqn.to_string(),
-                format!("class {fqn} cannot extend final class {parent}"),
-                span,
-                0,
-                "class.extendsFinal",
-            );
+        let is_readonly = info.is_readonly;
+        let target_kind = |name: &str| {
+            self.registry
+                .lookup_class(name)
+                .map(|(fqn, i)| (fqn.to_string(), i.kind))
+        };
+        let mut reports: Vec<(String, &'static str)> = Vec::new();
+
+        for parent in &info.extends {
+            let Some((parent_fqn, parent_info)) = self.registry.lookup_class(parent) else {
+                continue;
+            };
+            let parent_kind = class_kind_identifier(&parent_info.kind);
+            if kind == ClassKind::Interface {
+                if parent_info.kind != ClassKind::Interface {
+                    reports.push((
+                        format!("{subject} cannot extend {parent_kind} {parent_fqn}"),
+                        match parent_info.kind {
+                            ClassKind::Trait => "interfaceExtends.trait",
+                            ClassKind::Enum => "interfaceExtends.enum",
+                            _ => "interfaceExtends.class",
+                        },
+                    ));
+                }
+                continue;
+            }
+            match parent_info.kind {
+                ClassKind::Interface | ClassKind::Trait | ClassKind::Enum => reports.push((
+                    format!("{subject} cannot extend {parent_kind} {parent_fqn}"),
+                    match parent_info.kind {
+                        ClassKind::Interface => "class.extendsInterface",
+                        ClassKind::Trait => "class.extendsTrait",
+                        _ => "class.extendsEnum",
+                    },
+                )),
+                ClassKind::Class => {
+                    if parent_info.is_final {
+                        reports.push((
+                            format!("{subject} cannot extend final class {parent_fqn}"),
+                            "class.extendsFinal",
+                        ));
+                    } else if parent_info.is_final_by_phpdoc {
+                        reports.push((
+                            format!("{subject} extends @final class {parent_fqn}"),
+                            "class.extendsFinalByPhpDoc",
+                        ));
+                    }
+                    if is_readonly && !parent_info.is_readonly {
+                        reports.push((
+                            format!(
+                                "readonly {bare_name} cannot extend non-readonly class {parent_fqn}"
+                            ),
+                            "class.readOnly",
+                        ));
+                    } else if !is_readonly && parent_info.is_readonly {
+                        reports.push((
+                            format!(
+                                "non-readonly {bare_name} cannot extend readonly class {parent_fqn}"
+                            ),
+                            "class.nonReadOnly",
+                        ));
+                    }
+                }
+            }
+        }
+
+        for iface in &info.implements {
+            let Some((iface_fqn, iface_kind)) = target_kind(iface) else {
+                continue;
+            };
+            if iface_kind == ClassKind::Interface {
+                continue;
+            }
+            reports.push((
+                format!(
+                    "{subject} cannot implement {} {iface_fqn}",
+                    class_kind_identifier(&iface_kind)
+                ),
+                match (kind == ClassKind::Enum, iface_kind) {
+                    (true, ClassKind::Trait) => "enumImplements.trait",
+                    (true, ClassKind::Enum) => "enumImplements.enum",
+                    (true, _) => "enumImplements.class",
+                    (false, ClassKind::Trait) => "classImplements.trait",
+                    (false, ClassKind::Enum) => "classImplements.enum",
+                    (false, _) => "classImplements.class",
+                },
+            ));
+        }
+
+        for used in &info.uses {
+            let Some((used_fqn, used_kind)) = target_kind(used) else {
+                continue;
+            };
+            if kind == ClassKind::Interface {
+                reports.push((
+                    format!("{subject} cannot use trait {used_fqn}"),
+                    "interface.traitUse",
+                ));
+                continue;
+            }
+            if used_kind == ClassKind::Trait {
+                continue;
+            }
+            reports.push((
+                format!(
+                    "{subject} cannot use {} {used_fqn} as a trait",
+                    class_kind_identifier(&used_kind)
+                ),
+                match used_kind {
+                    ClassKind::Interface => "traitUse.interface",
+                    ClassKind::Enum => "traitUse.enum",
+                    _ => "traitUse.class",
+                },
+            ));
+        }
+
+        for (message, identifier) in reports {
+            self.report(label.to_string(), message, span, 0, identifier);
         }
     }
 
@@ -54,16 +182,13 @@ impl<'a> Checker<'a> {
     /// actually resolve" existence pipeline - every `extends` target (a
     /// class's single parent, or an interface's possibly-multiple parent
     /// interfaces), every `implements` target, and every `use`d trait.
-    /// Unlike `check_final_class_extension`'s identical
-    /// `info.extends.get(0)`-only walk (which only needs the first
-    /// parent to check finality, since a class can only ever have one),
-    /// this checks every entry - an interface's `extends A, B;` is real,
+    /// Checks every entry - an interface's `extends A, B;` is real,
     /// valid PHP with more than one target. Operates purely on the
     /// already-indexed, already name-resolved `ClassInfo`, so this needs
     /// no raw `ClassDecl`/`EnumDecl` at all and covers both uniformly
-    /// from one call site. Deliberately existence-only, not kind-
-    /// compatibility (a class `implements`-ing another class instead of
-    /// an interface is a separate PHPStan rule this doesn't attempt).
+    /// from one call site. Existence-only - kind compatibility (a
+    /// class `implements`-ing another class instead of an interface) is
+    /// `check_inheritance_target_kinds`'.
     pub(crate) fn check_class_references_exist(&mut self, fqn: &str, span: Span) {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
