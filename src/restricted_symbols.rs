@@ -60,6 +60,51 @@ pub enum RestrictedSymbolKind {
     Class,
 }
 
+/// A scalar literal to match a call argument's own already-inferred
+/// literal type against (real `value:` directive) - only scalars are
+/// supported (confirmed against the real docs: "only scalar values are
+/// supported with the `value` configuration directive"), matched
+/// against `Type::{True,False,IntLiteral,FloatLiteral,StringLiteral}`.
+/// `#[serde(untagged)]` picks whichever variant the configured TOML
+/// value's own type already is - no separate tag needed.
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum ParamScalarValue {
+    Bool(bool),
+    Int(i64),
+    Float(f64),
+    Str(String),
+}
+
+/// One `{position, name, value|typeString|classPattern}` parameter
+/// condition (real docs: "if you don't specify `name`, the named
+/// parameter will not be found... vice versa... only the `name` key
+/// matches the positional one"). `position` is 1-indexed, counting only
+/// non-named, non-spread arguments - matches the real package's own
+/// argument-resolution semantics directly against the call site, not
+/// against the callee's own declared parameter names (a named
+/// condition needs nothing more than `arg.name == configured_name`).
+/// Only one of `value`/`type_string`/`class_pattern` is meaningful at
+/// once - `type_string` takes precedence over `value` if both are set
+/// (confirmed against the real docs), `class_pattern` over `type_string`.
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct ParamCondition {
+    pub position: Option<u32>,
+    pub name: Option<String>,
+    pub value: Option<ParamScalarValue>,
+    pub type_string: Option<String>,
+    pub class_pattern: Option<String>,
+}
+
+/// `ParamCondition`'s own presence-only sibling, for the real `*AnyValue`
+/// directive family ("don't care about the parameter's value but want
+/// to make sure the parameter is passed").
+#[derive(Debug, Clone, Deserialize, PartialEq, Default)]
+pub struct ParamRef {
+    pub position: Option<u32>,
+    pub name: Option<String>,
+}
+
 /// One `[[restricted_symbols]]` entry.
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 pub struct RestrictedSymbolEntry {
@@ -185,6 +230,48 @@ pub struct RestrictedSymbolEntry {
     /// inside a matching class hierarchy, where it's still reported.
     #[serde(default)]
     pub allow_except_in_instance_of: Vec<String>,
+    /// `Function`/`Method`/`StaticMethod` kinds only (the other four
+    /// have no call-site arguments to condition on): real
+    /// `allowParamsAnywhere` - allows a call anywhere in the codebase
+    /// when it's made with *every* listed condition satisfied (an
+    /// AND across the list, confirmed against the real docs' own
+    /// `log()` worked example: "calls are allowed when called with all
+    /// parameters listed"), on top of the ordinary "disallowed
+    /// everywhere" default.
+    #[serde(default)]
+    pub allow_params_anywhere: Vec<ParamCondition>,
+    /// `allow_params_anywhere`'s presence-only sibling (real
+    /// `allowParamsAnywhereAnyValue`) - every listed parameter must be
+    /// passed, with any value.
+    #[serde(default)]
+    pub allow_params_anywhere_any_value: Vec<ParamRef>,
+    /// The inverse of `allow_params_anywhere` (real
+    /// `allowExceptParamsAnywhere`, alias `disallowParamsAnywhere`):
+    /// unlike the additive field above, a full match here *inverts the
+    /// entry's own default* - allowed everywhere except a call made
+    /// with every listed condition satisfied, where it's still
+    /// reported (confirmed against the real docs' `hash()`/`foo()`
+    /// worked examples).
+    #[serde(default)]
+    pub allow_except_params_anywhere: Vec<ParamCondition>,
+    /// `allow_except_params_anywhere`'s presence-only sibling (real
+    /// `allowExceptParamsAnyValue`, alias `disallowParamsAnyValue`) -
+    /// disallows only when every listed parameter is passed, with any
+    /// value (confirmed against the real docs' `waldo()` example:
+    /// `waldo('foo')`, with only one of two listed parameters present,
+    /// stays allowed).
+    #[serde(default)]
+    pub allow_except_params_any_value: Vec<ParamRef>,
+    /// `allow_except_params_anywhere`'s case-insensitive sibling (real
+    /// `allowExceptCaseInsensitiveParams`, alias
+    /// `disallowCaseInsensitiveParams`) - identical default-inverting
+    /// shape, except a `value:` string condition matches regardless of
+    /// case (confirmed against the real docs' `hash('md5', ...)`
+    /// example - only `value:`-shaped conditions are affected;
+    /// `type_string`/`class_pattern` matching is unrelated to string
+    /// casing).
+    #[serde(default)]
+    pub allow_except_case_insensitive_params: Vec<ParamCondition>,
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -396,6 +483,11 @@ mod tests {
             allow_except_in_methods: Vec::new(),
             allow_in_instance_of: Vec::new(),
             allow_except_in_instance_of: Vec::new(),
+            allow_params_anywhere: Vec::new(),
+            allow_params_anywhere_any_value: Vec::new(),
+            allow_except_params_anywhere: Vec::new(),
+            allow_except_params_any_value: Vec::new(),
+            allow_except_case_insensitive_params: Vec::new(),
         }
     }
 

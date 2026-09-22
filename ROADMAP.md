@@ -4942,16 +4942,38 @@ Recommended sequencing, each its own commit (small/medium as noted):
    already reads) - zero new hierarchy-walking code.
 3. `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` +
    `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
-   `allowExceptCaseInsensitiveParams` (medium - the location-independent
-   half; builds the value/typeString/classPattern matching engine with
-   no zone dependency).
+   `allowExceptCaseInsensitiveParams` - **done**: the location-
+   independent half, and the value/typeString/classPattern matching
+   engine every later sub-item reuses. `ParamCondition`/`ParamRef` new
+   config types; matching resolves `{position, name}` directly against
+   the raw call-site `&[Arg]` list (not `checker::calls::
+   resolve_call_args`'s `ParamSig`-keyed shape - a named condition only
+   ever needs `arg.name == configured_name`), then reads the arg's
+   already-inferred `Type` via `Checker::infer_expr` for `value`
+   (`Type::{True,False,IntLiteral,FloatLiteral,StringLiteral}`),
+   `type_string` (`types::parse_type_string` + `Registry::is_assignable`),
+   or `class_pattern` (`Type::Object`'s bare name + `glob_matches`), in
+   that precedence order. Each directive's own list is one AND-group
+   (every listed condition must match - confirmed against the real
+   docs' `log()` example), and the two families compose exactly like
+   every other allow mechanism here: `allow_params_anywhere`/`_any_value`
+   purely additive, `allow_except_params_anywhere`/`_any_value`/
+   `_case_insensitive_params` invert the entry's own default. The real
+   first-class-callable rule (sub-item 6 below) fell out for free for
+   this family: an FCC call site has no real `Arg` list, so every
+   condition/ref fails to resolve against it - the additive family
+   never grants an allowance (matches the real docs: "always reported")
+   and the inverting family never finds a disallow-match (matches:
+   "never reported") - zero FCC-specific code needed for this family.
 4. `allowParamsInAllowed`/`allowParamsInAllowedAnyValue` +
    `allowExceptParamsInAllowed` (medium - same engine, read together
    with whichever zone directive - path/instanceof/methods - the entry
    also configures).
 5. The `ParamFlags` family (medium - needs the new constant folder
    above; otherwise reuses step 3/4's engine).
-6. First-class-callable interaction (small, cross-cutting).
+6. First-class-callable interaction for the `*InAllowed` family (small
+   - the `*Anywhere` family's own share of this is already done, see
+   step 3).
 
 Not started - this is the investigation only. The config-shortcut forms
 (bare `position: true`/`name: 'bar'` maps expanding to a full condition)

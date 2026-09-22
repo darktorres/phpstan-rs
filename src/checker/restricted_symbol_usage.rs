@@ -4,13 +4,16 @@
 //! `@internal` checks, one function per event, each opening with a fast
 //! `is_empty()` bail.
 
-use crate::ast::{ClassKind, FunctionDecl, Param};
+use crate::ast::{Arg, ClassKind, Expr, FunctionDecl, Param};
 use crate::checker::internal_usage::class_type_word;
 use crate::checker::internal_usage::collect_referenced_class_names;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::ignore_errors::glob_matches;
-use crate::restricted_symbols::RestrictedSymbolEntry;
+use crate::restricted_symbols::{
+    ParamCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
+};
 use crate::token::Span;
+use crate::types::Type;
 
 /// Where a `Class`-kind ban's own referenced-class check fires -
 /// `allowInParamTypes`/`allowInReturnType` and their `allowExceptIn*`
@@ -58,7 +61,181 @@ fn is_allowed_by_position(entry: &RestrictedSymbolEntry, location: ClassUsageLoc
     false
 }
 
+/// Resolves one `{position, name}` pair against the real call-site
+/// argument list - matches the real package's own "positional or
+/// named" resolution directly (confirmed against its docs): a named
+/// condition looks for a literally-named argument; a positional one
+/// (1-indexed) counts the Nth non-named, non-spread argument. Named
+/// resolution is tried first, matching the real docs' own combined
+/// `position`+`name` worked example (`json_decode()`'s `flags`
+/// parameter, matched whether called positionally or by name).
+/// Independent of the callee's own declared parameter names - unlike
+/// `checker::calls::resolve_call_args`, which needs a `ParamSig` list
+/// to resolve a named argument, a named condition here needs nothing
+/// more than `arg.name == configured_name`. A spread/unpack argument
+/// makes every subsequent positional slot statically unknown, so
+/// positional resolution stops (returns `None`) once one is seen -
+/// this project's own conservative posture, matching how every other
+/// spread-aware check here already treats an unpack as "can't know."
+fn resolve_arg<'a>(args: &'a [Arg], position: Option<u32>, name: Option<&str>) -> Option<&'a Expr> {
+    if let Some(name) = name
+        && let Some(found) = args
+            .iter()
+            .find(|a| !a.spread && a.name.as_deref() == Some(name))
+    {
+        return Some(&found.value);
+    }
+    let pos = position?;
+    let idx = pos.checked_sub(1)?;
+    let mut count = 0u32;
+    for a in args {
+        if a.spread {
+            return None;
+        }
+        if a.name.is_some() {
+            continue;
+        }
+        if count == idx {
+            return Some(&a.value);
+        }
+        count += 1;
+    }
+    None
+}
+
+/// `value:`'s own scalar-literal matching - the argument's own already-
+/// inferred `Type` must be the exact literal variant configured (real
+/// docs: "only scalar values are supported"). `case_insensitive` only
+/// affects a `Str` comparison (real `allowExceptCaseInsensitiveParams`);
+/// the docs confirm this doesn't extend to `typeString`/`classPattern`
+/// matching, which never reach this function at all.
+fn scalar_value_matches(ty: &Type, value: &ParamScalarValue, case_insensitive: bool) -> bool {
+    match (ty, value) {
+        (Type::True, ParamScalarValue::Bool(true)) => true,
+        (Type::False, ParamScalarValue::Bool(false)) => true,
+        (Type::IntLiteral(n), ParamScalarValue::Int(v)) => n == v,
+        (Type::FloatLiteral(f), ParamScalarValue::Float(v)) => f == v,
+        (Type::StringLiteral(s), ParamScalarValue::Str(v)) => {
+            if case_insensitive {
+                s.eq_ignore_ascii_case(v)
+            } else {
+                s == v
+            }
+        }
+        _ => false,
+    }
+}
+
 impl<'a> Checker<'a> {
+    /// One `ParamCondition`'s own match against the real call site -
+    /// `class_pattern` takes precedence over `type_string`, which takes
+    /// precedence over `value` (confirmed against the real docs: "If
+    /// both `classPattern` and `typeString` are specified, `classPattern`
+    /// takes precedence"; "If both `typeString` and `value` directives
+    /// are specified, the `value` directive is ignored"). An argument
+    /// that can't be resolved at all (missing, or past an unresolvable
+    /// spread) never matches, regardless of which directive is
+    /// configured.
+    fn param_condition_matches(
+        &self,
+        cond: &ParamCondition,
+        args: &[Arg],
+        locals: &Locals,
+        case_insensitive: bool,
+    ) -> bool {
+        let Some(expr) = resolve_arg(args, cond.position, cond.name.as_deref()) else {
+            return false;
+        };
+        let ty = self.infer_expr(expr, locals);
+        if let Some(pattern) = &cond.class_pattern {
+            return matches!(&ty, Type::Object(name, _) if glob_matches(&pattern.to_lowercase(), &name.to_lowercase()));
+        }
+        if let Some(type_string) = &cond.type_string {
+            let configured = crate::types::parse_type_string(type_string);
+            return self.registry.is_assignable(&ty, &configured);
+        }
+        if let Some(value) = &cond.value {
+            return scalar_value_matches(&ty, value, case_insensitive);
+        }
+        false
+    }
+
+    /// `*AnyValue` siblings' own per-parameter check - present at all,
+    /// regardless of value.
+    fn param_ref_present(&self, r: &ParamRef, args: &[Arg]) -> bool {
+        resolve_arg(args, r.position, r.name.as_deref()).is_some()
+    }
+
+    /// Every real `*Params*` directive is a *list* of conditions
+    /// evaluated together as one AND-group (confirmed against the real
+    /// docs' own `log()` worked example: "calls are allowed when called
+    /// with all parameters listed"), not "any one matches." An empty
+    /// list never matches anything (there's nothing to be an unconfigured
+    /// directive's own vacuous truth here - the caller's own `is_empty()`
+    /// gate is what decides whether this directive applies at all).
+    fn all_conditions_match(
+        &self,
+        conditions: &[ParamCondition],
+        args: &[Arg],
+        locals: &Locals,
+        case_insensitive: bool,
+    ) -> bool {
+        !conditions.is_empty()
+            && conditions
+                .iter()
+                .all(|c| self.param_condition_matches(c, args, locals, case_insensitive))
+    }
+
+    /// `all_conditions_match`'s presence-only sibling.
+    fn all_refs_present(&self, refs: &[ParamRef], args: &[Arg]) -> bool {
+        !refs.is_empty() && refs.iter().all(|r| self.param_ref_present(r, args))
+    }
+
+    /// `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` (purely
+    /// additive, on top of "disallowed everywhere") and
+    /// `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
+    /// `allowExceptCaseInsensitiveParams` (default-inverting, the same
+    /// shape `is_allowed_by_position`/`is_allowed_by_calling_context`
+    /// already established) - all location-independent, unlike the
+    /// `*InAllowed` family's own zone-combined siblings (not yet built).
+    /// A first-class-callable call site (no real arguments) naturally
+    /// falls out of this correctly with zero special-casing: every
+    /// condition/ref fails to resolve against an empty `args`, so the
+    /// additive family never grants an allowance (matching the real
+    /// docs: "always reported") and the inverting family never finds a
+    /// disallow-match either (matching the real docs: "never reported").
+    fn is_allowed_by_params_anywhere_context(
+        &self,
+        entry: &RestrictedSymbolEntry,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> bool {
+        let has_allow = !entry.allow_params_anywhere.is_empty()
+            || !entry.allow_params_anywhere_any_value.is_empty();
+        if has_allow
+            && (self.all_conditions_match(&entry.allow_params_anywhere, args, locals, false)
+                || self.all_refs_present(&entry.allow_params_anywhere_any_value, args))
+        {
+            return true;
+        }
+        let has_disallow_gate = !entry.allow_except_params_anywhere.is_empty()
+            || !entry.allow_except_params_any_value.is_empty()
+            || !entry.allow_except_case_insensitive_params.is_empty();
+        if has_disallow_gate {
+            let disallowed_here =
+                self.all_conditions_match(&entry.allow_except_params_anywhere, args, locals, false)
+                    || self.all_refs_present(&entry.allow_except_params_any_value, args)
+                    || self.all_conditions_match(
+                        &entry.allow_except_case_insensitive_params,
+                        args,
+                        locals,
+                        true,
+                    );
+            return !disallowed_here;
+        }
+        false
+    }
+
     /// Every `check_restricted_*` report call routes through here -
     /// centralizes both halves of Phase 67's own filter-DSL extension
     /// (confirmed against the real `spaze/phpstan-disallowed-calls`
@@ -280,7 +457,14 @@ impl<'a> Checker<'a> {
         false
     }
 
-    pub(crate) fn check_restricted_function_call(&mut self, fqn: &str, span: Span, label: &str) {
+    pub(crate) fn check_restricted_function_call(
+        &mut self,
+        fqn: &str,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
         if self.registry.restricted_symbols.is_empty() {
             return;
         }
@@ -288,6 +472,9 @@ impl<'a> Checker<'a> {
         let Some(entry) = self.registry.restricted_symbols.function(bare) else {
             return;
         };
+        if self.is_allowed_by_params_anywhere_context(entry, args, locals) {
+            return;
+        }
         let entry = entry.clone();
         self.report_restricted(
             &entry,
@@ -298,11 +485,14 @@ impl<'a> Checker<'a> {
         );
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn check_restricted_method_call(
         &mut self,
         owner: &str,
         method: &str,
         is_static: bool,
+        args: &[Arg],
+        locals: &Locals,
         span: Span,
         label: &str,
     ) {
@@ -317,6 +507,9 @@ impl<'a> Checker<'a> {
             self.registry.restricted_symbols.method(owner, method)
         };
         let Some(entry) = entry else { return };
+        if self.is_allowed_by_params_anywhere_context(entry, args, locals) {
+            return;
+        }
         let entry = entry.clone();
         let static_word = if is_static { "static " } else { "" };
         let identifier = if is_static {

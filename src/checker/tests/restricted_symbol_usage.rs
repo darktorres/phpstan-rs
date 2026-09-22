@@ -2,7 +2,10 @@
 //! behavior-per-test, mirroring `internal_usage.rs`'s own test style.
 
 use super::helpers::*;
-use crate::restricted_symbols::{RestrictedSymbolEntry, RestrictedSymbolKind, RestrictedSymbols};
+use crate::restricted_symbols::{
+    ParamCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry, RestrictedSymbolKind,
+    RestrictedSymbols,
+};
 
 fn with_entries(src: &str, entries: Vec<RestrictedSymbolEntry>) -> Vec<crate::checker::Diagnostic> {
     diagnostics_for_with(src, move |r| {
@@ -38,6 +41,11 @@ fn entry(
         allow_except_in_methods: Vec::new(),
         allow_in_instance_of: Vec::new(),
         allow_except_in_instance_of: Vec::new(),
+        allow_params_anywhere: Vec::new(),
+        allow_params_anywhere_any_value: Vec::new(),
+        allow_except_params_anywhere: Vec::new(),
+        allow_except_params_any_value: Vec::new(),
+        allow_except_case_insensitive_params: Vec::new(),
     }
 }
 
@@ -1002,4 +1010,215 @@ fn allow_except_in_instance_of_disallows_only_inside_the_matching_hierarchy() {
         .collect();
     assert_eq!(flagged.len(), 1, "got: {d:?}");
     assert!(flagged[0].location.contains("MyHandler"));
+}
+
+// `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` (additive) and
+// `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
+// `allowExceptCaseInsensitiveParams` (default-inverting) - the
+// location-independent half of the real parameter-value-conditions
+// family.
+
+#[test]
+fn allow_params_anywhere_allows_only_the_call_matching_every_condition() {
+    let d = with_entries(
+        r#"<?php
+            print_r($x);
+            print_r($x, true);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "print_r",
+            "use logging instead",
+            |e| {
+                e.allow_params_anywhere = vec![ParamCondition {
+                    position: Some(2),
+                    value: Some(ParamScalarValue::Bool(true)),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_params_anywhere_any_value_allows_only_when_the_parameter_is_present() {
+    let d = with_entries(
+        r#"<?php
+            function f($a = null) {}
+            f(1);
+            f();
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "f",
+            "no bare calls",
+            |e| {
+                e.allow_params_anywhere_any_value = vec![ParamRef {
+                    position: Some(1),
+                    name: None,
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_except_params_anywhere_disallows_only_the_exact_matching_value() {
+    let d = with_entries(
+        r#"<?php
+            function foo(string $a, string $b) {}
+            foo('bar', 'baz');
+            foo('bar', 'BAZ');
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "foo",
+            "not with baz",
+            |e| {
+                e.allow_except_params_anywhere = vec![ParamCondition {
+                    position: Some(2),
+                    value: Some(ParamScalarValue::Str("baz".to_string())),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_except_case_insensitive_params_matches_regardless_of_case() {
+    let d = with_entries(
+        r#"<?php
+            hash('md5', $s);
+            hash('MD5', $s);
+            hash('sha256', $s);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "hash",
+            "md5 is not a secure hash",
+            |e| {
+                e.allow_except_case_insensitive_params = vec![ParamCondition {
+                    position: Some(1),
+                    name: Some("algo".to_string()),
+                    value: Some(ParamScalarValue::Str("md5".to_string())),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 2, "got: {d:?}");
+}
+
+#[test]
+fn allow_except_params_any_value_disallows_only_when_every_listed_param_is_present() {
+    let d = with_entries(
+        r#"<?php
+            function waldo(string $a = '', string $b = '') {}
+            waldo('foo', 'bar');
+            waldo('foo');
+            waldo();
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "waldo",
+            "no waldo",
+            |e| {
+                e.allow_except_params_any_value = vec![
+                    ParamRef {
+                        position: Some(1),
+                        name: None,
+                    },
+                    ParamRef {
+                        position: Some(2),
+                        name: None,
+                    },
+                ]
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn a_first_class_callable_is_always_flagged_when_allow_params_anywhere_is_configured() {
+    let d = with_entries(
+        r#"<?php
+            $f = print_r(...);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "print_r",
+            "use logging instead",
+            |e| {
+                e.allow_params_anywhere = vec![ParamCondition {
+                    position: Some(2),
+                    value: Some(ParamScalarValue::Bool(true)),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.function"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_first_class_callable_is_never_flagged_when_allow_except_params_anywhere_is_configured() {
+    let d = with_entries(
+        r#"<?php
+            function foo(string $a, string $b) {}
+            $f = foo(...);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "foo",
+            "not with baz",
+            |e| {
+                e.allow_except_params_anywhere = vec![ParamCondition {
+                    position: Some(2),
+                    value: Some(ParamScalarValue::Str("baz".to_string())),
+                    ..Default::default()
+                }]
+            },
+        )],
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.function"),
+        "unexpected diagnostics: {d:?}"
+    );
 }

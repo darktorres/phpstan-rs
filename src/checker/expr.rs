@@ -715,7 +715,7 @@ impl<'a> Checker<'a> {
                         let dynamic_throw = self.dynamic_function_throw_type(&bare, args, locals);
                         self.record_call_throw_point(dynamic_throw, Some(sig));
                         self.check_internal_function_call(name, sig, e.span, label);
-                        self.check_restricted_function_call(name, e.span, label);
+                        self.check_restricted_function_call(name, args, locals, e.span, label);
                         self.check_deprecated_function_call(name, sig, e.span, label);
                         self.record_function_usage_token(name, sig, callee.span);
                         match name.as_ref() {
@@ -1303,7 +1303,9 @@ impl<'a> Checker<'a> {
                             label,
                         });
                         self.check_internal_method_call(owner, method, sig, false, e.span, label);
-                        self.check_restricted_method_call(owner, method, false, e.span, label);
+                        self.check_restricted_method_call(
+                            owner, method, false, args, locals, e.span, label,
+                        );
                         self.check_deprecated_method_call(owner, method, sig, false, e.span, label);
                         self.record_member_usage_token(
                             UsageTokenKind::Method,
@@ -2467,7 +2469,9 @@ impl<'a> Checker<'a> {
                             self.check_internal_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
-                            self.check_restricted_method_call(owner, method, true, e.span, label);
+                            self.check_restricted_method_call(
+                                owner, method, true, args, locals, e.span, label,
+                            );
                             self.check_deprecated_method_call(
                                 owner, method, sig, true, e.span, label,
                             );
@@ -3907,6 +3911,8 @@ impl<'a> Checker<'a> {
                                         // (`banned_func()`) already was.
                                         self.check_restricted_function_call(
                                             &resolved_name,
+                                            &[],
+                                            locals,
                                             e.span,
                                             label,
                                         );
@@ -4000,7 +4006,13 @@ impl<'a> Checker<'a> {
                                     &owner, method, sig, false, e.span, label,
                                 );
                                 self.check_restricted_method_call(
-                                    &owner, method, false, e.span, label,
+                                    &owner,
+                                    method,
+                                    false,
+                                    &[],
+                                    locals,
+                                    e.span,
+                                    label,
                                 );
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, false, e.span, label,
@@ -4050,7 +4062,13 @@ impl<'a> Checker<'a> {
                                     &owner, method, sig, true, e.span, label,
                                 );
                                 self.check_restricted_method_call(
-                                    &owner, method, true, e.span, label,
+                                    &owner,
+                                    method,
+                                    true,
+                                    &[],
+                                    locals,
+                                    e.span,
+                                    label,
                                 );
                                 self.check_deprecated_method_call(
                                     &owner, method, sig, true, e.span, label,
