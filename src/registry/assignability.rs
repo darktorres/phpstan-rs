@@ -735,4 +735,172 @@ impl Registry {
         }
         self.is_assignable(sub, sup)
     }
+
+    /// `checker::check_strict_comparison_of_different_types`'s own
+    /// disjointness primitive - real PHPStan's `InitializerExprTypeResolver::
+    /// resolveIdenticalType` reaches this same question via `leftType->
+    /// isSuperTypeOf(rightType)->no() && rightType->isSuperTypeOf(leftType)
+    /// ->no()`, a genuinely *trinary* (yes/no/maybe) answer this project's
+    /// own `is_assignable` doesn't give (`!is_assignable(a, b)` only means
+    /// "not provably a subtype," not "provably no overlap at all" - the
+    /// stronger claim this function exists to answer directly, class by
+    /// class, rather than trying to derive it from two `is_assignable`
+    /// calls that can't actually express it). Recurses into `Union` on
+    /// either side (every member of one side must be disjoint from the
+    /// other for the whole comparison to count, the same "stay on the
+    /// lenient side" direction `narrowing::types_definitely_disjoint`'s
+    /// own doc comment already established for its narrower version of
+    /// this same idea) - `Type::Never` is vacuously disjoint from
+    /// anything (no real value to overlap with).
+    ///
+    /// A leaf pair is disjoint when either (1) they resolve to different
+    /// coarse scalar families (`int` vs `string`, `array` vs `object`,
+    /// ...), or (2) both are object-family with two *different* class
+    /// names, neither an ancestor of the other, and **both** names
+    /// resolve to a real, registered `ClassKind::Class` or `ClassKind::
+    /// Enum` (never `Interface`/`Trait`) - real PHP's single-inheritance
+    /// rule means one concrete object's class has exactly one linear
+    /// `extends` chain, so two unrelated classes/enums neither of which
+    /// is the other's ancestor genuinely can never share an instance;
+    /// requiring *both* sides closed this way is what makes the claim
+    /// sound even though real PHP allows multiple *interface*
+    /// implementation - if either side is an interface, an unrelated
+    /// third class could still freely implement both, so nothing is
+    /// provably disjoint there, matching this project's own established
+    /// "don't know, don't guess" precedent (real PHPStan's own analogous
+    /// case additionally leans on `final`-ness, not attempted here - a
+    /// disclosed narrower scope, not an oversight; a non-final class vs
+    /// an unrelated non-final class stays undecided here rather than
+    /// guessing "maybe" the way `final` alone would let real PHPStan
+    /// still answer "no"). `Type::EnumCase`/a bare enum-typed
+    /// `Type::Object` share this exact same class-name-based reasoning -
+    /// a specific case and its own enum's bare type are never disjoint
+    /// (same class name), while two *different* enums always are (an
+    /// enum can never extend or be extended).
+    pub(crate) fn types_provably_disjoint(&self, a: &Type, b: &Type) -> bool {
+        match (a, b) {
+            (Type::Never, _) | (_, Type::Never) => true,
+            (Type::Union(members), _) => members.iter().all(|m| self.types_provably_disjoint(m, b)),
+            (_, Type::Union(members)) => members.iter().all(|m| self.types_provably_disjoint(a, m)),
+            _ => {
+                let (fam_a, class_a) = leaf_family_and_class(a);
+                let (fam_b, class_b) = leaf_family_and_class(b);
+                match (fam_a, fam_b) {
+                    (Some(fa), Some(fb)) if fa != fb => true,
+                    (Some(ScalarFamily::Object), Some(ScalarFamily::Object)) => {
+                        let (Some(ca), Some(cb)) = (class_a, class_b) else {
+                            return false;
+                        };
+                        if ca == cb || self.is_subclass_of(ca, cb) || self.is_subclass_of(cb, ca) {
+                            return false;
+                        }
+                        self.is_closed_class_kind(ca) && self.is_closed_class_kind(cb)
+                    }
+                    _ => false,
+                }
+            }
+        }
+    }
+
+    /// `types_provably_disjoint`'s own "single linear `extends` chain"
+    /// requirement - `Class`/`Enum` only, never `Interface`/`Trait`
+    /// (freely, multiply implementable) or an unregistered name (unknown
+    /// hierarchy, don't guess).
+    fn is_closed_class_kind(&self, name: &str) -> bool {
+        self.classes
+            .get(name)
+            .is_some_and(|info| matches!(info.kind, ClassKind::Class | ClassKind::Enum))
+    }
+
+    /// Real PHPStan's own `InitializerExprTypeResolver::
+    /// resolveIdenticalType` - what `left === right` provably evaluates
+    /// to from both operands' own types alone, `None` when it could go
+    /// either way. Two independent halves, mirroring that real algorithm
+    /// exactly: (1) both operands already reduce to the exact same kind
+    /// of single finite value (a literal, an enum case, `null`, `true`/
+    /// `false`, or an empty array) - direct value equality decides both
+    /// directions at once (`Type`'s own `PartialEq`, deliberately
+    /// including `FloatLiteral`: comparing two floats via `==` already
+    /// gives the correct, real-PHP-matching `NAN !== NAN` answer for
+    /// free, since IEEE-754 float `==` is exactly what PHP's own runtime
+    /// `===` uses). (2) otherwise, `types_provably_disjoint` decides only
+    /// the "always false" direction - a type-family/unrelated-closed-
+    /// class mismatch proves the two operands can never be equal, but
+    /// proves nothing about "always true" (two different, non-finite
+    /// `int`-typed expressions could coincidentally hold the same
+    /// runtime value). Shared by `checker::check_strict_comparison_of_
+    /// different_types` (`===`/`!==` as a real comparison expression) and
+    /// `checker::expr`'s own `match.unhandled`-adjacent `match(true)`/
+    /// per-arm exhaustiveness reasoning (`MatchExpressionRule.php`'s own
+    /// `$armConditionExpr = new Identical($matchCondition, $rawCondition)`
+    /// reaches this exact same question, for exactly the same reason).
+    pub(crate) fn identical_result(&self, left: &Type, right: &Type) -> Option<bool> {
+        if is_finite_scalar_type(left) && is_finite_scalar_type(right) {
+            return Some(left == right);
+        }
+        if self.types_provably_disjoint(left, right) {
+            return Some(false);
+        }
+        None
+    }
+}
+
+/// `identical_result`'s own "already the one exact value it'll ever be"
+/// leaf test - deliberately broader than `narrowing::is_known_single_
+/// value` (`checker/narrowing/type_ops.rs`), which excludes
+/// `FloatLiteral` for a *different* reason specific to its own
+/// narrowing-exclusion purpose (excluding a float literal from a
+/// `Union` on a false `!==` branch would wrongly also exclude a real
+/// `NAN`, which never satisfies `!==` against anything, including
+/// itself) - that concern doesn't apply here at all, since this
+/// function only ever feeds a direct `Type::eq` comparison between two
+/// *independently* inferred operands.
+fn is_finite_scalar_type(ty: &Type) -> bool {
+    matches!(
+        ty,
+        Type::Null
+            | Type::True
+            | Type::False
+            | Type::IntLiteral(_)
+            | Type::StringLiteral(_)
+            | Type::FloatLiteral(_)
+            | Type::EnumCase(_, _)
+    ) || matches!(ty, Type::ArrayShape(fields) if fields.is_empty())
+}
+
+#[derive(PartialEq)]
+enum ScalarFamily {
+    Int,
+    Float,
+    String,
+    Bool,
+    Null,
+    Array,
+    Object,
+}
+
+/// `types_provably_disjoint`'s own leaf classifier - `None` for anything
+/// with no confident family (`Mixed`, `Never` - handled separately by
+/// its own caller before this is ever reached, `Callable` - a real
+/// runtime value could be a string/array/`Closure` object, genuinely
+/// ambiguous, `Intersection`/`Accessory`/templates/every pseudo-type),
+/// matching `narrowing::types_definitely_disjoint`'s own identically-
+/// named, identically-scoped helper - this version additionally returns
+/// the class name for `Object`/`EnumCase`, needed for the object-family
+/// case's own closed-class-kind/ancestor check just above.
+fn leaf_family_and_class(ty: &Type) -> (Option<ScalarFamily>, Option<&str>) {
+    match ty {
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => (Some(ScalarFamily::Int), None),
+        Type::Float | Type::FloatLiteral(_) => (Some(ScalarFamily::Float), None),
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => {
+            (Some(ScalarFamily::String), None)
+        }
+        Type::Bool | Type::True | Type::False => (Some(ScalarFamily::Bool), None),
+        Type::Null => (Some(ScalarFamily::Null), None),
+        Type::Array(_, _) | Type::ArrayShape(_) => (Some(ScalarFamily::Array), None),
+        Type::Object(name, _) => (Some(ScalarFamily::Object), Some(name.as_str())),
+        Type::EnumCase(class, _) => (Some(ScalarFamily::Object), Some(class.as_str())),
+        Type::ObjectShape(_) => (Some(ScalarFamily::Object), None),
+        _ => (None, None),
+    }
 }

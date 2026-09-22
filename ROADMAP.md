@@ -1605,6 +1605,49 @@ exhaustive-and-non-exhaustive/catch-exact/catch-broader/catch-unrelated/
 `@throws`-tag (`src/checker/tests/narrowing.rs`); full suite (4384 lib
 tests) still green.
 
+**`match.alwaysTrue`/`match.alwaysFalse` - the dead-arm half of
+`MatchExpressionRule.php` this project's own `match.unhandled` deliberately
+left out**: a later arm whose own condition can never be reached because
+an earlier arm already covers its whole type (`match.alwaysTrue`), or is
+disjoint from the subject's remaining type (`match.alwaysFalse`). Each arm
+condition is checked exactly the way real PHPStan's own rule does - as
+`$matchCondition === $rawCondition` - via the new shared `registry::
+identical_result` primitive (`identical.alwaysFalse`/`.alwaysTrue`'s own
+entry below), `$matchCondition` being the literal `true` for a
+`match(true)` subject, an independently-tracked `remaining_subject_ty`
+otherwise. That independence (not reading `accumulated`'s own narrowed
+subject value the way arm bodies do) was confirmed necessary by direct
+testing, not assumed: `accumulated`'s own subject entry stays the bare,
+unexpanded enum type across repeated exclusions (a bare `Object(EnumClass)`
+has no case list for `narrow_type_excluding` to filter without
+`expand_enum_cases` first) - the exact same reason `match.unhandled`'s own
+"remaining" computation just above is independent too. Seeded once via
+`expand_enum_cases`, narrowed incrementally per arm via `narrow_type_
+excluding`, mirroring `match.unhandled`'s own exclusion loop one arm at a
+time instead of all at once at the end. A `next_arm_is_dead` flag mirrors
+real PHPStan's own `$nextArmIsDeadForType`: once any condition proves
+always-true, every arm *after* it stops getting this diagnostic entirely
+(not narrowing/body-checking, untouched) - within the *same* arm, every
+remaining condition is still individually checked, matching real PHPStan's
+identical per-arm (not per-condition) skip granularity. The last arm is
+unconditionally exempted from `alwaysTrue` - not the `elseif`-style
+`reportAlwaysTrueInLastCondition` config gate `identical.alwaysTrue`
+itself honors, confirmed via direct source reading that this specific rule
+uses a plain, unconditional `$i === $armsCount - 1` check instead; a
+trailing `default` arm counts as one more "arm" for this purpose even
+though it carries no conditions of its own to check, so a genuinely
+redundant last *named* arm followed only by an unreachable `default` still
+gets reported (verified: `match($b) { true => 'a', false => 'b', default
+=> 'unreachable' }` flags the `false` arm, while the identical match with
+no trailing `default` correctly doesn't). Each condition in a multi-
+condition arm is checked independently, matching real PHPStan exactly -
+`Status::A, Status::B, Status::C => ...` covering an entire enum
+collectively never flags any single condition, since per-condition
+reasoning can't see the combined-OR exhaustiveness (that question belongs
+to `match.unhandled` alone). Guarded on `loop_depth`, matching every
+sibling `alwaysTrue`/`alwaysFalse` check in this project. 6 new regression
+tests (`src/checker/tests/narrowing.rs`); full suite green, clippy clean.
+
 ## Rule catalog (checker)
 
 Symbol existence (classes/functions/use-imports/typehints, catch
@@ -4043,6 +4086,55 @@ property (gets the "Static property" wording), and an enum-case default;
 8 new regression tests (`src/checker/tests/property_default_types.rs`);
 full suite green, clippy clean.
 
+**`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.alwaysFalse`/
+`.alwaysTrue` - a `===`/`!==` comparison whose outcome is provably
+constant from both operands' own types** (real PHPStan's own `Rules/
+Comparison/StrictComparisonOfDifferentTypesRule.php`, level 4, via
+`RicherScopeGetTypeHelper::getIdenticalResult`/`InitializerExprTypeResolver::
+resolveIdenticalType`). The real type-relation reasoning lives in a new
+shared primitive, `registry::identical_result` (`src/registry/
+assignability.rs`), mirroring real PHPStan's own two-step algorithm: (1)
+both operands already reduce to the exact same kind of single finite
+value (a literal, an enum case, `null`, `true`/`false`, or an empty
+array) - direct value equality decides both directions at once (`Type`'s
+own `PartialEq`, deliberately including `FloatLiteral`: comparing two
+floats via `==` already gives the correct, real-PHP-matching `NAN !==
+NAN` answer for free, since IEEE-754 float `==` is exactly what PHP's
+own runtime `===` uses); (2) otherwise, a new `registry::types_provably_
+disjoint` decides only the "always false" direction. That disjointness
+primitive is the genuinely new piece: real PHPStan's own `isSuperTypeOf`
+is *trinary* (yes/no/maybe), a "provably no overlap at all" answer this
+project's `is_assignable` alone can't give (`!is_assignable(a, b)` only
+means "not provably a subtype," not "provably disjoint"). Disjoint when
+either (1) two different coarse scalar families (`int` vs `string`,
+`array` vs `object`, ...), or (2) both object-family with two different
+class names, neither an ancestor of the other, and **both** resolve to a
+real, registered `ClassKind::Class`/`ClassKind::Enum` (never `Interface`/
+`Trait`) - real PHP's single-inheritance rule means one concrete object's
+class has exactly one linear `extends` chain, so two unrelated classes/
+enums neither of which is the other's ancestor genuinely can never share
+an instance; requiring *both* sides closed this way (not real PHPStan's
+own additional `final`-ness leniency, not attempted here) is what keeps
+the claim sound despite real PHP's free multiple-*interface*
+implementation - an unrelated third class could always implement both of
+two unrelated interfaces, so nothing is provably disjoint there. `!==`'s
+own outcome is always exactly `===`'s negated answer, mirroring real
+PHPStan's `getNotIdenticalResult` computing it from `getIdenticalResult`
+directly. Honors the same "acts as an implicit else" `elseif`-with-no-
+trailing-`else` exemption `elseif.alwaysTrue`/`function.alreadyNarrowedType`
+already have (`alwaysTrue` only) - confirmed present in this exact real
+rule's own source, not assumed by analogy. Guarded on `loop_depth`/a
+dedicated `expr_reads_a_mutable_property` (narrower than the pre-existing
+`expr_reads_a_property` the sibling loose/numeric-comparison checks
+share - that helper treats *any* `Foo::X` access, including an immutable
+class-constant/enum-case reference, as a mutable property read; reusing
+it verbatim silently exempted `$status === Status::A`, the single most
+valuable real-world shape this check exists for, from ever firing at
+all - caught by this check's own manual verification pass, fixed with a
+purpose-built guard that only treats a real `Foo::$bar` static-property
+read as mutable). 13 new regression tests (`src/checker/tests/
+operator_validity.rs`); full suite green, clippy clean.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4912,10 +5004,10 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 
 ## Comparison
 
-- **`Rules/Comparison/StrictComparisonOfDifferentTypesRule.php`**: Real PHPStan flags a `===`/`!==` comparison whose outcome is provably constant (operands' types disjoint => always false, or provably equal => always true) with identical.alwaysFalse/alwaysTrue and notIdentical.alwaysFalse/alwaysTrue.
+- **`Rules/Comparison/StrictComparisonOfDifferentTypesRule.php` - now done**, see Done's own entry under "Rule catalog (checker)".
 - **`Rules/Comparison/ImpossibleInArrayHaystackFiniteTypesRule.php`**: Real PHPStan flags a call to in_array()/array_search()/array_keys() where a needle's finite type can never match any value in a constant-array haystack (function.impossibleHaystackValue, registered at level 4 via conf/config.level4.neon).
 - **`Rules/Comparison/UsageOfVoidMatchExpressionRule.php`**: Real PHPStan flags using the result of a match expression whose every arm's result is a void-returning call (match.void). phpstan-rs's Match handling (both the statement-checking arm in checker/expr.rs and the type-inference arm) has no void-result-usage check at all, and this identifier/feature appears nowhere in src/ or ROADMAP.md.
-- **`Rules/Comparison/MatchExpressionRule.php`** (level 4, `#[RegisteredRule]`): real PHPStan's own `match`-exhaustiveness check. The `match.unhandled` half - a `match` with no `default` arm whose condition's type isn't fully covered by the arm conditions present, the real `UnhandledMatchError` PHP itself throws at runtime - is now done, see Done's own entry under "Narrowing engine". Still open: the two dead-arm variants from the same rule, a later arm whose own condition can never be reached because an earlier arm already covers its whole type (`match.alwaysTrue`, `MatchExpressionRule.php:146`) or is disjoint from the subject's remaining type (`match.alwaysFalse`, line 119) - genuinely distinct from exhaustiveness (these are about a *redundant* arm, not a *missing* one), not attempted alongside `match.unhandled`.
+- **`Rules/Comparison/MatchExpressionRule.php`** (level 4, `#[RegisteredRule]`) - now fully done, both halves**: the `match.unhandled` exhaustiveness half and the `match.alwaysTrue`/`match.alwaysFalse` dead-arm half, see Done's own entry under "Narrowing engine".
 
 ## PhpDoc
 

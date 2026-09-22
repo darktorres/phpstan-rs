@@ -3532,6 +3532,131 @@ fn match_unhandled_is_exempted_by_an_enclosing_throws_tag() {
     );
 }
 
+// `match.alwaysTrue`/`match.alwaysFalse` - real PHPStan's own
+// `MatchExpressionRule` dead-arm half, the sibling of `match.unhandled`'s
+// own missing-arm half above.
+
+#[test]
+fn a_dead_arm_condition_already_excluded_by_an_earlier_multi_condition_arm_is_always_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; case B; case C; }
+            function f(Status $s): string {
+                return match ($s) {
+                    Status::A, Status::B, Status::C => 'covers everything',
+                    Status::A => 'dead code',
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "match.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_bool_arm_exhaustive_before_a_trailing_default_is_always_true() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $b): string {
+                return match ($b) {
+                    true => 'a',
+                    false => 'b',
+                    default => 'unreachable',
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "match.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_bool_arm_exhaustive_with_no_trailing_default_is_never_flagged_as_the_last_arm() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(bool $b): string {
+                return match ($b) {
+                    true => 'a',
+                    false => 'b',
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_literal_arm_repeated_after_an_already_narrowed_single_value_subject_is_always_true() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): string {
+                $x = 1;
+                return match ($x) {
+                    1 => 'always true but followed by default',
+                    default => 'unreachable',
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "match.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_ordinary_unbounded_subject_match_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): string {
+                return match ($x) {
+                    1 => 'a',
+                    2 => 'b',
+                    default => 'c',
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "match.alwaysTrue" || x.identifier == "match.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_single_arm_covering_every_enum_case_individually_is_never_flagged_per_condition() {
+    // Each condition in a multi-condition arm is checked independently
+    // (`$matchCondition === $rawCondition` for just that one raw
+    // condition) - real PHPStan's own per-condition reasoning can't see
+    // that the arm's *combined* OR exhausts every case, so no single
+    // condition is itself "always true," matching real PHPStan exactly
+    // (that combined-exhaustiveness question belongs to `match.unhandled`
+    // alone, not this check).
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; case B; case C; }
+            function f(Status $s): string {
+                return match ($s) {
+                    Status::A, Status::B, Status::C => 'covers everything',
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "match.alwaysTrue" || x.identifier == "match.alwaysFalse"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
 // `??`/`??=`'s left side must not be checked for "undefined
 // variable"/"undefined property" like an ordinary read - both are
 // specifically designed to be warning-free for a variable/property

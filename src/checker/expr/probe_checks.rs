@@ -426,6 +426,88 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// Real PHPStan's own `Rules/Comparison/StrictComparisonOfDifferentTypesRule.php`:
+    /// a `===`/`!==` comparison whose outcome is provably constant
+    /// from both operands' own types: `identical.alwaysFalse`/
+    /// `.alwaysTrue`, `notIdentical.alwaysFalse`/`.alwaysTrue`. The real
+    /// type-relation reasoning (`RicherScopeGetTypeHelper::
+    /// getIdenticalResult`/`InitializerExprTypeResolver::
+    /// resolveIdenticalType`) lives in `registry::identical_result`
+    /// itself, not here - shared with `checker/expr.rs`'s own `match`
+    /// per-arm exhaustiveness reasoning, which reaches this exact same
+    /// question for the exact same reason real PHPStan's own
+    /// `MatchExpressionRule` does (each arm condition is itself checked
+    /// as `$matchCondition === $rawCondition`). `!==`'s own outcome is
+    /// always exactly `===`'s negated answer - mirrors real PHPStan's
+    /// `getNotIdenticalResult` computing it from `getIdenticalResult`
+    /// directly, never independently.
+    ///
+    /// Guarded on `loop_depth`/`expr_reads_a_property` the same way the
+    /// sibling `check_constant_loose_comparison` right above is - the
+    /// same "one pass looks tighter than a real fixed point" unsoundness
+    /// risk applies here too (a loop counter's own `IntLiteral` snapshot
+    /// on a single pass, e.g. `$j !== 3` right after `$j = 0`, is
+    /// exactly the shape the finite-value fast path above would compare
+    /// directly).
+    ///
+    /// Honors the same "acts as an implicit else" `elseif`-with-no-
+    /// trailing-`else` exemption `elseif.alwaysTrue`/`function.
+    /// alreadyNarrowedType` already have (`alwaysTrue` only, never
+    /// `alwaysFalse`) - confirmed present in this exact real rule's own
+    /// source (`$isLast === true && !$this->reportAlwaysTrueInLastCondition`),
+    /// not assumed by analogy the way it would be for an unverified
+    /// sibling.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn check_strict_comparison_of_different_types(
+        &mut self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        l_ty: &Type,
+        r_ty: &Type,
+        span: Span,
+        is_exempt_last_condition: bool,
+        label: &str,
+    ) {
+        if self.loop_depth > 0
+            || expr_reads_a_mutable_property(l)
+            || expr_reads_a_mutable_property(r)
+        {
+            return;
+        }
+        if !matches!(op, BinOp::Identical | BinOp::NotIdentical) {
+            return;
+        }
+        let Some(identical_outcome) = self.registry.identical_result(l_ty, r_ty) else {
+            return;
+        };
+        let is_identical = matches!(op, BinOp::Identical);
+        let outcome = if is_identical {
+            identical_outcome
+        } else {
+            !identical_outcome
+        };
+        if outcome && is_exempt_last_condition {
+            return;
+        }
+        let sigil = if is_identical { "===" } else { "!==" };
+        let rule_name = if is_identical {
+            "identical"
+        } else {
+            "notIdentical"
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "Strict comparison using {sigil} between {l_ty} and {r_ty} will always evaluate to {}.",
+                if outcome { "true" } else { "false" }
+            ),
+            span,
+            4,
+            &format!("{rule_name}.always{}", if outcome { "True" } else { "False" }),
+        );
+    }
+
     /// Real PHPStan's own
     /// `NumberComparisonOperatorsConstantConditionRule` (level 4): flags a
     /// `</>/<=/>=` comparison whose outcome is provably constant from
@@ -594,5 +676,44 @@ impl<'a> Checker<'a> {
                 "function.alreadyNarrowedType",
             );
         }
+    }
+}
+
+/// `check_strict_comparison_of_different_types`'s own narrower cousin
+/// of `expr_reads_a_property` - a real static *property* read
+/// (`Foo::$bar`) carries the same "could be repopulated between two
+/// reads" risk `expr_reads_a_property` already guards `check_constant_
+/// loose_comparison`/`check_constant_numeric_comparison` against, but a
+/// class *constant*/enum-case reference (`Foo::BAR`, `Status::A`) is
+/// exactly as immutable as a bare literal - conflating the two (as
+/// `expr_reads_a_property`'s own single `StaticAccess(..) => true` arm
+/// does, correctly for those two siblings' own narrower needs) would
+/// silently exempt the single most valuable real-world shape this check
+/// exists for (`$status === Status::A`) from ever firing at all -
+/// caught by this check's own manual verification pass, not a test
+/// written in advance of knowing this gap existed.
+fn expr_reads_a_mutable_property(e: &Expr) -> bool {
+    match &e.kind {
+        ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
+        ExprKind::StaticAccess(_, member) => member.starts_with('$'),
+        ExprKind::Call(callee, args) => {
+            expr_reads_a_mutable_property(callee)
+                || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
+        }
+        ExprKind::MethodCall(base, _, args, _) => {
+            expr_reads_a_mutable_property(base)
+                || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))
+        }
+        ExprKind::Binary(_, l, r) => {
+            expr_reads_a_mutable_property(l) || expr_reads_a_mutable_property(r)
+        }
+        ExprKind::Unary(_, inner) | ExprKind::Grouping(inner) => {
+            expr_reads_a_mutable_property(inner)
+        }
+        ExprKind::Index(base, idx) => {
+            expr_reads_a_mutable_property(base)
+                || idx.as_deref().is_some_and(expr_reads_a_mutable_property)
+        }
+        _ => false,
     }
 }

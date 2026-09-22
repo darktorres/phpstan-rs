@@ -1511,6 +1511,16 @@ impl<'a> Checker<'a> {
                 self.check_division_by_literal_zero(op, r, &r_ty, r.span, label);
                 self.check_constant_loose_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
                 self.check_constant_numeric_comparison(op, l, r, &l_ty, &r_ty, e.span, label);
+                self.check_strict_comparison_of_different_types(
+                    op,
+                    l,
+                    r,
+                    &l_ty,
+                    &r_ty,
+                    e.span,
+                    is_exempt_last_condition,
+                    label,
+                );
                 // Mirrors real PHPStan's `LogicalXorConstantConditionRule` -
                 // see `check_logical_xor`'s doc comment. `BinOp::And`/`Or`
                 // are deliberately not handled here: they each have their
@@ -3026,9 +3036,107 @@ impl<'a> Checker<'a> {
                 // condition already tautologically true from here."
                 let mut accumulated_before_last_arm = accumulated.clone();
                 let arms_count = arms.len();
+                // `match.alwaysTrue`/`match.alwaysFalse` - real PHPStan's
+                // own `MatchExpressionRule` dead-arm half, the sibling of
+                // `match.unhandled`'s own missing-arm half just below.
+                // Each arm condition is checked as `$matchCondition ===
+                // $rawCondition` (`registry::identical_result`, the exact
+                // same primitive `identical.alwaysFalse`/`.alwaysTrue`
+                // uses for a real `===` expression) - `$matchCondition`
+                // is the literal `true` for a `match(true)` subject,
+                // `remaining_subject_ty` otherwise: a deliberately
+                // independent running exclusion, NOT `accumulated`'s own
+                // narrowed value the way arm *bodies* read it - confirmed
+                // by direct testing that `accumulated`'s own subject
+                // entry stays the bare, unexpanded enum type across
+                // repeated exclusions (a bare `Object(EnumClass)` has no
+                // case list of its own for `narrow_type_excluding` to
+                // filter against without `expand_enum_cases` first, the
+                // exact same reason `match.unhandled`'s own "remaining"
+                // computation just below is independent too - see its
+                // own doc comment). Seeded once via `expand_enum_cases`
+                // before the loop, then narrowed incrementally per arm
+                // exactly the way `match.unhandled`'s own exclusion loop
+                // does, just spread one arm at a time instead of all at
+                // once at the end.
+                //
+                // `next_arm_is_dead` mirrors real PHPStan's own
+                // `$nextArmIsDeadForType`: once any condition in some arm
+                // proves always-true, every arm *after* it is dead code
+                // real PHPStan stops reporting on entirely (not narrowing/
+                // body-checking, which this project's existing loop below
+                // is untouched and keeps doing regardless - only this
+                // diagnostic's own emission stops) - within the *same*
+                // arm, every remaining condition is still individually
+                // checked and reported, matching real PHPStan's identical
+                // "only the outer per-arm loop skips, never the inner
+                // per-condition one" structure. The last arm is
+                // unconditionally exempted from `alwaysTrue` specifically
+                // (never `alwaysFalse`) - not the `elseif`-style
+                // `reportAlwaysTrueInLastCondition` config gate `identical.
+                // alwaysTrue` itself honors, a plain, unconditional
+                // "redundant" concept doesn't even apply to whichever arm
+                // there's nothing left after" (confirmed directly in this
+                // exact rule's own source: `$i === $armsCount - 1` alone,
+                // no config flag involved). Guarded on `loop_depth` for
+                // the same reason every sibling `alwaysTrue`/`alwaysFalse`
+                // check in this project already is - only the diagnostic
+                // itself is skipped, not the surrounding arm processing.
+                let mut next_arm_is_dead = false;
+                let mut remaining_subject_ty = if match_true {
+                    Type::True
+                } else {
+                    self.expand_enum_cases(&self.infer_expr(subject, locals))
+                };
                 for (i, (conds, result)) in arms.iter().enumerate() {
                     for c in conds {
                         self.check_expr(c, locals, label);
+                    }
+                    if self.loop_depth == 0 && !next_arm_is_dead {
+                        for c in conds {
+                            let cond_ty = self.infer_expr(c, &accumulated);
+                            let Some(outcome) = self
+                                .registry
+                                .identical_result(&remaining_subject_ty, &cond_ty)
+                            else {
+                                continue;
+                            };
+                            if !outcome {
+                                self.report(
+                                    label.to_string(),
+                                    format!(
+                                        "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always false."
+                                    ),
+                                    c.span,
+                                    4,
+                                    "match.alwaysFalse",
+                                );
+                                continue;
+                            }
+                            next_arm_is_dead = true;
+                            // Real PHPStan's own `$armsCount` includes a
+                            // trailing `default` arm as one more "arm"
+                            // (an empty-condition one its own inner loop
+                            // never iterates, but that still counts for
+                            // *this* "is anything left after this one"
+                            // check) - `default` isn't part of `arms`
+                            // here at all, so the exemption additionally
+                            // requires no `default` present, or a
+                            // genuinely redundant last *real* arm
+                            // followed only by an unreachable `default`
+                            // would wrongly go unreported.
+                            if i != arms_count - 1 || default.is_some() {
+                                self.report(
+                                    label.to_string(),
+                                    format!(
+                                        "Match arm comparison between {remaining_subject_ty} and {cond_ty} is always true."
+                                    ),
+                                    c.span,
+                                    4,
+                                    "match.alwaysTrue",
+                                );
+                            }
+                        }
                     }
                     let mut arm_locals =
                         self.narrow_match_arm_conditions(subject, conds, &accumulated, match_true);
@@ -3047,6 +3155,15 @@ impl<'a> Checker<'a> {
                     } else {
                         for c in conds {
                             self.apply_equality_narrowing(subject, c, &mut accumulated, false);
+                            // `remaining_subject_ty`'s own incremental
+                            // exclusion - see this loop's own leading
+                            // comment for why this can't just reuse
+                            // `accumulated`'s value above.
+                            let cond_ty = self.infer_expr(c, locals);
+                            if is_known_single_value(&cond_ty) {
+                                remaining_subject_ty =
+                                    narrow_type_excluding(&remaining_subject_ty, &cond_ty);
+                            }
                         }
                     }
                 }

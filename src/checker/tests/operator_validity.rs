@@ -682,3 +682,268 @@ fn compound_assign_division_by_a_literal_zero_is_flagged() {
     assert_eq!(d.len(), 1, "got: {d:?}");
     assert_eq!(d[0].identifier, "division.byZero");
 }
+
+// `identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.alwaysFalse`/
+// `.alwaysTrue` - real PHPStan's own `Rules/Comparison/
+// StrictComparisonOfDifferentTypesRule.php`, the `===`/`!==` sibling of
+// `equal.always*`/`notEqual.always*` above.
+
+#[test]
+fn a_type_family_mismatch_is_always_false() {
+    let d = diagnostics_for(r#"<?php function f(int $x) { if ($x === "hello") { echo 1; } }"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn two_different_literal_values_of_the_same_family_are_always_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                $x = 5;
+                if ($x === 6) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn the_same_literal_value_on_both_sides_is_always_true() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                $x = 5;
+                if ($x === 5) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn two_ordinary_unbounded_int_operands_are_never_flagged() {
+    let d = diagnostics_for(r#"<?php function f(int $a, int $b) { if ($a === $b) { echo 1; } }"#);
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "identical.alwaysFalse"
+                || x.identifier == "identical.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn two_different_enum_cases_of_the_same_enum_are_always_false() {
+    // Enum-case access (`Status::A`) must not be swallowed by the same
+    // "could be a mutable property, don't trust it between two reads"
+    // guard a real `Foo::$bar` static-property read needs - a class
+    // constant/enum case is exactly as immutable as a bare literal.
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; case B; }
+            function f(): void {
+                if (Status::A === Status::B) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_narrowed_enum_case_compared_against_a_different_case_is_always_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; case B; }
+            function f(Status $s): void {
+                if ($s === Status::A) {
+                    if ($s === Status::B) {
+                        echo 1;
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn two_different_enum_types_are_always_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; }
+            enum Color { case Red; }
+            function f(Status $s, Color $c): void {
+                if ($s === $c) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn two_unrelated_classes_are_always_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            class Bar {}
+            function f(Foo $a, Bar $b): void {
+                if ($a === $b) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_parent_and_child_class_are_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Derived extends Base {}
+            function f(Base $base, Derived $d): void {
+                if ($base === $d) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "identical.alwaysFalse"
+                || x.identifier == "identical.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn an_interface_typed_operand_is_never_flagged_against_an_unrelated_implementor() {
+    // A third, unrelated class could always implement the same
+    // interface too - never provably disjoint.
+    let d = diagnostics_for(
+        r#"<?php
+            interface Iface {}
+            class ImplA implements Iface {}
+            function f(Iface $i, ImplA $a): void {
+                if ($i === $a) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "identical.alwaysFalse"
+                || x.identifier == "identical.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn not_identical_negates_the_identical_outcome() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                $x = 5;
+                if ($x !== 6) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "notIdentical.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn not_identical_always_false_when_identical_would_be_always_true() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                $x = 5;
+                if ($x !== 5) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "notIdentical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn identical_always_true_is_exempted_as_a_trailing_elseif_with_no_else() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): void {
+                $x = 5;
+                if ($x > 100) {
+                    echo "a";
+                } elseif ($x === 5) {
+                    echo "b";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "identical.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn identical_always_false_is_never_exempted_as_a_trailing_elseif() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): void {
+                $x = 5;
+                if ($x > 100) {
+                    echo "a";
+                } elseif ($x === "never") {
+                    echo "b";
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "identical.alwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_loop_counter_compared_with_not_identical_is_never_flagged() {
+    // Same unsoundness risk `check_constant_loose_comparison`/
+    // `check_constant_numeric_comparison` already guard against - a
+    // single-pass loop-body check must not treat a counter's own
+    // snapshot type as if it were the real, converged fixed point.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                for ($j = 0; $j !== 3; $j++) {
+                    echo $j;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "notIdentical.alwaysFalse"
+            || x.identifier == "notIdentical.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
