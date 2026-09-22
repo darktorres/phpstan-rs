@@ -194,6 +194,20 @@ pub enum PhpFeature {
     /// on overrides. `PhpVersion::hasTentativeReturnTypes`
     /// (`OverridingMethodRule`).
     TentativeReturnTypes,
+    /// Native `readonly` properties. `PhpVersion::supportsReadOnlyProperties`
+    /// (`ReadOnlyPropertyRule`).
+    ReadOnlyProperties,
+    /// Property hooks, and properties declared on an interface.
+    /// `PhpVersion::supportsPropertyHooks` (`PropertyInClassRule`/
+    /// `PropertiesInInterfaceRule`).
+    PropertyHooks,
+    /// `final` properties. `PhpVersion::supportsFinalProperties`
+    /// (`PropertyInClassRule`).
+    FinalProperties,
+    /// Asymmetric visibility on a `static` property.
+    /// `PhpVersion::supportsAsymmetricVisibilityForStaticProperties`
+    /// (`PropertyInClassRule`).
+    AsymmetricVisibilityForStaticProperties,
 }
 
 impl PhpFeature {
@@ -219,12 +233,13 @@ impl PhpFeature {
             | PureIntersectionTypes
             | SerializableRequiresMagicMethods
             | FirstClassCallables
-            | TentativeReturnTypes => (8, 1),
+            | TentativeReturnTypes
+            | ReadOnlyProperties => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
             | ReadOnlyAnonymousClasses
             | ReadonlyPropertyReinitializationOnClone => (8, 3),
-            ImplicitlyNullableParameterDeprecated => (8, 4),
+            ImplicitlyNullableParameterDeprecated | PropertyHooks | FinalProperties => (8, 4),
             FinalPromotedProperties
             | VoidCast
             | DeprecatedNonStandardCasts
@@ -233,7 +248,8 @@ impl PhpFeature {
             | FilterThrowOnFailureConstant
             | DeprecatesNullArrayOffset
             | DeprecatedAttributeOnTraits
-            | OverrideAttributeOnProperty => (8, 5),
+            | OverrideAttributeOnProperty
+            | AsymmetricVisibilityForStaticProperties => (8, 5),
         }
     }
 

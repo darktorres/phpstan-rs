@@ -578,6 +578,7 @@ impl<'a> Checker<'a> {
             StmtKind::FunctionDecl(f) => self.check_function(f, None, false, true),
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
+                self.check_nested_class_declaration(&fqn, c);
                 self.check_attributes(&c.attrs, &fqn);
                 self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
                 self.check_self_attribute_class_declaration(
@@ -633,6 +634,7 @@ impl<'a> Checker<'a> {
             }
             StmtKind::EnumDecl(e) => {
                 let fqn = self.name_ctx.declared_name(&e.name);
+                self.check_nested_enum_declaration(&fqn, e);
                 self.check_attributes(&e.attrs, &fqn);
                 self.check_attribute_targets(&e.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
                 self.check_self_attribute_class_declaration(

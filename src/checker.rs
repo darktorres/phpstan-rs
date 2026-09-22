@@ -1768,6 +1768,14 @@ impl<'a> Checker<'a> {
                             c.is_abstract,
                             &c.methods,
                         );
+                        self.check_property_declarations(
+                            &fqn,
+                            &fqn,
+                            c.kind,
+                            c.is_abstract,
+                            &c.properties,
+                            &c.methods,
+                        );
                         self.check_reserved_class_constant_name(&fqn, &c.consts);
                         self.check_typed_class_constant_values(&fqn, &c.consts);
                         self.check_class_constant_modifiers(&fqn, c.kind, &c.consts);

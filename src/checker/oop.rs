@@ -14,6 +14,7 @@ use crate::types::{self, Type};
 mod attributes;
 mod enums;
 mod method_overrides;
+mod property_declarations;
 mod property_hooks;
 mod property_overrides;
 
@@ -843,6 +844,56 @@ impl<'a> Checker<'a> {
             }
         }
         self.current_class = previous_class;
+    }
+
+    /// The declaration-level checks for a class-like declared inside a
+    /// block (a conditional or function-local declaration). Those keyed
+    /// on the registry entry only run when that entry was built from
+    /// this very declaration's `extends`/`implements`/`use` lists, since
+    /// conditional duplicate declarations share one entry.
+    pub(crate) fn check_nested_class_declaration(&mut self, fqn: &str, c: &ClassDecl) {
+        if self.facts_only {
+            return;
+        }
+        self.check_readonly_class_version(c.is_readonly, false, fqn, c.name_span);
+        self.check_method_declaration_sanity(fqn, c.kind, c.is_abstract, &c.methods);
+        self.check_property_declarations(
+            fqn,
+            fqn,
+            c.kind,
+            c.is_abstract,
+            &c.properties,
+            &c.methods,
+        );
+        self.check_class_constant_modifiers(fqn, c.kind, &c.consts);
+        let own = crate::registry::ClassInfo::from_decl(c, &self.name_ctx);
+        let registry_matches = self.registry.classes.get(fqn).is_some_and(|info| {
+            info.extends == own.extends
+                && info.implements == own.implements
+                && info.uses == own.uses
+        });
+        if registry_matches {
+            self.check_inheritance_target_kinds(fqn, false, fqn, c.span);
+            self.check_magic_serialization_methods(fqn, fqn, fqn, c.name_span);
+        }
+    }
+
+    /// `check_nested_class_declaration`'s enum counterpart.
+    pub(crate) fn check_nested_enum_declaration(&mut self, fqn: &str, e: &EnumDecl) {
+        if self.facts_only {
+            return;
+        }
+        self.check_method_declaration_sanity(fqn, ClassKind::Enum, false, &e.methods);
+        self.check_class_constant_modifiers(fqn, ClassKind::Enum, &e.consts);
+        let own = crate::registry::ClassInfo::from_enum_decl(e, &self.name_ctx);
+        let registry_matches = self
+            .registry
+            .classes
+            .get(fqn)
+            .is_some_and(|info| info.implements == own.implements && info.uses == own.uses);
+        if registry_matches {
+            self.check_inheritance_target_kinds(fqn, false, fqn, e.span);
+        }
     }
 
     /// A concrete class implementing `Serializable` without also providing

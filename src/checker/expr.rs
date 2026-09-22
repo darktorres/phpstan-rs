@@ -2301,6 +2301,18 @@ impl<'a> Checker<'a> {
                     self.check_inheritance_target_kinds(&name, true, label, e.span);
                     self.check_magic_serialization_methods(&name, "anonymous class", label, e.span);
                 }
+                let registry_name = self
+                    .current_anonymous_class
+                    .clone()
+                    .unwrap_or_else(|| decl.name.to_string());
+                self.check_property_declarations(
+                    &registry_name,
+                    "class@anonymous",
+                    ClassKind::Class,
+                    false,
+                    &decl.properties,
+                    &decl.methods,
+                );
                 self.check_readonly_class_version(decl.is_readonly, true, label, e.span);
                 for m in &decl.methods {
                     let ancestor_sig =

@@ -536,7 +536,15 @@ calls; `@method static` tags and enum `cases()`/`from()`/`tryFrom()` are
 now recorded in `ClassInfo::static_methods`. `OverridingMethodRule`'s
 `method.tentativeReturnType` (PHP 8.1+, a stub's `#[TentativeType]`
 return replacing `method.childReturnType`, `#[\ReturnTypeWillChange]`
-exempt).
+exempt). Property declaration legality for plain and promoted
+properties: `PropertiesInInterfaceRule` and `PropertyInClassRule`'s full
+hook/modifier matrix and PHP 8.4/8.5 gates, `ReadOnlyPropertyRule`,
+`ReadOnlyByPhpDocPropertyRule` (with `@phpstan-allow-private-mutation`
+modeled, which also exempts its own class's writes from
+`property.readOnlyAssignNotInConstructor`), and `property.callableType`.
+A class or enum declared inside a block now gets the declaration-level
+checks too, the registry-keyed ones only when the registry entry was
+built from that declaration.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3556,16 +3564,6 @@ against this list, and added the real gaps the audit had missed.
   48) and `property.trait` (`check_type_trait_refs`,
   `checker/generics/bounds.rs`) are both built. Only
   `property.unresolvableNativeType` is left.
-- `PropertiesInInterfaceRule`/`PropertyInClassRule` — PHP 8.4
-  property-hook *declaration-site* legality (hooked/public/non-
-  readonly/non-static/non-abstract/non-final for interfaces; the
-  matching modifier-combination matrix for classes).
-- `ReadOnlyPropertyRule`/`ReadOnlyByPhpDocPropertyRule` — `readonly`
-  declaration legality (native type required, no default, not static,
-  PHP-version-gated) for both the native and `@phpstan-readonly`/
-  `@readonly` doc-tag forms.
-- `InvalidCallablePropertyTypeRule` — `callable` as a property's native
-  type is a real PHP fatal error; unchecked today.
 - Five-rule cluster around PHP 8.4 write-only/read-only/asymmetric-
   visibility properties: assign-by-ref (plain/readonly-native/
   readonly-by-phpdoc), reading a write-only property, writing a
