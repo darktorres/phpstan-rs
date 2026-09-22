@@ -822,7 +822,7 @@ large type-inference shift across `vendor/`.
 - see Reverted); the `array_key_exists()`-narrows-a-specific-element
 equivalent of `HasOffsetValueType`; unsealed-shape (`array{...}`)
 tracking with a real `...` sentinel field gating both narrowing and
-`shapeAccess.notFound`; `ArrayShape`'s own int-vs-string key precision.
+`offsetAccess.notFound`; `ArrayShape`'s own int-vs-string key precision.
 
 Opt-in array-key cast warnings (`array.keyCast`/`offsetAccess.keyCast`).
 Opt-in `constructor.missingParentCall`. Closure `use (...)` capture
@@ -4814,7 +4814,7 @@ change:
   proposed as its own systemic item (AP1) below, not a separate check.
 - **`EmptyArrayAccess`** (indexing a provably-empty array) - an empty
   array shape has zero valid keys, so this is already a degenerate case
-  of the general shape-key-existence check (`shapeAccess.notFound`)
+  of the general shape-key-existence check (`offsetAccess.notFound`)
   rather than needing its own special case.
 - **`RedundantPropertyInitializationCheck`** (an `isset()` check on an
   already-non-nullable property) - same "redundant condition given a
