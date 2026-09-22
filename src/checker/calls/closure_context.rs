@@ -330,6 +330,14 @@ impl<'a> Checker<'a> {
                     },
                 );
                 closure_locals = converged;
+                self.check_closure_missing_return(
+                    body,
+                    return_type.is_some(),
+                    declared_return.as_ref(),
+                    &closure_locals,
+                    closure_expr.span,
+                    &closure_label,
+                );
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
                 self.current_function_throw_points = previous_throw_points;

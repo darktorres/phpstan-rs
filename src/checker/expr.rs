@@ -3709,6 +3709,14 @@ impl<'a> Checker<'a> {
                 // same as a named function's, no special-casing needed
                 // there).
                 self.record_by_ref_exit_snapshot(&closure_locals);
+                self.check_closure_missing_return(
+                    body,
+                    return_type.is_some(),
+                    declared_return.as_ref(),
+                    &closure_locals,
+                    e.span,
+                    &closure_label,
+                );
                 // Captured before the restore below overwrites the live
                 // field back to the *outer* scope's own snapshots - the
                 // write-back loop further down needs this closure's own

@@ -299,21 +299,28 @@ impl<'a> Checker<'a> {
                 // Same fall-off-the-end completeness check `check_function`
                 // performs - real PHPStan runs `MissingReturnRule` against
                 // a hook the same as any other function-like node.
-                if !stmts.is_empty()
-                    && !stmts.iter().any(|s| self.always_terminates(s, &locals))
+                if !stmts.iter().any(|s| self.always_terminates(s, &locals))
                     && !self.current_function_is_generator
-                    && prop_sig.ty != Type::Mixed(false)
+                    && let Some(level) = crate::checker::function_decl::missing_return_level(
+                        &prop_sig.ty,
+                        prop_sig.has_native_type,
+                        false,
+                    )
                 {
-                    self.report(
+                    let mut builder = DiagnosticBuilder::new(
                         label.clone(),
                         format!(
                             "should return {} but return statement is missing",
                             prop_sig.ty
                         ),
                         span,
-                        3,
+                        level,
                         "return.missing",
                     );
+                    if prop_sig.has_native_type {
+                        builder = builder.non_ignorable();
+                    }
+                    self.report_builder(builder);
                 }
             }
             // No real statement/expression to type-check at all.

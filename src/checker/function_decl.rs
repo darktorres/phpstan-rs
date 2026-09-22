@@ -321,8 +321,11 @@ impl<'a> Checker<'a> {
             self.check_implicitly_nullable_params(f, &label);
             self.check_required_parameter_after_optional(f, &label);
             if let Some(sig) = sig {
+                let previous_class =
+                    std::mem::replace(&mut self.current_class, class_name.map(str::to_string));
                 self.check_default_parameter_types(f, sig, class_name, &label);
                 self.check_phpdoc_types_against_native(f, sig, class_name, &label);
+                self.current_class = previous_class;
             }
             // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-
             // validity family plus `method.shadowTemplate`, method-level -
@@ -1036,6 +1039,7 @@ impl<'a> Checker<'a> {
                 && body_falls_off_end
                 && (!self.current_function_is_generator || generator_treturn.is_some())
             {
+                let is_generator_treturn = generator_treturn.is_some();
                 let expected = if let Some(treturn) = generator_treturn {
                     treturn
                 } else {
@@ -1059,17 +1063,20 @@ impl<'a> Checker<'a> {
                         3,
                         "return.never",
                     );
-                } else if expected != Type::Void
-                    && expected != Type::Mixed(false)
-                    && !self.registry.is_assignable(&Type::Null, &expected)
+                } else if let Some(level) =
+                    missing_return_level(&expected, f.return_type.is_some(), is_generator_treturn)
                 {
-                    self.report(
+                    let mut builder = DiagnosticBuilder::new(
                         label.clone(),
                         format!("should return {expected} but return statement is missing"),
                         f.span,
-                        3,
+                        level,
                         "return.missing",
                     );
+                    if f.return_type.is_some() {
+                        builder = builder.non_ignorable();
+                    }
+                    self.report_builder(builder);
                 }
             }
             // `body_falls_off_end == false` means the body already provably
@@ -1533,6 +1540,90 @@ impl<'a> Checker<'a> {
                 "parameter.defaultValue",
             );
         }
+    }
+}
+
+impl<'a> Checker<'a> {
+    /// `MissingReturnRule` for a closure literal, which is only checked
+    /// when it declares a native return type. Called with the converged
+    /// post-body `locals`, before the closure's generator flag is
+    /// restored.
+    pub(crate) fn check_closure_missing_return(
+        &mut self,
+        body: &[Stmt],
+        has_native_return: bool,
+        declared_return: Option<&Type>,
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
+        if !has_native_return || self.current_function_is_generator {
+            return;
+        }
+        let Some(expected) = declared_return else {
+            return;
+        };
+        if body.iter().any(|s| self.always_terminates(s, locals)) {
+            return;
+        }
+        let expected = match &self.current_class {
+            Some(c) => self.resolve_pseudo(expected, &c.clone()),
+            None => expected.clone(),
+        };
+        if expected == Type::Never {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    "should never return, but a return statement was reached".to_string(),
+                    span,
+                    3,
+                    "return.never",
+                )
+                .non_ignorable(),
+            );
+            return;
+        }
+        let Some(level) = missing_return_level(&expected, true, false) else {
+            return;
+        };
+        self.report_builder(
+            DiagnosticBuilder::new(
+                label.to_string(),
+                format!("should return {expected} but return statement is missing"),
+                span,
+                level,
+                "return.missing",
+            )
+            .non_ignorable(),
+        );
+    }
+}
+
+/// `MissingReturnRule`'s condition for a body that falls off its end:
+/// `None` when no return is owed (a `void`-accepting type, or an
+/// undeclared/PHPDoc-only `mixed`), otherwise the level to report at -
+/// level 2 (`checkPhpDocMissingReturn`) for a generator's `TReturn` or a
+/// PHPDoc-only nullable type, level 0 otherwise.
+pub(crate) fn missing_return_level(
+    expected: &Type,
+    has_native_hint: bool,
+    is_generator_treturn: bool,
+) -> Option<u8> {
+    if matches!(expected, Type::Void) {
+        return None;
+    }
+    if matches!(expected, Type::Mixed(_)) && (!has_native_hint || is_generator_treturn) {
+        return None;
+    }
+    let contains_null = match expected {
+        Type::Null => true,
+        Type::Union(members) => members.contains(&Type::Null),
+        _ => false,
+    };
+    if is_generator_treturn || (!has_native_hint && contains_null) {
+        Some(2)
+    } else {
+        Some(0)
     }
 }
 

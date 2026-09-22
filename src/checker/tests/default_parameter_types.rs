@@ -174,3 +174,32 @@ fn closure_and_arrow_function_default_values_are_checked_against_their_hints() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_self_constant_default_resolves_against_the_declaring_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface IO {
+                public const NORMAL = 2;
+                public function write(string $m, int $v = self::NORMAL): void;
+            }
+            class C {
+                const X = 1;
+                const NAME = 'n';
+                public function f(int $a = self::X, int $b = self::NAME): void {}
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "parameter.defaultValue")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Default value of the parameter #2 $b ('n') of method C::f() is incompatible with type int."
+        ],
+        "got: {d:?}"
+    );
+}

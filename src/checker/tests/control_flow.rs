@@ -2650,7 +2650,7 @@ fn check_empty_method_bodies_does_not_flag_an_interface_method_declaration() {
 }
 
 #[test]
-fn check_empty_method_bodies_does_not_flag_a_void_or_nullable_return_type() {
+fn check_empty_method_bodies_flags_a_nullable_but_not_a_void_return_type() {
     let d = diagnostics_for_with(
         r#"<?php
             class C {
@@ -2660,8 +2660,42 @@ fn check_empty_method_bodies_does_not_flag_a_void_or_nullable_return_type() {
         "#,
         |r| r.check_empty_method_bodies = true,
     );
-    assert!(
-        !d.iter().any(|x| x.identifier == "return.missing"),
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "return.missing")
+        .map(|x| x.location.as_str())
+        .collect();
+    assert_eq!(found, vec!["C::g"], "got: {d:?}");
+}
+
+#[test]
+fn missing_return_follows_missing_return_rule_conditions() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            function nativeNullable(bool $b): ?int { if ($b) { return 1; } }
+            /** @return int|null */
+            function docNullable(bool $b) { if ($b) { return 1; } }
+            function nativeMixed(bool $b): mixed { if ($b) { return 1; } }
+            /** @return mixed */
+            function docMixed(bool $b) { if ($b) { return 1; } }
+            function voidOk(bool $b): void { if ($b) { return; } }
+            $closure = function (bool $b): int { if ($b) { return 1; } };
+            $untyped = function (bool $b) { if ($b) { return 1; } };
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "return.missing")
+        .map(|x| (x.message.as_str(), x.level))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("should return int|null but return statement is missing", 0),
+            ("should return int|null but return statement is missing", 2),
+            ("should return mixed but return statement is missing", 0),
+            ("should return int but return statement is missing", 0),
+        ],
         "got: {d:?}"
     );
 }
