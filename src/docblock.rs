@@ -408,6 +408,24 @@ pub fn parse(raw: &str) -> DocBlock {
 /// not `array`). So the tag is applied to a scratch block first and only
 /// merged in when it parsed cleanly; its errors are kept either way.
 fn apply_tag_recording_errors(block: &mut DocBlock, written: &str, tag: &str, rest: &str) {
+    // A tag phpdoc-parser has no dedicated parser for, whose value opens
+    // with `(`, is a Doctrine annotation there (`@ORM\Column(...)`,
+    // `@url (image.jpg) ...`), invalid when its argument list doesn't
+    // parse. This project has nothing to apply from such a tag either way.
+    let is_prefixed = written.starts_with("phpstan-");
+    let has_dedicated_parser = PLAIN_TAGS_PHPSTAN_PARSES.contains(&tag)
+        || (is_prefixed && PREFIXED_ONLY_TAGS_PHPSTAN_PARSES.contains(&tag));
+    if !has_dedicated_parser && rest.starts_with('(') {
+        let errors = phpdoc_grammar::doctrine_argument_errors(rest);
+        if let Some(first) = errors.first() {
+            block.invalid_tag_values.push(InvalidTagValue {
+                tag: written.to_string(),
+                value: rest.to_string(),
+                message: first.message.clone(),
+            });
+            block.parse_errors.extend(errors);
+        }
+    }
     let mut scratch = DocBlock::default();
     apply_tag(&mut scratch, tag, rest);
     let parsed_by_phpstan =
@@ -567,12 +585,32 @@ const PLAIN_TAGS_PHPSTAN_PARSES: &[&str] = &[
     "template-use",
 ];
 
+/// A tag line's name and value. The name runs up to the first character
+/// that can't be part of one - phpdoc-parser's own tag tokens stop there
+/// too, so `@ORM\Column(type="string")` is the tag `ORM\Column` with the
+/// value `(type="string")`, not one run-on name.
 fn split_tag(tag_body: &str) -> (&str, &str) {
-    let mut parts = tag_body.splitn(2, char::is_whitespace);
-    let tag = parts.next().unwrap_or("");
-    let rest = parts.next().unwrap_or("").trim();
-    (tag, rest)
+    let end = tag_body
+        .find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '\\' | ':')))
+        .unwrap_or(tag_body.len());
+    (&tag_body[..end], tag_body[end..].trim())
 }
+
+/// The prefixed-only tag names phpdoc-parser gives a dedicated parser
+/// (only their `@phpstan-` form - see `PLAIN_TAGS_PHPSTAN_PARSES`).
+const PREFIXED_ONLY_TAGS_PHPSTAN_PARSES: &[&str] = &[
+    "type",
+    "import-type",
+    "assert",
+    "assert-if-true",
+    "assert-if-false",
+    "self-out",
+    "this-out",
+    "require-extends",
+    "require-implements",
+    "sealed",
+    "pure-unless-callable-is-impure",
+];
 
 /// The `apply_tag` name a `@psalm-`/`@phan-`-prefixed tag maps onto -
 /// exactly the spellings real PHPStan's `PhpDocNodeResolver` resolves,

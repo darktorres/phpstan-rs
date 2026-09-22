@@ -159,3 +159,63 @@ fn an_invalid_tag_contributes_no_type_at_all() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn well_formed_doctrine_annotations_are_valid() {
+    let errors = parse_errors(
+        r#"<?php
+            /**
+             * @ORM\Entity(repositoryClass="App\Repo")
+             * @ORM\Table(name="users", indexes={@ORM\Index(name="idx", columns={"a", "b"})})
+             * @Route("/users/{id}", name="user_show", methods={"GET", "POST"}, requirements={"id": "\d+"})
+             * @Assert\Choice(choices={1, 2.5, true, null}, strict=true,)
+             * @Serializer\Type("array<string>")
+             * @Custom(value=Foo::BAR, all=Foo::*, key = 'single')
+             * @Empty()
+             */
+            class User {}
+        "#,
+    );
+    assert!(errors.is_empty(), "got: {errors:?}");
+}
+
+#[test]
+fn a_parenthesized_free_text_value_on_an_unknown_tag_is_a_doctrine_parse_error() {
+    // Piwigo's own `include/minify/src/CSS.php` shape - real PHPStan reads
+    // `(image.jpg)` as Doctrine annotation arguments.
+    let errors = parse_errors(
+        r#"<?php
+            /**
+             * @url (image.jpg) images will be loaded and merged
+             * @internal (do not use this)
+             * @see (see below)
+             */
+            function f() {}
+        "#,
+    );
+    assert_eq!(errors.len(), 3, "got: {errors:?}");
+    assert!(
+        errors[0].starts_with(
+            "PHPDoc tag @url has invalid value ((image.jpg) images will be loaded and merged): "
+        ),
+        "got: {errors:?}"
+    );
+    assert!(
+        errors.iter().all(|e| e.contains("expected ')'")),
+        "got: {errors:?}"
+    );
+}
+
+#[test]
+fn a_parenthesized_value_on_a_tag_with_its_own_parser_is_not_a_doctrine_annotation() {
+    let errors = parse_errors(
+        r#"<?php
+            /**
+             * @deprecated (since 2.0, use g() instead)
+             * @return (int|string) the result
+             */
+            function f() { return 1; }
+        "#,
+    );
+    assert!(errors.is_empty(), "got: {errors:?}");
+}

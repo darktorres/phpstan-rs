@@ -103,6 +103,130 @@ impl TagParser {
         matches!(self.peek(), PhpDocToken::Eof)
     }
 
+    /// `( [arg (, arg)*] )`, a trailing comma allowed - phpdoc-parser's
+    /// `parseDoctrineArguments`. Stops at the first error.
+    fn parse_doctrine_arguments(&mut self) {
+        if !self.eat(&PhpDocToken::LParen) {
+            return;
+        }
+        loop {
+            if matches!(self.peek(), PhpDocToken::RParen) {
+                break;
+            }
+            if !self.parse_doctrine_argument() {
+                return;
+            }
+            if !self.eat(&PhpDocToken::Comma) {
+                break;
+            }
+        }
+        if !self.eat(&PhpDocToken::RParen) {
+            self.error_unexpected_token("')'");
+        }
+    }
+
+    /// `name = value` or a bare `value` - `parseDoctrineArgument`, whose
+    /// named form is tried first and rolled back when no `=` follows the
+    /// identifier. `false` once an error has been recorded.
+    fn parse_doctrine_argument(&mut self) -> bool {
+        if matches!(self.peek(), PhpDocToken::Identifier(_))
+            && matches!(
+                self.tokens.get(self.pos + 1).map(|(t, _)| t),
+                Some(PhpDocToken::Equals)
+            )
+        {
+            self.advance();
+            self.advance();
+        }
+        self.parse_doctrine_value()
+    }
+
+    /// `parseDoctrineArgumentValue`: a nested `@Annotation(...)`, a
+    /// `{...}` array, an identifier, or a constant expression (a number, a
+    /// string, a `Foo::BAR` constant fetch). A `[...]` constant array is
+    /// rejected there (`expected TOKEN_IDENTIFIER`), and so is anything
+    /// else.
+    fn parse_doctrine_value(&mut self) -> bool {
+        let errors_before = self.errors.len();
+        match self.peek().clone() {
+            PhpDocToken::At => {
+                self.advance();
+                if matches!(self.peek(), PhpDocToken::Identifier(_)) {
+                    self.advance();
+                    if matches!(self.peek(), PhpDocToken::LParen) {
+                        self.parse_doctrine_arguments();
+                    }
+                } else {
+                    self.error_unexpected_token("TOKEN_IDENTIFIER");
+                }
+            }
+            PhpDocToken::LBrace => {
+                self.advance();
+                loop {
+                    if matches!(self.peek(), PhpDocToken::RBrace) {
+                        break;
+                    }
+                    if !self.parse_doctrine_array_item() {
+                        return false;
+                    }
+                    if !self.eat(&PhpDocToken::Comma) {
+                        break;
+                    }
+                }
+                if !self.eat(&PhpDocToken::RBrace) {
+                    self.error_unexpected_token("'}'");
+                }
+            }
+            PhpDocToken::Identifier(_) => {
+                self.advance();
+                if self.eat(&PhpDocToken::ColonColon) {
+                    if matches!(self.peek(), PhpDocToken::Identifier(_) | PhpDocToken::Star) {
+                        self.advance();
+                    } else {
+                        self.error_unexpected_token("TOKEN_IDENTIFIER");
+                    }
+                }
+            }
+            PhpDocToken::IntLiteral(_)
+            | PhpDocToken::FloatLiteral(_)
+            | PhpDocToken::StringLiteral(_) => {
+                self.advance();
+            }
+            _ => self.error_unexpected_token("TOKEN_IDENTIFIER"),
+        }
+        self.errors.len() == errors_before
+    }
+
+    /// `parseDoctrineArrayItem`: `key = value` / `key: value` (an integer,
+    /// a string, or an identifier or constant fetch as the key), else a
+    /// bare value.
+    fn parse_doctrine_array_item(&mut self) -> bool {
+        let checkpoint = self.pos;
+        let keyed = match self.peek() {
+            PhpDocToken::IntLiteral(_) | PhpDocToken::StringLiteral(_) => {
+                self.advance();
+                true
+            }
+            PhpDocToken::Identifier(_) => {
+                self.advance();
+                if self.eat(&PhpDocToken::ColonColon) {
+                    matches!(self.peek(), PhpDocToken::Identifier(_) | PhpDocToken::Star) && {
+                        self.advance();
+                        true
+                    }
+                } else {
+                    true
+                }
+            }
+            _ => false,
+        };
+        if keyed && (self.eat(&PhpDocToken::Equals) || self.eat(&PhpDocToken::Colon)) {
+            return self.parse_doctrine_value();
+        }
+        self.pos = checkpoint;
+        self.parse_doctrine_value()
+    }
+
     /// phpdoc-parser's own `Unexpected token "X", expected Y` wording,
     /// without its trailing byte-offset/line suffix (this project's
     /// tokens don't keep a docblock-relative offset).
@@ -944,6 +1068,20 @@ pub(crate) fn parse_tag_rest(name: &str, rest: &str) -> (PhpDocTagValue, Vec<Php
     (value, parser.errors)
 }
 
+/// The errors real phpdoc-parser's `parseDoctrineArguments` would raise
+/// for `rest`, a tag value starting with `(` on a tag it has no dedicated
+/// parser for (`@ORM\Column(type="string")`, `@url (image.jpg) ...`) -
+/// such a tag is a Doctrine annotation there, and a malformed argument
+/// list makes it an `InvalidTagValueNode` (`phpDoc.parseError`). Empty
+/// when the arguments parse, including when `rest` doesn't start with
+/// `(` at all.
+pub(crate) fn doctrine_argument_errors(rest: &str) -> Vec<PhpDocParseError> {
+    let tokens = Lexer::new(rest).tokenize();
+    let mut parser = TagParser::new(tokens);
+    parser.parse_doctrine_arguments();
+    parser.errors
+}
+
 /// Parses a single leading type expression off `rest`, returning it
 /// alongside `rest`'s own remaining raw text - untouched, byte-exact, not
 /// reconstructed from tokens - plus any error the type itself produced.
@@ -956,20 +1094,28 @@ pub(crate) fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpD
     let tokens = Lexer::new(rest).tokenize();
     let mut parser = TagParser::new(tokens);
     let ty = parser.try_parse_type();
-    // `rest` is always one already-joined logical line (no embedded
-    // newline - see `parse`'s own doc comment), so the lexer's own 1-based
-    // `col` maps directly onto a *char* index into `rest`; converted to a
-    // byte index since Rust string slicing is byte-indexed and `rest` can
-    // contain multi-byte UTF-8 (this project's own identifier grammar
-    // explicitly allows non-ASCII bytes, see `lexer.rs`'s own doc
-    // comment).
-    let char_idx = (parser.peek_span().start.col as usize).saturating_sub(1);
-    let byte_idx = rest
-        .char_indices()
-        .nth(char_idx)
-        .map(|(b, _)| b)
-        .unwrap_or(rest.len());
+    let byte_idx = byte_offset_of(rest, parser.peek_span().start);
     (ty, &rest[byte_idx..], parser.errors)
+}
+
+/// The byte offset in `text` of the lexer's 1-based `pos` (line, and char
+/// column within that line). A tag's `rest` can span several lines (a
+/// wrapped tag's continuation lines are joined with `\n`, see
+/// `docblock::parse`), and Rust slicing is byte-indexed while `text` can
+/// hold multi-byte UTF-8, so both coordinates matter.
+fn byte_offset_of(text: &str, pos: crate::token::Position) -> usize {
+    let line_start = if pos.line <= 1 {
+        0
+    } else {
+        text.match_indices('\n')
+            .nth(pos.line as usize - 2)
+            .map_or(text.len(), |(i, _)| i + 1)
+    };
+    let col = (pos.col as usize).saturating_sub(1);
+    text[line_start..]
+        .char_indices()
+        .nth(col)
+        .map_or(text.len(), |(b, _)| line_start + b)
 }
 
 fn token_text(t: &PhpDocToken) -> String {

@@ -335,3 +335,17 @@ fn an_invalid_tag_value_containing_a_url_is_recorded_whole() {
         "boolean with_scheme if false - does not add http://toto.com"
     );
 }
+
+#[test]
+fn a_param_closure_this_type_wrapped_across_lines_keeps_its_variable_name() {
+    let block = parse(
+        r#"/**
+         * @param-closure-this array{a: int,
+         *   b: int} $fn
+         */"#,
+    );
+    assert_eq!(
+        block.param_closure_this.get("fn"),
+        Some(&"array{a: int, b: int}".to_string())
+    );
+}
