@@ -954,7 +954,10 @@ fn new_self_and_static_are_never_flagged_as_undefined() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 // A self/static/parent-typed parameter must be resolved, or it

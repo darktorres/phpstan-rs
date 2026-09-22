@@ -4161,6 +4161,18 @@ impl<'a> Checker<'a> {
                         self.check_expr(recv, locals, label);
                         self.check_expr(name_expr, locals, label);
                     }
+                    ExprKind::New(..) => {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                label.to_string(),
+                                "Cannot create callable from the new operator.".to_string(),
+                                e.span,
+                                0,
+                                "callable.notSupported",
+                            )
+                            .non_ignorable(),
+                        );
+                    }
                     _ => {
                         self.check_expr(inner, locals, label);
                     }

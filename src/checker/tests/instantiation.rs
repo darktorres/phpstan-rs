@@ -178,3 +178,88 @@ fn dynamic_new_on_a_non_class_name_type_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn new_static_is_flagged_only_without_a_consistent_constructor_guarantee() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Open { public static function make(): static { return new static(); } }
+            final class Closed { public static function make(): static { return new static(); } }
+            /** @final */
+            class SoftClosed { public static function make(): static { return new static(); } }
+            /** @phpstan-consistent-constructor */
+            class Consistent { public static function make(): static { return new static(); } }
+            class ConsistentChild extends Consistent {
+                public function m(): static { return new static(); }
+            }
+            class FinalCtor {
+                final public function __construct() {}
+                public function m(): static { return new static(); }
+            }
+            interface HasCtor { public function __construct(); }
+            class ViaIface implements HasCtor {
+                public function __construct() {}
+                public function m(): static { return new static(); }
+            }
+            abstract class AbsProto { abstract public function __construct(); }
+            class ProtoImpl extends AbsProto {
+                public function __construct() {}
+                public function m(): static { return new static(); }
+            }
+            trait NeedsCtor {
+                abstract public function __construct();
+                public function m(): static { return new static(); }
+            }
+            class UsesNeedsCtor {
+                use NeedsCtor;
+                public function __construct() {}
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "new.static")
+        .map(|x| x.location.as_str())
+        .collect();
+    assert_eq!(found, vec!["Open::make"], "got: {d:?}");
+}
+
+#[test]
+fn new_static_in_a_static_method_of_an_abstract_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class AbsFactory {
+                final public function __construct() {}
+                public static function make(): static { return new static(); }
+                public function copy(): static { return new static(); }
+            }
+        "#,
+    );
+    assert_eq!(
+        with_identifier(&d, "new.staticInAbstractClassStaticMethod"),
+        vec!["unsafe usage of new static() in abstract class AbsFactory in static method make()"],
+        "got: {d:?}"
+    );
+    assert!(with_identifier(&d, "new.static").is_empty(), "got: {d:?}");
+}
+
+#[test]
+fn first_class_callable_new_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Made { public function __construct(int $x) {} }
+            function f(): void {
+                $factory = new Made(...);
+            }
+        "#,
+    );
+    assert_eq!(
+        with_identifier(&d, "callable.notSupported"),
+        vec!["Cannot create callable from the new operator."],
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier.starts_with("arguments.")),
+        "got: {d:?}"
+    );
+}

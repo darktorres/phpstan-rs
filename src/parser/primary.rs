@@ -180,15 +180,21 @@ impl Parser {
                         self.expr(ExprKind::Name(name), s)
                     }
                 };
-                // `new Foo(...)` first-class-callable syntax doesn't exist
-                // in PHP - a constructor can't be referenced that way - so
-                // the flag is simply dropped here rather than handled.
-                let args = if self.check(&Token::LParen) {
-                    self.parse_args()?.0
+                // `new Foo(...)` parses but is a compile error in PHP (a
+                // constructor can't be referenced as a first-class
+                // callable) - kept as a `FirstClassCallable` so the
+                // checker can report it.
+                let (args, is_first_class_callable) = if self.check(&Token::LParen) {
+                    self.parse_args()?
                 } else {
-                    Vec::new()
+                    (Vec::new(), false)
                 };
-                self.expr(ExprKind::New(Box::new(class_expr), args), start)
+                let new_expr = self.expr(ExprKind::New(Box::new(class_expr), args), start);
+                if is_first_class_callable {
+                    self.expr(ExprKind::FirstClassCallable(Box::new(new_expr)), start)
+                } else {
+                    new_expr
+                }
             }
             Token::Keyword(Keyword::Clone) => {
                 self.skip();

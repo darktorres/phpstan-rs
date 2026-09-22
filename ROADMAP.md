@@ -512,7 +512,11 @@ promotes with implicit `public` visibility. `ReadOnlyClassRule`'s version gate
 `.interface`/`.abstract` (never for `new static`, nor a dynamic
 `new $expr()`), `new.noConstructor`, `new.privateConstructor`/
 `.protectedConstructor`, `new.nonObject`, `class.noParent`, and
-`outOfClass.self`/`.static`/`.parent`.
+`outOfClass.self`/`.static`/`.parent`. `NewStaticRule` (`new.static`, exempting final
+classes, `@phpstan-consistent-constructor`, interface-pinned, `final`,
+or abstract-prototype constructors) and
+`new.staticInAbstractClassStaticMethod`; `new Foo(...)` reports
+`callable.notSupported`.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3505,13 +3509,6 @@ against this list, and added the real gaps the audit had missed.
   literal boolean or a non-string/object dynamic class-name expr;
   phpstan-rs's unreachable-code family deliberately excludes
   `instanceof` today.
-- `NewStaticRule`/`NewStaticInAbstractClassStaticMethodRule` — "Unsafe
-  usage of `new static()`" in a non-final class without a
-  consistent-constructor guarantee, and the abstract-static-method
-  variant.
-- `InstantiationCallableRule` — `new Foo(...)` (first-class-callable
-  syntax on `new`) is syntactically legal but a real semantic error;
-  `callable.notSupported`.
 
 ### Phase 126 — Functions (`Rules/Functions/` gaps)
 

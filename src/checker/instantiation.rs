@@ -126,6 +126,9 @@ impl<'a> Checker<'a> {
         if !is_name {
             return true;
         }
+        if is_static {
+            self.check_new_static(span, label);
+        }
         let kind = info.kind;
         let is_abstract = info.is_abstract;
         match kind {
@@ -209,6 +212,127 @@ impl<'a> Checker<'a> {
                 0,
                 &format!("new.{word}Constructor"),
             );
+        }
+        true
+    }
+
+    /// `new static()` in a class whose subclasses could redeclare the
+    /// constructor with an incompatible signature (`new.static`): not
+    /// when the class is final, carries `@phpstan-consistent-constructor`
+    /// itself or on an ancestor, has its constructor pinned by an
+    /// interface, declares it `final`, or overrides an abstract
+    /// prototype (including a trait's own abstract constructor). Plus
+    /// `new static()` in a static method of an abstract class
+    /// (`new.staticInAbstractClassStaticMethod`), which a direct call
+    /// to that method on the abstract class itself would crash.
+    fn check_new_static(&mut self, span: Span, label: &str) {
+        let Some(class) = self.current_class.clone() else {
+            return;
+        };
+        let Some(info) = self.registry.classes.get(class.as_str()) else {
+            return;
+        };
+        let is_abstract = info.is_abstract;
+        if !info.is_final && !info.is_final_by_phpdoc && self.new_static_is_unsafe(&class) {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    "unsafe usage of new static()".to_string(),
+                    span,
+                    0,
+                    "new.static",
+                )
+                .tip("See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static"),
+            );
+        }
+        let Some(method) = self.current_method.clone() else {
+            return;
+        };
+        let in_static_method = self
+            .registry
+            .lookup_method_with_owner(&class, &method)
+            .and_then(|(owner, _)| self.registry.classes.get(&owner))
+            .is_some_and(|owner| {
+                owner
+                    .static_methods
+                    .iter()
+                    .any(|m| m.eq_ignore_ascii_case(&method))
+            });
+        if is_abstract && in_static_method {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    format!(
+                        "unsafe usage of new static() in abstract class {class} in static method {method}()"
+                    ),
+                    span,
+                    0,
+                    "new.staticInAbstractClassStaticMethod",
+                )
+                .tip(format!(
+                    "Direct call to {class}::{method}() would crash because an abstract class cannot be instantiated."
+                )),
+            );
+        }
+    }
+
+    fn new_static_is_unsafe(&self, class: &str) -> bool {
+        let registry = &self.registry;
+        let mut current = Some(class.to_string());
+        while let Some(c) = current {
+            let Some(info) = registry.classes.get(c.as_str()) else {
+                break;
+            };
+            if info.is_consistent_constructor {
+                return false;
+            }
+            current = info.extends.first().map(|p| p.to_string());
+        }
+        let Some((owner, _)) = registry.lookup_method_with_owner(class, "__construct") else {
+            return true;
+        };
+        if !registry
+            .all_interfaces_declaring_method(class, "__construct")
+            .is_empty()
+        {
+            return false;
+        }
+        if registry.classes.get(&owner).is_some_and(|info| {
+            info.final_methods.contains("__construct")
+                || info.final_methods_by_phpdoc.contains("__construct")
+        }) {
+            return false;
+        }
+        let mut prototype_owner = owner.clone();
+        let mut current = registry
+            .classes
+            .get(&owner)
+            .and_then(|info| info.extends.first().cloned());
+        while let Some(c) = current {
+            let Some(info) = registry.classes.get(&c) else {
+                break;
+            };
+            if info.methods.contains_key("__construct") {
+                prototype_owner = c.clone();
+            }
+            current = info.extends.first().cloned();
+        }
+        if registry
+            .classes
+            .get(&prototype_owner)
+            .is_some_and(|info| info.abstract_methods.contains("__construct"))
+        {
+            return false;
+        }
+        let abstract_trait_methods_supported = registry.php_version.is_none_or(|v| v >= (8, 0));
+        if abstract_trait_methods_supported
+            && let Some(t) = &self.current_trait
+            && registry
+                .classes
+                .get(t.as_str())
+                .is_some_and(|info| info.abstract_methods.contains("__construct"))
+        {
+            return false;
         }
         true
     }
