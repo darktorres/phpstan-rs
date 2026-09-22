@@ -1923,3 +1923,40 @@ fn empty_dim_in_read_position_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn unpacking_string_keys_is_gated_on_php_8_1() {
+    let src = r#"<?php
+        /**
+         * @param array<string, int> $named
+         * @param list<int> $list
+         * @param array<int|string, int> $mixed
+         */
+        function f(array $named, array $list, array $mixed): array {
+            return [...$named, ...$list, ...$mixed];
+        }
+    "#;
+    let found = |v| {
+        diagnostics_for_with(src, |r| r.php_version = Some(v))
+            .into_iter()
+            .filter(|x| x.identifier == "arrayUnpacking.stringOffset")
+            .map(|x| (x.message, x.level))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        found((8, 0)),
+        vec![
+            (
+                "Array unpacking cannot be used on an array with string keys: array<string, int>"
+                    .to_string(),
+                3
+            ),
+            (
+                "Array unpacking cannot be used on an array with potential string keys: array<int>"
+                    .to_string(),
+                7
+            ),
+        ]
+    );
+    assert!(found((8, 1)).is_empty());
+}

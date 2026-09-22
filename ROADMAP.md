@@ -568,7 +568,8 @@ flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
 (`function.impossibleHaystackValue` for `in_array()`/`array_search()`/
 `array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule` (`foreach.emptyArray`). `OffsetAccessWithoutDimForReadingRule`
 (`offsetAccess.noDim`; a by-reference argument slot and `$r = &$a[]`
-legally create the element).
+legally create the element). `ArrayUnpackingRule`'s
+`arrayUnpacking.stringOffset` below PHP 8.1.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3613,10 +3614,6 @@ against this list, and added the real gaps the audit had missed.
 - `ArrayDestructuringRule` remainder — the RHS-is-array-like half
   (`offsetAccess.nonArray`) is now built (receiver-type-checks phase);
   the per-key-existence half is still open.
-- `ArrayUnpackingRule`'s `arrayUnpacking.stringOffset` remainder — the
-  non-iterable-spread half (`arrayUnpacking.nonIterable`/`argument.
-  unpackNonIterable`) is now built (receiver-type-checks phase); only
-  the PHP-8.1-string-key-support gating remains.
 - `NonexistentOffsetInArrayDimFetchRule` remainder — the "isn't offset-
   accessible at all" half is now built (`shapeAccess.notFound` for the
   shape case, receiver-type-checks phase); general-array/constant-array

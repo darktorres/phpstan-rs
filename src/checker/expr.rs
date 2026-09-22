@@ -2094,6 +2094,9 @@ impl<'a> Checker<'a> {
                             "arrayUnpacking.nonIterable",
                         );
                     }
+                    if item.spread {
+                        self.check_unpacked_string_keys(&value_ty, item.value.span, label);
+                    }
                 }
                 self.check_array_literal_duplicate_keys(items, locals, label);
                 self.infer_array_literal_type(items, locals)

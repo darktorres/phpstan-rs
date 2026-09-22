@@ -1,7 +1,8 @@
 //! Array arguments whose values a function implicitly casts, mirroring
 //! real PHPStan's `ParameterCastableToStringRule`,
 //! `ParameterCastableToNumberRule`, `ImplodeParameterCastableToStringRule`,
-//! and `SortParameterCastableToStringRule` (all level 5, `argument.type`).
+//! and `SortParameterCastableToStringRule` (all level 5, `argument.type`),
+//! plus `ArrayUnpackingRule`'s string-key gate for an unpacked array.
 
 use crate::ast::{Arg, Expr, ExprKind};
 use crate::checker::{Checker, Locals};
@@ -243,5 +244,43 @@ impl<'a> Checker<'a> {
     /// toFloat()` is an error for sorting).
     fn type_to_float_strict(&self, ty: &Type) -> bool {
         self.type_to_number(ty) && self.type_to_float(ty).is_some()
+    }
+
+    /// `ArrayUnpackingRule` (`arrayUnpacking.stringOffset`): below PHP
+    /// 8.1, `[...$x]` can't unpack string keys. Level 3 when the keys
+    /// are definitely strings, level 7 when only some may be.
+    pub(crate) fn check_unpacked_string_keys(
+        &mut self,
+        value_ty: &Type,
+        span: crate::token::Span,
+        label: &str,
+    ) {
+        if !self.registry.php_version.is_some_and(|v| {
+            !crate::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
+        }) {
+            return;
+        }
+        let Some(key_ty) = Self::array_key_type(value_ty) else {
+            return;
+        };
+        let is_string = |t: &Type| matches!(t, Type::String | Type::StringLiteral(_));
+        let (definitely, possibly) = match &key_ty {
+            t if is_string(t) => (true, true),
+            Type::Union(members) => (members.iter().all(is_string), members.iter().any(is_string)),
+            _ => (false, false),
+        };
+        if !possibly {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "Array unpacking cannot be used on an array with {}string keys: {value_ty}",
+                if definitely { "" } else { "potential " }
+            ),
+            span,
+            if definitely { 3 } else { 7 },
+            "arrayUnpacking.stringOffset",
+        );
     }
 }
