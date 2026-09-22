@@ -4659,13 +4659,62 @@ arm has existed since Phase 14, predating the note that named it a gap.
 config list, its `Class`-kind detection-surface gaps, and a real slice of
 the real `spaze/phpstan-disallowed-calls` package's own allow/disallow-in
 filter DSL (path-scoped and attribute-context-scoped allow/disallow) are
-all done now - see Done. Still genuinely unbuilt, a narrower remainder
-than before: the rest of that same filter DSL
-(`allowInClassWithMethodAttributes`, `allowInParamTypes`/
-`allowInReturnType` and their `allowExcept*` inverses, `allowInUse`,
-parameter-value conditions) and its wholly-separate namespace/enum/
-superglobal/keyword-specific siblings, each a materially different
-detection shape needing its own separate investigation.
+all done now - see Done. `allowInUse` is done too: real docs (fetched
+directly from the package's own GitHub repo, not recalled) confirm a
+plain, class-shaped `use Foo;` import is genuinely a separate detection
+occurrence from every type-hint position ("the `use` line will still be
+reported as a separate occurrence") - a real, previously-undocumented
+gap in this project's own `Class`-kind coverage (`checker::imports::
+check_use_class_imports` already checked a `use` import for
+`class.prefixed`, never for a restricted-symbols ban at all). Closed via
+a new `check_restricted_class_use_import`, plus the new `allow_in_use`
+bool entry field to suppress exactly that one occurrence.
+
+Still genuinely unbuilt, each now scoped against the real fetched docs
+rather than a guess:
+- `allowInParamTypes`/`allowExceptInParamTypes` (alias
+  `disallowInParamTypes`) and their `*ReturnType` siblings, `Class`-kind
+  only. Materially bigger than the purely-additive `allow_in_use` shape:
+  `allowIn*` opts a class *out* of its normal "disallowed everywhere"
+  default at exactly one type-hint position, but `allowExceptIn*`
+  *inverts the entry's own default entirely* - "disallow a class only
+  when it appears as a parameter type hint, allowing it everywhere
+  else" - a real, different mechanism from every allow field built so
+  far (all strictly additive, never flipping the base posture), needing
+  its own design pass before touching `check_restricted_param_and_
+  return_types_raw`'s two now-position-aware call sites.
+- `allowInClassWithMethodAttributes`/`allowExceptInClassWithMethodAttributes`
+  (alias `disallowInClassWithMethodAttributes`): matches when *any*
+  method in the enclosing class carries the attribute (including the
+  method the restricted usage lives in, but never the class's own
+  attributes) - confirmed genuinely different from the already-built
+  `allow_in_methods_with_attributes` (current method only). Blocked on
+  real, missing data: neither `FunctionSig` nor any other per-method
+  record tracks its own attribute list at all (confirmed: no `attrs`
+  field anywhere in `registry/function_sig.rs`) - `Checker::current_
+  method_attrs` only ever has the *currently-executing* method's own
+  attrs on hand, never every sibling method's. Needs a new per-method
+  attrs field threaded through every `FunctionSig` construction site
+  first, not just a new allow-check.
+- Parameter-value conditions (`allowParamsInAllowed`/`allowParamsAnywhere`/
+  `allowExceptParamsAnywhere`/`allowExceptParamsInAllowed`/their
+  `AnyValue`/`CaseInsensitive` siblings) - real scope confirmed
+  substantial, not a small addendum: positional *and* named-parameter
+  resolution, three distinct value-matching modes (`value` - scalars
+  only; `typeString` - full PHPDoc-type matching, arrays/unions/classes;
+  `classPattern` - `fnmatch()` against an argument's own declared class,
+  no ancestor traversal), a first-class-callable edge case (a condition
+  restricting which calls are *allowed* always reports a bare `(...)`
+  reference, since there's no argument list yet to evaluate; one
+  restricting which are *disallowed* never does), and combining with
+  every existing zone directive (`allowIn`/`allowInMethods`/etc.) as a
+  further narrowing rather than a replacement. Its own separate,
+  properly-scoped investigation, not folded in here.
+
+Still wholly out of scope, unchanged: the filter DSL's own wholly-
+separate namespace/enum/superglobal/keyword-specific siblings, each a
+materially different detection shape needing its own separate
+investigation.
 
 **Receiver-type-checks phase (DONE).** Nine real-PHPStan identifiers for
 "this receiver's own type provably can never support the operation at

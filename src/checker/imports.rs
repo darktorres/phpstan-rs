@@ -179,6 +179,7 @@ impl<'a> Checker<'a> {
                         break;
                     }
                 }
+                self.check_restricted_class_use_import(path, stmt.span);
             }
         }
     }

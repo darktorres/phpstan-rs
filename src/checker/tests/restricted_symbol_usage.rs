@@ -27,6 +27,7 @@ fn entry(
         allow_except_in_class_with_attributes: Vec::new(),
         allow_in_methods_with_attributes: Vec::new(),
         allow_except_in_methods_with_attributes: Vec::new(),
+        allow_in_use: false,
     }
 }
 
@@ -384,6 +385,61 @@ fn a_restricted_class_closure_parameter_type_hint_is_flagged() {
     assert!(
         d.iter().any(|x| x.identifier == "restrictedSymbol.class"),
         "got: {d:?}"
+    );
+}
+
+#[test]
+fn importing_a_restricted_class_via_use_is_flagged() {
+    // A plain, class-shaped `use Foo;` is not itself a type hint - real
+    // PHPStan's own `ClassNameCheck` skips existence-checking there, but
+    // a `Class`-kind ban still reports it as its own, separate
+    // occurrence (confirmed against the real `spaze/phpstan-disallowed-
+    // calls` docs).
+    let d = with_entries(
+        r#"<?php
+            namespace App;
+            use Vendor\Banned;
+        "#,
+        vec![entry(
+            RestrictedSymbolKind::Class,
+            None,
+            "Vendor\\Banned",
+            "do not use Banned",
+        )],
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("Importing")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn allow_in_use_suppresses_only_the_use_import_occurrence() {
+    let d = with_entries(
+        r#"<?php
+            namespace App;
+            use Vendor\Banned;
+            function f(): void { new Banned(); }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Class,
+            None,
+            "Vendor\\Banned",
+            "do not use Banned",
+            |e| e.allow_in_use = true,
+        )],
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "restrictedSymbol.class" && x.message.contains("Importing")),
+        "the use import itself should be allowed: {d:?}"
+    );
+    assert!(
+        d.iter().any(
+            |x| x.identifier == "restrictedSymbol.class" && x.message.contains("Instantiation")
+        ),
+        "instantiation must still be flagged: {d:?}"
     );
 }
 

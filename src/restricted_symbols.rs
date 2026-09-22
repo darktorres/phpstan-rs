@@ -102,6 +102,19 @@ pub struct RestrictedSymbolEntry {
     /// The inverse of `allow_in_methods_with_attributes`.
     #[serde(default)]
     pub allow_except_in_methods_with_attributes: Vec<String>,
+    /// `Class`-kind only: a plain, class-shaped `use Foo;` import is not
+    /// itself a type hint (real PHPStan's own `ClassNameCheck::
+    /// checkClassNames`, called with a `null` usage location for this
+    /// exact shape, never calls `hasClass` there - but a `Class`-kind ban
+    /// *does* still report it as its own, separate occurrence there by
+    /// default, confirmed against the real `spaze/phpstan-disallowed-
+    /// calls` docs: "the `use` line will still be reported as a separate
+    /// occurrence"). `true` here suppresses exactly that one occurrence,
+    /// leaving every other detection surface (`new`/`instanceof`/
+    /// `catch`/`extends`/`implements`/param-and-return-type-hints)
+    /// unaffected, mirroring the real `allowInUse` key exactly.
+    #[serde(default)]
+    pub allow_in_use: bool,
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -302,6 +315,7 @@ mod tests {
             allow_except_in_class_with_attributes: Vec::new(),
             allow_in_methods_with_attributes: Vec::new(),
             allow_except_in_methods_with_attributes: Vec::new(),
+            allow_in_use: false,
         }
     }
 

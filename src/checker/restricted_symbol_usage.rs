@@ -260,6 +260,45 @@ impl<'a> Checker<'a> {
         );
     }
 
+    /// The `use`-import detection surface a `Class`-kind ban's own
+    /// listed locations never covered at all until now - a real,
+    /// confirmed gap: `checker::imports::check_use_class_imports`
+    /// already checks a class-shaped `use Foo;` for `class.prefixed`,
+    /// but never for a restricted-symbols ban. Kept separate from
+    /// `check_restricted_class_name_usage` (rather than threading a new
+    /// parameter through its 6 other call sites) since `allow_in_use`
+    /// is the one allow-mechanism scoped to exactly this single
+    /// location, not shared by any of the others.
+    pub(crate) fn check_restricted_class_use_import(&mut self, class: &str, span: Span) {
+        if self.registry.restricted_symbols.is_empty() {
+            return;
+        }
+        let Some(entry) = self.registry.restricted_symbols.class(class) else {
+            return;
+        };
+        if entry.allow_in_use {
+            return;
+        }
+        let entry = entry.clone();
+        let type_word = self
+            .registry
+            .classes
+            .get(class)
+            .map(|info| class_type_word(info.kind))
+            .unwrap_or_else(|| class_type_word(ClassKind::Class));
+        self.report_restricted(
+            &entry,
+            "<main>",
+            format!(
+                "Importing restricted {} {class}: {}",
+                type_word.to_lowercase(),
+                entry.message
+            ),
+            span,
+            "restrictedSymbol.class",
+        );
+    }
+
     /// Closes a real, live enforcement gap: the `Class` kind's own ban
     /// was never actually checked against an `extends`/`implements`
     /// clause at all (only `instanceof`/`new` called `check_restricted_
