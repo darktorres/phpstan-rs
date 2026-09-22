@@ -1104,6 +1104,34 @@ fn a_trait_condition_that_agrees_across_every_host_is_still_flagged() {
     );
 }
 
+#[test]
+fn a_trait_condition_constant_for_only_some_hosts_is_suppressed_entirely() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait Common {
+                public function check(): void {
+                    if (self::FLAG) {
+                        echo 1;
+                    }
+                }
+            }
+            class HostConstant {
+                use Common;
+                const FLAG = true;
+            }
+            class HostUndecided {
+                use Common;
+                /** @var bool */
+                const FLAG = PHP_INT_SIZE > 4;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "if.alwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
 // `function.impossibleType`/`function.alreadyNarrowedType` - real
 // PHPStan's own `Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`,
 // scoped to the `is_string`/`is_int`/... predicate table this project's

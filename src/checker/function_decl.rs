@@ -49,7 +49,16 @@ impl<'a> Checker<'a> {
         // trait's registry entry after indexing, so this is a no-op
         // reconstruction for the common non-duplicated-trait case.
         let own_info = ClassInfo::from_decl(c, &self.name_ctx);
-        for host in contexts {
+        let host_count = contexts.len();
+        let mut family_verdicts_by_span: std::collections::HashMap<
+            Span,
+            (
+                std::collections::HashSet<usize>,
+                std::collections::HashSet<bool>,
+            ),
+        > = std::collections::HashMap::new();
+        for (host_index, host) in contexts.into_iter().enumerate() {
+            let host_start = self.diagnostics.len();
             for m in &c.methods {
                 let own_sig = own_info.methods.get(m.function.name.as_ref());
                 self.check_function_with_own_sig(
@@ -59,6 +68,15 @@ impl<'a> Checker<'a> {
                     !m.is_abstract,
                     own_sig,
                 );
+            }
+            for d in &self.diagnostics[host_start..] {
+                if is_constant_condition_family_identifier(&d.identifier) {
+                    let entry = family_verdicts_by_span.entry(d.span).or_default();
+                    entry.0.insert(host_index);
+                    entry
+                        .1
+                        .insert(d.identifier.to_ascii_lowercase().ends_with("true"));
+                }
             }
         }
         self.current_trait = previous_trait;
@@ -98,35 +116,21 @@ impl<'a> Checker<'a> {
         // control_flow/boolean_conditions.rs`'s own doc comment on why a
         // bare call condition is folded into the ordinary if/while/
         // ternary/&&/|| rules rather than getting a separate one) - a
-        // call-conditioned constant-truth finding (`if.alwaysTrue`,
-        // `while.alwaysFalse`, ...) that disagrees between two different
-        // hosts of this same trait (one host's own state makes it
-        // provably true, another's makes it provably false) is
-        // completely suppressed, not reported for either verdict -
-        // exactly the false-positive shape real PHPStan's own collector-
-        // based suppression exists to prevent. The exact-duplicate
-        // `dedup_by` just above only ever collapses an *identical*
-        // message repeated across hosts; a genuinely divergent pair
-        // survives it as two adjacent (same span, sorted) but distinct
-        // entries - `is_constant_condition_family_identifier`'s own doc
-        // comment explains why restricting to this one family already
-        // scopes correctly to the call-conditioned case with no
-        // separate call-shape bookkeeping needed.
+        // constant-truth finding (`if.alwaysTrue`, `instanceof.alwaysFalse`,
+        // ...) in a trait used by several hosts is kept only when every
+        // host reports it with the same verdict. One host proving it
+        // true while another proves it false, or while another can't
+        // decide it at all, suppresses it for every host.
         if has_hosts {
-            let mut family_span_counts: std::collections::HashMap<Span, usize> =
-                std::collections::HashMap::new();
-            for d in &self.diagnostics[start..] {
-                if is_constant_condition_family_identifier(&d.identifier) {
-                    *family_span_counts.entry(d.span).or_insert(0) += 1;
-                }
-            }
-            if family_span_counts.values().any(|&count| count > 1) {
-                let tail = self.diagnostics.split_off(start);
-                self.diagnostics.extend(tail.into_iter().filter(|d| {
-                    !(is_constant_condition_family_identifier(&d.identifier)
-                        && family_span_counts.get(&d.span).copied().unwrap_or(0) > 1)
-                }));
-            }
+            let tail = self.diagnostics.split_off(start);
+            self.diagnostics.extend(tail.into_iter().filter(|d| {
+                !is_constant_condition_family_identifier(&d.identifier)
+                    || family_verdicts_by_span
+                        .get(&d.span)
+                        .is_some_and(|(hosts, verdicts)| {
+                            hosts.len() == host_count && verdicts.len() == 1
+                        })
+            }));
         }
     }
 
