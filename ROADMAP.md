@@ -55,7 +55,9 @@ own reasoning is needed verbatim.)
   **Verification approach**), only spot-checked per new-finding bucket.
   Re-run before citing a number - it drifts as vendored dependencies and
   this project's own precision both change.
-- Test suite: 4471 unit tests, all passing (build/test/clippy clean).
+- Test suite: 4499 `#[test]` functions as of 2026-09-22 (counted from
+  source, not a fresh `cargo test` run; last full run was all passing,
+  build/test/clippy clean).
 
 ---
 
@@ -311,8 +313,12 @@ converge_loop_body`, mirroring real PHPStan's own bounded
 `LOOP_SCOPE_ITERATIONS`): a
 `While`/`DoWhile`/`For`/`Foreach` body is checked against a candidate
 entry state, then re-checked with that entry unioned against the
-previous pass's exit whenever the two differ, capped at 3 total passes,
-with only the final pass's diagnostics kept. This is the foundation the
+previous pass's exit whenever the two differ, capped at 6 total passes,
+with only the final pass's diagnostics kept. (Phase 85's A1 raised the
+cap from real PHPStan's 3: real PHPStan widens literal types after one
+pass, so 3 passes is cheap there, but this project's plain union
+merging does no early widening, so a higher cap costs compute on
+non-convergent loops and never costs precision.) This is the foundation the
 unreachable-code/constant-condition family depends on - see that entry
 and **Reverted** for the real soundness bug this fixed. A closure
 literal's body (both a plain `Closure` and `ArrowFn`) routes through the
@@ -339,7 +345,10 @@ the OR/AND-chain narrowing mechanism (Phase 171, `$x === null || $x ===
 shape); a nullsafe chain's own proven-non-null result implying its
 receiver is non-null too (Phase 172); `foreach` header inline `@var`
 annotation (Phase 161, the loop-variable rebind previously overwrote
-whatever the annotation preamble had set); by-ref closure-
+whatever the annotation preamble had set); `branch_implied_facts`
+carried into a `use (...)`-capturing closure literal, filtered to the
+captured names (Phase 175, `RateService::rate`'s own closure re-testing
+an outer `if ($userAnonymous)` discriminant); by-ref closure-
 capture write-back now unions every real exit point's own snapshot
 (mirroring the existing by-ref-*parameter* mechanism) instead of reading
 whichever state a single sequential walk happened to land on -
@@ -504,7 +513,9 @@ declared `TReturn`, not the whole `Generator<...>` type; PHP 8.5's
 TSend, TReturn>` is a real, resolved shape throughout - `yield`/`yield
 from`'s own types, five compatibility diagnostics, and `foreach` over
 any `Traversable`/`Iterator`/`Generator`/`IteratorAggregate`-typed
-object inferring real key/value types.
+object inferring real key/value types. `YieldFromTypeRule`'s standalone
+`generator.nonIterable` (Phase 138: a `yield from` whose operand isn't
+iterable) is built too, in `check_yield_from_compatibility`.
 
 Format-string checking for `sprintf`/`printf`/`fprintf`/`vsprintf`/
 `vprintf` (positional specifiers, exact placeholder-count matching, PHP
@@ -822,7 +833,12 @@ clone), `FxHashMap` for hot build-once maps, a criterion regression-
 guard benchmark, and `hotpath`, an opt-in in-process instrumentation
 profiler. `check-project`'s own parse and check phases both run on a
 shared rayon thread pool, files pre-sorted largest-first to shrink the
-straggler tail.
+straggler tail. Class-hierarchy member lookups are memoized (Phase 95's
+C3): per-class method/property/constant owner maps
+(`method_owner_by_class` and siblings) and each class's full ancestor
+set are precomputed once the class graph freezes, so
+`lookup_method`/`lookup_property`/`lookup_const`/`is_subclass_of` no
+longer re-walk the ancestor BFS on every call.
 
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
@@ -979,15 +995,19 @@ Pick items the same way any other Pending/partial phase gets picked up.
   framework's own runtime metadata model, which phpstan-rs has no
   equivalent of.
 - **158-175** were a batch of narrowing-engine and corpus-driven
-  follow-ups. Everything in it has shipped (see Done) except 173 and
-  175, which have their own sub-section. 165 was a duplicate of
+  follow-ups. Everything in it has shipped (see Done) except 173, which
+  has its own sub-section. 165 was a duplicate of
   already-shipped work and was removed.
 - **176-178** (Part 11) come from an exhaustive read of Psalm's own
   diagnostic catalog, cross-checked against real PHPStan and this
   project's `src/`.
+- **179+** come from re-verifying every open item against the codebase
+  directly (2026-09-22). That pass also turned up gaps with no earlier
+  phase, and each gets the next number in whichever section it belongs
+  to.
 
 A number between 85 and 175 with no entry here (86, 92, 93, 99,
-102-104, 106, 108, 135, 158-172, 174) belongs to a phase that has fully
+102-104, 106, 108, 135, 138, 158-172, 174, 175) belongs to a phase that has fully
 shipped, and Done records it.
 
 Two structural facts most of the beyond-parity findings (Parts 1-9 and
@@ -1046,34 +1066,6 @@ was true when they were written and isn't anymore.
 Real PHPStan approximates in these spots for its own architectural
 reasons; phpstan-rs doesn't share the reason, so it can be exact where
 PHPStan chooses not to be.
-
-#### A1. Raise the loop-convergence pass cap (currently copied from PHPStan verbatim, for the wrong reason)
-
-`checker::converge_loop_body` (`src/checker/control_flow.rs:289-384`) mirrors
-real PHPStan's bounded loop-body fixed-point at `MAX_PASSES = 3`
-(`control_flow.rs:338`), copied from
-`NodeScopeResolver::LOOP_SCOPE_ITERATIONS = 3`. But phpstan-rs never copied
-the *reason* 3 is tolerable for PHPStan: PHPStan widens literal/constant
-types to their base type after just **one** candidate pass
-(`GENERALIZE_AFTER_ITERATION = 1`, `NodeScopeResolver.php:120-121`,
-applied in `StmtHandler/WhileHandler.php:70-108`,
-`MutatingScope::generalizeWith`/`generalizeType`,
-`MutatingScope.php:4171-4333`) specifically because every pass re-walks the
-loop body through PHPStan's full Scope-object/Rule-registry/PHPDoc machinery
-- expensive at PHP-interpreter speed, which is also why
-`isReplayableConvergenceBody`/`REPLAYABLE_BODY_ATTRIBUTE` caching exists
-(`NodeScopeResolver.php:970-1008`) purely to dodge a second walk.
-phpstan-rs's own convergence loop does plain type-union merging on every
-pass with no early widening at all - it's already more precise per pass than
-PHPStan, it just stops at a pass count borrowed from a mechanism it doesn't
-use. Each pass here is a native match-arm walk with no per-node
-Rule-registry dispatch, so raising `MAX_PASSES` (5-8, or adaptive on
-non-convergence) costs little and lets more real loops (an accumulator
-unioning several distinct branch outcomes, a state machine advancing
-through several literal states) reach their true fixpoint instead of being
-truncated early.
-
-**Effort: small.**
 
 #### A2. Unroll `foreach` over small literal arrays, with a higher ceiling than PHPStan's 16/8
 
@@ -1362,6 +1354,15 @@ project+vendor universe declaring `foo` - a sound, computable, finite
 answer no open-world tool can give - so a following `$x->foo(...)`
 resolves against real parameter/return types instead of a signature-blind
 placeholder.
+
+**Status: the parity half is built, the beyond-parity half isn't.** A
+`method_exists($x, 'foo')`/`property_exists($x, 'foo')` true branch now
+records a per-receiver guard (`Locals::guarded_methods`/
+`guarded_properties`, `checker/narrowing.rs`), which suppresses
+`method.notFound`/`property.notFound` for the rest of that branch,
+mirroring real PHPStan's `HasMethodType` effect. `$x`'s *type* is still
+not narrowed, so `$x->foo(...)` resolves to nothing rather than to the
+real declaring classes' signatures. That narrowing is what U1 proposes.
 
 **Effort: large.**
 
@@ -1882,28 +1883,6 @@ Turbo-tier win by default, no opt-in extension, no build matrix.
 
 **Effort: large.**
 
-#### C3. Memoize class-hierarchy member lookups
-
-Real PHPStan's own July-2026 performance write-up names member-lookup
-pricing ("`ObjectType::getMethod` + `getMethodReflection` + dynamic-extension
-registry sweeps, ~1.9M calls") as a *still-open* target for the next speed
-tier, unsolved even by the native Turbo extension
-(`turbo-ext/README.md:371-379`) - blocked behind a larger, unbuilt "native
-expression engine" tier. phpstan-rs has the exact analogous hot path,
-unmemoized: `Registry::lookup_in_hierarchy_with_owner`
-(`src/registry/hierarchy.rs:127-150`) re-walks the full ancestor BFS from
-scratch - fresh `HashSet`, fresh `VecDeque`, cloning every visited class
-name - on every call, backing `lookup_method`, `lookup_property`,
-`lookup_const`, `is_subclass_of` and more (`hierarchy.rs:12,157-169,399,
-556-595`) - essentially every method call, property access, and subtype
-check the checker performs anywhere. Because `Registry`'s class graph is
-frozen right after `Project::finish_loading()` (`src/project.rs:277`), a
-plain per-(class, member) memo table is an immediately buildable,
-same-tier win real PHPStan's own profiling says it hasn't gotten to yet
-even with a compiled extension in hand.
-
-**Effort: medium.**
-
 ---
 
 ## Part 3: New rule categories and design-pattern suggestions
@@ -2255,20 +2234,20 @@ flags a 1-argument `array_filter($x)` call (`arrayFilter.strict`) unless the
 array's element type is provably boolean, provably array-valued, or a union
 that splits cleanly into all-truthy/all-falsy members - i.e. unless PHP's
 implicit loose-truthy cast is guaranteed safe. phpstan-rs already ports
-core PHPStan's narrower `arrayFilter.empty` sub-check
-(`src/checker/expr/array_ops.rs:395-439`) but explicitly declined to port
-two siblings, `arrayFilter.same`/`arrayFilter.alwaysEmpty`, after corpus
-verification caught two real false positives - both traced to gaps in this
-project's own flow-sensitive variable-type tracking, not to the checks
-themselves (`array_ops.rs:395-416`). `ArrayFilterStrictRule`'s truthy/falsy
-union-splitting logic (lines 89-106) is the same shape of judgment that
-tripped those two false positives, so this is real, buildable, and
-genuinely absent from core PHPStan - but should not be picked up without
-first addressing (or explicitly accepting the risk of re-triggering) the
-same variable-type-tracking gaps that killed its siblings.
+all three of core PHPStan's own `ArrayFilterRule` sub-checks
+(`arrayFilter.empty`/`.same`/`.alwaysEmpty`,
+`check_array_filter_no_op` in `src/checker/expr/array_ops.rs`). The
+two siblings were once declined after corpus false positives, traced to
+gaps in this project's own flow-sensitive variable-type tracking (loop
+branches, `try`/`finally`). Those gaps were fixed and both siblings
+rebuilt (Phase 68.1, commit `c96b1f0`); all three now run
+unconditionally. `ArrayFilterStrictRule`'s truthy/falsy union-splitting
+logic (lines 89-106) is the same shape of judgment, so the old reason
+to hold this back is gone. It's real, buildable, and absent from core
+PHPStan. Ship it opt-in, matching `phpstan-strict-rules`' own opt-in
+status.
 
-**Effort: medium**, and gate it on revisiting `array_ops.rs:395-416`'s two
-documented false positives first.
+**Effort: medium.**
 
 ---
 
@@ -2448,7 +2427,7 @@ populates).
 #### T2. Per-pass loop-convergence widening trace, for a diagnostic whose type came from fixed-point iteration rather than branch narrowing
 
 `Checker::converge_loop_body` (`control_flow.rs:331-384`) runs up to
-`MAX_PASSES = 3` passes, each producing a full `Locals` clone unioned via
+`MAX_PASSES = 6` passes, each producing a full `Locals` clone unioned via
 `merge_scopes` into the next entry state - then, for every pass except the
 one finally kept, explicitly discards both that pass's diagnostics
 (`self.diagnostics.truncate(...)`) and its `Locals` state. For a
@@ -2468,8 +2447,8 @@ type after only the first candidate pass
 (`GENERALIZE_AFTER_ITERATION = 1`, line 121) - destroying the literal type
 identity a trace would even need to show, on top of having no interactive
 query surface at all. phpstan-rs's convergence loop does plain type-union
-merging with no early generalization (A1 in Part 1 already documents this
-precision gap in the *other* direction - raising the pass cap for more
+merging with no early generalization (Phase 85's A1, now shipped, used
+that same fact in the *other* direction - raising the pass cap for more
 precise final types; this is about retaining and exposing the discarded
 intermediate passes for explainability instead) - each pass's precise
 `Locals` state is already fully materialized in memory immediately before
@@ -3358,12 +3337,21 @@ against this list, and added the real gaps the audit had missed.
   syntax on `new`) is syntactically legal but a real semantic error;
   `callable.notSupported`.
 - `InstantiationRule`'s remaining sub-checks — phpstan-rs's `new`
-  checking only covers `new.interface`/`new.abstract`, missing several
-  siblings.
-- `ExistingClassesInClassImplementsRule` — phpstan-rs's `extends`/
-  `implements`/trait-use check is existence-only, never confirms the
-  target is the *right kind* of symbol (a class implementing an
-  interface that's actually a trait, etc.).
+  checking covers `new.interface`/`new.abstract` (plus `class.notFound`).
+  Still missing: `new.enum`, `new.trait`, `new.nonObject`,
+  `new.noConstructor`, `class.noParent`, and
+  `outOfClass.self`/`.static`/`.parent`.
+- `ExistingClassesInClassImplementsRule`/`ExistingClassInClassExtendsRule`/
+  `ExistingClassesInInterfaceExtendsRule` — phpstan-rs's `extends`/
+  `implements`/trait-use check is existence-only (plus
+  `class.extendsFinal`). It never confirms the target is the *right kind*
+  of symbol: `class.extendsInterface`/`.extendsTrait`/`.extendsEnum`,
+  `classImplements.class`/`.trait`/`.enum`, and
+  `interfaceExtends.class`/`.trait`/`.enum` are all unbuilt. So are
+  `class.extendsFinalByPhpDoc` (an `@final`-tagged parent; the
+  method/property `...FinalByPhpDoc` checks are built, the class-level
+  one isn't) and `class.readOnly`/`class.nonReadOnly` (readonly-ness has
+  to match between a class and its parent).
 - `InvalidPromotedPropertiesRule` — promotion legality (only inside
   `__construct`, never abstract, never variadic, PHP-8.0-gated, `final`
   promotion additionally gated).
@@ -3415,17 +3403,20 @@ against this list, and added the real gaps the audit had missed.
   dozen similarly narrow gates but not this one.
 - `StaticMethodCallCheck`'s static/instance-context mismatch half —
   `method.staticCall` for calling a non-static method through
-  `Foo::method()` static-call syntax (or the reverse). The casing-
-  mismatch check in the same file is already built.
+  `Foo::method()` static-call syntax (or the reverse). The same real
+  check's `staticMethod.nonObject` (a static call on a non-class-string
+  expression) is unbuilt too. The casing-mismatch check in the same file
+  is already built.
 - `OverridingMethodRule`'s tentative-return-type sub-check —
   `method.tentativeReturnType`. Niche: it only matters when extending
   certain SPL/core classes.
 
 ### Phase 128 — Properties (`Rules/Properties/` gaps)
 
-- `ExistingClassesInPropertiesRule`'s `property.trait`/two further
-  identifiers — the `class.notFound` half is built (Phase 48); the
-  "wrong kind of symbol" half isn't.
+- `ExistingClassesInPropertiesRule` remainder — `class.notFound` (Phase
+  48) and `property.trait` (`check_type_trait_refs`,
+  `checker/generics/bounds.rs`) are both built. Only
+  `property.unresolvableNativeType` is left.
 - `PropertiesInInterfaceRule`/`PropertyInClassRule` — PHP 8.4
   property-hook *declaration-site* legality (hooked/public/non-
   readonly/non-static/non-abstract/non-final for interfaces; the
@@ -3471,19 +3462,32 @@ against this list, and added the real gaps the audit had missed.
   unimplemented (only in the typo-detection whitelist). (Phase 88's U4
   is the *inference* half of this same tag family, once real tag
   support exists.)
-- `FunctionAssertRule`/`MethodAssertRule`'s deeper assertion-validity
-  half — Phase 48.7 closed the plain class-existence slice
-  (`class.notFound`); `assert.impossibleType`/`.alreadyNarrowedType`/
-  `.unresolvableType`/`.trait`/`.unknownExpr` and generic/missing-
-  typehint checks on the asserted type remain.
+- `FunctionAssertRule`/`MethodAssertRule` (`AssertRuleHelper`) remainder
+  — `class.notFound`, `assert.impossibleType`/`.alreadyNarrowedType`/
+  `.trait`/`.unknownExpr`, and `parameter.notFound` are all built
+  (`check_one_assert_tag`, `checker/narrowing.rs`). Left:
+  `assert.unresolvableType`, and the `missingType.iterableValue`/
+  `.generics`/`.callable` checks `AssertRuleHelper` runs on the asserted
+  type itself.
 - `FunctionConditionalReturnTypeRule`/`MethodConditionalReturnTypeRule`
   — validating a conditional PHPDoc return type's own declaration
   (`conditionalType.subjectNotFound`/`.alwaysTrue`/`.alwaysFalse`).
 - `InvalidPhpDocVarTagTypeRule`/`WrongVariableNameInVarTagRule`/
   `VarTagChangedExpressionTypeRule` — phpstan-rs's inline-`@var`
   checking is deliberately scoped to the plain-assignment case only;
-  the much larger name-matching surface (foreach/static/global/return/
-  misplaced-declaration variants) is unbuilt.
+  the much larger name-matching surface (`varTag.differentVariable`/
+  `.misplaced`/`.multipleTags`/`.noVariable`/`.variableNotFound`,
+  foreach/static/global/return variants) and `varTag.trait`/
+  `.unresolvableType` are unbuilt. Of `VarTagTypeRuleHelper`'s two
+  compatibility checks, only `varTag.type` is built.
+  `varTag.nativeType` (the `@var` type against the expression's
+  *native* type, not its PHPDoc-refined one) isn't.
+- `IncompatiblePhpDocTypeRule`'s identifiers, for reference when that
+  item above is built: `parameter.phpDocType`/`.unresolvableType`,
+  `return.phpDocType`/`.unresolvableType`, `property.phpDocType`/
+  `.unresolvableType`, `classConstant.phpDocType`/`.unresolvableType`,
+  and `selfOut.type`/`.static`/`.unresolvableType` for
+  `IncompatibleSelfOutTypeRule`. None exist yet.
 
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 
@@ -3559,12 +3563,17 @@ against this list, and added the real gaps the audit had missed.
 - `UnsetRule` — five distinct `unset(...)`-target diagnostics
   (undefined variable, illegal/nonexistent offset, readonly-property
   variants, hooked/possibly-hooked property).
-- `NullCoalesceRule`'s dead-`??`-operand check — this project's
-  `nullCoalesce.variable`/`.property`/`.offset` only fire when the left
-  side is *definitely undefined*. Real PHPStan's `nullCoalesce.expr`
-  also flags the opposite case, where the left side is defined and
-  already excludes `null`, so `??`'s right side can never run (5 corpus
-  hits).
+- `NullCoalesceRule`/`IssetCheck` remainder — the `.variable`/
+  `.offset`/`.property` probes ("always exists and is not nullable", and
+  "never defined") are built for `??`, `isset()`, and `empty()`
+  (`check_pointless_null_probe`/`check_pointless_offset_or_property_probe`,
+  `checker/expr/probe_checks.rs`). Two pieces are left. First,
+  `nullCoalesce.expr`/`isset.expr`/`empty.expr`: the same "can never be
+  null" verdict for an arbitrary non-chain expression on the left
+  (a call result, a cast). Real PHPStan gates this behind
+  `checkAdvancedIsset`, and it's the 5-corpus-hit item. Second, the
+  newer `nullCoalesce.unnecessary`: `$x ?? null`/`$x ??= null` where
+  the left side is always set, so the whole coalesce is a no-op.
 
 (`VariableCloningRule` — `clone.nonObject` — is now built; see Done,
 receiver-type-checks phase.)
@@ -3599,14 +3608,6 @@ receiver-type-checks phase.)
   entry stays here only as the parity-audit's own finding, not a
   separate build.)
 
-### Phase 138 — Generators+Pure (`Rules/Generators/` gaps)
-
-- `YieldFromTypeRule` — `generator.nonIterable` when the expression
-  after `yield from` is definitely (or, with `reportMaybes`, possibly)
-  not iterable. A standalone check needing only `exprType.isIterable()`,
-  independent of the broader `Generator<K,V,TSend,TReturn>` generic-
-  shape work.
-
 ### Phase 139 — DeadCode+EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace (mixed small gaps)
 
 - `Rules/DeadCode/NoopRule`'s generic fallback — `noop.rs` covers a set
@@ -3623,6 +3624,58 @@ receiver-type-checks phase.)
   malformed `@phpstan-ignore` identifier-list syntax; phpstan-rs's own
   `ignore_comments.rs` deliberately swallows this with no diagnostic at
   all today (confirmed by its own test name).
+- `MissingTypehintCheck`'s `missingType.callable` — a `callable`/
+  `Closure` type with no signature, gated behind real PHPStan's opt-in
+  `checkMissingCallableSignature` (off by default). `checker/
+  missing_typehint.rs`'s module doc says this is impossible because a
+  bare `callable` and a signature-carrying `callable(int): string`
+  parse to the same `Type::Callable`. That stopped being true when Phase
+  53 made it `Type::Callable(Option<Arc<CallableSig>>)` (see Done), so
+  `None` now means exactly "no signature written". Buildable as an
+  opt-in `Registry` flag. The same predicate also covers the
+  `missingType.callable` half of Phase 130's assert-type item.
+
+### Phase 179 — `@psalm-*`/`@phan-*` PHPDoc tag spellings (`PhpDocNodeResolver` parity)
+
+Found by a direct re-verification pass against the codebase rather than
+the original `Rules/` audit, because this lives in real PHPStan's PHPDoc
+*resolver*, not a Rule class. `docblock.rs::parse` reads plain tags,
+then a second pass for `@phpstan-`-prefixed ones. Every `@psalm-`/
+`@phan-`-prefixed tag is dropped silently, since the second pass skips
+any line not starting with `phpstan-`. Real PHPStan's
+`PhpDocNodeResolver` resolves all of these:
+
+- `@psalm-`/`@phan-` `var`, `param`, `return` (plus `@phan-real-return`),
+  `method`, `template` (and `@psalm-template-covariant`/`-contravariant`),
+  `type`, `@psalm-param-out`, `@psalm-import-type`,
+  `@psalm-require-extends`/`-implements`, `@psalm-inheritors` (the
+  `@phpstan-sealed` equivalent), `@psalm-this-out`/`-self-out`,
+  `@psalm-`/`@phan-` `pure` (and `@phan-side-effect-free`),
+  `@psalm-readonly`/`@phan-read-only`, `@psalm-`/`@phan-` `immutable`,
+  `@psalm-(readonly-)allow-private-mutation`,
+  `@psalm-consistent-constructor`, and `@phan-extends`/`@phan-inherits`.
+- `@psalm-assert`/`-if-true`/`-if-false` and their `@phan-` versions
+  (`resolveAssertTags` tries the `@phpstan`, `@psalm`, then `@phan`
+  prefixes, and the first prefix with any assert tag wins).
+
+Precedence matters and has to be mirrored exactly. For `var`/`param`/
+`return`, later spellings in real PHPStan's own list override earlier
+ones (plain < `@phan-` < `@psalm-` < `@phpstan-`). A `@psalm-`-prefixed
+tag whose type PHPStan can't resolve is skipped instead of reported
+(`shouldSkipType`), because Psalm-only type syntax has to degrade
+quietly.
+
+Why this is worth doing: widely used libraries annotate with `@psalm-`
+tags only. `webmozart/assert`'s `Assert.php` alone carries 48
+`@psalm-assert` tags (122 more in `Mixin.php`), which makes most of
+Phase 146a's webmozart/beberlei table unnecessary once this lands.
+Expect a large type-inference shift across `vendor/`: many vendored
+libraries' `@psalm-return`/`@psalm-param` types become visible for the
+first time. Do a full unscoped corpus diff, verified location by
+location, not just the scoped one.
+
+**Effort: medium** (a tag-name normalization pass plus per-family
+precedence rules, not new type machinery).
 
 
 ## Part 10 — Top-100 Packagist `phpstan-extension` survey (new phases)
@@ -3789,13 +3842,15 @@ one of the richest single packages surveyed):
   cheap special case if the generic form's config surface isn't worth
   it yet).
 
-### Phase 145 — Extended access-control primitives (alternative to Phase 67's declined DSL)
+### Phase 145 — Extended access-control primitives (attribute-based, complementing Phase 67's DSL)
 
 `dave-liddament/phpstan-php-language-extensions` ships a materially
 *simpler*, attribute-based design for the same underlying need Phase
-67's declined `spaze` allow/disallow-in DSL was trying to solve
-generically — worth building this instead when that need resurfaces,
-since it needs no path/context-matching engine at all:
+67's `spaze`-style allow/disallow-in DSL solves generically. That DSL
+is built (`restricted_symbols`, `allow_in`/`allow_except_in` and the
+rest, see Done). This is a complementary design, where the restriction
+lives on the target symbol as an attribute rather than in a central
+config file, and it needs no path/context-matching engine at all:
 
 - **145a.** `#[Friend(AllowedCaller::class)]` on a method/class —
   explicit whitelist of which *other* specific classes may call it (the
@@ -3830,7 +3885,12 @@ since it needs no path/context-matching engine at all:
   dependency tree, worth checking first), `beberlei/assert` (same
   fluent shape), `azjezz/psl` (PHP Standard Library), Mockery,
   Prophecy, Nette Tester's `Assert::*`, and `eloquent/phony`'s
-  MockBuilder/InstanceHandle fluent API.
+  MockBuilder/InstanceHandle fluent API. **Do Phase 179 first:**
+  `webmozart/assert` and `beberlei/assert` annotate every method with
+  `@psalm-assert`, which phpstan-rs currently ignores. Honoring those
+  tags narrows through them with no hardcoded table at all, so 146a's
+  table is really only needed for the libraries that don't carry assert
+  tags.
 - **146b (medium, new family, entirely generic, no new mechanism
   needed).** PHPUnit-native mock-builder-API misuse detection —
   distinct from 146a (this catches mock-*configuration* mistakes, not
@@ -3942,9 +4002,8 @@ generic, zero framework dependency:
   keys iterating a Generator with non-sequential/string keys);
   identical-class `===` comparison; calling `__construct()` directly as
   an ordinary method/static call (`$obj->__construct()` re-runs the
-  constructor on an already-built object); a non-static closure
-  explicitly capturing `$this` via `use ($this)` when it's already
-  implicitly bound (pure redundancy); a `foreach`/`for` loop's own
+  constructor on an already-built object; the same check as Phase 176's
+  L3); a `foreach`/`for` loop's own
   loop-variable shadowing a variable already holding a value from
   outside the loop (data-loss footgun); calling a statically-declared
   method via `->` instead of `::`; a `switch` case value whose type
@@ -4140,9 +4199,9 @@ detail and citations: `TOP100_RESEARCH_NOTES.md`.
 
 ---
 
-## Narrowing-engine follow-ups (phases 173, 175)
+## Narrowing-engine follow-up (phase 173)
 
-The two phases left over from the 158-175 correlated-narrowing batch.
+The one phase left over from the 158-175 correlated-narrowing batch.
 Everything else in that batch has shipped (see Done's narrowing-engine
 cluster).
 
@@ -4187,40 +4246,6 @@ populated and purged the same way `condition_aliases` already is:
 larger than a single leaf-arm addition but bounded and self-contained,
 reusing `condition_aliases`'s own invalidation discipline rather than
 inventing a new one.
-
-### Phase 175 — Closure capturing an outer branch's co-assignment fact
-
-`RateService::rate`'s own closure - `$userAnonymous && $anonymousId
-!== $savedAnonymousId` implying `$savedAnonymousId` was set to a real,
-non-null value by the *outer* scope's own `if ($userAnonymous) {
-$savedAnonymousId = ... ?? ...; }` before the closure even runs.
-
-Phase 169's own mechanism (`Locals::branch_implied_facts`,
-`checker.rs`/`checker/narrowing.rs`) is now built and its exact shape
-settled, so this is independently assessable - and needs real, further
-work beyond what 169 shipped, not just closure-capture plumbing on top
-of it: `record_branch_implied_facts` only recognizes an equality
-discriminant (`$subject === value`/`$subject == value`), matching the
-`AuthService::authKeyLogin` shape 169 was built for. `RateService::
-rate`'s own discriminant is a bare boolean truthiness test
-(`if ($userAnonymous) { $savedAnonymousId = ...; }`), a different
-recognized-shape gap on top of the closure-capture question - the
-discriminant key would need to cover a bare `narrowing_key`-able
-truthiness condition too, not just an equality comparison, before the
-closure-capture half (surviving into a closure body reading the
-captured variable, seeded from the outer scope's own `Locals` at the
-closure literal's declaration point - see `checker/expr.rs`'s
-`closure_locals`/`arrow_locals` seeding) is even reachable.
-
-**Effort: medium** — one more discriminant-shape arm in
-`record_branch_implied_facts`/its replay hook (bare truthiness, not
-just equality), plus verifying the closure-capture seeding path
-actually carries `branch_implied_facts` forward (`Locals::fresh_scope`
-currently resets it to empty for every closure literal, matching
-`condition_aliases`'s own precedent - may need to *not* reset it here
-specifically, unlike the boolean-flag-scoped `condition_aliases`,
-since a fact here is meant to survive scope boundaries).
-
 
 ---
 
@@ -4822,12 +4847,19 @@ before defaulting to another full revert.
   check_empty_method_bodies` (default off), per
   [[feedback_dont_discard_correct_checks_ship_opt_in]].
 - **`Foreach`'s own "may run zero times" pre-loop-state merge**
-  (originally Phase 29, re-attempted and re-reverted since). A real,
-  demonstrated soundness bug both times: giving `Foreach` the same
+  (originally Phase 29, re-attempted and re-reverted, then shipped in a
+  narrower form - superseded). Both earlier attempts hit a real,
+  demonstrated soundness bug: giving `Foreach` the same
   `While`/`For`-style zero-iteration merge breaks the common "a loop
-  mutates the very array it iterates via its own loop variable" idiom -
-  a later re-attempt with fixed-point loop analysis in place still
-  regressed a real corpus file via a narrowing-wrapper interaction.
+  mutates the very array it iterates via its own loop variable" idiom.
+  A later re-attempt with fixed-point loop analysis in place still
+  regressed a real corpus file via a narrowing-wrapper interaction. It
+  is now live (commit `ce5b411`): `LoopZeroIterations::Possible {
+  subject_exempt }` merges every variable with the pre-loop entry except
+  the `foreach`'s own bare-`$variable` subject, which keeps its post-body
+  value. Exempting only the subject is a narrow, one-variable version of
+  Phase 123's O1 asymmetric join. O1 itself, for every other variable,
+  is still open.
 - **`@phpstan-type`/local type-alias support, first attempt** (Phase
   48). Implemented and reverted after a net-negative corpus regression,
   root-caused to a separate, real, pre-existing gap (`define()`-declared
@@ -4873,12 +4905,15 @@ a specific, corpus-checked reason to stay deferred.
   intersect/remove or generic recursive type-tree traverse/map
   combinator (a refactor-timing call, revisit once several bespoke
   traverse/map functions accumulate).
-- **140c.** A `foreach ($arr as &$v) { $v['key'] = ...; }` by-reference
-  mutation never updates `$arr`'s own tracked element shape. A real,
-  buildable gap (real PHPStan does track this), surfaced only once a
-  separate fix stopped masking it behind `Mixed`. Phase 123's O1 is the
-  closely related foreach-merge fix; this is a distinct, narrower
-  by-ref-mutation-tracking gap, not the same item.
+- **140c remainder.** A `foreach ($arr as &$v) { $v['key'] = ...; }`
+  by-reference mutation now does update `$arr`'s tracked element type
+  (see Done's `CategoryCatsRenderer::render` entry), but only when the
+  subject is a bare variable whose element type is already uniform
+  (the same scope `array_element_type` binds the loop variable from). A
+  per-field `ArrayShape` subject, or a non-variable subject
+  (`$this->items`, `$data['rows']`), still isn't updated. Real PHPStan
+  tracks both. Phase 123's O1 is the closely related foreach-merge fix;
+  this is a distinct, narrower by-ref-mutation-tracking gap.
 - **140d.** Dynamic-key `isset($arr[$dynamicKey])`/`array_key_exists(
   $dynamicKey, $arr)` never narrows the specific element's own value
   type - only a *literal* string key does today. A real, buildable
@@ -4888,21 +4923,26 @@ a specific, corpus-checked reason to stay deferred.
   materially larger change (value-keyed, not name-keyed, narrowing) than
   a corpus-cleanup pass should take on, and each finding it produces
   today is sound, not a false positive to chase down.
-- **A closure literal's own `Type::Closure`/`Callable` signature uses
-  its bare declared return-type hint, not its more precise inferred body
-  return type** - unlike an ordinary named function/method, which
-  already gets careful native/PHPDoc reconciliation. Confirmed via
-  `\PHPStan\dumpType()`: real PHPStan uses the body's own more precise
-  inferred return type for a closure/arrow-fn literal's own signature. A
-  real, well-scoped gap at the specific closure-literal signature-
-  construction call site(s), not inventoried this round.
+- **A closure/arrow-fn literal's own value carries no signature at
+  all.** `ExprKind::Closure`/`ArrowFn` both evaluate to a bare
+  `Type::Object("Closure", [])` (`checker/expr.rs`), not a
+  `Type::Callable(Some(sig))`. So `$f = fn(int $x): string => ...;
+  $f('a')` gets neither its argument checked nor a `string` result
+  inferred, and passing it to a `Closure(int): string`-typed parameter
+  can't be checked structurally. Real PHPStan gives every closure literal
+  a full `ClosureType` signature, and, confirmed via
+  `\PHPStan\dumpType()`, uses the body's more precise inferred return
+  type rather than the bare declared hint. Two layers: attach a
+  `CallableSig` built from the declared params/return at all (the bigger
+  half, reusing Phase 53's `CallableSig`), then prefer the inferred body
+  return type over the declared one.
 - **Correlated-narrowing family** (`ConditionalExpressionHolder`): the
   *general*, unbounded mechanism (an arbitrary boolean-formula memory
   over recorded facts) stays declined - no natural stopping point,
   unlike a single named idiom. Every named instance found in this
   project's own corpus work has been individually assessed on its own
   merits instead (most are now built - see Done's own narrowing-engine
-  cluster). Two real, still-open sub-cases: a cross-*function* version
+  cluster). One real, still-open sub-case: a cross-*function* version
   of the parallel-accumulator-array correlation (the same-function case
   is filed and buildable - Phase 173, see Planned; the cross-function
   generalization splits into two layers - the two-pass collect-then-
@@ -4911,10 +4951,9 @@ a specific, corpus-checked reason to stay deferred.
   on its own, and "soundly answering whether the correlation still holds
   by the time a different function reads it" - a fundamentally harder,
   unbounded invariant-maintenance problem with no known bounded design
-  yet, the actual wall); a compound `RateService::rate`-shaped case
-  compounding discriminant-variable correlation with closure-capture
-  timing (Phase 175, see Planned, blocked on Phase 169 - now built, so
-  this specific compound case is a real, narrow, buildable follow-up).
+  yet, the actual wall). (The compound `RateService::rate`-shaped case,
+  discriminant-variable correlation carried across a closure capture, is
+  now built - Phase 175, see Done.)
 - **A dynamic array read (`isset`/`array_key_exists`-guarded or not)
   built by a single-loop accumulator idiom can read back `T|null`
   instead of `T`.** Root-caused to one level upstream of narrowing
