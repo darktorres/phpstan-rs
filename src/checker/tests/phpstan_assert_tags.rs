@@ -483,3 +483,76 @@ fn asserting_against_an_untyped_parameter_is_never_flagged_impossible_or_already
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn a_psalm_assert_tag_on_a_static_assertion_method_narrows_its_argument() {
+    // `webmozart/assert`'s own shape: every assertion method carries only
+    // a `@psalm-assert` tag, which real PHPStan honors when no
+    // `@phpstan-assert` is present.
+    let d = diagnostics_for(
+        r#"<?php
+            class Assert {
+                /** @psalm-assert string $value */
+                public static function string(mixed $value): void {
+                    if (!is_string($value)) {
+                        throw new \InvalidArgumentException('not a string');
+                    }
+                }
+            }
+
+            function takesString(string $s): void {}
+
+            function test(int|string $input): void {
+                Assert::string($input);
+                takesString($input);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn without_a_psalm_assert_tag_the_same_call_is_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Assert {
+                public static function string(mixed $value): void {
+                    if (!is_string($value)) {
+                        throw new \InvalidArgumentException('not a string');
+                    }
+                }
+            }
+
+            function takesString(string $s): void {}
+
+            function test(int|string $input): void {
+                Assert::string($input);
+                takesString($input);
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "argument.type"),
+        "expected argument.type without the tag, got: {d:?}"
+    );
+}
+
+#[test]
+fn a_psalm_param_tag_refines_a_plain_param_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param array $ids
+             * @psalm-param list<int> $ids
+             */
+            function test(array $ids): string {
+                return $ids;
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "return.type" && x.message.contains("list<int>")),
+        "expected the @psalm-param type to be the one in effect, got: {d:?}"
+    );
+}

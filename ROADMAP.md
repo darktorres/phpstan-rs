@@ -593,6 +593,29 @@ whitelist; `@param-immediately-invoked-callable`/`-later-invoked-
 callable`/`-closure-this` declaration-time validation plus real `$this`
 injection at call sites.
 
+**`@psalm-*`/`@phan-*` tag spellings** (Phase 179). `docblock::parse`
+now reads real PHPStan's `PhpDocNodeResolver` spelling set, not just
+plain and `@phpstan-` tags, in its precedence order: plain, then
+`@phan-`, then `@psalm-`, then `@phpstan-`, each later spelling
+overriding. That covers `var`/`param`/`return`/`method`/`template*`/
+`type`/`import-type`/`param-out`/`require-*`/`pure`/`readonly`/
+`immutable`/`consistent-constructor`, plus renamed spellings
+(`@psalm-inheritors` means `@phpstan-sealed`, `@phan-real-return` means
+`@return`, `@phan-side-effect-free` means `@pure`, `@phan-read-only`
+means `@readonly`, `@phan-extends`/`-inherits` mean `@extends`). The
+assert family follows `resolveAssertTags`'s own "first prefix with any
+assert wins" rule (`@phpstan-` > `@psalm-` > `@phan-`), so
+webmozart/assert-style `@psalm-assert`-only libraries now narrow with
+no per-library table. A foreign-prefixed tag whose type doesn't parse
+is skipped (the nearest equivalent of `shouldSkipType`).
+Psalm-only vocabulary (`@psalm-suppress`, `@psalm-internal`, ...) is
+ignored, as is `@psalm-(readonly-)allow-private-mutation`, since the
+private-mutation exemption isn't modeled. Four raw-text pre-filters
+that matched only some spellings (pure, `template`, template variance,
+inline `var`) now match every one; the inline-`var` one had been
+silently skipping `@phpstan-var` too. Not yet corpus-verified: expect a
+large type-inference shift across `vendor/`.
+
 **`Type::Array` key-type/offset engine** (Phase 50):
 `InvalidKeyInArrayDimFetchRule` (reverted once, reattempted successfully
 - see Reverted); the `array_key_exists()`-narrows-a-specific-element
@@ -1006,8 +1029,8 @@ Pick items the same way any other Pending/partial phase gets picked up.
   phase, and each gets the next number in whichever section it belongs
   to.
 
-A number between 85 and 175 with no entry here (86, 92, 93, 99,
-102-104, 106, 108, 135, 138, 158-172, 174, 175) belongs to a phase that has fully
+A number between 85 and 179 with no entry here (86, 92, 93, 99,
+102-104, 106, 108, 135, 138, 158-172, 174, 175, 179) belongs to a phase that has fully
 shipped, and Done records it.
 
 Two structural facts most of the beyond-parity findings (Parts 1-9 and
@@ -3644,49 +3667,6 @@ receiver-type-checks phase.)
   level. Wiring the toggles in is small: consult `configured_level` and
   the explicit/implicit `Type::Mixed(bool)` flag at the same sites.
 
-### Phase 179 — `@psalm-*`/`@phan-*` PHPDoc tag spellings (`PhpDocNodeResolver` parity)
-
-Found by a direct re-verification pass against the codebase rather than
-the original `Rules/` audit, because this lives in real PHPStan's PHPDoc
-*resolver*, not a Rule class. `docblock.rs::parse` reads plain tags,
-then a second pass for `@phpstan-`-prefixed ones. Every `@psalm-`/
-`@phan-`-prefixed tag is dropped silently, since the second pass skips
-any line not starting with `phpstan-`. Real PHPStan's
-`PhpDocNodeResolver` resolves all of these:
-
-- `@psalm-`/`@phan-` `var`, `param`, `return` (plus `@phan-real-return`),
-  `method`, `template` (and `@psalm-template-covariant`/`-contravariant`),
-  `type`, `@psalm-param-out`, `@psalm-import-type`,
-  `@psalm-require-extends`/`-implements`, `@psalm-inheritors` (the
-  `@phpstan-sealed` equivalent), `@psalm-this-out`/`-self-out`,
-  `@psalm-`/`@phan-` `pure` (and `@phan-side-effect-free`),
-  `@psalm-readonly`/`@phan-read-only`, `@psalm-`/`@phan-` `immutable`,
-  `@psalm-(readonly-)allow-private-mutation`,
-  `@psalm-consistent-constructor`, and `@phan-extends`/`@phan-inherits`.
-- `@psalm-assert`/`-if-true`/`-if-false` and their `@phan-` versions
-  (`resolveAssertTags` tries the `@phpstan`, `@psalm`, then `@phan`
-  prefixes, and the first prefix with any assert tag wins).
-
-Precedence matters and has to be mirrored exactly. For `var`/`param`/
-`return`, later spellings in real PHPStan's own list override earlier
-ones (plain < `@phan-` < `@psalm-` < `@phpstan-`). A `@psalm-`-prefixed
-tag whose type PHPStan can't resolve is skipped instead of reported
-(`shouldSkipType`), because Psalm-only type syntax has to degrade
-quietly.
-
-Why this is worth doing: widely used libraries annotate with `@psalm-`
-tags only. `webmozart/assert`'s `Assert.php` alone carries 48
-`@psalm-assert` tags (122 more in `Mixin.php`), which makes most of
-Phase 146a's webmozart/beberlei table unnecessary once this lands.
-Expect a large type-inference shift across `vendor/`: many vendored
-libraries' `@psalm-return`/`@psalm-param` types become visible for the
-first time. Do a full unscoped corpus diff, verified location by
-location, not just the scoped one.
-
-**Effort: medium** (a tag-name normalization pass plus per-family
-precedence rules, not new type machinery).
-
-
 ## Part 10 — Top-100 Packagist `phpstan-extension` survey (new phases)
 
 Every one of the top 100 `phpstan-extension` packages on Packagist by
@@ -3894,11 +3874,10 @@ config file, and it needs no path/context-matching engine at all:
   dependency tree, worth checking first), `beberlei/assert` (same
   fluent shape), `azjezz/psl` (PHP Standard Library), Mockery,
   Prophecy, Nette Tester's `Assert::*`, and `eloquent/phony`'s
-  MockBuilder/InstanceHandle fluent API. **Do Phase 179 first:**
-  `webmozart/assert` and `beberlei/assert` annotate every method with
-  `@psalm-assert`, which phpstan-rs currently ignores. Honoring those
-  tags narrows through them with no hardcoded table at all, so 146a's
-  table is really only needed for the libraries that don't carry assert
+  MockBuilder/InstanceHandle fluent API. `webmozart/assert` and
+  `beberlei/assert` annotate every method with `@psalm-assert`, which
+  Phase 179 (see Done) already honors, so they need no table entry.
+  146a's table is only needed for libraries that don't carry assert
   tags.
 - **146b (medium, new family, entirely generic, no new mechanism
   needed).** PHPUnit-native mock-builder-API misuse detection —

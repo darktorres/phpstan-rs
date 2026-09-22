@@ -972,7 +972,9 @@ impl<'a> Checker<'a> {
         // `#[hotpath::measure]`-instrumented, confirming this is a real
         // hot path worth avoiding a full docblock parse on every
         // statement's own `@param`/`@return`-only declaration comment.
-        if !doc.contains("@var") {
+        // Matched without the leading `@` so `@phpstan-var`/`@psalm-var`/
+        // `@phan-var` pass too, not just a plain `@var`.
+        if !doc.contains("var") {
             return None;
         }
         let block = docblock::parse(doc);

@@ -373,9 +373,10 @@ impl<'a> Checker<'a> {
         let Some(sig) = sig else {
             return;
         };
-        let tagged_pure = f.doc_comment.as_deref().is_some_and(|doc| {
-            (doc.contains("@phpstan-pure") || doc.contains("@pure")) && docblock::parse(doc).pure
-        });
+        let tagged_pure = f
+            .doc_comment
+            .as_deref()
+            .is_some_and(|doc| doc.contains("pure") && docblock::parse(doc).pure);
         if !tagged_pure {
             return;
         }

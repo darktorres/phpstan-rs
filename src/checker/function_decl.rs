@@ -332,15 +332,15 @@ impl<'a> Checker<'a> {
             // of its own. Cheap substring pre-filter before the real
             // docblock::parse below - most documented methods declare no
             // `@template` at all, so this skips a real parse cost on every
-            // one (matching the pattern in `noop.rs`'s `@impure`/
-            // `@phpstan-impure` gate). Both spellings must be checked:
-            // `@phpstan-template*` is an alias `docblock::parse` treats
-            // identically to `@template*` - a filter checking only the bare
-            // spelling would silently stop catching it.
+            // one. Matched on the bare `template` substring rather than
+            // any one spelling: `docblock::parse` treats `@phpstan-`/
+            // `@psalm-`/`@phan-template*` identically to `@template*`, and
+            // a filter checking only some spellings would silently stop
+            // catching the rest.
             let has_own_template = f
                 .doc_comment
                 .as_deref()
-                .is_some_and(|d| d.contains("@template") || d.contains("@phpstan-template"));
+                .is_some_and(|d| d.contains("template"));
             if let Some(c) = class_name
                 && has_own_template
                 && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)

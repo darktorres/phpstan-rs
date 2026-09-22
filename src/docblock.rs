@@ -313,42 +313,164 @@ pub fn parse(raw: &str) -> DocBlock {
         }
     }
 
-    // PHPStan recognizes a `@phpstan-`-prefixed sibling of `@param`/
-    // `@return`/`@var`/`@template*`/`@extends`/`@implements` as a more
-    // precise, PHPStan-only override of the same information - meant to
-    // coexist with a plainer tag for non-PHPStan tooling (e.g. a native
-    // `@return` staying the loose `array` an IDE/other tools understand
-    // while `@phpstan-return list<T>` carries the precise generic type),
-    // not replace it outright. Two passes over the same tag list - plain tags
-    // first, then `@phpstan-*` ones with the prefix stripped, reusing the
-    // exact same per-tag logic - gives the override its right-to-win
-    // regardless of which one the docblock happens to write first.
+    // A prefixed sibling of a plain tag (`@phpstan-return list<T>` next to
+    // a looser `@return array`) is a more precise, tool-specific override
+    // of the same information, meant to coexist with the plain tag other
+    // tools understand. One pass per spelling, in real PHPStan's own
+    // `PhpDocNodeResolver` precedence order - plain, then `@phan-`, then
+    // `@psalm-`, then `@phpstan-` - with every later pass overwriting an
+    // earlier one through the exact same per-tag logic, gives the most
+    // specific spelling its right to win regardless of which one the
+    // docblock happens to write first.
     for line in &tag_lines {
         let Some(tag_body) = line.strip_prefix('@') else {
             continue;
         };
-        if tag_body.starts_with("phpstan-") {
+        if tag_body.starts_with("phpstan-")
+            || tag_body.starts_with("psalm-")
+            || tag_body.starts_with("phan-")
+        {
             continue;
         }
-        let mut parts = tag_body.splitn(2, char::is_whitespace);
-        let tag = parts.next().unwrap_or("");
-        let rest = parts.next().unwrap_or("").trim();
+        let (tag, rest) = split_tag(tag_body);
         apply_tag(&mut block, tag, rest);
     }
+    // The assert family is the one exception to "later spelling
+    // overwrites": `resolveAssertTags` takes the first prefix among
+    // `@phpstan`/`@psalm`/`@phan` that has any assert tag at all and
+    // ignores the rest, so `@psalm-`/`@phan-` asserts are collected aside
+    // and only used when nothing earlier in that order supplied one.
+    let mut foreign_asserts = [DocBlock::default(), DocBlock::default()];
+    for (prefix, asserts) in [("phan-", 1), ("psalm-", 0)] {
+        for line in &tag_lines {
+            let Some(tag_body) = line.strip_prefix('@').and_then(|b| b.strip_prefix(prefix)) else {
+                continue;
+            };
+            let (tag, rest) = split_tag(tag_body);
+            let Some(canonical) = foreign_tag_canonical_name(prefix, tag) else {
+                continue;
+            };
+            if foreign_tag_has_invalid_type(canonical, rest) {
+                continue;
+            }
+            if canonical.starts_with("assert") {
+                apply_tag(&mut foreign_asserts[asserts], canonical, rest);
+            } else {
+                apply_tag(&mut block, canonical, rest);
+            }
+        }
+    }
     for line in &tag_lines {
-        let Some(tag_body) = line.strip_prefix('@') else {
+        let Some(tag_body) = line
+            .strip_prefix('@')
+            .and_then(|b| b.strip_prefix("phpstan-"))
+        else {
             continue;
         };
-        let Some(tag_body) = tag_body.strip_prefix("phpstan-") else {
-            continue;
-        };
-        let mut parts = tag_body.splitn(2, char::is_whitespace);
-        let tag = parts.next().unwrap_or("");
-        let rest = parts.next().unwrap_or("").trim();
+        let (tag, rest) = split_tag(tag_body);
         apply_tag(&mut block, tag, rest);
+    }
+    let has_assert = |b: &DocBlock| {
+        !(b.assert.is_empty() && b.assert_if_true.is_empty() && b.assert_if_false.is_empty())
+    };
+    if !has_assert(&block)
+        && let Some(source) = foreign_asserts.into_iter().find(has_assert)
+    {
+        block.assert = source.assert;
+        block.assert_if_true = source.assert_if_true;
+        block.assert_if_false = source.assert_if_false;
     }
 
     block
+}
+
+fn split_tag(tag_body: &str) -> (&str, &str) {
+    let mut parts = tag_body.splitn(2, char::is_whitespace);
+    let tag = parts.next().unwrap_or("");
+    let rest = parts.next().unwrap_or("").trim();
+    (tag, rest)
+}
+
+/// The `apply_tag` name a `@psalm-`/`@phan-`-prefixed tag maps onto -
+/// exactly the spellings real PHPStan's `PhpDocNodeResolver` resolves,
+/// transcribed from its own per-tag lists. Anything else under those
+/// prefixes is Psalm/Phan-only vocabulary with no PHPStan meaning
+/// (`@psalm-suppress`, `@psalm-internal` - a namespace argument, not
+/// `@internal`'s no-argument form - `@psalm-mutation-free`, ...) and is
+/// skipped. `@psalm-readonly-allow-private-mutation`/`@psalm-allow-
+/// private-mutation` are deliberately not mapped: real PHPStan treats
+/// them as readonly *plus* a private-mutation exemption this project
+/// doesn't model, so mapping them to plain `readonly` would flag the
+/// very private writes the tag exists to allow. `@psalm-this-out`/
+/// `-self-out` aren't mapped because `apply_tag` has no self-out arm to
+/// map them onto yet.
+fn foreign_tag_canonical_name(prefix: &str, tag: &str) -> Option<&'static str> {
+    let canonical = match (prefix, tag) {
+        (_, "var") => "var",
+        (_, "param") => "param",
+        (_, "return") => "return",
+        (_, "method") => "method",
+        (_, "template") => "template",
+        (_, "type") => "type",
+        (_, "pure") => "pure",
+        (_, "immutable") => "immutable",
+        (_, "assert") => "assert",
+        (_, "assert-if-true") => "assert-if-true",
+        (_, "assert-if-false") => "assert-if-false",
+        ("phan-", "real-return") => "return",
+        ("phan-", "extends" | "inherits") => "extends",
+        ("phan-", "side-effect-free") => "pure",
+        ("phan-", "read-only") => "readonly",
+        ("psalm-", "template-covariant") => "template-covariant",
+        ("psalm-", "template-contravariant") => "template-contravariant",
+        ("psalm-", "param-out") => "param-out",
+        ("psalm-", "import-type") => "import-type",
+        ("psalm-", "require-extends") => "require-extends",
+        ("psalm-", "require-implements") => "require-implements",
+        ("psalm-", "inheritors") => "sealed",
+        ("psalm-", "readonly") => "readonly",
+        ("psalm-", "consistent-constructor") => "consistent-constructor",
+        _ => return None,
+    };
+    Some(canonical)
+}
+
+/// Real PHPStan skips a `@psalm-`-prefixed tag whose type it can't
+/// resolve (`PhpDocNodeResolver::shouldSkipType`), so Psalm-only type
+/// syntax degrades to "tag absent" - the plain tag still applies -
+/// instead of producing an error type. This project's nearest
+/// equivalent at the docblock layer is the tag's own type text failing
+/// to parse, applied to `@phan-` tags too since the same reasoning
+/// holds for Phan-only syntax.
+fn foreign_tag_has_invalid_type(canonical: &str, rest: &str) -> bool {
+    match canonical {
+        "var"
+        | "param"
+        | "param-out"
+        | "return"
+        | "method"
+        | "template"
+        | "template-covariant"
+        | "template-contravariant"
+        | "extends" => !phpdoc_grammar::parse_tag_rest(canonical, rest).1.is_empty(),
+        "type" | "require-extends" | "require-implements" | "sealed" => {
+            let remainder = if canonical == "type" {
+                rest.split_once(char::is_whitespace)
+                    .map_or("", |(_, r)| r.trim_start())
+                    .trim_start_matches('=')
+                    .trim_start()
+            } else {
+                rest
+            };
+            let (ty, _, errors) = phpdoc_grammar::parse_type_prefix(remainder);
+            ty.is_none() || !errors.is_empty()
+        }
+        "assert" | "assert-if-true" | "assert-if-false" => {
+            let (tag, errors) = parse_assert_tag(rest);
+            tag.is_none() || !errors.is_empty()
+        }
+        _ => false,
+    }
 }
 
 /// Extracts a PHPDoc-conventional `$name` token - the variable-name half
