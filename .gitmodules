@@ -52,3 +52,6 @@
 [submodule "vendor/phpstan-doctrine"]
 	path = vendor/phpstan-doctrine
 	url = https://github.com/phpstan/phpstan-doctrine.git
+[submodule "vendor/erp-web"]
+	path = vendor/erp-web
+	url = https://github.com/darktorres/erp-web.git
