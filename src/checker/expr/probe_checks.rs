@@ -5,7 +5,7 @@ use crate::checker::expr::ranges::{
 };
 use crate::checker::{
     Checker, Locals, array_value_type_for_key, is_superglobal, literal_string_key,
-    narrow_array_shape_by_key_presence,
+    narrow_array_shape_by_key_presence, narrowing_type_for_predicate, types_definitely_disjoint,
 };
 use crate::token::Span;
 use crate::types::Type;
@@ -504,5 +504,95 @@ impl<'a> Checker<'a> {
                 if outcome { "True" } else { "False" }
             ),
         );
+    }
+
+    /// Real PHPStan's own `Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`
+    /// (`ImpossibleCheckTypeHelper::getSpecifiedType`) - a single-argument
+    /// type-check call (`is_string($x)`, `is_int($x)`, ...) whose outcome
+    /// is already statically decided by its argument's own current type.
+    /// Deliberately scoped to exactly the `narrowing_type_for_predicate`
+    /// table this project's own narrowing engine already trusts for
+    /// these same functions (`checker/narrowing.rs`'s own `is_string`/
+    /// `is_int`/... dispatch) - real PHPStan's own helper additionally
+    /// reasons about `in_array()`, `method_exists()`, `assert()`, and a
+    /// handful of others via its own generic `TypeSpecifier` machinery
+    /// this project has no equivalent of; not attempted here, favoring a
+    /// false negative on those shapes over a wrong guess. Reuses the
+    /// exact same disjointness/subtyping primitives `assert.
+    /// impossibleType`/`.alreadyNarrowedType` already established for
+    /// the PHPDoc-tag version of this same idea (`types_definitely_
+    /// disjoint`, `registry.is_assignable`) - `types_definitely_disjoint`
+    /// only fires on a genuinely different scalar family (never a guess
+    /// between two object types), so `is_string((object) $x)` stays
+    /// silent rather than risking a wrong "always false".
+    ///
+    /// Deliberately not guarded on `loop_depth` the way
+    /// `check_constant_numeric_comparison` above is - that guard exists
+    /// specifically because a numeric *bound* read on one loop pass can
+    /// look tighter than it really is across later iterations (`$j < 3`
+    /// right after `$j = 0`). A type-*family* fact doesn't have that
+    /// failure mode: `Locals` convergence already unions every loop
+    /// body path's own facts before a post-loop condition ever sees
+    /// them, so a variable that's sometimes `string` and sometimes `int`
+    /// across iterations already reads back as `string|int` here, which
+    /// neither `types_definitely_disjoint` nor `is_assignable` treats as
+    /// decided.
+    pub(crate) fn check_impossible_type_check_call(
+        &mut self,
+        callee: &Expr,
+        args: &[Arg],
+        locals: &Locals,
+        is_exempt_last_condition: bool,
+        span: Span,
+        label: &str,
+    ) {
+        let ExprKind::Name(name) = &callee.kind else {
+            return;
+        };
+        let name = name.trim_start_matches('\\');
+        let Some(target_ty) = narrowing_type_for_predicate(name) else {
+            return;
+        };
+        let [single_arg] = args else {
+            return;
+        };
+        if single_arg.spread {
+            return;
+        }
+        // Deliberately plain `infer_expr` on the whole argument
+        // expression, not `narrowing_key`/`current_narrowed_type` (the
+        // mechanism `apply_narrowing`'s own predicate dispatch above
+        // uses) - that pair answers "what does the underlying container
+        // *key* alone currently narrow to," which is the wrong question
+        // here for a wrapping expression like `$page['k'] ?? null`: the
+        // key's own narrowed type is just the shape field's value type
+        // (`list<string>`, no `null` - an unsealed shape's "key absent"
+        // state isn't itself part of that `Type`), while the call's real
+        // argument value is the whole `?? null` expression, correctly
+        // `list<string>|null` under plain `infer_expr` - conflating the
+        // two produced a real false `function.alreadyNarrowedType` on
+        // exactly this shape during this check's own corpus-style
+        // regression pass.
+        let arg_ty = self.infer_expr(&single_arg.value, locals);
+        if matches!(arg_ty, Type::Mixed(_) | Type::Never) {
+            return;
+        }
+        if types_definitely_disjoint(&target_ty, &arg_ty) {
+            self.report(
+                label.to_string(),
+                format!("Call to function {name}() with {arg_ty} will always evaluate to false."),
+                span,
+                4,
+                "function.impossibleType",
+            );
+        } else if !is_exempt_last_condition && self.registry.is_assignable(&arg_ty, &target_ty) {
+            self.report(
+                label.to_string(),
+                format!("Call to function {name}() with {arg_ty} will always evaluate to true."),
+                span,
+                4,
+                "function.alreadyNarrowedType",
+            );
+        }
     }
 }

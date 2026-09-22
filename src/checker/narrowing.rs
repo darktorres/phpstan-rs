@@ -1517,7 +1517,7 @@ impl<'a> Checker<'a> {
 /// disjointness needs a `final`-class/no-subtype-relation check this
 /// primitive deliberately doesn't attempt), `Intersection`, `Callable`,
 /// `Accessory`, templates, and every pseudo-type.
-fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
+pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Union(members), _) => members.iter().all(|m| types_definitely_disjoint(m, b)),
         (_, Type::Union(members)) => members.iter().all(|m| types_definitely_disjoint(a, m)),

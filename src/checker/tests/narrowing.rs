@@ -378,12 +378,16 @@ fn is_scalar_narrows_to_the_four_scalar_types() {
 // `count()` on anything but `array|Countable` is a real PHP 8+
 // `TypeError`, so `is_countable` must narrow via
 // `narrowing_type_for_predicate` before a following `count()` call.
+// `array|null` (not a hardcoded `null` literal) - a provably-`null`
+// subject would now also be a genuine `function.impossibleType` finding
+// of its own (`is_countable(null)` is unconditionally `false`), which
+// isn't what this test means to exercise.
 #[test]
 fn is_countable_narrows_a_possibly_null_value_before_count() {
     let d = diagnostics_for(
         r#"<?php
-            function f(): int {
-                $tags = null;
+            /** @param array<int>|null $tags */
+            function f($tags): int {
                 if (is_countable($tags) and count($tags) > 1) {
                     return count($tags);
                 }
@@ -2241,10 +2245,13 @@ fn a_by_ref_out_param_defined_on_the_right_of_and_is_readable_afterward() {
     // `check_expr`'s `Binary(And, l, r)` arm must check `r` against the
     // real `locals`, not a clone that gets discarded once the
     // expression finishes, or this definition never reaches the real
-    // `locals` the enclosing `if`'s body sees.
+    // `locals` the enclosing `if`'s body sees. `mixed`, not `string` -
+    // an already-`string`-typed subject makes the `is_string` guard
+    // itself a genuine `function.alreadyNarrowedType` finding, which
+    // isn't what this test means to exercise.
     let d = diagnostics_for(
         r#"<?php
-            function f(string $subject): void {
+            function f(mixed $subject): void {
                 if (is_string($subject) and (bool) preg_match('/(\d+)/', $subject, $matches)) {
                     echo $matches[0];
                     echo $matches[1];

@@ -3829,6 +3829,56 @@ already-built `Closure`) is silently skipped, matching real PHPStan's
 own silent skip whenever its type-level resolution can't produce a
 confident `isCallable()` type either.
 
+**`function.alreadyNarrowedType`/`function.impossibleType` - a single-
+argument type-check call (`is_string($x)`, `is_int($x)`, ...) whose
+outcome is already statically decided by its argument's own current
+type** (real PHPStan's own `Rules/Comparison/
+ImpossibleCheckTypeFunctionCallRule.php`/`ImpossibleCheckTypeHelper`;
+found via a real-PHPStan-vs-phpstan-rs corpus diff against `piwigo16`,
+60 `function.alreadyNarrowedType` + 26 `function.impossibleType` hits on
+that corpus alone). Deliberately scoped to exactly the
+`narrowing_type_for_predicate` table this project's own narrowing engine
+already trusts for these same functions (`checker/narrowing/
+predicates.rs`) - real PHPStan's own helper additionally reasons about
+`in_array()`, `method_exists()`, and `assert()` via its own generic
+`TypeSpecifier` machinery this project has no equivalent of; not
+attempted here, favoring a false negative on those shapes over a wrong
+guess (see the residual note under "Newly identified gaps" > "Comparison"
+for that still-open slice). Reuses the exact same disjointness/subtyping
+primitives `assert.impossibleType`/`.alreadyNarrowedType` already
+established for the PHPDoc-tag version of this same idea
+(`types_definitely_disjoint`, `registry.is_assignable`) - both made
+`pub(crate)` and re-exported alongside `narrowing_type_for_predicate` for
+this new call site (`checker/expr/probe_checks.rs`'s new
+`check_impossible_type_check_call`, called once per `Call` expression
+right after its own arguments are checked). Honors the same "acts as an
+implicit else" `elseif`-with-no-trailing-`else` exemption `elseif.
+alwaysTrue` already has (`Checker::in_exempt_last_condition`, reused
+as-is, unmodified) - `alwaysTrue` only, never `alwaysFalse`, matching
+real PHPStan's own `reportAlwaysTrueInLastCondition: false` default.
+Deliberately reads the call argument's type via plain `infer_expr` on
+the whole argument expression, not the `narrowing_key`/
+`current_narrowed_type` pair `apply_narrowing`'s own predicate dispatch
+uses for actual narrowing - that pair answers "what does the underlying
+container *key* alone currently narrow to" (e.g. an array shape's
+optional-field value type, without `null` for the "key absent" case,
+which isn't itself part of that `Type`), the wrong question for a
+wrapping expression like `$page['k'] ?? null`, where the call's real
+argument value is the whole `??`-defaulted expression - conflating the
+two produced a real false `function.alreadyNarrowedType` on exactly this
+shape during this check's own regression pass, caught by an existing,
+unrelated array-shape fixture (`array_merge_preserves_a_shape_argument_
+when_the_other_argument_is_a_union`) rather than a test written for this
+check itself. Two more pre-existing fixtures had their own subject types
+loosened (a hardcoded `null` local to `array<int>|null`; a `string`
+parameter to `mixed`) once full-suite verification showed each one's
+own `is_string`/`is_countable` guard had *genuinely* become one of this
+check's own new, correct findings - not a bug in the new check, just an
+old fixture whose subject type happened to make its own guard clause
+provably redundant/impossible once something actually checked for that.
+7 new regression tests (`src/checker/tests/constant_conditions.rs`);
+full suite still green.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4349,20 +4399,14 @@ verified-absent-from-`src/`, previously-undocumented gaps.
   class). Cosmetic for a human reader, but would break exact-identifier
   matching against a real-PHPStan-generated baseline file for any
   `and`/`or`-spelled condition.
-- **`Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`**:
-  flags calling a type-check function (`is_string()`, `is_int()`,
-  `is_array()`, ...) whose outcome is already statically decided by the
-  argument's own inferred type - `function.alreadyNarrowedType` (the
-  check is always true, e.g. `is_int($x)` where `$x` is already known
-  `int`) and `function.impossibleType` (always false, e.g. `is_string($x)`
-  where `$x` is already known `int`). phpstan-rs has the PHPDoc-tag
-  analogue of this exact pair - `assert.alreadyNarrowedType`/
-  `.impossibleType` (`src/checker/narrowing.rs:1488-1499`, for
-  `@phpstan-assert`/`-if-true`/`-if-false` tag validity) - but nothing
-  wired to the far more commonly-hit plain-function-call case (108095
-  scoped diagnostics dominate the piwigo16 level-10 corpus overall, but
-  isolating this one rule alone: 60 `function.alreadyNarrowedType` + 26
-  `function.impossibleType` hits).
+- **`Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`**: the
+  `is_string()`/`is_int()`/... single-argument type-check-predicate slice
+  of this rule (`function.alreadyNarrowedType`/`.impossibleType`) is now
+  done, see Done's own entry under "Rule catalog (checker)". Still open:
+  real PHPStan's own additional reasoning for `in_array()`,
+  `method_exists()`, and `assert()` via its own generic `TypeSpecifier`
+  machinery this project has no equivalent of - not attempted alongside
+  the predicate-table slice.
 
 ## DeadCode
 

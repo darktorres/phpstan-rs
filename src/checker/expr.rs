@@ -687,6 +687,22 @@ impl<'a> Checker<'a> {
                         self.check_expr(&a.value, locals, label);
                     }
                 }
+                // `function.impossibleType`/`function.alreadyNarrowedType`
+                // - deliberately checked against every call regardless of
+                // `resolved_name`/`sig` (the same raw-callee-name shape
+                // `narrowing.rs`'s own `is_string`/`is_int`/... narrowing
+                // dispatch already keys off of, not this arm's own
+                // resolved/namespace-qualified name), since these are
+                // always-global builtin predicate names with no
+                // legitimate user override to resolve against.
+                self.check_impossible_type_check_call(
+                    callee,
+                    args,
+                    locals,
+                    is_exempt_last_condition,
+                    e.span,
+                    label,
+                );
                 if let Some(name) = &resolved_name {
                     if let Some(sig) = sig {
                         // This function's own throw contribution - tried

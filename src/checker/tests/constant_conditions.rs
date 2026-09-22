@@ -991,3 +991,106 @@ fn a_trait_condition_that_agrees_across_every_host_is_still_flagged() {
         "got: {d:?}"
     );
 }
+
+// `function.impossibleType`/`function.alreadyNarrowedType` - real
+// PHPStan's own `Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`,
+// scoped to the `is_string`/`is_int`/... predicate table this project's
+// own narrowing engine already trusts for these same functions.
+
+#[test]
+fn is_string_on_a_known_int_is_flagged_impossible() {
+    let d = diagnostics_for("<?php function f(int $x) { if (is_string($x)) { echo 1; } }");
+    assert!(
+        d.iter().any(|x| x.identifier == "function.impossibleType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn is_int_on_a_known_int_is_flagged_already_narrowed() {
+    let d = diagnostics_for("<?php function f(int $x) { if (is_int($x)) { echo 1; } }");
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "function.alreadyNarrowedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn is_string_on_a_mixed_argument_is_never_flagged() {
+    let d = diagnostics_for("<?php function f(mixed $x) { if (is_string($x)) { echo 1; } }");
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.impossibleType"
+            || x.identifier == "function.alreadyNarrowedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn is_string_on_a_union_that_could_go_either_way_is_never_flagged() {
+    let d = diagnostics_for("<?php function f(int|string $x) { if (is_string($x)) { echo 1; } }");
+    assert!(
+        !d.iter().any(|x| x.identifier == "function.impossibleType"
+            || x.identifier == "function.alreadyNarrowedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn is_object_on_an_enum_subject_is_flagged_already_narrowed() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; case B; }
+            function f(Status $s) {
+                if (is_object($s)) { echo 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "function.alreadyNarrowedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn already_narrowed_type_is_exempted_as_a_trailing_elseif_with_no_else() {
+    // Mirrors `elseif.alwaysTrue`'s own "acts as an implicit else" idiom
+    // exemption (`reportAlwaysTrueInLastCondition: false`) - `alwaysTrue`
+    // only, never `alwaysFalse`.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x) {
+                if ($x > 5) {
+                    echo 1;
+                } elseif (is_int($x)) {
+                    echo 2;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "function.alreadyNarrowedType"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn impossible_type_is_never_exempted_as_a_trailing_elseif() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x) {
+                if ($x > 5) {
+                    echo 1;
+                } elseif (is_string($x)) {
+                    echo 2;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "function.impossibleType"),
+        "got: {d:?}"
+    );
+}
