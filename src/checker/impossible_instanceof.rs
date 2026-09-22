@@ -24,7 +24,9 @@ impl<'a> Checker<'a> {
         is_exempt_last_condition: bool,
     ) {
         let expr_ty = self.infer_expr(inner, locals);
-        let name = match target {
+        // A dynamic `class-string<C>` target names `C` or any subclass of
+        // it, so only "never" carries over, or "always" when `C` is final.
+        let (class, only_subclass_known) = match target {
             InstanceofTarget::Expr(target_expr) => {
                 let target_ty = self.infer_expr(target_expr, locals);
                 if type_can_never_name_a_class(&target_ty) {
@@ -37,24 +39,39 @@ impl<'a> Checker<'a> {
                         0,
                         "instanceof.invalidExprType",
                     );
+                    return;
                 }
-                return;
+                match target_ty {
+                    Type::StringLiteral(name) => (name, false),
+                    Type::ClassString(inner_ty) => match *inner_ty {
+                        Type::Object(name, _) => (name, true),
+                        _ => return,
+                    },
+                    _ => return,
+                }
             }
-            InstanceofTarget::Name(name, _) => name,
+            InstanceofTarget::Name(name, _) => {
+                if name.eq_ignore_ascii_case("static") {
+                    return;
+                }
+                let Type::Object(class, _) = self.resolve_name_expr(name) else {
+                    return;
+                };
+                (class, false)
+            }
         };
-        if name.eq_ignore_ascii_case("static") {
-            return;
-        }
-        let Type::Object(class, _) = self.resolve_name_expr(name) else {
+        let Some((class, class_info)) = self.registry.lookup_class(class.trim_start_matches('\\'))
+        else {
             return;
         };
-        let Some((class, _)) = self.registry.lookup_class(&class) else {
-            return;
-        };
+        let class_is_final = class_info.is_final || class_info.kind == ClassKind::Enum;
         let class = class.to_string();
         let Some(always) = self.instanceof_verdict(&expr_ty, &class) else {
             return;
         };
+        if always && only_subclass_known && !class_is_final {
+            return;
+        }
         if always && is_exempt_last_condition {
             return;
         }

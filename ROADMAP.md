@@ -519,8 +519,10 @@ or abstract-prototype constructors) and
 `callable.notSupported`. `ImpossibleInstanceOfRule`
 (`instanceof.alwaysTrue`/`.alwaysFalse` from a registry-aware
 always/never/maybe verdict over the checked expression's type, the
-always-true half exempt as the last `elseif`; `instanceof.invalidExprType`
-for a dynamic target that can't name a class). A constant-condition
+always-true half exempt as the last `elseif`; a dynamic target typed as a
+class-name literal or `class-string<C>` decided too;
+`instanceof.invalidExprType` for a dynamic target that can't name a
+class). A constant-condition
 finding inside a trait is kept only when every using host reports it
 with the same verdict, matching `ConstantConditionInTraitRule`. `MissingMagicSerializationMethodsRule`
 (`class.serializable`, PHP 8.1+, anonymous classes included). A bodiless non-abstract method outside an interface

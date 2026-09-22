@@ -135,3 +135,44 @@ fn instanceof_in_a_trait_is_flagged_only_when_every_host_agrees() {
     );
     assert!(instanceof_findings(&d).is_empty(), "got: {d:?}");
 }
+
+#[test]
+fn dynamic_class_string_targets_are_decided_where_possible() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Base {}
+            class Child extends Base {}
+            final class Sealed {}
+            class Other {}
+            /**
+             * @param class-string<Base> $base
+             * @param class-string<Sealed> $sealed
+             */
+            function f(Other $o, Child $c, Sealed $s, string $base, string $sealed): void {
+                $lit = 'Other';
+                if ($o instanceof $lit) { echo 1; }
+                if ($o instanceof $base) { echo 2; }
+                if ($c instanceof $base) { echo 3; }
+                if ($s instanceof $sealed) { echo 4; }
+            }
+        "#,
+    );
+    assert_eq!(
+        instanceof_findings(&d),
+        vec![
+            (
+                "instanceof.alwaysTrue",
+                "Instanceof between Other and Other will always evaluate to true."
+            ),
+            (
+                "instanceof.alwaysFalse",
+                "Instanceof between Other and Base will always evaluate to false."
+            ),
+            (
+                "instanceof.alwaysTrue",
+                "Instanceof between Sealed and Sealed will always evaluate to true."
+            ),
+        ],
+        "got: {d:?}"
+    );
+}
