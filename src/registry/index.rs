@@ -189,7 +189,7 @@ impl Registry {
                     // vendored class - every other method/constant - the
                     // moment a targeted override's own bare `class Foo
                     // { public function bar() {} }` is indexed.
-                    if analyzed {
+                    if analyzed && !self.built_in_stub_classes.contains(&name) {
                         // An analyzed (first-party) file's class
                         // declaration is ground truth for whatever is
                         // actually being checked - it must always
@@ -198,6 +198,63 @@ impl Registry {
                         // with it the way two context-only declarations
                         // legitimately do above.
                         self.classes.insert(name, new_info);
+                    } else if self.built_in_stub_classes.contains(&name) {
+                        // The one exception to the rule just above: a
+                        // *built-in* stub name (`ArrayIterator`, ...)
+                        // this project already ships its own vendored,
+                        // authoritative `@template`-tagged declaration
+                        // for. An "unscoped" (`--no-composer`) run has no
+                        // analyzed/context split at all, so a real-world
+                        // third-party dev-tooling package that happens to
+                        // redeclare the same global PHP core class with
+                        // *less* information (real shape: a project's own
+                        // vendored `jetbrains/phpstorm-stubs` copy, itself
+                        // missing `@template` tags this project's own
+                        // vendored copy of the identical package has) is
+                        // `analyzed: true` there too - the same collision
+                        // an ordinary scoped run never even reaches, since
+                        // that dev-tooling package is never composer-
+                        // autoload-reachable as application code in the
+                        // first place. Merging (matching the `conditional`
+                        // built-in-stub-collision case above, and for the
+                        // identical reason) keeps this project's own more
+                        // authoritative `templates`/`extends`/
+                        // `implements`/`uses` rather than letting whatever
+                        // an accidentally-analyzed vendor package
+                        // declares silently discard them - members still
+                        // merge additively either way, so a real, legitimate
+                        // first-party override of one specific method still
+                        // works exactly as before.
+                        let existing = self
+                                .classes
+                                .remove(&name)
+                                .expect("name is in unconditionally_declared_classes, so it must already be indexed");
+                        let (
+                            extends,
+                            implements,
+                            uses,
+                            templates,
+                            extends_args,
+                            trait_aliases,
+                            implements_args,
+                        ) = (
+                            existing.extends.clone(),
+                            existing.implements.clone(),
+                            existing.uses.clone(),
+                            existing.templates.clone(),
+                            existing.extends_args.clone(),
+                            existing.trait_aliases.clone(),
+                            existing.implements_args.clone(),
+                        );
+                        let mut merged = existing.merge(new_info);
+                        merged.extends = extends;
+                        merged.implements = implements;
+                        merged.uses = uses;
+                        merged.templates = templates;
+                        merged.extends_args = extends_args;
+                        merged.trait_aliases = trait_aliases;
+                        merged.implements_args = implements_args;
+                        self.classes.insert(name, merged);
                     } else {
                         let existing = self
                                 .classes

@@ -32,6 +32,34 @@ fn generated_stub_classes_cover_real_built_in_classes() {
 }
 
 #[test]
+fn patch_spl_iterator_templates_gives_real_generic_spl_classes_their_missing_templates() {
+    // Confirmed directly against a real, installed `phpstan/phpstan`
+    // (not assumed): none of these carry `@template` tags in this
+    // project's own vendored phpstorm-stubs, yet real PHPStan resolves
+    // every one as generic with exactly this template list.
+    let classes = generated_stub_classes();
+    let by_name: std::collections::HashMap<&str, &Vec<std::sync::Arc<str>>> = classes
+        .iter()
+        .map(|(n, info)| (n.as_ref(), &info.templates))
+        .collect();
+    let expected: &[(&str, &[&str])] = &[
+        ("FilterIterator", &["TKey", "TValue", "TIterator"]),
+        ("RecursiveIterator", &["TKey", "TValue"]),
+        ("RegexIterator", &["TKey", "TValue", "TIterator"]),
+        ("RecursiveFilterIterator", &["TKey", "TValue", "TIterator"]),
+        ("RecursiveIteratorIterator", &["T"]),
+        ("RecursiveDirectoryIterator", &["TKey", "TValue"]),
+    ];
+    for (name, templates) in expected {
+        let got = by_name
+            .get(name)
+            .unwrap_or_else(|| panic!("{name} should be a known generated stub class"));
+        let got_names: Vec<&str> = got.iter().map(|t| t.as_ref()).collect();
+        assert_eq!(&got_names, templates, "{name}'s own template list");
+    }
+}
+
+#[test]
 fn generated_stub_classes_cover_real_phpstan_src_classes() {
     // vendor/phpstan-src's classes, chained in after phpstorm-stubs -
     // confirms PHPSTAN_SRC_SOURCES is actually wired in, not just

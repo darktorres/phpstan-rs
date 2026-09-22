@@ -552,6 +552,45 @@ fn a_stub_file_override_merges_onto_a_built_in_class_from_merge_stub_classes() {
     );
 }
 
+// The "unscoped" (`--no-composer`) verification mode drops the analyzed/
+// context split entirely, so a real-world third-party dev-tooling
+// package that happens to redeclare a global PHP core class with *less*
+// information (real shape: a project's own vendored `jetbrains/
+// phpstorm-stubs` copy, itself missing `@template` tags this project's
+// own vendored copy of the identical package has) gets indexed with
+// `analyzed: true` too - the same collision an ordinary scoped run never
+// reaches. Without this fix, that would silently discard the built-in
+// stub's own `templates`/`extends`/`implements`, wrongly making
+// `generics.notGeneric` fire on every real, generic use of the class.
+#[test]
+fn an_analyzed_files_redeclaration_of_a_built_in_stub_class_still_keeps_its_generics() {
+    let built_in = build_registry(
+            "<?php /** @template TKey\n * @template TValue\n */ class ArrayIterator implements SeekableIterator, ArrayAccess {}",
+        )
+        .classes
+        .remove("ArrayIterator")
+        .unwrap();
+    assert_eq!(built_in.templates, vec!["TKey".into(), "TValue".into()]);
+
+    let mut r = Registry::default();
+    r.merge_stub_classes(vec![("ArrayIterator".to_string(), built_in)]);
+
+    // A less-informed redeclaration (no `@template` tags at all), the
+    // same shape a vendored third-party stub package's own copy has -
+    // indexed as `analyzed: true`, matching the unscoped mode.
+    let tokens =
+        Lexer::new("<?php class ArrayIterator implements SeekableIterator, ArrayAccess {}")
+            .tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    r.index(&program, true);
+
+    assert_eq!(
+        r.classes["ArrayIterator"].templates,
+        vec!["TKey".into(), "TValue".into()],
+        "an analyzed re-declaration must not discard the built-in stub's own templates"
+    );
+}
+
 // A polyfill's conditional declaration (`if (PHP_VERSION_ID < 80400) {
 // final class ReflectionConstant { private $value; ... } }`) can collide
 // with a native-class stub for a newer PHP version's built-in of the

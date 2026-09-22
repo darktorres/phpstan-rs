@@ -70,6 +70,21 @@ pub(crate) const ITERABLE_GENERIC_CLASS_NAMES: [&str; 4] =
 pub(crate) const SYNTHETIC_GENERIC_CLASS_NAMES: [&str; 2] =
     ["ReflectionMethod", "ReflectionProperty"];
 
+/// `RecursiveDirectoryIterator` carries a real (not synthetic)
+/// `TKey`/`TValue` template pair once patched in
+/// (`php_stubs::patch_spl_iterator_templates`) - real PHPStan resolves it
+/// as generic too (confirmed: a mismatched `@extends` argument there
+/// triggers `generics.notCompatible`, which only fires past the
+/// `isGeneric()` gate), yet a real, installed `phpstan/phpstan` never
+/// flags a bare, untemplated reference to it with `missingType.generics`
+/// either - confirmed directly: the identical probe that flagged every
+/// other class `patch_spl_iterator_templates` patches left this one
+/// alone. An observed real-PHPStan leniency to mirror, not this
+/// project's own invention (unlike `SYNTHETIC_GENERIC_CLASS_NAMES`
+/// above).
+pub(crate) const MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_NAMES: [&str; 1] =
+    ["RecursiveDirectoryIterator"];
+
 /// Method names PHP (and real PHPStan's own `PhpMethodReflection::
 /// getReturnType`) give an implicit, non-`mixed` return type even when the
 /// source writes no `: T` hint at all. This project's `FunctionSig`
@@ -324,6 +339,7 @@ impl<'a> Checker<'a> {
                 }
                 if ITERABLE_GENERIC_CLASS_NAMES.contains(&name.as_str())
                     || SYNTHETIC_GENERIC_CLASS_NAMES.contains(&name.as_str())
+                    || MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_NAMES.contains(&name.as_str())
                 {
                     return;
                 }

@@ -621,6 +621,57 @@ fn patch_reflection_and_exception_list_types(classes: &mut [(Arc<str>, ClassInfo
     }
 }
 
+/// Six real SPL iterator classes real PHPStan resolves as generic that
+/// this project's own vendored `jetbrains/phpstorm-stubs` copy doesn't
+/// `@template`-tag at all - confirmed not a vendoring-freshness gap
+/// specific to this project's own pinned commit: a separately-installed,
+/// newer `jetbrains/phpstorm-stubs` release (a real target project's own
+/// `vendor/`) lacks the same tags on the same classes. Yet a real,
+/// installed `phpstan/phpstan` still resolves every one of them as
+/// generic - confirmed directly, not assumed: a bare, untyped parameter
+/// of each type triggers `missingType.generics` naming the exact
+/// template list used below (`RecursiveDirectoryIterator` alone left
+/// unflagged by that same probe - a real, observed leniency mirrored via
+/// `checker::missing_typehint::MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_
+/// NAMES`, not this project's own invention). Real PHPStan must get these
+/// from a separate, PHPStan-specific source this project doesn't
+/// otherwise ingest - synthesized here the same way `patch_reflection_
+/// method_and_property_templates` synthesizes `ReflectionMethod`/
+/// `ReflectionProperty`'s own templates just above.
+///
+/// Real corpus impact (Piwigo's own full unscoped, `--no-composer`
+/// verification run, which - unlike this project's real, production
+/// scoped `check-project` usage - has no analyzed/context split at all
+/// and so is the only mode that ever reaches a vendored dev-tooling
+/// package's own incomplete declaration of these): every one of the
+/// `generics.notGeneric` false positives these six classes caused is
+/// gone.
+fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
+    let shapes: &[(&str, &[&str])] = &[
+        ("FilterIterator", &["TKey", "TValue", "TIterator"]),
+        ("RecursiveIterator", &["TKey", "TValue"]),
+        ("RegexIterator", &["TKey", "TValue", "TIterator"]),
+        ("RecursiveFilterIterator", &["TKey", "TValue", "TIterator"]),
+        ("RecursiveIteratorIterator", &["T"]),
+        ("RecursiveDirectoryIterator", &["TKey", "TValue"]),
+    ];
+    for (class_name, template_names) in shapes {
+        let Some((_, info)) = classes
+            .iter_mut()
+            .find(|(name, _)| name.as_ref() == *class_name)
+        else {
+            continue;
+        };
+        if !info.templates.is_empty() {
+            continue;
+        }
+        info.templates = template_names
+            .iter()
+            .map(|t| Arc::<str>::from(*t))
+            .collect();
+    }
+}
+
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(Arc<str>, ClassInfo)> {
@@ -723,6 +774,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_reflection_class_constructor_template(&mut classes);
         patch_reflection_method_and_property_templates(&mut classes);
         patch_reflection_and_exception_list_types(&mut classes);
+        patch_spl_iterator_templates(&mut classes);
         GeneratedStubData {
             functions,
             classes,

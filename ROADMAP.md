@@ -4434,27 +4434,75 @@ including at the Latte stub's own real trigger case; a direct real,
 installed `vendor/bin/phpstan` probe (`ArrayObject::getIterator()`'s
 own `ArrayIterator<TKey, TValue>` return type, a different but related
 concern - see below) confirms real PHPStan doesn't flag it either, for
-an unrelated reason. One real, disclosed residual, found only by the
-*unscoped* (`--no-composer`) verification run, which deliberately
-drops the analyzed/context split to scan `vendor/` as ordinary code:
-several common SPL iterator classes (`ArrayIterator`, `RegexIterator`,
-`RecursiveIterator`, `RecursiveFilterIterator`, `FilterIterator`,
-`RecursiveIteratorIterator`, `RecursiveDirectoryIterator`) get parsed
-straight out of whatever third-party dev-tooling stub package (e.g.
-`jetbrains/phpstorm-stubs`) happens to be vendored, which doesn't
-`@template`-tag them the way real PHPStan's own internal, separately-
-bundled reflection stubber does (confirmed: the exact same
-`ArrayObject::getIterator()` case above produces zero errors from real,
-installed PHPStan) - a real gap in this project's own built-in SPL
-stub coverage (`php_stubs.rs` doesn't declare any of these classes at
-all today), not a defect in the check itself, and not reachable in
-this project's own real, production `check-project` usage (scoped
-mode) at all, confirmed by the zero-diff scoped run. The
-`Doctrine\ORM\Query`/`PhpParser\Node\Stmt\Expression`/`PhpBench\Data\
-DataFrames` findings in that same unscoped run are the identical
-pattern one level up (a downstream *tool* - `phpstan-doctrine`,
-Rector - assuming a *different* vendored package's class is generic
-without that class's own declaration saying so).
+an unrelated reason.
+
+The full Piwigo *unscoped* (`--no-composer`) run - which deliberately
+drops the analyzed/context split to scan `vendor/` as ordinary code -
+surfaced two further real, since-fixed bugs, plus one disclosed,
+genuinely narrow residual:
+
+- A real merge-precedence bug in `registry::index::insert_built_decl`,
+  not specific to this check: an "analyzed (first-party) file's
+  declaration always wins" rule, correct for a genuine first-party
+  override, wrongly also applied to an ordinary *third-party* file once
+  unscoped mode makes every file `analyzed: true` - silently discarding
+  this project's own correct, vendored, `@template`-tagged
+  `ArrayIterator` in favor of whatever a project's separately-installed
+  `jetbrains/phpstorm-stubs` copy says (confirmed: even a *newer*,
+  separately-installed community release, Piwigo's own, still lacks the
+  tag - not a version-freshness gap in this project's own vendored
+  copy). Fixed: a same-named collision against one of this project's own
+  known `built_in_stub_classes` now merges (keeping this project's own
+  `templates`/`extends`/`implements`/`uses`), mirroring the identical,
+  already-existing `conditional`-collision precedent just above, rather
+  than a blind overwrite - real, first-party overrides of one specific
+  method still work exactly as before.
+- Six real SPL iterator classes (`FilterIterator`, `RecursiveIterator`,
+  `RegexIterator`, `RecursiveFilterIterator`, `RecursiveIteratorIterator`,
+  `RecursiveDirectoryIterator`) whose `@template` tags are missing not
+  just from this project's own vendored `jetbrains/phpstorm-stubs`
+  commit but from a separately-installed, newer community release too -
+  yet a real, installed `phpstan/phpstan` still resolves every one as
+  generic (confirmed directly, not assumed: a bare, untyped parameter of
+  each type triggers `missingType.generics` naming the exact template
+  list `php_stubs::patch_spl_iterator_templates` now synthesizes, the
+  same way `patch_reflection_method_and_property_templates` already
+  synthesizes `ReflectionMethod`/`ReflectionProperty`'s own templates -
+  real PHPStan must get these from a separate, PHPStan-specific source
+  this project doesn't otherwise ingest). `RecursiveDirectoryIterator`
+  alone is also exempted from `missingType.generics` itself
+  (`checker::missing_typehint::MISSING_TYPEHINT_LENIENT_GENERIC_CLASS_
+  NAMES`), matching a real, observed PHPStan leniency the identical
+  probe surfaced (every other class flagged, this one didn't). Landing
+  real templates for these surfaced further genuine, parity-matching
+  findings in the same unscoped run (`missingType.generics` on
+  previously-untyped real uses; `generics.lessTypes` on Symfony
+  Finder's own `FilterIterator<TKey, TValue>` subclasses, missing the
+  3rd `TIterator` argument) - confirmed via the identical direct-probe
+  technique that real, installed PHPStan flags the exact same code the
+  exact same way, not a regression.
+- Genuinely narrow, disclosed residual, not chased further: a `Tokens<Token>`
+  reference to `friendsofphp/php-cs-fixer`'s own `PhpCsFixer\Tokenizer\
+  Tokens` (`@extends \SplFixedArray<Token>`, no `@template` of its own -
+  the identical "fixed concrete subclass" shape as `IntCollection
+  extends Collection<int>`, which correctly *does* get flagged) produces
+  zero errors from real PHPStan, while an otherwise-identical userland
+  reproduction (`IntCollection<int>`, `MyFixedInts extends
+  \SplFixedArray<int>`) confirms real PHPStan flags a *userland*-ancestor
+  case but not this internal-ancestor one - a narrow, real PHPStan-
+  internal reflection nuance specific to a subclass of a native/internal
+  generic class, not a pattern this project's own model has an
+  equivalent representation of. `Doctrine\ORM\Query`/
+  `PhpParser\Node\Stmt\Expression`/`PhpBench\Data\DataFrames` (a
+  handful of hits each) are the identical pattern one level up (a
+  downstream *tool* - `phpstan-doctrine`, Rector - assuming a *different*
+  vendored package's class is generic without that class's own
+  declaration saying so) - disclosed, not individually chased, matching
+  this project's own established unscoped-mode noise precedent.
+  `CachingIterator` (4 hits) is a correct, expected finding, not a
+  residual - real PHP's own `\CachingIterator` genuinely has no
+  `@template` anywhere, matching real PHPStan's own behavior too
+  (confirmed earlier via the Latte stub investigation above).
 
 Declined, each for a verified reason (both freshly re-verified against
 `vendor/phpstan-src` directly this session, not carried over
