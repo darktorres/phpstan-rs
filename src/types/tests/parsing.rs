@@ -28,6 +28,19 @@ fn a_union_containing_mixed_collapses_to_plain_mixed() {
 }
 
 #[test]
+fn a_leading_nullable_mark_on_mixed_still_collapses_to_plain_mixed() {
+    // A different code path from the pipe-separated `mixed|null` case
+    // just above: `?mixed`'s nullable prefix is stripped and re-wrapped
+    // around the already-parsed inner type at the very end of
+    // `parse_type_string`, after the pipe-union collapse above has
+    // already run - unconditionally re-wrapping with `Type::Null`
+    // regardless of what the inner type turned out to be, building
+    // `Union([Mixed, Null])` for this one shape with nothing to ever
+    // collapse it back down.
+    assert_eq!(parse_type_string("?mixed"), Type::Mixed(false));
+}
+
+#[test]
 fn an_ordinary_union_with_no_mixed_member_is_unaffected() {
     assert_eq!(
         parse_type_string("int|string"),

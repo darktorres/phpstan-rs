@@ -40,7 +40,7 @@ pub fn parse_type_string(raw: &str) -> Type {
         parse_type_atom(s)
     };
 
-    if nullable {
+    if nullable && ty != Type::Mixed(false) {
         Type::Union(vec![ty, Type::Null])
     } else {
         ty

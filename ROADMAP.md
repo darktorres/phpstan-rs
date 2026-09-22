@@ -1106,6 +1106,35 @@ unscoped corpus (zero new finding locations, 23 disappeared), the
 identical false-positive class across Symfony, Doctrine, Rector, and
 PHP-CS-Fixer.
 
+**A union containing `mixed` alongside other members wasn't collapsing
+to plain `mixed`.** Found via an erp-web corpus round: diagnostics
+printing un-simplified types verbatim (`null|string|mixed`) and 7
+false-positive `nullsafe.neverNull` firings on receivers like
+`T|mixed`/`mixed|mixed` (`mixed` already includes `null`, so "never
+null" should never fire once the union is properly collapsed). Two
+related gaps, both fixed: (1) `types::parse::parse_type_string`'s
+nullable-prefix handling (`?mixed`) unconditionally re-wrapped its
+already-parsed inner type in `Type::Union(vec![ty, Type::Null])` at the
+very end, after the function's own earlier pipe-union `mixed`-absorption
+check had already run and had no chance to see this later-constructed
+union - so `?mixed` built `Union([Mixed, Null])` with nothing left to
+collapse it; now skipped whenever the inner type is already `Mixed`. (2)
+`checker::type_union::union_types_impl`'s own fast path only ever
+checked whether a *bare* `Mixed` was one of the two immediate operands
+(`a == Type::Mixed(false) || b == Type::Mixed(false)`) - a `Mixed` that
+only surfaces once flattened out of an already-multi-member `Union`
+operand (exactly what (1) used to produce, and any other similarly-
+shaped construction that bypasses this function entirely) sailed
+straight through unexamined into the final assembled union. Fixed
+defensively, independent of (1): after flattening, if any member is
+`Mixed`, the whole union collapses. Verified with two regression tests -
+`a_leading_nullable_mark_on_mixed_still_collapses_to_plain_mixed`
+(`src/types/tests/parsing.rs`) for (1), and
+`union_types_collapses_a_mixed_member_reached_only_via_flattening`
+(`src/checker/tests/accessory_and_refinement_types.rs`) for (2), calling
+`union_types` directly with a pre-built `Mixed`-containing `Union`
+operand rather than relying on (1) to ever produce one again.
+
 ## Narrowing engine
 
 `instanceof`, equality/identity, `isset`/`??`/`??=` (including the
@@ -4696,13 +4725,14 @@ section used to carry:
 against `app`/`tests`/`database`, `php_version = "8.5"`; 2803 files
 checked, 2730 diagnostics, 1 parse-error skip).** Four genuine engine
 bugs found, independent of the Laravel-specific gap documented
-separately below - two now fixed, see Done's own `break`/`continue`-
-with-a-parenthesized-level entry under "Parser, lexer, AST" and "PHP
-8.2+ trait constants" entry under "Registry / symbol resolution": the
-original heredoc/dense-PCRE-braces hypothesis for the parse-error skip
-turned out to be a red herring once bisected down to a minimal repro;
-the real cause (`continue (2);` later in the same method) was unrelated
-to the heredoc entirely. Two smaller, separate findings from
+separately below - three now fixed, see Done's own `break`/`continue`-
+with-a-parenthesized-level entry under "Parser, lexer, AST", "PHP
+8.2+ trait constants" entry under "Registry / symbol resolution", and
+`mixed`-union-collapsing entry under "Type system": the original
+heredoc/dense-PCRE-braces hypothesis for the parse-error skip turned out
+to be a red herring once bisected down to a minimal repro; the real
+cause (`continue (2);` later in the same method) was unrelated to the
+heredoc entirely. Two smaller, separate findings from
 isolating that one: the skip diagnostic doesn't name which file was
 skipped in either the text or `--format json` output (isolating it took
 ~12 runs of binary-searching smaller directory subsets - it should
@@ -4711,14 +4741,19 @@ skip), and `Style.php` in the same directory (156 diagnostics, no skip)
 confirms the skip really was isolated to `Stylesheet.php` alone, not a
 directory-wide issue.
 
-Two still open (the trait-constant one is fixed - see Done's own "PHP
-8.2+ trait constants" entry under "Registry / symbol resolution"; the
-original hypothesis there, that `self::` resolution itself was at
-fault, was half right and half wrong - `current_class` was already
-correctly set to the composing class by `check_trait_methods`, but the
-trait's constants were never reachable through that class's registry
-entry to begin with, since `flatten_traits_one_pass` never merged
-`consts` the way it already merges `methods`/`properties`):
+One still open - three of the four are now fixed (the trait-constant
+one, see Done's own "PHP 8.2+ trait constants" entry under "Registry /
+symbol resolution" - the original hypothesis there, that `self::`
+resolution itself was at fault, was half right and half wrong:
+`current_class` was already correctly set to the composing class by
+`check_trait_methods`, but the trait's constants were never reachable
+through that class's registry entry to begin with, since
+`flatten_traits_one_pass` never merged `consts` the way it already
+merges `methods`/`properties`; and the `mixed`-union-normalization one,
+see Done's own entry under "Type system" - two related gaps, a real
+construction bug in `?mixed`'s own parsing plus a robustness gap in
+`union_types_impl` that let any similarly-shaped union slip through
+undetected):
 
 - **`shapeAccess.notFound` false-positives on a plain integer-keyed list
   built via `$arr[] = $x;` - 5 occurrences, apparent int/string key
@@ -4732,21 +4767,6 @@ entry to begin with, since `flatten_traits_one_pass` never merged
   other representation that doesn't compare equal) - needs tracing
   through wherever `$arr[] = ...`'s key-tracking and `$arr[0]`'s
   offset-lookup comparison diverge in representation.
-- **A union type containing `mixed` isn't collapsed to bare `mixed`** -
-  `mixed` absorbs every other union member by definition, so
-  `null|string|mixed` (observed verbatim in a diagnostic message,
-  `app/Data/Ponto/PontoFalhaLinhaData.php:72`) should always normalize to
-  plain `mixed`. Any diagnostic keyed off an un-normalized union like
-  this is suspect for the same reason - confirmed to also cause 7
-  `nullsafe.neverNull` false positives on receivers like
-  `App\Models\DexperienceRun|mixed`/`mixed|mixed`
-  (`app/Http/Controllers/Web/DexperienceWebController.php:216`,
-  `LegacyImportAdminController.php:49` - since a union containing `mixed`
-  already includes `null`, "never null" should never fire here), and
-  plausibly explains stray false positives elsewhere that weren't
-  individually traced back to it this round. Wherever this project
-  constructs/simplifies a `Type::Union`, it needs a `mixed`-absorption
-  rule alongside whatever normalization already exists.
 
 **Design question, not a bug**: `arrayValues.list` (26 occurrences, all
 in this corpus technically correct on inspection - e.g.

@@ -22,6 +22,32 @@ fn union_types_collapses_an_int_literal_into_an_already_present_int() {
     assert_eq!(union_types(Type::Int, Type::IntLiteral(0)), Type::Int);
 }
 
+#[test]
+fn union_types_collapses_a_mixed_member_reached_only_via_flattening() {
+    // The pre-existing fast path only catches a *bare* `Mixed` operand
+    // (`a == Type::Mixed(false) || b == Type::Mixed(false)`) - a `Mixed`
+    // that only shows up once a multi-member `Union` operand gets
+    // flattened into `members` (real shape: `?mixed`'s own
+    // `Union([Mixed, Null])` construction, `types/parse.rs`, before its
+    // own fix) sailed straight through into the final assembled union
+    // unexamined, instead of collapsing the whole thing to `mixed` the
+    // way it's vacuously equal to.
+    assert_eq!(
+        union_types(
+            Type::Union(vec![Type::String, Type::Mixed(false)]),
+            Type::Null
+        ),
+        Type::Mixed(false)
+    );
+    assert_eq!(
+        union_types(
+            Type::Null,
+            Type::Union(vec![Type::String, Type::Mixed(false)])
+        ),
+        Type::Mixed(false)
+    );
+}
+
 // The float-widening pitfall this fix deliberately avoids: `is_subtype
 // (IntLiteral(0), Float)` is `true` (PHP's int-to-float argument
 // coercion), but that's an *assignability* fact, not a "this value's

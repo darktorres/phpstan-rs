@@ -71,6 +71,24 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
             }
         }
     }
+    // Same `Mixed`-absorption the fast-path check above already gives a
+    // *bare* `Mixed` operand - here for a `Mixed` that only surfaces
+    // once flattened out of a multi-member `Union` operand (real shape:
+    // `?mixed`'s own union-with-`Null` construction, `types/parse.rs`'s
+    // `parse_type_string`, before its own analogous fix), which the
+    // fast-path's `a == Type::Mixed(false)`/`b == Type::Mixed(false)`
+    // checks never see since neither whole operand is bare `Mixed` -
+    // only one of its now-flattened members is. Without this, a
+    // `Mixed`-containing union merged with anything else keeps
+    // accumulating distinct members (`null|string|mixed`) instead of
+    // collapsing to the `mixed` it's vacuously equal to, both visibly
+    // (an unsimplified union in a diagnostic message) and functionally
+    // (`nullsafe.neverNull` false-firing on a `T|mixed` receiver, since
+    // `mixed` already includes `null` but a raw member scan for `Null`
+    // specifically wouldn't find it).
+    if members.contains(&Type::Mixed(false)) {
+        return Type::Mixed(false);
+    }
     // Drop a literal member whenever its exact base type is also present
     // in the same union - a ternary's two branches
     // (`is_string($x) ? $x : ''`) build exactly this shape,
