@@ -1524,16 +1524,34 @@ alone). Also extended the same arm-narrowing loop's exclusion side to
 cover every condition in a multi-condition arm (`1, 2 => ...`), not just
 a single-condition arm as before - both a correctness prerequisite for
 this check and a real precision improvement for every later arm/`default`
-body's own narrowing. Deliberately scoped away from the `match(true)`
-idiom (proving an arbitrary boolean-condition chain exhaustive needs
-real SAT-style reasoning this project's type system doesn't attempt) and
-from real PHPStan's own `UnhandledMatchError`-catch/`@throws`-tag
-exemptions (a disclosed narrower scope, not an oversight). Verified
-against an unbounded int subject (never flagged exhaustive by finitely
-many literals, matching real PHPStan), a `Mixed` subject (still flagged,
-also matching real PHPStan), and 8 regression tests covering enum/bool/
-default/nullable-enum/match(true) (`src/checker/tests/narrowing.rs`);
-full suite (4384 lib tests) still green.
+body's own narrowing. Also covers the `match(true)` idiom's own
+exhaustiveness: a new `condition_is_provably_true` helper checks the
+last arm's single condition against the accumulated narrowing from every
+earlier arm's own exclusion (snapshotted right before the last arm's own
+exclusion is applied), first via the existing `inferred_constant_condition`
+oracle and, for a comparison-operator condition (`inferred_constant_
+condition` deliberately skips those, deferring to the dedicated
+`smaller.alwaysTrue`-family machinery), falling back to the same
+`numeric_comparison_bounds`/`compare_range_outcome` pair that family
+already uses - no new SAT-style reasoning needed, this was a wiring gap,
+not a missing capability. Also honors real PHPStan's own
+`UnhandledMatchError`-catch/`@throws`-tag exemptions
+(`isUnhandledMatchErrorCaught`/`hasUnhandledMatchErrorThrowsTag` in the
+same rule file): two new `Checker` fields, `current_catch_types: Vec<Type>`
+(pushed/truncated around a `try` body in `check_try`, one entry per
+resolved `catch` type) and `current_declared_throws_type: Option<Type>`
+(set from the enclosing function/closure/arrow-fn's own `@throws` tag,
+saved/restored the same way `current_declared_return_type` already is),
+checked via one `registry.is_assignable`-based `match_unhandled_error_
+is_exempted` helper against `UnhandledMatchError` itself - covers both an
+exact catch and a broader `Throwable`-family catch, and doesn't exempt an
+unrelated catch type. Verified against an unbounded int subject (never
+flagged exhaustive by finitely many literals, matching real PHPStan), a
+`Mixed` subject (still flagged, also matching real PHPStan), and 13
+regression tests covering enum/bool/default/nullable-enum/match(true)
+exhaustive-and-non-exhaustive/catch-exact/catch-broader/catch-unrelated/
+`@throws`-tag (`src/checker/tests/narrowing.rs`); full suite (4384 lib
+tests) still green.
 
 ## Rule catalog (checker)
 

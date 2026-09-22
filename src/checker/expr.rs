@@ -2992,7 +2992,15 @@ impl<'a> Checker<'a> {
                 let mut accumulated = locals.clone();
                 let mut merged: Option<Locals> = None;
                 let mut result_types: Vec<Type> = Vec::new();
-                for (conds, result) in arms {
+                // Snapshotted right before the *last* arm's own condition
+                // gets excluded from `accumulated` below - `match.unhandled`'s
+                // own `match(true)` handling further down needs exactly
+                // this state (every *earlier* arm already proven false,
+                // but not yet this one) to ask "is the last arm's own
+                // condition already tautologically true from here."
+                let mut accumulated_before_last_arm = accumulated.clone();
+                let arms_count = arms.len();
+                for (i, (conds, result)) in arms.iter().enumerate() {
                     for c in conds {
                         self.check_expr(c, locals, label);
                     }
@@ -3003,6 +3011,9 @@ impl<'a> Checker<'a> {
                         Some(m) => merge_scopes(&m, &arm_locals),
                         None => arm_locals.clone(),
                     });
+                    if i == arms_count - 1 {
+                        accumulated_before_last_arm = accumulated.clone();
+                    }
                     if match_true {
                         if let [only_cond] = conds.as_slice() {
                             self.apply_narrowing(only_cond, &mut accumulated, false);
@@ -3014,57 +3025,93 @@ impl<'a> Checker<'a> {
                     }
                 }
                 // `match.unhandled` - real PHPStan's own `MatchExpressionRule`
-                // (`vendor/phpstan-src/src/Rules/Comparison/MatchExpressionRule.php:160-181`).
-                // A deliberately independent computation from `accumulated`
-                // above (which also carries every OTHER variable's own
-                // narrowing, threaded through for arm-BODY precision) -
-                // this re-derives `subject`'s own original type fresh and
-                // excludes every arm condition's own known-single-value
-                // type from it directly, so a bug in some unrelated
-                // narrowing fact can't accidentally suppress or misfire
-                // this diagnostic. `expand_enum_cases` first, since a
-                // plain enum-typed subject (`Type::Object(EnumClass, _)`,
-                // the overwhelmingly common real shape) has no case list
-                // of its own for `narrow_type_excluding` to filter against
-                // otherwise - only its already-`Union`-shaped form (every
-                // real case as its own member) lets that function's
-                // existing "filter out excluded members, `Never` once
-                // none remain" `Union` handling do the actual work. If
-                // anything is still left once every arm's condition has
-                // been excluded and there's no `default`, some real value
-                // would fall through to a runtime `UnhandledMatchError`.
-                // Scoped to the ordinary (non-`match(true)`) case only -
-                // proving a `match(true)` chain of arbitrary boolean
-                // conditions exhaustive would need real boolean-SAT-style
-                // reasoning this project's type system doesn't attempt,
-                // so it's left unchecked there rather than risk a false
-                // positive on a genuinely-exhaustive `$x < 0 => ...,
-                // $x >= 0 => ...` chain. Doesn't yet replicate real
-                // PHPStan's own `UnhandledMatchError`-catch/`@throws`-tag
-                // exemptions (`isUnhandledMatchErrorCaught`/
-                // `hasUnhandledMatchErrorThrowsTag`) - a disclosed,
-                // narrower scope for a first pass, not an oversight.
-                if default.is_none() && !match_true {
-                    let subject_ty = self.infer_expr(subject, locals);
-                    let mut remaining = self.expand_enum_cases(&subject_ty);
-                    for (conds, _) in arms.iter() {
-                        for c in conds {
-                            let cond_ty = self.infer_expr(c, locals);
-                            if is_known_single_value(&cond_ty) {
-                                remaining = narrow_type_excluding(&remaining, &cond_ty);
+                // (`vendor/phpstan-src/src/Rules/Comparison/MatchExpressionRule.php:160-181`),
+                // including both of its real exemptions (`isUnhandledMatchErrorCaught`/
+                // `hasUnhandledMatchErrorThrowsTag`, `match_unhandled_error_is_exempted`
+                // below) and its `match(true)` handling.
+                if default.is_none() && !self.match_unhandled_error_is_exempted() {
+                    if match_true {
+                        // Real PHPStan's own mechanism for this shape: a
+                        // `match(true)` chain is exhaustive exactly when
+                        // its *last* arm's own condition is already
+                        // tautologically true given every earlier arm's
+                        // condition having been false
+                        // (`$nextArmIsDeadForType` staying true through
+                        // the last arm, `MatchExpressionRule.php:90-92`)
+                        // - ordinary narrowing already proves this the
+                        // same way it already proves any other condition
+                        // constant (`condition_is_provably_true`'s own
+                        // doc comment), no boolean-SAT solving needed for
+                        // it - only a single-condition last arm is
+                        // attempted here (a multi-condition last arm's
+                        // own OR-combined exhaustiveness isn't), matching
+                        // this same arm's own narrowing-loop exemption
+                        // just above.
+                        let last_is_exhaustive = arms.last().is_some_and(|(conds, _)| {
+                            matches!(conds.as_slice(), [only_cond]
+                                if self.condition_is_provably_true(only_cond, &accumulated_before_last_arm))
+                        });
+                        if !last_is_exhaustive {
+                            // `$matchCondition` is the literal `true` -
+                            // real PHPStan's own `$remainingType` for
+                            // this shape is always just that same
+                            // constant (narrowing doesn't apply to a
+                            // literal), so its message is this same
+                            // degenerate-but-accurate "true" regardless
+                            // of which arm(s) are actually unhandled.
+                            self.report(
+                                label.to_string(),
+                                "Match expression does not handle remaining value: true"
+                                    .to_string(),
+                                e.span,
+                                4,
+                                "match.unhandled",
+                            );
+                        }
+                    } else {
+                        // A deliberately independent computation from
+                        // `accumulated` above (which also carries every
+                        // OTHER variable's own narrowing, threaded
+                        // through for arm-BODY precision) - this
+                        // re-derives `subject`'s own original type fresh
+                        // and excludes every arm condition's own known-
+                        // single-value type from it directly, so a bug
+                        // in some unrelated narrowing fact can't
+                        // accidentally suppress or misfire this
+                        // diagnostic. `expand_enum_cases` first, since a
+                        // plain enum-typed subject (`Type::Object(EnumClass,
+                        // _)`, the overwhelmingly common real shape) has
+                        // no case list of its own for `narrow_type_
+                        // excluding` to filter against otherwise - only
+                        // its already-`Union`-shaped form (every real
+                        // case as its own member) lets that function's
+                        // existing "filter out excluded members, `Never`
+                        // once none remain" `Union` handling do the
+                        // actual work. If anything is still left once
+                        // every arm's condition has been excluded and
+                        // there's no `default`, some real value would
+                        // fall through to a runtime `UnhandledMatchError`.
+                        let subject_ty = self.infer_expr(subject, locals);
+                        let mut remaining = self.expand_enum_cases(&subject_ty);
+                        for (conds, _) in arms.iter() {
+                            for c in conds {
+                                let cond_ty = self.infer_expr(c, locals);
+                                if is_known_single_value(&cond_ty) {
+                                    remaining = narrow_type_excluding(&remaining, &cond_ty);
+                                }
                             }
                         }
-                    }
-                    if remaining != Type::Never {
-                        self.report(
-                            label.to_string(),
-                            format!(
-                                "Match expression does not handle remaining value: {remaining}"
-                            ),
-                            e.span,
-                            4,
-                            "match.unhandled",
-                        );
+                        if remaining != Type::Never {
+                            self.report(
+                                label.to_string(),
+                                format!(
+                                    "Match expression does not handle remaining value: {remaining}"
+                                ),
+                                e.span,
+                                4,
+                                "match.unhandled",
+                            );
+                        }
                     }
                 }
                 if let Some(d) = default {
@@ -3327,6 +3374,13 @@ impl<'a> Checker<'a> {
                         Some(c) => self.resolve_pseudo(t, c),
                         None => t.clone(),
                     });
+                // A closure is a genuinely separate callable with its
+                // own `@throws` contract, independent of whatever the
+                // *enclosing* function declares - cleared, not
+                // inherited, same reasoning as every other
+                // `current_function_*` field already cleared just below
+                // for this same arm.
+                let previous_declared_throws_type = self.current_declared_throws_type.take();
                 let previous_goto_targets = std::mem::replace(
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
@@ -3426,6 +3480,7 @@ impl<'a> Checker<'a> {
                 );
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
+                self.current_declared_throws_type = previous_declared_throws_type;
                 self.current_function_throw_points = previous_throw_points;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
@@ -3558,6 +3613,7 @@ impl<'a> Checker<'a> {
                         None => t.clone(),
                     });
                 // Same reasoning as the `Closure` arm above.
+                let previous_declared_throws_type = self.current_declared_throws_type.take();
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_unannotated_call =
                     std::mem::take(&mut self.current_function_has_unannotated_call);
@@ -3580,6 +3636,7 @@ impl<'a> Checker<'a> {
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 self.current_function_is_generator = previous_generator_flag;
                 self.current_declared_return_type = previous_declared_return_type;
+                self.current_declared_throws_type = previous_declared_throws_type;
                 self.current_function_throw_points = previous_throw_points;
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
@@ -5471,6 +5528,76 @@ impl<'a> Checker<'a> {
                 .reduce(|a, b| merge_scopes(&a, &b))
                 .unwrap_or_else(|| base.clone()),
         }
+    }
+
+    /// `match.unhandled`'s own two real exemptions, mirroring real
+    /// PHPStan's `isUnhandledMatchErrorCaught`/`hasUnhandledMatchErrorThrowsTag`
+    /// exactly: a `match` with no case for the value it's given isn't
+    /// actually unsound when the resulting `UnhandledMatchError` is
+    /// either already caught by an enclosing `try` (`current_catch_types`,
+    /// pushed/popped around a `try`'s own protected region in
+    /// `check_try`) or already covered by the enclosing function's own
+    /// declared `@throws` (`current_declared_throws_type`) - both real,
+    /// if rare, ways to make the "your `match` might throw" fact this
+    /// check exists for already an explicit, handled part of the
+    /// contract rather than a silent runtime surprise. `is_assignable`
+    /// (not a plain class-name string comparison) so a broader catch/
+    /// `@throws` type - `\Throwable`, `\Error`, or a real union
+    /// containing either - counts too, not just the exact
+    /// `UnhandledMatchError` class name.
+    fn match_unhandled_error_is_exempted(&self) -> bool {
+        let unhandled_match_error = Type::Object("UnhandledMatchError".to_string(), Vec::new());
+        self.current_catch_types
+            .iter()
+            .any(|caught| self.registry.is_assignable(&unhandled_match_error, caught))
+            || self
+                .current_declared_throws_type
+                .as_ref()
+                .is_some_and(|declared| {
+                    self.registry
+                        .is_assignable(&unhandled_match_error, declared)
+                })
+    }
+
+    /// `match(true)`'s own "is this condition provably true" oracle for
+    /// `match.unhandled`'s last-arm exhaustiveness check just above -
+    /// `inferred_constant_condition` alone isn't enough, since it
+    /// deliberately *defers* a comparison-operator condition to that
+    /// family's own dedicated always-true/false check
+    /// (`should_skip_constant_condition`'s own doc comment,
+    /// `control_flow/boolean_conditions.rs`) rather than resolving it
+    /// generically - confirmed via a real `if ($x > 5) {} elseif ($x <=
+    /// 5) {}` chain already correctly flagging `smallerOrEqual.alwaysTrue`,
+    /// proving the *narrowing* itself was never the gap, only which
+    /// function this check called to read it. Reaches for that same
+    /// dedicated machinery directly (`compare_range_outcome`/
+    /// `numeric_comparison_bounds`, already used by `check_constant_
+    /// numeric_comparison` to report `smaller.alwaysTrue`/`greater.
+    /// alwaysFalse`/etc.) as a plain predicate instead of that
+    /// function's own side-effecting report. Scoped to the same four
+    /// ordering operators that family covers - an `==`/`===`/
+    /// `instanceof`/`&&`/`||` condition (all also skipped by
+    /// `inferred_constant_condition`) isn't attempted here yet, each
+    /// with its own separate dedicated-check family this could equally
+    /// reach into later.
+    fn condition_is_provably_true(&self, e: &Expr, locals: &Locals) -> bool {
+        if self.inferred_constant_condition(e, locals) == Some(true) {
+            return true;
+        }
+        let ExprKind::Binary(op @ (BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq), l, r) =
+            &e.kind
+        else {
+            return false;
+        };
+        let l_ty = self.infer_expr(l, locals);
+        let r_ty = self.infer_expr(r, locals);
+        let Some(l_bounds) = numeric_comparison_bounds(&l_ty) else {
+            return false;
+        };
+        let Some(r_bounds) = numeric_comparison_bounds(&r_ty) else {
+            return false;
+        };
+        compare_range_outcome(op, l_bounds, r_bounds) == Some(true)
     }
 
     /// `match.unhandled`'s own case-expansion step: a plain enum-typed

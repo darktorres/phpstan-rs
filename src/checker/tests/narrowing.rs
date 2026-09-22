@@ -3400,18 +3400,121 @@ fn match_unhandled_flags_an_unbounded_int_subject_covered_by_finitely_many_liter
 }
 
 #[test]
-fn match_unhandled_is_never_checked_for_the_match_true_idiom() {
-    // Proving a `match(true)` chain of arbitrary boolean conditions
-    // exhaustive would need real boolean-SAT-style reasoning this
-    // project's type system doesn't attempt - deliberately unchecked
-    // rather than risk a false positive on a genuinely-exhaustive
-    // `$x < 0 => ..., $x >= 0 => ...` chain.
+fn match_unhandled_proves_a_match_true_idiom_exhaustive_via_range_narrowing() {
+    // Real PHPStan's own mechanism for this shape: the *last* arm's own
+    // condition, narrowed by every earlier arm having been false, is
+    // already tautologically true - ordinary int-range narrowing
+    // (`condition_is_provably_true`, the same machinery an ordinary
+    // `if ($x > 5) {} elseif ($x <= 5) {}` chain already uses to report
+    // `smallerOrEqual.alwaysTrue`) proves this directly, no boolean-SAT
+    // solving needed.
     let d = diagnostics_for(
         r#"<?php
             function f(int $x): string {
                 return match (true) {
                     $x > 5 => "big",
                     $x <= 5 => "small",
+                };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_still_flags_a_genuinely_non_exhaustive_match_true_idiom() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $x): string {
+                return match (true) {
+                    $x > 5 => "big",
+                    $x > 10 => "bigger",
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "match.unhandled"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_exempted_when_wrapped_in_a_try_catching_unhandled_match_error() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $n): string {
+                try {
+                    return match ($n) {
+                        1 => "one",
+                    };
+                } catch (\UnhandledMatchError $e) {
+                    return "caught";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_exempted_when_caught_via_a_broader_throwable_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $n): string {
+                try {
+                    return match ($n) {
+                        1 => "one",
+                    };
+                } catch (\Throwable $e) {
+                    return "caught";
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "match.unhandled"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_never_exempted_by_an_unrelated_catch_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $n): string {
+                try {
+                    return match ($n) {
+                        1 => "one",
+                    };
+                } catch (\RuntimeException $e) {
+                    return "caught";
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "match.unhandled"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn match_unhandled_is_exempted_by_an_enclosing_throws_tag() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @throws \UnhandledMatchError
+             */
+            function f(int $n): string {
+                return match ($n) {
+                    1 => "one",
                 };
             }
         "#,

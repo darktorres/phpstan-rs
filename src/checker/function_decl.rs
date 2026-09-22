@@ -902,6 +902,8 @@ impl<'a> Checker<'a> {
                 Some(c) => self.resolve_pseudo(t, c),
                 None => t.clone(),
             });
+        let previous_declared_throws_type = self.current_declared_throws_type.take();
+        self.current_declared_throws_type = sig.and_then(|s| s.throws.clone());
         let previous_goto_targets = std::mem::replace(
             &mut self.current_function_goto_targets,
             collect_goto_targets(&f.body),
@@ -1180,6 +1182,7 @@ impl<'a> Checker<'a> {
         self.saw_dynamic_var_construct = previous_dynamic_flag;
         self.current_function_is_generator = previous_generator_flag;
         self.current_declared_return_type = previous_declared_return_type;
+        self.current_declared_throws_type = previous_declared_throws_type;
         self.current_function_throw_points = previous_throw_points;
         self.current_function_has_unannotated_call = previous_unannotated_call;
         self.current_function_explicit_throw_points = previous_explicit_throw_points;

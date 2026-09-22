@@ -701,6 +701,30 @@ pub struct Checker<'a> {
     // Consulted by `ExprKind::Yield`/`YieldFrom` to resolve `yield`'s
     // TSend and `yield from`'s TReturn via `generator_template_param`.
     pub(crate) current_declared_return_type: Option<Type>,
+    // The enclosing function/method's own resolved `@throws` type, if
+    // it declares one - set/restored at the same choke point as
+    // `current_declared_return_type`, cleared (not inherited) for a
+    // nested closure/arrow-fn body the same way that field's own
+    // sibling `current_function_*` fields already are, since a real
+    // `@throws` tag on the *enclosing* declaration says nothing about
+    // what a closure declared inside it is allowed to throw - a
+    // genuinely separate callable with its own contract. Consulted by
+    // `match.unhandled`'s own real PHPStan `hasUnhandledMatchErrorThrowsTag`
+    // exemption - a `match` with no handler for `UnhandledMatchError`
+    // is not itself unsound when the enclosing function already
+    // declares it may throw one.
+    pub(crate) current_declared_throws_type: Option<Type>,
+    // Every currently-enclosing `try` block's own resolved catch types,
+    // flattened across however many `try`s the current statement is
+    // lexically nested inside (pushed in `check_try` before its own
+    // `check_block` call, truncated back after) - real PHPStan's own
+    // `isUnhandledMatchErrorCaught` exemption for `match.unhandled`,
+    // but computed eagerly at `catch` position rather than by walking
+    // `TryCatchTypeVisitor`'s own attribute afterward, since this
+    // checker's `match.unhandled` check runs inline during the same
+    // single-pass body walk a real `try` block's protected region is
+    // already checked under.
+    pub(crate) current_catch_types: Vec<Type>,
     // Every real throw point recorded so far inside the enclosing
     // function/method/closure body - an explicit `throw` expression's
     // thrown-value type, or a call's resolved `@throws` type (a matching
@@ -1225,6 +1249,8 @@ impl<'a> Checker<'a> {
             saw_dynamic_var_construct: false,
             current_function_is_generator: false,
             current_declared_return_type: None,
+            current_declared_throws_type: None,
+            current_catch_types: Vec::new(),
             current_function_throw_points: Vec::new(),
             current_function_has_unannotated_call: false,
             current_function_explicit_throw_points: Vec::new(),

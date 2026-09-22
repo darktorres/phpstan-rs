@@ -30,7 +30,26 @@ impl<'a> Checker<'a> {
         // try/catch's own normal-completion state right before
         // `finally` runs, rather than trusting only the latter.
         let pre_try_locals = locals.clone();
+        // `match.unhandled`'s own real PHPStan `isUnhandledMatchErrorCaught`
+        // exemption - pushed before the protected region's own body is
+        // checked (so a `match` expression anywhere inside it, at any
+        // nesting depth, can see every currently-enclosing `try`'s own
+        // catch types), truncated back right after, mirroring this same
+        // function's own later `previously_caught`/`class_name_exists`
+        // per-catch-type resolution (a malformed/unresolvable catch type
+        // is simply skipped here too, not guessed at).
+        let catch_types_mark = self.current_catch_types.len();
+        let new_catch_types: Vec<Type> = catches
+            .iter()
+            .flat_map(|c| &c.types)
+            .filter_map(|t| match self.resolve_name_expr(t) {
+                obj @ Type::Object(..) => Some(obj),
+                _ => None,
+            })
+            .collect();
+        self.current_catch_types.extend(new_catch_types);
         self.check_block(body, locals, declared_return, label);
+        self.current_catch_types.truncate(catch_types_mark);
         let try_end_locals = locals.clone();
         let try_terminates = body
             .last()
