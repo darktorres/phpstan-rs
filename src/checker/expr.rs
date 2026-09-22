@@ -219,8 +219,34 @@ impl<'a> Checker<'a> {
             .unwrap_or(Type::Mixed)
     }
 
-    #[hotpath::measure]
+    /// Thin wrapper over `check_expr_impl` - the real work - so every
+    /// external `rule::Rule` registered via `Checker::set_external_rules`
+    /// still fires at every recursion depth without each of
+    /// `check_expr_impl`'s own many internal `self.check_expr(...)`
+    /// recursive calls needing to know about rule dispatch at all (see
+    /// `rule`'s own module doc comment).
     pub(crate) fn check_expr(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
+        let ty = self.check_expr_impl(e, locals, label);
+        if !self.external_rules.is_empty() {
+            self.dispatch_expr_rules(e, locals, label, &ty);
+        }
+        ty
+    }
+
+    fn dispatch_expr_rules(&mut self, e: &Expr, locals: &Locals, label: &str, ty: &Type) {
+        let rules = self.external_rules;
+        let mut found = Vec::new();
+        for rule in rules {
+            if rule.wants_expr(&e.kind) {
+                let scope = crate::rule::Scope::new(self, locals, label);
+                found.extend(rule.check_expr(&scope, e, ty));
+            }
+        }
+        self.diagnostics.extend(found);
+    }
+
+    #[hotpath::measure]
+    fn check_expr_impl(&mut self, e: &Expr, locals: &mut Locals, label: &str) -> Type {
         // See `Checker::in_bare_statement_position`'s doc comment - taken,
         // not just read, so it reads `true` only for the exact top-level
         // expression `StmtKind::Expression` set it for, never for

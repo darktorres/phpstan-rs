@@ -882,6 +882,14 @@ pub struct Checker<'a> {
     // see `set_facts_only`'s own doc comment for why this exists and what
     // stays unconditional regardless.
     pub(crate) facts_only: bool,
+    // Every externally-registered `rule::Rule`, dispatched from
+    // `check_expr`/`check_stmt`'s own thin wrappers - see `set_
+    // external_rules`'s own doc comment. Empty (the default for every
+    // one of this project's own ~31 `Checker::new` call sites, none of
+    // which needs to know this mechanism exists at all) skips dispatch
+    // entirely via the `is_empty()` guard at each of those two call
+    // sites, so this costs nothing when unused.
+    pub(crate) external_rules: &'a [Box<dyn crate::rule::Rule>],
     // One frame per currently-open loop or switch, collecting
     // the `locals` snapshot at every `break` reached inside it - a stack,
     // since loops/switches nest. `StmtKind::Foreach`/`While`/`For`/
@@ -1219,6 +1227,7 @@ impl<'a> Checker<'a> {
             renamed_parameter_override_facts: Vec::new(),
             cross_file_property_assign_facts: None,
             facts_only: false,
+            external_rules: &[],
             loop_break_states: Vec::new(),
             loop_continue_states: Vec::new(),
             loop_depth: 0,
@@ -1326,6 +1335,19 @@ impl<'a> Checker<'a> {
     /// resolution) always stay unconditional, in both modes.
     pub fn set_facts_only(&mut self, facts_only: bool) {
         self.facts_only = facts_only;
+    }
+
+    /// Registers every third-party `rule::Rule` this `Checker` should
+    /// dispatch to, mid-analysis, from `check_expr`/`check_stmt`'s own
+    /// thin wrappers - real PHPStan's own `Rule<TNodeType>` equivalent
+    /// (`rule`'s own module doc comment has the full picture). An
+    /// embedder calls this once, right after `Checker::new` and before
+    /// `check_program`, with a `rules` slice that outlives this
+    /// `Checker` - compile-time-registered, same-binary rules, not
+    /// dynamically loaded ones (no stable Rust ABI exists for that
+    /// without a large separate FFI project).
+    pub fn set_external_rules(&mut self, rules: &'a [Box<dyn crate::rule::Rule>]) {
+        self.external_rules = rules;
     }
 
     /// This run's own `property_assign_facts` - the collect half of the

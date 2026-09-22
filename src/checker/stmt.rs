@@ -77,8 +77,36 @@ impl<'a> Checker<'a> {
         }
     }
 
-    #[hotpath::measure]
+    /// Thin wrapper over `check_stmt_impl` - see `check_expr`'s own
+    /// identically-shaped wrapper (`checker/expr.rs`) for the full
+    /// reasoning.
     pub(crate) fn check_stmt(
+        &mut self,
+        stmt: &Stmt,
+        locals: &mut Locals,
+        declared_return: Option<&Type>,
+        label: &str,
+    ) {
+        self.check_stmt_impl(stmt, locals, declared_return, label);
+        if !self.external_rules.is_empty() {
+            self.dispatch_stmt_rules(stmt, locals, label);
+        }
+    }
+
+    fn dispatch_stmt_rules(&mut self, stmt: &Stmt, locals: &Locals, label: &str) {
+        let rules = self.external_rules;
+        let mut found = Vec::new();
+        for rule in rules {
+            if rule.wants_stmt(&stmt.kind) {
+                let scope = crate::rule::Scope::new(self, locals, label);
+                found.extend(rule.check_stmt(&scope, stmt));
+            }
+        }
+        self.diagnostics.extend(found);
+    }
+
+    #[hotpath::measure]
+    fn check_stmt_impl(
         &mut self,
         stmt: &Stmt,
         locals: &mut Locals,
