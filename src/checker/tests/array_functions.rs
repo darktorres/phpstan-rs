@@ -2883,3 +2883,52 @@ fn array_flip_on_a_shape_lets_a_later_duplicate_value_win() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn array_arguments_that_are_implicitly_cast_must_hold_castable_values() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Plain {}
+            class Named { public function __toString(): string { return ''; } }
+            /**
+             * @param list<array<int>> $nested
+             * @param list<Plain> $plains
+             * @param list<Named> $named
+             * @param list<int> $ints
+             */
+            function f(array $nested, array $plains, array $named, array $ints): void {
+                implode(',', $nested);
+                implode(',', $named);
+                implode($ints);
+                array_sum($nested);
+                array_sum($ints);
+                array_diff($ints, $plains);
+                array_combine($plains, $ints);
+                array_unique($plains);
+                sort($plains);
+                sort($plains, SORT_NUMERIC);
+                sort($named, SORT_STRING);
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| {
+            x.identifier == "argument.type"
+                && (x.message.contains("castable") || x.message.contains("array<string>"))
+        })
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Parameter #2 $array of function implode expects array<string>, list<array<(int|string), int>> given.",
+            "Parameter #1 $array of function array_sum expects an array of values castable to number, list<array<(int|string), int>> given.",
+            "Parameter #2 $arrays of function array_diff expects an array of values castable to string, list<Plain> given.",
+            "Parameter #1 $keys of function array_combine expects an array of values castable to string, list<Plain> given.",
+            "Parameter #1 $array of function array_unique expects an array of values castable to string, list<Plain> given.",
+            "Parameter #1 $array of function sort expects an array of values castable to float, list<Plain> given.",
+        ],
+        "got: {d:?}"
+    );
+}

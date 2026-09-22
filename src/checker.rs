@@ -1156,6 +1156,7 @@ mod assignment;
 mod by_ref_params;
 mod callable_values;
 mod calls;
+mod castable_arguments;
 mod coercion;
 mod control_flow;
 mod date_interval;

@@ -561,7 +561,10 @@ one, and closures with a native return type are checked. `CallCallablesRule`'s
 remainder: invoking a value that names a function or method (`'strlen'`,
 `'Foo::bar'`, `[$obj, 'method']`, `['Foo', 'bar']`, an `__invoke`
 object) checks the resolved signature's arity and argument types, plus
-`callable.inaccessibleMethod`.
+`callable.inaccessibleMethod`. The castable-array-argument family
+(`ParameterCastableToStringRule`/`ToNumberRule`/
+`ImplodeParameterCastableToStringRule`/`SortParameterCastableToStringRule`,
+flag-aware for the sort functions).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3549,14 +3552,6 @@ identifier diff, direct `vendor/bin/phpstan analyse` (level 10) against
 `phpstan-rs check-project` on `~/piwigo16`, took every real identifier
 with no matching literal anywhere in this project's source, checked it
 against this list, and added the real gaps the audit had missed.
-
-### Phase 126 — Functions (`Rules/Functions/` gaps)
-
-- `ParameterCastableToStringRule`/`...ToNumberRule` family — array-
-  argument values passed to `implode`/`array_combine`/`sort`/etc.
-  actually castable to string/number, since these implicitly cast at
-  runtime.
-
 
 ### Phase 129 — Comparison (`Rules/Comparison/` gaps)
 

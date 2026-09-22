@@ -751,6 +751,9 @@ impl<'a> Checker<'a> {
                             defining_class: None,
                             span: e.span,
                         });
+                        self.check_castable_array_arguments(
+                            name, sig, args, &resolved, locals, label,
+                        );
                         if !args.iter().any(|a| a.spread)
                             && matches!(
                                 name.as_ref(),
