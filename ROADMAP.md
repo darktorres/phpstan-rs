@@ -4440,10 +4440,38 @@ where the shape's own real content actually disagrees with something
 (net diagnostic count *dropped*, not just shifted); the scoped run
 stays byte-identical.
 
-What remains of the original ~27-location pipeline, now that the
-above turned out to already be built or newly fixed, is smaller still
-- a genuine residual, but still a size-XL/low-priority stretch goal, go
-one-by-one only if/when there's a concrete reason to prioritize it.
+Verified the remaining two previously-unconfirmed real-PHPStan
+`class.notFound` sites directly (`InstantiationRule`'s `new Foo()`
+existence check, `ExistingClassInClassExtendsRule`'s plain `extends`
+base-name existence check) - both already correctly report, closing
+out this audit's own remaining uncertainty. The one deliberate
+non-gap this audit surfaced, confirmed by direct testing (`class Sub
+extends Collection<NoSuchClass> {}` produces zero diagnostics today):
+`GenericAncestorsCheck`'s own `getReferencedClasses()`-based existence
+check for a generic type's own *arguments* (as opposed to its base
+name) has no equivalent here, because `checker::resolve::collect_
+unknown_class_names` - the single shared helper every `check_type_
+class_names_exist` call site above relies on - deliberately never
+recurses into a `Type::Object`'s own generic argument list at all
+(confirmed reading its own doc comment), a project-wide leniency
+policy, not a location-specific oversight. This is architecturally the
+same shape as Phase 54's own already-disclosed `@template T of Bound`
+existence exclusion (this project's registry is inherently partial;
+a generic argument is more likely than most positions to reference a
+library type this registry has no data for), just reaching one level
+further (an ordinary generic argument, not only a bound/default) -
+extending existence-checking into generic arguments would mean
+auditing that same leniency's blast radius across every one of this
+function's existing callers project-wide, real foundational surgery
+this project's own precedent (`is_assignable_at_level`'s doc comment,
+Phase 84) says not to force for one narrow need. Left declined for
+that reason, not chased further this round.
+
+What remains of the original ~27-location pipeline, now that every
+item above turned out to already be built, newly fixed, or a
+deliberate non-gap, is smaller still - a genuine residual, but still a
+size-XL/low-priority stretch goal, go one-by-one only if/when there's a
+concrete reason to prioritize it.
 
 **54 - Generic template richness (PARTIAL, variance-aware assignability,
 arity, and cross-path conflict checking all done).** See Done for what
