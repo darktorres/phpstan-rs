@@ -170,3 +170,29 @@ fn foreach_key_variable_from_a_generic_iterator_is_used_correctly_afterward() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn foreach_over_an_always_empty_array_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $items): void {
+                $empty = [];
+                foreach ($empty as $x) { echo $x; }
+                foreach ([] as $y) { echo $y; }
+                foreach ($items as $z) { echo $z; }
+                $grow = [];
+                foreach ($items as $i) {
+                    foreach ($grow as $g) { echo $g; }
+                    $grow[] = $i;
+                }
+            }
+        "#,
+    );
+    assert_eq!(
+        d.iter()
+            .filter(|x| x.identifier == "foreach.emptyArray")
+            .count(),
+        2,
+        "got: {d:?}"
+    );
+}

@@ -591,6 +591,17 @@ impl<'a> Checker<'a> {
             _ => None,
         };
         let subject_ty = self.check_expr(subject, locals, label);
+        // `DeadForeachRule` - skipped inside an enclosing loop, whose
+        // earlier convergence passes can still see a not-yet-grown array.
+        if self.loop_depth == 0 && type_is_always_empty_array(&subject_ty) {
+            self.report(
+                label.to_string(),
+                "Empty array passed to foreach.".to_string(),
+                subject.span,
+                4,
+                "foreach.emptyArray",
+            );
+        }
         // The loop variable(s) are a definition site, not a read -
         // bound (to the subject's known element type, when it's a
         // homogeneous array) before checking anything that could
@@ -856,5 +867,14 @@ fn replace_array_element_type(ty: &Type, new_elem: &Type) -> Type {
                 .collect(),
         ),
         other => other.clone(),
+    }
+}
+
+/// `array{}`, or a union made only of it.
+fn type_is_always_empty_array(ty: &Type) -> bool {
+    match ty {
+        Type::ArrayShape(fields) => fields.is_empty(),
+        Type::Union(members) => members.iter().all(type_is_always_empty_array),
+        _ => false,
     }
 }

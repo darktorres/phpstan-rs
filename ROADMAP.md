@@ -566,7 +566,7 @@ object) checks the resolved signature's arity and argument types, plus
 `ImplodeParameterCastableToStringRule`/`SortParameterCastableToStringRule`,
 flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
 (`function.impossibleHaystackValue` for `in_array()`/`array_search()`/
-`array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`).
+`array_keys()` against a constant-array haystack). `UsageOfVoidMatchExpressionRule` (`match.void`). `DeadForeachRule` (`foreach.emptyArray`).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3608,10 +3608,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 132 — Arrays (`Rules/Arrays/` gaps)
 
-- `DeadForeachRule` — `foreach` over a provably always-empty array,
-  level 4. (`IterableInForeachRule`'s own non-iterable-subject half,
-  `foreach.nonIterable`, is now built - receiver-type-checks phase, see
-  Done.)
 - `ArrayDestructuringRule` remainder — the RHS-is-array-like half
   (`offsetAccess.nonArray`) is now built (receiver-type-checks phase);
   the per-key-existence half is still open.
