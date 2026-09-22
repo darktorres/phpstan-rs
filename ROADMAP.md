@@ -523,7 +523,9 @@ always-true half exempt as the last `elseif`; `instanceof.invalidExprType`
 for a dynamic target that can't name a class). A constant-condition
 finding inside a trait is kept only when every using host reports it
 with the same verdict, matching `ConstantConditionInTraitRule`. `MissingMagicSerializationMethodsRule`
-(`class.serializable`, PHP 8.1+, anonymous classes included).
+(`class.serializable`, PHP 8.1+, anonymous classes included). A bodiless non-abstract method outside an interface
+(`method.nonAbstract`), from a new `FunctionDecl::has_body`; an
+empty-bodied constructor's unused parameters are now reported too.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3539,9 +3541,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 127 — Methods (`Rules/Methods/` gaps)
 
-- `AbstractMethodInNonAbstractClassRule`'s second half — a non-abstract,
-  non-interface method with no body at all (real PHP's parser accepts
-  this invalid syntax; PHPStan must catch it).
 - `MethodCallableRule` — gates first-class-callable syntax
   (`$obj->method(...)`) behind a PHP-8.1 version check; phpstan-rs's own
   extensive `PhpFeature`/`php_version.rs` framework covers roughly a

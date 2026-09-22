@@ -898,3 +898,19 @@ fn anonymous_class_unused_constructor_parameter_names_the_anonymous_class() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn empty_bodied_constructor_parameters_are_still_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Empty1 {
+                public function __construct(int $x) {}
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "constructor.unusedParameter"),
+        "got: {d:?}"
+    );
+}

@@ -792,3 +792,39 @@ fn promotion_is_gated_on_the_configured_php_version() {
     let d = diagnostics_for_with(src, |r| r.php_version = Some((8, 5)));
     assert!(promotion_errors(&d).is_empty(), "got: {d:?}");
 }
+
+#[test]
+fn bodiless_non_abstract_method_is_flagged_outside_interfaces() {
+    let d = diagnostics_for(
+        r#"<?php
+            class NoBody {
+                public function run();
+                public function fine() {}
+            }
+            abstract class AbsNoBody {
+                abstract public function ok();
+                public function missing();
+            }
+            interface Contract {
+                public function run();
+            }
+            trait NoBodyTrait {
+                public function run();
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "method.nonAbstract")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Non-abstract method NoBody::run() must contain a body",
+            "Non-abstract method AbsNoBody::missing() must contain a body",
+            "Non-abstract method NoBodyTrait::run() must contain a body",
+        ],
+        "got: {d:?}"
+    );
+}

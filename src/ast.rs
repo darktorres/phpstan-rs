@@ -214,6 +214,9 @@ pub struct FunctionDecl {
     // `src/intern.rs`'s own table, parsing/registry-building runs in
     // parallel across files via a real `rayon` thread pool.
     pub body: Arc<Vec<Stmt>>,
+    // `false` for a bodiless `function f();` declaration (abstract and
+    // interface methods), distinct from an empty `{}` body.
+    pub has_body: bool,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this declaration - shared by a

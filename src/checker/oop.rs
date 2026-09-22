@@ -1078,6 +1078,24 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
+            // `method.nonAbstract`: a bodiless method that isn't abstract,
+            // outside an interface - real PHP: "Non-abstract method
+            // Foo::bar() must contain body."
+            if !m.is_abstract && kind != ClassKind::Interface && !m.function.has_body {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Non-abstract method {fqn}::{}() must contain a body",
+                            m.function.name
+                        ),
+                        m.span,
+                        0,
+                        "method.nonAbstract",
+                    )
+                    .non_ignorable(),
+                );
+            }
             // `method.abstractPrivate`: an abstract method can never be
             // `private` - nothing could ever provide the required
             // implementation, since a `private` method isn't visible to

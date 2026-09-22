@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         let Some(fqn) = class_name else {
             return;
         };
-        if f.name != "__construct".into() || f.body.is_empty() {
+        if !f.name.eq_ignore_ascii_case("__construct") || !f.has_body {
             return;
         }
         let candidates: Vec<&Param> = f

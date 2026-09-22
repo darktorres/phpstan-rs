@@ -154,7 +154,8 @@ impl Parser {
         } else {
             None
         };
-        let body = if self.eat(&Token::Semicolon) {
+        let has_body = !self.eat(&Token::Semicolon);
+        let body = if !has_body {
             Vec::new()
         } else if let StmtKind::Block(stmts) = self.parse_block()?.kind {
             stmts
@@ -168,6 +169,7 @@ impl Parser {
             return_type,
             return_type_span,
             body: std::sync::Arc::new(body),
+            has_body,
             // Callers that saw a preceding doc comment overwrite this -
             // parse_function_decl itself is entered after any modifiers
             // (and thus after the doc comment's position) have already
