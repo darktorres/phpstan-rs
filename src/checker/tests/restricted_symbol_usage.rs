@@ -27,6 +27,8 @@ fn entry(
         allow_except_in_class_with_attributes: Vec::new(),
         allow_in_methods_with_attributes: Vec::new(),
         allow_except_in_methods_with_attributes: Vec::new(),
+        allow_in_class_with_method_attributes: Vec::new(),
+        allow_except_in_class_with_method_attributes: Vec::new(),
         allow_in_use: false,
     }
 }
@@ -537,6 +539,96 @@ fn a_restricted_call_is_allowed_in_a_class_with_the_configured_attribute() {
     assert!(
         !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
         "unexpected diagnostics: {d:?}"
+    );
+}
+
+// `allowInClassWithMethodAttributes`/`allowExceptInClassWithMethodAttributes` -
+// matches when *any* method of the enclosing class carries the
+// attribute, not just the currently-executing one (confirmed distinct
+// from `allow_in_methods_with_attributes` above against the real docs
+// directly).
+
+#[test]
+fn a_restricted_call_is_allowed_when_a_sibling_method_carries_the_configured_attribute() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            class Repo {
+                public function f(Db $db): void { $db->query('select 1'); }
+
+                #[AllowedLegacy]
+                private function checkThis(): void {}
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_in_class_with_method_attributes = vec!["AllowedLegacy".to_string()],
+        )],
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_restricted_call_is_still_flagged_when_no_method_in_the_class_carries_the_attribute() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            class Repo {
+                public function f(Db $db): void { $db->query('select 1'); }
+                private function checkThis(): void {}
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_in_class_with_method_attributes = vec!["AllowedLegacy".to_string()],
+        )],
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn allow_except_in_class_with_method_attributes_only_flags_classes_with_a_matching_method() {
+    let d = with_entries(
+        r#"<?php
+            class Db { public function query(string $sql) {} }
+            class Repo {
+                public function f(Db $db): void { $db->query('select 1'); }
+                #[Special]
+                private function checkThis(): void {}
+            }
+            class OtherRepo {
+                public function f(Db $db): void { $db->query('select 1'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Db"),
+            "query",
+            "use the connection service",
+            |e| e.allow_except_in_class_with_method_attributes = vec!["Special".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(
+        flagged[0].location.contains("Repo") && !flagged[0].location.contains("OtherRepo"),
+        "got: {:?}",
+        flagged[0]
     );
 }
 

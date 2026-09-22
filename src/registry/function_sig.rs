@@ -152,6 +152,16 @@ pub struct FunctionSig {
     // getAgentInfo()`) - `@method` only ever documents a
     // magic-`__call`-backed capability, never a requirement.
     pub is_magic: bool,
+    // `#[Attr]` groups on this declaration's own attribute list, by
+    // short (as-written, un-lowercased) name - `Checker::current_class_
+    // attrs`/`current_method_attrs`'s own persistent, per-signature
+    // equivalent (those only ever hold the *currently-executing*
+    // method's own attrs; `restricted_symbols`' own `allowInClassWith
+    // MethodAttributes` needs every sibling method's, which only a
+    // field on the signature itself, reachable via `ClassInfo::methods`,
+    // can provide). Populated the identical way `current_method_attrs`
+    // already is (`f.attrs.iter().map(|a| intern(&a.name)).collect()`).
+    pub attrs: Vec<Arc<str>>,
 }
 
 /// A class constant's value is almost always a literal in real code - this
@@ -437,6 +447,11 @@ impl FunctionSig {
             .iter()
             .any(|a| is_no_discard_attribute_name(&a.name));
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
+        let attrs: Vec<Arc<str>> = f
+            .attrs
+            .iter()
+            .map(|a| crate::intern::intern(&a.name))
+            .collect();
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);
         let is_api = doc.as_ref().is_some_and(|d| d.api);
@@ -483,6 +498,7 @@ impl FunctionSig {
             is_internal,
             is_api,
             has_override_attr,
+            attrs,
             deprecated,
             throws,
             assert_if_true,
@@ -602,6 +618,10 @@ impl FunctionSig {
             // `no_discard`/`is_internal` above.
             is_api: self.is_api || other.is_api,
             has_override_attr,
+            // Both real overloads' own attributes are real, independent
+            // facts worth checking - concatenated, not chosen between,
+            // matching `case_refs`'s own identical reasoning below.
+            attrs: self.attrs.into_iter().chain(other.attrs).collect(),
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` above.
             deprecated: self.deprecated.or(other.deprecated),

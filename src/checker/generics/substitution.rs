@@ -160,6 +160,7 @@ impl<'a> Checker<'a> {
             is_internal: sig.is_internal,
             is_api: sig.is_api,
             has_override_attr: sig.has_override_attr,
+            attrs: sig.attrs.clone(),
             deprecated: sig.deprecated.clone(),
             throws: sig.throws.as_ref().map(subst),
             assert_if_true: substitute_assert_infos(&sig.assert_if_true, &subst),

@@ -102,6 +102,17 @@ pub struct RestrictedSymbolEntry {
     /// The inverse of `allow_in_methods_with_attributes`.
     #[serde(default)]
     pub allow_except_in_methods_with_attributes: Vec<String>,
+    /// `fnmatch()`-style patterns against an attribute name - a match
+    /// against *any* method in the enclosing class (including the one
+    /// the restricted usage itself lives in, but never the class's own
+    /// attributes) allows it. Confirmed distinct from `allow_in_methods_
+    /// with_attributes` above (current method only) against the real
+    /// `spaze/phpstan-disallowed-calls` docs directly.
+    #[serde(default)]
+    pub allow_in_class_with_method_attributes: Vec<String>,
+    /// The inverse of `allow_in_class_with_method_attributes`.
+    #[serde(default)]
+    pub allow_except_in_class_with_method_attributes: Vec<String>,
     /// `Class`-kind only: a plain, class-shaped `use Foo;` import is not
     /// itself a type hint (real PHPStan's own `ClassNameCheck::
     /// checkClassNames`, called with a `null` usage location for this
@@ -315,6 +326,8 @@ mod tests {
             allow_except_in_class_with_attributes: Vec::new(),
             allow_in_methods_with_attributes: Vec::new(),
             allow_except_in_methods_with_attributes: Vec::new(),
+            allow_in_class_with_method_attributes: Vec::new(),
+            allow_except_in_class_with_method_attributes: Vec::new(),
             allow_in_use: false,
         }
     }

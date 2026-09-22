@@ -94,6 +94,9 @@ pub(crate) fn method_tag_sig(
         is_internal: false,
         is_api: false,
         has_override_attr: false,
+        // A magic `@method` tag has no real declaration to carry
+        // attributes on at all.
+        attrs: Vec::new(),
         deprecated: None,
         throws: None,
         assert_if_true: Vec::new(),

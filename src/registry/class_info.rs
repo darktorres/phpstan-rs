@@ -1200,6 +1200,7 @@ impl ClassInfo {
                 is_internal: false,
                 is_api: false,
                 has_override_attr: false,
+                attrs: Vec::new(),
                 deprecated: None,
                 throws: None,
                 assert_if_true: Vec::new(),
@@ -1247,6 +1248,7 @@ impl ClassInfo {
                     is_internal: false,
                     is_api: false,
                     has_override_attr: false,
+                    attrs: Vec::new(),
                     deprecated: None,
                     // `from()` throws a real `ValueError` when no case
                     // matches - unlike `tryFrom()`, which returns `null`
@@ -1276,6 +1278,7 @@ impl ClassInfo {
                     is_internal: false,
                     is_api: false,
                     has_override_attr: false,
+                    attrs: Vec::new(),
                     deprecated: None,
                     throws: None,
                     assert_if_true: Vec::new(),

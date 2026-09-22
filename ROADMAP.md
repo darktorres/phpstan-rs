@@ -4670,32 +4670,34 @@ check_use_class_imports` already checked a `use` import for
 a new `check_restricted_class_use_import`, plus the new `allow_in_use`
 bool entry field to suppress exactly that one occurrence.
 
-Still genuinely unbuilt, each now scoped against the real fetched docs
-rather than a guess:
+`allowInClassWithMethodAttributes`/`allowExceptInClassWithMethodAttributes`
+(alias `disallowInClassWithMethodAttributes`) are done too: matches when
+*any* method in the enclosing class carries the attribute (including the
+method the restricted usage lives in, but never the class's own
+attributes) - confirmed genuinely different from the already-built
+`allow_in_methods_with_attributes` (current method only). Real,
+previously-missing data closed it in: `FunctionSig` gained its own
+`attrs: Vec<Arc<str>>` field (populated identically to `Checker::
+current_method_attrs`, `f.attrs.iter().map(|a| intern(&a.name)).collect()`,
+threaded through every construction/merge site - `from_decl`, template
+substitution, `@method`-tag/enum-method synthesis, stub merging), letting
+a new `current_class_any_method_attrs` walk every sibling method via
+`ClassInfo::methods` rather than only the currently-executing one
+`current_method_attrs` alone ever had.
+
+Still genuinely unbuilt, scoped against the real fetched docs rather
+than a guess:
 - `allowInParamTypes`/`allowExceptInParamTypes` (alias
   `disallowInParamTypes`) and their `*ReturnType` siblings, `Class`-kind
-  only. Materially bigger than the purely-additive `allow_in_use` shape:
+  only. Materially bigger than the purely-additive shapes built so far:
   `allowIn*` opts a class *out* of its normal "disallowed everywhere"
   default at exactly one type-hint position, but `allowExceptIn*`
   *inverts the entry's own default entirely* - "disallow a class only
   when it appears as a parameter type hint, allowing it everywhere
-  else" - a real, different mechanism from every allow field built so
-  far (all strictly additive, never flipping the base posture), needing
-  its own design pass before touching `check_restricted_param_and_
-  return_types_raw`'s two now-position-aware call sites.
-- `allowInClassWithMethodAttributes`/`allowExceptInClassWithMethodAttributes`
-  (alias `disallowInClassWithMethodAttributes`): matches when *any*
-  method in the enclosing class carries the attribute (including the
-  method the restricted usage lives in, but never the class's own
-  attributes) - confirmed genuinely different from the already-built
-  `allow_in_methods_with_attributes` (current method only). Blocked on
-  real, missing data: neither `FunctionSig` nor any other per-method
-  record tracks its own attribute list at all (confirmed: no `attrs`
-  field anywhere in `registry/function_sig.rs`) - `Checker::current_
-  method_attrs` only ever has the *currently-executing* method's own
-  attrs on hand, never every sibling method's. Needs a new per-method
-  attrs field threaded through every `FunctionSig` construction site
-  first, not just a new allow-check.
+  else" - a real, different mechanism (every allow field built so far is
+  strictly additive, never flipping the base posture), needing its own
+  design pass before touching `check_restricted_param_and_return_types_
+  raw`'s two now-position-aware call sites.
 - Parameter-value conditions (`allowParamsInAllowed`/`allowParamsAnywhere`/
   `allowExceptParamsAnywhere`/`allowExceptParamsInAllowed`/their
   `AnyValue`/`CaseInsensitive` siblings) - real scope confirmed

@@ -62,6 +62,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         is_internal: false,
         is_api: false,
         has_override_attr: false,
+        attrs: Vec::new(),
         deprecated: None,
         throws: None,
         assert_if_true: Vec::new(),

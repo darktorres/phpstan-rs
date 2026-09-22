@@ -97,7 +97,53 @@ impl<'a> Checker<'a> {
         {
             return true;
         }
+        if !entry.allow_in_class_with_method_attributes.is_empty()
+            || !entry
+                .allow_except_in_class_with_method_attributes
+                .is_empty()
+        {
+            let any_method_attrs = self.current_class_any_method_attrs();
+            if matches_any(
+                &entry.allow_in_class_with_method_attributes,
+                &any_method_attrs,
+            ) {
+                return true;
+            }
+            if !entry
+                .allow_except_in_class_with_method_attributes
+                .is_empty()
+                && !matches_any(
+                    &entry.allow_except_in_class_with_method_attributes,
+                    &any_method_attrs,
+                )
+            {
+                return true;
+            }
+        }
         false
+    }
+
+    /// `allow_in_class_with_method_attributes`'s own data source - every
+    /// attribute on *any* method of the current class (the enclosing
+    /// method's own attrs included, via `ClassInfo::methods`, never the
+    /// class's own attrs) - distinct from `current_method_attrs`, which
+    /// only ever holds the single currently-executing method's own.
+    /// Collected fresh per call rather than threaded as another
+    /// `Checker` field: only consulted when an entry actually configures
+    /// this one specific allow mechanism (the `is_empty()` guard just
+    /// above), unlike `current_class_attrs`/`current_method_attrs`,
+    /// which every restricted-symbol report reads.
+    fn current_class_any_method_attrs(&self) -> Vec<std::sync::Arc<str>> {
+        let Some(class) = &self.current_class else {
+            return Vec::new();
+        };
+        let Some(info) = self.registry.classes.get(class.as_str()) else {
+            return Vec::new();
+        };
+        info.methods
+            .values()
+            .flat_map(|sig| sig.attrs.iter().cloned())
+            .collect()
     }
 
     pub(crate) fn check_restricted_function_call(&mut self, fqn: &str, span: Span, label: &str) {
