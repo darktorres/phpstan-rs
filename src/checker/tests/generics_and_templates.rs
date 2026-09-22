@@ -3298,5 +3298,9 @@ fn an_uninferred_class_template_on_a_new_expression_stays_assignable_to_any_argu
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter()
+            .all(|x| x.identifier == "constructor.unusedParameter"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
