@@ -141,6 +141,31 @@ docblock-only parameter types now resolve at all where they previously
 silently didn't) or cosmetic message-text churn on an already-unmodeled
 construct.
 
+**`break`/`continue` with a parenthesized level expression failed to
+parse, aborting the whole file.** Found via an erp-web corpus round: one
+file (`vendor/dompdf/dompdf/src/Css/Stylesheet.php`) came back as a
+parse-error skip. The original hypothesis (a flexible heredoc's dense,
+non-interpolated PCRE-pattern braces confusing the interpolation
+scanner) turned out to be entirely wrong once bisected down to a minimal
+repro - the heredoc was a red herring; the real cause was a `continue
+(2);` later in the same method (`_parse_css`, inside a `switch` nested
+in a `while`). Real PHP's own grammar for `break`/`continue` is `T_BREAK
+optional_expr ';'`, not just a bare integer literal, so `break (1);`/
+`continue (2);` are both legal, real PHP (parenthesizing an expression
+is always legal) - this project's own `parse_optional_level`
+(`src/parser/stmt.rs`) only ever recognized a bare `Token::Integer`
+immediately after `break`/`continue`, leaving the parser stuck at an
+unexpected `(` for the parenthesized form and failing the entire file.
+Fixed by having `parse_optional_level` parse a full expression (falling
+straight through to "no level" only when the very next token is `;`)
+and constant-folding the result via a small local `const_fold_level`
+helper (literal int, parenthesized, or unary-negated - real PHP itself
+requires the operand be compile-time-constant since 5.4, so nothing
+past those three shapes can occur in valid PHP source). Verified against
+the real `Stylesheet.php` (now parses cleanly) and a regression test
+(`break_and_continue_parse_a_parenthesized_level`,
+`src/parser/tests/statements_and_control_flow.rs`).
+
 ## Registry / symbol resolution
 
 Namespace- and `use`-import-aware name resolution, tracked positionally
@@ -4643,27 +4668,23 @@ section used to carry:
 **erp-web corpus round (real, closed-source Laravel app; `check-project`
 against `app`/`tests`/`database`, `php_version = "8.5"`; 2803 files
 checked, 2730 diagnostics, 1 parse-error skip).** Four genuine engine
-bugs, independent of the Laravel-specific gap documented separately
-below:
+bugs found, independent of the Laravel-specific gap documented
+separately below - one (the parse-error skip) already fixed, see Done's
+own `break`/`continue`-with-a-parenthesized-level entry under "Parser,
+lexer, AST": the original heredoc/dense-PCRE-braces hypothesis for that
+skip turned out to be a red herring once bisected down to a minimal
+repro; the real cause (`continue (2);` later in the same method) was
+unrelated to the heredoc entirely. Two smaller, separate findings from
+isolating that one: the skip diagnostic doesn't name which file was
+skipped in either the text or `--format json` output (isolating it took
+~12 runs of binary-searching smaller directory subsets - it should
+always carry the file's own path, independent of whatever's causing the
+skip), and `Style.php` in the same directory (156 diagnostics, no skip)
+confirms the skip really was isolated to `Stylesheet.php` alone, not a
+directory-wide issue.
 
-- **Heredoc parsing fails on dense literal braces sitting next to real
-  `{$...}` interpolations - one confirmed parse-error skip.** Isolated
-  to `vendor/dompdf/dompdf/src/Css/Stylesheet.php:1271-1303`, a flexible
-  (indented) heredoc mixing two genuine `{$pattern_atimport_string}`/
-  `{$pattern_atimport_url}` interpolations with a large PCRE pattern body
-  dense with literal, non-interpolated `{`/`}` from named/conditional/
-  recursive regex groups (`(?<CSS_ATFONT_BODY>.*?)}`, `(?(CSS_ATFONT)...)`,
-  `(?R)`, `[^{}]*`). Confirmed isolated by testing every file in that
-  directory individually (`Style.php` - 156 diagnostics, no skip;
-  `Stylesheet.php` alone - 0 diagnostics, 1 skip). Not yet minimized to a
-  standalone repro; the recommended next step is extracting just that
-  heredoc assignment into its own `<?php $re = <<<EOL ... EOL;` file to
-  confirm it alone reproduces the failure, then bisecting the brace
-  density/nesting against the interpolation scanner. Separately: neither
-  the text nor `--format json` output names which file was skipped when
-  this happens - isolating it took ~12 runs of binary-searching smaller
-  directory subsets. The skip diagnostic should always carry the file's
-  own path, independent of whatever's causing the skip itself.
+Three still open:
+
 - **Trait constant `self::` resolution fails when the constant-declaring
   trait method executes in the context of the composing class -
   135 false-positive `classConstant.notFound`.** A `private const array

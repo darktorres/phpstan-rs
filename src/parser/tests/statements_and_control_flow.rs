@@ -171,6 +171,26 @@ fn break_and_continue_parse_their_optional_numeric_level() {
 }
 
 #[test]
+fn break_and_continue_parse_a_parenthesized_level() {
+    // Real PHP's own grammar is `T_BREAK optional_expr ';'`, not just a
+    // bare integer literal - `continue (2);` is real code (dompdf's own
+    // `Stylesheet::_parse_css`, a `switch` nested in a `while`) that used
+    // to abort the whole file with a parse error, since the parenthesized
+    // form was previously indistinguishable from "no level" immediately
+    // followed by an unexpected `(`.
+    let program = parse(
+        r#"<?php
+            break (1);
+            continue (2);
+            break (-1);
+        "#,
+    );
+    assert!(matches!(&program[0].kind, StmtKind::Break(Some(1))));
+    assert!(matches!(&program[1].kind, StmtKind::Continue(Some(2))));
+    assert!(matches!(&program[2].kind, StmtKind::Break(Some(-1))));
+}
+
+#[test]
 fn foreach_alt_syntax_parses_its_body_via_parse_alt_block() {
     // parse_if_alt and parse_switch each parse their own alt-syntax
     // body inline - parse_alt_block is the shared path only

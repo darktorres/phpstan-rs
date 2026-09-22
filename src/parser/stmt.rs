@@ -63,13 +63,13 @@ impl Parser {
             Token::Keyword(Keyword::Foreach) => self.parse_foreach()?,
             Token::Keyword(Keyword::Break) => {
                 self.skip();
-                let level = self.parse_optional_level();
+                let level = self.parse_optional_level()?;
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Break(level), start)
             }
             Token::Keyword(Keyword::Continue) => {
                 self.skip();
-                let level = self.parse_optional_level();
+                let level = self.parse_optional_level()?;
                 self.expect_semicolon()?;
                 self.stmt(StmtKind::Continue(level), start)
             }
@@ -378,14 +378,30 @@ impl Parser {
         Ok(stmt)
     }
 
-    pub(crate) fn parse_optional_level(&mut self) -> Option<i64> {
-        if let Token::Integer(n) = self.peek() {
-            let n = *n;
-            self.skip();
-            Some(n)
-        } else {
-            None
+    /// `break`/`continue`'s optional level - real PHP's own grammar is
+    /// `T_BREAK optional_expr ';'`/`T_CONTINUE optional_expr ';'`, not
+    /// just a bare integer literal: `break (2);`/`continue (2);` are
+    /// both legal PHP (a real, non-hypothetical shape - dompdf's own
+    /// `Stylesheet::_parse_css` uses `continue (2);` inside a `switch`
+    /// nested in a `while`) and were previously misparsed as a bare
+    /// `break`/`continue` immediately followed by an unexpected `(`,
+    /// aborting the whole file with a parse error. A `;` immediately
+    /// after `break`/`continue` still means "no level" (the common
+    /// case, defaults to 1 downstream); anything else now parses as a
+    /// real expression and gets constant-folded by `const_fold_level`.
+    /// Real PHP itself requires this expression to be a compile-time-
+    /// constant integer (a variable operand is a fatal error since 5.4),
+    /// so every shape `const_fold_level` doesn't handle (anything beyond
+    /// a literal/negation/parenthesization) can't occur in valid PHP
+    /// source - falling back to `None` there is the same "unknown,
+    /// default to implicit level 1" treatment a bare `break;` already
+    /// gets, not a silent wrong answer for real code.
+    pub(crate) fn parse_optional_level(&mut self) -> Result<Option<i64>, ParseError> {
+        if self.check(&Token::Semicolon) {
+            return Ok(None);
         }
+        let expr = self.parse_expression()?;
+        Ok(const_fold_level(&expr))
     }
 
     /// A `global` statement's target - almost always a plain `$name`, but
@@ -404,5 +420,16 @@ impl Parser {
             return Ok("{dynamic}".to_string());
         }
         self.expect_variable().map(|s| s.to_string())
+    }
+}
+
+/// `parse_optional_level`'s own constant-folder - see that function's
+/// doc comment for why only these three shapes matter.
+fn const_fold_level(e: &Expr) -> Option<i64> {
+    match &e.kind {
+        ExprKind::Literal(Literal::Int(n)) => Some(*n),
+        ExprKind::Grouping(inner) => const_fold_level(inner),
+        ExprKind::Unary(UnaryOp::Neg, inner) => const_fold_level(inner).map(|n| -n),
+        _ => None,
     }
 }
