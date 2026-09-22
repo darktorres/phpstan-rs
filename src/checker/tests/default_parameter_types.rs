@@ -1,0 +1,135 @@
+//! `parameter.defaultValue` - real PHPStan's own `Rules/Functions/
+//! IncompatibleDefaultParameterTypeRule.php`/`Rules/Methods/
+//! IncompatibleDefaultParameterTypeRule.php`: a parameter's own default
+//! value expression's type must be assignable to its declared type.
+
+use super::helpers::*;
+
+#[test]
+fn an_incompatible_scalar_default_on_a_function_is_flagged() {
+    let d = diagnostics_for(r#"<?php function f(int $x = "hello") {}"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_compatible_scalar_default_on_a_function_is_never_flagged() {
+    let d = diagnostics_for(r#"<?php function f(int $x = 5) {}"#);
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_null_default_on_an_implicitly_nullable_native_type_is_never_flagged() {
+    // `int $x = null` is implicitly nullable (real PHP, pre-8.4) -
+    // `FunctionSig::from_decl`'s own `apply_implicit_nullable_default`
+    // already widens the resolved param type to `int|null` before this
+    // check ever sees it.
+    let d = diagnostics_for(r#"<?php function f(int $x = null) {}"#);
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_incompatible_default_on_a_method_is_flagged_with_the_method_wording() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public function bar(string $s = 5) {}
+            }
+        "#,
+    );
+    let hit = d
+        .iter()
+        .find(|x| x.identifier == "parameter.defaultValue")
+        .unwrap_or_else(|| panic!("got: {d:?}"));
+    assert!(
+        hit.message.contains("method Foo::bar()"),
+        "got: {}",
+        hit.message
+    );
+}
+
+#[test]
+fn an_untyped_parameter_is_never_flagged_regardless_of_its_default() {
+    let d = diagnostics_for(r#"<?php function f($x = "anything") {}"#);
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_variadic_parameter_is_never_flagged() {
+    let d = diagnostics_for(r#"<?php function f(int ...$x) {}"#);
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_matching_enum_case_default_is_never_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Status { case A; case B; }
+            function f(Status $s = Status::A) {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_empty_array_default_on_an_int_parameter_is_flagged() {
+    let d = diagnostics_for(r#"<?php function f(int $x = []) {}"#);
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_default_satisfying_a_templates_own_bound_is_never_flagged() {
+    // `resolveToBounds` (real PHPStan) / the same-named local step here -
+    // a bare `@template T of int` parameter's own default is checked
+    // against `T`'s bound (`int`), not the raw, unresolved `T` itself.
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T of int
+             * @param T $x
+             */
+            function f($x = 5) {}
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_default_violating_a_templates_own_bound_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @template T of int
+             * @param T $x
+             */
+            function f($x = "oops") {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "parameter.defaultValue"),
+        "got: {d:?}"
+    );
+}

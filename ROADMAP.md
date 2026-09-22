@@ -3929,6 +3929,43 @@ round. 9 new regression tests (`src/checker/tests/constant_conditions.rs`,
 `src/checker/tests/noop.rs`); full suite green (4396 passed), clippy
 clean.
 
+**`parameter.defaultValue` - a parameter's own default value expression's
+type must be assignable to its declared type** (real PHPStan's own,
+identical `Rules/Functions/IncompatibleDefaultParameterTypeRule.php`/
+`Rules/Methods/IncompatibleDefaultParameterTypeRule.php`, level 2 -
+`function f(int $x = "bad")`). New `check_default_parameter_types`
+(`checker/function_decl.rs`), called once from the shared `check_
+function_impl` (functions and methods alike, matching every other
+`sig`-gated check there) - reuses `registry.is_assignable` and
+`infer_expr(default, &Locals::default())` (the same empty-locals
+pattern `collect_default_and_const_value_member_refs` already
+establishes for a default-value expression, which real PHP only ever
+allows to be a constant expression, never a reference to another local).
+Resolves a bare, top-level `@template T`-typed parameter to its own
+bound before checking (mirroring real PHPStan's own explicit
+`TemplateTypeHelper::resolveToBounds` step) - `registry::is_assignable`
+only has a dedicated `Type::TemplateParam` rule on the *sub*-type side,
+not the *super*-type side this check needs, so without it a `@template T
+of int` parameter's own compatible `int` default would wrongly fail
+against the raw, unresolved `T`. Deliberately shallow (only a bare
+top-level `T`, not real PHPStan's own recursive substitution through the
+whole type tree, e.g. a template nested inside `array<T> $x = []`) - a
+default value is overwhelmingly a scalar literal/array/`null`, where a
+*nested* unresolved template essentially never actually decides
+assignability; a disclosed narrower scope, not an oversight. A variadic
+parameter is skipped outright (never has a real default in valid PHP).
+Deliberately scoped to a named function/method only - real PHPStan's own
+closure/arrow-fn variants (`IncompatibleClosureDefaultParameterTypeRule.php`/
+`IncompatibleArrowFunctionDefaultParameterTypeRule.php`) aren't attempted
+alongside this. Verified manually against an implicitly-nullable native
+default (`int $x = null`, correctly silent - `FunctionSig::from_decl`'s
+own `apply_implicit_nullable_default` already widens the resolved type
+before this check ever sees it), an untyped parameter (never flagged
+regardless of its default, matching real PHPStan), an enum-case default,
+and both directions of the template-bound case; 10 new regression tests
+(`src/checker/tests/default_parameter_types.rs`); full suite green,
+clippy clean.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4499,14 +4536,13 @@ verified-absent-from-`src/`, previously-undocumented gaps.
   open: `callable.inaccessibleMethod` and running arity/parameter-type
   checking against a resolved `[$obj, 'method']`/`'Foo::bar'`-shaped
   callable's own signature.
-- **`Functions/IncompatibleDefaultParameterTypeRule.php (+ IncompatibleClosureDefaultParameterTypeRule.php, IncompatibleArrowFunctionDefaultParameterTypeRule.php)`**: Real PHPStan (level 2) checks that a parameter's default value expression's type is assignable to that parameter's declared type hint (identifier parameter.defaultValue) for functions, closures, and arrow functions alike. phpstan-rs's AST carries a `default: Option<Expr>` on every parameter but no checker code anywhere validates it against the parameter's type hint.
+- **`Functions/IncompatibleDefaultParameterTypeRule.php` (+ the identical `Rules/Methods/IncompatibleDefaultParameterTypeRule.php`) - now done**, see Done's own entry under "Rule catalog (checker)". Still open: the closure/arrow-fn variants (`IncompatibleClosureDefaultParameterTypeRule.php`/`IncompatibleArrowFunctionDefaultParameterTypeRule.php`) - not attempted alongside the named-function/method slice.
 - **`Functions/ReturnNullsafeByRefRule.php (+ ArrowFunctionReturnNullsafeByRefRule.php)`**: Real PHPStan flags 'Nullsafe cannot be returned by reference' (identifier nullsafe.byRef) when a by-ref function/arrow-function returns an expression whose access chain passes through a nullsafe operator (?->). phpstan-rs has a `contains_nullsafe_access` helper already used for the analogous by-ref-argument check, but nothing calls it against a by-ref function/arrow-fn's own...
 - **`Functions/InvalidParameterNameRule.php + InvalidLexicalVariablesInClosureUseRule.php + RedefinedParametersRule.php + VariadicParametersDeclarationRule.php`**: A family of small level-0 parameter/closure-use-list sanity checks (parameter named $this or a superglobal; a closure `use($this)`/`use($_GET)`/a use-variable duplicating a param name; a duplicate parameter name; a non-last variadic parameter) has no phpstan-rs equivalent at all - none of the identifiers (parameter.superglobal, parameter.this, closure.useThis,...
 - **`Functions/ParameterCastableToStringRule.php + ParameterCastableToNumberRule.php + ImplodeParameterCastableToStringRule.php + SortParameterCastableToStringRule.php`**: Real PHPStan checks that array-argument values passed to specific stdlib functions (implode/join; array_combine/natsort/natcasesort/array_count_values/array_fill_keys; array_intersect/array_diff family; array_unique/sort/rsort/asort/arsort; and a castable-to-number variant) are actually castable to string/number, since these functions implicitly cast at runtime and a...
 
 ## Methods
 
-- **`Rules/Methods/IncompatibleDefaultParameterTypeRule.php`**: Real PHPStan (level 2) checks that a method parameter's default value type is assignable to its declared parameter type, reporting identifier 'parameter.defaultValue'. phpstan-rs has no equivalent check anywhere - grepping the whole checker for default-value/parameter-type-compatibility logic finds nothing beyond override-compatibility's unrelated 'ancestor made it optional'...
 - **`Rules/Methods/MissingMagicSerializationMethodsRule.php`**: Real PHPStan flags a non-abstract class implementing Serializable that lacks __serialize()/__unserialize() (identifier 'class.serializable', PHP-version-gated via serializableRequiresMagicMethods()). phpstan-rs's only Serializable-related logic is the unrelated 'enum cannot implement Serializable' check in oop.rs; the magic-method-presence check itself doesn't exist, and...
 - **`Rules/Methods/AbstractMethodInNonAbstractClassRule.php`**: Real PHPStan's second half of this rule flags a non-abstract, non-interface method with no body at all (identifier 'method.nonAbstract') - real PHP's parser accepts this syntax even though it's semantically invalid, so PHPStan itself must catch it.
 - **`Rules/Methods/MethodCallableRule.php`**: Real PHPStan gates first-class-callable syntax (`$obj->method(...)`) behind a PHP-8.1 version check, reporting 'callable.notSupported' when the configured target is older. phpstan-rs built an extensive PhpFeature/php_version.rs framework covering roughly a dozen similarly narrow PHP-version-gated syntax checks (noncapturing catch, throw-expression, promoted properties,...

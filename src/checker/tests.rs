@@ -22,6 +22,7 @@ mod date_interval;
 mod date_time_constructor;
 mod date_time_method_return_types;
 mod declaration_sanity;
+mod default_parameter_types;
 mod deprecated_usage;
 mod diagnostic_identifiers;
 mod did_you_mean;

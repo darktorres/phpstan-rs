@@ -316,6 +316,9 @@ impl<'a> Checker<'a> {
             self.check_unresolvable_native_types(f, &label);
             self.check_implicitly_nullable_params(f, &label);
             self.check_required_parameter_after_optional(f, &label);
+            if let Some(sig) = sig {
+                self.check_default_parameter_types(f, sig, class_name, &label);
+            }
             // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-
             // validity family plus `method.shadowTemplate`, method-level -
             // see `check_class_generic_bounds`'s identical class-level call
@@ -1442,6 +1445,75 @@ impl<'a> Checker<'a> {
             if p.default.is_some() {
                 optional_param = Some(&p.name);
             }
+        }
+    }
+
+    /// Real PHPStan's own `Rules/Functions/
+    /// IncompatibleDefaultParameterTypeRule.php`/`Rules/Methods/
+    /// IncompatibleDefaultParameterTypeRule.php` (level 2) - a
+    /// parameter's own default value expression's type must be
+    /// assignable to its declared type (`function f(int $x = "bad")`).
+    /// Scoped to a named function/method only, matching every other
+    /// `sig`-gated check in `check_function_impl` - real PHPStan's own
+    /// closure/arrow-fn variants (`IncompatibleClosureDefaultParameterTypeRule`/
+    /// `IncompatibleArrowFunctionDefaultParameterTypeRule`) aren't
+    /// attempted here. A variadic parameter can never have a real
+    /// default in valid PHP, so it's skipped outright.
+    ///
+    /// `param_ty` mirrors real PHPStan's own explicit `TemplateTypeHelper::
+    /// resolveToBounds` step - without it, a `@template T`-typed
+    /// parameter's own default would be checked against the bare,
+    /// unresolved `TemplateParam` itself, which `registry::is_assignable`
+    /// has no dedicated rule for on the *super*-type side (only the
+    /// *sub*-type side, `(Type::TemplateParam(tp), _) => ... self.
+    /// is_assignable(&tp.bound, sup)`, already used elsewhere for the
+    /// opposite direction). Deliberately shallow - only a bare top-level
+    /// `T $x = ...`, not real PHPStan's own recursive substitution
+    /// through the whole type tree (e.g. a template nested inside
+    /// `array<T> $x = []`) - a disclosed narrower scope: a default value
+    /// is overwhelmingly a scalar literal/array/`null`, where a *nested*
+    /// unresolved template essentially never actually decides whether
+    /// that literal is assignable to it.
+    fn check_default_parameter_types(
+        &mut self,
+        f: &FunctionDecl,
+        sig: &FunctionSig,
+        class_name: Option<&str>,
+        label: &str,
+    ) {
+        for (i, p) in f.params.iter().enumerate() {
+            let Some(default) = &p.default else {
+                continue;
+            };
+            if p.variadic {
+                continue;
+            }
+            let Some(param_sig) = sig.params.get(i) else {
+                continue;
+            };
+            let param_ty = match &param_sig.ty {
+                Type::TemplateParam(tp) => tp.bound.as_ref(),
+                other => other,
+            };
+            let default_ty = self.infer_expr(default, &Locals::default());
+            if self.registry.is_assignable(&default_ty, param_ty) {
+                continue;
+            }
+            let target = match class_name {
+                Some(c) => format!("method {c}::{}()", f.name),
+                None => format!("function {}()", f.name),
+            };
+            self.report(
+                label.to_string(),
+                format!(
+                    "Default value of the parameter #{} ${} ({default_ty}) of {target} is incompatible with type {param_ty}.",
+                    i + 1,
+                    p.name,
+                ),
+                default.span,
+                2,
+                "parameter.defaultValue",
+            );
         }
     }
 }
