@@ -263,3 +263,105 @@ fn first_class_callable_new_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn instance_method_called_statically_without_a_compatible_this_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Svc {
+                public function run(): void {}
+                public static function make(): void { self::run(); }
+                public function again(): void { self::run(); static::run(); }
+            }
+            class SvcChild extends Svc {
+                public function go(): void { parent::run(); Svc::run(); }
+            }
+            class Unrelated {
+                public function go(): void { Svc::run(); }
+            }
+            function outside(): void { Svc::run(); }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "method.staticCall")
+        .map(|x| x.location.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec!["Svc::make", "Unrelated::go", "outside"],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn calling_an_abstract_method_through_a_class_name_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            abstract class AbsBase {
+                abstract public function work(): void;
+                abstract public static function build(): void;
+            }
+            class Impl extends AbsBase {
+                public function work(): void { parent::work(); }
+                public static function build(): void { parent::build(); static::build(); }
+            }
+        "#,
+    );
+    assert_eq!(
+        with_identifier(&d, "method.callToAbstract"),
+        vec!["cannot call abstract method AbsBase::work()"],
+        "got: {d:?}"
+    );
+    assert_eq!(
+        with_identifier(&d, "staticMethod.callToAbstract"),
+        vec!["cannot call abstract static method AbsBase::build()"],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn pseudo_class_static_calls_outside_a_class_or_without_a_parent_are_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void { self::go(); parent::go(); }
+            class Lonely {
+                public function m(): void { parent::go(); }
+            }
+        "#,
+    );
+    assert_eq!(
+        with_identifier(&d, "outOfClass.self"),
+        vec!["calling self::go() outside of class scope"]
+    );
+    assert_eq!(
+        with_identifier(&d, "outOfClass.parent"),
+        vec!["calling parent::go() outside of class scope"]
+    );
+    assert_eq!(
+        with_identifier(&d, "class.noParent"),
+        vec!["Lonely::m() calls parent::go() but Lonely does not extend any class"],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn static_call_on_a_value_that_cannot_name_a_class_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(int $i, string $s, int|string $m): void {
+                $i::go();
+                $s::go();
+                $m::go();
+            }
+        "#,
+    );
+    assert_eq!(
+        with_identifier(&d, "staticMethod.nonObject"),
+        vec![
+            "cannot call static method go() on int",
+            "cannot call static method go() on int|string",
+        ],
+        "got: {d:?}"
+    );
+}

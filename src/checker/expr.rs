@@ -2514,6 +2514,9 @@ impl<'a> Checker<'a> {
                                 e.span,
                             );
                             self.record_member_ref(e.span, owner, method);
+                            self.check_static_call_context(
+                                target, class, owner, method, e.span, label,
+                            );
                             // Mirrors real PHPStan's
                             // `CallPrivateMethodThroughStaticRule` - same
                             // late-static-binding unsafety as the
@@ -2572,6 +2575,8 @@ impl<'a> Checker<'a> {
                             "class.notFound",
                         );
                     }
+                } else {
+                    self.check_unresolved_static_call_target(target, method, locals, e.span, label);
                 }
                 match (&resolved_class, sig) {
                     (Some(class), Some(s)) => {
@@ -3953,11 +3958,6 @@ impl<'a> Checker<'a> {
             // real, callable `Closure` bound to that exact method the
             // same as an ordinary call would.
             ExprKind::FirstClassCallable(inner) => {
-                match &inner.kind {
-                    ExprKind::Call(callee, _) => {
-                        if let ExprKind::Name(name) = &callee.kind {
-                            if !is_language_construct(name) {
-                                let (primary, fallback) =
                 if !matches!(inner.kind, ExprKind::New(..))
                     && self.registry.php_version.is_some_and(|v| {
                         !crate::php_version::PhpFeature::FirstClassCallables.is_available(v)
@@ -3975,6 +3975,11 @@ impl<'a> Checker<'a> {
                         .non_ignorable(),
                     );
                 }
+                match &inner.kind {
+                    ExprKind::Call(callee, _) => {
+                        if let ExprKind::Name(name) = &callee.kind {
+                            if !is_language_construct(name) {
+                                let (primary, fallback) =
                                     self.name_ctx.resolve_function_candidates(name);
                                 let resolved_sig = self
                                     .registry

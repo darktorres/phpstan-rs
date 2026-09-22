@@ -346,7 +346,7 @@ pub struct ClassInfo {
     // yet inserted into `methods` - insertion has to wait for
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
-    pub method_tags: Vec<(Arc<str>, FunctionSig)>,
+    pub method_tags: Vec<(Arc<str>, FunctionSig, bool)>,
     // `#[ORM\Entity]` metadata (ROADMAP Phase 168 168a) - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
@@ -838,7 +838,7 @@ impl ClassInfo {
         // is also vacant-only.
         // `Registry::resolve_method_tags` runs this insertion later
         // instead, once `flatten_traits` has had its own say.
-        let method_tags: Vec<(Arc<str>, FunctionSig)> = class_doc
+        let method_tags: Vec<(Arc<str>, FunctionSig, bool)> = class_doc
             .as_ref()
             .map(|d| {
                 d.method_tags
@@ -847,6 +847,7 @@ impl ClassInfo {
                         (
                             intern(&tag.name),
                             method_tag_sig(tag, &template_params, ctx),
+                            tag.is_static,
                         )
                     })
                     .collect()
@@ -1512,6 +1513,16 @@ impl ClassInfo {
             }
             if m.is_static {
                 static_methods.insert(m.function.name.clone());
+            }
+        }
+        for builtin in ["cases", "from", "tryFrom"] {
+            if methods.contains_key(builtin)
+                && !e
+                    .methods
+                    .iter()
+                    .any(|m| m.function.name.eq_ignore_ascii_case(builtin))
+            {
+                static_methods.insert(intern(builtin));
             }
         }
         let trait_aliases: Vec<TraitAlias> = e

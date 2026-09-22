@@ -1193,6 +1193,7 @@ mod return_type_too_wide;
 mod risky_tests;
 pub(crate) mod semantic_tokens;
 pub(crate) mod sql_reflection;
+mod static_call_context;
 mod stmt;
 pub(crate) mod suggest;
 mod throws;
@@ -1725,8 +1726,8 @@ impl<'a> Checker<'a> {
                         self.check_class_completeness(&fqn, c.span);
                         self.check_inheritance_target_kinds(&fqn, false, &fqn, c.span);
                         self.check_readonly_class_version(c.is_readonly, false, &fqn, c.name_span);
-                        self.check_class_references_exist(&fqn, c.span);
                         self.check_magic_serialization_methods(&fqn, &fqn, &fqn, c.name_span);
+                        self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);
                         self.check_restricted_class_inheritance(&fqn, c.span);
                         for (i, parent) in c.extends.iter().enumerate() {

@@ -316,8 +316,15 @@ impl Registry {
             .collect::<Vec<_>>()
             .into_par_iter()
             .for_each(|info| {
-                for (name, sig) in std::mem::take(&mut info.method_tags) {
-                    info.methods.entry(name).or_insert(sig);
+                for (name, sig, is_static) in std::mem::take(&mut info.method_tags) {
+                    if let std::collections::hash_map::Entry::Vacant(slot) =
+                        info.methods.entry(name.clone())
+                    {
+                        slot.insert(sig);
+                        if is_static {
+                            info.static_methods.insert(name);
+                        }
+                    }
                 }
             });
     }

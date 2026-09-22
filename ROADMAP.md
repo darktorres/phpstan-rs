@@ -527,7 +527,13 @@ with the same verdict, matching `ConstantConditionInTraitRule`. `MissingMagicSer
 (`method.nonAbstract`), from a new `FunctionDecl::has_body`; an
 empty-bodied constructor's unused parameters are now reported too. First-class-callable syntax below PHP 8.1
 (`callable.notSupported`, `FunctionCallableRule`/`MethodCallableRule`/
-`StaticMethodCallableRule`).
+`StaticMethodCallableRule`). `StaticMethodCallCheck`'s remainder:
+`method.staticCall` (an instance method called statically without a
+compatible `$this`), `method.callToAbstract`/
+`staticMethod.callToAbstract`, `staticMethod.nonObject`, and
+`outOfClass.*`/`class.noParent` for `self::`/`static::`/`parent::`
+calls; `@method static` tags and enum `cases()`/`from()`/`tryFrom()` are
+now recorded in `ClassInfo::static_methods`.
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3543,12 +3549,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 127 — Methods (`Rules/Methods/` gaps)
 
-- `StaticMethodCallCheck`'s static/instance-context mismatch half —
-  `method.staticCall` for calling a non-static method through
-  `Foo::method()` static-call syntax (or the reverse). The same real
-  check's `staticMethod.nonObject` (a static call on a non-class-string
-  expression) is unbuilt too. The casing-mismatch check in the same file
-  is already built.
 - `OverridingMethodRule`'s tentative-return-type sub-check —
   `method.tentativeReturnType`. Niche: it only matters when extending
   certain SPL/core classes.
