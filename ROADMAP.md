@@ -4840,21 +4840,113 @@ purely-additive `allow_in_*` pair short-circuits to allowed at exactly
 its own position; the default-inverting `allow_except_in_*` pair flips
 the baseline to "allowed everywhere except the marked position(s)."
 
-Still genuinely unbuilt: parameter-value conditions
-(`allowParamsInAllowed`/`allowParamsAnywhere`/
-`allowExceptParamsAnywhere`/`allowExceptParamsInAllowed`/their
-`AnyValue`/`CaseInsensitive` siblings) - real scope confirmed
-substantial, not a small addendum: positional *and* named-parameter
-resolution, three distinct value-matching modes (`value` - scalars
-only; `typeString` - full PHPDoc-type matching, arrays/unions/classes;
-`classPattern` - `fnmatch()` against an argument's own declared class,
-no ancestor traversal), a first-class-callable edge case (a condition
-restricting which calls are *allowed* always reports a bare `(...)`
-reference, since there's no argument list yet to evaluate; one
-restricting which are *disallowed* never does), and combining with
-every existing zone directive (`allowIn`/`allowInMethods`/etc.) as a
-further narrowing rather than a replacement. Its own separate,
-properly-scoped investigation, not folded in here.
+Still genuinely unbuilt: parameter-value conditions. Investigated
+2026-09-22 (real docs re-fetched directly from `spaze/phpstan-
+disallowed-calls`'s `docs/allow-with-parameters.md`/`allow-with-flags.md`,
+not recalled, plus a direct code audit of this project's own existing
+building blocks - not assumed). Real scope, corrected from the
+placeholder text this replaces:
+
+Directive surface: ~14 keys, `Function`/`Method`/`StaticMethod` kinds
+only (the other four kinds have no call-site arguments to condition
+on) - `allowParamsInAllowed`/`allowParamsInAllowedAnyValue`,
+`allowParamsAnywhere`/`allowParamsAnywhereAnyValue`,
+`allowExceptParamsAnywhere` (alias `disallowParamsAnywhere`)/
+`allowExceptParamsAnyValue` (`disallowParamsAnyValue`)/
+`allowExceptCaseInsensitiveParams` (`disallowCaseInsensitiveParams`)/
+`allowExceptParamsInAllowed` (`disallowParamsInAllowed`), plus a
+`ParamFlags` bitmask sibling of 4 of those
+(`allowParamFlagsInAllowed`/`allowParamFlagsAnywhere`/
+`allowExceptParamFlagsInAllowed` (`disallowParamFlagsInAllowed`)/
+`allowExceptParamFlags` (`disallowParamFlags`)). Each entry is a
+`{position, name, value|typeString|classPattern}` condition.
+
+Building-block audit against this project's own code:
+- Positional/named argument resolution at the call site is not free
+  despite `checker::calls::resolve_call_args(args, params: &[ParamSig])`
+  already existing - real semantics matches the raw `&[Arg]` list
+  directly (a `name`-configured condition just needs `arg.name ==
+  configured_name`; a `position`-configured one is "the Nth non-named,
+  non-spread argument"), independent of the callee's own declared
+  parameter names, so reusing `resolve_call_args`'s signature-keyed
+  shape would be the wrong tool - a new, smaller direct-`Arg`-list
+  matcher is the right one.
+- `value`/`typeString`/`classPattern` matching all reuse existing
+  machinery: `value` reads the argument's own already-inferred
+  `Type::{Int,String,Bool,Float}Literal` (same convention as
+  `checker::assignment::literal_key_from_type`); `typeString` reuses
+  `types::parse::parse_type_string` + `Registry::is_assignable`;
+  `classPattern` reads a bare `Type::Object(name, _)`'s `name` (no
+  ancestor walk - confirmed against the real docs' own "declared class
+  name only" wording) through the existing `glob_matches`.
+- Flags matching is genuinely NOT free, unlike it first appears:
+  confirmed via direct grep that this project's real *type-inference*
+  path for `BinOp::BitOr`/`BitAnd`/`BitXor` (`checker/expr.rs:5101`)
+  deliberately widens two folded int literals to plain `Type::Int`
+  (only `operators.rs`'s validity check, a separate boolean-only path,
+  looks at bitwise legality at all) - there is no existing literal-
+  value-preserving fold for a `JSON_HEX_TAG | JSON_HEX_APOS`-shaped
+  expression anywhere in this codebase today. Needs a small, dedicated,
+  best-effort AST-level constant folder (`Literal`, unary minus of one,
+  `BinOp::{BitOr,BitAnd,BitXor}` of two foldable operands, and a `Name`
+  leaf). That last leaf is real and directly reusable, though:
+  `registry::index::define_call_constant`/`infer_const_type` already
+  resolve a stub's `define('JSON_HEX_APOS', 4)` to `Type::IntLiteral(4)`
+  in `Registry::global_constants` - confirmed live against the vendored
+  `jetbrains/phpstorm-stubs/json/json.php:255`, so the folder's `Name`
+  leaf is a plain map lookup, not new inference.
+- **Two prerequisite zone directives are missing outright, not just
+  their parameter-condition combination** - this corrects the
+  placeholder text's own "combining with every existing zone directive
+  (`allowIn`/`allowInMethods`/etc.)" phrasing, which wrongly implied
+  `allowInMethods` already existed: `allowInMethods`/`allowInFunctions`/
+  `allowExceptInMethods`/`allowExceptInFunctions` (fnmatch against the
+  calling function/method's own `Class::method()`/`function()` name)
+  and `allowInInstanceOf`/`allowExceptInInstanceOf` (fnmatch against the
+  calling class's own name plus every transitive ancestor/interface) do
+  not exist in this codebase at all - confirmed via a direct grep, zero
+  hits. Both are real, useful zone mechanisms independent of parameter
+  conditions (the real package supports them standalone too), so
+  they're their own two small sub-items, sequenced before the
+  `*InAllowed` parameter-condition variants that need a zone to narrow
+  (the `*Anywhere` variants don't depend on either and can ship
+  first). Both have real, already-existing data to build on: `Checker::
+  current_class`/`current_method` (bare name only, confirmed shape at
+  `function_decl.rs:865`) give `allowInMethods`'s match string directly;
+  `Registry::ancestor_names` (`registry/hierarchy.rs:466`, the exact
+  precomputed transitive `extends`+`implements` closure `is_subclass_of`
+  itself already reads at line 22) gives `allowInInstanceOf`'s candidate
+  set directly - zero new hierarchy-walking code needed for either.
+- A first-class-callable edge case applies on top, per the real docs:
+  a condition restricting which calls are *allowed*
+  (`*InAllowed`/`*Anywhere` on the allow side) always reports a bare
+  `f(...)` reference (no argument list exists yet to evaluate); one
+  restricting which are *disallowed* (`allowExcept*`) never does for
+  the `*Anywhere` shape, and only outside its own zone for the
+  `*InAllowed` shape - a three-way rule, not a single flag.
+
+Recommended sequencing, each its own commit (small/medium as noted):
+1. `allowInMethods`/`allowInFunctions` + `allowExceptIn*` aliases (small).
+2. `allowInInstanceOf`/`allowExceptInInstanceOf` (small).
+3. `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` +
+   `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
+   `allowExceptCaseInsensitiveParams` (medium - the location-independent
+   half; builds the value/typeString/classPattern matching engine with
+   no zone dependency).
+4. `allowParamsInAllowed`/`allowParamsInAllowedAnyValue` +
+   `allowExceptParamsInAllowed` (medium - same engine, read together
+   with whichever zone directive - path/instanceof/methods - the entry
+   also configures).
+5. The `ParamFlags` family (medium - needs the new constant folder
+   above; otherwise reuses step 3/4's engine).
+6. First-class-callable interaction (small, cross-cutting).
+
+Not started - this is the investigation only. The config-shortcut forms
+(bare `position: true`/`name: 'bar'` maps expanding to a full condition)
+are a NEON config-ergonomics detail with no TOML equivalent needed, the
+same call this project's own `allow_except_in_param_types` field already
+made by carrying no separate `disallow_in_*` alias either - declined,
+not a gap.
 
 Still wholly out of scope, unchanged: the filter DSL's own wholly-
 separate namespace/enum/superglobal/keyword-specific siblings, each a
