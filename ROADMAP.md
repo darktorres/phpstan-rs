@@ -4966,9 +4966,27 @@ Recommended sequencing, each its own commit (small/medium as noted):
    and the inverting family never finds a disallow-match (matches:
    "never reported") - zero FCC-specific code needed for this family.
 4. `allowParamsInAllowed`/`allowParamsInAllowedAnyValue` +
-   `allowExceptParamsInAllowed` (medium - same engine, read together
-   with whichever zone directive - path/instanceof/methods - the entry
-   also configures).
+   `allowExceptParamsInAllowed` - **done**: reuses step 3's own matching
+   engine (`params_in_allowed_gate` computes one unified verdict -
+   additive-family matched, or inverting-family didn't - independent of
+   which zone accompanies it), then combines it with whichever zone the
+   entry also configures. `allow_in_instance_of`/`allow_in_methods`
+   (additive zones) and their `allow_except_in_*` siblings (default-
+   inverting) are combined *inline*, in the checker, before a
+   diagnostic is even built (`is_allowed_by_params_in_allowed_context`)
+   - the entry's own unconditional `is_allowed_by_calling_context`/
+   `is_allowed_by_instance_of_context` defer to this combined check
+   instead whenever `has_params_in_allowed_directive()` is true, so the
+   same zone is never independently (and wrongly) re-granted without
+   the param condition. The path-scoped `allow_in`/`allow_except_in`
+   zone has no call-site context available inline (it's resolved by a
+   later post-filter, `restricted_symbols::filter_by_path`), so the
+   already-resolved gate travels there as new diagnostic metadata
+   (`restrictedSymbol.paramsInAllowedGate`) instead, and the post-filter
+   folds it in with the identical formula. Verified against the real
+   docs' own two worked examples directly (`Controller::redirect()`/
+   `handleRequest()`/`SafeUrl`; `dispatch()`/`HandlerInterface`/
+   `DangerousEvent`), both now passing tests.
 5. The `ParamFlags` family (medium - needs the new constant folder
    above; otherwise reuses step 3/4's engine).
 6. First-class-callable interaction for the `*InAllowed` family (small

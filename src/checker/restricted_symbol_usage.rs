@@ -236,6 +236,80 @@ impl<'a> Checker<'a> {
         false
     }
 
+    /// The single unified verdict `allow_params_in_allowed`/
+    /// `allow_except_params_in_allowed` contribute, independent of
+    /// which of the entry's own zone directives (`allow_in_instance_of`/
+    /// `allow_in_methods`/`allow_in`/their `allow_except_in_*` siblings)
+    /// they're paired with: `true` when the param condition favors
+    /// allowing (the additive family matched, or the inverting family
+    /// did *not* match), `false` when it favors reporting. `None` when
+    /// neither field is configured on this entry at all - the caller
+    /// then knows this whole mechanism doesn't apply here.
+    fn params_in_allowed_gate(
+        &self,
+        entry: &RestrictedSymbolEntry,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<bool> {
+        if !entry.allow_except_params_in_allowed.is_empty() {
+            return Some(!self.all_conditions_match(
+                &entry.allow_except_params_in_allowed,
+                args,
+                locals,
+                false,
+            ));
+        }
+        if !entry.allow_params_in_allowed.is_empty()
+            || !entry.allow_params_in_allowed_any_value.is_empty()
+        {
+            return Some(
+                self.all_conditions_match(&entry.allow_params_in_allowed, args, locals, false)
+                    || self.all_refs_present(&entry.allow_params_in_allowed_any_value, args),
+            );
+        }
+        None
+    }
+
+    /// Combines `params_in_allowed_gate`'s own verdict with whichever
+    /// of `allow_in_instance_of`/`allow_in_methods`/their `allow_
+    /// except_in_*` siblings this entry also configures (real docs:
+    /// "the parameter condition is applied to the location matched by
+    /// the accompanying allow directive"). An `allow_in_*`-style zone
+    /// is purely additive - not matching it means "not allowed via this
+    /// mechanism" regardless of `gate`; an `allow_except_in_*`-style
+    /// zone inverts the default - not matching it means "allowed,
+    /// params irrelevant" (matching the real docs' own "outside the
+    /// zone, the zone rule alone determines" FCC-section wording,
+    /// generalized to the ordinary case too). Returns `None` when
+    /// neither zone type is configured on this entry - the path-scoped
+    /// `allow_in`/`allow_except_in` zone is handled separately (see
+    /// `report_restricted_with_params_gate`'s own doc comment), since
+    /// it has no call-site context available inline at all.
+    fn is_allowed_by_params_in_allowed_context(
+        &self,
+        entry: &RestrictedSymbolEntry,
+        gate: Option<bool>,
+    ) -> Option<bool> {
+        let gate = gate?;
+        if !entry.allow_in_instance_of.is_empty() || !entry.allow_in_methods.is_empty() {
+            let zone_matched = self.matches_instance_of_patterns(&entry.allow_in_instance_of)
+                || self.matches_calling_context_patterns(&entry.allow_in_methods);
+            return Some(zone_matched && gate);
+        }
+        if !entry.allow_except_in_instance_of.is_empty()
+            || !entry.allow_except_in_methods.is_empty()
+        {
+            let zone_matched = self
+                .matches_instance_of_patterns(&entry.allow_except_in_instance_of)
+                || self.matches_calling_context_patterns(&entry.allow_except_in_methods);
+            if !zone_matched {
+                return Some(true);
+            }
+            return Some(gate);
+        }
+        None
+    }
+
     /// Every `check_restricted_*` report call routes through here -
     /// centralizes both halves of Phase 67's own filter-DSL extension
     /// (confirmed against the real `spaze/phpstan-disallowed-calls`
@@ -256,6 +330,29 @@ impl<'a> Checker<'a> {
         span: Span,
         identifier: &'static str,
     ) {
+        self.report_restricted_with_params_gate(entry, label, message, span, identifier, None);
+    }
+
+    /// `report_restricted`'s own real body, plus one extra piece only
+    /// `Function`/`Method`/`StaticMethod` call sites ever have:
+    /// `params_gate` (`Self::params_in_allowed_gate`'s already-resolved
+    /// verdict) is attached as diagnostic metadata for `restricted_
+    /// symbols::filter_by_path`'s own post-filter to combine with the
+    /// path-scoped `allow_in`/`allow_except_in` zone, exactly the way
+    /// `is_allowed_by_params_in_allowed_context` already combines it
+    /// with the instance-of/methods zones inline, right here, before a
+    /// diagnostic is even built - the path zone alone has no call-site
+    /// context available at post-filter time (see `filter_by_path`'s
+    /// own doc comment).
+    fn report_restricted_with_params_gate(
+        &mut self,
+        entry: &RestrictedSymbolEntry,
+        label: &str,
+        message: String,
+        span: Span,
+        identifier: &'static str,
+        params_gate: Option<bool>,
+    ) {
         if self.is_allowed_by_attribute_context(entry)
             || self.is_allowed_by_calling_context(entry)
             || self.is_allowed_by_instance_of_context(entry)
@@ -273,6 +370,12 @@ impl<'a> Checker<'a> {
             builder = builder.metadata(
                 "restrictedSymbol.allowExceptIn",
                 serde_json::json!(entry.allow_except_in),
+            );
+        }
+        if let Some(gate) = params_gate {
+            builder = builder.metadata(
+                "restrictedSymbol.paramsInAllowedGate",
+                serde_json::json!(gate),
             );
         }
         self.report_builder(builder);
@@ -384,20 +487,39 @@ impl<'a> Checker<'a> {
         if entry.allow_in_methods.is_empty() && entry.allow_except_in_methods.is_empty() {
             return false;
         }
-        let current = self.current_calling_context_label().to_lowercase();
-        let matches_any = |patterns: &[String]| {
-            patterns
-                .iter()
-                .any(|p| glob_matches(&p.to_lowercase(), &current))
-        };
-        if matches_any(&entry.allow_in_methods) {
+        if entry.has_params_in_allowed_directive() {
+            // Evaluated together with the param condition instead (see
+            // `is_allowed_by_params_in_allowed_context`, which reads
+            // this same zone via `matches_calling_context_patterns`) -
+            // this unconditional check would otherwise wrongly grant
+            // the allowance without ever consulting the param
+            // condition the entry also configures.
+            return false;
+        }
+        if self.matches_calling_context_patterns(&entry.allow_in_methods) {
             return true;
         }
-        if !entry.allow_except_in_methods.is_empty() && !matches_any(&entry.allow_except_in_methods)
+        if !entry.allow_except_in_methods.is_empty()
+            && !self.matches_calling_context_patterns(&entry.allow_except_in_methods)
         {
             return true;
         }
         false
+    }
+
+    /// The raw pattern match `is_allowed_by_calling_context` and
+    /// `is_allowed_by_params_in_allowed_context` both need - factored
+    /// out so the latter can combine it with a param condition instead
+    /// of the former's own unconditional "matched, therefore allowed"
+    /// shortcut.
+    fn matches_calling_context_patterns(&self, patterns: &[String]) -> bool {
+        if patterns.is_empty() {
+            return false;
+        }
+        let current = self.current_calling_context_label().to_lowercase();
+        patterns
+            .iter()
+            .any(|p| glob_matches(&p.to_lowercase(), &current))
     }
 
     /// The calling function/method's own `Class::method()`/`function()`-
@@ -428,33 +550,45 @@ impl<'a> Checker<'a> {
         if entry.allow_in_instance_of.is_empty() && entry.allow_except_in_instance_of.is_empty() {
             return false;
         }
-        let Some(class) = &self.current_class else {
+        if entry.has_params_in_allowed_directive() {
+            // Same reasoning as `is_allowed_by_calling_context`'s own
+            // identical guard just above.
             return false;
-        };
-        let matches_any = |patterns: &[String]| {
-            patterns.iter().any(|p| {
-                let p = p.to_lowercase();
-                glob_matches(&p, &class.to_lowercase())
-                    || self
-                        .registry
-                        .ancestor_names
-                        .get(class.as_str())
-                        .is_some_and(|ancestors| {
-                            ancestors
-                                .iter()
-                                .any(|a| glob_matches(&p, &a.to_lowercase()))
-                        })
-            })
-        };
-        if matches_any(&entry.allow_in_instance_of) {
+        }
+        if self.matches_instance_of_patterns(&entry.allow_in_instance_of) {
             return true;
         }
         if !entry.allow_except_in_instance_of.is_empty()
-            && !matches_any(&entry.allow_except_in_instance_of)
+            && !self.matches_instance_of_patterns(&entry.allow_except_in_instance_of)
         {
             return true;
         }
         false
+    }
+
+    /// The raw pattern match `is_allowed_by_instance_of_context` and
+    /// `is_allowed_by_params_in_allowed_context` both need - see
+    /// `matches_calling_context_patterns`'s own identical rationale.
+    fn matches_instance_of_patterns(&self, patterns: &[String]) -> bool {
+        if patterns.is_empty() {
+            return false;
+        }
+        let Some(class) = &self.current_class else {
+            return false;
+        };
+        patterns.iter().any(|p| {
+            let p = p.to_lowercase();
+            glob_matches(&p, &class.to_lowercase())
+                || self
+                    .registry
+                    .ancestor_names
+                    .get(class.as_str())
+                    .is_some_and(|ancestors| {
+                        ancestors
+                            .iter()
+                            .any(|a| glob_matches(&p, &a.to_lowercase()))
+                    })
+        })
     }
 
     pub(crate) fn check_restricted_function_call(
@@ -475,13 +609,20 @@ impl<'a> Checker<'a> {
         if self.is_allowed_by_params_anywhere_context(entry, args, locals) {
             return;
         }
+        let gate = self.params_in_allowed_gate(entry, args, locals);
+        if let Some(allowed) = self.is_allowed_by_params_in_allowed_context(entry, gate)
+            && allowed
+        {
+            return;
+        }
         let entry = entry.clone();
-        self.report_restricted(
+        self.report_restricted_with_params_gate(
             &entry,
             label,
             format!("Call to restricted function {bare}(): {}", entry.message),
             span,
             "restrictedSymbol.function",
+            gate,
         );
     }
 
@@ -510,6 +651,12 @@ impl<'a> Checker<'a> {
         if self.is_allowed_by_params_anywhere_context(entry, args, locals) {
             return;
         }
+        let gate = self.params_in_allowed_gate(entry, args, locals);
+        if let Some(allowed) = self.is_allowed_by_params_in_allowed_context(entry, gate)
+            && allowed
+        {
+            return;
+        }
         let entry = entry.clone();
         let static_word = if is_static { "static " } else { "" };
         let identifier = if is_static {
@@ -517,7 +664,7 @@ impl<'a> Checker<'a> {
         } else {
             "restrictedSymbol.method"
         };
-        self.report_restricted(
+        self.report_restricted_with_params_gate(
             &entry,
             label,
             format!(
@@ -526,6 +673,7 @@ impl<'a> Checker<'a> {
             ),
             span,
             identifier,
+            gate,
         );
     }
 

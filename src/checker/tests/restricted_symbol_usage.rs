@@ -46,6 +46,9 @@ fn entry(
         allow_except_params_anywhere: Vec::new(),
         allow_except_params_any_value: Vec::new(),
         allow_except_case_insensitive_params: Vec::new(),
+        allow_params_in_allowed: Vec::new(),
+        allow_params_in_allowed_any_value: Vec::new(),
+        allow_except_params_in_allowed: Vec::new(),
     }
 }
 
@@ -1221,4 +1224,92 @@ fn a_first_class_callable_is_never_flagged_when_allow_except_params_anywhere_is_
             .any(|x| x.identifier == "restrictedSymbol.function"),
         "unexpected diagnostics: {d:?}"
     );
+}
+
+// `allowParamsInAllowed`/`allowExceptParamsInAllowed` - narrows
+// whichever zone directive (`allow_in_instance_of`/`allow_in_methods`/
+// their `allow_except_in_*` siblings) the same entry also configures,
+// mirroring the real docs' own `Controller::redirect()`/`dispatch()`
+// worked examples directly.
+
+#[test]
+fn allow_params_in_allowed_combined_with_allow_except_in_methods() {
+    let d = with_entries(
+        r#"<?php
+            class SafeUrl {}
+            class OtherUrl {}
+            class Controller {
+                public function redirect(SafeUrl|OtherUrl $url): void {}
+                public function handleRequest(): void {
+                    $this->redirect(new SafeUrl());
+                    $this->redirect(new OtherUrl());
+                }
+                public function other(): void {
+                    $this->redirect(new OtherUrl());
+                }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Controller"),
+            "redirect",
+            "use a safe redirect instead",
+            |e| {
+                e.allow_except_in_methods = vec!["Controller::handleRequest()".to_string()];
+                e.allow_params_in_allowed = vec![ParamCondition {
+                    position: Some(1),
+                    type_string: Some("SafeUrl".to_string()),
+                    ..Default::default()
+                }];
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_except_params_in_allowed_combined_with_allow_except_in_instance_of() {
+    let d = with_entries(
+        r#"<?php
+            interface HandlerInterface {}
+            class SafeEvent {}
+            class DangerousEvent {}
+            function dispatch(SafeEvent|DangerousEvent $e) {}
+            class MyHandler implements HandlerInterface {
+                public function f(): void {
+                    dispatch(new DangerousEvent());
+                    dispatch(new SafeEvent());
+                }
+            }
+            class Other {
+                public function f(): void {
+                    dispatch(new DangerousEvent());
+                }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "dispatch",
+            "use the module-specific handler instead",
+            |e| {
+                e.allow_except_in_instance_of = vec!["HandlerInterface".to_string()];
+                e.allow_except_params_in_allowed = vec![ParamCondition {
+                    position: Some(1),
+                    type_string: Some("DangerousEvent".to_string()),
+                    ..Default::default()
+                }];
+            },
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(flagged[0].location.contains("MyHandler"));
 }

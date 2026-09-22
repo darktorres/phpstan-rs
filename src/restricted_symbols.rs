@@ -272,6 +272,50 @@ pub struct RestrictedSymbolEntry {
     /// casing).
     #[serde(default)]
     pub allow_except_case_insensitive_params: Vec<ParamCondition>,
+    /// Narrows whichever of `allow_in_instance_of`/`allow_except_in_
+    /// instance_of`/`allow_in_methods`/`allow_except_in_methods`/
+    /// `allow_in`/`allow_except_in` this same entry also configures
+    /// (real `allowParamsInAllowed`: "the parameter condition is
+    /// applied to the location matched by the accompanying allow
+    /// directive"). Purely additive on top of an `allow_in_*`-style
+    /// zone (both the zone match *and* every listed condition must
+    /// hold to be allowed); combined with an `allow_except_in_*`-style
+    /// zone instead, a match lets the call through *inside* that zone
+    /// (confirmed against the real docs' `Controller::handleRequest()`
+    /// worked example).
+    #[serde(default)]
+    pub allow_params_in_allowed: Vec<ParamCondition>,
+    /// `allow_params_in_allowed`'s presence-only sibling.
+    #[serde(default)]
+    pub allow_params_in_allowed_any_value: Vec<ParamRef>,
+    /// The inverse of `allow_params_in_allowed` (real
+    /// `allowExceptParamsInAllowed`, alias `disallowParamsInAllowed`):
+    /// combined with an `allow_in_*`-style zone, a match *disallows* the
+    /// call inside the zone instead of allowing it (confirmed against
+    /// the real docs' `views/`+`waldo()` worked example: allowed in
+    /// `views/*` unless the 2nd parameter is `'quux'`); combined with an
+    /// `allow_except_in_*`-style zone, a match keeps the call disallowed
+    /// inside the zone, same as having no param condition at all
+    /// (confirmed against the real docs' `HandlerInterface`+`dispatch()`
+    /// worked example).
+    #[serde(default)]
+    pub allow_except_params_in_allowed: Vec<ParamCondition>,
+}
+
+impl RestrictedSymbolEntry {
+    /// Whether this entry configures any `*ParamsInAllowed` field at
+    /// all - `checker::restricted_symbol_usage`'s own unconditional
+    /// zone checks (`is_allowed_by_calling_context`/`is_allowed_by_
+    /// instance_of_context`) defer to the params-aware combined check
+    /// instead of evaluating `allow_in_methods`/`allow_in_instance_of`/
+    /// their `allow_except_in_*` siblings on their own whenever this is
+    /// `true`, so the same zone isn't evaluated twice with two
+    /// different (param-unaware vs. param-aware) answers.
+    pub(crate) fn has_params_in_allowed_directive(&self) -> bool {
+        !self.allow_params_in_allowed.is_empty()
+            || !self.allow_params_in_allowed_any_value.is_empty()
+            || !self.allow_except_params_in_allowed.is_empty()
+    }
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -400,13 +444,18 @@ impl RestrictedSymbols {
     }
 }
 
-/// The two metadata keys `checker::restricted_symbol_usage`'s own
-/// `report_restricted` attaches to a diagnostic when its entry has real
-/// `allow_in`/`allow_except_in` patterns - read back here, not re-looked-
-/// up against the registry, since this runs as a post-filter over already-
-/// produced diagnostics with no `Checker`/`Registry` in scope at all.
+/// The metadata keys `checker::restricted_symbol_usage`'s own
+/// `report_restricted`/`report_restricted_with_params_gate` attach to a
+/// diagnostic when its entry has real `allow_in`/`allow_except_in`
+/// patterns (the first two) or an `allow_params_in_allowed`/
+/// `allow_except_params_in_allowed` condition (the third,
+/// `Function`/`Method`/`StaticMethod` kinds only) - read back here, not
+/// re-looked-up against the registry, since this runs as a post-filter
+/// over already-produced diagnostics with no `Checker`/`Registry` in
+/// scope at all.
 const ALLOW_IN_METADATA_KEY: &str = "restrictedSymbol.allowIn";
 const ALLOW_EXCEPT_IN_METADATA_KEY: &str = "restrictedSymbol.allowExceptIn";
+const PARAMS_IN_ALLOWED_GATE_METADATA_KEY: &str = "restrictedSymbol.paramsInAllowedGate";
 
 /// Path-scoped `allow_in`/`allow_except_in` (Phase 67's own DSL
 /// extension) - a **post-filter** over already-produced diagnostics,
@@ -426,20 +475,34 @@ fn is_allowed_by_path(d: &Diagnostic, path: &str) -> bool {
     if !d.identifier.starts_with("restrictedSymbol.") {
         return false;
     }
+    // `allow_params_in_allowed`/`allow_except_params_in_allowed`'s own
+    // already-resolved verdict, if this entry configures either -
+    // combines with a *matched* zone below exactly like it already
+    // does with the inline instance-of/methods zones
+    // (`Checker::is_allowed_by_params_in_allowed_context`): `gate.
+    // unwrap_or(<the zone's own unconditional behavior>)` leaves an
+    // entry with no params-in-allowed condition at all fully
+    // unaffected.
+    let gate = d
+        .metadata
+        .get(PARAMS_IN_ALLOWED_GATE_METADATA_KEY)
+        .and_then(|v| v.as_bool());
     let allow_in = string_array_metadata(d, ALLOW_IN_METADATA_KEY);
     if allow_in
         .iter()
         .any(|p| crate::ignore_errors::glob_matches(p, path))
     {
-        return true;
+        return gate.unwrap_or(true);
     }
     let allow_except_in = string_array_metadata(d, ALLOW_EXCEPT_IN_METADATA_KEY);
-    if !allow_except_in.is_empty()
-        && !allow_except_in
+    if !allow_except_in.is_empty() {
+        if !allow_except_in
             .iter()
             .any(|p| crate::ignore_errors::glob_matches(p, path))
-    {
-        return true;
+        {
+            return true;
+        }
+        return gate.unwrap_or(false);
     }
     false
 }
@@ -488,6 +551,9 @@ mod tests {
             allow_except_params_anywhere: Vec::new(),
             allow_except_params_any_value: Vec::new(),
             allow_except_case_insensitive_params: Vec::new(),
+            allow_params_in_allowed: Vec::new(),
+            allow_params_in_allowed_any_value: Vec::new(),
+            allow_except_params_in_allowed: Vec::new(),
         }
     }
 
@@ -609,5 +675,50 @@ mod tests {
         filter_by_path(&mut results);
         assert!(results[&PathBuf::from("tests/Foo.php")].is_empty());
         assert_eq!(results[&PathBuf::from("src/Foo.php")].len(), 1);
+    }
+
+    fn with_gate(mut d: crate::checker::Diagnostic, gate: bool) -> crate::checker::Diagnostic {
+        d.metadata.insert(
+            PARAMS_IN_ALLOWED_GATE_METADATA_KEY.to_string(),
+            serde_json::json!(gate),
+        );
+        d
+    }
+
+    // `allow_params_in_allowed`/`allow_except_params_in_allowed`'s own
+    // already-resolved gate, combined with the path-scoped `allow_in`/
+    // `allow_except_in` zone at post-filter time - the one zone type
+    // `Checker::is_allowed_by_params_in_allowed_context` can't combine
+    // with inline, since it has no call-site context by the time this
+    // post-filter runs.
+
+    #[test]
+    fn params_in_allowed_gate_narrows_an_allow_in_match() {
+        let matching = with_gate(restricted_diagnostic(&["views/*"], &[]), true);
+        assert!(is_allowed_by_path(&matching, "views/Foo.php"));
+
+        let non_matching = with_gate(restricted_diagnostic(&["views/*"], &[]), false);
+        assert!(!is_allowed_by_path(&non_matching, "views/Foo.php"));
+    }
+
+    #[test]
+    fn params_in_allowed_gate_is_ignored_when_the_allow_in_path_does_not_match() {
+        let d = with_gate(restricted_diagnostic(&["views/*"], &[]), true);
+        assert!(!is_allowed_by_path(&d, "src/Foo.php"));
+    }
+
+    #[test]
+    fn params_in_allowed_gate_narrows_an_allow_except_in_match() {
+        let matching = with_gate(restricted_diagnostic(&[], &["legacy/*.php"]), true);
+        assert!(is_allowed_by_path(&matching, "legacy/Foo.php"));
+
+        let non_matching = with_gate(restricted_diagnostic(&[], &["legacy/*.php"]), false);
+        assert!(!is_allowed_by_path(&non_matching, "legacy/Foo.php"));
+    }
+
+    #[test]
+    fn params_in_allowed_gate_is_irrelevant_outside_an_allow_except_in_zone() {
+        let d = with_gate(restricted_diagnostic(&[], &["legacy/*.php"]), false);
+        assert!(is_allowed_by_path(&d, "src/Foo.php"));
     }
 }
