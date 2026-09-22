@@ -24,7 +24,13 @@ impl<'a> Checker<'a> {
     }
 
     /// `BooleanAndConstantConditionRule`/`BooleanOrConstantConditionRule` -
-    /// three independent diagnostics (left side, right side, whole-expression result), the
+    /// called for both the symbol (`&&`/`||`, `BinOp::And`/`Or`) and word
+    /// (`and`/`or`, `BinOp::LogicalAnd`/`LogicalOr`) spellings, `op`
+    /// carrying the exact matched variant through to `kind`/`symbol`
+    /// below so the identifier prefix (`booleanAnd`/`logicalAnd`) and
+    /// rendered message text match real PHPStan's own per-spelling
+    /// `$identifierType`/`getOperatorSigil()`.
+    /// Three independent diagnostics (left side, right side, whole-expression result), the
     /// left one unconditional, the other two gated by `is_first_level`
     /// (`Checker::in_condition_position`'s own doc comment - real
     /// PHPStan's `!isInFirstLevelStatement()` guard: skipped exactly when
@@ -75,12 +81,17 @@ impl<'a> Checker<'a> {
         label: &str,
         is_first_level: bool,
     ) {
-        let kind = if *op == BinOp::And {
-            "booleanAnd"
-        } else {
-            "booleanOr"
+        let is_and = matches!(op, BinOp::And | BinOp::LogicalAnd);
+        let kind = match op {
+            BinOp::And => "booleanAnd",
+            BinOp::LogicalAnd => "logicalAnd",
+            BinOp::Or => "booleanOr",
+            BinOp::LogicalOr => "logicalOr",
+            _ => unreachable!(
+                "check_boolean_and_or is only ever called with And/Or/LogicalAnd/LogicalOr"
+            ),
         };
-        let symbol = if *op == BinOp::And { "&&" } else { "||" };
+        let symbol = crate::checker::binop_sigil(op);
         if let Some(value) = self.inferred_constant_condition(l, locals) {
             self.report(
                 label.to_string(),
@@ -97,7 +108,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let mut narrowed = locals.clone();
-        self.apply_narrowing(l, &mut narrowed, *op == BinOp::And);
+        self.apply_narrowing(l, &mut narrowed, is_and);
         if let Some(value) = self.inferred_constant_condition(r, &narrowed) {
             self.report(
                 label.to_string(),
@@ -231,7 +242,11 @@ fn should_skip_constant_condition(e: &Expr) -> bool {
             _,
         ) | ExprKind::Instanceof(_, _)
             | ExprKind::Unary(UnaryOp::Not, _)
-            | ExprKind::Binary(BinOp::And | BinOp::Or, _, _)
+            | ExprKind::Binary(
+                BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr,
+                _,
+                _,
+            )
             | ExprKind::Ternary(_, _, _)
     )
 }

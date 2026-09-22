@@ -718,7 +718,7 @@ fn is_possibly_nullable_array(ty: &Type) -> bool {
     !matches!(ty, Type::Null) && is_array_or_null(ty)
 }
 
-fn binop_sigil(op: &BinOp) -> &'static str {
+pub(crate) fn binop_sigil(op: &BinOp) -> &'static str {
     match op {
         BinOp::Add => "+",
         BinOp::Sub => "-",
@@ -738,6 +738,8 @@ fn binop_sigil(op: &BinOp) -> &'static str {
         BinOp::Spaceship => "<=>",
         BinOp::And => "&&",
         BinOp::Or => "||",
+        BinOp::LogicalAnd => "and",
+        BinOp::LogicalOr => "or",
         BinOp::LogicalXor => "xor",
         BinOp::BitAnd => "&",
         BinOp::BitOr => "|",

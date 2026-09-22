@@ -3879,6 +3879,56 @@ provably redundant/impossible once something actually checked for that.
 7 new regression tests (`src/checker/tests/constant_conditions.rs`);
 full suite still green.
 
+**`and`/`or` word-operator identifier fidelity** (real PHPStan's
+`Rules/Comparison/BooleanAndConstantConditionRule.php`/
+`BooleanOrConstantConditionRule.php`, plus `Rules/DeadCode/NoopRule.php`'s
+own `logicalAnd.resultUnused`/`logicalOr.resultUnused` pair). This
+project's AST previously had a single `BinOp::And`/`BinOp::Or` variant
+for both the symbol spelling (`&&`/`||`) and the word spelling (`and`/
+`or`) - deliberately, per that variant's own old doc comment, on the
+reasoning that only *precedence* (a parse-time concern) genuinely
+differs between them. That reasoning covered every narrowing/type-
+inference consumer correctly, but missed that real PHPStan's own
+identifier *and* rendered message text (`getOperatorSigil()`) differ by
+spelling too (`booleanAnd.leftAlwaysTrue`/`"&&"` vs `logicalAnd.
+leftAlwaysTrue`/`"and"`) - cosmetic for a human reader, but breaks exact-
+identifier matching against a real-PHPStan-generated baseline for any
+`and`/`or`-spelled condition. Fixed by adding `BinOp::LogicalAnd`/
+`LogicalOr` (`src/ast.rs`, parsed only by the word-keyword precedence
+tier, `parser/expr.rs`'s `parse_low_precedence_and`/`_or` - the `&&`/`||`
+symbol tier, `parse_logical_and`/`_or`, is untouched) and widening every
+purely-semantic consumer's own `BinOp::And`/`Or` match to also accept
+the Logical pair (narrowing dispatch and its `or_chain_narrowing_target`/
+`and_chain_narrowing_target` helpers, the disjunctive-syllogism/"guard or
+die"/bare-`assert()` helpers in `checker/stmt.rs`, `infer_binary`'s own
+short-circuit type folding, `binop_sigil`) - the compiler's own
+exhaustive-match errors on `infer_binary`/`binop_sigil` caught both real
+compile-time-enforced sites directly; every other, non-exhaustive
+(`_ =>`-tailed) site was hand-audited against a full `BinOp::And`/`Or`
+grep instead, since missing one there would have been a silent
+narrowing-power regression for the word spelling rather than a build
+failure. `check_boolean_and_or` (`checker/control_flow/boolean_
+conditions.rs`) and `check_noop_statement` (`checker/noop.rs`) are the
+only two sites that actually branch on which of the four variants was
+matched, to render the correct `booleanAnd`/`logicalAnd`/`booleanOr`/
+`logicalOr` identifier prefix and sigil. `check_non_boolean_and_or_
+operand`'s own `leftNotBoolean`/`rightNotBoolean` pair is deliberately
+left under one identifier for both spellings (its message's rendered
+sigil still varies) - confirmed via a `vendor/phpstan-src` grep that this
+specific diagnostic has no real PHPStan rule behind it at all (a
+phpstan-rs-only invention reusing the `booleanAnd`/`booleanOr` prefix by
+convention), so there's no real per-spelling identifier to match fidelity
+against. Also deliberately not replicated: real PHPStan's own
+`NoopRule`'s wider trigger condition for the word spelling specifically
+(`logicalAnd.resultUnused`/`logicalOr.resultUnused` fire even when the
+statement contains an assignment elsewhere, e.g. `$x = true and
+someCheck();`, unlike the symbol spelling) - both spellings share the
+same strict `expr_is_side_effect_free` gate here, a disclosed, never-
+wrong subset of that wider real behavior, not a new one attempted this
+round. 9 new regression tests (`src/checker/tests/constant_conditions.rs`,
+`src/checker/tests/noop.rs`); full suite green (4396 passed), clippy
+clean.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4385,20 +4435,9 @@ already have a line above). What follows is only the residue: real,
 verified-absent-from-`src/`, previously-undocumented gaps.
 
 - **`Rules/Comparison/BooleanAndConstantConditionRule.php`/
-  `BooleanOrConstantConditionRule.php` - `and`/`or` word-operator
-  identifier fidelity**: not a missing check - `check_boolean_and_or`
-  (`src/checker/control_flow/boolean_conditions.rs:68-145`) already
-  covers the "left/right/whole-condition already constant" family
-  completely. The gap is identifier *naming*: this project's AST has a
-  single `BinOp::And`/`BinOp::Or` variant (`src/ast.rs:578-579`) for
-  both the symbol spelling (`&&`/`||`) and the word spelling (`and`/
-  `or`), so the check always reports under `booleanAnd.*`/`booleanOr.*`
-  - real PHPStan's own parser keeps them distinct and reports the
-  word-operator spelling as `logicalAnd.*`/`logicalOr.*` instead (a
-  different `$identifierType` string passed into the same shared rule
-  class). Cosmetic for a human reader, but would break exact-identifier
-  matching against a real-PHPStan-generated baseline file for any
-  `and`/`or`-spelled condition.
+  `BooleanOrConstantConditionRule.php`/`Rules/DeadCode/NoopRule.php` -
+  `and`/`or` word-operator identifier fidelity is now done**, see Done's
+  own entry under "Rule catalog (checker)".
 - **`Rules/Comparison/ImpossibleCheckTypeFunctionCallRule.php`**: the
   `is_string()`/`is_int()`/... single-argument type-check-predicate slice
   of this rule (`function.alreadyNarrowedType`/`.impossibleType`) is now

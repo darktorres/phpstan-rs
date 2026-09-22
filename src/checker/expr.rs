@@ -3,7 +3,7 @@ use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
-    TemplateBindings, UsageTokenKind, body_contains_yield, collect_goto_targets,
+    TemplateBindings, UsageTokenKind, binop_sigil, body_contains_yield, collect_goto_targets,
     expr_contains_yield, generator_template_param, is_known_single_value, is_language_construct,
     is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
     narrow_type_excluding, narrowing_key, propagate_container_field_facts,
@@ -1382,12 +1382,19 @@ impl<'a> Checker<'a> {
             // right side against the un-narrowed left-hand type produced
             // real false positives once undefined-property detection
             // started exercising exactly this idiom on real code.
-            ExprKind::Binary(BinOp::And, l, r) => {
+            // `And`/`LogicalOr` are `&&`/`and` - runtime-identical,
+            // spelling-only difference (`BinOp::And`'s own doc comment) -
+            // handled in one arm, with the exact matched `op` threaded
+            // through to `check_non_boolean_and_or_operand`/
+            // `check_boolean_and_or`/`infer_binary` so each renders the
+            // spelling the source actually used.
+            ExprKind::Binary(op @ (BinOp::And | BinOp::LogicalAnd), l, r) => {
+                let sigil = binop_sigil(op);
                 let l_ty = self.check_expr(l, locals, label);
                 self.check_non_boolean_and_or_operand(
                     l,
                     &l_ty,
-                    "&&",
+                    sigil,
                     "left",
                     "booleanAnd.leftNotBoolean",
                     label,
@@ -1398,7 +1405,7 @@ impl<'a> Checker<'a> {
                 self.check_non_boolean_and_or_operand(
                     r,
                     &r_ty,
-                    "&&",
+                    sigil,
                     "right",
                     "booleanAnd.rightNotBoolean",
                     label,
@@ -1414,7 +1421,7 @@ impl<'a> Checker<'a> {
                 // `ExpressionContext::createTopLevel()` the same way an
                 // `if`/`while`'s direct condition is.
                 self.check_boolean_and_or(
-                    &BinOp::And,
+                    op,
                     l,
                     r,
                     e,
@@ -1423,14 +1430,15 @@ impl<'a> Checker<'a> {
                     is_condition_position || is_bare_statement,
                 );
                 merge_new_variable_definitions(locals, &narrowed);
-                self.infer_binary(&BinOp::And, l, r, locals)
+                self.infer_binary(op, l, r, locals)
             }
-            ExprKind::Binary(BinOp::Or, l, r) => {
+            ExprKind::Binary(op @ (BinOp::Or | BinOp::LogicalOr), l, r) => {
+                let sigil = binop_sigil(op);
                 let l_ty = self.check_expr(l, locals, label);
                 self.check_non_boolean_and_or_operand(
                     l,
                     &l_ty,
-                    "||",
+                    sigil,
                     "left",
                     "booleanOr.leftNotBoolean",
                     label,
@@ -1441,7 +1449,7 @@ impl<'a> Checker<'a> {
                 self.check_non_boolean_and_or_operand(
                     r,
                     &r_ty,
-                    "||",
+                    sigil,
                     "right",
                     "booleanOr.rightNotBoolean",
                     label,
@@ -1449,7 +1457,7 @@ impl<'a> Checker<'a> {
                 // Mirrors real PHPStan's `BooleanOrConstantConditionRule` -
                 // same reasoning as `&&` above.
                 self.check_boolean_and_or(
-                    &BinOp::Or,
+                    op,
                     l,
                     r,
                     e,
@@ -1458,7 +1466,7 @@ impl<'a> Checker<'a> {
                     is_condition_position || is_bare_statement,
                 );
                 merge_new_variable_definitions(locals, &narrowed);
-                self.infer_binary(&BinOp::Or, l, r, locals)
+                self.infer_binary(op, l, r, locals)
             }
             // `??` is built on isset()-style quiet semantics - its left
             // side is evaluated without ever raising an undefined-
@@ -4804,7 +4812,7 @@ impl<'a> Checker<'a> {
             // `apply_narrowing` every call site narrows into before
             // checking the right operand), since that's the only scope
             // the right side is ever actually reached in.
-            BinOp::And => {
+            BinOp::And | BinOp::LogicalAnd => {
                 let l_ty = self.infer_expr(l, locals);
                 if matches!(l_ty, Type::False) {
                     return Type::False;
@@ -4820,7 +4828,7 @@ impl<'a> Checker<'a> {
                     Type::Bool
                 }
             }
-            BinOp::Or => {
+            BinOp::Or | BinOp::LogicalOr => {
                 let l_ty = self.infer_expr(l, locals);
                 if matches!(l_ty, Type::True) {
                     return Type::True;

@@ -49,6 +49,44 @@ fn a_bare_boolean_or_statement_is_flagged() {
 }
 
 #[test]
+fn a_bare_word_and_statement_is_flagged_under_the_logical_identifier() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(bool $a, bool $b): void {
+                $a and $b;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "logicalAnd.resultUnused"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "booleanAnd.resultUnused"),
+        "word spelling must not also report under the symbol identifier: {d:?}"
+    );
+}
+
+#[test]
+fn a_bare_word_or_statement_is_flagged_under_the_logical_identifier() {
+    let d = diagnostics_for(
+        r#"<?php
+            function test(bool $a, bool $b): void {
+                $a or $b;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "logicalOr.resultUnused"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "booleanOr.resultUnused"),
+        "word spelling must not also report under the symbol identifier: {d:?}"
+    );
+}
+
+#[test]
 fn a_bare_ternary_statement_is_flagged() {
     let d = diagnostics_for(
         r#"<?php

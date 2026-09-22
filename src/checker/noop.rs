@@ -18,28 +18,27 @@
 //! side-effecting, never the other way around.
 //!
 //! Real PHPStan's version additionally splits `and`/`or`
-//! (`Node\Expr\BinaryOp\LogicalAnd`/`LogicalOr`) from `&&`/`||`
-//! (`BooleanAnd`/`BooleanOr`) into two different identifiers with two
-//! different *additional* gates on top of the shared purity one above:
-//! `logicalAnd.resultUnused`/`logicalOr.resultUnused` fire regardless of
-//! whether the statement also contains an assignment (the whole point,
-//! since `$x = a() and b();` parses as `($x = a()) and b();` and
-//! silently discards `b()`'s own result - though note `a()`/`b()` being
-//! real calls means this exact example still wouldn't reach `NoopRule`
-//! at all, per the purity gate above; the distinction only matters for a
-//! side-effect-free assignment target, e.g. `$x = true and someCheck();`
-//! where `someCheck()` genuinely has no side effects), while
-//! `booleanAnd.resultUnused`/`booleanOr.resultUnused` require the
-//! *additional* absence of any assignment anywhere in the statement.
-//! This project's own parser deliberately erases the `and`/`or`-vs-
-//! `&&`/`||` distinction at parse time (see `BinOp::LogicalXor`'s own
-//! doc comment in `ast.rs`: "only their *precedence* differs, which is
-//! purely a parse-time concern already resolved by the time this tree
-//! exists"), so that additional split isn't recoverable here - every
-//! `And`/`Or` case below is treated as the `&&`/`||`-shaped one
-//! (requiring no assignment anywhere, which `expr_is_side_effect_free`
-//! already guarantees, since an assignment is itself a side effect) -
-//! a strict, never-wrong subset of the real rule's own combined scope.
+//! (`Node\Expr\BinaryOp\LogicalAnd`/`LogicalOr`, this project's own
+//! `BinOp::LogicalAnd`/`LogicalOr`) from `&&`/`||` (`BooleanAnd`/
+//! `BooleanOr`, `BinOp::And`/`Or`) into two different identifiers -
+//! `logicalAnd.resultUnused`/`logicalOr.resultUnused` vs `booleanAnd.
+//! resultUnused`/`booleanOr.resultUnused` - which this project now also
+//! does. Real PHPStan additionally gives the two spellings two different
+//! *gates* on top of the shared purity one above: the word spelling
+//! fires regardless of whether the statement also contains an
+//! assignment (the whole point, since `$x = a() and b();` parses as
+//! `($x = a()) and b();` and silently discards `b()`'s own result -
+//! though note `a()`/`b()` being real calls means this exact example
+//! still wouldn't reach `NoopRule` at all, per the purity gate above;
+//! the distinction only matters for a side-effect-free assignment
+//! target, e.g. `$x = true and someCheck();` where `someCheck()`
+//! genuinely has no side effects), while the symbol spelling requires
+//! the *additional* absence of any assignment anywhere in the
+//! statement. That second, gate-level distinction is *not* replicated
+//! here - both spellings share the exact same strict
+//! `expr_is_side_effect_free` gate (which already treats any assignment
+//! as disqualifying), so the word spelling's own wider real trigger
+//! condition stays a disclosed, never-wrong subset of the real rule.
 //!
 //! `xor` (`BinOp::LogicalXor`) has no competing spelling - PHP's `xor`
 //! keyword is the only way to write it - so it needs no such
@@ -113,6 +112,20 @@ impl<'a> Checker<'a> {
             ExprKind::Binary(BinOp::Or, ..) if expr_is_side_effect_free(e) => (
                 "Unused result of \"||\" operator.".to_string(),
                 "booleanOr.resultUnused",
+            ),
+            // Real PHPStan additionally reports these even when the
+            // statement contains an assignment elsewhere (see the module
+            // doc comment above) - not replicated here, still gated by
+            // the same strict `expr_is_side_effect_free` the symbol
+            // spelling uses, a disclosed, never-wrong subset of that
+            // wider real behavior rather than the full thing.
+            ExprKind::Binary(BinOp::LogicalAnd, ..) if expr_is_side_effect_free(e) => (
+                "Unused result of \"and\" operator.".to_string(),
+                "logicalAnd.resultUnused",
+            ),
+            ExprKind::Binary(BinOp::LogicalOr, ..) if expr_is_side_effect_free(e) => (
+                "Unused result of \"or\" operator.".to_string(),
+                "logicalOr.resultUnused",
             ),
             ExprKind::Ternary(..) if expr_is_side_effect_free(e) => (
                 "Unused result of ternary operator.".to_string(),

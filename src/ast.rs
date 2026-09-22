@@ -577,11 +577,21 @@ pub enum BinOp {
     Spaceship,
     And,
     Or,
-    // The `xor` keyword operator - logical, not `^`'s bitwise BitXor. The
-    // word forms of &&/|| (`and`/`or`) reuse And/Or directly since they're
-    // the same operation at runtime, only their *precedence* differs,
-    // which is purely a parse-time concern already resolved by the time
-    // this tree exists.
+    // The word forms of &&/|| - runtime-identical to And/Or (only their
+    // *precedence* differs, a parse-time concern already resolved by the
+    // time this tree exists), kept as their own variants (not folded into
+    // And/Or the way this comment used to argue for) because real
+    // PHPStan's own identifier/message text genuinely differs by spelling
+    // (`booleanAnd.*`/`logicalAnd.*`, `"&&"` vs `"and"` in the rendered
+    // message) - every consumer that only cares about runtime semantics
+    // matches `BinOp::And | BinOp::LogicalAnd` (`BinOp::Or | BinOp::
+    // LogicalOr`) together; only the diagnostic-identifier/message sites
+    // distinguish them.
+    LogicalAnd,
+    LogicalOr,
+    // The `xor` keyword operator - logical, not `^`'s bitwise BitXor. Has
+    // no symbol counterpart at all, so it never needed an And/Or-style
+    // split.
     LogicalXor,
     BitAnd,
     BitOr,

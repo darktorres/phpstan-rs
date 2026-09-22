@@ -136,7 +136,7 @@ fn condition_alias_shape(rhs: &Expr) -> bool {
         // tracks every distinct subject named anywhere in the tree (not
         // just one shared target), so a rebind of *any* of them still
         // correctly invalidates the whole alias.
-        ExprKind::Binary(BinOp::And | BinOp::Or, l, r) => {
+        ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
             condition_alias_shape(l) && condition_alias_shape(r)
         }
         // `! $isUserFound` as one leaf of a larger `||`/`&&` tree (`!
@@ -498,7 +498,7 @@ fn condition_alias_targets(rhs: &Expr) -> Option<Vec<String>> {
             _ => None,
         },
         ExprKind::Variable(name) => Some(vec![name.to_string()]),
-        ExprKind::Binary(BinOp::And | BinOp::Or, l, r) => {
+        ExprKind::Binary(BinOp::And | BinOp::Or | BinOp::LogicalAnd | BinOp::LogicalOr, l, r) => {
             let mut targets = condition_alias_targets(l)?;
             for key in condition_alias_targets(r)? {
                 if !targets.contains(&key) {
@@ -611,11 +611,11 @@ impl<'a> Checker<'a> {
             // not sure which", which isn't a narrowing this can express,
             // so it's left alone, same conservative choice `||` mirrors
             // for its own unrepresentable branch below.
-            ExprKind::Binary(BinOp::And, l, r) if branch_true => {
+            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) if branch_true => {
                 self.apply_narrowing(l, locals, true);
                 self.apply_narrowing(r, locals, true);
             }
-            ExprKind::Binary(BinOp::Or, l, r) if !branch_true => {
+            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) if !branch_true => {
                 self.apply_narrowing(l, locals, false);
                 self.apply_narrowing(r, locals, false);
             }
@@ -628,7 +628,7 @@ impl<'a> Checker<'a> {
             // up"). `or_chain_narrowing_target` is the one doing the
             // actual restriction-checking; this arm only acts when it
             // succeeds.
-            ExprKind::Binary(BinOp::Or, ..) if branch_true => {
+            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, ..) if branch_true => {
                 if let Some((key, target_ty, repr_expr)) =
                     self.or_chain_narrowing_target(cond, locals)
                 {
@@ -655,7 +655,7 @@ impl<'a> Checker<'a> {
             // independent (a different key each), so each And-term
             // simply lands on its own call to this same arm, mutating
             // the one shared `locals` for its own key only.
-            ExprKind::Binary(BinOp::And, ..) if !branch_true => {
+            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, ..) if !branch_true => {
                 if let Some((key, target_ty, repr_expr)) =
                     self.and_chain_narrowing_target(cond, locals)
                 {

@@ -9,11 +9,11 @@ fn word_operators_bind_looser_than_assignment() {
     // not `$a = ($b or $c);` - unlike &&/||.
     let program = parse("<?php $x = 5 or die();");
     let StmtKind::Expression(Expr {
-        kind: ExprKind::Binary(BinOp::Or, lhs, _),
+        kind: ExprKind::Binary(BinOp::LogicalOr, lhs, _),
         ..
     }) = &program[0].kind
     else {
-        panic!("expected a top-level Or binary expression");
+        panic!("expected a top-level LogicalOr binary expression");
     };
     assert!(matches!(&lhs.kind, ExprKind::Assign(..)));
 }

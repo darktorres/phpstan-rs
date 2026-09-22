@@ -401,7 +401,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
         match &cond.kind {
-            ExprKind::Binary(BinOp::Or, l, r) => {
+            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
                 let (lk, lt, le) = self.or_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.or_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, union_types(lt, rt), le))
@@ -466,7 +466,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Option<(String, Type, &'e Expr)> {
         match &cond.kind {
-            ExprKind::Binary(BinOp::And, l, r) => {
+            ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, r) => {
                 let (lk, lt, le) = self.and_chain_narrowing_target(l, locals)?;
                 let (rk, rt, _) = self.and_chain_narrowing_target(r, locals)?;
                 (lk == rk).then(|| (lk, union_types(lt, rt), le))

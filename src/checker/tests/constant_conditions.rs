@@ -747,6 +747,118 @@ fn a_standalone_boolean_or_with_a_literal_true_left_side_is_flagged() {
     );
 }
 
+// The `and`/`or` word-spelling identifier fidelity - real PHPStan's own
+// `BooleanAndConstantConditionRule`/`BooleanOrConstantConditionRule`
+// report a `logicalAnd.*`/`logicalOr.*` identifier (and an "and"/"or"
+// message) for the word spelling, distinct from `booleanAnd.*`/
+// `booleanOr.*` for `&&`/`||` - this project's own `BinOp::LogicalAnd`/
+// `LogicalOr` (`src/ast.rs`) exist for exactly this distinction.
+
+#[test]
+fn a_standalone_logical_and_with_a_literal_false_left_side_is_flagged_under_the_word_identifier() {
+    // Deliberately a bare statement, not `$y = false and $x;` - `and`
+    // binds looser than `=`, so that would parse as `($y = false) and
+    // $x;`, an unrelated precedence gotcha this test isn't after.
+    let d = diagnostics_for("<?php function f(bool $x) { false and $x; }");
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "logicalAnd.leftAlwaysFalse"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "booleanAnd.leftAlwaysFalse"),
+        "word spelling must not also report under the symbol identifier: {d:?}"
+    );
+}
+
+#[test]
+fn a_standalone_logical_or_with_a_literal_true_left_side_is_flagged_under_the_word_identifier() {
+    // Deliberately a bare statement - see the `and` test just above for
+    // why an assignment on the left isn't used here either.
+    let d = diagnostics_for("<?php function f(bool $x) { true or $x; }");
+    assert!(
+        d.iter().any(|x| x.identifier == "logicalOr.leftAlwaysTrue"),
+        "got: {d:?}"
+    );
+    assert!(
+        d.iter().any(|x| x.message.contains("or")),
+        "the rendered message should use the \"or\" sigil, not \"||\": {d:?}"
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "booleanOr.leftAlwaysTrue"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_symbol_and_condition_still_reports_under_the_boolean_identifier() {
+    // Regression guard: adding the word-spelling split must not flip the
+    // pre-existing `&&`/`||` behavior over to the new identifiers.
+    let d = diagnostics_for("<?php function f(bool $x) { $y = false && $x; }");
+    assert!(
+        d.iter()
+            .any(|x| x.identifier == "booleanAnd.leftAlwaysFalse"),
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "logicalAnd.leftAlwaysFalse"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_symbol_and_binary_op_result_unused_reports_under_the_boolean_identifier() {
+    let d = diagnostics_for("<?php function f(bool $x, bool $y) { $x && $y; }");
+    assert!(
+        d.iter().any(|x| x.identifier == "booleanAnd.resultUnused"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_word_and_binary_op_result_unused_reports_under_the_logical_identifier() {
+    let d = diagnostics_for("<?php function f(bool $x, bool $y) { $x and $y; }");
+    assert!(
+        d.iter().any(|x| x.identifier == "logicalAnd.resultUnused"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_word_or_chain_still_narrows_both_disjuncts_to_non_null_afterward() {
+    // The word spelling must keep every narrowing/soundness-critical
+    // consumer (`apply_narrowing`'s own `Or`-branch dispatch) working
+    // identically to `||` - only the diagnostic identifier/message
+    // should differ.
+    let d = diagnostics_for(
+        r#"<?php
+            function f(?string $a, ?string $b): void {
+                if ($a === null or $b === null) {
+                    return;
+                }
+                echo strlen($a) + strlen($b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_word_and_chain_still_short_circuit_narrows_the_right_operand() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(?string $a): void {
+                if ($a !== null and strlen($a) > 0) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
 #[test]
 fn a_boolean_and_used_directly_as_an_if_condition_does_not_double_report_the_right_side() {
     // `is_first_level` (`Checker::in_condition_position`) should suppress

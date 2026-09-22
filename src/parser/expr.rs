@@ -22,7 +22,7 @@ impl Parser {
         while self.eat(&Token::Keyword(Keyword::Or)) {
             let rhs = self.parse_low_precedence_xor()?;
             lhs = self.expr(
-                ExprKind::Binary(BinOp::Or, Box::new(lhs), Box::new(rhs)),
+                ExprKind::Binary(BinOp::LogicalOr, Box::new(lhs), Box::new(rhs)),
                 start,
             );
         }
@@ -48,7 +48,7 @@ impl Parser {
         while self.eat(&Token::Keyword(Keyword::And)) {
             let rhs = self.parse_assignment()?;
             lhs = self.expr(
-                ExprKind::Binary(BinOp::And, Box::new(lhs), Box::new(rhs)),
+                ExprKind::Binary(BinOp::LogicalAnd, Box::new(lhs), Box::new(rhs)),
                 start,
             );
         }

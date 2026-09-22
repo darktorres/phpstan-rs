@@ -203,7 +203,7 @@ impl<'a> Checker<'a> {
                 // `A && B;` gives no equivalent guarantee (if `A` is
                 // false, `B` never runs and the statement simply ends,
                 // without proving `A` either way).
-                if let ExprKind::Binary(BinOp::Or, lhs, rhs) = &e.kind
+                if let ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, lhs, rhs) = &e.kind
                     && self.infer_expr(rhs, locals) == Type::Never
                 {
                     self.apply_narrowing(lhs, locals, true);
@@ -862,7 +862,9 @@ impl<'a> Checker<'a> {
         // discipline regardless of how `then_branch`'s own check
         // returns.
         let or_disjuncts = match &unwrap_grouping(cond).kind {
-            ExprKind::Binary(BinOp::Or, l, r) => Some(((**l).clone(), (**r).clone())),
+            ExprKind::Binary(BinOp::Or | BinOp::LogicalOr, l, r) => {
+                Some(((**l).clone(), (**r).clone()))
+            }
             _ => None,
         };
         if let Some(pair) = or_disjuncts.clone() {
@@ -1103,7 +1105,7 @@ fn bare_assert_condition(e: &Expr) -> Option<&Expr> {
         args.first().map(|a| &a.value)
     }
     match &e.kind {
-        ExprKind::Binary(BinOp::And, l, _) => as_bare_assert_call(l),
+        ExprKind::Binary(BinOp::And | BinOp::LogicalAnd, l, _) => as_bare_assert_call(l),
         _ => as_bare_assert_call(e),
     }
 }
