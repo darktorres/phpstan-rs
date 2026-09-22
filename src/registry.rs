@@ -323,6 +323,23 @@ pub struct Registry {
     // level-0 default. Set once from `check-project`'s already-resolved
     // `level`/`config.level` merge, not a flag of its own.
     pub configured_level: Option<u8>,
+    // Mirrors real PHPStan's own standalone `checkBenevolentUnionTypes`
+    // parameter (`conf/config.neon`, `checkBenevolentUnionTypes: false`,
+    // not tied to any `-l`/`level` ladder rung at all, unlike
+    // `checkExplicitMixed`/`checkImplicitMixed`) - real PHPStan's own
+    // default (`false`) is already unconditionally lenient toward a
+    // `BenevolentUnionType` accepted value, exactly this project's own
+    // existing, always-on `AccessoryKind::Benevolent` leniency in
+    // `is_assignable` (not an "opposite gap" from real PHPStan's default
+    // posture, contrary to an earlier draft of this ROADMAP's own
+    // claim). This flag opts *into* real PHPStan's stricter, non-default
+    // behavior: when `true`, `accepts_at_configured_level_rec` strips a
+    // Benevolent-marked `sub`'s own leniency and requires *every* member
+    // of its wrapped `Union` to satisfy `sup`, mirroring `RuleLevelHelper::
+    // transformAcceptedType`'s own `checkBenevolentUnionTypes` branch
+    // exactly - unconditional, independent of `configured_level`, matching
+    // how real PHPStan's own flag isn't level-gated either.
+    pub check_benevolent_union_types: bool,
     // Whether this project consumes real PHPStan as a dependency at all
     // (set once from `composer::detect_phpstan_dependency` before any
     // file is checked). Gates the main `MethodCall` arm's own

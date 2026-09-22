@@ -586,6 +586,27 @@ impl Registry {
     }
 
     fn accepts_at_configured_level_rec(&self, sub: &Type, sup: &Type, level: u8) -> bool {
+        // Real PHPStan's own `checkBenevolentUnionTypes` (`RuleLevelHelper::
+        // transformAcceptedType`) runs first, unconditionally, independent
+        // of level - mirrored here ahead of both fast paths below, which
+        // would otherwise fall straight through to `is_assignable_at_level`
+        // (and from there, `is_assignable`'s own always-lenient Benevolent
+        // arm) without ever seeing this override. Strips the marker and
+        // demands *every* member of the wrapped `Union` satisfy `sup`,
+        // recursing back into this same method (not plain `is_assignable`)
+        // so the rest of this method's own level-aware behavior (`checkNullables`/
+        // `checkUnionTypes`/`checkExplicitMixed`/`checkImplicitMixed`) still
+        // applies per-member exactly as it would for an ordinary Union.
+        if self.check_benevolent_union_types
+            && let Type::Intersection(members) = sub
+            && members.contains(&Type::Accessory(types::AccessoryKind::Benevolent))
+            && let Some(Type::Union(wrapped)) = members.iter().find(|m| matches!(m, Type::Union(_)))
+        {
+            return wrapped
+                .iter()
+                .all(|m| self.accepts_at_configured_level_rec(m, sup, level));
+        }
+
         // Fast path: both real gates already at their strict threshold -
         // byte-identical to `is_assignable_at_level` (which still applies
         // `checkExplicitMixed`/`checkImplicitMixed`, real PHPStan's own

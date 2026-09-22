@@ -331,9 +331,14 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
         "is_int" | "is_integer" | "is_long" => Some(Type::Int),
         "is_float" | "is_double" => Some(Type::Float),
         "is_bool" | "is_boolean" => Some(Type::Bool),
+        // Real PHPStan's own `IsArrayFunctionTypeSpecifyingExtension`
+        // narrows to `ArrayType(MixedType(true), MixedType(true))` -
+        // explicit, not implicit: this is a deliberate "the narrowed type
+        // really is array-of-anything" answer, not a "we don't know"
+        // fallback (confirmed reading `vendor/phpstan-src` directly).
         "is_array" => Some(Type::Array(
             Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
+            Box::new(Type::Mixed(true)),
         )),
         // `is_countable($x)` is true for exactly
         // `array|Countable` - guards `count($x)` in a correct PHP 8+

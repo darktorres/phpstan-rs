@@ -400,6 +400,53 @@ fn at_level_ten_ordinary_rejection_is_unaffected() {
     assert!(!r.accepts_at_configured_level(&Type::Int, &Type::String));
 }
 
+// `check_benevolent_union_types` - real PHPStan's own standalone
+// `checkBenevolentUnionTypes` parameter (`registry::Registry::
+// check_benevolent_union_types`'s own doc comment).
+
+#[test]
+fn a_benevolent_union_is_accepted_leniently_by_default() {
+    let r = build_registry("<?php");
+    assert!(!r.check_benevolent_union_types);
+    // Only `Int` actually matches `Type::String` here - the default,
+    // unconfigured leniency accepts because *any* member does.
+    assert!(r.accepts_at_configured_level(&Type::benevolent_array_key(), &Type::String));
+}
+
+#[test]
+fn a_benevolent_union_is_rejected_strictly_once_opted_in() {
+    let mut r = build_registry("<?php");
+    r.check_benevolent_union_types = true;
+    // Once opted in, *every* member of the wrapped union must satisfy
+    // `sup` - `Int` doesn't satisfy `Type::String`, so this now fails.
+    assert!(!r.accepts_at_configured_level(&Type::benevolent_array_key(), &Type::String));
+}
+
+#[test]
+fn a_benevolent_union_still_accepted_once_opted_in_when_every_member_matches() {
+    let mut r = build_registry("<?php");
+    r.check_benevolent_union_types = true;
+    let int_or_string = Type::Intersection(vec![
+        Type::Union(vec![Type::Int, Type::String]),
+        Type::Accessory(crate::types::AccessoryKind::Benevolent),
+    ]);
+    let int_or_string_target = Type::Union(vec![Type::Int, Type::String]);
+    assert!(r.accepts_at_configured_level(&int_or_string, &int_or_string_target));
+}
+
+#[test]
+fn opting_in_never_affects_is_assignable_directly() {
+    // Real PHPStan's own `checkBenevolentUnionTypes` only ever changes
+    // `RuleLevelHelper::accepts()` - never a bare `isSuperTypeOf()`/
+    // `accepts()` call outside it (narrowing, generics bound-checking,
+    // ...). Mirrored here: opting in must never touch this project's
+    // own general-purpose `is_assignable`, only `accepts_at_configured_
+    // level`.
+    let mut r = build_registry("<?php");
+    r.check_benevolent_union_types = true;
+    assert!(r.is_assignable(&Type::benevolent_array_key(), &Type::String));
+}
+
 #[test]
 fn variance_composes_through_a_nested_covariant_generic_argument() {
     let r = build_registry(

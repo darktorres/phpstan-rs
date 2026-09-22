@@ -888,12 +888,22 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
 /// for an already-known `Type::Array`. Scoped to exactly the real declared
 /// type: `Array(Mixed)` for the always-array superglobals, `Int` for
 /// `argc` (never `[]` in the stub at all).
+///
+/// The always-array case mirrors real PHPStan's own `MutatingScope::
+/// getVariableType`'s `isGlobalVariable` branch exactly (confirmed
+/// reading `vendor/phpstan-src` directly): `ArrayType(BenevolentUnionType([
+/// Int, String]), MixedType(true))` - a `Benevolent`-marked key (this
+/// project's own `benevolent_array_key()`, the identical marker
+/// `dynamic_write_key_type`'s own fallback already uses for the same
+/// "I don't know the key" case) and an *explicit* Mixed value, not the
+/// generic implicit fallback - a deliberate "this superglobal's value
+/// really is unconstrained" answer, not "we don't know."
 pub(crate) fn superglobal_default_type(name: &str) -> Type {
     match name {
         "argc" => Type::Int,
         _ if is_superglobal(name) => Type::Array(
-            Box::new(Type::unknown_array_key()),
-            Box::new(Type::Mixed(false)),
+            Box::new(Type::benevolent_array_key()),
+            Box::new(Type::Mixed(true)),
         ),
         _ => Type::Mixed(false),
     }

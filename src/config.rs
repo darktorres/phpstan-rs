@@ -106,6 +106,9 @@ pub struct Config {
     /// Opt-in `MethodThrowTypeCovarianceRule` - see
     /// `registry::Registry::check_method_throw_type_covariance`.
     pub check_method_throw_type_covariance: Option<bool>,
+    /// Mirrors real PHPStan's own standalone `checkBenevolentUnionTypes`
+    /// parameter - see `registry::Registry::check_benevolent_union_types`.
+    pub check_benevolent_union_types: Option<bool>,
     /// A hand-mirrored subset of real PHPStan's own `ignoreErrors:` -
     /// this project has no NEON parser (see `baseline.rs`), so a
     /// project's real `phpstan.neon` config is manually re-typed here.

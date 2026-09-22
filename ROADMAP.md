@@ -589,12 +589,64 @@ return-type, property-assignment, by-ref-parameter checks) had their
 own manual Mixed bail-out removed in favor of this shared mechanism;
 generics bound-checking was deliberately *not* migrated - real
 PHPStan's own `GenericObjectTypeCheck` calls `isSuperTypeOf()` directly,
-never `RuleLevelHelper::accepts()` at all. `checkBenevolentUnionTypes`
-stays declined/open - real PHPStan's own `BenevolentUnionType` has an
-existing analogue in this codebase already (`AccessoryKind::Benevolent`/
-`Type::benevolent_array_key()`, unconditional/always-on today, the
-opposite gap from real PHPStan's own default-strict/opt-in-lenient
-posture) that a future item should audit rather than build fresh.
+never `RuleLevelHelper::accepts()` at all.
+
+`checkBenevolentUnionTypes` is done too, and an earlier claim in this
+very paragraph was wrong: real PHPStan's own `checkBenevolentUnionTypes`
+parameter (`RuleLevelHelper.php`, `conf/config.neon: checkBenevolentUnionTypes:
+false`, a standalone boolean, never tied to any `-l`/`level` rung the way
+`checkExplicitMixed`/`checkImplicitMixed` are) does *not* default to
+strict-with-opt-in-leniency - confirmed reading `vendor/phpstan-src`
+directly, its default (`false`) leaves a `BenevolentUnionType` accepted
+value exactly as unconditionally lenient as this project's own existing
+`AccessoryKind::Benevolent`/`Type::benevolent_array_key()` analogue
+already is; the flag instead opts *into* real PHPStan's stricter,
+non-default behavior (stripping the leniency, requiring every union
+member to satisfy the accepting type). No "opposite gap" ever existed -
+this project's status quo already matched real PHPStan's own default.
+`Registry::check_benevolent_union_types` (default `false`, threaded
+through the same `config.rs`/`project.rs`/`lsp.rs`/`lsp/workspace_config.rs`/
+`main.rs`/`main/check_project.rs` surface every other opt-in checker flag
+uses) now supplies the real opt-in toggle itself: `accepts_at_configured_
+level_rec` strips a Benevolent-marked accepted value's own leniency and
+requires *every* member of its wrapped Union to satisfy the declared
+type when set, mirroring `RuleLevelHelper::transformAcceptedType`'s own
+`checkBenevolentUnionTypes` branch exactly - scoped only to the same 4
+real `accepts_at_configured_level` call sites real PHPStan's own flag
+touches (argument-type, return-type, property-assignment, by-ref-
+parameter checks), never touching `is_assignable`'s own general-purpose
+Benevolent leniency arm used elsewhere (narrowing, generics bound-
+checking - real PHPStan's own flag never reaches those either).
+
+The disclosed per-site explicit-vs-implicit classification audit is also
+done now, not just the 3 patterns first confirmed. Every real
+`new MixedType(true)` construction-site family in `vendor/phpstan-src`
+(22 call sites across 13 files) was cross-checked against this project's
+own architecture: two more real, applicable fixes were found and landed
+- `is_array()`'s own type-narrowing (`checker::narrowing::predicates::
+narrowing_type_for_predicate`) mirrors real PHPStan's own
+`IsArrayFunctionTypeSpecifyingExtension` (`array<mixed, mixed>`,
+explicit), and an unset superglobal element's value (`checker::
+assignment::superglobal_default_type`) mirrors real PHPStan's own
+`MutatingScope::getVariableType`'s `isGlobalVariable` branch exactly
+(`ArrayType(BenevolentUnionType([Int, String]), MixedType(true))` -
+explicit value *and* a Benevolent-marked key, the third real
+`BenevolentUnionType` construction site this codebase now has). Every
+other real family (an `ArrayAccess`-implementing object's own iterable
+key/value type, old-style callable-to-array coercion, `parse_str()`'s
+out-parameter shape, a reflected constant-array property's own
+generalize-on-read widening, `__serialize`/`__debuginfo`'s hardcoded
+reflection-layer return-type override, an empty signature-map type
+string) has no analogue anywhere in this codebase at all - each
+confirmed absent by direct search, not assumed - so there was nothing
+to reclassify there. Every remaining, unlisted `Type::Mixed(false)`
+construction site in this codebase is confirmed implicit by this same
+process (not left as an unaudited default): either it's an ordinary
+"no type information available" fallback with no real-PHPStan explicit-
+construction counterpart at all, or (`iterable`/`is_iterable`'s own bare,
+generics-free form; an `@method`/`@param` tag with no type at all) it
+already matches real PHPStan's own *implicit*-`MixedType` construction
+for that exact shape, confirmed the same way.
 
 **`array + array`'s key/value precision, found via a Piwigo/real-PHPStan
 corpus diff.** `BinOp::Add`'s array-union arm used to collapse straight
@@ -4397,22 +4449,6 @@ than before: the rest of that same filter DSL
 parameter-value conditions) and its wholly-separate namespace/enum/
 superglobal/keyword-specific siblings, each a materially different
 detection shape needing its own separate investigation.
-
-**84 - `checkBenevolentUnionTypes`, remaining (PARTIAL).** `Registry::
-accepts_at_configured_level` and `checkExplicitMixed`/`checkImplicitMixed`
-(real level 9/10) are both done (see Done). Still open: auditing this
-project's own existing, always-on `BenevolentUnionType` analogue
-(`AccessoryKind::Benevolent`/`Type::benevolent_array_key()`) against real
-PHPStan's broader, opt-in set of construction sites, and deciding
-whether an explicit `checkBenevolentUnionTypes`-style toggle is worth
-adding on top - today's leniency is unconditional, the opposite gap from
-real PHPStan's own default-strict/opt-in-lenient posture. Also still
-open, disclosed rather than attempted: a full per-site audit of
-`Type::Mixed`'s own explicit-vs-implicit classification against every
-one of real PHPStan's own ~15+ explicit-construction call sites beyond
-the 3 confirmed so far (the literal `mixed` keyword; an unbounded
-`@template`) - the current classification is best-effort, defaulting to
-implicit everywhere else, not an exhaustive parity audit.
 
 **Receiver-type-checks phase (DONE).** Nine real-PHPStan identifiers for
 "this receiver's own type provably can never support the operation at

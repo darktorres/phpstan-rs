@@ -383,6 +383,14 @@ impl Project {
         self.registry.check_method_throw_type_covariance = enabled;
     }
 
+    /// Opts the whole project's checking into real PHPStan's own
+    /// standalone `checkBenevolentUnionTypes` behavior - see
+    /// `registry::Registry::check_benevolent_union_types`'s own doc
+    /// comment for why this defaults to `false`.
+    pub fn set_check_benevolent_union_types(&mut self, enabled: bool) {
+        self.registry.check_benevolent_union_types = enabled;
+    }
+
     /// Corrected from unconditional to opt-in - see `registry::Registry::
     /// check_duplicate_function_declarations`'s own doc comment for the
     /// real false positive that motivated this.
