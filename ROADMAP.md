@@ -57,10 +57,9 @@ reasoning is needed verbatim.)
   type`'s own boolean (not real PHPStan's trinary) actual-vs-declared
   comparison flagging every declared member whenever the actual type
   widened to `Mixed`. Phase 56 (the full grammar-level PHPDoc parser
-  rewrite) remains the one deliberately unattempted item from this
-  batch's own source plan - its own dedicated future session, given its
-  XL size and the whole plan's own explicit decision to sequence it
-  last. Every run is saved to `.corpus-runs/{scoped,unscoped}/
+  rewrite), the one deliberately unattempted item from that batch's own
+  source plan, has since landed in a later session - see Done. Every
+  run is saved to `.corpus-runs/{scoped,unscoped}/
   <commit-hash>.txt` (gitignored, see that directory's own README) -
   check there before re-running an old commit to get a comparison
   snapshot. Re-verify against real PHPStan before citing an exact
@@ -97,6 +96,50 @@ output, and baseline matching. A guard-clause assignment nested inside
 a comparison/`&&`/`||`/`+`/`-`/`.`/cast operand with no enclosing
 parens (`if (false === $x = fn())`) parses with real PHP's own actual
 precedence, not just at the top of the whole expression.
+
+**Grammar-level PHPDoc parser (Phase 56, Stage A + Stage B).**
+`docblock.rs` used to be a lenient, hand-rolled ad-hoc string tokenizer
+(`take_type_token`'s own bracket-depth-only scan, deferring real
+type-string parsing to a later, separate `types::parse_type_string`
+call) that silently produced whatever substring it happened to stop at
+rather than validating a type expression's own grammar, unlike real
+PHPStan's recoverable-error `phpDoc.parseError`. `src/phpdoc_grammar/`
+is a real tokenizer + recursive-descent parser covering
+nullable/union/intersection types, generics (including real PHPStan's
+own call-site variance markers, `Collection<covariant Foo>`/
+`<contravariant Foo>`/`<*>`), array shapes, callable/`Closure`
+signatures, int ranges, literal types, const-fetch types, conditional
+types, and every tag structure `DocBlock` reads, producing a real
+`PhpDocNode` AST plus recoverable `PhpDocParseError` diagnostics.
+`docblock.rs`'s own `apply_tag` now sources every type-bearing tag's
+type from this grammar, re-stringifying the parsed `TypeNode` back into
+`DocBlock`'s existing `Option<String>` fields (`DocBlock.parse_errors`
+now also carries every recoverable parse error, unconsumed by any rule
+yet) - the old `take_type_token`-based `parse_template_tag`/
+`parse_method_tag`/`parse_method_tag_param`/`split_top_level_commas`
+helpers are retired wherever this grammar now covers the same ground;
+`take_type_token` itself stays, used only by `@see` (never a type
+expression to begin with, matching real PHPStan's own lack of a
+`SeeTagValueNode`). Verified via a full unscoped Piwigo corpus diff
+against the pre-migration baseline, which caught and fixed 5 real
+grammar gaps once real-world text started flowing through the new
+parser: an HTML fragment right after a type (`@return array <p>...`,
+real phpstorm-stubs style) mistaken for a generic-argument list (fixed
+with the same `isHtml` lookahead `vendor/phpstan/phpdoc-parser`'s own
+`TypeParser` uses); a leading `\` on a fully-qualified name
+(`\Closure(): T`) defeating the callable-keyword check; `callable(Type
+$name): R`'s own optional, documentation-only parameter name (real,
+legal grammar) not being consumed; a bare wildcard suffix with no `::`
+(`\SIG*`) losing its `*`; and Psalm's `!Type` negation syntax (mixed
+into otherwise-PHPStan-flavored stubs) degrading to `TypeNode::Error`
+instead of the wrapped type. The scoped (real, in-repo) corpus diff
+stayed empty throughout; every remaining unscoped-only delta is
+vendor/-confined and is either a net fidelity improvement (a
+`@template T as callable` bound is now recognized, matching real
+`phpstan/phpdoc-parser`'s own `as`-as-`of`-synonym grammar; more
+docblock-only parameter types now resolve at all where they previously
+silently didn't) or cosmetic message-text churn on an already-unmodeled
+construct.
 
 ## Registry / symbol resolution
 
@@ -3943,32 +3986,6 @@ against current HEAD - the specific mechanism blamed (a generic `.any()`
 arm decomposing `sub` before `sup`) cannot occur for that shape at all,
 since the specific, textually-earlier `Intersection`-vs-`Intersection`
 arm has existed since Phase 14, predating the note that named it a gap.
-
-**56 - Grammar-level PHPDoc parser rewrite, Stage A done, Stage B
-PLANNED (PARTIAL).** `docblock.rs` is a lenient, hand-rolled ad-hoc
-string tokenizer (`take_type_token`'s own bracket-depth-only scan,
-deferring real type-string parsing to a later, separate `types::
-parse_type_string` call) that silently produces whatever substring it
-happened to stop at rather than validating a type expression's own
-grammar, unlike real PHPStan's recoverable-error `phpDoc.parseError`.
-Stage A (a real tokenizer + recursive-descent parser, `src/
-phpdoc_grammar/`) is built: nullable/union/intersection types, generics,
-array shapes, callable/`Closure` signatures, int ranges, literal types,
-const-fetch types, conditional types, and every tag structure this
-project's own `DocBlock` currently reads, all producing a real
-`PhpDocNode` AST plus recoverable `PhpDocParseError` diagnostics - see
-Done. Deliberately additive only: nothing in `checker`/`registry`
-consumes it yet, `docblock.rs`/`types::parse_type_string` remain the
-real, load-bearing pipeline. Stage B - migrating `DocBlock` to be
-populated from this parser (re-stringifying parsed types back into its
-existing `Option<String>` fields for full backward compatibility, then
-retiring the old hand-rolled tokenizer once nothing calls it anymore) -
-stays unbuilt: a real, separate, higher-risk migration touching the
-single most heavily-consumed subsystem in the whole checker, needing its
-own full Piwigo corpus diff to verify no silent behavior regression
-before it can be trusted - the one sub-item in this whole area where
-that's a real, live risk. Size: XL (now split - Stage A done, Stage B
-still XL on its own).
 
 **67 - `@internal`/`restricted_symbols`, remaining (PARTIAL).** The
 `@internal` restricted-usage engine, the declarative `restricted_symbols`
