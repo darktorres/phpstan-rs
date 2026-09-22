@@ -79,7 +79,8 @@ impl<'a> Checker<'a> {
         span: Span,
         identifier: &'static str,
     ) {
-        if self.is_allowed_by_attribute_context(entry) {
+        if self.is_allowed_by_attribute_context(entry) || self.is_allowed_by_calling_context(entry)
+        {
             return;
         }
         let mut builder = DiagnosticBuilder::new(label.to_string(), message, span, 0, identifier);
@@ -190,6 +191,48 @@ impl<'a> Checker<'a> {
             .values()
             .flat_map(|sig| sig.attrs.iter().cloned())
             .collect()
+    }
+
+    /// `allow_in_methods`/`allow_except_in_methods` - matches the
+    /// *calling* function/method's own name, unlike `allow_in_methods_
+    /// with_attributes` (attribute-context, a wholly separate mechanism
+    /// already built above). `allow_in_methods` is purely additive
+    /// (allowed on top of the ordinary "disallowed everywhere" default);
+    /// `allow_except_in_methods` inverts the entry's own default
+    /// entirely, the same shape `is_allowed_by_position` already
+    /// established for `allow_except_in_param_types`.
+    fn is_allowed_by_calling_context(&self, entry: &RestrictedSymbolEntry) -> bool {
+        if entry.allow_in_methods.is_empty() && entry.allow_except_in_methods.is_empty() {
+            return false;
+        }
+        let current = self.current_calling_context_label().to_lowercase();
+        let matches_any = |patterns: &[String]| {
+            patterns
+                .iter()
+                .any(|p| glob_matches(&p.to_lowercase(), &current))
+        };
+        if matches_any(&entry.allow_in_methods) {
+            return true;
+        }
+        if !entry.allow_except_in_methods.is_empty() && !matches_any(&entry.allow_except_in_methods)
+        {
+            return true;
+        }
+        false
+    }
+
+    /// The calling function/method's own `Class::method()`/`function()`-
+    /// shaped label `is_allowed_by_calling_context` matches patterns
+    /// against - `current_method` alone (bare name, no parens) for a
+    /// top-level function, `current_class`+`current_method` for a
+    /// method. Empty when neither is set (top-level file scope), which
+    /// correctly never matches any real pattern.
+    fn current_calling_context_label(&self) -> String {
+        match (&self.current_class, &self.current_method) {
+            (Some(class), Some(method)) => format!("{class}::{method}()"),
+            (None, Some(method)) => format!("{method}()"),
+            _ => String::new(),
+        }
     }
 
     pub(crate) fn check_restricted_function_call(&mut self, fqn: &str, span: Span, label: &str) {

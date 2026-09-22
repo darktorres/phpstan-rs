@@ -152,6 +152,25 @@ pub struct RestrictedSymbolEntry {
     /// position instead.
     #[serde(default)]
     pub allow_except_in_return_type: bool,
+    /// `fnmatch()`-style patterns against the *calling* function or
+    /// method's own `Class::method()`/`function()`-shaped name (real
+    /// `allowInFunctions`, alias `allowInMethods` - this project picks
+    /// one canonical spelling, the same call every other alias-bearing
+    /// field here already made) - a match allows the item when called
+    /// from that context, on top of the ordinary "disallowed
+    /// everywhere" default.
+    #[serde(default)]
+    pub allow_in_methods: Vec<String>,
+    /// The inverse of `allow_in_methods` (real `allowExceptInFunctions`,
+    /// aliases `allowExceptInMethods`/`disallowInFunctions`/
+    /// `disallowInMethods`): unlike `allow_in_methods`, a match here
+    /// *inverts the entry's own default* - allowed everywhere except
+    /// when called from a matching context, where it's still reported
+    /// (confirmed against the real docs' own worked example: `Controller::
+    /// redirect()` stays allowed everywhere, reported only when called
+    /// from a `Controller\Foo\Bar\*::__construct()`-matching method).
+    #[serde(default)]
+    pub allow_except_in_methods: Vec<String>,
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -359,6 +378,8 @@ mod tests {
             allow_except_in_param_types: false,
             allow_in_return_type: false,
             allow_except_in_return_type: false,
+            allow_in_methods: Vec::new(),
+            allow_except_in_methods: Vec::new(),
         }
     }
 

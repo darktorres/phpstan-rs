@@ -4926,7 +4926,13 @@ Building-block audit against this project's own code:
   `*InAllowed` shape - a three-way rule, not a single flag.
 
 Recommended sequencing, each its own commit (small/medium as noted):
-1. `allowInMethods`/`allowInFunctions` + `allowExceptIn*` aliases (small).
+1. `allowInMethods`/`allowInFunctions` + `allowExceptIn*` aliases -
+   **done**: `allow_in_methods`/`allow_except_in_methods` fields, a new
+   `is_allowed_by_calling_context` matching the calling function/
+   method's own `Class::method()`/`function()`-shaped label
+   (`Checker::current_class`+`current_method`, already-existing fields,
+   zero new state) against `fnmatch()`-style patterns. Routed through
+   `report_restricted` alongside `is_allowed_by_attribute_context`.
 2. `allowInInstanceOf`/`allowExceptInInstanceOf` (small).
 3. `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` +
    `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/

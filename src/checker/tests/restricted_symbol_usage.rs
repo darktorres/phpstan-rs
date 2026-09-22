@@ -34,6 +34,8 @@ fn entry(
         allow_except_in_param_types: false,
         allow_in_return_type: false,
         allow_except_in_return_type: false,
+        allow_in_methods: Vec::new(),
+        allow_except_in_methods: Vec::new(),
     }
 }
 
@@ -837,4 +839,81 @@ fn attribute_name_matching_is_case_insensitive() {
         !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
         "unexpected diagnostics: {d:?}"
     );
+}
+
+// `allowInMethods`/`allowExceptInMethods` - matches the *calling*
+// function/method's own `Class::method()`/`function()`-shaped name,
+// unlike `allow_in_methods_with_attributes` above (attribute context, a
+// wholly separate mechanism).
+
+#[test]
+fn allow_in_methods_allows_only_the_matching_calling_method() {
+    let d = with_entries(
+        r#"<?php
+            class Logger { public function log(string $msg): void {} }
+            class Foo {
+                public function allowed(Logger $l): void { $l->log('a'); }
+                public function other(Logger $l): void { $l->log('b'); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Logger"),
+            "log",
+            "use our own logger instead",
+            |e| e.allow_in_methods = vec!["Foo::allowed()".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_except_in_methods_disallows_only_the_matching_calling_method() {
+    let d = with_entries(
+        r#"<?php
+            class Controller {
+                public function redirect(): void {}
+                public function handleRequest(): void { $this->redirect(); }
+                public function other(): void { $this->redirect(); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Controller"),
+            "redirect",
+            "redirect in startup() instead",
+            |e| e.allow_except_in_methods = vec!["Controller::handleRequest()".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+#[test]
+fn allow_in_methods_matches_a_bare_function_name_with_no_enclosing_class() {
+    let d = with_entries(
+        r#"<?php
+            function var_dump_wrapper() { var_dump(1); }
+            var_dump(2);
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Function,
+            None,
+            "var_dump",
+            "no debug dumps",
+            |e| e.allow_in_methods = vec!["var_dump_wrapper()".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.function")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
 }
