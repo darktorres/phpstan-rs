@@ -548,7 +548,11 @@ write-only/read-only/by-ref cluster: `property.writeOnly` and
 `assign.propertyReadOnly` (a `@property-read`/`@property-write` tag, or a
 virtual hooked property missing that hook, via `PropertySig::
 is_readable`/`is_writable`), and `property.assignByRef`/
-`.readOnlyAssignByRef`/`.readOnlyByPhpDocAssignByRef` for `$x = &...`.
+`.readOnlyAssignByRef`/`.readOnlyByPhpDocAssignByRef` for `$x = &...`. Once per
+function-like (function, method, closure, arrow function, hook `set`
+parameter): `parameter.superglobal`/`.this`/`.duplicate`/
+`.variadicNotLast`, and `nullsafe.byRef` for a by-ref function-like
+returning through `?->` (`FunctionDecl`/`ArrowFn` now record `by_ref`).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3551,15 +3555,6 @@ against this list, and added the real gaps the audit had missed.
   `return;` check (`return.empty`) is done (see Done), but its sibling
   `return.missing` (falling off the end with no `return` at all) still
   has the same imprecision `return.empty` had before that fix.
-- `ReturnNullsafeByRefRule` family — "nullsafe cannot be returned by
-  reference" when a by-ref function/arrow-fn's return passes through
-  `?->`; the existing `contains_nullsafe_access` helper is unused for
-  this.
-- `InvalidParameterNameRule`/`RedefinedParametersRule`/
-  `VariadicParametersDeclarationRule` — a small family of level-0
-  parameter-list sanity checks (superglobal/`$this` param name, a
-  duplicate parameter name, a non-last variadic parameter) with zero
-  phpstan-rs equivalent.
 - `ParameterCastableToStringRule`/`...ToNumberRule` family — array-
   argument values passed to `implode`/`array_combine`/`sort`/etc.
   actually castable to string/number, since these implicitly cast at

@@ -844,3 +844,71 @@ fn promoted_parameter_on_a_closure_inside_a_property_hook_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn parameter_list_sanity_is_checked_on_every_function_like() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f($_GET, $this, $a, $a, ...$rest) {}
+            function g(...$first, $second) {}
+            class K {
+                public function m($GLOBALS) {}
+                public int $p { set($this) { } }
+            }
+            $c = function ($x, $x) {};
+            $a = fn (...$v, $w) => 1;
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier.starts_with("parameter."))
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                "parameter.superglobal",
+                "Superglobal variable $_GET cannot be used as a parameter."
+            ),
+            ("parameter.this", "Cannot use $this as parameter."),
+            ("parameter.duplicate", "Redefinition of parameter $a."),
+            (
+                "parameter.variadicNotLast",
+                "Only the last parameter can be variadic."
+            ),
+            (
+                "parameter.superglobal",
+                "Superglobal variable $GLOBALS cannot be used as a parameter."
+            ),
+            ("parameter.this", "Cannot use $this as parameter."),
+            ("parameter.duplicate", "Redefinition of parameter $x."),
+            (
+                "parameter.variadicNotLast",
+                "Only the last parameter can be variadic."
+            ),
+        ],
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn nullsafe_returned_by_reference_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Box { public ?Box $next = null; public int $v = 0; }
+            function &byRef(?Box $b) {
+                if ($b === null) { $z = 0; return $z; }
+                return $b?->next;
+            }
+            function notByRef(?Box $b) { return $b?->next; }
+            $f = fn &(?Box $b) => $b?->v;
+            $g = function &(?Box $b) { $inner = function () use ($b) { return $b?->v; }; return $b->v; };
+        "#,
+    );
+    let found = d
+        .iter()
+        .filter(|x| x.identifier == "nullsafe.byRef")
+        .count();
+    assert_eq!(found, 2, "got: {d:?}");
+}

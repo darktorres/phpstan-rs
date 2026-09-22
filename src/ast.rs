@@ -217,6 +217,8 @@ pub struct FunctionDecl {
     // `false` for a bodiless `function f();` declaration (abstract and
     // interface methods), distinct from an empty `{}` body.
     pub has_body: bool,
+    // `function &f()` - returns by reference.
+    pub by_ref: bool,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
     pub doc_comment: Option<Arc<str>>,
     // `#[Attr]` groups preceding this declaration - shared by a
@@ -816,6 +818,8 @@ pub enum ExprKind {
         params: Vec<Param>,
         body: Box<Expr>,
         is_static: bool,
+        // `fn &() => ...` - returns by reference.
+        by_ref: bool,
         return_type: Option<String>,
         // See `Closure.attrs` above.
         attrs: Vec<Attribute>,

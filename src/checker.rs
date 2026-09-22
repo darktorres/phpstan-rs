@@ -1166,6 +1166,7 @@ pub(crate) mod duplicate_functions;
 mod duplicates;
 mod expr;
 mod function_decl;
+mod function_like_declarations;
 mod generics;
 mod imports;
 mod impossible_instanceof;
@@ -1183,7 +1184,6 @@ mod phpdoc_type_compat;
 pub(crate) mod phpstan_api;
 mod pipe_operator;
 mod preg_pattern_validity;
-mod promoted_properties;
 mod property_assignment;
 mod property_default_types;
 mod property_type_too_wide;
@@ -1701,7 +1701,7 @@ impl<'a> Checker<'a> {
         self.name_ctx = NameContext::default();
         for stmt in program {
             if !self.facts_only {
-                self.check_promoted_properties_in_stmt(stmt, "<main>");
+                self.check_function_like_declarations_in_stmt(stmt, "<main>");
             }
             match &stmt.kind {
                 StmtKind::Namespace(name) => self.name_ctx.set_namespace(name),

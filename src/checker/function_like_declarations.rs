@@ -1,7 +1,10 @@
-//! Constructor property promotion legality, mirroring real PHPStan's
-//! `InvalidPromotedPropertiesRule`: promotion needs PHP 8.0+, is only
-//! allowed on a non-abstract constructor, never on a variadic parameter,
-//! and `final` promotion needs PHP 8.5+.
+//! Declaration-level checks run once per function-like (function,
+//! method, closure, arrow function): constructor property promotion
+//! legality (`InvalidPromotedPropertiesRule` - PHP 8.0+, only on a
+//! non-abstract constructor, never variadic, `final` promotion PHP
+//! 8.5+), parameter-list sanity (`InvalidParameterNameRule`,
+//! `RedefinedParametersRule`, `VariadicParametersDeclarationRule`), and
+//! `ReturnNullsafeByRefRule`.
 //!
 //! A whole-file walk of its own rather than a hook inside
 //! `check_function`: a trait's methods are checked once per using host
@@ -9,6 +12,7 @@
 
 use crate::ast::*;
 use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
+use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::{Checker, DiagnosticBuilder};
 use crate::php_version::PhpFeature;
 use crate::token::Span;
@@ -20,6 +24,30 @@ enum PromotionSite {
     Constructor,
 }
 
+/// Where a function-like's `return` values come from, for
+/// `ReturnNullsafeByRefRule`.
+enum ReturnSource<'s> {
+    Body(&'s [Stmt]),
+    Arrow(&'s Expr),
+}
+
+const SUPERGLOBALS: [&str; 9] = [
+    "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV",
+];
+
+/// Every `return <expr>` directly in `body`, not inside a nested
+/// function-like or class declaration.
+fn collect_return_exprs<'s>(body: &'s [Stmt], out: &mut Vec<&'s Expr>) {
+    for stmt in body {
+        if let StmtKind::Return(Some(e)) = &stmt.kind {
+            out.push(e);
+        }
+        for child in stmt_children(stmt) {
+            collect_return_exprs(std::slice::from_ref(child), out);
+        }
+    }
+}
+
 fn is_promoted(p: &Param) -> bool {
     p.promoted_visibility.is_some() || p.hooks.is_some()
 }
@@ -27,10 +55,16 @@ fn is_promoted(p: &Param) -> bool {
 impl<'a> Checker<'a> {
     /// Entry point for one top-level statement of `check_program`'s own
     /// loop, so class names resolve against the positional `name_ctx`.
-    pub(crate) fn check_promoted_properties_in_stmt(&mut self, stmt: &Stmt, label: &str) {
+    pub(crate) fn check_function_like_declarations_in_stmt(&mut self, stmt: &Stmt, label: &str) {
         match &stmt.kind {
             StmtKind::FunctionDecl(f) => {
-                self.check_promoted_params(&f.params, PromotionSite::NotConstructor, &f.name);
+                self.check_function_like_declaration(
+                    &f.params,
+                    PromotionSite::NotConstructor,
+                    f.by_ref,
+                    Some(ReturnSource::Body(&f.body)),
+                    &f.name,
+                );
                 self.walk_promoted_in_body(&f.body, &f.name);
             }
             StmtKind::ClassDecl(c) => {
@@ -47,7 +81,7 @@ impl<'a> Checker<'a> {
                     self.walk_promoted_in_expr(e, label);
                 }
                 for child in stmt_children(stmt) {
-                    self.check_promoted_properties_in_stmt(child, label);
+                    self.check_function_like_declarations_in_stmt(child, label);
                 }
             }
         }
@@ -55,18 +89,40 @@ impl<'a> Checker<'a> {
 
     fn walk_promoted_in_body(&mut self, body: &[Stmt], label: &str) {
         for stmt in body {
-            self.check_promoted_properties_in_stmt(stmt, label);
+            self.check_function_like_declarations_in_stmt(stmt, label);
         }
     }
 
     fn walk_promoted_in_expr(&mut self, e: &Expr, label: &str) {
         match &e.kind {
-            ExprKind::Closure { params, body, .. } => {
-                self.check_promoted_params(params, PromotionSite::NotConstructor, label);
+            ExprKind::Closure {
+                params,
+                body,
+                by_ref,
+                ..
+            } => {
+                self.check_function_like_declaration(
+                    params,
+                    PromotionSite::NotConstructor,
+                    *by_ref,
+                    Some(ReturnSource::Body(body)),
+                    label,
+                );
                 self.walk_promoted_in_body(body, label);
             }
-            ExprKind::ArrowFn { params, body, .. } => {
-                self.check_promoted_params(params, PromotionSite::NotConstructor, label);
+            ExprKind::ArrowFn {
+                params,
+                body,
+                by_ref,
+                ..
+            } => {
+                self.check_function_like_declaration(
+                    params,
+                    PromotionSite::NotConstructor,
+                    *by_ref,
+                    Some(ReturnSource::Arrow(body)),
+                    label,
+                );
                 self.walk_promoted_in_expr(body, label);
             }
             ExprKind::NewAnonymousClass(decl, args) => {
@@ -98,7 +154,17 @@ impl<'a> Checker<'a> {
             } else {
                 PromotionSite::Constructor
             };
-            self.check_promoted_params(&m.function.params, site, &label);
+            let returns = m
+                .function
+                .has_body
+                .then_some(ReturnSource::Body(&m.function.body));
+            self.check_function_like_declaration(
+                &m.function.params,
+                site,
+                m.function.by_ref,
+                returns,
+                &label,
+            );
             self.walk_promoted_in_body(&m.function.body, &label);
         }
     }
@@ -109,6 +175,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             let label = format!("{fqn}::${}", p.name);
+            if let Some((Some(param), _)) = &hooks.set {
+                self.check_parameter_name(param, &label);
+            }
             let bodies = hooks
                 .get
                 .iter()
@@ -140,6 +209,78 @@ impl<'a> Checker<'a> {
             })
     }
 
+    fn check_function_like_declaration(
+        &mut self,
+        params: &[Param],
+        site: PromotionSite,
+        by_ref: bool,
+        returns: Option<ReturnSource>,
+        label: &str,
+    ) {
+        self.check_promoted_params(params, site, label);
+        let mut seen: Vec<&str> = Vec::new();
+        for (i, p) in params.iter().enumerate() {
+            self.check_parameter_name(p, label);
+            if seen.contains(&p.name.as_ref()) {
+                self.report_declaration(
+                    label,
+                    &format!("Redefinition of parameter ${}.", p.name),
+                    p.span,
+                    "parameter.duplicate",
+                );
+            } else {
+                seen.push(&p.name);
+            }
+            if p.variadic && i + 1 != params.len() {
+                self.report_declaration(
+                    label,
+                    "Only the last parameter can be variadic.",
+                    p.span,
+                    "parameter.variadicNotLast",
+                );
+            }
+        }
+        if by_ref {
+            let mut return_exprs = Vec::new();
+            match returns {
+                Some(ReturnSource::Body(body)) => collect_return_exprs(body, &mut return_exprs),
+                Some(ReturnSource::Arrow(e)) => return_exprs.push(e),
+                None => {}
+            }
+            for e in return_exprs {
+                if contains_nullsafe_access(e) {
+                    self.report_declaration(
+                        label,
+                        "Nullsafe cannot be returned by reference.",
+                        e.span,
+                        "nullsafe.byRef",
+                    );
+                }
+            }
+        }
+    }
+
+    fn check_parameter_name(&mut self, p: &Param, label: &str) {
+        if SUPERGLOBALS.contains(&p.name.as_ref()) {
+            self.report_declaration(
+                label,
+                &format!(
+                    "Superglobal variable ${} cannot be used as a parameter.",
+                    p.name
+                ),
+                p.span,
+                "parameter.superglobal",
+            );
+        } else if p.name.as_ref() == "this" {
+            self.report_declaration(
+                label,
+                "Cannot use $this as parameter.",
+                p.span,
+                "parameter.this",
+            );
+        }
+    }
+
     fn check_promoted_params(&mut self, params: &[Param], site: PromotionSite, label: &str) {
         let Some(first) = params.iter().find(|p| is_promoted(p)) else {
             return;
@@ -148,7 +289,7 @@ impl<'a> Checker<'a> {
         let unavailable = |feature: PhpFeature| version.is_some_and(|v| !feature.is_available(v));
         let first_span = first.span;
         if unavailable(PhpFeature::PromotedProperties) {
-            self.report_promotion(
+            self.report_declaration(
                 label,
                 "Promoted properties are supported only on PHP 8.0 and later.",
                 first_span,
@@ -158,7 +299,7 @@ impl<'a> Checker<'a> {
         }
         match site {
             PromotionSite::NotConstructor => {
-                self.report_promotion(
+                self.report_declaration(
                     label,
                     "Promoted properties can be in constructor only.",
                     first_span,
@@ -167,7 +308,7 @@ impl<'a> Checker<'a> {
                 return;
             }
             PromotionSite::AbstractConstructor => {
-                self.report_promotion(
+                self.report_declaration(
                     label,
                     "Promoted properties are not allowed in abstract constructors.",
                     first_span,
@@ -180,7 +321,7 @@ impl<'a> Checker<'a> {
         let final_unavailable = unavailable(PhpFeature::FinalPromotedProperties);
         for p in params.iter().filter(|p| p.promoted_visibility.is_some()) {
             if p.promoted_final && final_unavailable {
-                self.report_promotion(
+                self.report_declaration(
                     label,
                     "Final promoted properties are supported only on PHP 8.5 and later.",
                     p.span,
@@ -188,7 +329,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if p.variadic {
-                self.report_promotion(
+                self.report_declaration(
                     label,
                     &format!(
                         "Promoted property parameter ${} can not be variadic.",
@@ -201,7 +342,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    fn report_promotion(&mut self, label: &str, message: &str, span: Span, identifier: &str) {
+    fn report_declaration(&mut self, label: &str, message: &str, span: Span, identifier: &str) {
         self.report_builder(
             DiagnosticBuilder::new(label.to_string(), message.to_string(), span, 0, identifier)
                 .non_ignorable(),

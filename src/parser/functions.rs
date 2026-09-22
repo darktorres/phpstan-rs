@@ -134,7 +134,7 @@ impl Parser {
     pub(crate) fn parse_function_decl(&mut self) -> Result<FunctionDecl, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Function))?;
-        self.eat(&Token::Amp); // by-ref return marker
+        let by_ref = self.eat(&Token::Amp);
         let name_start = self.current_pos();
         let name = self.expect_ident()?;
         let name_span = Span {
@@ -170,6 +170,7 @@ impl Parser {
             return_type_span,
             body: std::sync::Arc::new(body),
             has_body,
+            by_ref,
             // Callers that saw a preceding doc comment overwrite this -
             // parse_function_decl itself is entered after any modifiers
             // (and thus after the doc comment's position) have already

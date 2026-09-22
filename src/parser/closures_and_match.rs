@@ -74,7 +74,7 @@ impl Parser {
     pub(crate) fn parse_arrow_fn(&mut self, is_static: bool) -> Result<Expr, ParseError> {
         let start = self.current_pos();
         self.expect(&Token::Keyword(Keyword::Fn))?;
-        self.eat(&Token::Amp);
+        let by_ref = self.eat(&Token::Amp);
         let params = self.parse_params()?;
         let return_type = if self.eat(&Token::Colon) {
             self.parse_type_hint()?
@@ -88,6 +88,7 @@ impl Parser {
                 params,
                 body: Box::new(body),
                 is_static,
+                by_ref,
                 return_type,
                 // See `Closure`'s identical note in `parse_closure`.
                 attrs: Vec::new(),
