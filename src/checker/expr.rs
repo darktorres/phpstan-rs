@@ -3958,6 +3958,23 @@ impl<'a> Checker<'a> {
                         if let ExprKind::Name(name) = &callee.kind {
                             if !is_language_construct(name) {
                                 let (primary, fallback) =
+                if !matches!(inner.kind, ExprKind::New(..))
+                    && self.registry.php_version.is_some_and(|v| {
+                        !crate::php_version::PhpFeature::FirstClassCallables.is_available(v)
+                    })
+                {
+                    self.report_builder(
+                        DiagnosticBuilder::new(
+                            label.to_string(),
+                            "First-class callables are supported only on PHP 8.1 and later."
+                                .to_string(),
+                            e.span,
+                            0,
+                            "callable.notSupported",
+                        )
+                        .non_ignorable(),
+                    );
+                }
                                     self.name_ctx.resolve_function_candidates(name);
                                 let resolved_sig = self
                                     .registry

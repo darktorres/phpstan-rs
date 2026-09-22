@@ -814,3 +814,26 @@ fn array_map_closure_use_of_a_never_defined_outer_variable_is_flagged() {
         "expected variable.undefined, got: {d:?}"
     );
 }
+
+#[test]
+fn first_class_callable_syntax_is_gated_on_php_8_1() {
+    let src = r#"<?php
+        class Fcc {
+            public function m(): void {}
+            public static function s(): void {}
+        }
+        function f(Fcc $o): void {
+            $a = strlen(...);
+            $b = $o->m(...);
+            $c = Fcc::s(...);
+        }
+    "#;
+    let gated = |v| {
+        diagnostics_for_with(src, |r| r.php_version = Some(v))
+            .into_iter()
+            .filter(|x| x.identifier == "callable.notSupported")
+            .count()
+    };
+    assert_eq!(gated((8, 0)), 3);
+    assert_eq!(gated((8, 1)), 0);
+}

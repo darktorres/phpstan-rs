@@ -525,7 +525,9 @@ finding inside a trait is kept only when every using host reports it
 with the same verdict, matching `ConstantConditionInTraitRule`. `MissingMagicSerializationMethodsRule`
 (`class.serializable`, PHP 8.1+, anonymous classes included). A bodiless non-abstract method outside an interface
 (`method.nonAbstract`), from a new `FunctionDecl::has_body`; an
-empty-bodied constructor's unused parameters are now reported too.
+empty-bodied constructor's unused parameters are now reported too. First-class-callable syntax below PHP 8.1
+(`callable.notSupported`, `FunctionCallableRule`/`MethodCallableRule`/
+`StaticMethodCallableRule`).
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3541,10 +3543,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 127 — Methods (`Rules/Methods/` gaps)
 
-- `MethodCallableRule` — gates first-class-callable syntax
-  (`$obj->method(...)`) behind a PHP-8.1 version check; phpstan-rs's own
-  extensive `PhpFeature`/`php_version.rs` framework covers roughly a
-  dozen similarly narrow gates but not this one.
 - `StaticMethodCallCheck`'s static/instance-context mismatch half —
   `method.staticCall` for calling a non-static method through
   `Foo::method()` static-call syntax (or the reverse). The same real
