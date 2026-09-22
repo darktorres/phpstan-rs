@@ -2288,6 +2288,10 @@ impl<'a> Checker<'a> {
                 // ancestor_hint`'s doc comment) - this project still
                 // doesn't otherwise type-check an anonymous class's body
                 // against its implemented interfaces.
+                let previous_anonymous_class = std::mem::replace(
+                    &mut self.current_anonymous_class,
+                    self.anonymous_class_names.get(&e.span).cloned(),
+                );
                 for m in &decl.methods {
                     let ancestor_sig =
                         decl.extends
@@ -2305,6 +2309,7 @@ impl<'a> Checker<'a> {
                         ancestor_sig,
                     );
                 }
+                self.current_anonymous_class = previous_anonymous_class;
                 // Its own properties'/consts' attributes too -
                 // method/param attributes are already covered inside
                 // `check_function` above.

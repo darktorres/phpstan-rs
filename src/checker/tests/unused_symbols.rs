@@ -772,3 +772,129 @@ fn private_methods_declared_in_a_trait_are_not_flagged_by_the_using_class() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn unused_constructor_parameter_uses_its_own_identifier() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Point {
+                public function __construct(int $x) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    let found = d
+        .iter()
+        .find(|x| x.message.contains("unused parameter $x"))
+        .unwrap_or_else(|| panic!("got: {d:?}"));
+    assert_eq!(found.identifier, "constructor.unusedParameter");
+    assert!(
+        !d.iter().any(|x| x.identifier == "parameter.unused"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn readonly_or_final_only_promoted_parameter_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Point {
+                public function __construct(readonly int $x, final int $y) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("unused parameter")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn attribute_class_constructor_parameters_are_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            #[\Attribute]
+            class Route {
+                public function __construct(string $path) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("unused parameter")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn constructor_dictated_by_an_interface_is_not_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Makeable {
+                public function __construct(int $seed);
+            }
+            abstract class Base implements Makeable {}
+            class Direct implements Makeable {
+                public function __construct(int $seed) {
+                    echo 1;
+                }
+            }
+            class Inherited extends Base {
+                public function __construct(int $seed) {
+                    echo 1;
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.message.contains("unused parameter")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn interface_without_a_constructor_does_not_exempt_the_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface Shape {
+                public function area(): int;
+            }
+            class Square implements Shape {
+                public function __construct(int $side) {
+                    echo 1;
+                }
+                public function area(): int { return 1; }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x
+            .message
+            .contains("constructor of Square has an unused parameter $side")),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn anonymous_class_unused_constructor_parameter_names_the_anonymous_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            function make(): object {
+                return new class(1) {
+                    public function __construct(int $seed) {
+                        echo 1;
+                    }
+                };
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.message
+            == "constructor of an anonymous class has an unused parameter $seed"),
+        "got: {d:?}"
+    );
+}

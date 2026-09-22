@@ -891,6 +891,12 @@ pub struct Checker<'a> {
     // `pest_this_type`'s own default gets - a lookup miss just falls back
     // to `Type::Mixed(false)`, matching today's unconditional behavior.
     pub(crate) anonymous_class_names: HashMap<crate::token::Span, String>,
+    // The registry name (`anonymous_class_names`' value) of the anonymous
+    // class whose own methods are currently being checked - its methods
+    // are checked under the placeholder `"class@anonymous"` class name,
+    // which never resolves against the registry. `None` outside an
+    // anonymous class's methods, or when its span has no entry.
+    pub(crate) current_anonymous_class: Option<String>,
     // Every private property write's own assigned type, discovered
     // anywhere in this file's own `check_program` run - keyed by
     // (declaring class fqn, property name), never reset per-class:
@@ -1271,6 +1277,7 @@ impl<'a> Checker<'a> {
             pest_this_type: Type::Mixed(false),
             pest_hook_properties: HashSet::new(),
             anonymous_class_names: HashMap::new(),
+            current_anonymous_class: None,
             property_assign_facts: HashMap::new(),
             named_argument_call_facts: HashMap::new(),
             renamed_parameter_override_facts: Vec::new(),

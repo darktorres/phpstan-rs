@@ -29,10 +29,13 @@ use var_usage::collect_var_usage;
 impl<'a> Checker<'a> {
     /// Flags a `__construct` parameter never referenced anywhere in the
     /// constructor's own body - scoped to constructors only, not a
-    /// general "unused parameter" rule. Constructor property promotion
-    /// (`private int $id`) is exempt: the promotion itself is an implicit
-    /// `$this->id = $id` assignment, a real use, even when the body never
-    /// reads `$id` again.
+    /// general "unused parameter" rule. A promoted parameter (any
+    /// visibility/`readonly`/`final` modifier) is exempt: the promotion
+    /// itself is an implicit `$this->id = $id` assignment, a real use,
+    /// even when the body never reads `$id` again. An attribute class, or
+    /// a class implementing an interface that declares `__construct`, is
+    /// exempt entirely, since its constructor signature is dictated from
+    /// outside the class.
     pub(crate) fn check_unused_constructor_parameters(
         &mut self,
         f: &FunctionDecl,
@@ -48,9 +51,20 @@ impl<'a> Checker<'a> {
         let candidates: Vec<&Param> = f
             .params
             .iter()
-            .filter(|p| p.promoted_visibility.is_none())
+            .filter(|p| {
+                p.promoted_visibility.is_none() && !p.promoted_readonly && !p.promoted_final
+            })
             .collect();
         if candidates.is_empty() {
+            return;
+        }
+        let is_anonymous = fqn == "class@anonymous";
+        let registry_name = if is_anonymous {
+            self.current_anonymous_class.as_deref()
+        } else {
+            Some(fqn)
+        };
+        if registry_name.is_some_and(|name| self.constructor_signature_is_dictated(name)) {
             return;
         }
         let usage = collect_var_usage(&f.body);
@@ -58,14 +72,43 @@ impl<'a> Checker<'a> {
             if usage.contains(&p.name) {
                 continue;
             }
+            let message = if is_anonymous {
+                format!(
+                    "constructor of an anonymous class has an unused parameter ${}",
+                    p.name
+                )
+            } else {
+                format!("constructor of {fqn} has an unused parameter ${}", p.name)
+            };
             self.report(
                 label.to_string(),
-                format!("constructor of {fqn} has an unused parameter ${}", p.name),
+                message,
                 p.span,
                 1,
-                "parameter.unused",
+                "constructor.unusedParameter",
             );
         }
+    }
+
+    /// Whether `class` is an attribute class, or implements (directly or
+    /// through any ancestor) an interface that itself declares
+    /// `__construct`.
+    fn constructor_signature_is_dictated(&self, class: &str) -> bool {
+        let Some(info) = self.registry.classes.get(class) else {
+            return false;
+        };
+        if info.attribute_targets.is_some() {
+            return true;
+        }
+        self.registry.all_ancestor_names(class).iter().any(|name| {
+            self.registry.classes.get(name).is_some_and(|ancestor| {
+                ancestor.kind == ClassKind::Interface
+                    && ancestor
+                        .methods
+                        .keys()
+                        .any(|m| m.eq_ignore_ascii_case("__construct"))
+            })
+        })
     }
 
     /// Flags a closure `use ($x)`/`use (&$x)` capture never referenced

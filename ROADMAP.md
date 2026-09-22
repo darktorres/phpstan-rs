@@ -468,7 +468,11 @@ class-constant visibility enforcement end to end, plus the whole
 first-class-callable family running the same checks an ordinary call
 gets. Unused-symbol detection matching real PHPStan's three
 `UnusedPrivate*Rule` classes end to end, plus a PHP 8.4 asymmetric-
-visibility property's own narrower dead-write check. Duplicate-
+visibility property's own narrower dead-write check, and
+`UnusedConstructorParametersRule` under its own
+`constructor.unusedParameter` identifier (any promotion modifier,
+attribute classes, and constructors dictated by an interface exempt,
+anonymous classes included). Duplicate-
 declaration scans within a class/trait/enum body, a same-file
 case-insensitive class-vs-`use`-alias collision, and duplicate top-level
 *function* declarations (a real, whole-project, cross-file scan,
@@ -3513,9 +3517,6 @@ against this list, and added the real gaps the audit had missed.
 - `ReadOnlyClassRule` — the PHP-version-gate data already exists
   (`PhpFeature::ReadOnlyClasses`/`ReadOnlyAnonymousClasses`,
   `php_version.rs`) but is never consumed by any checker call site.
-- `UnusedConstructorParametersRule` — an unused constructor parameter
-  is already flagged, but always under the generic `parameter.unused`
-  identifier instead of real PHPStan's own `constructor.unusedParameter`.
 
 ### Phase 126 — Functions (`Rules/Functions/` gaps)
 

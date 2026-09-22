@@ -134,3 +134,33 @@ fn calling_a_genuinely_undefined_method_on_an_anonymous_class_instance_is_still_
         "expected a method.notFound diagnostic, got: {d:?}"
     );
 }
+
+#[test]
+fn anonymous_class_constructor_dictated_by_an_interface_is_not_flagged_unused() {
+    let mut project = Project::new();
+    project
+        .load_file(
+            PathBuf::from("src/Makeable.php"),
+            "<?php interface Makeable { public function __construct(int $seed); }",
+        )
+        .unwrap();
+    project
+        .load_file(
+            PathBuf::from("src/build.php"),
+            "<?php
+            function build(): Makeable {
+                return new class(1) implements Makeable {
+                    public function __construct(int $seed) { echo 1; }
+                };
+            }",
+        )
+        .unwrap();
+    project.finish_loading();
+
+    let d = project.check_file(&PathBuf::from("src/build.php"));
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "constructor.unusedParameter"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

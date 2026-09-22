@@ -14,7 +14,7 @@ fn diagnostic_severity_reflects_diagnostic_level() {
     // level 0 (class.notFound) + level 6 (missingType.parameter, $x untyped)
     let level0_src =
         "<?php function f($x) { if ($x instanceof NotAClass) { return true; } return false; }";
-    // level 1 (parameter.unused, $unused never read in the ctor body)
+    // level 1 (constructor.unusedParameter, $unused never read in the ctor body)
     let level1_src =
         "<?php class Greeter { public function __construct(int $unused) { echo \"hi\"; } }";
     // level 5 (argument.type, string literal passed where int is declared)
@@ -72,8 +72,8 @@ fn diagnostic_severity_reflects_diagnostic_level() {
     let b_diags = diags_for(&b_uri);
     let unused_param = b_diags
         .iter()
-        .find(|d| d["code"] == "parameter.unused")
-        .unwrap_or_else(|| panic!("expected parameter.unused in {b_diags:?}"));
+        .find(|d| d["code"] == "constructor.unusedParameter")
+        .unwrap_or_else(|| panic!("expected constructor.unusedParameter in {b_diags:?}"));
     assert_eq!(unused_param["severity"], 2, "level 1 must map to WARNING");
 
     let c_diags = diags_for(&c_uri);
