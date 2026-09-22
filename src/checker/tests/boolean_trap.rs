@@ -1,5 +1,5 @@
 //! Opt-in "boolean trap" detection (`argument.booleanTrap`,
-//! PHASE_BACKLOG Phase 96 D2) - a bare `true`/`false` literal passed
+//! ROADMAP Phase 96 D2) - a bare `true`/`false` literal passed
 //! positionally into a bare-`bool`-typed parameter.
 
 use super::helpers::*;

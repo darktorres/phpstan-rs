@@ -1,4 +1,4 @@
-//! Opt-in `constructor.missingParentCall` (PHASE_BACKLOG Phase 101's
+//! Opt-in `constructor.missingParentCall` (ROADMAP Phase 101's
 //! E3, mirroring real `phpstan-strict-rules`'
 //! `RequireParentConstructCallRule`).
 

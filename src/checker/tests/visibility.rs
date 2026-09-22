@@ -802,7 +802,7 @@ fn writing_a_public_private_set_property_from_inside_its_own_class_is_never_flag
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
-// Dead-write detection for asymmetric-visibility properties (PHASE_BACKLOG
+// Dead-write detection for asymmetric-visibility properties (ROADMAP
 // Phase 98's AB2) - `UnusedPrivate*Rule`'s own gate is `visibility ==
 // Private`, missing `write_visibility` entirely; a `public private(set)`
 // property's write side is exactly as class-scoped as a fully-private

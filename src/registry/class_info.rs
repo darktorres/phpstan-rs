@@ -339,7 +339,7 @@ pub struct ClassInfo {
     // `Registry::resolve_method_tags`, a later pass. Empty again after
     // that pass runs; never read afterward.
     pub method_tags: Vec<(Arc<str>, FunctionSig)>,
-    // `#[ORM\Entity]` metadata (PHASE_BACKLOG Phase 168 168a) - `None`
+    // `#[ORM\Entity]` metadata (ROADMAP Phase 168 168a) - `None`
     // for the overwhelming majority of classes, which aren't Doctrine
     // entities at all.
     pub doctrine_entity: Option<DoctrineEntity>,

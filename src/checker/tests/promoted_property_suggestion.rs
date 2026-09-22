@@ -1,5 +1,5 @@
 //! Opt-in constructor-property-promotion suggestion
-//! (`constructor.promotionCandidate`, PHASE_BACKLOG Phase 97 AA3).
+//! (`constructor.promotionCandidate`, ROADMAP Phase 97 AA3).
 
 use super::helpers::*;
 use crate::registry::Registry;

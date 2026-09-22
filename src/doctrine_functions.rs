@@ -1,5 +1,5 @@
 //! A purely declarative, config-driven list of a project's own custom
-//! DQL function registrations (PHASE_BACKLOG Phase 168 168h) - a
+//! DQL function registrations (ROADMAP Phase 168 168h) - a
 //! `Doctrine\ORM\Query\AST\Functions\FunctionNode` subclass registered
 //! via `Configuration::addCustomStringFunction()`/
 //! `addCustomNumericFunction()`/`addCustomDatetimeFunction()` (e.g.

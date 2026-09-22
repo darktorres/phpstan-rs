@@ -1,6 +1,6 @@
 //! Structurally-identical operands on both sides of a comparison,
 //! `Sub`, or a plain self-assignment (`expr.duplicateOperands`,
-//! PHASE_BACKLOG Phase 96 D7).
+//! ROADMAP Phase 96 D7).
 
 use super::helpers::*;
 

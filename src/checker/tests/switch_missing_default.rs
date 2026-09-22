@@ -1,4 +1,4 @@
-//! Opt-in `switch` missing-`default:`-arm detection (PHASE_BACKLOG
+//! Opt-in `switch` missing-`default:`-arm detection (ROADMAP
 //! Phase 146 147f).
 
 use super::helpers::*;

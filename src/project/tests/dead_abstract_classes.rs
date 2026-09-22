@@ -1,4 +1,4 @@
-//! `checker::whole_program::dead_abstract_classes` (PHASE_BACKLOG Phase
+//! `checker::whole_program::dead_abstract_classes` (ROADMAP Phase
 //! 93), wired through `Project::check_whole_program` - opt-in, off by
 //! default (see `registry::Registry::check_dead_abstract_classes`'s own
 //! doc comment). Every fixture loads via `load_analyzed_file`, not

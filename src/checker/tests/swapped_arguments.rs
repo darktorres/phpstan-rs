@@ -1,5 +1,5 @@
 //! Opt-in swapped-adjacent-argument-name detection
-//! (`arguments.possiblySwapped`, PHASE_BACKLOG Phase 96 D6).
+//! (`arguments.possiblySwapped`, ROADMAP Phase 96 D6).
 
 use super::helpers::*;
 

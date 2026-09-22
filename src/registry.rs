@@ -248,7 +248,7 @@ pub struct Registry {
     // A declared enum case never referenced via `EnumName::CaseName`,
     // never a `match`/`switch` arm value, and never provably produced
     // by a literal `::from()`/`::tryFrom()` argument, project-wide
-    // (PHASE_BACKLOG Phase 92) - opt-in, since this is a whole-program
+    // (ROADMAP Phase 92) - opt-in, since this is a whole-program
     // fact this project's own closed-world registry can prove sound for
     // its own analyzed set, but real PHP has escape hatches this
     // project can't rule out in general: a case reachable only through
@@ -261,7 +261,7 @@ pub struct Registry {
     // member_refs`, not something specific to this check).
     pub check_dead_enum_cases: bool,
     // A top-level function or class/interface/trait/enum never referenced
-    // anywhere in the project (PHASE_BACKLOG Phase 86's B2) - opt-in, for
+    // anywhere in the project (ROADMAP Phase 86's B2) - opt-in, for
     // real, disclosed reasons real PHPStan has no equivalent rule at all
     // (its own per-file, open-world reflection can't prove a symbol has
     // zero consumers anywhere; this project's closed-world registry
@@ -273,7 +273,7 @@ pub struct Registry {
     // reachable only through framework magic/reflection.
     pub check_dead_code: bool,
     // A namespace-level `extends`/`implements`/`use`-trait dependency
-    // cycle (PHASE_BACKLOG Phase 86's B3) - real, structural, and fully
+    // cycle (ROADMAP Phase 86's B3) - real, structural, and fully
     // precise (every edge is an already-canonical `ClassInfo` field, no
     // approximation), so this is opt-in only because it's a genuinely
     // new architectural-smell category, not because of any disclosed
@@ -283,13 +283,13 @@ pub struct Registry {
     // namespace_deps`'s own module doc comment for why.
     pub check_circular_dependencies: bool,
     // An `abstract class` with zero concrete descendants anywhere in the
-    // closed universe (PHASE_BACKLOG Phase 93) - opt-in for the one real
+    // closed universe (ROADMAP Phase 93) - opt-in for the one real
     // disclosed risk: a concrete subclass generated only at runtime by
     // framework magic (a Doctrine proxy, a mocking framework) is
     // invisible to this project's static registry.
     pub check_dead_abstract_classes: bool,
     // A protected/public method/property/const never referenced
-    // anywhere in the project (PHASE_BACKLOG Phase 86's B1) - opt-in for
+    // anywhere in the project (ROADMAP Phase 86's B1) - opt-in for
     // real, disclosed reasons real PHPStan's own dead-member rule
     // doesn't cover this visibility at all (it gates on `isPrivate()`
     // specifically, since verifying no *other file* reaches a broader-
@@ -361,7 +361,7 @@ pub struct Registry {
     // once via `RestrictedSymbols::compile` (`Project::
     // set_restricted_symbols`).
     pub restricted_symbols: crate::restricted_symbols::RestrictedSymbols,
-    // A project's own `[[doctrine_custom_functions]]` config (PHASE_BACKLOG
+    // A project's own `[[doctrine_custom_functions]]` config (ROADMAP
     // Phase 168 168h) - DQL function name (lowercased, matching DQL's own
     // case-insensitive function-name lookup) -> declared category.
     pub doctrine_custom_functions:

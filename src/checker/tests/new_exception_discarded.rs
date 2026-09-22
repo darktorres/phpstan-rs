@@ -1,4 +1,4 @@
-//! Opt-in discarded-`new`-exception detection (PHASE_BACKLOG Phase 147
+//! Opt-in discarded-`new`-exception detection (ROADMAP Phase 147
 //! 147c).
 
 use super::helpers::*;

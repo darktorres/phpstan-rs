@@ -5626,7 +5626,7 @@ fn is_true_literal(e: &Expr) -> bool {
 /// method sharing its own `HYDRATE_OBJECT` shape - `execute()`/
 /// `toIterable()` when their own hydration-mode argument is omitted or
 /// explicit) always produces a real, sequentially-keyed list - true
-/// regardless of whether PHASE_BACKLOG Phase 168's own DQL-aware row-
+/// regardless of whether ROADMAP Phase 168's own DQL-aware row-
 /// type inference (168b-168d) managed to resolve a real element type,
 /// in which case `element_ty` is that resolved `Type`; `Type::Mixed(false)`
 /// when it didn't (matches this project's pre-Phase-168 fallback

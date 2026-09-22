@@ -1,4 +1,4 @@
-//! PHASE_BACKLOG Phase 86's B3: flag a *namespace-level* structural
+//! ROADMAP Phase 86's B3: flag a *namespace-level* structural
 //! dependency cycle - namespace `A` has a class that `extends`/
 //! `implements`/`use`s a class in namespace `B`, and namespace `B` (via
 //! some other, possibly unrelated, class pair) has an edge back into

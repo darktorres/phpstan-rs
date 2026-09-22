@@ -1,4 +1,4 @@
-//! `method.notFound`'s "did you mean?" tip (`checker::suggest`, PHASE_BACKLOG
+//! `method.notFound`'s "did you mean?" tip (`checker::suggest`, ROADMAP
 //! D8) - a close-typo call site gets a name suggestion, an unrelated one
 //! doesn't.
 

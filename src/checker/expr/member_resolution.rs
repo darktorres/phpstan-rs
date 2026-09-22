@@ -392,7 +392,7 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         match recv_ty {
-            // `EntityManager::createQuery($dql)` (PHASE_BACKLOG Phase 168
+            // `EntityManager::createQuery($dql)` (ROADMAP Phase 168
             // 168g) - the same DQL-aware row-shape inference as
             // `QueryBuilder::getQuery()` just below, fed a literal DQL
             // string directly instead of a `QueryBuilder`-reconstructed
@@ -428,7 +428,7 @@ impl<'a> Checker<'a> {
                     None => Type::Object("Doctrine\\ORM\\Query".to_string(), Vec::new()),
                 }
             }
-            // `QueryBuilder::getQuery()` (PHASE_BACKLOG Phase 168 168e) -
+            // `QueryBuilder::getQuery()` (ROADMAP Phase 168 168e) -
             // resolves the fluent chain (168b), parses its own select
             // items (168c) and builds the row shape (168d), carrying it
             // as `Doctrine\ORM\Query`'s own generic-argument slot (see
@@ -469,7 +469,7 @@ impl<'a> Checker<'a> {
             }
             // The five `AbstractQuery` terminal methods real
             // `phpstan-doctrine` itself resolves precisely via its own
-            // `QueryResultDynamicReturnTypeExtension` (PHASE_BACKLOG
+            // `QueryResultDynamicReturnTypeExtension` (ROADMAP
             // Phase 168 168e) - checkable against that reference
             // implementation's own `dumpType()` output.
             // `getArrayResult`/`getSingleColumnResult`/
@@ -543,7 +543,7 @@ impl<'a> Checker<'a> {
                 }
             }
             // `getArrayResult`/`getSingleColumnResult`/
-            // `getSingleScalarResult`/`getScalarResult` (PHASE_BACKLOG
+            // `getSingleScalarResult`/`getScalarResult` (ROADMAP
             // Phase 168 168f) - beyond real PHPStan (168e's own stub
             // check confirms none of these four get a dynamic-return-
             // type extension in real `phpstan-doctrine` either).
@@ -563,7 +563,7 @@ impl<'a> Checker<'a> {
             // a bare variable, with no way back to the assignment that
             // built it) - degrades to `Mixed` for that one call site
             // rather than a false claim, a real, disclosed coverage gap
-            // (see PHASE_BACKLOG.md), not a design defect.
+            // (see ROADMAP.md), not a design defect.
             Type::Object(class, _)
                 if matches!(
                     method,

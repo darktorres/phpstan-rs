@@ -1,4 +1,4 @@
-//! PHASE_BACKLOG Phase 86's B1: flag a protected/public method/
+//! ROADMAP Phase 86's B1: flag a protected/public method/
 //! property/const never referenced anywhere in the project. Real
 //! PHPStan's own dead-member rule gates on `isPrivate()` specifically,
 //! since verifying no *other file* reaches a broader-visibility member

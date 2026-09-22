@@ -1,4 +1,4 @@
-//! PHASE_BACKLOG Phase 86's B2: flag a top-level function or class-like
+//! ROADMAP Phase 86's B2: flag a top-level function or class-like
 //! declaration (class/interface/trait/enum) never referenced anywhere in
 //! the project - no `new`/`extends`/`implements`/`use`/`instanceof`/type-
 //! hint/`catch` for a class-like, no call or bare-callable `Name` for a

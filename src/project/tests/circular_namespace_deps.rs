@@ -1,4 +1,4 @@
-//! `checker::whole_program::circular_namespace_deps` (PHASE_BACKLOG
+//! `checker::whole_program::circular_namespace_deps` (ROADMAP
 //! Phase 86's B3), wired through `Project::check_whole_program` -
 //! opt-in, off by default (see `registry::Registry::
 //! check_circular_dependencies`'s own doc comment). Every fixture loads

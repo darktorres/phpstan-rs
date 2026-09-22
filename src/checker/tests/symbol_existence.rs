@@ -537,7 +537,7 @@ fn use_function_name_case_is_not_flagged_for_a_correctly_cased_import_even_when_
 }
 
 // `function.nameCase` also covers a plain call site's own written
-// casing vs. the resolved declaration (PHASE_BACKLOG Phase 102's W3) -
+// casing vs. the resolved declaration (ROADMAP Phase 102's W3) -
 // the same opt-in flag, extended past just `use function` imports.
 
 #[test]

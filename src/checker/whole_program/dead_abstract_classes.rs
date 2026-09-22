@@ -1,4 +1,4 @@
-//! PHASE_BACKLOG Phase 93: flag an `abstract class` with zero concrete
+//! ROADMAP Phase 93: flag an `abstract class` with zero concrete
 //! descendants anywhere in the closed universe - a permanent structural
 //! fact, not "currently unused" the way Phase 86's B2 (`class.unused`)
 //! is. Real PHPStan has no such rule at all: its `Reflection/` layer has

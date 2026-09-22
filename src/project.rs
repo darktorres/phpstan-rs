@@ -270,7 +270,7 @@ impl Project {
     }
 
     /// Compiles a project's own configured `[[doctrine_custom_functions]]`
-    /// list (PHASE_BACKLOG Phase 168 168h) into the `Registry`-held
+    /// list (ROADMAP Phase 168 168h) into the `Registry`-held
     /// lookup `checker::doctrine::result_shape` consults. Empty by
     /// default, so this is a zero-cost no-op call for every project with
     /// no custom DQL function registrations.

@@ -1,4 +1,4 @@
-//! `checker::whole_program::dead_members` (PHASE_BACKLOG Phase 86's
+//! `checker::whole_program::dead_members` (ROADMAP Phase 86's
 //! B1), wired through `Project::check_whole_program` - opt-in, off by
 //! default (see `registry::Registry::check_dead_members`'s own doc
 //! comment). Every fixture loads via `load_analyzed_file`, not

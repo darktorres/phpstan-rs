@@ -1,4 +1,4 @@
-//! `checker::whole_program::dead_code` (PHASE_BACKLOG Phase 86's B2),
+//! `checker::whole_program::dead_code` (ROADMAP Phase 86's B2),
 //! wired through `Project::check_whole_program` - opt-in, off by
 //! default (see `registry::Registry::check_dead_code`'s own doc
 //! comment). Every fixture loads via `load_analyzed_file`, not

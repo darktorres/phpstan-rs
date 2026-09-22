@@ -1,4 +1,4 @@
-//! Phase 92 (PHASE_BACKLOG): flag a declared enum case never referenced
+//! Phase 92 (ROADMAP): flag a declared enum case never referenced
 //! via `EnumName::CaseName`, never a `match`/`switch` arm value, and
 //! never provably produced by a literal `::from()`/`::tryFrom()`
 //! argument, project-wide. All three signals are already free once

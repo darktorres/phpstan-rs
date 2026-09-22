@@ -1,5 +1,5 @@
 //! Opt-in `never`-return-type suggestion (`return.neverCandidate`,
-//! PHASE_BACKLOG Phase 97 AA5).
+//! ROADMAP Phase 97 AA5).
 
 use super::helpers::*;
 

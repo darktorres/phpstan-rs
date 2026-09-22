@@ -1,4 +1,4 @@
-//! `@see` PHPDoc tag target validation (`phpDoc.seeTag`, PHASE_BACKLOG
+//! `@see` PHPDoc tag target validation (`phpDoc.seeTag`, ROADMAP
 //! Phase 96 D5) - `check_doc_see_tag_targets` in `checker/oop.rs`.
 
 use super::helpers::*;

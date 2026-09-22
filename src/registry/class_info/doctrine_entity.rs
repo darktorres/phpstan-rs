@@ -1,4 +1,4 @@
-//! Doctrine ORM entity metadata (PHASE_BACKLOG Phase 168 168a) - extracted
+//! Doctrine ORM entity metadata (ROADMAP Phase 168 168a) - extracted
 //! once, here, from a class's own `#[ORM\...]` attributes, reusing the
 //! native property types `ClassInfo::from_decl` has already resolved
 //! (this project's own already-indexed property types answer "what type
@@ -9,7 +9,7 @@
 //! (confirmed directly - zero `@ORM\...` legacy docblock annotations
 //! anywhere in the corpus), so only the attribute style is supported.
 //!
-//! Entity inheritance (PHASE_BACKLOG Phase 168 168j) - `#[ORM\
+//! Entity inheritance (ROADMAP Phase 168 168j) - `#[ORM\
 //! DiscriminatorMap]`'s own value -> concrete-subclass map is parsed on
 //! the root entity; a `FROM BaseEntity alias` with a non-empty map
 //! produces a union across every mapped subclass (`checker::doctrine::

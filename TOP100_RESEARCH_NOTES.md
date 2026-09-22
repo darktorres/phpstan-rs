@@ -372,7 +372,7 @@ exception-hygiene family, none of it framework-specific:
   stricter, unconditional sibling of Nette's own RethrowExceptionRule
   (#16, which only fires when a MORE SPECIFIC exception was actually
   thrown and swallowed). Combine both as one "exception-swallowing
-  hygiene" family when triaging into PHASE_BACKLOG.md.
+  hygiene" family when triaging into ROADMAP.md.
 - EmptyExceptionRule: throw new Exception() with no message argument.
 - DoNotThrowExceptionBaseClassRule: throwing the bare \Exception/\Error
   base class instead of a specific subclass.
@@ -1011,7 +1011,7 @@ widgets. phpstan-rs's own `src/output.rs:42-47` already has an
 4th variant is a small, self-contained, real CI-integration value-add
 (test-report-shaped output, distinct from log-shaped Checkstyle/JSON),
 not a checker rule. Genuinely novel, not covered anywhere in
-PHASE_BACKLOG.md/ROADMAP.md.
+ROADMAP.md.
 
 ## 70. brainbits/phpstan-rules - DONE (small, genuinely new finding)
 Real source read (2 files). PHPUnit `@covers`/`#[CoversClass]`/
@@ -1087,7 +1087,7 @@ NOT framework-specific:
   DTO comparison mistake). Completely generic, no framework dependency,
   cheap to implement (walk `BinOp::Identical`/`NotIdentical`, check LHS
   type for a native 1-arg `equals` method accepting RHS's type). Not
-  covered anywhere in PHASE_BACKLOG.md/ROADMAP.md - genuinely new.
+  covered anywhere in ROADMAP.md - genuinely new.
 
 - RestrictImplicitDependencyUsage (high value, novel, more involved):
   implements `RestrictedClassNameUsageExtension` to flag any class
@@ -1205,7 +1205,7 @@ applicable project-wide to any codebase with a documented "must call
 parent::onX()" convention (many base-class/framework patterns beyond
 SilverStripe specifically - abstract test-case setUp/tearDown-style
 hooks, kernel boot sequences, etc.). Not covered anywhere in
-PHASE_BACKLOG.md/ROADMAP.md - genuinely new, small, worth adding.
+ROADMAP.md - genuinely new, small, worth adding.
 
 ## 81. calebdw/fakerstan - DONE
 Real source read (7 files). Faker library-specific: resolves the
@@ -1421,7 +1421,7 @@ Real source read (21 files). Entirely generic, no framework dependency:
   didn't change). A real, concrete, version-relevant correctness check
   fitting naturally alongside phpstan-rs's own existing `PhpFeature`-
   gated PHP-version-behavior-change checks. Not covered anywhere in
-  PHASE_BACKLOG.md/ROADMAP.md - genuinely new.
+  ROADMAP.md - genuinely new.
 
 - **ExtendedBinaryOpRule/ExtendedAssignOpRule (deepens #32's shipmonk
   arithmetic-strictness family further - 3rd independent confirmation)**:

@@ -1,5 +1,5 @@
 //! Opt-in strict `checkDynamicProperties` behavior inside `isset()`/
-//! `empty()`/`??`/`??=` (PHASE_BACKLOG Phase 102 W1).
+//! `empty()`/`??`/`??=` (ROADMAP Phase 102 W1).
 
 use super::helpers::*;
 

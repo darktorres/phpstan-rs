@@ -1005,7 +1005,7 @@ impl Registry {
     /// reverse of `ClassInfo::doctrine_entity`'s own `repository_class`
     /// field, needed to resolve `EntityRepository::createQueryBuilder()`'s
     /// implicit `FROM` when checking a repository class's own method
-    /// body (PHASE_BACKLOG Phase 168 168b). A plain linear scan, not a
+    /// body (ROADMAP Phase 168 168b). A plain linear scan, not a
     /// precomputed map - a real project has at most a few dozen entities,
     /// nowhere near enough for this to be a real cost next to everything
     /// else a single method-body check already does.

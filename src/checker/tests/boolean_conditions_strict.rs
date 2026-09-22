@@ -1,5 +1,5 @@
 //! Opt-in "only booleans are allowed in a condition" family
-//! (PHASE_BACKLOG Phase 101 E1, mirroring real `phpstan-strict-rules`'
+//! (ROADMAP Phase 101 E1, mirroring real `phpstan-strict-rules`'
 //! `BooleansInConditions`).
 
 use super::helpers::*;

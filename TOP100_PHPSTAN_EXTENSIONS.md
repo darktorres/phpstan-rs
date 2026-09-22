@@ -8,7 +8,7 @@ separately by the API: `nunomaduro/larastan` -> `larastan/larastan`,
 and `carlosas/phpat` -> `phpat/phpat`.
 
 Used as the starting point for a one-by-one "what could phpstan-rs
-learn from this" pass, triaged into PHASE_BACKLOG.md.
+learn from this" pass, triaged into ROADMAP.md.
 
 | # | Package | Downloads | Favers | Description |
 |---|---------|-----------|--------|-------------|

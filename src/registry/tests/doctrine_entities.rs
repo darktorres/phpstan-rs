@@ -1,4 +1,4 @@
-//! Doctrine ORM entity metadata extraction (PHASE_BACKLOG Phase 168 168a).
+//! Doctrine ORM entity metadata extraction (ROADMAP Phase 168 168a).
 
 use super::super::*;
 use super::helpers::*;

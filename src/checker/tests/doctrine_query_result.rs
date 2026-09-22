@@ -1,4 +1,4 @@
-//! DQL-aware Doctrine ORM result-type inference (PHASE_BACKLOG Phase 168,
+//! DQL-aware Doctrine ORM result-type inference (ROADMAP Phase 168,
 //! 168b-168j) - end-to-end `assertType()` coverage through a minimal
 //! Doctrine class hierarchy declared directly in each fixture (this
 //! project vendors no real `doctrine-orm`/`doctrine-doctrine` stubs).

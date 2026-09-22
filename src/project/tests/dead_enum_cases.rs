@@ -1,4 +1,4 @@
-//! `checker::whole_program::dead_enum_cases` (PHASE_BACKLOG Phase 92),
+//! `checker::whole_program::dead_enum_cases` (ROADMAP Phase 92),
 //! wired through `Project::check_whole_program` - opt-in, off by
 //! default (see `registry::Registry::check_dead_enum_cases`'s own doc
 //! comment). Driven through `check_whole_program` directly (not

@@ -647,7 +647,7 @@ fn a_class_constant_key_that_does_not_infer_to_a_scalar_still_suppresses_checkin
     );
 }
 
-// Opt-in array-key cast warnings (PHASE_BACKLOG Phase 103's Z1,
+// Opt-in array-key cast warnings (ROADMAP Phase 103's Z1,
 // `array.keyCast`/`offsetAccess.keyCast`) - off by default.
 
 #[test]
