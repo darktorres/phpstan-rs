@@ -258,3 +258,31 @@ fn nested_class_declarations_get_declaration_checks() {
     assert!(ids.contains(&"class.extendsInterface"), "got: {d:?}");
     assert!(ids.contains(&"property.callableType"), "got: {d:?}");
 }
+
+#[test]
+fn unresolvable_native_property_type_is_flagged() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            final class Foo {}
+            final class Bar {}
+            class Impossible {
+                public Foo&Bar $a;
+                public \Countable&\Iterator $ok;
+                public function __construct(public Bar&Foo $b) {}
+            }
+        "#,
+        |r| r.php_version = Some((8, 1)),
+    );
+    let found: Vec<_> = findings(&d, "property.unresolvableNativeType")
+        .into_iter()
+        .map(|(_, m)| m)
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Property Impossible::$a has unresolvable native type.",
+            "Property Impossible::$b has unresolvable native type.",
+        ],
+        "got: {d:?}"
+    );
+}

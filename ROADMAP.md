@@ -541,7 +541,7 @@ properties: `PropertiesInInterfaceRule` and `PropertyInClassRule`'s full
 hook/modifier matrix and PHP 8.4/8.5 gates, `ReadOnlyPropertyRule`,
 `ReadOnlyByPhpDocPropertyRule` (with `@phpstan-allow-private-mutation`
 modeled, which also exempts its own class's writes from
-`property.readOnlyAssignNotInConstructor`), and `property.callableType`.
+`property.readOnlyAssignNotInConstructor`), `property.callableType`, and `property.unresolvableNativeType`.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3560,10 +3560,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 128 — Properties (`Rules/Properties/` gaps)
 
-- `ExistingClassesInPropertiesRule` remainder — `class.notFound` (Phase
-  48) and `property.trait` (`check_type_trait_refs`,
-  `checker/generics/bounds.rs`) are both built. Only
-  `property.unresolvableNativeType` is left.
 - Five-rule cluster around PHP 8.4 write-only/read-only/asymmetric-
   visibility properties: assign-by-ref (plain/readonly-native/
   readonly-by-phpdoc), reading a write-only property, writing a

@@ -1,7 +1,8 @@
 //! Property declaration legality, for plain and promoted properties
 //! alike, mirroring real PHPStan's `PropertiesInInterfaceRule`,
 //! `PropertyInClassRule`, `ReadOnlyPropertyRule`,
-//! `ReadOnlyByPhpDocPropertyRule`, and `InvalidCallablePropertyTypeRule`.
+//! `ReadOnlyByPhpDocPropertyRule`, `InvalidCallablePropertyTypeRule`, and
+//! `ExistingClassesInPropertiesRule`'s unresolvable-native-type half.
 
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder};
@@ -121,6 +122,16 @@ impl<'a> Checker<'a> {
                 self.check_property_in_class(view, registry_name, display, is_class_abstract);
             }
             self.check_readonly_property_declaration(view, display);
+            self.check_unresolvable_native_type(
+                view.type_hint,
+                &format!(
+                    "Property {display}::${} has unresolvable native type.",
+                    view.name
+                ),
+                "property.unresolvableNativeType",
+                view.span,
+                display,
+            );
             if view.type_hint.is_some_and(native_hint_mentions_callable) {
                 self.report_property_declaration(
                     display,
