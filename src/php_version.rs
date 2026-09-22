@@ -190,6 +190,10 @@ pub enum PhpFeature {
     /// (`FunctionCallableRule`/`MethodCallableRule`/
     /// `StaticMethodCallableRule`).
     FirstClassCallables,
+    /// Built-in methods' `#[TentativeType]` return types being enforced
+    /// on overrides. `PhpVersion::hasTentativeReturnTypes`
+    /// (`OverridingMethodRule`).
+    TentativeReturnTypes,
 }
 
 impl PhpFeature {
@@ -214,7 +218,8 @@ impl PhpFeature {
             | DeprecatesFloatArrayKey
             | PureIntersectionTypes
             | SerializableRequiresMagicMethods
-            | FirstClassCallables => (8, 1),
+            | FirstClassCallables
+            | TentativeReturnTypes => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
             | ReadOnlyAnonymousClasses

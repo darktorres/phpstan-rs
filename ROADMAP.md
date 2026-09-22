@@ -533,7 +533,10 @@ compatible `$this`), `method.callToAbstract`/
 `staticMethod.callToAbstract`, `staticMethod.nonObject`, and
 `outOfClass.*`/`class.noParent` for `self::`/`static::`/`parent::`
 calls; `@method static` tags and enum `cases()`/`from()`/`tryFrom()` are
-now recorded in `ClassInfo::static_methods`.
+now recorded in `ClassInfo::static_methods`. `OverridingMethodRule`'s
+`method.tentativeReturnType` (PHP 8.1+, a stub's `#[TentativeType]`
+return replacing `method.childReturnType`, `#[\ReturnTypeWillChange]`
+exempt).
 
 Invalid-operand-combination detection (`ErrorType`): the operand-
 validity matrix across binary/comparison/unary/inc-dec operators, plus
@@ -3546,12 +3549,6 @@ against this list, and added the real gaps the audit had missed.
   argument values passed to `implode`/`array_combine`/`sort`/etc.
   actually castable to string/number, since these implicitly cast at
   runtime.
-
-### Phase 127 — Methods (`Rules/Methods/` gaps)
-
-- `OverridingMethodRule`'s tentative-return-type sub-check —
-  `method.tentativeReturnType`. Niche: it only matters when extending
-  certain SPL/core classes.
 
 ### Phase 128 — Properties (`Rules/Properties/` gaps)
 

@@ -608,6 +608,47 @@ impl<'a> Checker<'a> {
         // faithfully keeps the ancestor's native `array` while the
         // ancestor's interface had separately narrowed it to `list<...>`
         // via docblock alone.
+        //
+        // A built-in ancestor's `#[TentativeType]` return (PHP 8.1+)
+        // replaces that check with `method.tentativeReturnType`, where a
+        // missing native return type counts as `mixed`, and
+        // `#[\ReturnTypeWillChange]` on either side opts out.
+        let tentative = ancestor_sig.is_stub
+            && has_attr(&ancestor_sig.attrs, "TentativeType")
+            && self.registry.php_version.is_none_or(|v| {
+                crate::php_version::PhpFeature::TentativeReturnTypes.is_available(v)
+            });
+        if tentative {
+            let will_change = has_attr(&own_sig.attrs, "ReturnTypeWillChange")
+                || has_attr(&ancestor_sig.attrs, "ReturnTypeWillChange");
+            let ancestor_ty = &ancestor_sig.return_type_native;
+            let own_ty = &own_sig.return_type_native;
+            let compatible = matches!(ancestor_ty, Type::Mixed(_))
+                || ancestor_return_uses_static(ancestor_ty)
+                || (!matches!(own_ty, Type::Mixed(false))
+                    && self.registry.is_assignable(own_ty, ancestor_ty));
+            if !will_change && !compatible {
+                let own_display = if matches!(own_ty, Type::Mixed(false)) {
+                    "mixed".to_string()
+                } else {
+                    own_ty.to_string()
+                };
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Return type {own_display} of method {fqn}::{method_name}() is not covariant with tentative return type {ancestor_ty} of method {ancestor_owner}::{method_name}()."
+                        ),
+                        span,
+                        0,
+                        "method.tentativeReturnType",
+                    )
+                    .tip("Make it covariant, or use the #[\\ReturnTypeWillChange] attribute to temporarily suppress the error.")
+                    .non_ignorable(),
+                );
+            }
+            return;
+        }
         // `self` is resolved on both sides as for parameters above: an
         // interface's `: self` is that interface, which an implementation
         // returning the interface by name satisfies.
@@ -630,6 +671,16 @@ impl<'a> Checker<'a> {
                 ), span, 0, "method.childReturnType");
         }
     }
+}
+
+/// Whether `attrs` (raw, as-written attribute names) contains `name`,
+/// ignoring any namespace qualification.
+fn has_attr(attrs: &[std::sync::Arc<str>], name: &str) -> bool {
+    attrs.iter().any(|a| {
+        a.rsplit('\\')
+            .next()
+            .is_some_and(|last| last.eq_ignore_ascii_case(name))
+    })
 }
 
 /// Whether an ancestor's native return type invokes the `static`

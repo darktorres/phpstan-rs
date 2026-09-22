@@ -3396,3 +3396,43 @@ fn well_formed_inheritance_reports_no_kind_errors() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn overriding_a_tentative_return_type_incompatibly_is_flagged() {
+    let src = r#"<?php
+        class TentIt implements IteratorAggregate {
+            public function getIterator() { return new ArrayIterator([]); }
+        }
+        class TentCount implements Countable {
+            public function count(): string { return ''; }
+        }
+        class TentOk implements Countable {
+            public function count(): int { return 0; }
+        }
+        class TentWillChange implements JsonSerializable {
+            #[\ReturnTypeWillChange]
+            public function jsonSerialize() { return 1; }
+        }
+        class TentMixed implements ArrayAccess {
+            public function offsetExists($o): bool { return true; }
+            public function offsetGet($o) { return 1; }
+            public function offsetSet($o, $v): void {}
+            public function offsetUnset($o): void {}
+        }
+    "#;
+    let tentative = |v| {
+        diagnostics_for_with(src, |r| r.php_version = Some(v))
+            .into_iter()
+            .filter(|x| x.identifier == "method.tentativeReturnType")
+            .map(|x| x.message)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        tentative((8, 1)),
+        vec![
+            "Return type mixed of method TentIt::getIterator() is not covariant with tentative return type Traversable of method IteratorAggregate::getIterator().",
+            "Return type string of method TentCount::count() is not covariant with tentative return type int of method Countable::count().",
+        ]
+    );
+    assert!(tentative((8, 0)).is_empty());
+}
