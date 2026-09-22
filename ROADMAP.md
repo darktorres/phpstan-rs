@@ -506,10 +506,43 @@ nullable declared type (`?string`, `?Foo`, ...) is represented as
 `Union([X, Null])` in this project, so `sup` being a Union is the
 *typical* case, not an edge one; fixed by giving the new method its own
 level-aware recursive counterpart to the existing Union-vs-Union
-cascade instead of bailing. Declined, needing infrastructure large and
-disconnected enough to be its own future phase: `checkExplicitMixed`/
-`checkImplicitMixed`/`checkBenevolentUnionTypes` (real level 9/10) -
-`Type::Mixed` carries no explicit-vs-implicit provenance to key them off.
+cascade instead of bailing.
+
+`checkExplicitMixed`/`checkImplicitMixed` (real level 9/10) are done
+too. `Type::Mixed` was widened to `Type::Mixed(bool)` - `true` when a
+type-resolution process completed and its own deliberate answer is
+`mixed` (the literal `mixed` keyword; an unbounded `@template` with no
+`of`/`as` clause, confirmed against `vendor/phpstan-src`'s own
+`TemplateTypeFactory`/`PhpDocNodeResolver`, which both resolve that
+shape to `MixedType(true)` too), `false` for a genuine "no type
+information at all" fallback - a best-effort, disclosed classification
+(not an exhaustive per-site audit against every one of real PHPStan's
+own ~15+ explicit-construction call sites, which stays open). `Type`'s
+own `PartialEq` is hand-written, not derived, so `Mixed(_) == Mixed(_)`
+is always true regardless of the flag (matching real PHPStan's own
+`MixedType::equals()`, which ignores it too) - every one of this
+project's ~360 pre-existing `== Type::Mixed`-shaped call sites kept
+their exact old meaning with no individual auditing needed.
+`accepts_at_configured_level` gained two more level thresholds via a
+new `is_assignable_at_level` helper: this project's own `is_subtype`
+never actually gave `Mixed` a blanket "accepted anywhere" structural
+rule the way real PHPStan's `MixedType::isAcceptedBy()` does - every
+call site instead bailed out on a literal `Mixed` value ad hoc, on its
+own - so `is_assignable_at_level` supplies that same leniency
+self-contained (not by widening `is_subtype` itself, real foundational
+surgery with unknown blast radius this one opt-in feature doesn't need
+to force). The real, confirmed acceptance-check call sites (verified
+against `vendor/phpstan-src` individually, not assumed: argument-type,
+return-type, property-assignment, by-ref-parameter checks) had their
+own manual Mixed bail-out removed in favor of this shared mechanism;
+generics bound-checking was deliberately *not* migrated - real
+PHPStan's own `GenericObjectTypeCheck` calls `isSuperTypeOf()` directly,
+never `RuleLevelHelper::accepts()` at all. `checkBenevolentUnionTypes`
+stays declined/open - real PHPStan's own `BenevolentUnionType` has an
+existing analogue in this codebase already (`AccessoryKind::Benevolent`/
+`Type::benevolent_array_key()`, unconditional/always-on today, the
+opposite gap from real PHPStan's own default-strict/opt-in-lenient
+posture) that a future item should audit rather than build fresh.
 
 **`array + array`'s key/value precision, found via a Piwigo/real-PHPStan
 corpus diff.** `BinOp::Add`'s array-union arm used to collapse straight
@@ -4021,20 +4054,21 @@ parameter-value conditions) and its wholly-separate namespace/enum/
 superglobal/keyword-specific siblings, each a materially different
 detection shape needing its own separate investigation.
 
-**84 - `RuleLevelHelper`-equivalent level-aware type-acceptance,
-remaining (PARTIAL).** `Registry::accepts_at_configured_level` (see
-Done) closes the real gap at its own 8 target call sites: `project.level`
-now genuinely modulates argument/return/property-type strictness
-(stripping `Null` below level 8, `.any()`-vs-`.all()` below level 7),
-including the level-8+-strict nullable-type case that was the feature's
-single most common real-world trigger. Declined, a change large and
-disconnected enough from this item's own 8-call-site scope to need its
-own future phase: `checkExplicitMixed`/`checkImplicitMixed`/
-`checkBenevolentUnionTypes` (real level 9/10) - `Type::Mixed` has no
-explicit-vs-implicit provenance field to key them off, and no
-`BenevolentUnionType` analogue exists at all; building either means
-threading provenance through every inference site that currently
-collapses to `Mixed`.
+**84 - `checkBenevolentUnionTypes`, remaining (PARTIAL).** `Registry::
+accepts_at_configured_level` and `checkExplicitMixed`/`checkImplicitMixed`
+(real level 9/10) are both done (see Done). Still open: auditing this
+project's own existing, always-on `BenevolentUnionType` analogue
+(`AccessoryKind::Benevolent`/`Type::benevolent_array_key()`) against real
+PHPStan's broader, opt-in set of construction sites, and deciding
+whether an explicit `checkBenevolentUnionTypes`-style toggle is worth
+adding on top - today's leniency is unconditional, the opposite gap from
+real PHPStan's own default-strict/opt-in-lenient posture. Also still
+open, disclosed rather than attempted: a full per-site audit of
+`Type::Mixed`'s own explicit-vs-implicit classification against every
+one of real PHPStan's own ~15+ explicit-construction call sites beyond
+the 3 confirmed so far (the literal `mixed` keyword; an unbounded
+`@template`) - the current classification is best-effort, defaulting to
+implicit everywhere else, not an exhaustive parity audit.
 
 **Receiver-type-checks phase (DONE).** Nine real-PHPStan identifiers for
 "this receiver's own type provably can never support the operation at
