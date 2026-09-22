@@ -1234,3 +1234,34 @@ fn impossible_type_is_never_exempted_as_a_trailing_elseif() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn haystack_values_the_needle_can_never_match_are_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            enum Suit { case Hearts; case Spades; }
+            enum Color { case Red; }
+            function f(Suit $s, string $name, int $n): void {
+                in_array($s, [Suit::Hearts, Color::Red], true);
+                in_array($s, [Suit::Hearts, Suit::Spades], true);
+                array_search($name, ['a', 1], true);
+                in_array($n, ['x', 'y'], true);
+                array_keys(['a' => 1], 'one', true);
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "function.impossibleHaystackValue")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "Value Color::Red in the haystack passed to in_array() can never be identical to the needle type Suit.",
+            "Value 1 in the haystack passed to array_search() can never be identical to the needle type string.",
+            "Value 1 in the haystack passed to array_keys() can never be identical to the needle type 'one'.",
+        ],
+        "got: {d:?}"
+    );
+}

@@ -564,7 +564,9 @@ object) checks the resolved signature's arity and argument types, plus
 `callable.inaccessibleMethod`. The castable-array-argument family
 (`ParameterCastableToStringRule`/`ToNumberRule`/
 `ImplodeParameterCastableToStringRule`/`SortParameterCastableToStringRule`,
-flag-aware for the sort functions).
+flag-aware for the sort functions). `ImpossibleInArrayHaystackFiniteTypesRule`
+(`function.impossibleHaystackValue` for `in_array()`/`array_search()`/
+`array_keys()` against a constant-array haystack).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3555,9 +3557,6 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 129 — Comparison (`Rules/Comparison/` gaps)
 
-- `ImpossibleInArrayHaystackFiniteTypesRule` — `in_array()`/
-  `array_search()`/`array_keys()` where a needle's finite type can never
-  match any constant-array-haystack value (level 4).
 - `UsageOfVoidMatchExpressionRule` — using the result of a `match`
   whose every arm is a void-returning call; phpstan-rs's `Match`
   handling has no void-result-usage check at all.

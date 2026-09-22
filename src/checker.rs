@@ -1170,6 +1170,7 @@ mod expr;
 mod function_decl;
 mod function_like_declarations;
 mod generics;
+mod haystack_values;
 mod imports;
 mod impossible_instanceof;
 mod instantiation;

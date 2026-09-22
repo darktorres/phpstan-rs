@@ -21,7 +21,7 @@ mod builtin_calls;
 mod member_resolution;
 mod preg_shapes;
 mod probe_checks;
-mod ranges;
+pub(crate) mod ranges;
 
 use crate::checker::expr::ranges::{
     checked_bound_op, compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range,
@@ -754,6 +754,7 @@ impl<'a> Checker<'a> {
                         self.check_castable_array_arguments(
                             name, sig, args, &resolved, locals, label,
                         );
+                        self.check_impossible_haystack_values(name, args, locals, e.span, label);
                         if !args.iter().any(|a| a.spread)
                             && matches!(
                                 name.as_ref(),
