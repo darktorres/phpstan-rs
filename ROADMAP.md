@@ -3966,6 +3966,31 @@ and both directions of the template-bound case; 10 new regression tests
 (`src/checker/tests/default_parameter_types.rs`); full suite green,
 clippy clean.
 
+**`property.defaultValue` - a property's own default value expression's
+type must be assignable to its declared (writable) type** (real
+PHPStan's own `Rules/Properties/DefaultValueTypesAssignedToPropertiesRule.php`,
+level 3 - `public int $x = "bad";`). New `check_default_property_types`
+(`checker/property_default_types.rs`), called once per class alongside
+`check_uninitialized_properties`. Checks against `PropertySig::set_ty`
+when present, falling back to `ty` otherwise - mirrors real PHPStan's
+own `getWritableType()` exactly: a PHP 8.4 `set(Type $value)` hook can
+accept a wider type than the property's own backing/read type, and this
+project already modeled that split for the unrelated write-checking
+purpose `set_ty` itself exists for. Replicates real PHPStan's own
+untyped-property exemption precisely: only a literal `null` default is
+exempted when the property has no *native* type hint at all (checked
+against the raw AST `type_hint`, never the resolved `Type`, which may
+still carry a `@var`-tag type even with no native hint) - real PHP
+quietly defaults every untyped property to `null` regardless of what its
+own `@var` tag claims, so an explicit `= null` is always legal there,
+but any *other* default on an untyped property is still checked normally
+against its own `@var` type. Verified manually and via tests against a
+nullable native type, an untyped property with a narrow `@var` tag (null
+exempted, a non-null incompatible default still flagged), a static
+property (gets the "Static property" wording), and an enum-case default;
+8 new regression tests (`src/checker/tests/property_default_types.rs`);
+full suite green, clippy clean.
+
 ## Performance & tooling
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
@@ -4565,7 +4590,7 @@ verified-absent-from-`src/`, previously-undocumented gaps.
 
 ## Properties
 
-- **`Rules/Properties/DefaultValueTypesAssignedToPropertiesRule.php`**: Real PHPStan (level 3) checks a typed property's own literal default value against its declared type (e.g. `public int $x = "bad";` → property.defaultValue); phpstan-rs has no equivalent pass over property declaration defaults at all, and ROADMAP.md never mentions it.
+- **`Rules/Properties/DefaultValueTypesAssignedToPropertiesRule.php` - now done**, see Done's own entry under "Rule catalog (checker)".
 - **`Rules/Properties/ExistingClassesInPropertiesRule.php`**: This rule's class.notFound half (referenced-class existence in a property's native+PHPDoc type) is correctly built and documented (Phase 48, generics.rs:184-190), but its other two identifiers — property.trait (a property typed as a trait, e.g.
 - **`Rules/Properties/PropertiesInInterfaceRule.php, Rules/Properties/PropertyInClassRule.php`**: Real PHPStan has two whole rule classes validating PHP 8.4 property-hook *declaration-site* legality — PropertiesInInterfaceRule (an interface property must be hooked, public, non-readonly, non-static, non-abstract, non-final, hookless-of-body) and PropertyInClassRule (abstract/final/private/static/readonly/hooksNotSupported/virtualDefault combinations on a class's own hooked...
 - **`Rules/Properties/ReadOnlyPropertyRule.php, Rules/Properties/ReadOnlyByPhpDocPropertyRule.php`**: Real PHPStan validates that a `readonly` property declaration is itself legal PHP (has a native type, no default value, isn't static, PHP version supports readonly) — and the identical four checks for the `@phpstan-readonly`/`@readonly` docblock-tag form.

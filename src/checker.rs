@@ -1175,6 +1175,7 @@ pub(crate) mod phpstan_api;
 mod pipe_operator;
 mod preg_pattern_validity;
 mod property_assignment;
+mod property_default_types;
 mod property_type_too_wide;
 mod resolve;
 mod restricted_symbol_usage;
@@ -1738,6 +1739,7 @@ impl<'a> Checker<'a> {
                         self.check_property_variances(&fqn, c);
                         self.check_trait_conflicts(&fqn, c.span);
                         self.check_uninitialized_properties(&fqn, c);
+                        self.check_default_property_types(&fqn, c);
                         self.check_premature_property_access(&fqn, c);
                         self.check_duplicate_class_members(&fqn, c);
                         if self.registry.check_risky_tests {

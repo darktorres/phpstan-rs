@@ -67,6 +67,7 @@ mod preg_and_regex;
 mod preg_quote_delimiter;
 mod printf_format_arguments;
 mod promoted_property_suggestion;
+mod property_default_types;
 mod property_hooks;
 mod property_type_too_wide;
 mod purity;
