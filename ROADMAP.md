@@ -3715,10 +3715,124 @@ reset for a nested closure/arrow-fn body, since PHP attributes can't
 attach to either; a disclosed simplification, not an oversight. Both
 route through one new shared `report_restricted` helper, so all 6
 `check_restricted_*` call sites get the identical allow/disallow
-evaluation. Deliberately narrower than the real package's own full DSL -
-no `allowInClassWithMethodAttributes`, `allowInParamTypes`/
-`allowInReturnType`, `allowInUse`, or parameter-value conditions; see
-Pending for what's left.
+evaluation.
+
+`allowInUse` closes next: real docs (fetched directly from the
+package's own GitHub repo, not recalled) confirm a plain, class-shaped
+`use Foo;` import is genuinely a separate detection occurrence from
+every type-hint position ("the `use` line will still be reported as a
+separate occurrence") - a real, previously-undocumented gap in this
+project's own `Class`-kind coverage (`checker::imports::
+check_use_class_imports` already checked a `use` import for
+`class.prefixed`, never for a restricted-symbols ban at all). Closed
+via a new `check_restricted_class_use_import`, plus a new `allow_in_use`
+bool entry field to suppress exactly that one occurrence.
+
+`allowInClassWithMethodAttributes`/`allowExceptInClassWithMethodAttributes`
+(alias `disallowInClassWithMethodAttributes`) match when *any* method in
+the enclosing class carries the attribute (including the method the
+restricted usage lives in, but never the class's own attributes) -
+confirmed genuinely different from `allow_in_methods_with_attributes`
+(current method only). Real, previously-missing data closed it in:
+`FunctionSig` gained its own `attrs: Vec<Arc<str>>` field (populated
+identically to `Checker::current_method_attrs`, threaded through every
+construction/merge site - `from_decl`, template substitution,
+`@method`-tag/enum-method synthesis, stub merging), letting a new
+`current_class_any_method_attrs` walk every sibling method via
+`ClassInfo::methods` rather than only the currently-executing one.
+
+`allowInParamTypes`/`allowExceptInParamTypes` (alias
+`disallowInParamTypes`) and their `*ReturnType` siblings, `Class`-kind
+only, are materially bigger than every purely-additive shape before
+them: `allowIn*` opts a class *out* of its normal "disallowed
+everywhere" default at exactly one type-hint position (a new
+`ClassUsageLocation::{ParamType,ReturnType,Other}` threaded through
+`check_restricted_class_name_usage`'s 7 call sites), but `allowExceptIn*`
+*inverts the entry's own default entirely* - "disallow a class only
+when it appears as a parameter type hint, allowing it everywhere else"
+(confirmed against the real docs' own worked examples). A new
+`is_allowed_by_position` implements both halves.
+
+**`restricted_symbols`' parameter-value-conditions filter DSL** (Phase
+67). Real PHPStan's `spaze/phpstan-disallowed-calls` package's own
+`Function`/`Method`/`StaticMethod`-only condition family (confirmed
+against its real `allow-with-parameters.md`/`allow-with-flags.md` docs,
+not recalled): `allowParamsAnywhere`/`allowParamsAnywhereAnyValue`,
+`allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
+`allowExceptCaseInsensitiveParams` (aliases
+`disallowParamsAnywhere`/`disallowParamsAnyValue`/
+`disallowCaseInsensitiveParams`), `allowParamsInAllowed`/
+`allowParamsInAllowedAnyValue`/`allowExceptParamsInAllowed`
+(`disallowParamsInAllowed`), and a `ParamFlags` bitmask sibling of 4 of
+those. Two prerequisite zone directives this project didn't have at
+all - `allowInMethods`/`allowInFunctions`/their `allowExceptIn*`
+siblings (matching the calling function/method's own
+`Class::method()`/`function()` name via the already-existing
+`Checker::current_class`/`current_method`) and `allowInInstanceOf`/
+`allowExceptInInstanceOf` (matching the current class's own name plus
+every transitive ancestor/interface, reusing `Registry::ancestor_names`
+directly - the same precomputed closure `is_subclass_of` itself
+already reads) - landed first, since the `*InAllowed` param-condition
+variants narrow whichever zone the same entry also configures.
+
+The value/typeString/classPattern matching engine (new `ParamCondition`/
+`ParamRef` types) resolves `{position, name}` directly against the raw
+call-site `&[Arg]` list (not `checker::calls::resolve_call_args`'s
+`ParamSig`-keyed shape - a named condition only needs `arg.name ==
+configured_name`, independent of the callee's own declared parameter
+names), then reads the argument's already-inferred `Type` for `value`
+(`Type::{True,False,IntLiteral,FloatLiteral,StringLiteral}`),
+`type_string` (`types::parse_type_string` + `Registry::is_assignable`),
+or `class_pattern` (`Type::Object`'s bare name + `glob_matches`, no
+ancestor traversal - confirmed against the real docs' own "declared
+class name only" wording), in that precedence order. Each directive's
+own condition list is one AND-group (every listed condition must
+match). The location-independent `*Anywhere` family is purely
+additive/default-inverting exactly like every other allow mechanism
+here; the `*InAllowed` family instead computes one unified
+`params_in_allowed_gate` verdict and combines it with whichever zone
+the entry configures - inline, in the checker, for `allow_in_instance_
+of`/`allow_in_methods` (the entry's own unconditional zone checks defer
+to this combined check instead whenever an `*InAllowed` directive is
+present, so the same zone is never independently re-granted without
+the param condition); via new diagnostic metadata (`restrictedSymbol.
+paramsInAllowedGate`) for the path-scoped `allow_in`/`allow_except_in`
+zone, which has no call-site context available at its own post-filter
+time. Verified against the real docs' own worked examples directly
+(`Controller::redirect()`/`handleRequest()`/`SafeUrl`; `dispatch()`/
+`HandlerInterface`/`DangerousEvent`).
+
+The `ParamFlags` family reuses this same engine verbatim via one new
+`ParamFlagsCondition` type; its only genuinely new piece is `Checker::
+fold_int_flags`, a small best-effort AST-level constant folder, needed
+because ordinary type inference for a bitwise expression (`checker/
+expr.rs:5101`) deliberately widens two folded int literals to plain
+`Type::Int` - a real, confirmed gap (a `JSON_HEX_TAG | JSON_HEX_APOS`-
+shaped flag mask would otherwise be unreadable). Matching is a
+bit-submask test (`(actual & configured) == configured`), not equality;
+`typeString: "1 | 2"` parses to a `Type::Union` whose members are tried
+as independent alternatives, matching the real docs' own "either flag 1
+or flag 2" semantics rather than a bitwise-or of the two.
+
+The real first-class-callable rule (a bare `f(...)` reference has no
+argument list to evaluate) falls out mostly for free: the `*Anywhere`
+family's own conditions simply never resolve against an empty `Arg`
+list, giving exactly the real docs' "always reported"/"never reported"
+split with zero special-casing; the `*InAllowed` family's own
+three-way rule (always reported for the allow-favoring directives;
+never reported inside an `allowExceptIn`-style zone; outside it, the
+zone rule alone determines) falls out the same way from the same
+`params_in_allowed_gate`/zone-combination logic, verified with 3
+dedicated tests.
+
+Still wholly out of scope: the filter DSL's own wholly-separate
+namespace/enum/superglobal/keyword-specific siblings, each a materially
+different detection shape needing its own separate investigation. The
+config-shortcut forms (bare `position: true`/`name: 'bar'` maps
+expanding to a full condition) are a NEON config-ergonomics detail with
+no TOML equivalent needed, the same call this project's own
+`allow_except_in_param_types` field already made by carrying no
+separate `disallow_in_*` alias either.
 
 **Class-specific `ReflectionMethod<T>`/`ReflectionProperty<T>` modeling**
 (Phase 77). A synthetic, stub-patched `@template-covariant TClass of
@@ -4787,237 +4901,6 @@ against current HEAD - the specific mechanism blamed (a generic `.any()`
 arm decomposing `sub` before `sup`) cannot occur for that shape at all,
 since the specific, textually-earlier `Intersection`-vs-`Intersection`
 arm has existed since Phase 14, predating the note that named it a gap.
-
-**67 - `@internal`/`restricted_symbols`, remaining (PARTIAL).** The
-`@internal` restricted-usage engine, the declarative `restricted_symbols`
-config list, its `Class`-kind detection-surface gaps, and a real slice of
-the real `spaze/phpstan-disallowed-calls` package's own allow/disallow-in
-filter DSL (path-scoped and attribute-context-scoped allow/disallow) are
-all done now - see Done. `allowInUse` is done too: real docs (fetched
-directly from the package's own GitHub repo, not recalled) confirm a
-plain, class-shaped `use Foo;` import is genuinely a separate detection
-occurrence from every type-hint position ("the `use` line will still be
-reported as a separate occurrence") - a real, previously-undocumented
-gap in this project's own `Class`-kind coverage (`checker::imports::
-check_use_class_imports` already checked a `use` import for
-`class.prefixed`, never for a restricted-symbols ban at all). Closed via
-a new `check_restricted_class_use_import`, plus the new `allow_in_use`
-bool entry field to suppress exactly that one occurrence.
-
-`allowInClassWithMethodAttributes`/`allowExceptInClassWithMethodAttributes`
-(alias `disallowInClassWithMethodAttributes`) are done too: matches when
-*any* method in the enclosing class carries the attribute (including the
-method the restricted usage lives in, but never the class's own
-attributes) - confirmed genuinely different from the already-built
-`allow_in_methods_with_attributes` (current method only). Real,
-previously-missing data closed it in: `FunctionSig` gained its own
-`attrs: Vec<Arc<str>>` field (populated identically to `Checker::
-current_method_attrs`, `f.attrs.iter().map(|a| intern(&a.name)).collect()`,
-threaded through every construction/merge site - `from_decl`, template
-substitution, `@method`-tag/enum-method synthesis, stub merging), letting
-a new `current_class_any_method_attrs` walk every sibling method via
-`ClassInfo::methods` rather than only the currently-executing one
-`current_method_attrs` alone ever had.
-
-`allowInParamTypes`/`allowExceptInParamTypes` (alias
-`disallowInParamTypes`) and their `*ReturnType` siblings are done too,
-`Class`-kind only. Materially bigger than every purely-additive shape
-built before them: `allowIn*` opts a class *out* of its normal
-"disallowed everywhere" default at exactly one type-hint position (a
-new `ClassUsageLocation::{ParamType,ReturnType,Other}` threaded through
-`check_restricted_class_name_usage`'s 7 call sites, `Other` covering
-`new`/`instanceof`/`catch`/`extends`/`implements`/the separate `allow_
-in_use` mechanism - none of which either flag ever touches, confirmed
-against the real docs), but `allowExceptIn*` *inverts the entry's own
-default entirely* - "disallow a class only when it appears as a
-parameter type hint, allowing it everywhere else" (confirmed against
-the real docs' own worked examples: a `use` of the class, `new`-ing it,
-and using it as the *other* type-hint position all become allowed once
-set). A new `is_allowed_by_position`, checked before every other allow
-mechanism (which still apply on top once it returns `false`, matching
-how every allow directive here combines), implements both halves: the
-purely-additive `allow_in_*` pair short-circuits to allowed at exactly
-its own position; the default-inverting `allow_except_in_*` pair flips
-the baseline to "allowed everywhere except the marked position(s)."
-
-Still genuinely unbuilt: parameter-value conditions. Investigated
-2026-09-22 (real docs re-fetched directly from `spaze/phpstan-
-disallowed-calls`'s `docs/allow-with-parameters.md`/`allow-with-flags.md`,
-not recalled, plus a direct code audit of this project's own existing
-building blocks - not assumed). Real scope, corrected from the
-placeholder text this replaces:
-
-Directive surface: ~14 keys, `Function`/`Method`/`StaticMethod` kinds
-only (the other four kinds have no call-site arguments to condition
-on) - `allowParamsInAllowed`/`allowParamsInAllowedAnyValue`,
-`allowParamsAnywhere`/`allowParamsAnywhereAnyValue`,
-`allowExceptParamsAnywhere` (alias `disallowParamsAnywhere`)/
-`allowExceptParamsAnyValue` (`disallowParamsAnyValue`)/
-`allowExceptCaseInsensitiveParams` (`disallowCaseInsensitiveParams`)/
-`allowExceptParamsInAllowed` (`disallowParamsInAllowed`), plus a
-`ParamFlags` bitmask sibling of 4 of those
-(`allowParamFlagsInAllowed`/`allowParamFlagsAnywhere`/
-`allowExceptParamFlagsInAllowed` (`disallowParamFlagsInAllowed`)/
-`allowExceptParamFlags` (`disallowParamFlags`)). Each entry is a
-`{position, name, value|typeString|classPattern}` condition.
-
-Building-block audit against this project's own code:
-- Positional/named argument resolution at the call site is not free
-  despite `checker::calls::resolve_call_args(args, params: &[ParamSig])`
-  already existing - real semantics matches the raw `&[Arg]` list
-  directly (a `name`-configured condition just needs `arg.name ==
-  configured_name`; a `position`-configured one is "the Nth non-named,
-  non-spread argument"), independent of the callee's own declared
-  parameter names, so reusing `resolve_call_args`'s signature-keyed
-  shape would be the wrong tool - a new, smaller direct-`Arg`-list
-  matcher is the right one.
-- `value`/`typeString`/`classPattern` matching all reuse existing
-  machinery: `value` reads the argument's own already-inferred
-  `Type::{Int,String,Bool,Float}Literal` (same convention as
-  `checker::assignment::literal_key_from_type`); `typeString` reuses
-  `types::parse::parse_type_string` + `Registry::is_assignable`;
-  `classPattern` reads a bare `Type::Object(name, _)`'s `name` (no
-  ancestor walk - confirmed against the real docs' own "declared class
-  name only" wording) through the existing `glob_matches`.
-- Flags matching is genuinely NOT free, unlike it first appears:
-  confirmed via direct grep that this project's real *type-inference*
-  path for `BinOp::BitOr`/`BitAnd`/`BitXor` (`checker/expr.rs:5101`)
-  deliberately widens two folded int literals to plain `Type::Int`
-  (only `operators.rs`'s validity check, a separate boolean-only path,
-  looks at bitwise legality at all) - there is no existing literal-
-  value-preserving fold for a `JSON_HEX_TAG | JSON_HEX_APOS`-shaped
-  expression anywhere in this codebase today. Needs a small, dedicated,
-  best-effort AST-level constant folder (`Literal`, unary minus of one,
-  `BinOp::{BitOr,BitAnd,BitXor}` of two foldable operands, and a `Name`
-  leaf). That last leaf is real and directly reusable, though:
-  `registry::index::define_call_constant`/`infer_const_type` already
-  resolve a stub's `define('JSON_HEX_APOS', 4)` to `Type::IntLiteral(4)`
-  in `Registry::global_constants` - confirmed live against the vendored
-  `jetbrains/phpstorm-stubs/json/json.php:255`, so the folder's `Name`
-  leaf is a plain map lookup, not new inference.
-- **Two prerequisite zone directives are missing outright, not just
-  their parameter-condition combination** - this corrects the
-  placeholder text's own "combining with every existing zone directive
-  (`allowIn`/`allowInMethods`/etc.)" phrasing, which wrongly implied
-  `allowInMethods` already existed: `allowInMethods`/`allowInFunctions`/
-  `allowExceptInMethods`/`allowExceptInFunctions` (fnmatch against the
-  calling function/method's own `Class::method()`/`function()` name)
-  and `allowInInstanceOf`/`allowExceptInInstanceOf` (fnmatch against the
-  calling class's own name plus every transitive ancestor/interface) do
-  not exist in this codebase at all - confirmed via a direct grep, zero
-  hits. Both are real, useful zone mechanisms independent of parameter
-  conditions (the real package supports them standalone too), so
-  they're their own two small sub-items, sequenced before the
-  `*InAllowed` parameter-condition variants that need a zone to narrow
-  (the `*Anywhere` variants don't depend on either and can ship
-  first). Both have real, already-existing data to build on: `Checker::
-  current_class`/`current_method` (bare name only, confirmed shape at
-  `function_decl.rs:865`) give `allowInMethods`'s match string directly;
-  `Registry::ancestor_names` (`registry/hierarchy.rs:466`, the exact
-  precomputed transitive `extends`+`implements` closure `is_subclass_of`
-  itself already reads at line 22) gives `allowInInstanceOf`'s candidate
-  set directly - zero new hierarchy-walking code needed for either.
-- A first-class-callable edge case applies on top, per the real docs:
-  a condition restricting which calls are *allowed*
-  (`*InAllowed`/`*Anywhere` on the allow side) always reports a bare
-  `f(...)` reference (no argument list exists yet to evaluate); one
-  restricting which are *disallowed* (`allowExcept*`) never does for
-  the `*Anywhere` shape, and only outside its own zone for the
-  `*InAllowed` shape - a three-way rule, not a single flag.
-
-Recommended sequencing, each its own commit (small/medium as noted):
-1. `allowInMethods`/`allowInFunctions` + `allowExceptIn*` aliases -
-   **done**: `allow_in_methods`/`allow_except_in_methods` fields, a new
-   `is_allowed_by_calling_context` matching the calling function/
-   method's own `Class::method()`/`function()`-shaped label
-   (`Checker::current_class`+`current_method`, already-existing fields,
-   zero new state) against `fnmatch()`-style patterns. Routed through
-   `report_restricted` alongside `is_allowed_by_attribute_context`.
-2. `allowInInstanceOf`/`allowExceptInInstanceOf` - **done**:
-   `allow_in_instance_of`/`allow_except_in_instance_of` fields, a new
-   `is_allowed_by_instance_of_context` matching the current class's own
-   name *and* every transitive ancestor/interface name against
-   `fnmatch()`-style patterns, reusing `Registry::ancestor_names`
-   directly (the exact precomputed closure `is_subclass_of` itself
-   already reads) - zero new hierarchy-walking code.
-3. `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` +
-   `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
-   `allowExceptCaseInsensitiveParams` - **done**: the location-
-   independent half, and the value/typeString/classPattern matching
-   engine every later sub-item reuses. `ParamCondition`/`ParamRef` new
-   config types; matching resolves `{position, name}` directly against
-   the raw call-site `&[Arg]` list (not `checker::calls::
-   resolve_call_args`'s `ParamSig`-keyed shape - a named condition only
-   ever needs `arg.name == configured_name`), then reads the arg's
-   already-inferred `Type` via `Checker::infer_expr` for `value`
-   (`Type::{True,False,IntLiteral,FloatLiteral,StringLiteral}`),
-   `type_string` (`types::parse_type_string` + `Registry::is_assignable`),
-   or `class_pattern` (`Type::Object`'s bare name + `glob_matches`), in
-   that precedence order. Each directive's own list is one AND-group
-   (every listed condition must match - confirmed against the real
-   docs' `log()` example), and the two families compose exactly like
-   every other allow mechanism here: `allow_params_anywhere`/`_any_value`
-   purely additive, `allow_except_params_anywhere`/`_any_value`/
-   `_case_insensitive_params` invert the entry's own default. The real
-   first-class-callable rule (sub-item 6 below) fell out for free for
-   this family: an FCC call site has no real `Arg` list, so every
-   condition/ref fails to resolve against it - the additive family
-   never grants an allowance (matches the real docs: "always reported")
-   and the inverting family never finds a disallow-match (matches:
-   "never reported") - zero FCC-specific code needed for this family.
-4. `allowParamsInAllowed`/`allowParamsInAllowedAnyValue` +
-   `allowExceptParamsInAllowed` - **done**: reuses step 3's own matching
-   engine (`params_in_allowed_gate` computes one unified verdict -
-   additive-family matched, or inverting-family didn't - independent of
-   which zone accompanies it), then combines it with whichever zone the
-   entry also configures. `allow_in_instance_of`/`allow_in_methods`
-   (additive zones) and their `allow_except_in_*` siblings (default-
-   inverting) are combined *inline*, in the checker, before a
-   diagnostic is even built (`is_allowed_by_params_in_allowed_context`)
-   - the entry's own unconditional `is_allowed_by_calling_context`/
-   `is_allowed_by_instance_of_context` defer to this combined check
-   instead whenever `has_params_in_allowed_directive()` is true, so the
-   same zone is never independently (and wrongly) re-granted without
-   the param condition. The path-scoped `allow_in`/`allow_except_in`
-   zone has no call-site context available inline (it's resolved by a
-   later post-filter, `restricted_symbols::filter_by_path`), so the
-   already-resolved gate travels there as new diagnostic metadata
-   (`restrictedSymbol.paramsInAllowedGate`) instead, and the post-filter
-   folds it in with the identical formula. Verified against the real
-   docs' own two worked examples directly (`Controller::redirect()`/
-   `handleRequest()`/`SafeUrl`; `dispatch()`/`HandlerInterface`/
-   `DangerousEvent`), both now passing tests.
-5. The `ParamFlags` family - **done**: `allowParamFlagsInAllowed`/
-   `allowParamFlagsAnywhere`/`allowExceptParamFlagsInAllowed`/
-   `allowExceptParamFlags` (aliases `disallowParamFlagsInAllowed`/
-   `disallowParamFlags`), a new `ParamFlagsCondition` type, reusing
-   step 3/4's own zone/gate plumbing verbatim - the only genuinely new
-   piece is `Checker::fold_int_flags`, a small best-effort AST-level
-   constant folder (`Literal`/unary-minus/`Name`-via-`Registry::
-   global_constants`/`BinOp::{BitOr,BitAnd,BitXor}`), needed because
-   ordinary type inference for a bitwise expression (`checker/expr.rs:
-   5101`) deliberately widens two folded int literals to plain
-   `Type::Int` - confirmed via direct grep, exactly the gap the
-   investigation flagged. Matching is a bit-submask test
-   (`(actual & configured) == configured`), not equality; `type_string`
-   (real docs: `1 | 2`) parses to a `Type::Union` whose members are
-   tried as independent alternatives (`typeString: 1 | 2` means "either
-   flag 1 or flag 2 is set," not a bitwise-or of the two).
-6. First-class-callable interaction for the `*InAllowed` family (small
-   - the `*Anywhere` family's own share of this is already done, see
-   step 3).
-
-Not started - this is the investigation only. The config-shortcut forms
-(bare `position: true`/`name: 'bar'` maps expanding to a full condition)
-are a NEON config-ergonomics detail with no TOML equivalent needed, the
-same call this project's own `allow_except_in_param_types` field already
-made by carrying no separate `disallow_in_*` alias either - declined,
-not a gap.
-
-Still wholly out of scope, unchanged: the filter DSL's own wholly-
-separate namespace/enum/superglobal/keyword-specific siblings, each a
-materially different detection shape needing its own separate
-investigation.
 
 **Receiver-type-checks phase (DONE).** Nine real-PHPStan identifiers for
 "this receiver's own type provably can never support the operation at

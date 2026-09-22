@@ -1415,3 +1415,105 @@ fn allow_except_param_flags_disallows_only_when_the_configured_bit_is_set() {
         .collect();
     assert_eq!(flagged.len(), 2, "got: {d:?}");
 }
+
+// The `*InAllowed` family's own first-class-callable rule (real docs:
+// an "allowed" condition - `allowParamsInAllowed` and siblings - always
+// reports an FCC, since there's no argument list to evaluate; an
+// "except" condition combined with an `allowIn`-style zone reports an
+// FCC exactly when it's *outside* the zone - "the zone rule alone
+// determines"; combined with an `allowExceptIn`-style zone, an FCC is
+// never reported, inside or outside it).
+
+#[test]
+fn a_first_class_callable_is_always_reported_with_allow_params_in_allowed_and_an_allow_style_zone()
+{
+    let d = with_entries(
+        r#"<?php
+            class Logger { public function log(string $msg): void {} }
+            class Foo {
+                public function allowed(Logger $l): void { $f = $l->log(...); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Logger"),
+            "log",
+            "use our own logger instead",
+            |e| {
+                e.allow_in_methods = vec!["Foo::allowed()".to_string()];
+                e.allow_params_in_allowed = vec![ParamCondition {
+                    position: Some(1),
+                    value: Some(ParamScalarValue::Str("safe".to_string())),
+                    ..Default::default()
+                }];
+            },
+        )],
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_first_class_callable_is_never_reported_with_allow_except_params_in_allowed_and_an_except_style_zone()
+ {
+    let d = with_entries(
+        r#"<?php
+            interface HandlerInterface {}
+            class Dispatcher { public function dispatch(string $e): void {} }
+            class MyHandler implements HandlerInterface {
+                public function f(Dispatcher $d): void { $g = $d->dispatch(...); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Dispatcher"),
+            "dispatch",
+            "use the module-specific handler instead",
+            |e| {
+                e.allow_except_in_instance_of = vec!["HandlerInterface".to_string()];
+                e.allow_except_params_in_allowed = vec![ParamCondition {
+                    position: Some(1),
+                    value: Some(ParamScalarValue::Str("dangerous".to_string())),
+                    ..Default::default()
+                }];
+            },
+        )],
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_first_class_callable_is_reported_with_allow_except_params_in_allowed_outside_an_allow_style_zone()
+ {
+    let d = with_entries(
+        r#"<?php
+            class Logger { public function log(string $msg): void {} }
+            class Foo {
+                public function other(Logger $l): void { $f = $l->log(...); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Logger"),
+            "log",
+            "use our own logger instead",
+            |e| {
+                e.allow_in_methods = vec!["Foo::allowed()".to_string()];
+                e.allow_except_params_in_allowed = vec![ParamCondition {
+                    position: Some(1),
+                    value: Some(ParamScalarValue::Str("dangerous".to_string())),
+                    ..Default::default()
+                }];
+            },
+        )],
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "got: {d:?}"
+    );
+}
