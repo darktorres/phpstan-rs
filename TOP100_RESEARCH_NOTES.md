@@ -8,7 +8,7 @@ via `checker/narrowing/assertions.rs`, this is additive):
   subclass overriding `setUp()`/`tearDown()` when a real parent
   implementation exists (beyond bare `TestCase`) must call
   `parent::setUp()`/`parent::tearDown()` — same "forgot the parent
-  lifecycle call" pattern as BEYOND_PHPSTAN's E3
+  lifecycle call" pattern as ROADMAP's E3
   (`RequireParentConstructCallRule`), applied to PHPUnit's own two
   lifecycle methods instead of `__construct`. Reuses the identical
   ancestor-walk technique E3 already proposes porting.
@@ -20,7 +20,7 @@ via `checker/narrowing/assertions.rs`, this is additive):
   tag/attribute validation gap phpstan-rs has nothing like today.
 - `ClassCoversExistsRule`/`ClassMethodCoversExistsRule`: `@covers`/
   `@coversDefaultClass` tag target-class/method existence — same shape
-  as BEYOND_PHPSTAN's D5 (`@see` tag validation), different tag family.
+  as ROADMAP's D5 (`@see` tag validation), different tag family.
 - `AssertSameBooleanExpectedRule`/`AssertSameNullExpectedRule`/
   `AssertSameWithCountRule`/`AssertEqualsIsDiscouragedRule`: "wrong
   assertion method chosen" family — `assertSame(true/false, ...)` should
@@ -98,7 +98,7 @@ separate, large, narrow undertaking.
 
 ## 5. phpstan/phpstan-strict-rules — DONE (re-verified from real cloned
 source, not the earlier rejected WebFetch summary — confirms it but
-finds much more depth). BEYOND_PHPSTAN.md's own §E only covers 4 of
+finds much more depth). ROADMAP's Phase 101 (§E) only covers 4 of
 this package's ~45 rule files (boolean-in-conditions, `array_filter`
 strictness, `parent::__construct()`, inherited-method name-casing).
 Real, concrete, NOT-yet-catalogued findings, grouped:
@@ -149,7 +149,7 @@ Real, concrete, NOT-yet-catalogued findings, grouped:
 - **`OverwriteVariablesWithForeachRule`/`...ForLoopInitRule`**: flags a
   `foreach`/`for` loop's own loop-variable name shadowing/overwriting a
   variable already holding a value from *outside* the loop — a real
-  data-loss footgun, distinct from anything in BEYOND_PHPSTAN's D-series.
+  data-loss footgun, distinct from anything in ROADMAP's D-series.
 - `UselessCastRule` — worth a quick existing-coverage check before
   building (phpstan-rs may already flag some useless-cast shapes
   elsewhere; verify at implementation time rather than assuming either
@@ -264,7 +264,7 @@ phpstan-rs already computes every individual missing-type-hint
 diagnostic this would aggregate (`missingType.*`) — this is purely a
 project-wide count-and-threshold-compare on top of data phpstan-rs
 already has per-site, the same "whole-program aggregate from per-site
-data already computed" shape BEYOND_PHPSTAN's Part 1 (B/H/X sections)
+data already computed" shape ROADMAP's Part 1 (B/H/X sections)
 already establishes repeatedly for other facts.
 
 ## 15. szepeviktor/phpstan-wordpress — DONE
@@ -330,7 +330,7 @@ Also: FinalRule/FinalInAbstractClassRule/PrivateInFinalClassRule (an
 opinionated "closed by default" bundle: classes final unless abstract,
 members private unless the class is final) and InvokeParentHookMethodRule
 (the same "must call parent's hook method" pattern as #1's
-ShouldCallParentMethodsRule/BEYOND_PHPSTAN's E3, generalized to any
+ShouldCallParentMethodsRule/ROADMAP's E3, generalized to any
 class implementing a configured "hook interface" list, not just
 PHPUnit TestCase - worth folding into the same family as E3/#1 as one
 configurable mechanism instead of three separate framework-specific
@@ -386,7 +386,7 @@ so far.
 
 ## 21. rector/type-perfect - DONE
 Real source read (~27 files). Strong independent real-world validation
-of BEYOND_PHPSTAN's already-documented Phase 91 (X1): its
+of ROADMAP's already-documented Phase 91 (X1): its
 PublicClassMethodParamTypesCollector/NarrowPublicClassMethodParamTypeRule
 literally IS X1's own proposed mechanism, already shipped by a real,
 actively-maintained tool using real PHPStan's own Collector
@@ -427,8 +427,7 @@ Real source read + a real usage example. This is a full, popular,
 well-established ARCHITECTURE-TESTING tool (1276 favers - among the
 highest faver counts in the entire top 100, meaning real developers
 value it, not just download it transitively) - a genuinely new,
-significant category not covered anywhere in BEYOND_PHPSTAN.md or
-ROADMAP.md. A fluent DSL:
+significant category not covered anywhere in ROADMAP.md. A fluent DSL:
   PHPat::rule()
     ->classes(Selector::inNamespace('App\Domain'))
     ->shouldNotDependOn()
@@ -441,7 +440,7 @@ shouldExtend/beFinal/beReadonly/etc. This is genuinely well-suited to
 phpstan-rs's own closed-world, single-process, whole-project Registry -
 arguably even more naturally than to real PHPStan itself (same
 "whole-program fact PHPStan's architecture can't cheaply compute"
-theme BEYOND_PHPSTAN's Part 1 already establishes repeatedly): a
+theme ROADMAP's Part 1 already establishes repeatedly): a
 project-wide pass resolving every class's own `use`-import/type-hint/
 extends/implements references against a small set of configured
 namespace/selector rules, flagging a forbidden dependency direction.
@@ -455,7 +454,7 @@ banning) and from the internal/@internal engine (package-boundary
 enforcement, not namespace-layer direction).
 
 ## 25. tomasvotruba/cognitive-complexity - DONE
-Real source read. Directly validates and refines BEYOND_PHPSTAN's
+Real source read. Directly validates and refines ROADMAP's
 already-documented D1 (function/method complexity metrics): this real,
 popular tool implements "Cognitive Complexity" specifically (Campbell/
 SonarSource's metric, which weighs nested control flow more heavily
@@ -474,7 +473,7 @@ which phpstan-rs already has.
 ## 26. shipmonk/dead-code-detector - DONE
 Real source read (~48 files). A comprehensive, production-grade,
 whole-project dead-code detector - strong, direct validation of
-BEYOND_PHPSTAN's already-documented Phase 86 (B1: whole-application
+ROADMAP's already-documented Phase 86 (B1: whole-application
 unused protected/public member detection; B2: dead function/class
 detection). Two real refinements worth folding into Phase 86 when it's
 picked up:
