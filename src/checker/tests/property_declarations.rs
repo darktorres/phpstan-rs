@@ -286,3 +286,117 @@ fn unresolvable_native_property_type_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn reading_a_write_only_and_writing_a_read_only_property_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @property-read int $readOnlyTag
+             * @property-write int $writeOnlyTag
+             */
+            class Magic {
+                public function __get($n) { return 1; }
+                public function __set($n, $v) {}
+                public int $getOnly { get => 1; }
+                public int $setOnly { set { echo $value; } }
+            }
+            function f(Magic $m): void {
+                $m->readOnlyTag = 1;
+                echo $m->writeOnlyTag;
+                $m->getOnly = 2;
+                echo $m->setOnly;
+                echo $m->readOnlyTag;
+                $m->writeOnlyTag = 3;
+            }
+        "#,
+    );
+    let found = |id| {
+        d.iter()
+            .filter(|x| x.identifier == id)
+            .map(|x| x.message.as_str())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        found("assign.propertyReadOnly"),
+        vec![
+            "Property Magic::$readOnlyTag is not writable.",
+            "Property Magic::$getOnly is not writable.",
+        ],
+        "got: {d:?}"
+    );
+    assert_eq!(
+        found("property.writeOnly"),
+        vec![
+            "Property Magic::$writeOnlyTag is not readable.",
+            "Property Magic::$setOnly is not readable.",
+        ],
+        "got: {d:?}"
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "property.readOnlyAssignNotInConstructor"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn taking_a_reference_to_a_protected_or_readonly_property_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Refs {
+                public private(set) int $asym = 0;
+                protected int $prot = 0;
+                public readonly int $ro;
+                /** @readonly */
+                public int $docRo = 0;
+                /** @readonly */
+                public static int $docStatic = 0;
+                public int $open = 0;
+                public function __construct() { $this->ro = 1; }
+                public function inside(): void {
+                    $a = &$this->ro;
+                    $b = &$this->docRo;
+                    $c = &self::$docStatic;
+                    $d = &$this->asym;
+                }
+            }
+            function f(Refs $r): void {
+                $a = &$r->asym;
+                $b = &$r->prot;
+                $c = &$r->open;
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier.ends_with("ssignByRef"))
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                "property.readOnlyAssignByRef",
+                "Readonly property Refs::$ro is assigned by reference."
+            ),
+            (
+                "property.readOnlyByPhpDocAssignByRef",
+                "@readonly property Refs::$docRo is assigned by reference."
+            ),
+            (
+                "property.readOnlyByPhpDocAssignByRef",
+                "@readonly property Refs::$docStatic is assigned by reference."
+            ),
+            (
+                "property.assignByRef",
+                "Property Refs::$asym with private(set) visibility is assigned by reference."
+            ),
+            (
+                "property.assignByRef",
+                "Property Refs::$prot with protected visibility is assigned by reference."
+            ),
+        ],
+        "got: {d:?}"
+    );
+}

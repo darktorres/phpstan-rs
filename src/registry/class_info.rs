@@ -27,6 +27,20 @@ pub(crate) use tag_synthesis::object_class_names;
 pub(crate) use virtual_property::hook_body_references_property;
 use virtual_property::{hooks_reference_backing_storage, property_hook_set_type};
 
+impl PropertySig {
+    /// Whether a read is legal: not a `@property-write` tag, and a
+    /// virtual hooked property needs a `get` hook.
+    pub fn is_readable(&self) -> bool {
+        !self.tag_write_only && (!self.is_virtual || self.has_get_hook)
+    }
+
+    /// Whether a write is legal: not a `@property-read` tag, and a
+    /// virtual hooked property needs a `set` hook.
+    pub fn is_writable(&self) -> bool {
+        !self.tag_read_only && (!self.is_virtual || self.has_set_hook)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct PropertySig {
     pub ty: Type,
@@ -36,6 +50,12 @@ pub struct PropertySig {
     // `@phpstan-allow-private-mutation`: the declaring class may still
     // write it outside its constructor.
     pub allows_private_mutation: bool,
+    // `@readonly`-by-PHPDoc, never native `readonly`.
+    pub readonly_by_phpdoc: bool,
+    // A `@property-read`/`@property-write` magic tag's one-directional
+    // access.
+    pub tag_read_only: bool,
+    pub tag_write_only: bool,
     // `public`/`private`/`protected`. A magic `@property` tag and an
     // enum's built-in `name`/`value` are always `Visibility::Public` -
     // real PHP has no way to declare either any other way.
@@ -655,6 +675,10 @@ impl ClassInfo {
                             && doc_ty
                                 .as_ref()
                                 .is_some_and(|d| d.readonly && d.allow_private_mutation),
+                        readonly_by_phpdoc: !p.is_readonly
+                            && doc_ty.as_ref().is_some_and(|d| d.readonly),
+                        tag_read_only: false,
+                        tag_write_only: false,
                         set_ty,
                         is_virtual,
                         visibility: p.visibility.clone(),
@@ -764,6 +788,9 @@ impl ClassInfo {
                         allows_private_mutation: !p.promoted_readonly
                             && doc_readonly
                             && doc_allows_private_mutation,
+                        readonly_by_phpdoc: !p.promoted_readonly && doc_readonly,
+                        tag_read_only: false,
+                        tag_write_only: false,
                         set_ty,
                         is_virtual,
                         visibility: p.promoted_visibility.clone().unwrap_or(Visibility::Public),
@@ -792,10 +819,9 @@ impl ClassInfo {
         // magic properties with no real declared field. Only fills a
         // name this class doesn't already declare for real - a real
         // property/promoted param always wins, since the tag exists to
-        // add virtual members, not override real ones. `@property-write`'s
-        // write-only direction isn't separately enforced (no existing
-        // "write-only" checking mechanism to hook into) - treated the
-        // same as a plain `@property` (readable and writable).
+        // add virtual members, not override real ones. `@property-read`/
+        // `@property-write`'s one-directional access is
+        // `PropertySig::is_writable`/`is_readable`'s concern.
         if let Some(doc) = &class_doc {
             for tag in &doc.properties {
                 properties.entry(intern(&tag.name)).or_insert_with(|| {
@@ -816,6 +842,9 @@ impl ClassInfo {
                         is_static: false,
                         is_readonly: tag.readable && !tag.writable,
                         allows_private_mutation: false,
+                        readonly_by_phpdoc: false,
+                        tag_read_only: tag.readable && !tag.writable,
+                        tag_write_only: tag.writable && !tag.readable,
                         set_ty: None,
                         is_virtual: false,
                         visibility: Visibility::Public,
@@ -1415,6 +1444,9 @@ impl ClassInfo {
                 is_static: false,
                 is_readonly: false,
                 allows_private_mutation: false,
+                readonly_by_phpdoc: false,
+                tag_read_only: false,
+                tag_write_only: false,
                 set_ty: None,
                 is_virtual: false,
                 visibility: Visibility::Public,
@@ -1475,6 +1507,9 @@ impl ClassInfo {
                     is_static: false,
                     is_readonly: false,
                     allows_private_mutation: false,
+                    readonly_by_phpdoc: false,
+                    tag_read_only: false,
+                    tag_write_only: false,
                     set_ty: None,
                     is_virtual: false,
                     visibility: Visibility::Public,

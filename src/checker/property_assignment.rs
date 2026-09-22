@@ -49,8 +49,24 @@ impl<'a> Checker<'a> {
         // property) makes every property of the class - and any subclass,
         // via `class_is_immutable`'s `extends`-walk - behave as if
         // individually `readonly`.
+        // `WritingToReadOnlyPropertiesRule` - a `@property-read` tag, or a
+        // virtual hooked property without a `set` hook. Replaces the
+        // readonly check below for the same write.
+        let can_write =
+            self.is_member_access_visible(&owner, &prop_sig.write_visibility, prop, "property");
+        let not_writable = can_write && !prop_sig.is_writable();
+        if not_writable {
+            self.report(
+                label.to_string(),
+                format!("Property {owner}::${prop} is not writable."),
+                lhs.span,
+                0,
+                "assign.propertyReadOnly",
+            );
+        }
         let in_declaring_class = self.current_class.as_deref() == Some(owner.as_ref());
         if (prop_sig.is_readonly || self.registry.class_is_immutable(&owner))
+            && !not_writable
             && !in_clone_reinit
             && !(in_declaring_class && prop_sig.allows_private_mutation)
             && (!in_declaring_class || self.current_method.as_deref() != Some("__construct"))
@@ -137,5 +153,85 @@ impl<'a> Checker<'a> {
             3,
             "assign.propertyType",
         );
+    }
+
+    /// `$x = &$obj->prop` / `$x = &Foo::$prop`: taking a reference to a
+    /// property the current scope can't write (`property.assignByRef`,
+    /// PHP 8.4+ asymmetric visibility), or to a readonly one
+    /// (`property.readOnlyAssignByRef`/`property.readOnlyByPhpDocAssignByRef`).
+    pub(crate) fn check_property_assign_by_ref(
+        &mut self,
+        rhs: &Expr,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let (owner, prop, sig, is_static_fetch) = match &rhs.kind {
+            ExprKind::PropertyAccess(base, prop, _) => {
+                let base_ty = self.infer_expr(base, locals);
+                let Some((_, _, owner, sig)) = self.find_property_receiver(&base_ty, prop) else {
+                    return;
+                };
+                (owner, prop.to_string(), sig, false)
+            }
+            ExprKind::StaticAccess(class, member) if member.starts_with('$') => {
+                let Some(class) = self.resolve_static_class_name(class) else {
+                    return;
+                };
+                let prop = member.trim_start_matches('$');
+                let Some((owner, sig)) = self.registry.lookup_property_with_owner(&class, prop)
+                else {
+                    return;
+                };
+                (owner.clone(), prop.to_string(), sig.clone(), true)
+            }
+            _ => return,
+        };
+        let can_write =
+            self.is_member_access_visible(&owner, &sig.write_visibility, &prop, "property");
+        if !can_write {
+            let asymmetric_supported = self
+                .registry
+                .php_version
+                .is_none_or(|v| crate::php_version::PhpFeature::PropertyHooks.is_available(v));
+            if asymmetric_supported && !is_static_fetch {
+                let description = if sig.write_visibility != sig.visibility {
+                    match sig.write_visibility {
+                        Visibility::Private => "private(set)",
+                        _ => "protected(set)",
+                    }
+                } else if sig.visibility == Visibility::Private {
+                    "private"
+                } else {
+                    "protected"
+                };
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Property {owner}::${prop} with {description} visibility is assigned by reference."
+                    ),
+                    rhs.span,
+                    0,
+                    "property.assignByRef",
+                );
+            }
+            return;
+        }
+        if sig.is_readonly && !sig.readonly_by_phpdoc && !sig.tag_read_only && !is_static_fetch {
+            self.report(
+                label.to_string(),
+                format!("Readonly property {owner}::${prop} is assigned by reference."),
+                rhs.span,
+                3,
+                "property.readOnlyAssignByRef",
+            );
+        } else if sig.readonly_by_phpdoc {
+            self.report(
+                label.to_string(),
+                format!("@readonly property {owner}::${prop} is assigned by reference."),
+                rhs.span,
+                3,
+                "property.readOnlyByPhpDocAssignByRef",
+            );
+        }
     }
 }

@@ -1852,6 +1852,7 @@ impl<'a> Checker<'a> {
                 self.check_assignable_target(lhs, label);
                 if matches!(&e.kind, ExprKind::AssignRef(..)) {
                     self.check_nullsafe_byref_target(rhs, label);
+                    self.check_property_assign_by_ref(rhs, locals, label);
                 }
                 let rhs_ty = self.check_expr(rhs, locals, label);
                 // `offsetAccess.nonArray` - `[$a, $b] = $x;`/
@@ -2935,6 +2936,17 @@ impl<'a> Checker<'a> {
                         span: e.span,
                         label,
                     });
+                    if !p.is_readable()
+                        && self.is_member_access_visible(&owner, &p.visibility, prop, "property")
+                    {
+                        self.report(
+                            label.to_string(),
+                            format!("Property {owner}::${prop} is not readable."),
+                            e.span,
+                            0,
+                            "property.writeOnly",
+                        );
+                    }
                     self.check_internal_property_access(&owner, prop, p, e.span, label);
                     self.check_restricted_property_access(&owner, prop, false, e.span, label);
                     self.check_deprecated_property_access(&owner, prop, p, e.span, label);

@@ -541,7 +541,12 @@ properties: `PropertiesInInterfaceRule` and `PropertyInClassRule`'s full
 hook/modifier matrix and PHP 8.4/8.5 gates, `ReadOnlyPropertyRule`,
 `ReadOnlyByPhpDocPropertyRule` (with `@phpstan-allow-private-mutation`
 modeled, which also exempts its own class's writes from
-`property.readOnlyAssignNotInConstructor`), `property.callableType`, and `property.unresolvableNativeType`.
+`property.readOnlyAssignNotInConstructor`), `property.callableType`, and `property.unresolvableNativeType`. The
+write-only/read-only/by-ref cluster: `property.writeOnly` and
+`assign.propertyReadOnly` (a `@property-read`/`@property-write` tag, or a
+virtual hooked property missing that hook, via `PropertySig::
+is_readable`/`is_writable`), and `property.assignByRef`/
+`.readOnlyAssignByRef`/`.readOnlyByPhpDocAssignByRef` for `$x = &...`.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3558,12 +3563,6 @@ against this list, and added the real gaps the audit had missed.
   actually castable to string/number, since these implicitly cast at
   runtime.
 
-### Phase 128 — Properties (`Rules/Properties/` gaps)
-
-- Five-rule cluster around PHP 8.4 write-only/read-only/asymmetric-
-  visibility properties: assign-by-ref (plain/readonly-native/
-  readonly-by-phpdoc), reading a write-only property, writing a
-  not-writable one.
 
 ### Phase 129 — Comparison (`Rules/Comparison/` gaps)
 
