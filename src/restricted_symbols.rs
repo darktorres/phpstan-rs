@@ -171,6 +171,20 @@ pub struct RestrictedSymbolEntry {
     /// from a `Controller\Foo\Bar\*::__construct()`-matching method).
     #[serde(default)]
     pub allow_except_in_methods: Vec<String>,
+    /// `fnmatch()`-style patterns against the current class's own name
+    /// *and* every transitive `extends`/`implements` ancestor's name
+    /// (real `allowInInstanceOf`, named after PHP's `instanceof`
+    /// operator) - a match allows the item when used inside a class
+    /// that *is*, extends, or implements a matching name, on top of the
+    /// ordinary "disallowed everywhere" default.
+    #[serde(default)]
+    pub allow_in_instance_of: Vec<String>,
+    /// The inverse of `allow_in_instance_of` (real
+    /// `allowExceptInInstanceOf`, alias `disallowInInstanceOf`): a match
+    /// *inverts the entry's own default* - allowed everywhere except
+    /// inside a matching class hierarchy, where it's still reported.
+    #[serde(default)]
+    pub allow_except_in_instance_of: Vec<String>,
 }
 
 /// A compiled, case-folded index over a project's own configured
@@ -380,6 +394,8 @@ mod tests {
             allow_except_in_return_type: false,
             allow_in_methods: Vec::new(),
             allow_except_in_methods: Vec::new(),
+            allow_in_instance_of: Vec::new(),
+            allow_except_in_instance_of: Vec::new(),
         }
     }
 

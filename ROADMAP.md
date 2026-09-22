@@ -4933,7 +4933,13 @@ Recommended sequencing, each its own commit (small/medium as noted):
    (`Checker::current_class`+`current_method`, already-existing fields,
    zero new state) against `fnmatch()`-style patterns. Routed through
    `report_restricted` alongside `is_allowed_by_attribute_context`.
-2. `allowInInstanceOf`/`allowExceptInInstanceOf` (small).
+2. `allowInInstanceOf`/`allowExceptInInstanceOf` - **done**:
+   `allow_in_instance_of`/`allow_except_in_instance_of` fields, a new
+   `is_allowed_by_instance_of_context` matching the current class's own
+   name *and* every transitive ancestor/interface name against
+   `fnmatch()`-style patterns, reusing `Registry::ancestor_names`
+   directly (the exact precomputed closure `is_subclass_of` itself
+   already reads) - zero new hierarchy-walking code.
 3. `allowParamsAnywhere`/`allowParamsAnywhereAnyValue` +
    `allowExceptParamsAnywhere`/`allowExceptParamsAnyValue`/
    `allowExceptCaseInsensitiveParams` (medium - the location-independent

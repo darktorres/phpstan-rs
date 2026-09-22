@@ -36,6 +36,8 @@ fn entry(
         allow_except_in_return_type: false,
         allow_in_methods: Vec::new(),
         allow_except_in_methods: Vec::new(),
+        allow_in_instance_of: Vec::new(),
+        allow_except_in_instance_of: Vec::new(),
     }
 }
 
@@ -916,4 +918,88 @@ fn allow_in_methods_matches_a_bare_function_name_with_no_enclosing_class() {
         .filter(|x| x.identifier == "restrictedSymbol.function")
         .collect();
     assert_eq!(flagged.len(), 1, "got: {d:?}");
+}
+
+// `allowInInstanceOf`/`allowExceptInInstanceOf` - matches the current
+// class's own name and every transitive `extends`/`implements`
+// ancestor's name, not just an exact class-name match.
+
+#[test]
+fn allow_in_instance_of_allows_only_inside_the_matching_hierarchy() {
+    let d = with_entries(
+        r#"<?php
+            class Logger { public function log(string $msg): void {} }
+            class Wrapper { public function f(Logger $l): void { $l->log('a'); } }
+            class Other { public function f(Logger $l): void { $l->log('b'); } }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Logger"),
+            "log",
+            "use our own logger instead",
+            |e| e.allow_in_instance_of = vec!["Wrapper".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(flagged[0].location.contains("Other"));
+}
+
+#[test]
+fn allow_in_instance_of_matches_a_transitive_ancestor_not_just_an_exact_class() {
+    let d = with_entries(
+        r#"<?php
+            class Logger { public function log(string $msg): void {} }
+            interface Handler {}
+            class BaseHandler implements Handler {
+                public function f(Logger $l): void { $l->log('a'); }
+            }
+            class ConcreteHandler extends BaseHandler {}
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Logger"),
+            "log",
+            "use our own logger instead",
+            |e| e.allow_in_instance_of = vec!["Handler".to_string()],
+        )],
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "restrictedSymbol.method"),
+        "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn allow_except_in_instance_of_disallows_only_inside_the_matching_hierarchy() {
+    let d = with_entries(
+        r#"<?php
+            interface HandlerInterface {}
+            class Dispatcher {
+                public function dispatch(): void {}
+            }
+            class MyHandler implements HandlerInterface {
+                public function f(Dispatcher $d): void { $d->dispatch(); }
+            }
+            class Other {
+                public function f(Dispatcher $d): void { $d->dispatch(); }
+            }
+        "#,
+        vec![entry_with(
+            RestrictedSymbolKind::Method,
+            Some("Dispatcher"),
+            "dispatch",
+            "module handles its own dispatch",
+            |e| e.allow_except_in_instance_of = vec!["HandlerInterface".to_string()],
+        )],
+    );
+    let flagged: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "restrictedSymbol.method")
+        .collect();
+    assert_eq!(flagged.len(), 1, "got: {d:?}");
+    assert!(flagged[0].location.contains("MyHandler"));
 }

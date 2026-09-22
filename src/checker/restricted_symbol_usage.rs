@@ -79,7 +79,9 @@ impl<'a> Checker<'a> {
         span: Span,
         identifier: &'static str,
     ) {
-        if self.is_allowed_by_attribute_context(entry) || self.is_allowed_by_calling_context(entry)
+        if self.is_allowed_by_attribute_context(entry)
+            || self.is_allowed_by_calling_context(entry)
+            || self.is_allowed_by_instance_of_context(entry)
         {
             return;
         }
@@ -233,6 +235,49 @@ impl<'a> Checker<'a> {
             (None, Some(method)) => format!("{method}()"),
             _ => String::new(),
         }
+    }
+
+    /// `allow_in_instance_of`/`allow_except_in_instance_of` - matches
+    /// the current class's own name *and* every transitive `extends`/
+    /// `implements` ancestor's name (real docs: "matched against the
+    /// current class name as well as all its parent class and
+    /// interface names transitively"). Reuses `Registry::ancestor_names`
+    /// directly - the exact precomputed closure `is_subclass_of` itself
+    /// already reads - rather than a fresh hierarchy walk.
+    /// `allow_in_instance_of` is purely additive; `allow_except_in_
+    /// instance_of` inverts the entry's own default, the same shape
+    /// `is_allowed_by_calling_context` already established.
+    fn is_allowed_by_instance_of_context(&self, entry: &RestrictedSymbolEntry) -> bool {
+        if entry.allow_in_instance_of.is_empty() && entry.allow_except_in_instance_of.is_empty() {
+            return false;
+        }
+        let Some(class) = &self.current_class else {
+            return false;
+        };
+        let matches_any = |patterns: &[String]| {
+            patterns.iter().any(|p| {
+                let p = p.to_lowercase();
+                glob_matches(&p, &class.to_lowercase())
+                    || self
+                        .registry
+                        .ancestor_names
+                        .get(class.as_str())
+                        .is_some_and(|ancestors| {
+                            ancestors
+                                .iter()
+                                .any(|a| glob_matches(&p, &a.to_lowercase()))
+                        })
+            })
+        };
+        if matches_any(&entry.allow_in_instance_of) {
+            return true;
+        }
+        if !entry.allow_except_in_instance_of.is_empty()
+            && !matches_any(&entry.allow_except_in_instance_of)
+        {
+            return true;
+        }
+        false
     }
 
     pub(crate) fn check_restricted_function_call(&mut self, fqn: &str, span: Span, label: &str) {
