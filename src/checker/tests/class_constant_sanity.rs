@@ -380,3 +380,35 @@ fn a_constant_declared_inside_a_class_is_never_flagged_as_in_trait() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn self_referencing_a_trait_constant_from_inside_the_trait_is_never_flagged_notfound() {
+    // A used trait's own constants weren't merged into a using class's
+    // registry entry at all (only methods/properties were) - `self::`
+    // inside the trait's own method body, checked in the host's context
+    // (`check_trait_methods` runs each trait method once per host), had
+    // nowhere to resolve the constant against, since it was never
+    // reachable via the host's own `consts` map. Real shape: PHP 8.2+
+    // trait constants, referenced via `self::` from a method physically
+    // declared inside the trait, on two separate hosts.
+    let d = diagnostics_for(
+        r#"<?php
+            trait Walker {
+                private const string STOP = "stop";
+                public function walk(): string {
+                    return self::STOP;
+                }
+            }
+            class HostA {
+                use Walker;
+            }
+            class HostB {
+                use Walker;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "classConstant.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
+}

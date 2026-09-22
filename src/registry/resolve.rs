@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::ast::{ClassKind, Visibility};
 use crate::registry::Registry;
 use crate::registry::function_sig;
-use crate::registry::{ClassInfo, FunctionSig, PropertySig, substitute_type_aliases};
+use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig, substitute_type_aliases};
 use crate::types::Type;
 
 impl Registry {
@@ -133,6 +133,7 @@ impl Registry {
             Arc<str>,
             Vec<(Arc<str>, FunctionSig)>,
             Vec<(Arc<str>, PropertySig)>,
+            Vec<(Arc<str>, ConstSig)>,
             HashSet<Arc<str>>,
             HashSet<Arc<str>>,
         );
@@ -160,6 +161,7 @@ impl Registry {
                     .collect();
                 let mut methods = Vec::new();
                 let mut properties = Vec::new();
+                let mut consts = Vec::new();
                 let mut abstract_from_traits: HashSet<Arc<str>> = HashSet::new();
                 // `static_methods` needs the identical trait-flattening
                 // treatment `abstract_from_traits` gets below - without
@@ -190,6 +192,29 @@ impl Registry {
                                 .iter()
                                 .map(|(n, s)| (n.clone(), s.clone())),
                         );
+                        // PHP 8.2+ trait constants - composed into the
+                        // using class exactly like a trait's methods/
+                        // properties already are just above: a `self::`
+                        // reference inside a trait-defined method's body
+                        // resolves against whichever class actually
+                        // composes the trait (`current_class` is set to
+                        // the host in `check_trait_methods`, once per
+                        // host), so the constant needs to actually be
+                        // reachable through that host's own `consts` map
+                        // for `Registry::lookup_const`/`lookup_const_
+                        // with_owner` to ever find it - without this, a
+                        // trait's own `self::CONST` reference from
+                        // inside its own body silently read as
+                        // `classConstant.notFound` against every one of
+                        // its hosts, since the constant was never
+                        // anywhere but the trait's own, otherwise-
+                        // unreachable registry entry.
+                        consts.extend(
+                            trait_info
+                                .consts
+                                .iter()
+                                .map(|(n, s)| (n.clone(), s.clone())),
+                        );
                     }
                 }
                 // `use A, B { B::hello as helloB; }` - registers the
@@ -217,6 +242,7 @@ impl Registry {
                     class_name.clone(),
                     methods,
                     properties,
+                    consts,
                     abstract_from_traits,
                     static_from_traits,
                 ))
@@ -224,7 +250,8 @@ impl Registry {
             .collect();
 
         let mut changed = false;
-        for (class_name, methods, properties, abstract_from_traits, static_from_traits) in additions
+        for (class_name, methods, properties, consts, abstract_from_traits, static_from_traits) in
+            additions
         {
             if let Some(info) = self.classes.get_mut(&class_name) {
                 for (name, sig) in methods {
@@ -238,6 +265,13 @@ impl Registry {
                 for (name, sig) in properties {
                     if let std::collections::hash_map::Entry::Vacant(slot) =
                         info.properties.entry(name)
+                    {
+                        slot.insert(sig);
+                        changed = true;
+                    }
+                }
+                for (name, sig) in consts {
+                    if let std::collections::hash_map::Entry::Vacant(slot) = info.consts.entry(name)
                     {
                         slot.insert(sig);
                         changed = true;

@@ -332,6 +332,33 @@ computation site to keep in sync. Fixes 3 `*MiddlewareTest.php` findings
 `SentryMiddlewareTest`) where an anonymous-class instance is
 passed/assigned somewhere its declared interface should satisfy.
 
+**PHP 8.2+ trait constants were never composed into a using class's own
+registry entry.** Found via an erp-web corpus round: 135 false-positive
+`classConstant.notFound` diagnostics, all `self::CONST` references from
+inside a method physically declared in a trait, checked against every
+class that `use`s it. `flatten_traits_one_pass`
+(`src/registry/resolve.rs`) already composes a used trait's `methods`
+and `properties` into the using class's own `ClassInfo` (which
+`check_trait_methods`, `src/checker/function_decl.rs`, relies on when it
+checks each trait method once per host with `current_class` set to that
+host - real PHP semantics, since a trait has no `self` of its own) - but
+never touched `consts` at all, so a trait's own constant stayed
+reachable only through the trait's own, otherwise-unused registry entry,
+never through any host's. `Registry::lookup_const`/`lookup_const_with_owner`
+(`src/registry/hierarchy.rs`) walk `const_owner_by_class`, built by
+`precompute_member_owners` from each class's own already-merged
+`consts` map - once `flatten_traits_one_pass` also merges `consts` (same
+`Entry::Vacant`-gated "first/own wins" semantics the method/property
+merge already uses, so a using class's own same-named constant still
+takes precedence), that ownership map picks the trait's constants up
+automatically, with no other change needed. Verified against the real
+`BladeTypeWalker`/`BladeComponentPropTypeTest`/`BladeRelationAccessTest`
+shape from the corpus report (now clean) and two regression tests -
+`trait_constants_are_flattened_in`
+(`src/registry/tests/class_hierarchy.rs`) and
+`self_referencing_a_trait_constant_from_inside_the_trait_is_never_flagged_notfound`
+(`src/checker/tests/class_constant_sanity.rs`).
+
 ## Type system
 
 Generics with call-site substitution, `@extends`/`@implements` chain
@@ -4669,12 +4696,13 @@ section used to carry:
 against `app`/`tests`/`database`, `php_version = "8.5"`; 2803 files
 checked, 2730 diagnostics, 1 parse-error skip).** Four genuine engine
 bugs found, independent of the Laravel-specific gap documented
-separately below - one (the parse-error skip) already fixed, see Done's
-own `break`/`continue`-with-a-parenthesized-level entry under "Parser,
-lexer, AST": the original heredoc/dense-PCRE-braces hypothesis for that
-skip turned out to be a red herring once bisected down to a minimal
-repro; the real cause (`continue (2);` later in the same method) was
-unrelated to the heredoc entirely. Two smaller, separate findings from
+separately below - two now fixed, see Done's own `break`/`continue`-
+with-a-parenthesized-level entry under "Parser, lexer, AST" and "PHP
+8.2+ trait constants" entry under "Registry / symbol resolution": the
+original heredoc/dense-PCRE-braces hypothesis for the parse-error skip
+turned out to be a red herring once bisected down to a minimal repro;
+the real cause (`continue (2);` later in the same method) was unrelated
+to the heredoc entirely. Two smaller, separate findings from
 isolating that one: the skip diagnostic doesn't name which file was
 skipped in either the text or `--format json` output (isolating it took
 ~12 runs of binary-searching smaller directory subsets - it should
@@ -4683,24 +4711,15 @@ skip), and `Style.php` in the same directory (156 diagnostics, no skip)
 confirms the skip really was isolated to `Stylesheet.php` alone, not a
 directory-wide issue.
 
-Three still open:
+Two still open (the trait-constant one is fixed - see Done's own "PHP
+8.2+ trait constants" entry under "Registry / symbol resolution"; the
+original hypothesis there, that `self::` resolution itself was at
+fault, was half right and half wrong - `current_class` was already
+correctly set to the composing class by `check_trait_methods`, but the
+trait's constants were never reachable through that class's registry
+entry to begin with, since `flatten_traits_one_pass` never merged
+`consts` the way it already merges `methods`/`properties`):
 
-- **Trait constant `self::` resolution fails when the constant-declaring
-  trait method executes in the context of the composing class -
-  135 false-positive `classConstant.notFound`.** A `private const array
-  SINGULAR_RELATIONS`/`private const string STOP` declared inside a
-  trait (`tests/Feature/Architecture/Support/BladeTypeWalker.php:24-33`),
-  referenced via `self::STOP`/`self::SINGULAR_RELATIONS` from methods
-  defined in that same trait
-  (`BladeTypeWalker.php:99,127,128,146,153,189,202`), consumed via `use
-  BladeTypeWalker;` by two separate classes
-  (`Tests\Feature\Architecture\BladeComponentPropTypeTest`,
-  `BladeRelationAccessTest`). PHP 8.2+ trait constants are real and get
-  composed into the consuming class at compile time - this project's
-  `self::`-resolution inside a trait-defined method's body apparently
-  still resolves against the trait itself (or nothing) rather than the
-  actual composing class it ends up running in for each user. Unrelated
-  to Laravel; a real trait-constant-resolution gap.
 - **`shapeAccess.notFound` false-positives on a plain integer-keyed list
   built via `$arr[] = $x;` - 5 occurrences, apparent int/string key
   representation mismatch.** `array{...} has no key '0'` reported against

@@ -231,6 +231,29 @@ fn trait_methods_and_properties_are_flattened_in() {
 }
 
 #[test]
+fn trait_constants_are_flattened_in() {
+    // Same shape as `trait_methods_and_properties_are_flattened_in`
+    // just above, but for PHP 8.2+ trait constants specifically - these
+    // were never merged into a using class's own `consts` map at all
+    // (only methods/properties were), so `lookup_const` against the
+    // using class silently found nothing.
+    let r = build_registry(
+        r#"<?php
+            trait Greets {
+                public const string GREETING = "hi";
+            }
+            class Person {
+                use Greets;
+            }
+        "#,
+    );
+    assert_eq!(
+        r.lookup_const("Person", "GREETING").unwrap().ty,
+        Type::StringLiteral("hi".to_string())
+    );
+}
+
+#[test]
 fn trait_flattening_works_across_namespaced_classes() {
     // `flatten_traits` iterates `self.classes` (FQN-keyed) and resolves
     // each class's own `uses` list (also FQN, via `ClassInfo::from_decl`'s
