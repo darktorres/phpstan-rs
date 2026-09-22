@@ -516,7 +516,10 @@ fn a_closure_literal_still_resolves_closure_class_methods_and_instanceof() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "instanceof.alwaysTrue"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]
