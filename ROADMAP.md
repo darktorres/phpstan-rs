@@ -4452,20 +4452,56 @@ check for a generic type's own *arguments* (as opposed to its base
 name) has no equivalent here, because `checker::resolve::collect_
 unknown_class_names` - the single shared helper every `check_type_
 class_names_exist` call site above relies on - deliberately never
-recurses into a `Type::Object`'s own generic argument list at all
-(confirmed reading its own doc comment), a project-wide leniency
-policy, not a location-specific oversight. This is architecturally the
-same shape as Phase 54's own already-disclosed `@template T of Bound`
-existence exclusion (this project's registry is inherently partial;
-a generic argument is more likely than most positions to reference a
-library type this registry has no data for), just reaching one level
-further (an ordinary generic argument, not only a bound/default) -
-extending existence-checking into generic arguments would mean
-auditing that same leniency's blast radius across every one of this
-function's existing callers project-wide, real foundational surgery
-this project's own precedent (`is_assignable_at_level`'s doc comment,
-Phase 84) says not to force for one narrow need. Left declined for
-that reason, not chased further this round.
+recurses into a `Type::Object`'s own generic argument list at all.
+
+Actually built and corpus-tested this leniency (not just re-read its
+own doc comment) to settle whether it's still warranted: a real
+prototype recursing `collect_unknown_class_names` into generic
+arguments, run against the full unscoped Piwigo corpus, surfaced 40 new
+findings. A dedicated fix for a real, independent bug it also
+surfaced (below) accounted for 12 of them; every one of the remaining
+28 was a genuine instance of exactly the risk the leniency exists to
+avoid - an optional/soft dependency not installed in this exact vendor
+tree (`GuzzleHttp\Promise\Promise`, `Symfony\Component\HttpFoundation\
+Request`, `Illuminate\Testing\TestResponse`, ...), a `@psalm-type`
+alias this project doesn't resolve (`maglnet/composer-require-
+checker`'s own `ComposerData`/`InstalledComposerData` - a pre-existing,
+already-disclosed gap elsewhere in this file, newly reached here, not
+newly broken), or a PHP-Scoper-prefixed package whose own PHPDoc text
+was never rewritten to match its prefixed declaration (`rector/rector`'s
+vendored `react/dns`, `@return React\Dns\Model\Message` when the real
+declared class is `RectorPrefix202608\React\Dns\Model\Message` - a
+known PHP-Scoper limitation, not something a class-existence check
+could safely paper over). Confirms the leniency is correctly load-
+bearing, not just theoretically risky - left declined, with real
+corpus evidence behind it now instead of an unverified assumption.
+
+The real, independent bug the prototype surfaced along the way: a
+programmer-written `@return Traversable<Edge>`/`Iterator<K, V>` tag is
+real, common PHPDoc syntax (confirmed: `bacon/bacon-qr-code`'s own
+`@return Traversable<Edge>`, `Edge` a real same-namespace class) - not
+only this project's own internal desugaring of the `iterable` keyword,
+which is all `resolve_names_in_type`'s/`collect_class_name_case_refs`'s
+own `Traversable` sentinel arms assumed. Both returned early without
+ever recursing into their own generic argument list, silently leaving
+a nested reference like `Edge` unqualified/uncase-checked past its bare
+spelling - and, independent of existence-checking or case-checking
+entirely, silently wrong for ordinary type-compatibility comparisons
+too (confirmed via a second real corpus false positive: `composer-
+unused/symbol-parser`'s own `Traversable<SymbolInterface>` parameter
+type wrongly mismatched against a correctly-qualified
+`Generator<ComposerUnused\SymbolParser\Symbol\SymbolInterface>`
+argument, purely because the *expected* side's own argument never got
+qualified to compare against). Fixed by recursing into `Traversable`'s
+own argument list the same way the pre-existing `$$valueof`/call-site-
+variance sentinel arms already do, while still leaving the `Traversable`
+name itself unresolved, for the reason already documented there.
+`object`/`resource` needed no equivalent fix - confirmed via
+`types::parse::parse_type_string`, both are always argument-less in
+practice, since real PHP forbids generics on either native keyword.
+Corpus-verified: the scoped Piwigo run stays byte-identical; the
+unscoped run loses the one false `argument.type` mismatch above with
+no new findings anywhere else.
 
 What remains of the original ~27-location pipeline, now that every
 item above turned out to already be built, newly fixed, or a

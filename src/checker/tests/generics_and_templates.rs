@@ -2455,6 +2455,33 @@ fn a_single_argument_traversable_reference_is_never_flagged_for_arity() {
     );
 }
 
+// A real, programmer-written `Traversable<T>` PHPDoc reference (not this
+// project's own internal `iterable`-desugaring synthetic use of the same
+// name) must still resolve/case-check its own type argument `T` -
+// `resolve_names_in_type`'s own `Traversable` sentinel arm previously
+// returned early without ever recursing into it, silently leaving a
+// same-namespace argument unqualified (real shape: `bacon/bacon-qr-code`'s
+// own `@return Traversable<Edge>`, `Edge` a real same-namespace class
+// whose own case was never checked past its bare, unresolved spelling).
+// Existence-checking a generic argument stays deliberately unbuilt here
+// too, same as any other generic class's own arguments (`Collection<T>`
+// included) - this fix is scoped to name resolution/case-checking only.
+
+#[test]
+fn a_differently_cased_class_inside_a_traversables_own_argument_is_flagged_name_case() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Edge {}
+            /** @return \Traversable<edge> */
+            function f(): \Traversable {}
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.nameCase"),
+        "got: {d:?}"
+    );
+}
+
 // `generics.interfaceConflict` - `check_cross_path_interface_conflicts`,
 // ported from
 // `Rules/Generics/CrossCheckInterfacesHelper.php`. A real "diamond

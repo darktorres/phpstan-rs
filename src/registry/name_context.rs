@@ -283,17 +283,25 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // Without this, a plain `object` type hint got namespace-qualified
         // into nonsense like `App\Some\Namespace\object`.
         Type::Object(name, args) if name == "object" => Type::Object(name, args),
-        // Same reasoning as `object` above, for a different reason:
-        // `Traversable` here is never something the programmer wrote as
-        // a class reference in their own code - it's this project's own
-        // internal desugaring of the `iterable` keyword (`array|
-        // Traversable`), a fixed, always-global meaning `iterable` itself
-        // carries regardless of the current namespace. Without this, a
-        // namespaced file's `iterable`-typed parameter got its synthetic
-        // `Traversable` half namespace-qualified into nonsense like
-        // `App\Traversable`, which no real `Iterator`/`Generator`/
-        // `IteratorAggregate` implementation could ever satisfy.
-        Type::Object(name, args) if name == "Traversable" => Type::Object(name, args),
+        // Same reasoning as `object` above for the *name* itself, but
+        // unlike `object`/`resource` (always argument-less in practice -
+        // real PHP forbids generics on either native keyword), a real,
+        // programmer-written `@return Traversable<Edge>`/`Iterator<K, V>`
+        // tag is common (confirmed via a real corpus false positive:
+        // `bacon/bacon-qr-code`'s own `@return Traversable<Edge>`, `Edge`
+        // a real same-namespace class that never got resolved past its
+        // bare spelling) - `Traversable` isn't only this project's own
+        // internal `iterable`-desugaring synthetic, it's also real,
+        // directly-written PHPDoc syntax, so its own type arguments still
+        // need ordinary name resolution here, the same as `$$valueof`'s
+        // wrapped argument just below - only the outer name itself must
+        // stay untouched, for the reason already given.
+        Type::Object(name, args) if name == "Traversable" => Type::Object(
+            name,
+            args.into_iter()
+                .map(|a| resolve_names_in_type(a, ctx))
+                .collect(),
+        ),
         // Same reasoning as `object`/`Traversable` above: `resource` is
         // a sentinel for a real PHP value kind with no actual class
         // behind it (`types::parse_type_keyword_or_class`'s own
@@ -446,20 +454,20 @@ pub(crate) fn collect_class_name_case_refs(
 ) {
     match ty {
         // Mirrors `resolve_names_in_type`'s own sentinel arms exactly:
-        // `object`/`Traversable`/`resource`/`$$interface`/`$$trait` are
-        // never a real class reference to check the case of, and (unlike
-        // the `$$valueof`/variance sentinels just below) their own
-        // argument list isn't recursed into there either, so this
-        // doesn't either.
+        // `object`/`resource`/`$$interface`/`$$trait` are never a real
+        // class reference to check the case of, and (unlike the
+        // `$$valueof`/variance sentinels just below) their own argument
+        // list isn't recursed into there either, so this doesn't either -
+        // both are always argument-less in practice regardless.
         Type::Object(name, _)
             if matches!(
                 name.as_str(),
-                "object" | "Traversable" | "resource" | "$$interface" | "$$trait"
+                "object" | "resource" | "$$interface" | "$$trait"
             ) => {}
         Type::Object(name, args)
             if matches!(
                 name.as_str(),
-                "$$valueof" | "$$covariant" | "$$contravariant" | "$$bivariant"
+                "$$valueof" | "$$covariant" | "$$contravariant" | "$$bivariant" | "Traversable"
             ) =>
         {
             for a in args {

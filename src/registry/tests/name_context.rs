@@ -45,6 +45,22 @@ fn skips_the_object_traversable_and_resource_sentinels() {
 }
 
 #[test]
+fn recurses_into_a_traversables_own_generic_argument_without_collecting_traversable_itself() {
+    // Real shape: `bacon/bacon-qr-code`'s own `@return Traversable<Edge>`
+    // - a real, programmer-written PHPDoc tag, not this project's own
+    // internal `iterable`-desugaring synthetic use of `Traversable` -
+    // `Edge`'s own case/namespace-qualification must still be collected.
+    let ctx = ctx_for("App");
+    let ty = Type::Object(
+        "Traversable".to_string(),
+        vec![Type::Object("Edge".to_string(), Vec::new())],
+    );
+    let mut out = Vec::new();
+    collect_class_name_case_refs(&ty, &ctx, &mut out);
+    assert_eq!(out, vec![(intern("Edge"), intern("App\\Edge"))]);
+}
+
+#[test]
 fn recurses_through_the_dollar_dollar_variance_sentinels_without_collecting_them() {
     let ctx = ctx_for("App");
     let ty = Type::Object(
