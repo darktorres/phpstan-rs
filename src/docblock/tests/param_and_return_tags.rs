@@ -299,3 +299,39 @@ fn a_real_phpstan_conditional_return_type_is_captured_as_its_own_raw_token() {
         Some("($params is array{wrapperClass: class-string<T>} ? T : Connection)".to_string())
     );
 }
+
+#[test]
+fn a_trailing_line_comment_inside_a_wrapped_shape_is_skipped_but_a_url_is_kept() {
+    // A wrapped array shape's own `// description` after a field ends at
+    // its line - the type still parses whole.
+    let block = parse(
+        r#"/**
+         * @var array{v?: string, // null or undefined
+         *   b?: bool, // a flag
+         * } $opts
+         * @param string $url see http://example.com/docs for details
+         * @see https://example.com/page
+         */"#,
+    );
+    assert_eq!(
+        block.var_type,
+        Some("array{v?: string, b?: bool}".to_string())
+    );
+    assert_eq!(block.params.get("url"), Some(&"string".to_string()));
+    assert_eq!(block.see, vec!["https://example.com/page".to_string()]);
+    assert!(
+        block.parse_errors.is_empty(),
+        "got: {:?}",
+        block.parse_errors
+    );
+}
+
+#[test]
+fn an_invalid_tag_value_containing_a_url_is_recorded_whole() {
+    let block = parse("/** @param boolean with_scheme if false - does not add http://toto.com */");
+    assert_eq!(block.invalid_tag_values.len(), 1);
+    assert_eq!(
+        block.invalid_tag_values[0].value,
+        "boolean with_scheme if false - does not add http://toto.com"
+    );
+}

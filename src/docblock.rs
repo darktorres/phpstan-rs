@@ -311,21 +311,17 @@ pub fn parse(raw: &str) -> DocBlock {
     for raw_line in inner.lines() {
         let line = raw_line.trim();
         let line = line.strip_prefix('*').map(str::trim).unwrap_or(line);
-        // A wrapped array-shape/list field commonly carries its own
-        // trailing `// description` (e.g. `@var array{v?: string, //
-        // null, undefined, ..., b?: bool, // boolean, ...}`). Without
-        // stripping it, the comment text gets spliced straight into the
-        // joined type string below and `take_type_token` happily parses
-        // "// null" as a bare class-like name, corrupting the whole
-        // shape - `//` never appears in type-expression syntax, so
-        // stripping from its first occurrence to end of line is safe.
-        let line = line
-            .split_once("//")
-            .map_or(line, |(before, _)| before.trim());
+        // Continuation lines join with a real newline, not a space: a
+        // wrapped array-shape field's own trailing `// description`
+        // (`@var array{v?: string, // null, ...`) is a comment only up to
+        // the end of its own line, which `phpdoc_grammar`'s lexer skips
+        // the same way phpdoc-parser's `TOKEN_COMMENT` does. Stripping
+        // `//`-onward here instead would also cut `http://...` out of a
+        // description or a `@see` URL.
         if line.starts_with('@') || tag_lines.is_empty() {
             tag_lines.push(line.to_string());
         } else if let Some(last) = tag_lines.last_mut() {
-            last.push(' ');
+            last.push('\n');
             last.push_str(line);
         }
     }

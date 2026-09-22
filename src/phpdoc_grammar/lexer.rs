@@ -89,9 +89,23 @@ impl<'a> Lexer<'a> {
         Some(c)
     }
 
+    /// Whitespace, and a `//` comment running to the end of its line -
+    /// phpdoc-parser's own `TOKEN_COMMENT`, which its type parser skips
+    /// (a wrapped array shape's `// description` after a field). The tag
+    /// text itself keeps the comment: only the token stream drops it.
     fn skip_whitespace(&mut self) {
-        while matches!(self.peek(), Some(c) if c.is_whitespace()) {
-            self.advance();
+        loop {
+            match self.peek() {
+                Some(c) if c.is_whitespace() => {
+                    self.advance();
+                }
+                Some('/') if self.peek_at(1) == Some('/') => {
+                    while !matches!(self.peek(), None | Some('\n' | '\r')) {
+                        self.advance();
+                    }
+                }
+                _ => break,
+            }
         }
     }
 
