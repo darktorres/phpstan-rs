@@ -196,6 +196,43 @@ fn canonical_int_key_rejects_non_numeric_and_out_of_range_strings() {
 }
 
 #[test]
+fn a_list_shape_parses_identically_to_the_array_shape_spelling() {
+    // Real shape: `Psl\Type\Internal\MutableMapType`'s own
+    // `list<list{Tk, Tv}>` - the bare, unnamed-tuple `list{...}` spelling
+    // real PHPStan's own `phpdoc-parser` recognizes
+    // (`ArrayShapeNode::KIND_LIST`) alongside `array{...}`, previously
+    // unhandled here and silently mangled into a bogus, namespace-
+    // qualified "class name" instead.
+    assert_eq!(
+        parse_type_string("list{int, string}"),
+        Type::ArrayShape(vec![
+            ("0".to_string(), Type::Int, false),
+            ("1".to_string(), Type::String, false),
+        ])
+    );
+}
+
+#[test]
+fn a_non_empty_array_shape_and_a_non_empty_list_shape_both_parse() {
+    assert_eq!(
+        parse_type_string("non-empty-array{a: int}"),
+        Type::ArrayShape(vec![("a".to_string(), Type::Int, false)])
+    );
+    assert_eq!(
+        parse_type_string("non-empty-list{int}"),
+        Type::ArrayShape(vec![("0".to_string(), Type::Int, false)])
+    );
+}
+
+#[test]
+fn a_class_name_merely_starting_with_list_is_not_mistaken_for_a_list_shape() {
+    assert_eq!(
+        parse_type_string("ListNode"),
+        Type::Object("ListNode".to_string(), Vec::new())
+    );
+}
+
+#[test]
 fn a_negative_shape_key_parses_as_a_real_int_literal() {
     assert_eq!(
         parse_type_string("array{-5: int}"),

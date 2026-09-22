@@ -246,12 +246,25 @@ fn push_shape_field(fields: &mut Vec<(String, Type, bool)>, key: String, ty: Typ
 /// `array{name: string, age?: int}` - PHPDoc's structural array shape.
 /// Field values can themselves be full type strings (unions, generics,
 /// nested shapes), so each is re-run through `parse_type_string`.
+///
+/// Real PHPStan's own `phpdoc-parser` recognizes the identical brace-field
+/// grammar under 3 sibling prefixes too (`ArrayShapeNode::KIND_NON_EMPTY_
+/// ARRAY`/`KIND_LIST`/`KIND_NON_EMPTY_LIST`) - `list{Tk, Tv}`'s own
+/// positional fields already number identically to `array{Tk, Tv}`'s
+/// (both auto-index `0, 1, ...`), so treating all 4 prefixes as the same
+/// underlying shape grammar is correct, not just convenient: a real,
+/// confirmed corpus bug (`list{Tk, Tv}` falling through this function's
+/// old `array`-only gate straight to the generic bare-identifier
+/// fallback, namespace-qualified as if it were a literal class reference)
+/// found via this project's own `class.notFound` existence checking newly
+/// reaching an inline `@var list<list{Tk, Tv}> $entries` tag.
 fn try_parse_array_shape(s: &str) -> Option<Type> {
     let lower = s.to_ascii_lowercase();
-    if !lower.starts_with("array") {
-        return None;
-    }
-    let rest = s[5..].trim_start();
+    let prefix_len = ["non-empty-array", "non-empty-list", "array", "list"]
+        .iter()
+        .find(|p| lower.starts_with(*p))?
+        .len();
+    let rest = s[prefix_len..].trim_start();
     if !rest.starts_with('{') || !rest.ends_with('}') {
         return None;
     }

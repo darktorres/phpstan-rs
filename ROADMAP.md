@@ -4397,10 +4397,53 @@ diagnostics before - neither the "found, but member missing" branch nor
 any "class not found" branch ever fired for them. `@template T of
 Bound`'s existing leniency and a plain `use Foo;` import-site's own
 non-existence-check (real PHPStan doesn't check that either) were
-re-confirmed as correct, not gaps. What remains of the ~27-location
-pipeline is a genuinely smaller residual than before - still a
-size-XL/low-priority stretch goal, go one-by-one only if/when there's a
-concrete reason to prioritize it.
+re-confirmed as correct, not gaps.
+
+A fresh audit cross-checking every real PHPStan `Rule` class that
+reports `class.notFound` (20 files in `vendor/phpstan-src/src/Rules/`)
+against this project's own `check_type_class_names_exist` call sites
+found the pipeline is far more complete than the "~27-location"
+estimate suggested - `instanceof`, `catch`, `@mixin`, `@method`,
+`@phpstan-type`, and `PropertyTagCheck`'s own `@property`/`-read`/
+`-write` existence half (`checker/generics/bounds.rs`'s own, separately-
+named `check_property_tag_types`, easy to miss searching only
+`checker/*.rs` non-recursively) were all *already* built, contrary to
+this entry's own prior framing. Exactly one real, confirmed gap
+remained: `InvalidPhpDocVarTagTypeRule`'s existence half for an inline
+`@var` tag on a plain assignment statement - `checker::stmt::
+check_inline_var_annotation_type` already did type-*compatibility*
+checking (`varTag.type`) but never existence-checked the tag's own
+referenced class at all. Fixed by the identical "pure reuse of
+`check_type_class_names_exist`" pattern every sibling site already
+uses, scoped to the same narrow (plain-assignment-only) case
+`varTag.type` itself already is.
+
+Landing that fix surfaced a real, independent, pre-existing bug via
+corpus verification: `types::parse::try_parse_array_shape` only ever
+recognized the bare `array{...}` prefix, silently mis-parsing real
+PHPStan's 3 sibling shape kinds (`non-empty-array{...}`/`list{...}`/
+`non-empty-list{...}`, all real, `phpdoc-parser`-recognized
+`ArrayShapeNode` kinds) as a bare, unresolvable class-like identifier
+instead - concretely, `list<list{Tk, Tv}>` PHPDoc types (real shape:
+`php-standard-library/php-standard-library`'s own `MutableMapType`)
+produced a bogus `class.notFound` on `list{Tk, Tv}` used as a plain
+class name, cascading into further wrong diagnostics downstream
+(`argument.type`/`return.type` mismatches, `missingType.iterableValue`,
+`method.templateTypeNotInParameter`) wherever such a shape appeared.
+Fixed by widening the prefix check to all 4 real kinds, since a
+`list{...}`/`non-empty-list{...}` shape's own positional fields already
+number identically to `array{...}`'s (both auto-index `0, 1, ...`), so
+no new representation was needed, just the wider recognition.
+Corpus-verified on the full unscoped Piwigo run: every `list{...}`-
+shaped false positive gone, replaced by correct, narrower diagnostics
+where the shape's own real content actually disagrees with something
+(net diagnostic count *dropped*, not just shifted); the scoped run
+stays byte-identical.
+
+What remains of the original ~27-location pipeline, now that the
+above turned out to already be built or newly fixed, is smaller still
+- a genuine residual, but still a size-XL/low-priority stretch goal, go
+one-by-one only if/when there's a concrete reason to prioritize it.
 
 **54 - Generic template richness (PARTIAL, variance-aware assignability,
 arity, and cross-path conflict checking all done).** See Done for what

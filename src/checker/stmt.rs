@@ -1034,6 +1034,21 @@ impl<'a> Checker<'a> {
         if **lhs_name != *name {
             return;
         }
+        // `InvalidPhpDocVarTagTypeRule`'s own existence half - real
+        // PHPStan flags a `class.notFound` here independently of the
+        // `varTag.type` compatibility check just below, which this
+        // project's own inline-`@var` handling never did. Scoped to the
+        // identical narrow case `varTag.type` itself already is (a plain
+        // assignment statement), not real PHPStan's own broader `@var`
+        // surface (bare `@var Type` on a non-assignment statement, a
+        // property, ...) - that stays its own separate, larger, already-
+        // disclosed gap.
+        self.check_type_class_names_exist(
+            declared_ty,
+            &format!("PHPDoc tag @var for variable ${name}"),
+            lhs.span,
+            label,
+        );
         if matches!(declared_ty, Type::Mixed(_)) {
             return;
         }

@@ -37,6 +37,39 @@ fn a_bare_var_tag_with_no_name_is_also_checked() {
 }
 
 #[test]
+fn a_var_tag_referencing_an_unknown_class_is_flagged_class_not_found() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                /** @var NoSuchClass $x */
+                $x = null;
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn a_var_tag_referencing_a_real_class_is_never_flagged_class_not_found() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            function f(): void {
+                /** @var Foo $x */
+                $x = new Foo();
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "class.notFound"),
+        "got: {d:?}"
+    );
+}
+
+#[test]
 fn a_var_tag_matching_the_assigned_value_is_never_flagged() {
     let d = diagnostics_for(
         r#"<?php
