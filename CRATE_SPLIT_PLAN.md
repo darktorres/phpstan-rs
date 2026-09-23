@@ -23,6 +23,11 @@ tests. The debt the split has to remove, all measured on `89d468c`:
 | Library knowledge in the engine | Doctrine (`checker/doctrine`, the DBAL/ORM branches of `member_resolution`, `Locals.query_builder_aliases`), SQL/mysqli, pest, built-in function typing (`builtin_calls` 3.3k lines, `preg_shapes`, `date_time`), and PHPUnit spread across 18 files (assertion narrowing in `stmt.rs`/`narrowing/assertions.rs`, `risky_tests`, test-method entry points in `dead_members`, `TEST_BASE_CLASSES` in `access_attributes`, `parent_calls` defaults, `mock_hygiene`). Mockery lives in `assertion_tables` defaults and `mock_hygiene` |
 | Project-wide checks are custom passes | `Project::check_{architecture,banned,class_shapes,mock_hygiene}`, `composer_hygiene`, `checker/whole_program/*`, the duplicate-declaration checks, plus the `facts_only` throwaway pass that exists only to harvest property-assignment facts |
 | Rule config lives far from its rule | `restricted_symbols`, `banned`, `architecture`, `parent_calls`, `doctrine_functions`, `assertion_tables` are top-level modules that `config` depends on |
+| Ad-hoc scope model | besides `types`/`native`/`provenance`, `Locals` has nine special-purpose maps: `guarded_functions`, `guarded_constants`, `guarded_methods`, `guarded_properties`, `condition_aliases`, `branch_implied_facts`, `container_field_facts`, `discriminant_array_facts` and `query_builder_aliases`. Each has its own merge rule: union for some, intersection for others, `Rc::ptr_eq` for aliases. PHPStan covers every one with two mechanisms: expression-keyed type holders with certainty (a `function_exists('foo')` guard is just that call expression known to be `true`) and conditional-expression holders |
+| Eager, copied stubs | `generated_stub_data()` parses all ~2,351 embedded stub/phpstan-src files on first use, and every `Registry` then clones the full function/class/constant sets into itself (`registry.merge_stubs(generated_stubs())`), including every test's `diagnostics_for` |
+| Levels are a post-filter | every diagnostic carries `level: u8` set where it's emitted; `main/check_project.rs::apply_level_filter` drops diagnostics above `--level` after the run, so rules above the level still run. In PHPStan a level is a set of rules and parameters |
+| Fat binary | `main/check_project.rs` holds 1,285 lines of analysis orchestration (file collection, composer roots, parse fan-out, level filter, baseline generation) that the LSP partly duplicates; `main/incremental_bench.rs` is a benchmark living in the CLI |
+| Tests are compiled Rust | 3,250 checker test functions, ~65k lines of Rust that each wrap a PHP string and mostly assert `any()`/`contains` over the diagnostics. PHPStan's suite is PHP fixture files: `assertType()` data files for inference, and per-rule fixtures with the exact expected error list |
 | Misplaced utilities | `text_split` re-lexes spans (a syntax utility); `deps` computes incremental re-check dependencies (a project concern) |
 
 Module cycles today are all misplaced helpers:
@@ -49,7 +54,8 @@ Verified non-blockers:
 L0  syntax        token, intern, lexer, ast, parser, walk, printer, text_split, AST helpers
     types         Type, parsing, display, subtyping, union/merge algebra
     php-runtime   PHP version, float formatting, date parsing, regex groups, PCRE validation
-    stubs         build.rs + embedded phpstorm-stubs / phpstan-src sources
+    stubs         build.rs: embedded phpstorm-stubs / phpstan-src sources
+                  + a generated symbol → source-file index
 L1  phpdoc        PHPDoc grammar + docblock model                        (syntax)
     sql           standalone SQL reflection: config, DDL schema, live
                   reflector, drift. Knows nothing about PHP analysis      (types)
@@ -61,7 +67,8 @@ L2  config        loads phpstan-rs.toml: global settings (paths, level,
                   stays a raw toml::Value for its owner to parse          (diagnostics, php-runtime)
 L3  reflection    (was registry) ReflectionProvider API: class/function/
                   constant reflection, name resolution, PHPDoc→type
-                  resolution, stub loading. Private storage           (syntax, phpdoc, types, php-runtime, stubs)
+                  resolution. Layered source locators (process-wide
+                  lazily-parsed stubs, then the project). Private storage  (syntax, phpdoc, types, php-runtime, stubs)
 L4  analyser      the engine: traversal, Scope, expression/statement
                   inference, narrowing, control flow, generics; the
                   Rule / Collector / Observer / extension traits;
@@ -82,14 +89,16 @@ L5  rules                 every core PHPStan-equivalent rule + its config,
                           mock hygiene (PHPUnit half)
     ext-mockery           mock typing (built-in assertion-table entries),
                           mock hygiene (Mockery half)
-L6  project       file discovery, scheduling, the collection pass, the
+L6  project       the analysis Session API shared by CLI and LSP (config →
+                  file discovery, parse fan-out, scheduling, the collection pass,
+                  baseline generation), the
                   incremental dependency graph (deps), LSP indexes
                   (use_sites, decl_locations); wires rules + extensions
                   from config
 L7  lsp           protocol + features; semantic tokens, inlay hints,
                   probes, member references as analyser Observers
-L8  phpstan-rs    the binary (package name kept)
-    analysis-tests  test-only crate: the black-box engine+rules suite
+L8  phpstan-rs    the binary: clap + output only (package name kept)
+    analysis-tests  test-only crate: data-driven fixture suite (PHP files, not Rust)
 ```
 
 Conventions:
@@ -129,6 +138,40 @@ rule or extension that reads it, and `php_version` moves to
 `AnalysisContext`. Caches stay internal. Mutation happens only during the
 build (stub merge, project scan), through a separate `ReflectionBuilder`,
 so an analysis can't mutate reflection.
+
+**Reflection sources.** `stubs`' build.rs also generates a sorted
+symbol → source-file index (functions, classes, constants, with their
+lowercase keys). `ReflectionProvider` is layered:
+- a process-wide stub layer that parses a stub file the first time one
+  of its symbols is requested, applies the stub patches to it, and
+  caches the result behind `Arc` (thread-safe, shared by every project,
+  LSP session and test);
+- the per-project layer on top.
+
+Nothing is cloned per registry. Whole-program iteration (`classes()`)
+covers the project layer, plus the stub layer only where a collector
+explicitly asks for it.
+
+**Scope model.** `Locals` becomes PHPStan's model:
+- expression-keyed type holders, each with native type and certainty,
+  covering variables, property/offset paths and guard calls
+  (`function_exists('foo')`, `defined('X')`, `method_exists($o, 'm')`,
+  `property_exists(...)` held as known-`true` call expressions);
+- conditional-expression holders ("if E has type T then F has type U")
+  that replace `condition_aliases`, `branch_implied_facts`,
+  `container_field_facts` and `discriminant_array_facts`.
+
+There is one merge rule and one invalidation rule (rebinding a variable
+drops every holder whose expression or condition mentions it) instead of
+per-map rules. `query_builder_aliases` goes to `ext-doctrine`'s scope
+slot. The `Scope` API exposes this model directly.
+
+**Levels.** A level is a rule set plus a parameter set, as in PHPStan's
+`level0.neon`…`level10.neon`. Each rule declares the lowest level it's
+registered at; level-dependent behavior (e.g. reporting "maybe"
+certainties, nullable checks) becomes a named parameter the level sets and
+the config can override. `Diagnostic.level` and `apply_level_filter` go
+away, and rules above the level never run.
 
 **`analyser::Scope`.** A read-only view at a node:
 - the inferred type of any sub-expression (the engine caches each
@@ -207,7 +250,7 @@ Its built-in Mockery entries move to `ext-mockery`.
 Crates export their designed APIs; nothing is widened just because the
 compiler asks. When a cross-crate use shows up that the API doesn't
 cover, the API gets the missing operation. `unreachable_pub` is
-denied workspace-wide once Phase 16 lands.
+denied workspace-wide once Phase 18 lands.
 
 ## Phases
 
@@ -224,7 +267,7 @@ unscoped snapshots byte-identical (after `LC_ALL=C sort`). Moves use
 - Hoist the helpers above to `syntax`/`types`, `Diagnostic*` into a
   `diagnostic` module, and `text_split` under the syntax modules.
 - Gate: a module graph with no upward edge. The whole-program-pass edge
-  is handled by Phase 12, so it's temporarily allowed.
+  is handled by Phase 13, so it's temporarily allowed.
 
 **Phase 1: workspace skeleton + `stubs`.** The package moves to
 `crates/phpstan-rs` inside a virtual workspace. `stubs` gets build.rs
@@ -241,7 +284,7 @@ parsing moves into `sql`. The SQL state leaves `Registry` for an
 
 **Phase 5: `config` slimmed to global settings.** Every rule/extension
 section is kept as a raw `toml::Value`, and its current parser moves next
-to its current consumer (it follows the owner again in Phases 11–12). The
+to its current consumer (it follows the owner again in Phases 12–14). The
 top-level `restricted_symbols`, `banned`, `architecture`, `parent_calls`,
 `doctrine_functions` and `assertion_tables` modules stop being `config`
 dependencies.
@@ -249,16 +292,22 @@ dependencies.
 **Phase 6: `reflection`.** Still inside the package, turn `Registry`
 into `ReflectionProvider` + `ReflectionBuilder` with private storage, and
 move the 58 settings off it (to a `Settings`/`AnalysisContext` the
-checker holds, until Phases 11–12 hand each one to its owner). Then
-extract it as the `reflection` crate with `php_stubs` → `reflection::stubs`.
+checker holds, until Phases 12–15 hand each one to its owner). Replace
+eager stub parsing and per-registry cloning with the build-time symbol
+index and the lazily-populated shared stub layer. Then extract it as the
+`reflection` crate, with `php_stubs` → `reflection::stubs`.
 
 **Phase 7: `analyser` extraction.** `checker.rs` → `lib.rs`,
 `crate::checker::X` → `crate::X`, together with `rule`, `reflection_rule` and
-`pest_config`. The rest of the package (`project`, `lsp`, the bin) uses
-its existing public entry points. Fix the includes-test paths.
+`pest_config`. The rest of the package uses its existing public entry
+points. Fix the includes-test paths.
 
-**Phase 8: `project`, `lsp` extraction** (`deps` joins `project`).
-The package is now just the bin.
+**Phase 8: `project`, `lsp` extraction, thin binary.** `deps` joins
+`project`. `main/check_project.rs`'s orchestration becomes
+`project::Session`, which the CLI and the LSP both drive (the LSP
+drops its duplicate discovery and config plumbing). The bin keeps clap,
+output selection and exit codes. `incremental_bench` becomes a
+`project` criterion bench, and `demo` goes wherever its logic belongs.
 
 **Phase 9: tidy the extraction.** CI builds `-p phpstan-rs`; README,
 ROADMAP, the fuzz guide, and every doc comment naming a `src/`/`crate::`
@@ -266,26 +315,31 @@ path get updated; the memory test command becomes
 `cargo test -p <crate> --lib -- <filter>`; re-measure and record the
 Phase 0 timings.
 
-**Phase 10: engine APIs (no moves).** `Scope`, `Rule` with the derived
-nodes, `Collector`, `Observer`, the extension traits, per-extension scope
-slots, the dispatch tables, and `AnalysisContext`. Port the existing
+**Phase 10: scope model.** `Locals` → expression holders + conditional
+expressions, as above. The nine special maps and their per-map merge and
+purge code go away; `query_builder_aliases` waits in a generic
+extension-slot map for Phase 12.
+
+**Phase 11: engine APIs (no moves).** `Scope` over the new model;
+`Rule` with the derived nodes and declared identifiers and levels;
+`Collector`, `Observer`, the extension traits, per-extension scope slots,
+the dispatch tables, and `AnalysisContext`. Port the existing
 `Rule`/`ReflectionRule` users.
 
-**Phase 11: extension crates, one commit each:** `ext-php`, `ext-sql`
-(takes over the `SqlContext`), `ext-doctrine` (scope slot replaces
-`query_builder_aliases`; takes `doctrine_functions`), `ext-pest` (takes
-`pest_config` and the pest `Checker` fields), `ext-phpunit`,
-`ext-mockery` (takes the Mockery assertion entries), then
-`ext-strict-rules` and `ext-deprecation-rules`. Each takes its config
-section, settings, and diagnostics with it.
+**Phase 12: extension crates, one commit each:** `ext-php`, `ext-sql`
+(takes over the `SqlContext`), `ext-doctrine` (scope slot, takes
+`doctrine_functions`), `ext-pest` (takes `pest_config` and the pest
+`Checker` fields), `ext-phpunit`, `ext-mockery` (takes the Mockery
+assertion entries), `ext-strict-rules`, `ext-deprecation-rules`. Each
+takes its config section, settings and diagnostics with it.
 
-**Phase 12: collectors.** The whole-program passes, duplicate checks,
-circular namespaces, architecture, banned, class_shape and composer hygiene
-become collector-based rules in `rules`. The property-assignment pre-pass becomes the
-empty-rule-set collection pass. `facts_only` and every `*_facts` field
-disappear from `Checker`.
+**Phase 13: collectors.** The whole-program passes, duplicate checks,
+circular namespaces, architecture, banned, class_shape and composer
+hygiene become collector-based rules in `rules`. The property-assignment
+pre-pass becomes the empty-rule-set collection pass. `facts_only` and
+every `*_facts` field disappear from `Checker`.
 
-**Phase 13: every diagnostic to `rules`.** Sub-phases, one commit each,
+**Phase 14: every diagnostic to `rules`.** Sub-phases, one commit each,
 grouped by the node they hook:
 - (a) file-level (incl. `keywords`, `whitespace`, and
   `uninitialized_dataflow` as a file rule with its own walk);
@@ -299,21 +353,40 @@ grouped by the node they hook:
 
 Gate: no `report` site in `crates/analyser/src` outside `Scope`.
 
-**Phase 14: observers.** Semantic tokens, inlay hints, probes and
+**Phase 15: levels as rule and parameter sets.** Each rule's emission-site
+`level` becomes either its registration level or a level-set parameter;
+`Diagnostic.level` and `apply_level_filter` are deleted. Gate: at every
+level 0–6, the scoped Piwigo output equals the Phase 14 output filtered
+to that level.
+
+**Phase 16: observers.** Semantic tokens, inlay hints, probes and
 member-reference collection move to `lsp`.
 
-**Phase 15: `Checker` decomposition.** Split the remaining state into
+**Phase 17: `Checker` decomposition.** Split the remaining state into
 `AnalysisContext` / file state / function-like state stack. Gate: every
 field has an inference-side reader.
 
-**Phase 16: split the test suite.** The 92 black-box `checker/tests`
-files (they only use the `diagnostics_for*` helpers) move to
-`crates/analysis-tests`: one integration binary whose helpers assemble
-the engine with every built-in rule, collector and extension. The 26
-white-box files go to whichever crate owns what they reach into. This
-comes last so each file moves once. Deny `unreachable_pub` workspace-wide.
+**Phase 18: fixture-based test suite.** `crates/analysis-tests` becomes a
+data-driven harness (`libtest-mimic`, so every fixture is still a named,
+filterable test) over PHP files:
+- **Inference:** `assertType()`/`assertNativeType()` data files.
+- **Rules:** a fixture plus the *exact* expected diagnostic list
+  (line, identifier, message, tip), scoped to the rules or extension under
+  test, as PHPStan's `RuleTestCase` does. Header comments set config,
+  PHP version and level.
+- **Codemods:** a `.php` file plus a `.fixed.php` file.
 
-From Phase 10 on, each commit's scoped wall time must also stay within
+The 3,250 black-box checker test functions are converted by a tool that
+extracts each test's PHP source and config and records the rule's current
+output as the expectation. Tests that asserted less than the full list
+(`any()`/`contains`) get their extra diagnostics reviewed, not blindly
+recorded: each is either a correct expectation or a bug to fix. The
+white-box tests go to the crate owning what they reach into. Gates:
+fixture count ≥ converted test count, with a mapping file from old
+test name to fixture. ~65k lines of Rust test code drop out of
+compilation. Deny `unreachable_pub` workspace-wide.
+
+From Phase 6 on, each commit's scoped wall time must also stay within
 noise of Phase 0, to catch dispatch overhead.
 
 ## Risks
@@ -329,6 +402,14 @@ noise of Phase 0, to catch dispatch overhead.
   are listed above, and the test-count gate catches silently skipped
   tests.
 - **Build times.** An analyser edit still rebuilds everything above it.
-  The payoff comes from the ~30k lines of rules and extensions and
-  ~65k lines of tests leaving the engine crate, and from lower crates
-  no longer rebuilding the world.
+  The payoff comes from the ~30k lines of rules and extensions leaving
+  the engine crate, ~65k lines of Rust tests becoming fixtures that
+  don't compile at all, and lower crates no longer rebuilding the world.
+- **Scope-model semantics.** The nine maps' merge rules differ on
+  purpose (union vs intersection). The unified conditional-expression
+  merge has to reproduce each case, so Phase 10 is gated on
+  byte-identical Piwigo output, and any intentional semantic change
+  goes in its own commit with its own test.
+- **Fixture conversion.** Converting weak assertions to exact lists will
+  surface diagnostics the old tests silently tolerated; each gets triaged
+  like a corpus finding.
