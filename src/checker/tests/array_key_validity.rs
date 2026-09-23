@@ -850,3 +850,28 @@ fn offset_assignments_check_key_and_value_acceptance() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn offset_assignments_into_unions_are_checked_per_member() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string|array $either, ?string $maybe): void {
+                $either[] = 'x';
+                $maybe[] = 'y';
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "offsetAssign.dimType")
+        .map(|x| (x.message.as_str(), x.level))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("Cannot assign new offset to string|array.", 7),
+            ("Cannot assign new offset to string|null.", 3),
+        ],
+        "got: {d:?}"
+    );
+}

@@ -64,63 +64,68 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let string_dim_error = is_string_type(&container)
-            && match &dim {
+        let members: Vec<&Type> = match &container {
+            Type::Union(members) => members
+                .iter()
+                .filter(|m| !matches!(m, Type::Null))
+                .collect(),
+            other => vec![other],
+        };
+        let verdicts: Vec<Option<&'static str>> = members
+            .iter()
+            .map(|m| self.offset_write_error(m, dim.as_ref(), value))
+            .collect();
+        let Some(identifier) = verdicts.iter().flatten().next().copied() else {
+            return;
+        };
+        let level = if verdicts.iter().all(Option::is_some) {
+            3
+        } else {
+            7
+        };
+        let message = if identifier == "offsetAssign.valueType" {
+            format!("{container} does not accept {value}.")
+        } else {
+            match &dim {
+                None => format!("Cannot assign new offset to {container}."),
+                Some(d) => format!("Cannot assign offset {d} to {container}."),
+            }
+        };
+        self.report(label.to_string(), message, lhs.span, level, identifier);
+    }
+
+    /// Why writing `value` at `dim` into one container type fails, if
+    /// it does: `offsetAssign.dimType` or `offsetAssign.valueType`.
+    fn offset_write_error(
+        &self,
+        container: &Type,
+        dim: Option<&Type>,
+        value: &Type,
+    ) -> Option<&'static str> {
+        if is_string_type(container) {
+            let bad = match dim {
                 None => true,
                 Some(d) => !matches!(d, Type::Mixed(_)) && !is_integer_type(d),
             };
-        if string_dim_error {
-            let message = match &dim {
-                None => format!("Cannot assign new offset to {container}."),
-                Some(d) => format!("Cannot assign offset {d} to {container}."),
-            };
-            self.report(
-                label.to_string(),
-                message,
-                lhs.span,
-                3,
-                "offsetAssign.dimType",
-            );
-            return;
+            return bad.then_some("offsetAssign.dimType");
         }
-        let Type::Object(class, _) = &container else {
-            return;
+        let Type::Object(class, _) = container else {
+            return None;
         };
         if !self.registry.is_subclass_of(class, "ArrayAccess") {
-            return;
+            return None;
         }
-        let Some(offset_set) = self.registry.lookup_method(class, "offsetSet") else {
-            return;
-        };
+        let offset_set = self.registry.lookup_method(class, "offsetSet")?;
         let [offset_param, value_param, ..] = offset_set.params.as_slice() else {
-            return;
+            return None;
         };
-        let offset_ty = dim.clone().unwrap_or(Type::Null);
+        let offset_ty = dim.cloned().unwrap_or(Type::Null);
         if !matches!(offset_ty, Type::Mixed(_))
             && !self.registry.is_assignable(&offset_ty, &offset_param.ty)
         {
-            let message = match &dim {
-                None => format!("Cannot assign new offset to {container}."),
-                Some(d) => format!("Cannot assign offset {d} to {container}."),
-            };
-            self.report(
-                label.to_string(),
-                message,
-                lhs.span,
-                3,
-                "offsetAssign.dimType",
-            );
-            return;
+            return Some("offsetAssign.dimType");
         }
-        if !matches!(value, Type::Mixed(_)) && !self.registry.is_assignable(value, &value_param.ty)
-        {
-            self.report(
-                label.to_string(),
-                format!("{container} does not accept {value}."),
-                lhs.span,
-                3,
-                "offsetAssign.valueType",
-            );
-        }
+        (!matches!(value, Type::Mixed(_)) && !self.registry.is_assignable(value, &value_param.ty))
+            .then_some("offsetAssign.valueType")
     }
 }
