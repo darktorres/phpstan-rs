@@ -54,9 +54,6 @@ fn is_local_assign_target(target: &Expr) -> bool {
 fn expr_side_effects(e: &Expr) -> Effects {
     let own = match &e.kind {
         ExprKind::Call(callee, _) if is_pure_language_construct(callee) => Effects::None,
-        ExprKind::Name(n) if n.eq_ignore_ascii_case("exit") || n.eq_ignore_ascii_case("die") => {
-            Effects::Some
-        }
         ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
             if is_local_assign_target(target) =>
         {

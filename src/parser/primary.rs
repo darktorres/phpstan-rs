@@ -450,7 +450,16 @@ impl Parser {
                 | Keyword::Enum,
             ) => {
                 let name = self.parse_qualified_name();
-                self.expr(ExprKind::Name(name), start)
+                let is_bare_exit = (name.eq_ignore_ascii_case("exit")
+                    || name.eq_ignore_ascii_case("die"))
+                    && !self.check(&Token::LParen);
+                let name_expr = self.expr(ExprKind::Name(name), start);
+                if is_bare_exit {
+                    // `exit;` is the same construct as `exit()`.
+                    self.expr(ExprKind::Call(Box::new(name_expr), Vec::new()), start)
+                } else {
+                    name_expr
+                }
             }
             other => {
                 return Err(ParseError {

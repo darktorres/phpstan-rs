@@ -2708,3 +2708,27 @@ fn missing_return_follows_missing_return_rule_conditions() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_guard_clause_built_on_a_bare_exit_or_die_terminates_like_return() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return array<string, mixed>|false */
+            function load(): array|false { return false; }
+            function f(): void {
+                $a = load();
+                if ($a === false) {
+                    echo 'x';
+                    exit;
+                }
+                $b = load();
+                if ($b === false) {
+                    die;
+                }
+                foreach ($a as $v) {}
+                foreach ($b as $v) {}
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

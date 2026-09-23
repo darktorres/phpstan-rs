@@ -271,15 +271,17 @@ impl<'a> Walker<'a> {
                         _ => None,
                     };
                     if let Some(construct) = construct {
-                        self.ban(construct, e.span, format!("{lower}()"));
+                        // A bare `exit;` parses as a call whose span is
+                        // just the name - reported as written.
+                        let shown = if callee.span == e.span {
+                            lower
+                        } else {
+                            format!("{lower}()")
+                        };
+                        self.ban(construct, e.span, shown);
                     }
                 }
                 self.arguments(args, e.span);
-            }
-            ExprKind::Name(name)
-                if name.eq_ignore_ascii_case("exit") || name.eq_ignore_ascii_case("die") =>
-            {
-                self.ban(BannedConstruct::Exit, e.span, name.to_ascii_lowercase());
             }
             ExprKind::New(_, args)
             | ExprKind::MethodCall(_, _, args, _)

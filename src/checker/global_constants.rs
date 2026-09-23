@@ -119,7 +119,7 @@ impl<'a> Checker<'a> {
     ) {
         let bare = name.trim_start_matches('\\');
         let unqualified = bare.rsplit('\\').next().unwrap_or(bare);
-        if ["true", "false", "null", "exit", "die"]
+        if ["true", "false", "null"]
             .iter()
             .any(|kw| unqualified.eq_ignore_ascii_case(kw))
             || MAGIC_CONSTANTS
