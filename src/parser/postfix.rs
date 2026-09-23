@@ -127,6 +127,23 @@ impl Parser {
                         // name is static or dynamic, so this is just
                         // parsed (consuming the name expression correctly)
                         // rather than threading a real Expr through here.
+                        Token::LBrace if !matches!(self.peek_at(1), Token::RBrace) => {
+                            self.skip();
+                            let name = self.parse_expression()?;
+                            self.expect(&Token::RBrace)?;
+                            if !self.check(&Token::LParen) {
+                                let class_name = match &receiver_expr.kind {
+                                    ExprKind::Name(n) => n.clone(),
+                                    _ => "?".to_string(),
+                                };
+                                expr = self.expr(
+                                    ExprKind::DynamicClassConstFetch(class_name, Box::new(name)),
+                                    start,
+                                );
+                                continue;
+                            }
+                            "{dynamic}".to_string()
+                        }
                         Token::LBrace | Token::DollarBrace => {
                             self.skip();
                             self.parse_expression()?;

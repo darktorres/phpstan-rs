@@ -174,6 +174,7 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
         | ExprKind::YieldFrom(e)
         | ExprKind::FirstClassCallable(e)
         | ExprKind::ShellExec(e)
+        | ExprKind::DynamicClassConstFetch(_, e)
         | ExprKind::PropertyAccess(e, _, _) => bias_expr_spans(e, frag_base),
         ExprKind::ArrowFn { body, .. } => bias_expr_spans(body, frag_base),
         ExprKind::ArrayLiteral(items) => {

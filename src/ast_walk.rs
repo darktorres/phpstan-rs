@@ -52,6 +52,7 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::ShellExec(inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
+        | ExprKind::DynamicClassConstFetch(_, inner)
         | ExprKind::PropertyAccess(inner, _, _) => vec![inner],
         ExprKind::ArrayLiteral(items) => items
             .iter()
@@ -266,6 +267,7 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
         | ExprKind::ShellExec(inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
+        | ExprKind::DynamicClassConstFetch(_, inner)
         | ExprKind::PropertyAccess(inner, _, _) => f(inner),
         ExprKind::ArrayLiteral(items) => items
             .iter()

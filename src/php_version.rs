@@ -208,6 +208,10 @@ pub enum PhpFeature {
     /// `PhpVersion::supportsAsymmetricVisibilityForStaticProperties`
     /// (`PropertyInClassRule`).
     AsymmetricVisibilityForStaticProperties,
+    /// `Foo::{$expr}` dynamic class-constant fetches.
+    /// `PhpVersion::supportsDynamicClassConstantFetch`
+    /// (`DynamicClassConstantFetchRule`).
+    DynamicClassConstantFetch,
 }
 
 impl PhpFeature {
@@ -237,6 +241,7 @@ impl PhpFeature {
             | ReadOnlyProperties => (8, 1),
             ReadOnlyClasses | ConstantsInTraits => (8, 2),
             NativeTypedClassConstants
+            | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses
             | ReadonlyPropertyReinitializationOnClone => (8, 3),
             ImplicitlyNullableParameterDeprecated | PropertyHooks | FinalProperties => (8, 4),

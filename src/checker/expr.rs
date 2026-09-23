@@ -2674,6 +2674,11 @@ impl<'a> Checker<'a> {
                     _ => Type::Mixed(false),
                 }
             }
+            ExprKind::DynamicClassConstFetch(_, name) => {
+                let name_ty = self.check_expr(name, locals, label);
+                self.check_dynamic_class_constant_fetch(&name_ty, e.span, label);
+                Type::Mixed(false)
+            }
             ExprKind::StaticAccess(class_name, member) => {
                 // `Foo::class` (member == "class") always resolves to a
                 // real string constant, not an actual member of the

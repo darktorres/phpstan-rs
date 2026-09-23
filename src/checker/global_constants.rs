@@ -250,4 +250,54 @@ impl<'a> Checker<'a> {
             label,
         );
     }
+
+    /// `DynamicClassConstantFetchRule`: `Foo::{$expr}` needs PHP 8.3+
+    /// (`classConstant.dynamicFetch`), and its name must be a string
+    /// (`classConstant.nameType`; level 7 when only some union members
+    /// aren't).
+    pub(crate) fn check_dynamic_class_constant_fetch(
+        &mut self,
+        name_ty: &crate::types::Type,
+        span: Span,
+        label: &str,
+    ) {
+        use crate::types::Type;
+        if self.registry.php_version.is_some_and(|v| {
+            !crate::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
+        }) {
+            self.report_builder(
+                crate::checker::DiagnosticBuilder::new(
+                    label.to_string(),
+                    "Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
+                        .to_string(),
+                    span,
+                    0,
+                    "classConstant.dynamicFetch",
+                )
+                .non_ignorable(),
+            );
+            return;
+        }
+        let is_string = |t: &Type| {
+            matches!(
+                t,
+                Type::String | Type::StringLiteral(_) | Type::ClassString(_)
+            ) || matches!(t, Type::Intersection(ms) if ms.iter().any(|m| matches!(m, Type::String)))
+        };
+        let is_unknown =
+            |t: &Type| matches!(t, Type::Mixed(_) | Type::Never | Type::TemplateParam(_));
+        let level = match name_ty {
+            t if is_string(t) || is_unknown(t) => return,
+            Type::Union(members) if members.iter().any(is_unknown) => return,
+            Type::Union(members) if members.iter().any(is_string) => 7,
+            _ => 0,
+        };
+        self.report(
+            label.to_string(),
+            format!("Class constant name in dynamic fetch can only be a string, {name_ty} given."),
+            span,
+            level,
+            "classConstant.nameType",
+        );
+    }
 }

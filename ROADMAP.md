@@ -591,7 +591,10 @@ or method body, a loop, a `try` - now registers its global constant. `dynamicCon
 or general type, and `ValueAssignedToDefineRule`/
 `ValueAssignedToGlobalConstantRule`/`ValueAssignedToClassConstantRule`'s
 configured half report a declared value that type rejects
-(`constant.defineValue`/`constant.value`/`classConstant.value`).
+(`constant.defineValue`/`constant.value`/`classConstant.value`). `DynamicClassConstantFetchRule`
+(`classConstant.dynamicFetch` below PHP 8.3, `classConstant.nameType`),
+from a new `ExprKind::DynamicClassConstFetch` that also checks the name
+expression itself.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3630,12 +3633,6 @@ against this list, and added the real gaps the audit had missed.
   difference from `@extends`/`@implements` (a call-site variance
   annotation is *never* valid inside `@use<...>`, unlike the other two)
   — Phase 54 already closed the bound/arity/variance half.
-
-### Phase 133 — Constants (`Rules/Constants/` gaps)
-
-- `DynamicClassConstantFetchRule` — PHP 8.3's `Foo::{$expr}` dynamic
-  class-constant fetch; `StaticAccess`'s AST has no way to represent a
-  dynamic member name at all.
 
 ### Phase 134 — Variables (`Rules/Variables/` gaps)
 

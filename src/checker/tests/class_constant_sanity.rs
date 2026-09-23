@@ -583,3 +583,40 @@ fn a_constant_var_tag_must_describe_its_value() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn dynamic_class_constant_fetches_are_version_gated_and_need_a_string_name() {
+    let src = r#"<?php
+        class Box { const A = 1; }
+        function f(string $s, int $i, int|string $m): void {
+            echo Box::{$s};
+            echo Box::{$i};
+            echo Box::{$m};
+            echo Box::{$undefinedName};
+        }
+    "#;
+    let found = |v| {
+        diagnostics_for_with(src, |r| r.php_version = Some(v))
+            .into_iter()
+            .filter(|x| {
+                x.identifier.starts_with("classConstant.") || x.identifier == "variable.undefined"
+            })
+            .map(|x| (x.identifier, x.level))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        found((8, 3)),
+        vec![
+            ("classConstant.nameType".to_string(), 0),
+            ("classConstant.nameType".to_string(), 7),
+            ("variable.undefined".to_string(), 0),
+        ]
+    );
+    assert_eq!(
+        found((8, 2))
+            .iter()
+            .filter(|(id, _)| id == "classConstant.dynamicFetch")
+            .count(),
+        4
+    );
+}
