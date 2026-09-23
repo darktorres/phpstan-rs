@@ -713,6 +713,27 @@ struct GeneratedStubData {
     functions: Vec<(Arc<str>, FunctionSig)>,
     classes: Vec<(Arc<str>, ClassInfo)>,
     constants: Vec<(Arc<str>, Type)>,
+    // Lowercased name -> the phpstorm-stubs directory (extension) that
+    // declares it; PHPStan's own classes aren't built-ins and aren't here.
+    function_extensions: rustc_hash::FxHashMap<String, &'static str>,
+    class_extensions: rustc_hash::FxHashMap<String, &'static str>,
+}
+
+/// The phpstorm-stubs directory (the extension) declaring built-in
+/// function `name`, when it's a PHP built-in.
+pub fn builtin_function_extension(name: &str) -> Option<&'static str> {
+    generated_stub_data()
+        .function_extensions
+        .get(&name.trim_start_matches('\\').to_ascii_lowercase())
+        .copied()
+}
+
+/// The class-like counterpart of `builtin_function_extension`.
+pub fn builtin_class_extension(name: &str) -> Option<&'static str> {
+    generated_stub_data()
+        .class_extensions
+        .get(&name.trim_start_matches('\\').to_ascii_lowercase())
+        .copied()
 }
 
 /// Computes `GeneratedStubData` exactly once per process
@@ -773,9 +794,16 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         let mut classes = Vec::new();
         let mut merged_constants: rustc_hash::FxHashMap<Arc<str>, Type> =
             rustc_hash::FxHashMap::default();
-        for source in PHPSTORM_STUBS_SOURCES
+        let mut function_extensions = rustc_hash::FxHashMap::default();
+        let mut class_extensions = rustc_hash::FxHashMap::default();
+        let extensions = PHPSTORM_STUBS_EXTENSIONS
+            .iter()
+            .map(|e| Some(*e))
+            .chain(std::iter::repeat(None));
+        for (source, extension) in PHPSTORM_STUBS_SOURCES
             .iter()
             .chain(PHPSTAN_SRC_SOURCES.iter())
+            .zip(extensions)
         {
             let tokens = Lexer::new(source).tokenize_with_spans();
             let program = Parser::new(tokens)
@@ -789,6 +817,9 @@ fn generated_stub_data() -> &'static GeneratedStubData {
                 // so this is set here instead, the one place that does.
                 sig.is_stub = true;
                 if seen_functions.insert(name.clone()) {
+                    if let Some(extension) = extension {
+                        function_extensions.insert(name.to_ascii_lowercase(), extension);
+                    }
                     functions.push((name, sig));
                 }
             }
@@ -799,6 +830,9 @@ fn generated_stub_data() -> &'static GeneratedStubData {
                     sig.is_stub = true;
                 }
                 if seen_classes.insert(name.clone()) {
+                    if let Some(extension) = extension {
+                        class_extensions.insert(name.to_ascii_lowercase(), extension);
+                    }
                     classes.push((name, info));
                 }
             }
@@ -819,6 +853,8 @@ fn generated_stub_data() -> &'static GeneratedStubData {
             functions,
             classes,
             constants: merged_constants.into_iter().collect(),
+            function_extensions,
+            class_extensions,
         }
     });
     &CACHE

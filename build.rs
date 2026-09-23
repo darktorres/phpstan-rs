@@ -87,6 +87,20 @@ fn main() {
 
     let mut generated = String::new();
     write_source_array(&mut generated, "PHPSTORM_STUBS_SOURCES", &phpstorm_files);
+    // Each stub file's top-level directory under `vendor/phpstorm-stubs`
+    // - the extension it documents - parallel to `PHPSTORM_STUBS_SOURCES`.
+    let stubs_root = Path::new(&manifest_dir).join("vendor/phpstorm-stubs");
+    generated.push_str("pub static PHPSTORM_STUBS_EXTENSIONS: &[&str] = &[\n");
+    for path in &phpstorm_files {
+        let extension = path
+            .strip_prefix(&stubs_root)
+            .ok()
+            .and_then(|rel| rel.components().next())
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .unwrap_or_default();
+        generated.push_str(&format!("    {extension:?},\n"));
+    }
+    generated.push_str("];\n");
     write_source_array(&mut generated, "PHPSTAN_SRC_SOURCES", &phpstan_src_files);
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
