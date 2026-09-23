@@ -99,6 +99,13 @@ pub struct InstalledPackage {
     pub vendor_dir: PathBuf,
     pub provide: Vec<String>,
     pub replace: Vec<String>,
+    /// Whether it ships command-line binaries (`bin`), used by running
+    /// them rather than from code.
+    pub has_bin: bool,
+    /// Whether its `extra` registers it with a framework's auto-discovery
+    /// (a Pest/PHPStan/Psalm plugin, a Laravel package), so the framework
+    /// loads it without code naming it.
+    pub auto_discovered: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,6 +325,18 @@ fn read_installed(root: &Path) -> Vec<InstalledPackage> {
                     .and_then(Value::as_str)
                     .unwrap_or("library")
                     .to_string(),
+                auto_discovered: p
+                    .get("extra")
+                    .and_then(Value::as_object)
+                    .is_some_and(|extra| {
+                        ["pest", "laravel", "phpstan", "psalm"]
+                            .iter()
+                            .any(|key| extra.contains_key(*key))
+                    }),
+                has_bin: p
+                    .get("bin")
+                    .and_then(Value::as_array)
+                    .is_some_and(|b| !b.is_empty()),
                 provide: names(p.get("provide")),
                 replace: names(p.get("replace")),
                 name,

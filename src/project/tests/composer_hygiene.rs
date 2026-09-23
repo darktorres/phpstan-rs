@@ -158,7 +158,7 @@ fn dependency_declarations_are_checked_against_usage() {
     assert_eq!(
         found,
         vec![
-            "composer.json:6 unused.composerDependency: Package acme/unused is required, but the analysed code uses none of its symbols.",
+            "composer.json:6 unused.composerDependency: Package acme/unused is in require, but the analysed code uses none of its symbols.",
             "src/Service.php:10 misplaced.composerDependency: Class Acme\\DevTool\\Tool is declared in package acme/dev-tool, which composer.json only requires in require-dev, but this file is autoloaded in production.",
             "src/Service.php:8 undeclared.composerDependency: Class Acme\\Transitive\\Helper is declared in package acme/transitive, which composer.json doesn't require; it's only installed as another package's dependency.",
         ]
@@ -177,7 +177,7 @@ fn a_class_name_string_counts_as_using_its_package() {
     assert!(
         !found
             .iter()
-            .any(|f| f.contains("unused.composerDependency")),
+            .any(|f| f.contains("acme/used ") || f.contains("acme/unused ")),
         "{found:?}"
     );
 }
@@ -314,4 +314,59 @@ fn provide_scripts_and_platform_are_checked() {
     .collect();
     expected.sort();
     assert_eq!(manifest_level, expected);
+}
+
+#[test]
+fn dev_only_usage_and_unused_dev_dependencies_are_reported() {
+    let fixture = Fixture::new(
+        "dev-only",
+        r#"{
+    "name": "acme/app",
+    "require": {"acme/assert": "^1.0"},
+    "require-dev": {"acme/faker": "^1.0", "acme/tool": "^1.0", "acme/cli": "^1.0"},
+    "autoload": {"psr-4": {"App\\": "src/"}},
+    "autoload-dev": {"psr-4": {"App\\Tests\\": "tests/"}}
+}"#,
+    );
+    let dir = fixture.root.join("vendor/composer");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("installed.json"),
+        r#"{"packages": [
+            {"name": "acme/assert", "type": "library", "install-path": "../acme/assert"},
+            {"name": "acme/faker", "type": "library", "install-path": "../acme/faker"},
+            {"name": "acme/tool", "type": "library", "install-path": "../acme/tool"},
+            {"name": "acme/cli", "type": "library", "install-path": "../acme/cli", "bin": ["bin/cli"]}
+        ]}"#,
+    )
+    .unwrap();
+    let found = fixture
+        .file(
+            "vendor/acme/assert/src/Assert.php",
+            "<?php namespace Acme\\Assert; final class Assert {}",
+            false,
+        )
+        .file(
+            "vendor/acme/faker/src/Faker.php",
+            "<?php namespace Acme\\Faker; final class Faker {}",
+            false,
+        )
+        .file(
+            "vendor/acme/tool/src/Tool.php",
+            "<?php namespace Acme\\Tool; final class Tool {}",
+            false,
+        )
+        .file(
+            "tests/SomeTest.php",
+            "<?php namespace App\\Tests;\nfinal class SomeTest {\n    public function t(): void { new \\Acme\\Assert\\Assert(); new \\Acme\\Faker\\Faker(); }\n}\n",
+            true,
+        )
+        .check();
+    assert_eq!(
+        found,
+        vec![
+            "composer.json:3 devOnly.composerDependency: Package acme/assert is in require, but only code autoloaded through autoload-dev uses it; it belongs in require-dev.",
+            "composer.json:4 unused.composerDependency: Package acme/tool is in require-dev, but the analysed code uses none of its symbols.",
+        ]
+    );
 }

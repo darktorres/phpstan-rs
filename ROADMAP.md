@@ -1237,9 +1237,12 @@ of which PHPStan has: every class/function reference in first-party
 code is resolved to the installed package declaring it -
 `undeclared.composerDependency` (a package only installed transitively),
 `misplaced.composerDependency` (a `require-dev` package used from
-production-autoloaded code), `unused.composerDependency` (a `require`
-entry nothing references, class-name strings counting as use,
-symbol-less package types exempt), with `suggest` entries and
+production-autoloaded code), `devOnly.composerDependency` (a `require`
+package only code autoload-dev loads uses), `unused.composerDependency`
+(a `require`/`require-dev` entry nothing references, class-name strings
+counting as use, symbol-less package types, packages shipping binaries,
+and packages registered with Pest/PHPStan/Psalm/Laravel auto-discovery
+exempt), with `suggest` entries and
 `class_exists()`-probed uses accepted; `misplaced.autoloadDevSymbol`
 (production code using a class only `autoload-dev` loads);
 `psr4.pathMismatch`/`psr4.caseMismatch` (a class declared where its
@@ -3342,40 +3345,6 @@ PHPat::rule()
 - Genuinely distinct from `restricted_symbols` (per-symbol banning) and
   from the `@internal` engine (package-boundary enforcement) — namespace
   *layering direction* is a third, different axis.
-
-### Phase 142 — Composer-manifest dependency-declaration hygiene (new capability)
-
-Two independent real packages converge on the same underlying need:
-validate that every class a file uses is actually reachable through
-that *specific module's own* declared Composer dependencies, not merely
-resolvable via Composer's flat, whole-project autoloader.
-
-- **Shared prerequisite (medium).** Parse the project's own
-  `composer.json` (`require`/`require-dev`) plus `vendor/composer/
-  installed.json` (every installed package's own PSR-4 namespace
-  mapping) into a class-FQN → owning-package index. (Phase 94's P2
-  above needs the identical index for real Composer package-boundary
-  `@internal` enforcement — share one implementation, don't duplicate.)
-- **142a (medium).** Shadow-dependency detection: a class is used, but
-  its owning package is declared in neither `require` nor
-  `require-dev` — only resolvable because some *other* direct
-  dependency happens to also require it. Breaks the moment that
-  incidental transitive path is removed. (`gosuperscript/phpstan-rules`'
-  `RestrictImplicitDependencyUsage`, independently confirmed by
-  `pb30/phpstan-composer-analysis`'s wrapped `shipmonk/composer-
-  dependency-analyser` tool — real, two-package-validated demand.)
-- **142b (small, needs a prod-path/dev-path file classification).**
-  Dev-dependency-used-in-production-code: a class from a
-  `require-dev`-only package is referenced from a file classified as
-  "prod" — would break a `composer install --no-dev` deployment.
-- **142c (small).** The inverse of 142b: a `require`-declared package
-  is only ever referenced from dev/test paths — should be
-  `require-dev` instead.
-- **142d (small).** Unused-dependency detection: a declared package
-  (either section) has zero real usage anywhere in scanned paths —
-  dependency-bloat, safe to remove.
-- 142b-142d all come from `pb30/phpstan-composer-analysis` alone;
-  142a is the one both packages independently confirm.
 
 ### Phase 143 — Generalized "ban this construct/keyword/type" mechanism
 

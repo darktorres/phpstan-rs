@@ -4,8 +4,11 @@
 //! - which installed package every referenced symbol comes from:
 //!   `undeclared.composerDependency` (not required at all),
 //!   `misplaced.composerDependency` (only in `require-dev`, used from
-//!   production-autoloaded code), and `unused.composerDependency` (a
-//!   `require` entry nothing references);
+//!   production-autoloaded code), `devOnly.composerDependency` (a
+//!   `require` package only code autoload-dev loads uses), and
+//!   `unused.composerDependency` (a `require`/`require-dev` entry nothing
+//!   references, a package run through its binaries or registered with
+//!   a framework's auto-discovery exempt);
 //! - `misplaced.autoloadDevSymbol`: production code using a class only
 //!   `autoload-dev` can load;
 //! - `psr4.pathMismatch`/`psr4.caseMismatch`: a class declared where its
@@ -323,6 +326,7 @@ impl Project {
         };
 
         let mut used_packages: HashSet<String> = HashSet::new();
+        let mut used_outside_dev: HashSet<String> = HashSet::new();
         let mut analyzed: Vec<(&PathBuf, &super::FileState)> =
             self.files.iter().filter(|(_, f)| f.analyzed).collect();
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
@@ -333,6 +337,8 @@ impl Project {
         analyzed.retain(|(path, _)| belongs_to_root(path));
         for (path, file) in &analyzed {
             let production = manifest.autoload.covers(path);
+            let dev_only = !production && manifest.autoload_dev.covers(path);
+            let used_before: HashSet<String> = used_packages.clone();
             let mut facts = FileFacts::default();
             collect_facts_in_stmts(&file.ast, &mut facts);
             // Class names written as strings (service wiring, config)
@@ -493,30 +499,57 @@ impl Project {
                 }
             }
             self.check_psr4_locations(manifest, path, file, diagnostics);
+            if !dev_only {
+                used_outside_dev.extend(used_packages.difference(&used_before).cloned());
+            }
         }
 
         let composer_json = manifest.path.clone();
         let mut manifest_diagnostics = Vec::new();
-        for entry in &manifest.require {
-            let name = entry.value.to_ascii_lowercase();
-            if is_platform_package(&name) || used_packages.contains(&name) {
-                continue;
+        let sections = [
+            (&manifest.require, "require"),
+            (&manifest.require_dev, "require-dev"),
+        ];
+        for (entries, section) in sections {
+            for entry in entries {
+                let name = entry.value.to_ascii_lowercase();
+                if is_platform_package(&name) {
+                    continue;
+                }
+                let Some(installed) = manifest.installed_package(&name) else {
+                    continue;
+                };
+                if SYMBOL_LESS_PACKAGE_TYPES.contains(&installed.kind.as_str()) {
+                    continue;
+                }
+                if !used_packages.contains(&name) {
+                    if installed.has_bin || installed.auto_discovered {
+                        continue;
+                    }
+                    manifest_diagnostics.push(diagnostic(
+                        "composer.json",
+                        format!(
+                            "Package {} is in {section}, but the analysed code uses none of its symbols.",
+                            entry.value
+                        ),
+                        at_line(entry.line),
+                        "unused.composerDependency",
+                    ));
+                } else if section == "require"
+                    && !used_outside_dev.contains(&name)
+                    && !manifest.autoload_dev.psr4.is_empty()
+                {
+                    manifest_diagnostics.push(diagnostic(
+                        "composer.json",
+                        format!(
+                            "Package {} is in require, but only code autoloaded through autoload-dev uses it; it belongs in require-dev.",
+                            entry.value
+                        ),
+                        at_line(entry.line),
+                        "devOnly.composerDependency",
+                    ));
+                }
             }
-            let Some(installed) = manifest.installed_package(&name) else {
-                continue;
-            };
-            if SYMBOL_LESS_PACKAGE_TYPES.contains(&installed.kind.as_str()) {
-                continue;
-            }
-            manifest_diagnostics.push(diagnostic(
-                "composer.json",
-                format!(
-                    "Package {} is required, but the analysed code uses none of its symbols.",
-                    entry.value
-                ),
-                at_line(entry.line),
-                "unused.composerDependency",
-            ));
         }
         self.check_provided_implementations(manifest, &mut manifest_diagnostics);
         self.check_composer_scripts(manifest, &mut manifest_diagnostics);
