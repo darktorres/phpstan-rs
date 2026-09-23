@@ -91,3 +91,29 @@ class Child extends Base {
     assert_eq!(messages[0], "Dynamic call to static method Base::make().");
     assert_eq!(ids(src, |_| {}), Vec::<String>::new());
 }
+
+#[test]
+fn loop_variables_overwriting_defined_ones() {
+    let src = r#"<?php
+function f(array $rows, int $i, bool $b): void {
+    $row = null;
+    foreach ($rows as $key => $row) {}
+    foreach ($rows as $k => [$i, $fresh]) {}
+    for ($i = 0, $j = 0; $i < 3; $i++) {}
+    if ($b) { $maybe = 1; }
+    foreach ($rows as $maybe) {}
+    foreach ($rows as $b => $value) {}
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_loop_variable_overwrite = true;
+    assert_eq!(
+        ids(src, enabled),
+        vec![
+            "4 foreach.valueOverwrite",
+            "5 foreach.valueOverwrite",
+            "6 for.variableOverwrite",
+            "9 foreach.keyOverwrite",
+        ]
+    );
+    assert_eq!(ids(src, |_| {}), Vec::<String>::new());
+}

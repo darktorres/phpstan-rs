@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_loop_variable_overwrite`.
+    pub fn set_check_loop_variable_overwrite(&mut self, enabled: bool) {
+        self.registry.check_loop_variable_overwrite = enabled;
+    }
+
     /// See `Registry::check_dynamic_static_calls`.
     pub fn set_check_dynamic_static_calls(&mut self, enabled: bool) {
         self.registry.check_dynamic_static_calls = enabled;

@@ -6,6 +6,10 @@
 //! - `check_dynamic_static_calls` - a static method called, or turned
 //!   into a first-class callable, through an instance
 //!   (`staticMethod.dynamicCall`).
+//! - `check_loop_variable_overwrite` - a `foreach` key or value variable
+//!   (`foreach.keyOverwrite`/`foreach.valueOverwrite`) or a `for` loop's
+//!   initial assignment (`for.variableOverwrite`) replacing a variable
+//!   that is already defined.
 
 use crate::ast::*;
 use crate::checker::{Checker, Locals};
@@ -58,6 +62,53 @@ impl<'a> Checker<'a> {
                     );
                 }
                 _ => {}
+            }
+        }
+    }
+
+    /// The statement-level ports, before `stmt` itself is checked.
+    pub(crate) fn check_strict_rules_statement(
+        &mut self,
+        stmt: &Stmt,
+        locals: &Locals,
+        label: &str,
+    ) {
+        if self.registry.check_loop_variable_overwrite {
+            let mut overwritten: Vec<(crate::token::Span, &str, String)> = Vec::new();
+            match &stmt.kind {
+                StmtKind::Foreach { key, value, .. } => {
+                    if let Some(key) = key
+                        && let ExprKind::Variable(name) = &key.kind
+                        && locals.contains_key(name)
+                    {
+                        overwritten.push((
+                            key.span,
+                            "foreach.keyOverwrite",
+                            format!("Foreach overwrites ${name} with its key variable."),
+                        ));
+                    }
+                    for (name, span) in defined_targets(value, locals) {
+                        let message =
+                            format!("Foreach overwrites ${name} with its value variable.");
+                        overwritten.push((span, "foreach.valueOverwrite", message));
+                    }
+                }
+                StmtKind::For { init, .. } => {
+                    for expr in init {
+                        if let ExprKind::Assign(target, _) = &expr.kind {
+                            for (name, span) in defined_targets(target, locals) {
+                                let message = format!(
+                                    "For loop initial assignment overwrites variable ${name}."
+                                );
+                                overwritten.push((span, "for.variableOverwrite", message));
+                            }
+                        }
+                    }
+                }
+                _ => {}
+            }
+            for (span, id, message) in overwritten {
+                self.report(label.to_string(), message, span, 0, id);
             }
         }
     }
@@ -187,5 +238,20 @@ impl<'a> Checker<'a> {
             current = parent;
         }
         parents
+    }
+}
+
+/// The plain variables `target` binds (recursing into `[...]`/`list()`
+/// destructuring) that `locals` already defines.
+fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, crate::token::Span)> {
+    match &target.kind {
+        ExprKind::Variable(name) if locals.contains_key(name) => {
+            vec![(name.to_string(), target.span)]
+        }
+        ExprKind::ArrayLiteral(items) => items
+            .iter()
+            .flat_map(|item| defined_targets(&item.value, locals))
+            .collect(),
+        _ => Vec::new(),
     }
 }

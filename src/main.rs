@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag foreach/for loop variables that overwrite an already-defined variable.
+        #[arg(long)]
+        check_loop_variable_overwrite: bool,
         /// Flag static methods called through an instance with ->.
         #[arg(long)]
         check_dynamic_static_calls: bool,
@@ -462,6 +465,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_loop_variable_overwrite,
             check_dynamic_static_calls,
             check_illegal_constructor_calls,
             check_enum_exhaustiveness,
@@ -520,6 +524,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_loop_variable_overwrite,
             check_dynamic_static_calls,
             check_illegal_constructor_calls,
             check_enum_exhaustiveness,
