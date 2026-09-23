@@ -235,3 +235,19 @@ if (is_executable('c.php')) { include 'c.php'; }
     );
     assert!(d.is_empty(), "{d:?}");
 }
+
+#[test]
+fn dirname_of_dir_resolves_from_a_relative_file_path() {
+    // A file named relative to the working directory (a config's
+    // `paths = ["src"]`, tests run from the crate root) - `__DIR__` is
+    // still absolute, so climbing past the named path's own first
+    // segment lands in the real working directory, not at `""`.
+    let d: Vec<_> = diagnostics_for_file(
+        "<?php\nrequire dirname(__DIR__, 3) . '/Cargo.toml';\n",
+        std::path::Path::new("src/checker/tests/main.php"),
+    )
+    .into_iter()
+    .filter(|d| d.identifier.ends_with(".fileNotFound"))
+    .collect();
+    assert!(d.is_empty(), "{d:?}");
+}
