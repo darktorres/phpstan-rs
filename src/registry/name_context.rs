@@ -309,7 +309,9 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // class reference to resolve - without this, the same pseudo-
         // type used in two different namespaces was treated as two
         // unrelated "classes" (`App\resource` vs. plain `resource`).
-        Type::Object(name, args) if name == "resource" => Type::Object(name, args),
+        Type::Object(name, args) if name == "resource" || name == "closed-resource" => {
+            Type::Object(name, args)
+        }
         // Same reasoning again: `"$$interface"`/`"$$trait"`
         // (`types::parse_type_keyword_or_class`'s own bare `interface-
         // string`/`trait-string` sentinels, always argument-less) are
@@ -476,7 +478,7 @@ pub(crate) fn collect_class_name_case_refs(
         Type::Object(name, _)
             if matches!(
                 name.as_str(),
-                "object" | "resource" | "$$interface" | "$$trait"
+                "object" | "resource" | "closed-resource" | "$$interface" | "$$trait"
             ) => {}
         Type::Object(name, args)
             if matches!(

@@ -203,3 +203,146 @@ fn a_property_doc_member_the_native_type_excludes_does_not_reach_its_type() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn unresolvable_param_and_return_types_are_reported() {
+    let m = messages(
+        r#"<?php
+            namespace App;
+            class Known { const A = 1; }
+            /**
+             * @param string[optional] $a
+             * @param Closure(int): string $b
+             * @param Known::MISSING $c
+             * @param self $d
+             * @param int<5, 1> $e
+             * @param int&string $f
+             * @param array<int, string, bool> $g
+             * @param non-empty-foo $h
+             * @param-out Unknown::X $i
+             * @return list<int, string>
+             */
+            function f($a, $b, $c, $d, $e, $f, $g, $h, &$i) { return []; }
+        "#,
+        "parameter.unresolvableType",
+    );
+    assert_eq!(
+        m,
+        [
+            "PHPDoc tag @param for parameter $a contains unresolvable type.",
+            "PHPDoc tag @param for parameter $b contains unresolvable type.",
+            "PHPDoc tag @param for parameter $c contains unresolvable type.",
+            "PHPDoc tag @param for parameter $d contains unresolvable type.",
+            "PHPDoc tag @param for parameter $e contains unresolvable type.",
+            "PHPDoc tag @param for parameter $f contains unresolvable type.",
+            "PHPDoc tag @param for parameter $g contains unresolvable type.",
+            "PHPDoc tag @param for parameter $h contains unresolvable type.",
+            "PHPDoc tag @param-out for parameter $i contains unresolvable type.",
+        ]
+    );
+    let r = messages(
+        r#"<?php
+            /** @return list<int, string> */
+            function g(): array { return []; }
+        "#,
+        "return.unresolvableType",
+    );
+    assert_eq!(r, ["PHPDoc tag @return contains unresolvable type."]);
+}
+
+#[test]
+fn resolvable_types_are_never_reported_unresolvable() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            use Closure;
+            enum Suit: string { case Hearts = 'h'; case Spades = 's'; }
+            /** @phpstan-type Element array{type: string} */
+            class Known {
+                const A_ONE = 1;
+                const A_TWO = 2;
+                /**
+                 * @param array{a: int}['a'] $a
+                 * @param Closure(int): string $b
+                 * @param self::A_* $c
+                 * @param Suit::Hearts $d
+                 * @param string[] $e
+                 * @param int<1, 5> $f
+                 * @param non-empty-array<int, string> $g
+                 * @param list<int>&non-empty-array $h
+                 * @param \Closure(int): void $i
+                 * @param static $j
+                 * @param Known::class $k
+                 * @param closed-resource|open-resource $l
+                 * @param \OCI-Lob $m
+                 * @param Element&array{type: 'a'} $n
+                 * @return array<int, string>
+                 */
+                public function f($a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n) { return []; }
+            }
+        "#,
+    );
+    let bad: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier.ends_with(".unresolvableType"))
+        .collect();
+    assert!(bad.is_empty(), "got: {bad:?}");
+}
+
+#[test]
+fn an_unresolvable_property_type_is_reported() {
+    let m = messages(
+        r#"<?php
+            class Holder {
+                /** @var string[optional] */
+                public string $a = '';
+                public function __construct(
+                    /** @var int<9, 1> */
+                    public int $b,
+                ) {}
+            }
+        "#,
+        "property.unresolvableType",
+    );
+    assert_eq!(
+        m,
+        [
+            "PHPDoc tag @var for property Holder::$a contains unresolvable type.",
+            "PHPDoc type for property Holder::$b contains unresolvable type.",
+        ]
+    );
+}
+
+#[test]
+fn a_closed_resource_is_not_a_resource_to_is_resource() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Handle {
+                /** @var closed-resource|resource|null */
+                private mixed $stream = null;
+                public function close(): void {
+                    if (is_resource($this->stream)) {
+                        assertType('resource', $this->stream);
+                    }
+                }
+                /** @param closed-resource $c */
+                public function dead($c): void {
+                    if (is_resource($c)) {}
+                }
+            }
+        "#,
+    );
+    let ids: Vec<(&str, &str)> = d
+        .iter()
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        ids,
+        [(
+            "function.impossibleType",
+            "Call to function is_resource() with closed-resource will always evaluate to false."
+        )],
+        "got: {d:?}"
+    );
+}

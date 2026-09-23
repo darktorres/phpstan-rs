@@ -37,7 +37,9 @@ impl<'a> Checker<'a> {
     /// arbitrary object.
     pub(crate) fn type_to_integer(&self, ty: &Type) -> Option<Type> {
         match ty {
-            Type::Object(name, _) if name == "resource" => Some(Type::Int),
+            Type::Object(name, _) if name == "resource" || name == "closed-resource" => {
+                Some(Type::Int)
+            }
             Type::Object(name, _) if self.is_castable_object(name, INT_CASTABLE_CLASSES) => {
                 Some(Type::Int)
             }
@@ -65,7 +67,9 @@ impl<'a> Checker<'a> {
     /// no meaningful float value).
     pub(crate) fn type_to_float(&self, ty: &Type) -> Option<Type> {
         match ty {
-            Type::Object(name, _) if name == "resource" => Some(Type::Float),
+            Type::Object(name, _) if name == "resource" || name == "closed-resource" => {
+                Some(Type::Float)
+            }
             Type::Object(name, _) if self.is_castable_object(name, FLOAT_CASTABLE_CLASSES) => {
                 Some(Type::Float)
             }
@@ -100,7 +104,7 @@ impl<'a> Checker<'a> {
             // unlike `(int)`/`(float)` just above, a resource-to-string
             // cast is treated as illegal even though real PHP itself
             // produces a "Resource id #N" string with no warning.
-            Type::Object(name, _) if name == "resource" => None,
+            Type::Object(name, _) if name == "resource" || name == "closed-resource" => None,
             Type::Object(name, _) => {
                 if self.registry.is_subclass_of(name, "GMP")
                     || self.registry.is_subclass_of(name, "BcMath\\Number")

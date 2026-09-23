@@ -551,6 +551,7 @@ impl Registry {
             (_, Type::Object(name, _))
                 if name != "object"
                     && name != "resource"
+                    && name != "closed-resource"
                     && !self.classes.contains_key(name.as_str()) =>
             {
                 true

@@ -386,6 +386,7 @@ fn a_top_level_function_own_template_referenced_inside_an_inline_var_annotation_
     let d = diagnostics_for(
         r#"<?php
             namespace Psl\Dict;
+            use Closure;
             /**
              * @template Tk of array-key
              * @template Tv

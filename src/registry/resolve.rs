@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::collections::{HashMap, HashSet};
@@ -271,8 +272,7 @@ impl Registry {
                     }
                 }
                 for (name, sig) in consts {
-                    if let std::collections::hash_map::Entry::Vacant(slot) = info.consts.entry(name)
-                    {
+                    if let indexmap::map::Entry::Vacant(slot) = info.consts.entry(name) {
                         slot.insert(sig);
                         changed = true;
                     }
@@ -1414,8 +1414,8 @@ fn class_has_deferred_type(info: &ClassInfo) -> bool {
 fn visible_class_consts(
     fqn: &str,
     classes: &FxHashMap<Arc<str>, ClassInfo>,
-) -> HashMap<Arc<str>, ConstSig> {
-    let mut consts: HashMap<Arc<str>, ConstSig> = HashMap::new();
+) -> IndexMap<Arc<str>, ConstSig> {
+    let mut consts: IndexMap<Arc<str>, ConstSig> = IndexMap::new();
     let mut seen: HashSet<Arc<str>> = HashSet::new();
     let mut queue: std::collections::VecDeque<Arc<str>> = std::collections::VecDeque::new();
     queue.push_back(Arc::from(fqn));
@@ -1439,12 +1439,11 @@ fn visible_class_consts(
 
 /// The union of every constant in `consts` whose name matches `pattern` -
 /// see `resolve_class_const_type`.
-fn matching_class_const_type(consts: &HashMap<Arc<str>, ConstSig>, pattern: &str) -> Type {
-    let mut names: Vec<&Arc<str>> = consts
+fn matching_class_const_type(consts: &IndexMap<Arc<str>, ConstSig>, pattern: &str) -> Type {
+    let names: Vec<&Arc<str>> = consts
         .keys()
         .filter(|name| glob_matches(pattern, name))
         .collect();
-    names.sort();
     let mut members: Vec<Type> = Vec::new();
     for name in names {
         let ty = consts[name].ty.clone();
@@ -1515,7 +1514,7 @@ fn value_of_type(ty: Type) -> Type {
 /// rewritten out of the registry's class map while rewriting it, so
 /// `resolve_deferred_value_of_in_type` can't find a class's own constants
 /// there - this runs first, for the one class that's missing.
-fn bind_class_const_self(ty: Type, class: &str, own_consts: &HashMap<Arc<str>, ConstSig>) -> Type {
+fn bind_class_const_self(ty: Type, class: &str, own_consts: &IndexMap<Arc<str>, ConstSig>) -> Type {
     bind_class_const_self_at(ty, class, own_consts, 0)
 }
 
@@ -1526,7 +1525,7 @@ fn bind_class_const_self(ty: Type, class: &str, own_consts: &HashMap<Arc<str>, C
 fn bind_class_const_self_at(
     ty: Type,
     class: &str,
-    own_consts: &HashMap<Arc<str>, ConstSig>,
+    own_consts: &IndexMap<Arc<str>, ConstSig>,
     depth: usize,
 ) -> Type {
     const MAX_DEPTH: usize = 16;

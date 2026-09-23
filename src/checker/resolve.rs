@@ -453,7 +453,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
         matches!(
             name,
-            "object" | "Traversable" | "resource" | "class@anonymous"
+            "object" | "Traversable" | "resource" | "closed-resource" | "class@anonymous"
         ) || self.registry.lookup_class(name).is_some()
     }
 

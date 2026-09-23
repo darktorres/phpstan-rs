@@ -1578,6 +1578,7 @@ dependencies = [
  "dhat",
  "hotpath",
  "imbl",
+ "indexmap",
  "lsp-server",
  "lsp-types",
  "md5",

@@ -924,7 +924,9 @@ impl<'a> Checker<'a> {
             | Type::IntRange(..)
             | Type::Float
             | Type::FloatLiteral(_) => true,
-            Type::Object(class, _) if class.as_str() == "resource" => true,
+            Type::Object(class, _) if matches!(class.as_str(), "resource" | "closed-resource") => {
+                true
+            }
             Type::Object(class, _) | Type::EnumCase(class, _) => {
                 class.as_str() != "Closure"
                     && self

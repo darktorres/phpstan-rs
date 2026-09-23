@@ -905,7 +905,11 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `object` hint is (a sentinel `Object`, not a real class), with
         // the same namespace-qualification exemption below: "resource"
         // isn't a real class reference to resolve per-file.
-        "resource" => Type::Object("resource".to_string(), Vec::new()),
+        // `open-resource` is an ordinary (open) `resource`; a
+        // `closed-resource` is its own kind, one `is_resource()` rejects
+        // (PHPStan's `ClosedResourceType`).
+        "resource" | "open-resource" => Type::Object("resource".to_string(), Vec::new()),
+        "closed-resource" => Type::Object("closed-resource".to_string(), Vec::new()),
         // `value-of<T>`/`key-of<T>` - real PHPStan's own
         // `ValueOfType`/`KeyOfType`, both evaluated against `T`'s
         // resolved type only once needed. This project has no general

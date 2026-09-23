@@ -1088,7 +1088,20 @@ whole hierarchy indexed); a tag naming no parameter, or `@param-out` on
 a by-value one, is reported too, in tag order. Matches real PHPStan
 47/47 on the Piwigo corpus. `property.phpDocType` applies the same to a
 property's `@var` (a promoted property's constructor `@param`/inline
-`@var`, its "PHPDoc type"). **`function.alreadyNarrowedType`** answers
+`@var`, its "PHPDoc type"). **`parameter.unresolvableType`/
+`return.unresolvableType`/`property.unresolvableType`**
+(`checker/phpdoc_unresolvable.rs`) decide on the tag's parsed type node
+where PHPStan's `TypeNodeResolver` yields an `ErrorType` or implicit
+`never`: an invalid offset access (`string[optional]`), an unimported
+`Closure(...)` in a namespace (still typed as the global `Closure`),
+a missing class or constant in `Foo::BAR`/`Foo::X_*`, `self`/`static`/
+`parent` with no class, an empty `int<5, 1>`, a disjoint `int&string`,
+too many built-in generic arguments, and an unknown hyphenated keyword.
+Matches real PHPStan 55/55 on the Piwigo corpus. `closed-resource` is
+its own type, disjoint from an open `resource` (`is_resource()` rejects
+it), and class constants and enum cases keep declaration order
+(`IndexMap`), so a `match` remainder and a `Foo::X_*` union list them as
+PHP's own `getConstants()` does. **`function.alreadyNarrowedType`** answers
 "always true" through that strict relation, so `is_string()` on a
 benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
@@ -3626,11 +3639,9 @@ against this list, and added the real gaps the audit had missed.
 
 - `IncompatiblePhpDocTypeRule` family remainder — the function/method
   `@param`/`@param-out`/`@return` half and `property.phpDocType` are
-  built (see Done). Left: the property-hook variant
-  (`IncompatiblePropertyHookPhpDocTypeRule`), the `*.unresolvableType`
-  family (an unresolvable PHPDoc type modeled as its own verdict rather
-  than today's lenient fallbacks), and `GenericCallableRuleHelper`'s
-  template checks on callable shapes.
+  built, with their `*.unresolvableType` siblings (see Done). Left: the
+  property-hook variant (`IncompatiblePropertyHookPhpDocTypeRule`), and
+  `GenericCallableRuleHelper`'s template checks on callable shapes.
 - `IncompatibleSelfOutTypeRule` — `@phpstan-self-out` is entirely
   unimplemented (only in the typo-detection whitelist). (Phase 88's U4
   is the *inference* half of this same tag family, once real tag
@@ -3655,10 +3666,10 @@ against this list, and added the real gaps the audit had missed.
   compatibility checks, only `varTag.type` is built.
   `varTag.nativeType` (the `@var` type against the expression's
   *native* type, not its PHPDoc-refined one) isn't.
-- Identifiers still to build: `parameter.unresolvableType`,
-  `return.unresolvableType`, `property.unresolvableType`,
-  and `selfOut.type`/`.static`/`.unresolvableType` for
-  `IncompatibleSelfOutTypeRule`.
+- Identifiers still to build: `selfOut.type`/`.static`/
+  `.unresolvableType` for `IncompatibleSelfOutTypeRule`, and
+  `assert.unresolvableType`/`varTag.unresolvableType`, which can reuse
+  `checker/phpdoc_unresolvable.rs`.
 
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 

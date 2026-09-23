@@ -555,6 +555,15 @@ pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
         (Type::StringLiteral(x), Type::StringLiteral(y)) => x != y,
         (Type::IntLiteral(x), Type::IntLiteral(y)) => x != y,
         (Type::True, Type::False) | (Type::False, Type::True) => true,
+        // An open and a closed resource are never the same value.
+        (Type::Object(x, _), Type::Object(y, _))
+            if matches!(
+                (x.as_str(), y.as_str()),
+                ("resource", "closed-resource") | ("closed-resource", "resource")
+            ) =>
+        {
+            true
+        }
         (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
             class_a == class_b && case_a != case_b
         }

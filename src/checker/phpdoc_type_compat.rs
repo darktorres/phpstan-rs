@@ -29,6 +29,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let block = docblock::parse(doc);
+        let nodes = super::phpdoc_unresolvable::tag_type_nodes(doc);
         let resolve = |this: &Self, ty: &Type| match class_name {
             Some(c) => this.resolve_pseudo(ty, c),
             None => ty.clone(),
@@ -57,6 +58,23 @@ impl<'a> Checker<'a> {
                 let (Some(param), Some(param_sig)) = (f.params.get(i), sig.params.get(i)) else {
                     continue;
                 };
+                let node = if tag == "@param-out" {
+                    nodes.param_out.get(name.as_str())
+                } else {
+                    nodes.params.get(name.as_str())
+                };
+                if node.is_some_and(|n| self.type_node_unresolvable(n, class_name)) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "PHPDoc tag {tag} for parameter ${name} contains unresolvable type."
+                        ),
+                        f.name_span,
+                        2,
+                        "parameter.unresolvableType",
+                    );
+                    continue;
+                }
                 let doc_ty = if tag == "@param-out" {
                     if !param.by_ref {
                         self.report(
@@ -99,7 +117,19 @@ impl<'a> Checker<'a> {
                 );
             }
         }
-        if let Some(doc_ty) = &sig.return_doc_ty {
+        if nodes
+            .return_type
+            .as_ref()
+            .is_some_and(|n| self.type_node_unresolvable(n, class_name))
+        {
+            self.report(
+                label.to_string(),
+                "PHPDoc tag @return contains unresolvable type.".to_string(),
+                f.name_span,
+                2,
+                "return.unresolvableType",
+            );
+        } else if let Some(doc_ty) = &sig.return_doc_ty {
             let native = resolve(self, &sig.return_type_native);
             let doc_ty = resolve(self, doc_ty);
             self.report_phpdoc_native_mismatch(
@@ -114,37 +144,68 @@ impl<'a> Checker<'a> {
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDecl) {
-        let Some(info) = self.registry.classes.get(fqn) else {
+        if !self.registry.classes.contains_key(fqn) {
             return;
-        };
-        let promoted = c
+        }
+        // A promoted property's PHPDoc type is its constructor `@param`,
+        // else its own inline `@var`.
+        let ctor = c
             .methods
             .iter()
-            .find(|m| m.function.name.as_ref() == "__construct")
+            .find(|m| m.function.name.as_ref() == "__construct");
+        let ctor_nodes = ctor
+            .and_then(|m| m.function.doc_comment.as_deref())
+            .map(super::phpdoc_unresolvable::tag_type_nodes)
+            .unwrap_or_default();
+        let promoted = ctor
             .into_iter()
             .flat_map(|m| m.function.params.iter())
             .filter(|p| p.promoted_visibility.is_some())
-            .map(|p| (p.name.clone(), p.span, "PHPDoc type"));
-        let declared = c
-            .properties
-            .iter()
-            .map(|p| (p.name.clone(), p.span, "PHPDoc tag @var"));
-        let checks: Vec<(Type, Type, String, Span)> = declared
-            .chain(promoted)
-            .filter_map(|(name, span, description)| {
-                let prop = info.properties.get(name.as_ref())?;
-                if !prop.has_native_type {
-                    return None;
-                }
-                let doc = prop.doc_ty.clone()?;
-                Some((
-                    doc,
-                    prop.ty_native.clone(),
-                    format!("{description} for property {fqn}::${name}"),
+            .map(|p| {
+                let node = ctor_nodes.params.get(p.name.as_ref()).cloned().or_else(|| {
+                    p.doc_comment
+                        .as_deref()
+                        .and_then(|d| super::phpdoc_unresolvable::tag_type_nodes(d).var)
+                });
+                (p.name.clone(), p.span, "PHPDoc type", node)
+            });
+        let declared = c.properties.iter().map(|p| {
+            let node = p
+                .doc_comment
+                .as_deref()
+                .and_then(|d| super::phpdoc_unresolvable::tag_type_nodes(d).var);
+            (p.name.clone(), p.span, "PHPDoc tag @var", node)
+        });
+        let entries: Vec<_> = declared.chain(promoted).collect();
+        let mut checks: Vec<(Type, Type, String, Span)> = Vec::new();
+        for (name, span, description, node) in entries {
+            let subject = format!("{description} for property {fqn}::${name}");
+            if node.is_some_and(|n| self.type_node_unresolvable(&n, Some(fqn))) {
+                self.report(
+                    fqn.to_string(),
+                    format!("{subject} contains unresolvable type."),
                     span,
-                ))
-            })
-            .collect();
+                    2,
+                    "property.unresolvableType",
+                );
+                continue;
+            }
+            let Some(prop) = self
+                .registry
+                .classes
+                .get(fqn)
+                .and_then(|info| info.properties.get(name.as_ref()))
+            else {
+                continue;
+            };
+            if !prop.has_native_type {
+                continue;
+            }
+            let Some(doc) = prop.doc_ty.clone() else {
+                continue;
+            };
+            checks.push((doc, prop.ty_native.clone(), subject, span));
+        }
         for (doc, native, subject, span) in checks {
             let doc = self.resolve_pseudo(&doc, fqn);
             let native = self.resolve_pseudo(&native, fqn);

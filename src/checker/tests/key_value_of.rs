@@ -359,6 +359,8 @@ fn class_constant_values_are_typed_exactly_including_references() {
 
 #[test]
 fn a_class_constant_wildcard_sees_inherited_and_interface_constants() {
+    // PHP's own `ReflectionClass::getConstants()` order: own declarations,
+    // then the parent's, then interfaces'.
     let d = diagnostics_for(
         r#"<?php
             use function PHPStan\Testing\assertType;
@@ -369,11 +371,11 @@ fn a_class_constant_wildcard_sees_inherited_and_interface_constants() {
                 const CODE_C = 'c';
                 /** @param self::CODE_* $code */
                 public function f($code): void {
-                    assertType("'a'|'overridden'|'c'|'i'", $code);
+                    assertType("'overridden'|'c'|'a'|'i'", $code);
                 }
             }
             /** @param Child::CODE_* $code */
-            function g($code): void { assertType("'a'|'overridden'|'c'|'i'", $code); }
+            function g($code): void { assertType("'overridden'|'c'|'a'|'i'", $code); }
         "#,
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");

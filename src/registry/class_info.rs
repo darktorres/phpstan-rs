@@ -1,3 +1,4 @@
+use indexmap::IndexMap;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -203,7 +204,10 @@ pub struct ClassInfo {
     pub implements: Vec<Arc<str>>,
     pub methods: HashMap<Arc<str>, FunctionSig>,
     pub properties: HashMap<Arc<str>, PropertySig>,
-    pub consts: HashMap<Arc<str>, ConstSig>,
+    // Declaration order is kept: a listing of constants (a `match`
+    // remainder, a `Foo::X_*` wildcard) follows source order, as in real
+    // PHPStan.
+    pub consts: IndexMap<Arc<str>, ConstSig>,
     pub uses: Vec<Arc<str>>,
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
@@ -1375,7 +1379,7 @@ impl ClassInfo {
                 },
             );
         }
-        let mut consts: HashMap<Arc<str>, ConstSig> = e
+        let mut consts: IndexMap<Arc<str>, ConstSig> = e
             .consts
             .iter()
             .map(|cc| {
@@ -1420,6 +1424,21 @@ impl ClassInfo {
                 },
             );
         }
+        // Cases and constants interleave in source; keep that order.
+        let position = |name: &Arc<str>| {
+            e.cases
+                .iter()
+                .find(|c| c.name == *name)
+                .map(|c| c.name_span)
+                .or_else(|| {
+                    e.consts
+                        .iter()
+                        .find(|k| k.name == *name)
+                        .map(|k| k.name_span)
+                })
+                .map(|span| (span.start.line, span.start.col))
+        };
+        consts.sort_by_cached_key(|name, _| position(name));
 
         // Each case's own literal backing value, independent of whether
         // every case happens to be a bare literal (unlike `->value`'s
