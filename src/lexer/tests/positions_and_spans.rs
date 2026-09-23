@@ -151,3 +151,22 @@ fn many_tokens_on_one_extremely_long_line_does_not_blow_up_quadratically() {
         "tokenizing one long line took {elapsed:?} - looks quadratic again"
     );
 }
+
+#[test]
+fn a_short_echo_tag_after_inline_html_still_echoes() {
+    let src = "<title><?= $t ?></title><?= $u ?>";
+    let toks: Vec<Token> = Lexer::new(src)
+        .tokenize_with_spans()
+        .into_iter()
+        .map(|(t, _, _)| t)
+        .collect();
+    let echoes = toks
+        .iter()
+        .filter(|t| matches!(t, Token::Keyword(Keyword::Echo)))
+        .count();
+    assert_eq!(echoes, 2, "{toks:?}");
+    assert!(
+        matches!(&toks[0], Token::InlineHtml(h) if &**h == "<title>"),
+        "{toks:?}"
+    );
+}

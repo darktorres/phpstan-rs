@@ -447,11 +447,13 @@ impl<'a> Lexer<'a> {
             self.pos += 5;
             self.in_php = true;
         } else if self.starts_with("<?=") {
-            self.pos += 3;
-            self.in_php = true;
+            // The HTML before it is its own token; `<?=` is left for the
+            // next call, which surfaces it as `echo`.
             if !html.is_empty() {
                 return Token::InlineHtml(intern(&html));
             }
+            self.pos += 3;
+            self.in_php = true;
             // `<?=` is shorthand for `echo `; surface it as the keyword so
             // the parser can treat it identically to an echo statement.
             return Token::Keyword(Keyword::Echo);
