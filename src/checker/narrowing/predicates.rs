@@ -272,14 +272,9 @@ pub(crate) fn preg_match_condition(cond: &Expr) -> Option<(&Expr, &Expr, bool)> 
 /// `std::collections::HashMap` on the underlying `imbl` persistent map,
 /// not `retain`.
 pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
-    let base_prop = format!("{key}->");
-    let base_idx = format!("{key}[");
-    let subscript_marker = format!("[${key}]");
     let stale: Vec<String> = locals
         .iter()
-        .filter(|(k, _)| {
-            k.starts_with(&base_prop) || k.starts_with(&base_idx) || k.contains(&subscript_marker)
-        })
+        .filter(|(k, _)| k.as_str() != key && key_depends_on(k, key))
         .map(|(k, _)| k.clone())
         .collect();
     for k in stale {
@@ -293,6 +288,7 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     // itself), so riding along here covers all of them uniformly rather
     // than needing its own separate call at each one.
     locals.container_field_facts.remove(key);
+    locals.purge_branch_implied_facts_depending_on(key);
     // Same reasoning for `key`'s own per-discriminant accumulator facts
     // (see `DiscriminantArrayFactsMap`'s doc comment) - a wholesale
     // rebind (or an unrecognized by-ref pass) starts `key`'s own value
@@ -301,6 +297,17 @@ pub(crate) fn purge_stale_narrowing_for(locals: &mut Locals, key: &str) {
     locals
         .discriminant_array_facts
         .retain(|(container, _, _), _| container != key);
+}
+
+/// Whether narrowing key `k` names `key` itself, a chain rooted at it
+/// (`"key->prop"`, `"key[lit]"`), or a chain using `key` as a variable
+/// subscript (`"other[$key]"`) - i.e. whether `k`'s value can change
+/// when `key` is rebound.
+pub(crate) fn key_depends_on(k: &str, key: &str) -> bool {
+    k == key
+        || k.strip_prefix(key)
+            .is_some_and(|rest| rest.starts_with("->") || rest.starts_with('['))
+        || k.contains(&format!("[${key}]"))
 }
 
 /// Eagerly copies `source_container`'s own recorded per-field facts (see

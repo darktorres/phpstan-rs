@@ -90,14 +90,19 @@ type ConditionAliasMap = imbl::GenericHashMap<
 // `apply_equality_narrowing`'s own replay hook). `Rc`-wrapped `Vec`,
 // mirroring `ConditionAliasMap`'s own `Rc<Expr>` value, so cloning
 // `Locals` (extremely frequent - one clone per branch fork) stays O(1)
-// even though a fact list itself isn't `Copy`. Unlike `condition_
-// aliases` (purged the moment its own target is rebound), a recorded
-// fact here is a durable structural fact about the code at this exact
-// discriminant, not per-branch state - `merge_scopes` unions both
-// sides' entries rather than intersecting.
+// even though a fact list itself isn't `Copy`. A recorded fact is a
+// structural fact about the code at this exact discriminant, not
+// per-branch state - `merge_scopes` unions both sides' entries rather
+// than intersecting - but it only holds while the values it relates are
+// the ones it saw: rebinding the discriminant's subject drops the whole
+// entry, and rebinding an implied variable drops that pair
+// (`Locals::purge_branch_implied_facts_depending_on`). A loop's next
+// iteration rebinding its `foreach` variable is the common case.
+type BranchImpliedFacts = std::rc::Rc<Vec<(String, Type)>>;
+
 type BranchImpliedFactsMap = imbl::GenericHashMap<
     String,
-    std::rc::Rc<Vec<(String, Type)>>,
+    BranchImpliedFacts,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -303,6 +308,7 @@ impl Locals {
             self.provenance.insert(key.clone(), set);
         }
         self.purge_condition_aliases_targeting(&key);
+        self.purge_branch_implied_facts_depending_on(&key);
         self.query_builder_aliases.remove(&key);
         // A container rebound wholesale invalidates every per-field fact
         // recorded about its old value - see `ContainerFieldFactsMap`'s
@@ -351,6 +357,47 @@ impl Locals {
         self.condition_aliases.remove(key);
         self.condition_aliases
             .retain(|_, (targets, _)| !targets.iter().any(|t| t == key));
+    }
+
+    /// Drops every branch-implied fact that no longer holds once `key`
+    /// (a variable or `narrowing_key` chain) gets a new value - see
+    /// `BranchImpliedFactsMap`.
+    pub(crate) fn purge_branch_implied_facts_depending_on(&mut self, key: &str) {
+        if self.branch_implied_facts.is_empty() {
+            return;
+        }
+        let depends = |k: &str| narrowing::key_depends_on(k, key);
+        let mut changed: Vec<(String, Option<BranchImpliedFacts>)> = Vec::new();
+        for (fact_key, implied) in self.branch_implied_facts.iter() {
+            let subject = fact_key
+                .split_once("==")
+                .map_or(fact_key.as_str(), |(s, _)| s);
+            if depends(subject) {
+                changed.push((fact_key.clone(), None));
+                continue;
+            }
+            if implied.iter().any(|(var, _)| depends(var)) {
+                let kept: Vec<(String, Type)> = implied
+                    .iter()
+                    .filter(|(var, _)| !depends(var))
+                    .cloned()
+                    .collect();
+                changed.push((
+                    fact_key.clone(),
+                    (!kept.is_empty()).then(|| std::rc::Rc::new(kept)),
+                ));
+            }
+        }
+        for (fact_key, replacement) in changed {
+            match replacement {
+                Some(kept) => {
+                    self.branch_implied_facts.insert(fact_key, kept);
+                }
+                None => {
+                    self.branch_implied_facts.remove(&fact_key);
+                }
+            }
+        }
     }
 
     /// The provenance-*copying* primitive - used where a value moves

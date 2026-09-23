@@ -5309,3 +5309,46 @@ fn an_inline_var_tag_on_an_assignment_applies_after_the_right_hand_side() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn branch_implied_facts_do_not_survive_rebinding_the_variable_they_describe() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Expr {}
+            class Arr extends Expr {}
+            class Arg {
+                public Expr $value;
+                public function __construct() { $this->value = new Expr(); }
+            }
+            class Call {
+                /** @var array<Arg|int> */
+                public array $args = [];
+            }
+            /** @param list<Call> $calls */
+            function objects(array $calls): void {
+                $seen = [];
+                foreach ($calls as $call) {
+                    if (! $call->args[0] instanceof Arg || ! $call->args[0]->value instanceof Arr) {
+                        continue;
+                    }
+                    $seen[] = 1;
+                }
+            }
+            /** @param list<array<string, mixed>> $rows */
+            function flags(array $rows, bool $b): void {
+                $out = [];
+                foreach ($rows as $row) {
+                    if ($b) {
+                        $row['name'] = 'y';
+                    } else {
+                        assertType('mixed', $row['name']);
+                        $row['name'] = strip_tags('x');
+                    }
+                    $out[] = $row;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
