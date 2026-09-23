@@ -685,7 +685,13 @@ fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
 /// arguments); one declaring the same template names takes PHPStan's
 /// variances, and any bound or default it lacks. Differently named
 /// templates are left alone - phpstorm-stubs' own members refer to them.
-fn patch_phpstan_stub_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
+///
+/// Property types come from the same stubs: a property the stub gives a
+/// PHPDoc type (`DOMDocument::$documentElement` as `DOMElement|null`,
+/// where phpstorm-stubs' own `@var` claims a bare `DOMElement`) takes
+/// that type, as long as the class ends up with the stub's own template
+/// names, since the type may refer to them.
+fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassInfo)]) {
     for source in PHPSTAN_STUB_SOURCES {
         let tokens = Lexer::new(source).tokenize_with_spans();
         let Ok(program) = Parser::new(tokens).parse_program() else {
@@ -693,35 +699,51 @@ fn patch_phpstan_stub_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
         };
         let registry = Registry::index_and_flatten(&program);
         for (name, stub) in registry.classes {
-            if stub.templates.is_empty() {
-                continue;
-            }
             let Some((_, info)) = classes
                 .iter_mut()
                 .find(|(n, _)| n.eq_ignore_ascii_case(&name))
             else {
                 continue;
             };
-            if info.templates.is_empty() {
-                info.templates = stub.templates;
-                info.template_bounds = stub.template_bounds;
-                info.template_defaults = stub.template_defaults;
-                info.covariant_templates = stub.covariant_templates;
-                info.contravariant_templates = stub.contravariant_templates;
+            if stub.templates.is_empty() {
+                // Nothing to merge.
+            } else if info.templates.is_empty() {
+                info.templates = stub.templates.clone();
+                info.template_bounds = stub.template_bounds.clone();
+                info.template_defaults = stub.template_defaults.clone();
+                info.covariant_templates = stub.covariant_templates.clone();
+                info.contravariant_templates = stub.contravariant_templates.clone();
                 if info.extends_args.is_empty() {
-                    info.extends_args = stub.extends_args;
+                    info.extends_args = stub.extends_args.clone();
                 }
-                for (iface, args) in stub.implements_args {
-                    info.implements_args.entry(iface).or_insert(args);
+                for (iface, args) in &stub.implements_args {
+                    info.implements_args
+                        .entry(iface.clone())
+                        .or_insert_with(|| args.clone());
                 }
             } else if info.templates == stub.templates {
-                info.covariant_templates = stub.covariant_templates;
-                info.contravariant_templates = stub.contravariant_templates;
-                for (t, bound) in stub.template_bounds {
-                    info.template_bounds.entry(t).or_insert(bound);
+                info.covariant_templates = stub.covariant_templates.clone();
+                info.contravariant_templates = stub.contravariant_templates.clone();
+                for (t, bound) in &stub.template_bounds {
+                    info.template_bounds
+                        .entry(t.clone())
+                        .or_insert_with(|| bound.clone());
                 }
-                for (t, default) in stub.template_defaults {
-                    info.template_defaults.entry(t).or_insert(default);
+                for (t, default) in &stub.template_defaults {
+                    info.template_defaults
+                        .entry(t.clone())
+                        .or_insert_with(|| default.clone());
+                }
+            }
+            if info.templates != stub.templates {
+                continue;
+            }
+            for (prop, stub_sig) in &stub.properties {
+                if matches!(stub_sig.ty, Type::Mixed(_)) {
+                    continue;
+                }
+                if let Some(sig) = info.properties.get_mut(prop) {
+                    sig.ty = stub_sig.ty.clone();
                 }
             }
         }
@@ -903,7 +925,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_reflection_class_constructor_template(&mut classes);
         patch_reflection_method_and_property_templates(&mut classes);
         patch_reflection_and_exception_list_types(&mut classes);
-        patch_phpstan_stub_templates(&mut classes);
+        patch_phpstan_stub_classes(&mut classes);
         patch_spl_iterator_templates(&mut classes);
         patch_datetime_fluent_returns(&mut classes);
         GeneratedStubData {

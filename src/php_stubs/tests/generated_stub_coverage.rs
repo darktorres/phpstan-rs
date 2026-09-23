@@ -138,3 +138,24 @@ fn patched_return_shapes_follow_the_newest_function_map_delta() {
         "got: {cookie_params}"
     );
 }
+
+#[test]
+fn phpstan_stub_property_types_override_phpstorm_stubs_ones() {
+    let classes = generated_stub_classes();
+    let property_of = |class: &str, prop: &str| {
+        classes
+            .iter()
+            .find(|(n, _)| n.as_ref() == class)
+            .and_then(|(_, info)| info.properties.get(prop))
+            .map(|sig| sig.ty.to_string())
+            .unwrap_or_else(|| panic!("{class}::${prop} should be generated"))
+    };
+    assert_eq!(
+        property_of("DOMDocument", "documentElement"),
+        "DOMElement|null"
+    );
+    assert_eq!(
+        property_of("DOMDocument", "doctype"),
+        "DOMDocumentType|null"
+    );
+}
