@@ -3,6 +3,8 @@
 # per commit hash, so a before/after diff never needs rebuilding an old
 # commit just to re-run it. See .corpus-runs/README.md.
 /.corpus-runs/*/*.txt
+# `cargo xtask` gate snapshots (see xtask/src/main.rs).
+/.corpus-runs/gate/
 
 # VSCode extension client (editors/vscode/) - a separate Node/TypeScript
 # toolchain, kept out of the Cargo workspace; its own build artifacts
