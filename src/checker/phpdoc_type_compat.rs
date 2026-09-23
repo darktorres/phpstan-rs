@@ -605,7 +605,12 @@ impl<'a> Checker<'a> {
                 "selfOut.unresolvableType",
             );
         }
-        self.check_generic_bounds(&resolved, label, f.name_span);
+        self.check_generic_bounds(
+            &resolved,
+            "PHPDoc tag @phpstan-self-out",
+            label,
+            f.name_span,
+        );
     }
 
     /// `varTag.misplaced`: a `@var` in a declaration's own docblock (a

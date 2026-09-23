@@ -609,8 +609,8 @@ fn a_bounded_template_flags_a_param_type_that_violates_the_bound() {
     );
     assert!(
         d.iter()
-            .any(|x| x.message.contains("@template T requires Shape")
-                && x.message.contains("NotAShape")),
+            .any(|x| x.message
+                == "Type NotAShape in generic type Collection<NotAShape> in PHPDoc tag @param for parameter $c is not subtype of template type T of class Collection."),
         "expected a bound-violation diagnostic, got: {d:?}"
     );
 }
@@ -655,9 +655,9 @@ fn a_template_bound_by_value_of_an_enum_flags_a_non_matching_literal() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("@template T requires")
-            && x.message.contains("'H'|'S'")
-            && x.message.contains("nope")),
+        d.iter().any(|x| x.identifier == "generics.notSubtype"
+            && x.message
+                .starts_with("Type 'nope' in generic type Collection<'nope'>")),
         "expected a bound-violation diagnostic, got: {d:?}"
     );
 }
@@ -713,8 +713,9 @@ fn a_bound_violation_in_a_return_type_is_flagged() {
         "#,
     );
     assert!(
-        d.iter()
-            .any(|x| x.message.contains("@template T requires Shape")),
+        d.iter().any(|x| x.identifier == "generics.notSubtype"
+            && x.message
+                .contains("is not subtype of template type T of class")),
         "expected a bound-violation diagnostic, got: {d:?}"
     );
 }
@@ -746,7 +747,7 @@ fn a_template_whose_own_bound_is_a_union_satisfies_that_same_union_bound_via_sel
         "#,
     );
     assert!(
-        !d.iter().any(|x| x.identifier == "generics.templateBound"),
+        !d.iter().any(|x| x.identifier == "generics.notSubtype"),
         "unexpected diagnostics: {d:?}"
     );
 }
@@ -768,8 +769,9 @@ fn a_bound_violation_in_a_property_type_is_flagged() {
         "#,
     );
     assert!(
-        d.iter()
-            .any(|x| x.message.contains("@template T requires Shape")),
+        d.iter().any(|x| x.identifier == "generics.notSubtype"
+            && x.message
+                .contains("is not subtype of template type T of class")),
         "expected a bound-violation diagnostic, got: {d:?}"
     );
 }
@@ -789,8 +791,9 @@ fn a_bound_violation_via_an_extends_tag_is_flagged() {
         "#,
     );
     assert!(
-        d.iter()
-            .any(|x| x.message.contains("@template T requires Shape")),
+        d.iter().any(|x| x.identifier == "generics.notSubtype"
+            && x.message
+                .contains("is not subtype of template type T of class")),
         "expected a bound-violation diagnostic, got: {d:?}"
     );
 }
@@ -815,9 +818,10 @@ fn a_bound_referencing_the_same_class_s_own_earlier_template_resolves_positional
         "#,
     );
     assert!(
-        d.iter()
-            .any(|x| x.message.contains("@template B requires Circle")
-                && x.message.contains("NotAShape")),
+        d.iter().any(|x| x
+            .message
+            .starts_with("Type NotAShape in generic type Pair<Circle, NotAShape>")
+            && x.message.contains("template type B of class Pair")),
         "expected B's bound to resolve to Circle (A's own argument), got: {d:?}"
     );
 }
@@ -2322,7 +2326,7 @@ fn a_use_tag_violating_its_trait_s_own_template_bound_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "generics.templateBound"),
+        d.iter().any(|x| x.identifier == "generics.notSubtype"),
         "got: {d:?}"
     );
 }
@@ -3302,5 +3306,142 @@ fn an_uninferred_class_template_on_a_new_expression_stays_assignable_to_any_argu
         d.iter()
             .all(|x| x.identifier == "constructor.unusedParameter"),
         "unexpected diagnostics: {d:?}"
+    );
+}
+
+#[test]
+fn a_method_tags_own_templates_are_inferred_and_validated() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            /**
+             * @template T
+             * @method U wrap<U>(U $x)
+             * @method static list<V> many<V of object>(V ...$xs)
+             * @method T shadow<T>(T $x)
+             * @method void bad<Foo>()
+             * @method void opt<A = int, B>(A $a, B $b)
+             */
+            class Box {
+                public function __call(string $n, array $a): mixed { return null; }
+                public static function __callStatic(string $n, array $a): mixed { return null; }
+            }
+            /** @param Box<int> $b */
+            function f(Box $b): void {
+                assertType('5', $b->wrap(5));
+                assertType('list<Foo>', Box::many(new Foo()));
+            }
+        "#,
+    );
+    let m: Vec<&str> = d
+        .iter()
+        .filter(|x| x.identifier != "missingType.iterableValue")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        m,
+        [
+            "PHPDoc tag @method template T for method Box::shadow() shadows @template T for class Box.",
+            "PHPDoc tag @method template for method Box::bad() cannot have existing class Foo as its name.",
+            "PHPDoc tag @template B for method Box::opt() does not have a default type but follows an optional @template A.",
+        ]
+    );
+}
+
+#[test]
+fn ancestor_tags_must_describe_real_well_formed_ancestors() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            /** @template T */
+            class Base {}
+            /** @template T */
+            interface Coll {}
+            /** @template-covariant T */
+            interface Out {}
+            /** @template T */
+            trait Tr {}
+            class Plain {}
+            /** @extends Base<int> */
+            class A extends Plain {}
+            /** @extends Base<int> */
+            class B {}
+            class C extends Base {}
+            /**
+             * @template-covariant U
+             * @extends Base<U>
+             * @implements Coll<Missing>
+             */
+            class D extends Base implements Coll {}
+            /** @implements Out<covariant int> */
+            class E implements Out {}
+            /** @implements Coll<int> */
+            interface F extends Coll {}
+            /** @extends Coll<int> */
+            enum G implements Coll { case X; }
+            class H {
+                /** @use Tr<int> */
+                use Tr;
+            }
+            class I { use Tr; }
+        "#,
+    );
+    let m: Vec<(&str, &str)> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("generics.")
+                || x.identifier == "class.notFound"
+                || x.identifier == "missingType.generics"
+        })
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        m,
+        [
+            (
+                "generics.wrongParent",
+                "The @extends tag of class A describes Base but the class extends Plain."
+            ),
+            (
+                "generics.noParent",
+                "Class B has @extends tag, but does not extend any class."
+            ),
+            (
+                "missingType.generics",
+                "Class C extends generic class Base but does not specify its types: T"
+            ),
+            (
+                "generics.variance",
+                "Template type U is declared as covariant, but occurs in invariant position in extended type Base<U> of class D."
+            ),
+            (
+                "class.notFound",
+                "PHPDoc tag @implements has invalid type Missing."
+            ),
+            (
+                "generics.callSiteVarianceNotAllowed",
+                "Call-site variance annotation of covariant int in generic type Out<covariant int> in PHPDoc tag @implements is not allowed."
+            ),
+            (
+                "missingType.generics",
+                "Interface F extends generic interface Coll but does not specify its types: T"
+            ),
+            (
+                "generics.noParent",
+                "Interface F has @implements tag, but can not implement any interface, must extend from it."
+            ),
+            (
+                "generics.noParent",
+                "Enum G has @extends tag, but cannot extend anything."
+            ),
+            (
+                "missingType.generics",
+                "Enum G implements generic interface Coll but does not specify its types: T"
+            ),
+            (
+                "missingType.generics",
+                "Class I uses generic trait Tr but does not specify its types: T"
+            ),
+        ]
     );
 }

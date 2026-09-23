@@ -127,9 +127,18 @@ impl<'a> Checker<'a> {
     pub(crate) fn current_class_template_params(
         &self,
     ) -> std::collections::HashMap<String, types::TemplateParam> {
-        let Some(class) = &self.current_class else {
-            return std::collections::HashMap::new();
-        };
+        match &self.current_class {
+            Some(class) => self.class_template_params_for(class),
+            None => std::collections::HashMap::new(),
+        }
+    }
+
+    /// `current_class_template_params` for any class.
+    pub(crate) fn class_template_params_for(
+        &self,
+        class: &str,
+    ) -> std::collections::HashMap<String, types::TemplateParam> {
+        let class = &class.to_string();
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return std::collections::HashMap::new();
         };

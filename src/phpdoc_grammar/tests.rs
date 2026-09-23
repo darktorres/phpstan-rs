@@ -442,6 +442,7 @@ fn a_method_tag_with_return_type_and_params_parses() {
             return_type: Some(ret),
             name,
             params,
+            ..
         } => {
             assert_eq!(ret, TypeNode::Identifier("int".to_string()));
             assert_eq!(name, "foo");

@@ -231,6 +231,9 @@ pub struct MethodTag {
     // else in this project).
     pub return_type: Option<String>,
     pub name: String,
+    /// `@method T name<T of Bound = Default>(...)`'s own templates, as
+    /// `(name, bound, default)` source text.
+    pub templates: Vec<(String, Option<String>, Option<String>)>,
     pub params: Vec<MethodTagParam>,
 }
 
@@ -1052,6 +1055,7 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                     is_static,
                     return_type,
                     name,
+                    templates,
                     params,
                 } = value
                     && !name.is_empty()
@@ -1060,6 +1064,16 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                         is_static,
                         return_type: return_type.map(|t| t.to_source_string()),
                         name,
+                        templates: templates
+                            .into_iter()
+                            .map(|t| {
+                                (
+                                    t.name,
+                                    t.bound.map(|b| b.to_source_string()),
+                                    t.default.map(|d| d.to_source_string()),
+                                )
+                            })
+                            .collect(),
                         params: params
                             .into_iter()
                             .map(|p| MethodTagParam {

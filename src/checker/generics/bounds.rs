@@ -1,5 +1,4 @@
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use crate::ast::*;
 use crate::checker::{
@@ -29,8 +28,16 @@ impl<'a> Checker<'a> {
     /// than at every call/access site - a generic type only needs
     /// flagging once, where it's *written*.
     #[hotpath::measure]
-    pub(crate) fn check_generic_bounds(&mut self, ty: &Type, label: &str, span: Span) {
-        self.check_generic_bounds_and_arity(ty, label, span, true);
+    /// `location` names where `ty` was written, as the messages quote it
+    /// (`PHPDoc tag @param for parameter $x`).
+    pub(crate) fn check_generic_bounds(
+        &mut self,
+        ty: &Type,
+        location: &str,
+        label: &str,
+        span: Span,
+    ) {
+        self.check_generic_bounds_and_arity(ty, location, label, span, true);
     }
 
     /// `check_arity` gates both `check_generic_reference_arity` and
@@ -47,15 +54,16 @@ impl<'a> Checker<'a> {
     fn check_generic_bounds_and_arity(
         &mut self,
         ty: &Type,
+        location: &str,
         label: &str,
         span: Span,
         check_arity: bool,
     ) {
         if check_arity {
-            self.check_generic_reference_arity(ty, label, span);
+            self.check_generic_reference_arity(ty, location, label, span);
         }
         if check_arity && let Type::Object(class, args) = ty {
-            self.check_call_site_variance(class, args, label, span);
+            self.check_call_site_variance(class, args, location, label, span);
         }
         match ty {
             Type::Object(class, args) => {
@@ -118,40 +126,43 @@ impl<'a> Checker<'a> {
                             && self.is_type_fully_known(&bound)
                             && !self.registry.is_assignable(checked_arg, &bound)
                         {
+                            let kind = class_kind_identifier(&info.kind);
                             self.report(
                                 label.to_string(),
-                                format!("{class}'s @template {name} requires {bound}, got {arg}"),
+                                format!(
+                                    "Type {arg} in generic type {ty} in {location} is not subtype of template type {name} of {kind} {class}."
+                                ),
                                 span,
                                 6,
-                                "generics.templateBound",
+                                "generics.notSubtype",
                             );
                         }
                     }
                 }
                 for arg in args {
-                    self.check_generic_bounds(arg, label, span);
+                    self.check_generic_bounds(arg, location, label, span);
                 }
             }
             Type::Array(key, inner) => {
-                self.check_generic_bounds(key, label, span);
-                self.check_generic_bounds(inner, label, span);
+                self.check_generic_bounds(key, location, label, span);
+                self.check_generic_bounds(inner, location, label, span);
             }
-            Type::ClassString(inner) => self.check_generic_bounds(inner, label, span),
+            Type::ClassString(inner) => self.check_generic_bounds(inner, location, label, span),
             Type::Union(members) | Type::Intersection(members) => {
                 for m in members {
-                    self.check_generic_bounds(m, label, span);
+                    self.check_generic_bounds(m, location, label, span);
                 }
             }
             Type::ArrayShape(fields) => {
                 for (_, t, _) in fields {
-                    self.check_generic_bounds(t, label, span);
+                    self.check_generic_bounds(t, location, label, span);
                 }
             }
             // `object{...}`'s own field types also need recursing into
             // for bound-checking.
             Type::ObjectShape(fields) => {
                 for (_, t, _) in fields {
-                    self.check_generic_bounds(t, label, span);
+                    self.check_generic_bounds(t, location, label, span);
                 }
             }
             _ => {}
@@ -214,7 +225,12 @@ impl<'a> Checker<'a> {
         // deterministic, unlike the registry's `HashMap`-backed lookup).
         for p in &c.properties {
             if let Some(prop_sig) = info.properties.get(p.name.as_ref()) {
-                self.check_generic_bounds(&prop_sig.ty, fqn, p.span);
+                self.check_generic_bounds(
+                    &prop_sig.ty,
+                    &format!("PHPDoc tag @var for property {fqn}::${}", p.name),
+                    fqn,
+                    p.span,
+                );
                 // `ExistingClassesInPropertiesRule`'s own check -
                 // reuses this exact loop (same resolved `PropertySig::ty`,
                 // same real per-property span) rather than a second walk
@@ -247,6 +263,7 @@ impl<'a> Checker<'a> {
         }
         self.check_property_tag_types(fqn, c);
         self.check_property_phpdoc_types(fqn, c);
+        self.check_class_ancestors(fqn, c);
         self.check_ancestor_generic_bounds(fqn, c.span);
         // `TemplateTypeCheck`'s own declaration-validity family,
         // class-level (real PHPStan's per-kind rule split -
@@ -314,7 +331,12 @@ impl<'a> Checker<'a> {
                 (false, true) => "@property-write",
                 (false, false) => "@property",
             };
-            self.check_generic_bounds(&prop_sig.ty, fqn, c.span);
+            self.check_generic_bounds(
+                &prop_sig.ty,
+                &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
+                fqn,
+                c.span,
+            );
             self.check_type_class_names_exist(
                 &prop_sig.ty,
                 &format!("PHPDoc tag {tag_name} for property {fqn}::${}", tag.name),
@@ -327,76 +349,23 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// The `extends`/`implements` half of
-    /// `check_class_generic_bounds`, split out so an enum declaration -
-    /// which can `implements` a generic interface but has no properties
-    /// and can't `extends` anything - can share it too.
-    ///
-    /// Also covers `@use Trait<Arg, ...>` (a `use`
-    /// clause's own generic arguments) - real PHPStan's own
-    /// `UsedTraitsRule` is a separate rule, but its actual
-    /// bound/arity/call-site-variance checking is the identical
-    /// `GenericObjectTypeCheck`/`GenericAncestorsCheck` machinery this
-    /// function already runs for `extends`/`implements` - folding it in
-    /// here avoids a third near-duplicate call site for what's
-    /// ultimately the same check.
+    /// `generics.interfaceConflict` for a class - see
+    /// `checker::generics::interfaces`'s own module doc comment.
     pub(crate) fn check_ancestor_generic_bounds(&mut self, fqn: &str, span: Span) {
-        let Some(info) = self.registry.classes.get(fqn) else {
-            return;
-        };
-        // `extends_args`/`implements_args` store just the argument
-        // list, not paired with the parent/interface's own name -
-        // re-pair each one into a real `Object(class, args)` here, or
-        // `check_generic_bounds` has no class to look bounds up against.
-        // Neither name carries its own span in the AST, so both use the
-        // declaration's span. Each entry pairs a type to check with
-        // whether it's also safe to arity-check - see the `extends` case
-        // below for the one case where it isn't.
-        let mut types_to_check: Vec<(Type, bool)> = Vec::new();
-        // `extends_args` is a flat, un-keyed `Vec<Type>` (unlike
-        // `implements_args`, a real `HashMap`) - real PHP interfaces can
-        // `extends` more than one parent, each with its own independent
-        // argument list, but this field can't keep more than one
-        // ancestor's arguments apart, so multiple `@extends<...>` tags
-        // parse into one conflated list (real shape: Symfony's own
-        // `ServiceCollectionInterface`, which `extends
-        // ServiceProviderInterface, \Countable, \IteratorAggregate` with
-        // two of those three carrying their own tag). Harmless for
-        // `check_generic_bounds`'s tolerant, `zip`-based bound-checking,
-        // but `check_generic_reference_arity`'s exact-count comparison
-        // is only trustworthy when there's exactly one `extends` target
-        // - `check_generic_bounds_and_arity`'s `check_arity` flag is how
-        // this call site opts out of that check.
-        if let Some(parent) = info.extends.first() {
-            let parent_ty = Type::Object(parent.to_string(), info.extends_args.clone());
-            types_to_check.push((parent_ty, info.extends.len() == 1));
-        }
-        // `implements_args` is a `HashMap` with no guaranteed iteration
-        // order - sorted by key so two diagnostics from it always come out
-        // in the same relative order, not one that silently varies by
-        // process (Rust's default hasher is randomly seeded per run).
-        let mut iface_names: Vec<&Arc<str>> = info.implements_args.keys().collect();
-        iface_names.sort();
-        for iface in iface_names {
-            let iface_ty = Type::Object(iface.to_string(), info.implements_args[iface].clone());
-            types_to_check.push((iface_ty, true));
-        }
-        // `@use Trait<Arg, ...>` - a `HashMap` like `implements_args`,
-        // each trait keyed independently (no `extends_args`-style
-        // conflation risk: PHP requires one `@use` tag per trait), so
-        // every entry is as safe to arity-check as an interface is.
-        let mut trait_names: Vec<&Arc<str>> = info.uses_args.keys().collect();
-        trait_names.sort();
-        for trait_name in trait_names {
-            let trait_ty = Type::Object(trait_name.to_string(), info.uses_args[trait_name].clone());
-            types_to_check.push((trait_ty, true));
-        }
-        for (ty, check_arity) in &types_to_check {
-            self.check_generic_bounds_and_arity(ty, fqn, span, *check_arity);
-        }
-        // `generics.interfaceConflict` - see
-        // `checker::generics::interfaces`'s own module doc comment.
         self.check_cross_path_interface_conflicts(fqn, span);
+    }
+
+    /// `GenericObjectTypeCheck` for an ancestor tag: arity and bounds, but
+    /// not call-site variance, which an ancestor tag may not carry at all.
+    pub(crate) fn check_ancestor_generic_object(
+        &mut self,
+        ty: &Type,
+        location: &str,
+        label: &str,
+        span: Span,
+    ) {
+        self.check_generic_reference_arity(ty, location, label, span);
+        self.check_generic_bounds_and_arity(ty, location, label, span, false);
     }
 
     /// `GenericObjectTypeCheck`'s own arity/well-formedness half
@@ -435,7 +404,13 @@ impl<'a> Checker<'a> {
     /// never runs any rule against that file's own content either - only
     /// ordinary application code, whose registry state already reflects
     /// every stub-granted template correctly, ever reaches this check.
-    fn check_generic_reference_arity(&mut self, ty: &Type, label: &str, span: Span) {
+    fn check_generic_reference_arity(
+        &mut self,
+        ty: &Type,
+        location: &str,
+        label: &str,
+        span: Span,
+    ) {
         let Type::Object(class, args) = ty else {
             return;
         };
@@ -445,10 +420,11 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(class.as_str()) else {
             return;
         };
+        let kind = class_kind_identifier(&info.kind);
         if info.templates.is_empty() {
             self.report(
                 label.to_string(),
-                format!("Generic type {ty} is invalid because class {class} is not generic."),
+                format!("{location} contains generic type {ty} but {kind} {class} is not generic."),
                 span,
                 6,
                 "generics.notGeneric",
@@ -481,23 +457,38 @@ impl<'a> Checker<'a> {
             .iter()
             .filter(|name| !info.template_defaults.contains_key(*name))
             .count();
+        let total = info.templates.len();
+        let list = info
+            .templates
+            .iter()
+            .map(|t| t.as_ref())
+            .collect::<Vec<_>>()
+            .join(", ");
         if required > args.len() {
+            let list = if required == total {
+                list
+            } else {
+                format!("{list} ({required}-{total} required).")
+            };
             self.report(
                 label.to_string(),
                 format!(
-                    "Generic type {ty} requires at least {required} type argument(s), {} given.",
-                    args.len()
+                    "Generic type {ty} in {location} does not specify all template types of {kind} {class}: {list}"
                 ),
                 span,
                 6,
                 "generics.lessTypes",
             );
-        } else if info.templates.len() < args.len() {
+        } else if total < args.len() {
+            let list = if required == total {
+                list
+            } else {
+                format!("{list} ({required}-{total} required)")
+            };
             self.report(
                 label.to_string(),
                 format!(
-                    "Generic type {ty} accepts at most {} type argument(s), {} given.",
-                    info.templates.len(),
+                    "Generic type {ty} in {location} specifies {} template types, but {kind} {class} supports only {total}: {list}",
                     args.len()
                 ),
                 span,
@@ -529,10 +520,18 @@ impl<'a> Checker<'a> {
     /// with a plain `@template T of object`, not `@template-covariant`,
     /// so the carve-out's gating condition can never be reached against
     /// this project's actual data.
-    fn check_call_site_variance(&mut self, class: &str, args: &[Type], label: &str, span: Span) {
+    fn check_call_site_variance(
+        &mut self,
+        class: &str,
+        args: &[Type],
+        location: &str,
+        label: &str,
+        span: Span,
+    ) {
         let Some(info) = self.registry.classes.get(class) else {
             return;
         };
+        let kind = class_kind_identifier(&info.kind);
         let ty = Type::Object(class.to_string(), args.to_vec());
         for (i, arg) in args.iter().enumerate() {
             let call_site = match arg {
@@ -554,7 +553,7 @@ impl<'a> Checker<'a> {
                 self.report(
                     label.to_string(),
                     format!(
-                        "Call-site variance of {arg} in generic type {ty} is redundant, template type {template_name} of class {class} has the same variance."
+                        "Call-site variance of {arg} in generic type {ty} in {location} is redundant, template type {template_name} of {kind} {class} has the same variance."
                     ),
                     span,
                     6,
@@ -571,7 +570,7 @@ impl<'a> Checker<'a> {
                 self.report(
                     label.to_string(),
                     format!(
-                        "Call-site variance of {arg} in generic type {ty} is in conflict with {declared_word} template type {template_name} of class {class}."
+                        "Call-site variance of {arg} in generic type {ty} in {location} is in conflict with {declared_word} template type {template_name} of {kind} {class}."
                     ),
                     span,
                     6,
@@ -691,6 +690,8 @@ pub(crate) enum TemplateSubject<'s> {
         location: &'s str,
         description: &'s str,
     },
+    /// A `@method` tag's own templates.
+    MethodTag { class: &'s str, method: &'s str },
 }
 
 impl TemplateSubject<'_> {
@@ -704,6 +705,9 @@ impl TemplateSubject<'_> {
                 description,
             } => format!(
                 "PHPDoc tag {location} template of {description} cannot have existing class {name} as its name."
+            ),
+            TemplateSubject::MethodTag { class, method } => format!(
+                "PHPDoc tag @method template for method {class}::{method}() cannot have existing class {name} as its name."
             ),
         }
     }
@@ -719,6 +723,9 @@ impl TemplateSubject<'_> {
             } => format!(
                 "PHPDoc tag {location} template of {description} cannot have existing type alias {name} as its name."
             ),
+            TemplateSubject::MethodTag { class, method } => format!(
+                "PHPDoc tag @method template for method {class}::{method}() cannot have existing type alias {name} as its name."
+            ),
         }
     }
 
@@ -732,6 +739,9 @@ impl TemplateSubject<'_> {
                 description,
             } => format!(
                 "PHPDoc tag {location} template {name} of {description} with bound type {bound} is not supported."
+            ),
+            TemplateSubject::MethodTag { class, method } => format!(
+                "PHPDoc tag @method template {name} for method {class}::{method}() with bound type {bound} is not supported."
             ),
         }
     }
@@ -747,6 +757,9 @@ impl TemplateSubject<'_> {
             } => format!(
                 "PHPDoc tag {location} template {name} of {description} does not have a default type but follows an optional template {prev}."
             ),
+            TemplateSubject::MethodTag { class, method } => format!(
+                "PHPDoc tag @template {name} for method {class}::{method}() does not have a default type but follows an optional @template {prev}."
+            ),
         }
     }
 
@@ -760,6 +773,9 @@ impl TemplateSubject<'_> {
                 description,
             } => format!(
                 "Default type {default} in PHPDoc tag {location} template {name} of {description} is not subtype of bound type {bound}."
+            ),
+            TemplateSubject::MethodTag { class, method } => format!(
+                "Default type {default} in PHPDoc tag @method template {name} for method {class}::{method}() is not subtype of bound type {bound}."
             ),
         }
     }

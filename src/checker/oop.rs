@@ -285,6 +285,86 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// `MethodTagTemplateTypeCheck`: a `@method` tag's own templates are
+    /// validated like `@template` tags, and may not reuse a class
+    /// template's name (`methodTag.shadowTemplate`).
+    pub(crate) fn check_method_tag_templates(&mut self, fqn: &str, doc: Option<&str>, span: Span) {
+        let Some(doc) = doc else {
+            return;
+        };
+        if !doc.contains("method") {
+            return;
+        }
+        let block = docblock::parse(doc);
+        if block.method_tags.iter().all(|t| t.templates.is_empty()) {
+            return;
+        }
+        let previous_class = self.current_class.replace(fqn.to_string());
+        let class_templates = self.current_class_template_params();
+        self.current_class = previous_class;
+        let type_aliases = self
+            .registry
+            .classes
+            .get(fqn)
+            .map(|info| info.type_aliases.clone())
+            .unwrap_or_default();
+        for tag in &block.method_tags {
+            if tag.templates.is_empty() {
+                continue;
+            }
+            let mut scope = class_templates.clone();
+            for (name, _, _) in &tag.templates {
+                scope.insert(name.clone(), types::TemplateParam::unbounded(name.clone()));
+            }
+            let resolve = |text: &str| {
+                let ty =
+                    crate::registry::mark_template_params(types::parse_type_string(text), &scope);
+                crate::registry::resolve_names_in_type(ty, &self.name_ctx)
+            };
+            let names: Vec<std::sync::Arc<str>> = tag
+                .templates
+                .iter()
+                .map(|(n, _, _)| n.as_str().into())
+                .collect();
+            let bounds = tag
+                .templates
+                .iter()
+                .filter_map(|(n, b, _)| Some((n.as_str().into(), resolve(b.as_deref()?))))
+                .collect();
+            let defaults = tag
+                .templates
+                .iter()
+                .filter_map(|(n, _, d)| Some((n.as_str().into(), resolve(d.as_deref()?))))
+                .collect();
+            self.check_template_declaration_validity(
+                &names,
+                &bounds,
+                &defaults,
+                &type_aliases,
+                crate::checker::generics::TemplateSubject::MethodTag {
+                    class: fqn,
+                    method: &tag.name,
+                },
+                fqn,
+                span,
+            );
+            for (name, _, _) in &tag.templates {
+                if class_templates.contains_key(name) {
+                    self.report(
+                        fqn.to_string(),
+                        format!(
+                            "PHPDoc tag @method template {name} for method {fqn}::{}() shadows @template {name} for class {fqn}.",
+                            tag.name
+                        ),
+                        span,
+                        2,
+                        "methodTag.shadowTemplate",
+                    );
+                }
+            }
+        }
+    }
+
     /// Mirrors real PHPStan's `MixinCheck` - `@mixin Type` is already
     /// resolved to a bare FQN string (`ClassInfo::mixins`) and consumed
     /// for its real semantic effect (the mixin's methods/properties

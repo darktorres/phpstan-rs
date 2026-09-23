@@ -1887,6 +1887,7 @@ impl<'a> Checker<'a> {
                             self.check_class_name_case(&fqn, used, span);
                         }
                         self.check_method_tag_types(&fqn, c.span);
+                        self.check_method_tag_templates(&fqn, c.doc_comment.as_deref(), c.span);
                         self.check_mixin_types(&fqn, c.span);
                         self.check_type_alias_types(&fqn, c.span);
                         self.check_method_overrides(&fqn, c);
@@ -2036,6 +2037,7 @@ impl<'a> Checker<'a> {
                         }
                         self.check_ancestor_generic_bounds(&fqn, e.span);
                         self.check_enum_template_tag(&fqn, e);
+                        self.check_enum_ancestors(&fqn, e);
                         self.check_sealed_tag_types(&fqn, e.doc_comment.as_deref(), e.span, true);
                         self.check_misplaced_var_tag(
                             e.doc_comment.as_deref(),

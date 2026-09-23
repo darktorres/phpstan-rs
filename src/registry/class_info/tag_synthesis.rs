@@ -46,6 +46,32 @@ pub(crate) fn method_tag_sig(
     // same mark-then-resolve pipeline every other PHPDoc-typed position
     // uses, so its case refs need the identical
     // `collect_class_name_case_refs` call between the two steps.
+    // The tag's own templates, scoped to it like a real method's; a
+    // bound or default may name a sibling or a class template.
+    let mut template_params = template_params.clone();
+    if !tag.templates.is_empty() {
+        for (name, _, _) in &tag.templates {
+            template_params.insert(name.clone(), TemplateParam::unbounded(name.clone()));
+        }
+        let shallow = template_params.clone();
+        let resolve_bound = |text: &str| {
+            let ty = mark_template_params(types::parse_type_string(text), &shallow);
+            resolve_names_in_type(ty, ctx)
+        };
+        for (name, bound, default) in &tag.templates {
+            template_params.insert(
+                name.clone(),
+                TemplateParam {
+                    name: name.clone(),
+                    bound: Box::new(bound.as_deref().map_or(Type::Mixed(false), resolve_bound)),
+                    variance: types::Variance::Invariant,
+                    scope: Some(tag.name.clone()),
+                    default: default.as_deref().map(|d| Box::new(resolve_bound(d))),
+                },
+            );
+        }
+    }
+    let template_params = &template_params;
     #[allow(clippy::type_complexity)]
     let resolve = |text: &str| -> (Type, Vec<(Arc<str>, Arc<str>)>) {
         let ty = types::parse_type_string(text);

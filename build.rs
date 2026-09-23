@@ -85,6 +85,22 @@ fn main() {
         "vendor/phpstorm-stubs has no .php files - expected a fully          checked-out repo, not a shallow or partial clone"
     );
 
+    // PHPStan's own overrides of built-in class declarations (the
+    // top-level `stubs/*.stub` files; `stubs/runtime/` is PHPStan's own
+    // polyfills) - `php_stubs.rs` reads their class-level `@template`
+    // declarations.
+    let mut phpstan_stub_files: Vec<PathBuf> =
+        fs::read_dir(Path::new(&manifest_dir).join("vendor/phpstan-src/stubs"))
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|e| e.path())
+                    .filter(|p| p.extension().is_some_and(|e| e == "stub"))
+                    .collect()
+            })
+            .unwrap_or_default();
+    phpstan_stub_files.sort();
+
     let mut generated = String::new();
     write_source_array(&mut generated, "PHPSTORM_STUBS_SOURCES", &phpstorm_files);
     // Each stub file's top-level directory under `vendor/phpstorm-stubs`
@@ -102,6 +118,7 @@ fn main() {
     }
     generated.push_str("];\n");
     write_source_array(&mut generated, "PHPSTAN_SRC_SOURCES", &phpstan_src_files);
+    write_source_array(&mut generated, "PHPSTAN_STUB_SOURCES", &phpstan_stub_files);
 
     let out_dir = std::env::var("OUT_DIR").unwrap();
     fs::write(
@@ -112,5 +129,6 @@ fn main() {
 
     println!("cargo:rerun-if-changed=vendor/phpstorm-stubs");
     println!("cargo:rerun-if-changed=vendor/phpstan-src/src");
+    println!("cargo:rerun-if-changed=vendor/phpstan-src/stubs");
     println!("cargo:rerun-if-changed=build.rs");
 }

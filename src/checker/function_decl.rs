@@ -891,11 +891,17 @@ impl<'a> Checker<'a> {
         if !self.facts_only {
             if let Some(sig) = sig {
                 for (param, ast_param) in sig.params.iter().zip(&f.params) {
-                    self.check_generic_bounds(&param.ty, &label, ast_param.span);
+                    self.check_generic_bounds(
+                        &param.ty,
+                        &format!("PHPDoc tag @param for parameter ${}", param.name),
+                        &label,
+                        ast_param.span,
+                    );
                 }
             }
             self.check_generic_bounds(
                 declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
+                "PHPDoc tag @return",
                 &label,
                 f.span,
             );

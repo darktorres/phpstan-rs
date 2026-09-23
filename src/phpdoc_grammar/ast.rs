@@ -70,6 +70,8 @@ pub enum PhpDocTagValue {
         is_static: bool,
         return_type: Option<TypeNode>,
         name: String,
+        /// `@method T name<T of Bound>(...)`'s own templates.
+        templates: Vec<CallableTemplate>,
         params: Vec<MethodTagParam>,
     },
     /// Any tag this Stage A grammar doesn't specifically model

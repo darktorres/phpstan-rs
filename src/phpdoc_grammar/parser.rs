@@ -329,7 +329,13 @@ impl TagParser {
         }
         match lower.as_str() {
             "template" | "template-covariant" | "template-contravariant" => self.parse_template(),
-            "extends" | "implements" | "use" => self.parse_extends_like(),
+            "extends"
+            | "implements"
+            | "use"
+            | "template-extends"
+            | "template-implements"
+            | "template-use"
+            | "inherits" => self.parse_extends_like(),
             "method" => self.parse_method(),
             _ => PhpDocTagValue::Generic(self.remaining_description()),
         }
@@ -436,7 +442,7 @@ impl TagParser {
         let first = self.parse_type();
         let (return_type, name) = if let PhpDocToken::Identifier(n) = self.peek() {
             let n = n.clone();
-            if self.peek_ahead_is_lparen() {
+            if self.peek_ahead_is_lparen() || self.peek_ahead_is_langle() {
                 self.advance();
                 (Some(first), n)
             } else {
@@ -446,6 +452,14 @@ impl TagParser {
         } else {
             self.pos = checkpoint;
             (None, self.take_identifier_or_error())
+        };
+        let templates = if matches!(self.peek(), PhpDocToken::LAngle) {
+            self.parse_callable_templates().unwrap_or_else(|| {
+                self.error("expected a template list");
+                Vec::new()
+            })
+        } else {
+            Vec::new()
         };
         self.expect(&PhpDocToken::LParen, "'('");
         let mut params = Vec::new();
@@ -491,8 +505,16 @@ impl TagParser {
             is_static,
             return_type,
             name,
+            templates,
             params,
         }
+    }
+
+    fn peek_ahead_is_langle(&self) -> bool {
+        self.tokens
+            .get(self.pos + 1)
+            .map(|(t, _)| matches!(t, PhpDocToken::LAngle))
+            .unwrap_or(false)
     }
 
     fn peek_ahead_is_lparen(&self) -> bool {

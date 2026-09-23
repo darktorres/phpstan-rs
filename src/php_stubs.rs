@@ -672,6 +672,56 @@ fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
     }
 }
 
+/// Class-level template declarations from PHPStan's own stubs
+/// (`vendor/phpstan-src/stubs/*.stub`), which real PHPStan loads over its
+/// reflection of every built-in class. A class phpstorm-stubs declares no
+/// templates for takes PHPStan's (with their `@extends`/`@implements`
+/// arguments); one declaring the same template names takes PHPStan's
+/// variances, and any bound or default it lacks. Differently named
+/// templates are left alone - phpstorm-stubs' own members refer to them.
+fn patch_phpstan_stub_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
+    for source in PHPSTAN_STUB_SOURCES {
+        let tokens = Lexer::new(source).tokenize_with_spans();
+        let Ok(program) = Parser::new(tokens).parse_program() else {
+            continue;
+        };
+        let registry = Registry::index_and_flatten(&program);
+        for (name, stub) in registry.classes {
+            if stub.templates.is_empty() {
+                continue;
+            }
+            let Some((_, info)) = classes
+                .iter_mut()
+                .find(|(n, _)| n.eq_ignore_ascii_case(&name))
+            else {
+                continue;
+            };
+            if info.templates.is_empty() {
+                info.templates = stub.templates;
+                info.template_bounds = stub.template_bounds;
+                info.template_defaults = stub.template_defaults;
+                info.covariant_templates = stub.covariant_templates;
+                info.contravariant_templates = stub.contravariant_templates;
+                if info.extends_args.is_empty() {
+                    info.extends_args = stub.extends_args;
+                }
+                for (iface, args) in stub.implements_args {
+                    info.implements_args.entry(iface).or_insert(args);
+                }
+            } else if info.templates == stub.templates {
+                info.covariant_templates = stub.covariant_templates;
+                info.contravariant_templates = stub.contravariant_templates;
+                for (t, bound) in stub.template_bounds {
+                    info.template_bounds.entry(t).or_insert(bound);
+                }
+                for (t, default) in stub.template_defaults {
+                    info.template_defaults.entry(t).or_insert(default);
+                }
+            }
+        }
+    }
+}
+
 /// All classes generated from the vendored phpstorm-stubs sources, merged
 /// (first occurrence wins - see `generated_stubs`' equivalent note).
 pub fn generated_stub_classes() -> Vec<(Arc<str>, ClassInfo)> {
@@ -847,6 +897,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_reflection_class_constructor_template(&mut classes);
         patch_reflection_method_and_property_templates(&mut classes);
         patch_reflection_and_exception_list_types(&mut classes);
+        patch_phpstan_stub_templates(&mut classes);
         patch_spl_iterator_templates(&mut classes);
         patch_datetime_fluent_returns(&mut classes);
         GeneratedStubData {
