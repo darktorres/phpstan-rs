@@ -1221,6 +1221,7 @@ mod static_call_context;
 mod stmt;
 pub(crate) mod suggest;
 mod throws;
+mod type_declarations;
 mod type_union;
 mod uninitialized;
 mod uninitialized_dataflow;

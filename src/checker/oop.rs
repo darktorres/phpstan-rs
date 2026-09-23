@@ -1378,6 +1378,13 @@ impl<'a> Checker<'a> {
     ) {
         let version = self.registry.php_version;
         for c in consts {
+            let constant = format!("{fqn}::{}", c.name);
+            self.check_type_declaration(
+                c.type_hint.as_deref(),
+                crate::checker::type_declarations::TypePosition::ClassConstant(&constant),
+                c.type_hint_span.unwrap_or(c.span),
+                fqn,
+            );
             if kind == ClassKind::Trait
                 && let Some(version) = version
                 && !crate::php_version::PhpFeature::ConstantsInTraits.is_available(version)

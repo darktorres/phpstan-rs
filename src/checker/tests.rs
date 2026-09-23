@@ -98,6 +98,7 @@ mod throw_without_message;
 mod throws;
 mod trait_composition_and_conflicts;
 mod type_aliases;
+mod type_declarations;
 mod uninitialized;
 mod uninitialized_dataflow;
 mod unused_symbols;

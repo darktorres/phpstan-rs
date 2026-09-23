@@ -212,6 +212,12 @@ pub enum PhpFeature {
     /// `PhpVersion::supportsDynamicClassConstantFetch`
     /// (`DynamicClassConstantFetchRule`).
     DynamicClassConstantFetch,
+    /// `null`/`false` as standalone types and the `true` type.
+    /// `PhpVersion::supportsNullFalseTrueStandaloneTypes`-equivalent
+    /// (engine compile error before 8.2).
+    StandaloneNullFalseTrueTypes,
+    /// Disjunctive normal form types (`(A&B)|null`).
+    DisjunctiveNormalFormTypes,
 }
 
 impl PhpFeature {
@@ -239,7 +245,10 @@ impl PhpFeature {
             | FirstClassCallables
             | TentativeReturnTypes
             | ReadOnlyProperties => (8, 1),
-            ReadOnlyClasses | ConstantsInTraits => (8, 2),
+            ReadOnlyClasses
+            | ConstantsInTraits
+            | StandaloneNullFalseTrueTypes
+            | DisjunctiveNormalFormTypes => (8, 2),
             NativeTypedClassConstants
             | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses

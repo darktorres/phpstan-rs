@@ -115,6 +115,15 @@ impl<'a> Checker<'a> {
                     }),
             );
         }
+        for p in properties {
+            let property = format!("{display}::${}", p.name);
+            self.check_type_declaration(
+                p.type_hint.as_deref(),
+                crate::checker::type_declarations::TypePosition::Property(&property),
+                p.type_hint_span.unwrap_or(p.span),
+                display,
+            );
+        }
         for view in &views {
             if kind == ClassKind::Interface {
                 self.check_property_in_interface(view, display);

@@ -618,6 +618,15 @@ before the first `<?php` (`whitespace.fileStart`), and whitespace after
 the last `?>` of the file, a namespace, or a `declare` block
 (`whitespace.fileEnd`); the lexer keeps the single newline after `?>`
 as part of the tag, as PHP does.
+Native type declaration legality (`type_declarations.rs`, every
+parameter, return, property and class constant): `InvalidTypesInUnionRule`
+(`unionType.{mixed,never,void}`, `nullableType.*`) plus `?null`,
+duplicate members (resolved names, case-insensitive, `bool|false`),
+`true|false`, `object` with a class type, `iterable` with `array`/
+`Traversable`, non-class intersection members (`static` included),
+`void`/`never`/`static` parameters and properties, `void`/`never`/
+`callable`/`static` class constants, and below PHP 8.2 standalone
+`null`/`false`, the `true` type, and DNF types.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3690,8 +3699,6 @@ receiver-type-checks phase.)
 
 ### Phase 139 — DeadCode+EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace (mixed small gaps)
 
-- `Rules/Types/InvalidTypesInUnionRule` — rejecting `mixed`/`never`/
-  `void` inside a union or nullable type on a param/return/property.
 - `Rules/Ignore/IgnoreParseErrorRule` — a non-ignorable diagnostic for
   malformed `@phpstan-ignore` identifier-list syntax; phpstan-rs's own
   `ignore_comments.rs` deliberately swallows this with no diagnostic at

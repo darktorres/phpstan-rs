@@ -13,6 +13,7 @@
 use crate::ast::*;
 use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::checker::calls::contains_nullsafe_access;
+use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::php_version::PhpFeature;
 use crate::token::Span;
@@ -61,6 +62,10 @@ impl<'a> Checker<'a> {
             StmtKind::FunctionDecl(f) => {
                 self.check_function_like_declaration(
                     &f.params,
+                    (
+                        f.return_type.as_deref(),
+                        f.return_type_span.unwrap_or(f.span),
+                    ),
                     PromotionSite::NotConstructor,
                     f.by_ref,
                     Some(ReturnSource::Body(&f.body)),
@@ -104,10 +109,12 @@ impl<'a> Checker<'a> {
                 params,
                 body,
                 by_ref,
+                return_type,
                 ..
             } => {
                 self.check_function_like_declaration(
                     params,
+                    (return_type.as_deref(), e.span),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Body(body)),
@@ -120,10 +127,12 @@ impl<'a> Checker<'a> {
                 params,
                 body,
                 by_ref,
+                return_type,
                 ..
             } => {
                 self.check_function_like_declaration(
                     params,
+                    (return_type.as_deref(), e.span),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Arrow(body)),
@@ -171,6 +180,10 @@ impl<'a> Checker<'a> {
                 .then_some(ReturnSource::Body(&m.function.body));
             self.check_function_like_declaration(
                 &m.function.params,
+                (
+                    m.function.return_type.as_deref(),
+                    m.function.return_type_span.unwrap_or(m.function.span),
+                ),
                 site,
                 m.function.by_ref,
                 returns,
@@ -220,15 +233,26 @@ impl<'a> Checker<'a> {
             })
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn check_function_like_declaration(
         &mut self,
         params: &[Param],
+        return_type: (Option<&str>, Span),
         site: PromotionSite,
         by_ref: bool,
         returns: Option<ReturnSource>,
         label: &str,
     ) {
         self.check_promoted_params(params, site, label);
+        for p in params {
+            self.check_type_declaration(
+                p.type_hint.as_deref(),
+                TypePosition::Parameter,
+                p.type_hint_span.unwrap_or(p.span),
+                label,
+            );
+        }
+        self.check_type_declaration(return_type.0, TypePosition::Return, return_type.1, label);
         if let Some(ReturnSource::Body(body)) = &returns {
             self.check_statement_keywords(body, label);
         }
