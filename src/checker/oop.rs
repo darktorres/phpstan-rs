@@ -875,6 +875,7 @@ impl<'a> Checker<'a> {
         if registry_matches {
             self.check_inheritance_target_kinds(fqn, false, fqn, c.span);
             self.check_magic_serialization_methods(fqn, fqn, fqn, c.name_span);
+            self.check_constant_overrides(fqn, &c.consts);
         }
     }
 
@@ -893,6 +894,150 @@ impl<'a> Checker<'a> {
             .is_some_and(|info| info.implements == own.implements && info.uses == own.uses);
         if registry_matches {
             self.check_inheritance_target_kinds(fqn, false, fqn, e.span);
+            self.check_constant_overrides(fqn, &e.consts);
+        }
+    }
+
+    /// `OverridingConstantRule`: a class constant redeclaring one from an
+    /// immediate interface (checked first) or a non-private parent
+    /// constant - it can't override a `final` one (`classConstant.final`)
+    /// or narrow its visibility (`classConstant.visibility`), and, at
+    /// level 3, must keep a covariant native type
+    /// (`classConstant.nativeType`/`.missingNativeType`) and a covariant
+    /// `@var` type when both sides declare one (`classConstant.type`).
+    pub(crate) fn check_constant_overrides(&mut self, fqn: &str, consts: &[ClassConst]) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let interfaces = info.implements.clone();
+        let parent = info.extends.first().cloned();
+        let is_interface = info.kind == ClassKind::Interface;
+        for cc in consts {
+            let name = cc.name.as_ref();
+            let Some((own_owner, own)) = self.registry.lookup_const_with_owner(fqn, name) else {
+                continue;
+            };
+            if own_owner.as_ref() != fqn {
+                continue;
+            }
+            // An interface's own `extends` list plays the immediate-
+            // interface role.
+            let immediate: Vec<_> = if is_interface {
+                self.registry
+                    .classes
+                    .get(fqn)
+                    .map(|i| i.extends.clone())
+                    .unwrap_or_default()
+            } else {
+                interfaces.clone()
+            };
+            let prototype = immediate
+                .iter()
+                .find_map(|iface| self.registry.lookup_const_with_owner(iface, name))
+                .or_else(|| {
+                    if is_interface {
+                        return None;
+                    }
+                    let parent = parent.as_deref()?;
+                    self.registry
+                        .lookup_const_with_owner(parent, name)
+                        .filter(|(_, sig)| sig.visibility != Visibility::Private)
+                });
+            let Some((proto_owner, proto)) = prototype else {
+                continue;
+            };
+            let own = own.clone();
+            let proto = proto.clone();
+            let span = cc.name_span;
+            if proto.is_final {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        format!(
+                            "Constant {fqn}::{name} overrides final constant {proto_owner}::{name}."
+                        ),
+                        span,
+                        0,
+                        "classConstant.final",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            let narrowed = match (&proto.visibility, &own.visibility) {
+                (Visibility::Public, Visibility::Public) => None,
+                (Visibility::Public, own_vis) => Some(format!(
+                    "{} constant {fqn}::{name} overriding public constant {proto_owner}::{name} should also be public.",
+                    if *own_vis == Visibility::Private {
+                        "Private"
+                    } else {
+                        "Protected"
+                    }
+                )),
+                (_, Visibility::Private) => Some(format!(
+                    "Private constant {fqn}::{name} overriding protected constant {proto_owner}::{name} should be protected or public."
+                )),
+                _ => None,
+            };
+            if let Some(message) = narrowed {
+                self.report_builder(
+                    DiagnosticBuilder::new(
+                        fqn.to_string(),
+                        message,
+                        span,
+                        0,
+                        "classConstant.visibility",
+                    )
+                    .non_ignorable(),
+                );
+            }
+            if let Some(proto_native) = &proto.native_ty {
+                match &own.native_ty {
+                    Some(own_native) if !self.registry.is_assignable(own_native, proto_native) => {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                fqn.to_string(),
+                                format!(
+                                    "Native type {own_native} of constant {fqn}::{name} is not covariant with native type {proto_native} of constant {proto_owner}::{name}."
+                                ),
+                                span,
+                                3,
+                                "classConstant.nativeType",
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                    Some(_) => {}
+                    None => {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                fqn.to_string(),
+                                format!(
+                                    "Constant {fqn}::{name} overriding constant {proto_owner}::{name} ({proto_native}) should also have native type {proto_native}."
+                                ),
+                                span,
+                                3,
+                                "classConstant.missingNativeType",
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                }
+            }
+            if proto.has_phpdoc_type
+                && own.has_phpdoc_type
+                && !self.registry.is_assignable(&own.ty, &proto.ty)
+            {
+                self.report(
+                    fqn.to_string(),
+                    format!(
+                        "Type {} of constant {fqn}::{name} is not covariant with type {} of constant {proto_owner}::{name}.",
+                        own.ty, proto.ty
+                    ),
+                    span,
+                    3,
+                    "classConstant.type",
+                );
+            }
         }
     }
 

@@ -160,6 +160,12 @@ pub struct PropertySig {
 pub struct ConstSig {
     pub ty: Type,
     pub visibility: Visibility,
+    // `final const` (PHP 8.1+).
+    pub is_final: bool,
+    // The PHP 8.3 native type declaration, resolved; `None` when untyped.
+    pub native_ty: Option<Type>,
+    // Whether `ty` comes from an `@var` tag rather than the value.
+    pub has_phpdoc_type: bool,
     // `@internal` on this constant's own doc comment - direct mirror of
     // `PropertySig::is_internal`. Always `false` for an enum case (no
     // doc-comment/`@internal` convention of its own).
@@ -908,6 +914,7 @@ impl ClassInfo {
             .map(|cc| {
                 let doc = cc.doc_comment.as_deref().map(docblock::parse);
                 let doc_ty = doc.as_ref().and_then(|d| d.var_type.clone());
+                let has_phpdoc_type = doc_ty.is_some();
                 let ty = match doc_ty {
                     Some(doc_ty) => {
                         let ty = types::parse_type_string(&doc_ty);
@@ -922,6 +929,9 @@ impl ClassInfo {
                     ConstSig {
                         ty,
                         visibility: cc.visibility.clone(),
+                        is_final: cc.is_final,
+                        native_ty: native_const_type(cc, ctx),
+                        has_phpdoc_type,
                         // `@internal` on this constant's own doc
                         // comment - see `PropertySig::is_internal`'s doc
                         // comment for the convention this mirrors.
@@ -1372,6 +1382,9 @@ impl ClassInfo {
                     ConstSig {
                         ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         visibility: cc.visibility.clone(),
+                        is_final: cc.is_final,
+                        native_ty: native_const_type(cc, ctx),
+                        has_phpdoc_type: false,
                         is_internal: doc.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
                     },
@@ -1391,6 +1404,9 @@ impl ClassInfo {
                 ConstSig {
                     ty: Type::EnumCase(fqn.clone(), case.name.to_string()),
                     visibility: Visibility::Public,
+                    is_final: true,
+                    native_ty: None,
+                    has_phpdoc_type: false,
                     // A case has no doc-comment/`@internal`/`@deprecated`
                     // convention of its own in real PHP either - same
                     // reasoning as its always-`Visibility::Public` above.
@@ -1750,4 +1766,10 @@ impl ClassInfo {
         }
         self
     }
+}
+
+/// A class constant's PHP 8.3 native type, name-resolved.
+fn native_const_type(cc: &crate::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
+    let hint = cc.type_hint.as_deref()?;
+    Some(resolve_names_in_type(types::parse_type_string(hint), ctx))
 }

@@ -474,3 +474,73 @@ fn serializable_class_without_magic_serialization_methods_is_flagged() {
     );
     assert!(found((8, 0)).is_empty());
 }
+
+#[test]
+fn class_constant_overrides_must_stay_compatible() {
+    let d = diagnostics_for(
+        r#"<?php
+            interface HasLimit {
+                const LIMIT = 10;
+                final const FIXED = 1;
+            }
+            class Base {
+                public const OPEN = 'a';
+                protected const GUARDED = 'b';
+                private const HIDDEN = 'c';
+                const int TYPED = 1;
+                /** @var positive-int */
+                const DOC = 5;
+            }
+            class Child extends Base implements HasLimit {
+                const LIMIT = 20;
+                const FIXED = 2;
+                protected const OPEN = 'x';
+                private const GUARDED = 'y';
+                private const HIDDEN = 'z';
+                const TYPED = 2;
+                /** @var int */
+                const DOC = -1;
+            }
+            class TypedChild extends Base {
+                const string TYPED = 'no';
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("classConstant.") && x.identifier != "classConstant.unused"
+        })
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                "classConstant.final",
+                "Constant Child::FIXED overrides final constant HasLimit::FIXED."
+            ),
+            (
+                "classConstant.visibility",
+                "Protected constant Child::OPEN overriding public constant Base::OPEN should also be public."
+            ),
+            (
+                "classConstant.visibility",
+                "Private constant Child::GUARDED overriding protected constant Base::GUARDED should be protected or public."
+            ),
+            (
+                "classConstant.missingNativeType",
+                "Constant Child::TYPED overriding constant Base::TYPED (int) should also have native type int."
+            ),
+            (
+                "classConstant.type",
+                "Type int of constant Child::DOC is not covariant with type int<1, max> of constant Base::DOC."
+            ),
+            (
+                "classConstant.nativeType",
+                "Native type string of constant TypedChild::TYPED is not covariant with native type int of constant Base::TYPED."
+            ),
+        ],
+        "got: {d:?}"
+    );
+}

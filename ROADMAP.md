@@ -577,7 +577,9 @@ destructured key (`ArrayDestructuringRule`'s per-key half). `OffsetAccessAssignm
 `OffsetAccessAssignOpRule`/`OffsetAccessValueAssignmentRule`
 (`offsetAssign.dimType`/`.valueType`: a string written through `[]` or a
 non-int offset, an `ArrayAccess` object given an offset or value its
-`offsetSet()` rejects).
+`offsetSet()` rejects). `OverridingConstantRule` (`classConstant.final`/
+`.visibility`, and at level 3 `.nativeType`/`.missingNativeType`/`.type`),
+from `ConstSig`'s new `is_final`/`native_ty`/`has_phpdoc_type`.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3629,9 +3631,6 @@ against this list, and added the real gaps the audit had missed.
   `__METHOD__`/`__NAMESPACE__` used outside their own context; blocked
   on phpstan-rs having no dedicated magic-constant `Expr` kind at all
   (already documented in `registry.rs`).
-- `OverridingConstantRule` — class-constant override compatibility
-  against a parent/interface (final override, visibility narrowing,
-  native-type narrowing/dropping, PHPDoc-value-type covariance).
 - `ValueAssignedToDefineRule`/`ValueAssignedToGlobalConstantRule` — a
   `define()`'d/`const`-declared global constant's value checked against
   a configured `dynamicConstantNames` type.
