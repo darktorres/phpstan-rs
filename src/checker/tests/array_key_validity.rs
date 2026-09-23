@@ -794,3 +794,59 @@ fn a_computed_key_suppresses_further_duplicate_key_checking() {
         "unexpected diagnostics: {d:?}"
     );
 }
+
+#[test]
+fn offset_assignments_check_key_and_value_acceptance() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @implements ArrayAccess<int, string> */
+            class Bag implements ArrayAccess {
+                public function offsetExists(mixed $o): bool { return true; }
+                public function offsetGet(mixed $o): mixed { return 1; }
+                public function offsetSet(mixed $offset, mixed $value): void {}
+                public function offsetUnset(mixed $o): void {}
+            }
+            class IntBag implements ArrayAccess {
+                public function offsetExists(mixed $o): bool { return true; }
+                public function offsetGet(mixed $o): mixed { return 1; }
+                public function offsetSet(?int $offset, string $value): void {}
+                public function offsetUnset(mixed $o): void {}
+            }
+            function f(array $arr, string $s, IntBag $bag, Bag $any): void {
+                $arr[[1]] = 1;
+                $arr['ok'] = 1;
+                $s[] = 'x';
+                $s['a'] = 'x';
+                $s[0] = 'x';
+                $bag['k'] = 'v';
+                $bag[1] = 5;
+                $bag[] = 'fine';
+                $any['whatever'] = new \stdClass();
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier.starts_with("offsetAssign."))
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                "offsetAssign.dimType",
+                "Cannot assign new offset to string."
+            ),
+            (
+                "offsetAssign.dimType",
+                "Cannot assign offset 'a' to string."
+            ),
+            (
+                "offsetAssign.dimType",
+                "Cannot assign offset 'k' to IntBag."
+            ),
+            ("offsetAssign.valueType", "IntBag does not accept 5."),
+        ],
+        "got: {d:?}"
+    );
+}

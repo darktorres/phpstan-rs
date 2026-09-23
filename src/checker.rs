@@ -1187,6 +1187,7 @@ mod missing_typehint;
 mod named_argument_renames;
 mod narrowing;
 mod noop;
+mod offset_assignment;
 mod oop;
 mod operators;
 mod phpdoc_type_compat;

@@ -1883,6 +1883,7 @@ impl<'a> Checker<'a> {
                 {
                     self.check_destructuring_offsets(items, &rhs_ty, locals, label);
                 }
+                self.check_offset_assignment(lhs, &rhs_ty, false, locals, label);
                 if matches!(&lhs.kind, ExprKind::ArrayLiteral(_))
                     && self.type_confirmed_not_destructurable(&rhs_ty)
                 {
@@ -1987,6 +1988,7 @@ impl<'a> Checker<'a> {
                     self.check_expr(lhs, locals, label)
                 };
                 let rhs_ty = self.check_expr(rhs, locals, label);
+                self.check_offset_assignment(lhs, &rhs_ty, true, locals, label);
                 if *op != BinOp::Coalesce {
                     self.check_binary_operand_validity(op, &lhs_ty, &rhs_ty, true, lhs.span, label);
                     self.check_division_by_literal_zero(op, rhs, &rhs_ty, rhs.span, label);

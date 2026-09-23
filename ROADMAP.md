@@ -573,7 +573,11 @@ legally create the element). `ArrayUnpackingRule`'s
 definite half as `offsetAccess.notFound` (replacing this project's own
 `shapeAccess.notFound`): a literal key missing from a sealed shape, or
 ruled out by a general array's/list's key type, on reads and on every
-destructured key (`ArrayDestructuringRule`'s per-key half).
+destructured key (`ArrayDestructuringRule`'s per-key half). `OffsetAccessAssignmentRule`/
+`OffsetAccessAssignOpRule`/`OffsetAccessValueAssignmentRule`
+(`offsetAssign.dimType`/`.valueType`: a string written through `[]` or a
+non-int offset, an `ArrayAccess` object given an offset or value its
+`offsetSet()` rejects).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3612,15 +3616,6 @@ against this list, and added the real gaps the audit had missed.
   difference from `@extends`/`@implements` (a call-site variance
   annotation is *never* valid inside `@use<...>`, unlike the other two)
   — Phase 54 already closed the bound/arity/variance half.
-
-### Phase 132 — Arrays (`Rules/Arrays/` gaps)
-
-- `OffsetAccessAssignmentRule`/`OffsetAccessAssignOpRule` — an illegal
-  key type for `$arr[$key] = $v`/compound-assign.
-- `OffsetAccessValueAssignmentRule` — assigning a wrong-typed value into
-  a typed array/object offset; `write_index_into` always unions the new
-  value in rather than checking it against a pre-existing declared
-  value type.
 
 ### Phase 133 — Constants (`Rules/Constants/` gaps)
 
