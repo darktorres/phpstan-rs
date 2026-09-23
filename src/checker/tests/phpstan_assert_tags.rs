@@ -556,3 +556,24 @@ fn a_psalm_param_tag_refines_a_plain_param_tag() {
         "expected the @psalm-param type to be the one in effect, got: {d:?}"
     );
 }
+
+#[test]
+fn a_single_argument_function_s_assert_if_true_narrows_its_argument() {
+    let d = diagnostics_for(
+        r#"<?php
+use function PHPStan\Testing\assertType;
+final class User {}
+/** @phpstan-assert-if-true User $value */
+function is_user(mixed $value): bool { return true; }
+function f(mixed $b): void {
+    if (is_user($b)) {
+        assertType('User', $b);
+    }
+}
+"#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpstanRs.assertType"),
+        "{d:?}"
+    );
+}

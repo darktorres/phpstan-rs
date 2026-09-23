@@ -239,6 +239,35 @@ fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
 }
 
 impl<'a> Checker<'a> {
+    /// A plain function call tagged `@phpstan-assert-if-true`/`-if-false`
+    /// on its own docblock - see `FunctionSig::assert_if_true`'s own doc
+    /// comment for the full picture. No `$this`/receiver here, so only a
+    /// `Param`-targeted assertion can ever resolve (`apply_assert_infos`
+    /// silently skips the rest).
+    fn apply_function_conditional_asserts(
+        &self,
+        name: &str,
+        args: &[Arg],
+        locals: &mut Locals,
+        branch_true: bool,
+    ) {
+        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+        if let Some(sig) = self.registry.lookup_function(&primary).or_else(|| {
+            fallback
+                .as_deref()
+                .and_then(|g| self.registry.lookup_function(g))
+        }) {
+            let infos = if branch_true {
+                &sig.assert_if_true
+            } else {
+                &sig.assert_if_false
+            };
+            if !infos.is_empty() {
+                self.apply_assert_infos(infos, sig, None, args, locals);
+            }
+        }
+    }
+
     /// Disjunctive syllogism: `if ($a || $b) { if ($b) {} else { /*
     /// here, $a must be true */ } }` - called wherever a nested `if`'s
     /// own condition is proven *false*, checks whether that condition
@@ -917,6 +946,8 @@ impl<'a> Checker<'a> {
                             narrow_type_excluding(&current, &target_ty)
                         };
                         locals.insert(key, narrowed);
+                    } else if let ExprKind::Name(raw) = &callee.kind {
+                        self.apply_function_conditional_asserts(raw, args, locals, branch_true);
                     }
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "in_array"
@@ -1081,27 +1112,7 @@ impl<'a> Checker<'a> {
                         }
                     }
                 } else if let ExprKind::Name(name) = &callee.kind {
-                    // A plain function call tagged `@phpstan-assert-if-true`/
-                    // `-if-false` on its own docblock - see `FunctionSig::
-                    // assert_if_true`'s own doc comment for the full
-                    // picture. No `$this`/receiver here, so only a
-                    // `Param`-targeted assertion can ever resolve
-                    // (`apply_assert_infos` silently skips the rest).
-                    let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-                    if let Some(sig) = self.registry.lookup_function(&primary).or_else(|| {
-                        fallback
-                            .as_deref()
-                            .and_then(|g| self.registry.lookup_function(g))
-                    }) {
-                        let infos = if branch_true {
-                            &sig.assert_if_true
-                        } else {
-                            &sig.assert_if_false
-                        };
-                        if !infos.is_empty() {
-                            self.apply_assert_infos(infos, sig, None, args, locals);
-                        }
-                    }
+                    self.apply_function_conditional_asserts(name, args, locals, branch_true);
                 }
             }
             // `@phpstan-assert-if-true`/`-if-false` on a method's own
