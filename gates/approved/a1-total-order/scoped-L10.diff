@@ -1,0 +1,1084 @@
+--- old
++++ new
+@@ -197,8 +197,8 @@
+ src/Piwigo/Calendar/CalendarRenderer.php	229	76	10	offsetAccess.nonOffsetAccessible	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access offset on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	260	45	10	offsetAccess.nonOffsetAccessible	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access offset on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	261	32	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getDisplayName() on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	265	43	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getChronologyNavigationBars() on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	265	43	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Calendar\\Projection\\CalendarChronologyPageContext::__construct() argument #3 ($chronologyNavigationBars) expects list<Piwigo\\Calendar\\Projection\\ChronologyNavBarRow>, mixed given	
++src/Piwigo/Calendar/CalendarRenderer.php	265	43	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getChronologyNavigationBars() on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	277	27	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	count() argument #1 ($value) expects array|Countable, mixed given	
+ src/Piwigo/Calendar/CalendarRenderer.php	278	41	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	in_array() argument #2 ($haystack) expects array, mixed given	
+ src/Piwigo/Calendar/CalendarRenderer.php	285	35	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $date_field on mixed.	
+@@ -208,25 +208,25 @@
+ src/Piwigo/Calendar/CalendarRenderer.php	296	69	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $date_field on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	300	29	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method isHit() on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	300	62	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method get() on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	312	38	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	312	38	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $rawSqlWhere on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	312	38	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method toWhereClause() on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	314	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	312	38	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $rawSqlWhere on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	312	38	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	314	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $rawSqlFrom on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	315	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	315	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $rawSqlWhere on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	315	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $parameters on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	314	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	315	21	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Permission\\SqlCondition::fromRawSql() argument #2 ($parameters) expects array<string, mixed>, mixed given	
+-src/Piwigo/Calendar/CalendarRenderer.php	316	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	315	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $parameters on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	315	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $rawSqlWhere on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	315	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	316	21	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Permission\\SqlCondition::fromRawSql() argument #3 ($types) expects array<string, Doctrine\\DBAL\\ArrayParameterType|Doctrine\\DBAL\\ParameterType>, mixed given	
+ src/Piwigo/Calendar/CalendarRenderer.php	316	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $rawSqlWhere on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	316	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	316	21	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $types on mixed.	
+-src/Piwigo/Calendar/CalendarRenderer.php	316	21	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Permission\\SqlCondition::fromRawSql() argument #3 ($types) expects array<string, Doctrine\\DBAL\\ArrayParameterType|Doctrine\\DBAL\\ParameterType>, mixed given	
+-src/Piwigo/Calendar/CalendarRenderer.php	322	25	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getDateWhere() on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	322	25	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Calendar\\CalendarRepository::findImageIds() argument #2 ($dateWhere) expects Piwigo\\Permission\\SqlCondition, mixed given	
+-src/Piwigo/Calendar/CalendarRenderer.php	324	25	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	322	25	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getDateWhere() on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	324	25	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Calendar\\CalendarRepository::findImageIds() argument #4 ($dqlScope) expects Piwigo\\Calendar\\CalendarQueryScope|null, mixed given	
+-src/Piwigo/Calendar/CalendarRenderer.php	325	25	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getDateWhere() on mixed.	
++src/Piwigo/Calendar/CalendarRenderer.php	324	25	10	property.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot access property $scope on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	325	25	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Calendar\\CalendarRepository::findImageIds() argument #5 ($dqlDateWhere) expects Piwigo\\Permission\\SqlCondition|null, mixed given	
++src/Piwigo/Calendar/CalendarRenderer.php	325	25	10	method.nonObject	Piwigo\\Calendar\\CalendarRenderer::render	Cannot call method getDateWhere() on mixed.	
+ src/Piwigo/Calendar/CalendarRenderer.php	335	59	5	argument.type	Piwigo\\Calendar\\CalendarRenderer::render	Piwigo\\Calendar\\CalendarRenderResult::__construct() argument #3 ($chronologyDate) expects list<int|string>, mixed given	
+ src/Piwigo/Calendar/CalendarRepository.php	470	90	0	nullCoalesce.offset	Piwigo\\Calendar\\CalendarRepository::findRandomImageForDay	Offset 'file' on array{id: Piwigo\\Common\\ValueObject\\ImageId|null, file: string, representative_ext: string|null, path: string, width: int|null, height: int|null, rotation: int|null} on left side of ?? always exists and is not nullable.	
+ src/Piwigo/Calendar/CalendarRepository.php	471	28	0	nullCoalesce.offset	Piwigo\\Calendar\\CalendarRepository::findRandomImageForDay	Offset 'path' on array{id: Piwigo\\Common\\ValueObject\\ImageId|null, file: string, representative_ext: string|null, path: string, width: int|null, height: int|null, rotation: int|null} on left side of ?? always exists and is not nullable.	
+@@ -332,14 +332,14 @@
+ src/Piwigo/Controller/ImageDerivativeController.php	268	49	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Controller\\ImageDerivativeController::timeStep() argument #1 ($step) expects float, mixed given	
+ src/Piwigo/Controller/ImageDerivativeController.php	278	55	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Image\\SizingParams::compute() argument #3 ($crop_rect) expects Piwigo\\Image\\ImageRect|null, mixed given	
+ src/Piwigo/Controller/ImageDerivativeController.php	278	67	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Image\\SizingParams::compute() argument #4 ($scale_size) expects Piwigo\\Image\\Dimensions|null, mixed given	
+-src/Piwigo/Controller/ImageDerivativeController.php	281	26	10	method.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot call method width() on mixed.	
+ src/Piwigo/Controller/ImageDerivativeController.php	281	26	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Admin\\Image\\ImageBackend::crop() argument #1 ($width) expects int|float, mixed given	
+-src/Piwigo/Controller/ImageDerivativeController.php	281	47	10	method.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot call method height() on mixed.	
++src/Piwigo/Controller/ImageDerivativeController.php	281	26	10	method.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot call method width() on mixed.	
+ src/Piwigo/Controller/ImageDerivativeController.php	281	47	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Admin\\Image\\ImageBackend::crop() argument #2 ($height) expects int|float, mixed given	
+-src/Piwigo/Controller/ImageDerivativeController.php	281	69	10	property.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot access property $l on mixed.	
++src/Piwigo/Controller/ImageDerivativeController.php	281	47	10	method.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot call method height() on mixed.	
+ src/Piwigo/Controller/ImageDerivativeController.php	281	69	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Admin\\Image\\ImageBackend::crop() argument #3 ($x) expects int|float, mixed given	
+-src/Piwigo/Controller/ImageDerivativeController.php	281	84	10	property.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot access property $t on mixed.	
++src/Piwigo/Controller/ImageDerivativeController.php	281	69	10	property.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot access property $l on mixed.	
+ src/Piwigo/Controller/ImageDerivativeController.php	281	84	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Admin\\Image\\ImageBackend::crop() argument #4 ($y) expects int|float, mixed given	
++src/Piwigo/Controller/ImageDerivativeController.php	281	84	10	property.nonObject	Piwigo\\Controller\\ImageDerivativeController::__invoke	Cannot access property $t on mixed.	
+ src/Piwigo/Controller/ImageDerivativeController.php	282	47	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Controller\\ImageDerivativeController::timeStep() argument #1 ($step) expects float, mixed given	
+ src/Piwigo/Controller/ImageDerivativeController.php	289	48	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Controller\\ImageDerivativeController::timeStep() argument #1 ($step) expects float, mixed given	
+ src/Piwigo/Controller/ImageDerivativeController.php	296	50	5	argument.type	Piwigo\\Controller\\ImageDerivativeController::__invoke	Piwigo\\Controller\\ImageDerivativeController::timeStep() argument #1 ($step) expects float, mixed given	
+@@ -392,8 +392,8 @@
+ src/Piwigo/Group/GroupRepository.php	631	57	4	instanceof.alwaysTrue	Piwigo\\Group\\GroupRepository::findMembersByGroupIds	Instanceof between Piwigo\\Common\\ValueObject\\GroupId and Piwigo\\Common\\ValueObject\\GroupId will always evaluate to true.	
+ src/Piwigo/Group/GroupRepository.php	677	19	4	instanceof.alwaysTrue	Piwigo\\Group\\GroupRepository::findMembershipsForUserIds	Instanceof between Piwigo\\Common\\ValueObject\\UserId and Piwigo\\Common\\ValueObject\\UserId will always evaluate to true.	
+ src/Piwigo/Group/GroupRepository.php	677	57	4	instanceof.alwaysTrue	Piwigo\\Group\\GroupRepository::findMembershipsForUserIds	Instanceof between Piwigo\\Common\\ValueObject\\GroupId and Piwigo\\Common\\ValueObject\\GroupId will always evaluate to true.	
+-src/Piwigo/Group/GroupService.php	278	51	10	property.nonObject	Piwigo\\Group\\GroupService::merge	Cannot access property $value on mixed.	
+ src/Piwigo/Group/GroupService.php	278	51	5	argument.type	Piwigo\\Group\\GroupService::merge	Piwigo\\Core\\ActivityLoggerInterface::record() argument #2 ($objectId) expects int|string|array<int, int|string>, mixed given	
++src/Piwigo/Group/GroupService.php	278	51	10	property.nonObject	Piwigo\\Group\\GroupService::merge	Cannot access property $value on mixed.	
+ src/Piwigo/Group/GroupService.php	308	72	5	argument.type	Piwigo\\Group\\GroupService::delete	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ src/Piwigo/History/HistoryRepository.php	99	18	0	nullCoalesce.offset	Piwigo\\History\\HistoryRepository::findLastVisit	Offset 'time' on array{date: Piwigo\\Common\\ValueObject\\SqlDate|null, time: Piwigo\\Common\\ValueObject\\SqlTime} on left side of ?? always exists and is not nullable.	
+ src/Piwigo/History/HistoryRepository.php	127	23	0	nullCoalesce.offset	Piwigo\\History\\HistoryRepository::findLastSummaryWithHistoryIdTo	Offset 'year' on array{year: int, month: int|null, day: int|null, hour: int|null, history_id_to: int|null} on left side of ?? always exists and is not nullable.	
+@@ -690,8 +690,8 @@
+ tests/Browser/AdminCheckIntegrityTest.php	77	80	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/AdminCheckIntegrityTest.php	187	80	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/AdminCheckIntegrityTest.php	204	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Browser/AdminConfigurationTest.php	406	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/AdminConfigurationTest.php	406	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/AdminConfigurationTest.php	406	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/AdminConfigurationTest.php	553	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/AdminConfigurationTest.php	556	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/AdminConfigurationTest.php	557	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -730,16 +730,16 @@
+ tests/Browser/Api/InfoControllerTest.php	40	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Browser/Api/InfoControllerTest.php	43	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	24	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/Api/SessionControllerTest.php	24	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/Api/SessionControllerTest.php	24	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
++tests/Browser/Api/SessionControllerTest.php	24	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/Api/SessionControllerTest.php	24	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	25	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	26	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	27	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	44	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/Api/SessionControllerTest.php	44	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
+ tests/Browser/Api/SessionControllerTest.php	44	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Browser/Api/SessionControllerTest.php	44	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
++tests/Browser/Api/SessionControllerTest.php	44	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
+ tests/Browser/Api/SessionControllerTest.php	44	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	45	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Browser/Api/SessionControllerTest.php	46	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+@@ -777,8 +777,8 @@
+ tests/Browser/BatchManagerGlobalInteractionTest.php	130	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/BatchManagerSubControllerTest.php	1193	26	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Browser/BatchManagerSubControllerTest.php	1241	26	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+-tests/Browser/BatchManagerSubControllerTest.php	1318	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/BatchManagerSubControllerTest.php	1318	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/BatchManagerSubControllerTest.php	1318	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/BatchManagerSubControllerTest.php	1393	51	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/BatchManagerSubControllerTest.php	1412	48	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/BatchManagerSubControllerTest.php	1417	38	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+@@ -791,8 +791,8 @@
+ tests/Browser/BatchManagerUnitInteractionTest.php	107	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/BatchManagerUnitInteractionTest.php	111	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/BatchManagerUnitInteractionTest.php	118	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Browser/BatchManagerUnitPageRendererTest.php	108	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/BatchManagerUnitPageRendererTest.php	108	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/BatchManagerUnitPageRendererTest.php	108	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/CatListInteractionTest.php	34	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/CatListInteractionTest.php	36	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/CatListInteractionTest.php	38	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -825,19 +825,19 @@
+ tests/Browser/CatOptionsPageRendererTest.php	40	79	10	offsetAccess.nonOffsetAccessible	doubleSelectOptions	Cannot access offset on mixed.	
+ tests/Browser/CatOptionsPageRendererTest.php	40	83	5	argument.type	doubleSelectOptions	preg_match_all() argument #3 ($matches) expects null|array<(int|string), array<(int|string), string>>, mixed given	
+ tests/Browser/CatOptionsPageRendererTest.php	68	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/CatOptionsPageRendererTest.php	68	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/CatOptionsPageRendererTest.php	68	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
++tests/Browser/CatOptionsPageRendererTest.php	68	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/CatOptionsPageRendererTest.php	91	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/CatOptionsPageRendererTest.php	91	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Browser/CatOptionsPageRendererTest.php	91	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/CatOptionsPageRendererTest.php	91	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/CatOptionsPageRendererTest.php	91	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Browser/CatOptionsPageRendererTest.php	91	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
++tests/Browser/CatOptionsPageRendererTest.php	91	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/CatPermPageRendererTest.php	62	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/CatPermPageRendererTest.php	77	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/CatPermPageRendererTest.php	134	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/CatPermPageRendererTest.php	142	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Browser/CommentsControllerTest.php	136	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/CommentsControllerTest.php	136	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/CommentsControllerTest.php	136	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/CommentsControllerTest.php	389	59	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/CommentsControllerTest.php	489	63	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/CommentsControllerTest.php	616	20	5	argument.type	commentsPluginsPath	dirname() argument #1 ($path) expects string, mixed given	
+@@ -953,8 +953,8 @@
+ tests/Browser/PasswordControllerTest.php	423	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/PasswordControllerTest.php	425	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/PasswordControllerTest.php	455	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Browser/PasswordControllerTest.php	756	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/PasswordControllerTest.php	756	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/PasswordControllerTest.php	756	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/PasswordControllerTest.php	935	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/PasswordControllerTest.php	937	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/PasswordControllerTest.php	1179	24	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+@@ -989,10 +989,10 @@
+ tests/Browser/PictureControllerTest.php	2387	26	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Browser/PictureControllerTest.php	2393	27	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Browser/PictureControllerTest.php	2441	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/PictureControllerTest.php	2441	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/PictureControllerTest.php	2441	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/PictureControllerTest.php	2441	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
++tests/Browser/PictureControllerTest.php	2441	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/PictureControllerTest.php	2441	5	10	method.nonObject	<main> (closure)	Cannot call method toMatch() on mixed.	
++tests/Browser/PictureControllerTest.php	2441	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/PictureControllerTest.php	2508	82	5	argument.type	<main> (closure)	preg_match_all() argument #3 ($matches) expects null|array<(int|string), array<(int|string), string>>, mixed given	
+ tests/Browser/PictureModifyInteractionTest.php	40	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/PictureModifyInteractionTest.php	42	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -1060,37 +1060,37 @@
+ tests/Browser/SearchFilterRendererDataFiltersTest.php	1266	13	5	argument.type	<main> (closure)	preg_match_all() argument #3 ($matches) expects null|array<(int|string), array<(int|string), string>>, mixed given	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	116	95	5	argument.type	extraFiltersGlobalParamsJson	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Browser/SearchFilterRendererExtraFiltersTest.php	817	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/SiteManagerSubControllerTest.php	158	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/SiteManagerSubControllerTest.php	160	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/SiteManagerSubControllerTest.php	165	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -1130,8 +1130,8 @@
+ tests/Browser/UpdatesExtInteractionTest.php	362	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/UpdatesExtInteractionTest.php	365	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/UpdatesExtInteractionTest.php	377	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Browser/UpdatesPwgPageRendererTest.php	158	13	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/UpdatesPwgPageRendererTest.php	158	13	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Browser/UpdatesPwgPageRendererTest.php	158	13	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Browser/UserListInteractionTest.php	111	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Browser/UserListPageRendererTest.php	128	27	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Browser/UserPermPageRendererTest.php	39	37	5	argument.type	userPermSelectOptions	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+@@ -1505,9 +1505,9 @@
+ tests/Unit/Admin/Extensions/ExtensionScannerTest.php	950	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Extensions/ExtensionScannerTest.php	950	9	10	method.nonObject	<main> (closure)	Cannot call method toStartWith() on mixed.	
+ tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	360	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	360	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	360	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	360	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	360	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	443	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	473	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Admin/Extensions/ExtensionUpdateCheckerTest.php	504	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -1594,40 +1594,40 @@
+ tests/Unit/Admin/UnserializeAllowedClassesTest.php	27	41	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Admin/UnserializeAllowedClassesTest.php	37	41	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Admin/UnserializeAllowedClassesTest.php	63	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/UnserializeAllowedClassesTest.php	63	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/UnserializeAllowedClassesTest.php	63	5	10	method.nonObject	<main> (closure)	Cannot call method toBeArray() on mixed.	
++tests/Unit/Admin/UnserializeAllowedClassesTest.php	63	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/UnserializeAllowedClassesTest.php	63	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	49	12	3	return.type	upload_service_test_marker	return type mismatch: expected string, got mixed	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	203	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	218	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	233	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	309	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	326	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	326	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	348	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	348	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Admin/Upload/UploadServiceTest.php	363	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	621	30	5	argument.type	<main> (closure)	upload_service_unset_key() argument #1 ($superglobal) expects array, mixed given	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	626	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Admin/Upload/UploadServiceTest.php	626	22	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+@@ -1714,8 +1714,8 @@
+ tests/Unit/Cache/PersistentFileCacheTest.php	402	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Cache/PersistentFileCacheTest.php	435	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Calendar/CalendarWeeklyTest.php	105	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Calendar/CalendarWeeklyTest.php	105	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Calendar/CalendarWeeklyTest.php	105	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Calendar/CalendarWeeklyTest.php	105	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Calendar/Projection/CalendarChronologyPageContextTest.php	43	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Calendar/Projection/CalendarChronologyPageContextTest.php	58	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Calendar/Projection/CalendarMonthlyCalendarPageContextTest.php	28	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -1723,12 +1723,12 @@
+ tests/Unit/Calendar/Projection/CalendarMonthlyCalendarPageContextTest.php	75	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Category/CategoryRepositoryTest.php	177	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Category/CategoryRepositoryTest.php	226	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+-tests/Unit/Category/CategoryRepositoryTest.php	1032	16	10	property.nonObject	<main> (closure)	Cannot access property $name on mixed.	
+ tests/Unit/Category/CategoryRepositoryTest.php	1032	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Category/CategoryRepositoryTest.php	1034	19	10	property.nonObject	<main> (closure)	Cannot access property $permalink on mixed.	
++tests/Unit/Category/CategoryRepositoryTest.php	1032	16	10	property.nonObject	<main> (closure)	Cannot access property $name on mixed.	
+ tests/Unit/Category/CategoryRepositoryTest.php	1034	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+-tests/Unit/Category/CategoryRepositoryTest.php	1036	19	10	property.nonObject	<main> (closure)	Cannot access property $name on mixed.	
++tests/Unit/Category/CategoryRepositoryTest.php	1034	19	10	property.nonObject	<main> (closure)	Cannot access property $permalink on mixed.	
+ tests/Unit/Category/CategoryRepositoryTest.php	1036	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Category/CategoryRepositoryTest.php	1036	19	10	property.nonObject	<main> (closure)	Cannot access property $name on mixed.	
+ tests/Unit/Category/CategoryServiceTest.php	293	74	5	argument.type	<main> (closure)	Piwigo\\Category\\CategoryService::findCategoryIdFromPermalinks() argument #2 ($idx) expects int|null, mixed given	
+ tests/Unit/Category/CategoryServiceTest.php	297	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Category/CategoryServiceTest.php	307	63	5	argument.type	<main> (closure)	Piwigo\\Category\\CategoryService::findCategoryIdFromPermalinks() argument #2 ($idx) expects int|null, mixed given	
+@@ -1778,19 +1778,19 @@
+ tests/Unit/Config/SchemaIntegrityTest.php	177	41	5	argument.type	<main> (closure)	schemaIntegrityHookBody() argument #1 ($hook) expects ReflectionMethod, mixed given	
+ tests/Unit/Config/SchemaIntegrityTest.php	253	20	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Config/SchemaIntegrityTest.php	259	20	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Controller/AboutControllerTest.php	111	16	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/AboutControllerTest.php	111	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Controller/AboutControllerTest.php	111	16	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/AboutControllerTest.php	113	28	10	method.nonObject	<main> (closure)	Cannot call method getBody() on mixed.	
+ tests/Unit/Controller/AboutControllerTest.php	115	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+-tests/Unit/Controller/Admin/AdminPopuphelpControllerTest.php	113	16	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/Admin/AdminPopuphelpControllerTest.php	113	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Controller/Admin/AdminPopuphelpControllerTest.php	113	16	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/Admin/AdminPopuphelpControllerTest.php	115	28	10	method.nonObject	<main> (closure)	Cannot call method getBody() on mixed.	
+ tests/Unit/Controller/Admin/NotificationByMailSubControllerTest.php	127	72	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Unit/Controller/Admin/UserActivitySubControllerTest.php	299	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Controller/Api/Uploads/TusUploadStoreTest.php	81	30	5	argument.type	<main> (closure)	tusUploadStoreTestRrmdir() argument #1 ($dir) expects string, mixed given	
+ tests/Unit/Controller/Api/VersionControllerTest.php	19	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Controller/CustomLogoControllerTest.php	57	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/CustomLogoControllerTest.php	57	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Controller/CustomLogoControllerTest.php	57	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/CustomLogoControllerTest.php	59	24	10	method.nonObject	<main> (closure)	Cannot call method getBody() on mixed.	
+ tests/Unit/Controller/ImageDerivativeControllerTest.php	166	73	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Controller/ImageDerivativeControllerTest.php	188	73	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+@@ -1805,18 +1805,18 @@
+ tests/Unit/Controller/ImageDerivativeControllerTest.php	471	73	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Controller/ProfileFormHandlerTest.php	97	21	5	argument.type	profileFormHandlerTestRootWithRealThemesAndLanguage	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Controller/ProfileFormHandlerTest.php	98	21	5	argument.type	profileFormHandlerTestRootWithRealThemesAndLanguage	dirname() argument #1 ($path) expects string, mixed given	
+-tests/Unit/Controller/TestErrorsControllerTest.php	45	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/TestErrorsControllerTest.php	45	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Controller/TestErrorsControllerTest.php	45	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/TestErrorsControllerTest.php	47	21	10	method.nonObject	<main> (closure)	Cannot call method getBody() on mixed.	
+-tests/Unit/Controller/VitalsControllerTest.php	60	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/VitalsControllerTest.php	60	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Controller/VitalsControllerTest.php	60	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/VitalsControllerTest.php	62	24	10	method.nonObject	<main> (closure)	Cannot call method getBody() on mixed.	
+-tests/Unit/Controller/VitalsControllerTest.php	93	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/VitalsControllerTest.php	93	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Controller/VitalsControllerTest.php	106	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
++tests/Unit/Controller/VitalsControllerTest.php	93	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/VitalsControllerTest.php	106	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Controller/VitalsControllerTest.php	108	15	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
++tests/Unit/Controller/VitalsControllerTest.php	106	12	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Controller/VitalsControllerTest.php	108	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Controller/VitalsControllerTest.php	108	15	10	method.nonObject	<main> (closure)	Cannot call method getStatusCode() on mixed.	
+ tests/Unit/Core/CacheInterfaceBindingTest.php	23	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Core/CacheInterfaceBindingTest.php	38	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Core/CacheInterfaceBindingTest.php	46	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+@@ -1892,11 +1892,11 @@
+ tests/Unit/Core/ErrorCollectorTest.php	806	51	5	argument.type	errorCollectorTestResponseHeaders	fsockopen() argument #4 ($error_message) expects string|null, mixed given	
+ tests/Unit/Core/ErrorCollectorTest.php	853	29	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method toStartWith() on mixed.	
+ tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Core/ErrorCollectorTest.php	874	9	10	method.nonObject	<main> (closure)	Cannot call method toStartWith() on mixed.	
+ tests/Unit/Core/FilesystemHelperTest.php	178	32	5	argument.type	<main> (closure)	filesystemHelperTestRrmdir() argument #1 ($dir) expects string, mixed given	
+ tests/Unit/Core/FilesystemHelperTest.php	318	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Core/FilesystemHelperTest.php	443	28	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+@@ -1935,11 +1935,11 @@
+ tests/Unit/Db/DbConnectionTest.php	63	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Db/DbConnectionTest.php	64	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Db/DbConnectionTest.php	111	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Db/DbConnectionTest.php	111	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Db/DbConnectionTest.php	111	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
+ tests/Unit/Db/DbConnectionTest.php	111	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Db/DbConnectionTest.php	111	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Db/DbConnectionTest.php	111	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
++tests/Unit/Db/DbConnectionTest.php	111	5	10	method.nonObject	<main> (closure)	Cannot call method toHaveKey() on mixed.	
++tests/Unit/Db/DbConnectionTest.php	111	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Unit/Db/DbConnectionTest.php	111	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Db/DbConnectionTest.php	197	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/DbConnectionTest.php	199	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Db/DbConnectionTest.php	199	40	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+@@ -1947,15 +1947,15 @@
+ tests/Unit/Db/DbConnectionTest.php	273	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Db/DbConnectionTest.php	288	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/DbCredentialsTest.php	153	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Db/DbCredentialsTest.php	153	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Db/DbCredentialsTest.php	153	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Db/DbCredentialsTest.php	153	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Db/DbCredentialsTest.php	153	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Db/EntityManagerFactoryTest.php	190	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/ForeignKeyPresenceTest.php	212	93	5	argument.type	<main> (closure)	array_slice() argument #1 ($array) expects array, mixed given	
+ tests/Unit/Db/MigrationDependencyFactoryTest.php	34	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/SchemaDumpServiceSqliteTest.php	52	31	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+-tests/Unit/Db/SchemaDumpServiceSqliteTest.php	78	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Db/SchemaDumpServiceSqliteTest.php	78	9	10	method.nonObject	<main> (closure)	Cannot call method toMatch() on mixed.	
++tests/Unit/Db/SchemaDumpServiceSqliteTest.php	78	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Db/SqlDialectExecutorSqliteTest.php	67	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/SqlDialectExecutorTest.php	53	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/SqlDialectTest.php	38	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -1963,17 +1963,17 @@
+ tests/Unit/Db/SqlDialectTest.php	45	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Db/SqlDialectTest.php	46	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Feed/FeedHelperTest.php	134	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Feed/FeedHelperTest.php	134	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Feed/FeedHelperTest.php	134	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Feed/FeedHelperTest.php	134	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Feed/FeedHelperTest.php	174	79	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Feed/FeedHelperTest.php	242	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Feed/FeedHelperTest.php	242	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Feed/FeedHelperTest.php	242	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Feed/FeedHelperTest.php	242	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Unit/Feed/FeedHelperTest.php	242	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Filter/FilterServiceTest.php	168	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Filter/FilterServiceTest.php	196	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Filter/FilterServiceTest.php	224	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -1989,8 +1989,8 @@
+ tests/Unit/History/HistoryRepositoryTest.php	477	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Html/HtmlServiceTest.php	59	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Html/HtmlServiceTest.php	434	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Html/HtmlServiceTest.php	434	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Html/HtmlServiceTest.php	434	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Html/HtmlServiceTest.php	434	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Html/HtmlServiceTest.php	509	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Html/HtmlServiceTest.php	509	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Html/HtmlServiceTest.php	889	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -2174,10 +2174,10 @@
+ tests/Unit/Job/MessengerFactoryTest.php	53	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Job/MessengerFactoryTest.php	72	94	5	argument.type	<main> (closure)	str_contains() argument #1 ($haystack) expects string|null, mixed given	
+ tests/Unit/Job/MessengerFactoryTest.php	72	127	5	argument.type	<main> (closure)	is_a() argument #1 ($object_or_class) expects object|string, mixed given	
+-tests/Unit/Job/MessengerFactoryTest.php	82	12	10	method.nonObject	<main> (closure)	Cannot call method getDefaultConnectionName() on mixed.	
+ tests/Unit/Job/MessengerFactoryTest.php	82	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Job/MessengerFactoryTest.php	84	15	10	method.nonObject	<main> (closure)	Cannot call method getConnections() on mixed.	
++tests/Unit/Job/MessengerFactoryTest.php	82	12	10	method.nonObject	<main> (closure)	Cannot call method getDefaultConnectionName() on mixed.	
+ tests/Unit/Job/MessengerFactoryTest.php	84	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Job/MessengerFactoryTest.php	84	15	10	method.nonObject	<main> (closure)	Cannot call method getConnections() on mixed.	
+ tests/Unit/Job/MessengerFactoryTest.php	102	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Job/MessengerFactoryTest.php	229	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Job/RegenerateAllDerivativesHandlerTest.php	49	31	5	argument.type	<main> (closure)	regen_handler_test_rrmdir() argument #1 ($dir) expects string, mixed given	
+@@ -2185,53 +2185,53 @@
+ tests/Unit/Job/SendNotificationEmailHandlerTest.php	76	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Lang/LangServiceTest.php	33	44	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Lang/LangServiceTest.php	43	5	10	method.nonObject	<main> (closure)	Cannot call method loadArray() on mixed.	
+-tests/Unit/Lang/LangServiceTest.php	47	12	10	method.nonObject	<main> (closure)	Cannot call method t() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	47	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/LangServiceTest.php	52	12	10	method.nonObject	<main> (closure)	Cannot call method t() on mixed.	
++tests/Unit/Lang/LangServiceTest.php	47	12	10	method.nonObject	<main> (closure)	Cannot call method t() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	52	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/LangServiceTest.php	52	12	10	method.nonObject	<main> (closure)	Cannot call method t() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	57	5	10	method.nonObject	<main> (closure)	Cannot call method loadArray() on mixed.	
+-tests/Unit/Lang/LangServiceTest.php	61	12	10	method.nonObject	<main> (closure)	Cannot call method l10n() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	61	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/LangServiceTest.php	61	12	10	method.nonObject	<main> (closure)	Cannot call method l10n() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	62	16	10	method.nonObject	<main> (closure)	Cannot call method t() on mixed.	
+-tests/Unit/Lang/LangServiceTest.php	66	12	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	66	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/LangServiceTest.php	71	12	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
++tests/Unit/Lang/LangServiceTest.php	66	12	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	71	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/LangServiceTest.php	76	12	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
++tests/Unit/Lang/LangServiceTest.php	71	12	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	76	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/LangServiceTest.php	105	16	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
++tests/Unit/Lang/LangServiceTest.php	76	12	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	105	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/LangServiceTest.php	218	16	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
++tests/Unit/Lang/LangServiceTest.php	105	16	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
+ tests/Unit/Lang/LangServiceTest.php	218	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/LangServiceTest.php	218	16	10	method.nonObject	<main> (closure)	Cannot call method loadLanguageForPlugin() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	22	21	5	argument.type	<main> (closure)	file_exists() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	23	16	5	argument.type	<main> (closure)	unlink() argument #1 ($filename) expects string, mixed given	
+-tests/Unit/Lang/TranslatorTest.php	28	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	28	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	28	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	33	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	42	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	44	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	44	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	44	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	49	5	10	method.nonObject	<main> (closure)	Cannot call method loadArray() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	53	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	53	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	53	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	58	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	67	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	69	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	69	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	69	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	85	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	96	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	98	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	98	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/TranslatorTest.php	100	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
++tests/Unit/Lang/TranslatorTest.php	98	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	100	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Lang/TranslatorTest.php	100	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	126	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	138	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	140	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	140	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/TranslatorTest.php	142	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
++tests/Unit/Lang/TranslatorTest.php	140	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	142	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+-tests/Unit/Lang/TranslatorTest.php	144	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
++tests/Unit/Lang/TranslatorTest.php	142	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	144	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Lang/TranslatorTest.php	144	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	149	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	163	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	165	15	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+@@ -2242,8 +2242,8 @@
+ tests/Unit/Lang/TranslatorTest.php	168	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	168	23	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	172	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	174	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	174	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	174	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	187	5	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	204	5	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	214	5	10	method.nonObject	<main> (closure)	Cannot call method loadArray() on mixed.	
+@@ -2254,66 +2254,66 @@
+ tests/Unit/Lang/TranslatorTest.php	253	28	5	argument.type	<main> (closure)	Piwigo\\Lang\\Translator::restoreFrom() argument #1 ($snapshot) expects Piwigo\\Lang\\Translator, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	262	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	273	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	275	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	275	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/TranslatorTest.php	277	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
++tests/Unit/Lang/TranslatorTest.php	275	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	277	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Lang/TranslatorTest.php	277	15	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	308	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	321	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	323	15	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	324	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	324	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	324	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	324	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Lang/TranslatorTest.php	324	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	324	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	326	23	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	327	15	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	340	5	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	359	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	368	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	370	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	370	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	370	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	375	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	386	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	388	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	388	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	388	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	398	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	409	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	411	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	411	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	411	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	439	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	459	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	470	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	483	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	485	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	485	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	485	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	497	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	505	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	507	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	507	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Lang/TranslatorTest.php	509	15	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
++tests/Unit/Lang/TranslatorTest.php	507	12	10	method.nonObject	<main> (closure)	Cannot call method translate() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	509	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Lang/TranslatorTest.php	509	15	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	518	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	527	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	529	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	529	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	529	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	542	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	552	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	554	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	554	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	554	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	562	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	573	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	575	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	575	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	575	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	587	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	596	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	598	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	598	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	598	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	616	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	635	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	636	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	638	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	638	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	638	12	10	method.nonObject	<main> (closure)	Cannot call method plural() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	661	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	676	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	678	15	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+@@ -2323,20 +2323,20 @@
+ tests/Unit/Lang/TranslatorTest.php	683	23	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	706	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	716	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	718	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	718	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	718	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	726	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	737	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	739	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	739	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	739	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	751	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	761	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	763	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	763	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	763	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	771	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	782	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+-tests/Unit/Lang/TranslatorTest.php	784	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	784	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Lang/TranslatorTest.php	784	12	10	method.nonObject	<main> (closure)	Cannot call method mirroredStrings() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	814	23	5	argument.type	<main> (closure)	file_put_contents() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	823	5	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+ tests/Unit/Lang/TranslatorTest.php	825	24	5	argument.type	<main> (closure)	filemtime() argument #1 ($filename) expects string, mixed given	
+@@ -2351,15 +2351,15 @@
+ tests/Unit/Lang/TranslatorTest.php	888	25	5	argument.type	<main> (closure)	Piwigo\\Lang\\Translator::load() argument #2 ($poFile) expects string, mixed given	
+ tests/Unit/Lang/TranslatorTest.php	942	9	10	method.nonObject	<main> (closure)	Cannot call method load() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/BoundedSendmailTransportTest.php	89	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	266	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Mail/BoundedSendmailTransportTest.php	317	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	58	46	5	argument.type	mail_service_test_build	dirname() argument #1 ($path) expects string, mixed given	
+@@ -2425,23 +2425,23 @@
+ tests/Unit/Mail/MailServiceTest.php	1472	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1500	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1516	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/MailServiceTest.php	1516	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1516	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/MailServiceTest.php	1516	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1516	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/MailServiceTest.php	1516	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/MailServiceTest.php	1516	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1542	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1557	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/MailServiceTest.php	1557	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Mail/MailServiceTest.php	1557	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1557	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1557	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/MailServiceTest.php	1557	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/MailServiceTest.php	1557	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1563	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1597	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1625	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/MailServiceTest.php	1625	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1625	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Mail/MailServiceTest.php	1625	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1625	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/MailServiceTest.php	1625	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Mail/MailServiceTest.php	1625	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Mail/MailServiceTest.php	1636	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1654	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Mail/MailServiceTest.php	1668	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+@@ -2463,15 +2463,15 @@
+ tests/Unit/Mail/MailServiceTestFakeSmtpServer.php	36	67	5	argument.type	<main>	stream_socket_server() argument #3 ($error_message) expects string|null, mixed given	
+ tests/Unit/Mail/NotificationByMailSenderTest.php	42	42	5	argument.type	nbm_sender_with_timeout_inputs	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Menu/MenubarRendererTest.php	166	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/OpenApi/SpecStructureTest.php	77	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/OpenApi/SpecStructureTest.php	77	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+-tests/Unit/OpenApi/SpecStructureTest.php	89	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Unit/OpenApi/SpecStructureTest.php	77	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/OpenApi/SpecStructureTest.php	89	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/OpenApi/SpecStructureTest.php	89	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Page/PageDataPayloadTest.php	104	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+-tests/Unit/Page/PageDataPayloadTest.php	120	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+-tests/Unit/Page/PageDataPayloadTest.php	120	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Page/PageDataPayloadTest.php	120	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Page/PageDataPayloadTest.php	120	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Page/PageDataPayloadTest.php	120	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Page/PageDataPayloadTest.php	120	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Page/PageHeaderRendererTest.php	73	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Page/PageHeaderRendererTest.php	75	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Page/PageHeaderRendererTest.php	77	19	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+@@ -2539,49 +2539,49 @@
+ tests/Unit/Picture/PictureCommentRendererTest.php	109	33	5	argument.type	<main> (closure)	picture_comment_test_rrmdir() argument #1 ($dir) expects string, mixed given	
+ tests/Unit/Picture/PictureMetadataRendererTest.php	86	34	5	argument.type	<main> (closure)	picture_metadata_test_rrmdir() argument #1 ($dir) expects string, mixed given	
+ tests/Unit/Picture/PictureRateRendererTest.php	62	30	5	argument.type	<main> (closure)	picture_rate_test_rrmdir() argument #1 ($dir) expects string, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	22	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	22	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	27	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	22	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	27	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	35	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	27	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	35	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	37	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	35	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	37	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	43	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	37	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	43	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	45	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	43	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	45	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Search/Inflector/InflectorFrTest.php	45	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	61	35	5	argument.type	<main> (closure)	ReflectionProperty::getValue() argument #1 ($object) expects object|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	69	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	69	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	94	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	69	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	94	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	103	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	94	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	103	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	112	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	103	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	112	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	119	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	112	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	119	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	127	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	119	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	127	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	140	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	127	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	140	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	142	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	140	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	142	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	144	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	142	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	144	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	149	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	144	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	149	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	156	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	149	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	156	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	168	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	156	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	168	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	177	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	168	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	177	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	201	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	177	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	201	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Search/Inflector/InflectorFrTest.php	221	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
++tests/Unit/Search/Inflector/InflectorFrTest.php	201	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/Inflector/InflectorFrTest.php	221	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Search/Inflector/InflectorFrTest.php	221	12	10	method.nonObject	<main> (closure)	Cannot call method getVariants() on mixed.	
+ tests/Unit/Search/SearchRepositoryTest.php	205	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Search/SearchRepositoryTest.php	206	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Search/SearchRepositoryTest.php	219	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+@@ -2599,17 +2599,17 @@
+ tests/Unit/Search/SearchServiceTest.php	1483	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Search/SearchServiceTest.php	2430	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+-tests/Unit/Session/SessionServiceTest.php	95	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
++tests/Unit/Section/SectionContextTest.php	166	5	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Session/SessionServiceTest.php	95	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Session/SessionServiceTest.php	95	9	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Session/SessionServiceTest.php	293	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+ tests/Unit/Session/SessionServiceTest.php	316	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Session/SessionServiceTest.php	324	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -2669,14 +2669,14 @@
+ tests/Unit/Site/LocalSiteReaderTest.php	428	32	5	argument.type	<main> (closure)	Piwigo\\Site\\LocalSiteReader::getFormats() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Site/SiteRepositoryTest.php	72	42	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Tag/TagRepositoryTest.php	1032	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Tag/TagRepositoryTest.php	1032	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Tag/TagRepositoryTest.php	1032	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Tag/TagRepositoryTest.php	1032	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Tag/TagRepositoryTest.php	1032	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Tag/TagServiceTest.php	266	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Tag/TagServiceTest.php	760	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Tag/TagServiceTest.php	760	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Tag/TagServiceTest.php	760	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Tag/TagServiceTest.php	760	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Tag/TagServiceTest.php	760	9	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Tag/TagServiceTest.php	938	9	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Tag/TagServiceTest.php	938	9	10	method.nonObject	<main> (closure)	Cannot call method toBe() on mixed.	
+ tests/Unit/Telemetry/TelemetryServiceTest.php	65	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -2698,8 +2698,8 @@
+ tests/Unit/Template/RendererTest.php	71	41	5	argument.type	<main> (closure)	escapeshellarg() argument #1 ($arg) expects string, mixed given	
+ tests/Unit/Template/TemplateInstanceTest.php	248	35	5	argument.type	<main> (closure)	template_instance_test_rrmdir() argument #1 ($dir) expects string, mixed given	
+ tests/Unit/Template/TemplateInstanceTest.php	290	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+-tests/Unit/Template/TemplateInstanceTest.php	290	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Template/TemplateInstanceTest.php	290	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Template/TemplateInstanceTest.php	290	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Template/TemplateInstanceTest.php	335	5	10	method.nonObject	<main> (closure)	Cannot call method and() on mixed.	
+ tests/Unit/Template/TemplateInstanceTest.php	335	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
+ tests/Unit/Template/TemplateInstanceTest.php	377	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+@@ -2736,44 +2736,44 @@
+ tests/Unit/Template/TemplateTest.php	262	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Template/ViewTemplateTypeRoundTripTest.php	69	76	5	argument.type	<main> (closure)	preg_match() argument #3 ($matches) expects null|array<(int|string), string>, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	22	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	24	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	24	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	24	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	24	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	25	15	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	25	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	25	15	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	30	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	36	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	36	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	36	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	36	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	41	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	46	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	46	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	46	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	46	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	48	15	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	48	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	48	15	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	48	32	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	53	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	58	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	58	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	58	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	58	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	60	15	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	60	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	60	15	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	60	32	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	62	28	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	62	28	5	argument.type	<main> (closure)	implode() argument #2 ($array) expects array|null, mixed given	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	67	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
++tests/Unit/Tools/ContextVariableExtractorTest.php	62	28	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	67	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	67	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	67	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	72	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	75	9	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	75	9	5	argument.type	<main> (closure)	array_filter() argument #1 ($array) expects array, mixed given	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	80	25	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
++tests/Unit/Tools/ContextVariableExtractorTest.php	75	9	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	80	25	5	argument.type	<main> (closure)	implode() argument #2 ($array) expects array|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	80	25	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	85	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	87	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	87	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	91	9	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
++tests/Unit/Tools/ContextVariableExtractorTest.php	87	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	91	9	5	argument.type	<main> (closure)	array_filter() argument #1 ($array) expects array, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	91	9	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	97	21	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	98	119	5	argument.type	<main> (closure)	exec() argument #2 ($output) expects array|null, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	106	18	5	argument.type	<main> (closure)	count() argument #1 ($value) expects array|Countable, mixed given	
+@@ -2792,78 +2792,78 @@
+ tests/Unit/Tools/ContextVariableExtractorTest.php	196	20	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\VariableMapBuilder::__construct() argument #4 ($extractor) expects Piwigo\\Tools\\PhpStan\\Latte\\ContextVariableExtractor, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	221	37	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	228	18	10	method.nonObject	<main> (closure)	Cannot call method extract() on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	234	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	234	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	234	12	10	property.nonObject	<main> (closure)	Cannot access property $vars on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	234	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+-tests/Unit/Tools/ContextVariableExtractorTest.php	237	9	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	237	9	5	argument.type	<main> (closure)	array_filter() argument #1 ($array) expects array, mixed given	
++tests/Unit/Tools/ContextVariableExtractorTest.php	237	9	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	269	20	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\VariableMapBuilder::__construct() argument #4 ($extractor) expects Piwigo\\Tools\\PhpStan\\Latte\\ContextVariableExtractor, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	293	20	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\VariableMapBuilder::__construct() argument #4 ($extractor) expects Piwigo\\Tools\\PhpStan\\Latte\\ContextVariableExtractor, mixed given	
+ tests/Unit/Tools/ContextVariableExtractorTest.php	321	20	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\VariableMapBuilder::__construct() argument #4 ($extractor) expects Piwigo\\Tools\\PhpStan\\Latte\\ContextVariableExtractor, mixed given	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	15	37	5	argument.type	<main> (closure)	escapeshellarg() argument #1 ($arg) expects string, mixed given	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	27	37	5	argument.type	<main> (closure)	error_mapper_test_write() argument #1 ($dir) expects string, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	48	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	48	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	55	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	48	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	55	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	55	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	64	37	5	argument.type	<main> (closure)	error_mapper_test_write() argument #1 ($dir) expects string, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	76	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	76	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	82	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	76	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	82	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	91	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	82	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	91	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	93	12	10	method.nonObject	<main> (closure)	Cannot call method isGeneratedFile() on mixed.	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	91	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	93	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	93	12	10	method.nonObject	<main> (closure)	Cannot call method isGeneratedFile() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	96	41	5	argument.type	<main> (closure)	error_mapper_test_write() argument #1 ($dir) expects string, mixed given	
+-tests/Unit/Tools/GeneratedFileErrorMapperTest.php	97	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	97	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/GeneratedFileErrorMapperTest.php	97	12	10	method.nonObject	<main> (closure)	Cannot call method map() on mixed.	
+ tests/Unit/Tools/GeneratedFileErrorMapperTest.php	102	25	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	46	31	5	argument.type	<main> (closure)	dirname() argument #1 ($path) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	59	16	5	argument.type	<main> (closure)	is_dir() argument #1 ($filename) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	60	41	5	argument.type	<main> (closure)	escapeshellarg() argument #1 ($arg) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	65	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	70	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	70	40	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	71	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	70	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	71	5	10	method.nonObject	<main> (closure)	Cannot call method toContain() on mixed.	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	71	5	10	property.nonObject	<main> (closure)	Cannot access property $not on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	96	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	98	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	98	40	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	98	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	117	9	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler::__construct() argument #2 ($root) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	118	9	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler::__construct() argument #3 ($outputDir) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	130	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	134	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	134	40	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	134	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	149	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	151	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	151	40	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	151	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	166	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	168	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	168	40	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	168	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	187	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	189	39	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	189	39	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	189	39	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	206	52	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler::__construct() argument #2 ($root) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	206	69	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler::__construct() argument #3 ($outputDir) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	213	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	221	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	221	40	5	argument.type	<main> (closure)	file_get_contents() argument #1 ($filename) expects string, mixed given	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	225	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	221	40	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	225	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	225	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	232	14	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	235	24	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	235	24	5	argument.type	<main> (closure)	filemtime() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	235	24	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	236	15	10	method.nonObject	<main> (closure)	Cannot call method compile() on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	240	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	240	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	242	15	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	240	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	242	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	244	15	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	242	15	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	244	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	244	15	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	245	16	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+-tests/Unit/Tools/LatteTemplateCompilerTest.php	246	25	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	246	25	5	argument.type	<main> (closure)	filemtime() argument #1 ($filename) expects string, mixed given	
++tests/Unit/Tools/LatteTemplateCompilerTest.php	246	25	10	property.nonObject	<main> (closure)	Cannot access property $outputPath on mixed.	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	258	52	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler::__construct() argument #2 ($root) expects string, mixed given	
+ tests/Unit/Tools/LatteTemplateCompilerTest.php	258	69	5	argument.type	<main> (closure)	Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler::__construct() argument #3 ($outputDir) expects string, mixed given	
+ tests/Unit/Tools/ShimClassGeneratorTest.php	108	16	5	argument.type	<main> (closure)	is_dir() argument #1 ($filename) expects string, mixed given	
+@@ -2878,54 +2878,54 @@
+ tests/Unit/Tools/TemplateCallSiteScannerTest.php	108	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Tools/TemplateCallSiteScannerTest.php	111	16	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+ tests/Unit/Tools/TemplateCallSiteScannerTest.php	147	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/TemplateCallSiteScannerTest.php	155	12	10	property.nonObject	<main> (closure)	Cannot access property $contextsByClass on mixed.	
+ tests/Unit/Tools/TemplateCallSiteScannerTest.php	155	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/TemplateCallSiteScannerTest.php	157	12	10	property.nonObject	<main> (closure)	Cannot access property $templatesByClass on mixed.	
++tests/Unit/Tools/TemplateCallSiteScannerTest.php	155	12	10	property.nonObject	<main> (closure)	Cannot access property $contextsByClass on mixed.	
+ tests/Unit/Tools/TemplateCallSiteScannerTest.php	157	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/TemplateCallSiteScannerTest.php	163	9	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
++tests/Unit/Tools/TemplateCallSiteScannerTest.php	157	12	10	property.nonObject	<main> (closure)	Cannot access property $templatesByClass on mixed.	
+ tests/Unit/Tools/TemplateCallSiteScannerTest.php	163	9	5	argument.type	<main> (closure)	array_filter() argument #1 ($array) expects array, mixed given	
++tests/Unit/Tools/TemplateCallSiteScannerTest.php	163	9	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	14	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	23	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	23	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	25	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	23	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	25	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	33	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	25	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	33	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	33	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	43	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	47	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	47	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	49	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	47	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	49	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	49	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	64	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	66	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	66	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	68	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	66	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	68	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	68	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	73	14	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	76	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	76	35	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	80	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	80	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	82	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	80	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	82	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	82	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	83	16	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	87	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	89	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	89	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	91	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	89	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	91	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	91	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	98	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	102	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	102	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	104	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	102	12	10	property.nonObject	<main> (closure)	Cannot access property $changed on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	104	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	104	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	109	15	10	method.nonObject	<main> (closure)	Cannot call method sync() on mixed.	
+-tests/Unit/Tools/VarTypeSyncerTest.php	118	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	118	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	121	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	118	12	10	property.nonObject	<main> (closure)	Cannot access property $content on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	121	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
+-tests/Unit/Tools/VarTypeSyncerTest.php	123	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
++tests/Unit/Tools/VarTypeSyncerTest.php	121	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	123	12	5	argument.type	<main> (closure)	expect() argument #1 ($value) expects TValue|null, mixed given	
++tests/Unit/Tools/VarTypeSyncerTest.php	123	12	10	property.nonObject	<main> (closure)	Cannot access property $notices on mixed.	
+ tests/Unit/Tools/VarTypeSyncerTest.php	123	29	10	offsetAccess.nonOffsetAccessible	<main> (closure)	Cannot access offset on mixed.	
+ tests/Unit/Url/UrlServiceTest.php	427	71	5	argument.type	<main> (closure)	Piwigo\\Url\\UrlService::parseWellKnownParamsUrl() argument #2 ($i) expects int, mixed given	
+ tests/Unit/Url/UrlServiceTest.php	434	15	5	argument.type	<main> (closure)	Pest\\Expectation::and() argument #1 ($value) expects TAndValue, mixed given	

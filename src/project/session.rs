@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::checker::Diagnostic;
+use crate::checker::{self, Diagnostic};
 use crate::config::{self, Config};
 use crate::token::Span;
 use crate::{
@@ -74,7 +74,7 @@ pub struct Session {
 
 /// What one run produced, after the full post-processing chain.
 pub struct Analysis {
-    /// Per-file diagnostics, sorted by position.
+    /// Per-file diagnostics in `checker::diagnostic_order`.
     pub results: HashMap<PathBuf, Vec<Diagnostic>>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
@@ -621,9 +621,7 @@ impl Session {
 
         let mut extend = |found: HashMap<PathBuf, Vec<Diagnostic>>| {
             for (path, diags) in found {
-                let entry = results.entry(path).or_default();
-                entry.extend(diags);
-                entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+                results.entry(path).or_default().extend(diags);
             }
         };
         extend(project.check_whole_program());
@@ -656,6 +654,9 @@ impl Session {
             &self.config.ignore_errors.clone().unwrap_or_default(),
         );
         restricted_symbols::filter_by_path(&mut results);
+        for diagnostics in results.values_mut() {
+            checker::sort_diagnostics(diagnostics);
+        }
 
         Ok(Analysis {
             results,

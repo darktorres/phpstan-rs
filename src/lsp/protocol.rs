@@ -357,11 +357,13 @@ pub(crate) fn publish_diagnostics_notification(
     version: Option<i32>,
     diagnostics: &[Diagnostic],
 ) -> Message {
+    let mut ordered: Vec<&Diagnostic> = diagnostics.iter().collect();
+    ordered.sort_by(|a, b| crate::checker::diagnostic_order(a, b));
     Message::Notification(LspNotification::new(
         "textDocument/publishDiagnostics".to_string(),
         PublishDiagnosticsParams {
             uri,
-            diagnostics: diagnostics.iter().map(to_lsp_diagnostic).collect(),
+            diagnostics: ordered.into_iter().map(to_lsp_diagnostic).collect(),
             version,
         },
     ))

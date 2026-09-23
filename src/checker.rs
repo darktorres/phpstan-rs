@@ -576,6 +576,31 @@ pub struct Diagnostic {
 /// `description` is a short human label for the fix itself (real
 /// PHPStan's own fixer CLI output shows one per applied fix, e.g. "Add
 /// missing return statement").
+/// The total order every consumer presents diagnostics in within a file:
+/// position, then identifier, message and tip, so diagnostics sharing a
+/// position don't come out in whatever order the checks happened to run.
+pub fn diagnostic_order(a: &Diagnostic, b: &Diagnostic) -> std::cmp::Ordering {
+    (
+        a.span.start.line,
+        a.span.start.col,
+        &a.identifier,
+        &a.message,
+        &a.tip,
+    )
+        .cmp(&(
+            b.span.start.line,
+            b.span.start.col,
+            &b.identifier,
+            &b.message,
+            &b.tip,
+        ))
+}
+
+/// Sorts one file's diagnostics into `diagnostic_order`.
+pub fn sort_diagnostics(diagnostics: &mut [Diagnostic]) {
+    diagnostics.sort_by(diagnostic_order);
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticFix {
     pub span: Span,
