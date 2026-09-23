@@ -507,6 +507,16 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_psr3_exception_context`.
+    pub fn set_check_psr3_exception_context(&mut self, enabled: bool) {
+        self.registry.check_psr3_exception_context = enabled;
+    }
+
+    /// See `Registry::check_psr3_logging`.
+    pub fn set_check_psr3_logging(&mut self, enabled: bool) {
+        self.registry.check_psr3_logging = enabled;
+    }
+
     /// See `Registry::check_magic_numbers`.
     pub fn set_check_magic_numbers(&mut self, enabled: bool) {
         self.registry.check_magic_numbers = enabled;

@@ -434,7 +434,7 @@ impl<'a> Checker<'a> {
     }
 
     /// Whether every value of `ty` has a string conversion.
-    fn converts_to_string(&self, ty: &Type) -> bool {
+    pub(crate) fn converts_to_string(&self, ty: &Type) -> bool {
         match ty {
             Type::Union(members) => members.iter().all(|m| self.converts_to_string(m)),
             Type::Intersection(members) => members.iter().any(|m| self.converts_to_string(m)),

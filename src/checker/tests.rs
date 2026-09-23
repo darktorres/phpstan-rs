@@ -85,6 +85,7 @@ mod property_declarations;
 mod property_default_types;
 mod property_hooks;
 mod property_type_too_wide;
+mod psr3;
 mod purity;
 mod purity_tags;
 mod receiver_type_checks;

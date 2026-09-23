@@ -268,6 +268,11 @@ impl<'a> Checker<'a> {
         if self.registry.check_magic_numbers {
             self.check_magic_numbers_expression(e, label);
         }
+        if (self.registry.check_psr3_logging || self.registry.check_psr3_exception_context)
+            && matches!(e.kind, ExprKind::MethodCall(..) | ExprKind::StaticCall(..))
+        {
+            self.check_psr3_call(e, locals, label);
+        }
         if self.registry.check_illegal_constructor_calls
             || self.registry.check_dynamic_static_calls
             || self.registry.check_arithmetic_operands

@@ -259,6 +259,12 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag PSR-3 logger calls that leave out an in-scope Throwable as the exception context key.
+        #[arg(long)]
+        check_psr3_exception_context: bool,
+        /// Check PSR-3 logger calls: placeholders against context keys, static messages, levels and context shape.
+        #[arg(long)]
+        check_psr3_logging: bool,
         /// Flag magic numbers: numeric literals outside constant declarations.
         #[arg(long)]
         check_magic_numbers: bool,
@@ -501,6 +507,8 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_psr3_exception_context,
+            check_psr3_logging,
             check_magic_numbers,
             check_native_type_hints,
             check_implicit_array_creation,
@@ -572,6 +580,8 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_psr3_exception_context,
+            check_psr3_logging,
             check_magic_numbers,
             check_native_type_hints,
             check_implicit_array_creation,

@@ -163,6 +163,8 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_psr3_exception_context: bool,
+    check_psr3_logging: bool,
     check_magic_numbers: bool,
     magic_number_options: (Option<Vec<f64>>, bool),
     check_native_type_hints: bool,
@@ -271,6 +273,8 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_psr3_exception_context(check_psr3_exception_context);
+    project.set_check_psr3_logging(check_psr3_logging);
     project.set_check_magic_numbers(check_magic_numbers);
     project.set_magic_number_options(magic_number_options.0, magic_number_options.1);
     project.set_check_native_type_hints(check_native_type_hints);
@@ -755,6 +759,8 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_psr3_exception_context: bool,
+    check_psr3_logging: bool,
     check_magic_numbers: bool,
     check_native_type_hints: bool,
     check_implicit_array_creation: bool,
@@ -909,6 +915,9 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_psr3_exception_context =
+        check_psr3_exception_context || config.check_psr3_exception_context.unwrap_or(false);
+    let check_psr3_logging = check_psr3_logging || config.check_psr3_logging.unwrap_or(false);
     let check_magic_numbers = check_magic_numbers || config.check_magic_numbers.unwrap_or(false);
     let magic_number_options = (
         config
@@ -1198,6 +1207,8 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_psr3_exception_context,
+        check_psr3_logging,
         check_magic_numbers,
         magic_number_options,
         check_native_type_hints,

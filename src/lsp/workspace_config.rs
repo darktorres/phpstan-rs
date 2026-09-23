@@ -44,6 +44,8 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_throw_without_message: bool,
     pub(crate) check_throw_base_class: bool,
     pub(crate) check_exception_hygiene: bool,
+    pub(crate) check_psr3_exception_context: bool,
+    pub(crate) check_psr3_logging: bool,
     pub(crate) check_magic_numbers: bool,
     pub(crate) magic_number_exemptions: Option<Vec<f64>>,
     pub(crate) magic_numbers_ignore_numeric_strings: bool,
@@ -257,6 +259,8 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_throw_without_message: config.check_throw_without_message.unwrap_or(false),
         check_throw_base_class: config.check_throw_base_class.unwrap_or(false),
         check_exception_hygiene: config.check_exception_hygiene.unwrap_or(false),
+        check_psr3_exception_context: config.check_psr3_exception_context.unwrap_or(false),
+        check_psr3_logging: config.check_psr3_logging.unwrap_or(false),
         check_magic_numbers: config.check_magic_numbers.unwrap_or(false),
         magic_number_exemptions: config
             .magic_number_exemptions

@@ -419,6 +419,10 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_psr3_exception_context(resolved.check_psr3_exception_context);
+        self.project
+            .set_check_psr3_logging(resolved.check_psr3_logging);
+        self.project
             .set_check_magic_numbers(resolved.check_magic_numbers);
         self.project.set_magic_number_options(
             resolved.magic_number_exemptions.clone(),

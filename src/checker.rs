@@ -1283,6 +1283,7 @@ mod preg_pattern_validity;
 mod property_assignment;
 mod property_default_types;
 mod property_type_too_wide;
+mod psr3;
 mod resolve;
 mod restricted_symbol_usage;
 mod return_type_too_wide;
