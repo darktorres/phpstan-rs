@@ -93,6 +93,9 @@ impl<'a> Checker<'a> {
                 {
                     return false;
                 }
+                if self.registry.check_native_type_hints {
+                    self.suggest_closure_native_params(params, param_overrides, label);
+                }
                 let mut arrow_locals = locals.clone();
                 for (p, override_ty) in params.iter().zip(param_overrides) {
                     let (ty, case_refs) = if p.type_hint.is_some() {
@@ -173,6 +176,9 @@ impl<'a> Checker<'a> {
                     || params.iter().any(|p| p.variadic || p.by_ref)
                 {
                     return false;
+                }
+                if self.registry.check_native_type_hints {
+                    self.suggest_closure_native_params(params, param_overrides, label);
                 }
                 let mut closure_locals: Locals = locals.fresh_scope();
                 for u in uses {

@@ -9,6 +9,10 @@
 //! declares incompatibly), a default value the type wouldn't accept, and
 //! magic methods, whose signatures PHP fixes. Without a configured PHP
 //! version only types PHP 7.1 already has are suggested.
+//!
+//! A closure or arrow function passed where the callee's signature fixes
+//! its parameter types gets the same suggestion for each untyped
+//! parameter (unless that type is only `mixed`).
 
 use crate::ast::*;
 use crate::checker::Checker;
@@ -289,6 +293,36 @@ impl<'a> Checker<'a> {
         );
     }
 
+    pub(crate) fn suggest_closure_native_params(
+        &mut self,
+        params: &[Param],
+        contextual: &[Type],
+        label: &str,
+    ) {
+        for (param, ty) in params.iter().zip(contextual) {
+            if param.type_hint.is_some() || contains_mixed_or_template(ty) {
+                continue;
+            }
+            let mut native = Native::default();
+            if !collect(ty, Position::Parameter, &mut native) {
+                continue;
+            }
+            let Some(suggested) = render(native, self.registry.php_version) else {
+                continue;
+            };
+            self.report(
+                label.to_string(),
+                format!(
+                    "Parameter ${} of the closure can be declared natively as {suggested}.",
+                    param.name
+                ),
+                param.name_span,
+                0,
+                "missingNativeType.parameter",
+            );
+        }
+    }
+
     /// `suggested` as a type, with `self`/`static` bound to `class`.
     fn suggested_type(&self, suggested: &str, class_name: Option<&str>) -> Type {
         let ty = crate::types::parse_type_string(suggested);
@@ -316,5 +350,15 @@ impl<'a> Checker<'a> {
                                     != Trinary::Yes)
                     })
         })
+    }
+}
+
+fn contains_mixed_or_template(ty: &Type) -> bool {
+    match ty {
+        Type::Mixed(_) | Type::TemplateParam(_) => true,
+        Type::Union(members) | Type::Intersection(members) => {
+            members.iter().any(contains_mixed_or_template)
+        }
+        _ => false,
     }
 }

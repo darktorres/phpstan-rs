@@ -101,3 +101,23 @@ class Child extends Base {
         ]
     );
 }
+
+#[test]
+fn closure_parameters_from_the_callee() {
+    let src = r#"<?php
+/** @param list<int> $ints */
+function f(array $ints, array $unknown): void {
+    array_map(fn ($i) => $i * 2, $ints);
+    array_map(function ($i) { return $i; }, $ints);
+    array_map(fn (int $i) => $i, $ints);
+    array_map(fn ($x) => $x, $unknown);
+}
+"#;
+    assert_eq!(
+        found(src, Some((8, 3))),
+        vec![
+            "4 Parameter $i of the closure can be declared natively as int.",
+            "5 Parameter $i of the closure can be declared natively as int.",
+        ]
+    );
+}
