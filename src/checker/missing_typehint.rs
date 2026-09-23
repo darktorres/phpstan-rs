@@ -386,14 +386,23 @@ impl<'a> Checker<'a> {
                 {
                     return;
                 }
+                // Only templates without a default must be given.
                 if let Some(info) = self.registry.classes.get(name.as_str())
                     && info.kind != ClassKind::Trait
-                    && !info.templates.is_empty()
                 {
-                    out.push((
-                        format!("{} {name}", class_kind_word(info.kind)),
-                        info.templates.join(", "),
-                    ));
+                    let total = info.templates.len();
+                    let required = info
+                        .templates
+                        .iter()
+                        .filter(|t| !info.template_defaults.contains_key(*t))
+                        .count();
+                    if required > 0 {
+                        let mut list = info.templates.join(", ");
+                        if required != total {
+                            list.push_str(&format!(" ({required}-{total} required)"));
+                        }
+                        out.push((format!("{} {name}", class_kind_word(info.kind)), list));
+                    }
                 }
             }
             Type::Array(key, inner) => {

@@ -3445,3 +3445,31 @@ fn ancestor_tags_must_describe_real_well_formed_ancestors() {
         ]
     );
 }
+
+#[test]
+fn a_generic_class_whose_templates_all_have_defaults_needs_no_type_arguments() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            /** @template T = mixed */
+            final class Box {}
+            /**
+             * @template K
+             * @template V = int
+             */
+            final class Pair {}
+            final class Holder {
+                public function box(Box $b): void {}
+                public function pair(Pair $p): void {}
+            }
+        "#,
+    );
+    let hits: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "missingType.generics")
+        .collect();
+    assert_eq!(hits.len(), 1, "got: {d:?}");
+    assert!(
+        hits[0].message.ends_with("K, V (1-2 required)"),
+        "got: {d:?}"
+    );
+}
