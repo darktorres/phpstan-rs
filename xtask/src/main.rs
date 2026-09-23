@@ -64,8 +64,17 @@ fn corpus_dir() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/home/torres/piwigo17-frozen"))
 }
 
+/// The main checkout's `.corpus-runs/gate`, also from a linked worktree,
+/// so every worktree records into and compares against one store.
 fn gate_dir() -> PathBuf {
-    root().join(".corpus-runs/gate")
+    let common = git(&["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| root().join(".git"));
+    common
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(root)
+        .join(".corpus-runs/gate")
 }
 
 /// The `gate` profile's binary: what the corpus, type and baseline
@@ -603,9 +612,14 @@ fn perf() -> Result<(), String> {
     write(&dir.join(format!("{hash}.rss")), rss_kb.as_bytes())?;
     let (mean, stddev) = hyperfine_stats(&json)?;
     eprintln!("{hash}: mean {mean:.2}s ± {stddev:.2}s, peak RSS {rss_kb} KB");
-    let parent = parent_hash()?;
+    // Timing needs a quiet machine, so not every commit has a
+    // measurement: compare against the nearest ancestor that does.
+    let Some(parent) = nearest_ancestor_with(&dir, "hyperfine.json")? else {
+        eprintln!("no earlier performance measurement to compare against");
+        return Ok(());
+    };
     let parent_json = dir.join(format!("{parent}.hyperfine.json"));
-    if parent_json.exists() {
+    {
         let (old_mean, old_stddev) = hyperfine_stats(&parent_json)?;
         let limit = old_mean + (old_mean * 0.02).max(3.0 * old_stddev);
         if mean > limit {
@@ -624,6 +638,15 @@ fn perf() -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// The nearest proper ancestor of HEAD with `<hash>.<ext>` in `dir`.
+fn nearest_ancestor_with(dir: &Path, ext: &str) -> Result<Option<String>, String> {
+    let ancestors = git(&["rev-list", "--abbrev-commit", "--max-count=200", "HEAD~1"])?;
+    Ok(ancestors
+        .lines()
+        .map(str::to_string)
+        .find(|hash| dir.join(format!("{hash}.{ext}")).exists()))
 }
 
 fn hyperfine_stats(path: &Path) -> Result<(f64, f64), String> {
