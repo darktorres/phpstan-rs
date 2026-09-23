@@ -213,6 +213,7 @@ fn run_check_project(
     baseline_mode: baseline::MatchMode,
     baseline_per_identifier: bool,
     apply_fixes: bool,
+    dump_types: Option<&Path>,
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
     dynamic_constant_names: &[(String, Option<String>)],
@@ -529,6 +530,25 @@ fn run_check_project(
     });
     std::panic::set_hook(default_hook);
 
+    if let Some(out) = dump_types {
+        let mut dumps: Vec<(&PathBuf, Vec<String>)> = pool.install(|| {
+            analyze_files_by_size
+                .par_iter()
+                .map(|path| (path, project.dump_types(path)))
+                .collect()
+        });
+        dumps.sort_by(|a, b| a.0.cmp(b.0));
+        let mut text = String::new();
+        for (path, lines) in dumps {
+            for line in lines {
+                text.push_str(&format!("{}:{line}\n", path.display()));
+            }
+        }
+        if let Err(e) = std::fs::write(out, text) {
+            eprintln!("failed to write type dump {}: {e}", out.display());
+        }
+    }
+
     let mut results: HashMap<PathBuf, Vec<checker::Diagnostic>> = HashMap::new();
     let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
     for (path, outcome) in checked_results {
@@ -801,6 +821,7 @@ pub(crate) fn run_check_project_command(
     baseline_match_identifier: bool,
     baseline_per_identifier: bool,
     fix: bool,
+    dump_types: Option<PathBuf>,
     scan_dirs: Vec<PathBuf>,
     stub_paths: Vec<PathBuf>,
     no_composer: bool,
@@ -1273,6 +1294,7 @@ pub(crate) fn run_check_project_command(
         baseline_mode,
         baseline_per_identifier,
         fix,
+        dump_types.as_deref(),
         &ignore_error_entries,
         &restricted_symbol_entries,
         &dynamic_constant_names,

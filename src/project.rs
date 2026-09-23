@@ -1579,6 +1579,17 @@ impl Project {
         checker.take_semantic_tokens()
     }
 
+    /// `--dump-types`: every tracked variable's type after each statement
+    /// of `path`, one `line:col [host] vars` line per statement.
+    pub fn dump_types(&self, path: &Path) -> Vec<String> {
+        let Some((mut checker, ast)) = self.checker_for(path) else {
+            return Vec::new();
+        };
+        checker.set_dump_types(true);
+        checker.check_program(ast);
+        checker.take_type_dump()
+    }
+
     fn check_file_impl(
         &self,
         path: &Path,

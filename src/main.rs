@@ -25,6 +25,8 @@ struct Cli {
     command: Command,
 }
 
+// Parsed once per process, so the variant size difference costs nothing.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Command {
     /// Lex+parse every .php file under the given paths, reporting a
@@ -418,6 +420,10 @@ enum Command {
         /// offers as quick fixes) to the files on disk.
         #[arg(long)]
         fix: bool,
+        /// Writes every tracked variable's type after each statement of
+        /// every analysed file to this path (a regression-gate snapshot).
+        #[arg(long, hide = true)]
+        dump_types: Option<PathBuf>,
         /// Extra directories loaded for type-resolution context only -
         /// never analyzed or reported on. Repeatable.
         #[arg(long = "scan-dir")]
@@ -548,6 +554,7 @@ fn main() {
             baseline_match_identifier,
             baseline_per_identifier,
             fix,
+            dump_types,
             scan_dirs,
             stub_paths,
             no_composer,
@@ -622,6 +629,7 @@ fn main() {
             baseline_match_identifier,
             baseline_per_identifier,
             fix,
+            dump_types,
             scan_dirs,
             stub_paths,
             no_composer,

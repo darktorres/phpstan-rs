@@ -96,6 +96,7 @@ impl<'a> Checker<'a> {
             self.check_strict_rules_statement(stmt, locals, label);
         }
         self.check_stmt_impl(stmt, locals, declared_return, label);
+        self.record_type_dump(stmt, locals);
         if !self.external_rules.is_empty() {
             self.dispatch_stmt_rules(stmt, locals, label);
         }

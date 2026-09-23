@@ -1285,6 +1285,11 @@ pub struct Checker<'a> {
     // exactly which "is this the same atom" comparison is sound enough
     // to act on.
     pub(crate) pending_or_disjunctions: Vec<(Expr, Expr)>,
+    // `--dump-types`: every tracked variable's type (and native type) after
+    // each statement, keyed by the statement's start and the class it was
+    // checked in, so a later loop pass or trait host overwrites an earlier
+    // one. `None` unless enabled.
+    type_dump: Option<std::collections::BTreeMap<(u32, u32, String), String>>,
 }
 
 mod access_attributes;
@@ -1473,6 +1478,7 @@ impl<'a> Checker<'a> {
             semantic_tokens: Vec::new(),
             call_candidate_cache: RefCell::new(HashMap::new()),
             pending_or_disjunctions: Vec::new(),
+            type_dump: None,
         }
     }
 
@@ -1592,6 +1598,43 @@ impl<'a> Checker<'a> {
     /// `semantic_tokens` field's own doc comment.
     pub(crate) fn take_semantic_tokens(&mut self) -> Vec<semantic_tokens::UsageSemanticToken> {
         std::mem::take(&mut self.semantic_tokens)
+    }
+
+    pub(crate) fn set_dump_types(&mut self, enabled: bool) {
+        self.type_dump = enabled.then(std::collections::BTreeMap::new);
+    }
+
+    /// Records every tracked variable's type after `stmt` - see
+    /// `type_dump`.
+    pub(crate) fn record_type_dump(&mut self, stmt: &Stmt, locals: &Locals) {
+        let Some(dump) = self.type_dump.as_mut() else {
+            return;
+        };
+        let mut vars: Vec<(&String, &Type)> = locals.iter().collect();
+        vars.sort_by(|a, b| a.0.cmp(b.0));
+        let mut line = String::new();
+        for (name, ty) in vars {
+            if !line.is_empty() {
+                line.push_str("; ");
+            }
+            line.push_str(&format!("{name}: {ty}"));
+            if let Some(native) = locals.native(name) {
+                line.push_str(&format!(" (native {native})"));
+            }
+        }
+        let host = self.current_class.clone().unwrap_or_default();
+        dump.insert((stmt.span.start.line, stmt.span.start.col, host), line);
+    }
+
+    /// `line:col [host] vars` for every statement recorded by
+    /// `record_type_dump`, in source order.
+    pub(crate) fn take_type_dump(&mut self) -> Vec<String> {
+        self.type_dump
+            .take()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|((line, col, host), vars)| format!("{line}:{col} [{host}] {vars}"))
+            .collect()
     }
 
     pub(crate) fn set_collect_member_refs(&mut self, enabled: bool) {
