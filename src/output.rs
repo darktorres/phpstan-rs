@@ -28,12 +28,16 @@ use serde::Serialize;
 
 use crate::checker::Diagnostic;
 
+mod codeframe;
+pub use codeframe::render_friendly;
+
 /// Selects how `check-project` renders its diagnostics. `Text` (the
-/// default) is this project's original human-readable format; `Json` and
-/// `Checkstyle` are CI-consumable additions. A plain
+/// default) is this project's original human-readable format; `Json`,
+/// `Checkstyle` and `Junit` are CI-consumable additions, and `Friendly` a
+/// richer terminal rendering. A plain
 /// `#[derive(clap::ValueEnum)]` rather than hand-rolled `FromStr`/error
 /// message - clap already renders a helpful "invalid value 'x' for
-/// '--format <FORMAT>' [possible values: text, json, checkstyle]" on a bad
+/// '--format <FORMAT>' [possible values: text, json, checkstyle, junit, friendly]" on a bad
 /// value for free.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, clap::ValueEnum)]
 #[value(rename_all = "kebab-case")]
@@ -42,6 +46,11 @@ pub enum OutputFormat {
     Text,
     Json,
     Checkstyle,
+    /// JUnit XML: one test case per diagnostic, one passing case per
+    /// clean file.
+    Junit,
+    /// Each diagnostic with a highlighted frame of the source around it.
+    Friendly,
 }
 
 /// One diagnostic in this project's original text format, *without* the
@@ -199,6 +208,50 @@ pub fn render_checkstyle(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String 
         out.push_str("  </file>\n");
     }
     out.push_str("</checkstyle>\n");
+    out
+}
+
+/// Renders `results` as a JUnit XML report: a `<testsuite>` whose test
+/// cases are every diagnostic (a `<failure>`, named `path:line` and
+/// classed by identifier) plus one passing case per file without any, so
+/// CI test-report views show both.
+pub fn render_junit(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String {
+    let mut paths: Vec<&PathBuf> = results.keys().collect();
+    paths.sort();
+    let failures: usize = results.values().map(Vec::len).sum();
+    let clean = results.values().filter(|d| d.is_empty()).count();
+    let mut out = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    out.push_str(&format!(
+        "<testsuite name=\"phpstan-rs\" tests=\"{}\" failures=\"{failures}\" errors=\"0\" time=\"0\">\n",
+        failures + clean
+    ));
+    for path in paths {
+        let display = xml_escape(&path.display().to_string());
+        let diagnostics = &results[path];
+        if diagnostics.is_empty() {
+            out.push_str(&format!("  <testcase name=\"{display}\"/>\n"));
+            continue;
+        }
+        for d in diagnostics {
+            out.push_str(&format!(
+                "  <testcase name=\"{display}:{}\" classname=\"phpstan-rs.{}\">\n",
+                d.span.start.line,
+                xml_escape(&d.identifier),
+            ));
+            let mut body = format!("{}: {}", d.location, d.message);
+            if let Some(tip) = &d.tip {
+                body.push_str(&format!("\n{tip}"));
+            }
+            out.push_str(&format!(
+                "    <failure type=\"{}\" message=\"{}\">{}</failure>\n",
+                xml_escape(&d.identifier),
+                xml_escape(&d.message),
+                xml_escape(&body),
+            ));
+            out.push_str("  </testcase>\n");
+        }
+    }
+    out.push_str("</testsuite>\n");
     out
 }
 

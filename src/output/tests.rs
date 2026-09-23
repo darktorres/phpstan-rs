@@ -180,3 +180,87 @@ fn a_multi_line_message_stays_one_line_in_text_but_intact_in_json_and_checkstyle
     assert!(render_json(&results, 1).contains(r#"value (first\nsecond\r\nthird): bad"#));
     assert!(render_checkstyle(&results).contains("value (first&#10;second&#13;&#10;third): bad"));
 }
+
+#[test]
+fn junit_reports_each_diagnostic_as_a_failing_case_and_clean_files_as_passing() {
+    let mut results = HashMap::new();
+    results.insert(
+        PathBuf::from("src/a.php"),
+        vec![diag_with_identifier(
+            "f",
+            "Bad <thing> & more",
+            3,
+            5,
+            0,
+            "argument.type",
+        )],
+    );
+    results.insert(PathBuf::from("src/b.php"), vec![]);
+    let xml = render_junit(&results);
+    assert_eq!(
+        xml,
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+<testsuite name=\"phpstan-rs\" tests=\"2\" failures=\"1\" errors=\"0\" time=\"0\">\n  \
+<testcase name=\"src/a.php:3\" classname=\"phpstan-rs.argument.type\">\n    \
+<failure type=\"argument.type\" message=\"Bad &lt;thing&gt; &amp; more\">f: Bad &lt;thing&gt; &amp; more</failure>\n  \
+</testcase>\n  \
+<testcase name=\"src/b.php\"/>\n\
+</testsuite>\n"
+    );
+}
+
+fn friendly_fixture(name: &str) -> PathBuf {
+    let dir =
+        std::env::temp_dir().join(format!("phpstan-rs-friendly-{name}-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("a.php");
+    std::fs::write(
+        &path,
+        "<?php\n// note\nfunction f(int $x): string {\n    return $x + 1;\n}\n",
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn friendly_frames_the_reported_line_with_its_span_underlined() {
+    let path = friendly_fixture("plain");
+    let mut d = diag_with_identifier("f", "Wrong return.", 4, 12, 0, "return.type");
+    d.span.end = Position { line: 4, col: 18 };
+    d.tip = Some("Return a string.".to_string());
+    let results = HashMap::from([(path.clone(), vec![d])]);
+    let text = render_friendly(&results, false);
+    let expected = format!(
+        " ✖ Wrong return.\n  {}:4:12 · f · return.type\n    2 | // note\n    3 | function f(int $x): string {{\n  > 4 |     return $x + 1;\n      |            ^^^^^^\n    5 | }}\n  💡 Return a string.\n\n",
+        path.display()
+    );
+    assert_eq!(text, expected);
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}
+
+#[test]
+fn friendly_highlights_code_when_colour_is_on() {
+    let path = friendly_fixture("colour");
+    let results = HashMap::from([(
+        path.clone(),
+        vec![diag_with_identifier(
+            "f",
+            "Wrong return.",
+            4,
+            12,
+            0,
+            "return.type",
+        )],
+    )]);
+    let text = render_friendly(&results, true);
+    assert!(
+        text.contains("\x1b[35mreturn"),
+        "keyword coloured: {text:?}"
+    );
+    assert!(text.contains("\x1b[36m$x"), "variable coloured: {text:?}");
+    assert!(
+        text.contains("\x1b[90m// note"),
+        "comment coloured: {text:?}"
+    );
+    let _ = std::fs::remove_dir_all(path.parent().unwrap());
+}

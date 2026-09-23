@@ -563,18 +563,26 @@ fn run_check_project(
     // what a consumer wants, so they're left for a real request rather
     // than invented here).
     match format {
-        OutputFormat::Text => {
+        OutputFormat::Text | OutputFormat::Friendly => {
             let mut paths: Vec<&PathBuf> = results.keys().collect();
             paths.sort();
 
             let mut total = 0usize;
-            for path in paths {
-                for d in &results[path] {
-                    println!("{}:{}", path.display(), output::diagnostic_line(d));
-                    if let Some(tip) = &d.tip {
-                        println!("    💡 {tip}");
+            if format == OutputFormat::Friendly {
+                use std::io::IsTerminal;
+                let colour = std::io::stdout().is_terminal()
+                    && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+                print!("{}", output::render_friendly(&results, colour));
+                total = results.values().map(Vec::len).sum();
+            } else {
+                for path in paths {
+                    for d in &results[path] {
+                        println!("{}:{}", path.display(), output::diagnostic_line(d));
+                        if let Some(tip) = &d.tip {
+                            println!("    💡 {tip}");
+                        }
+                        total += 1;
                     }
-                    total += 1;
                 }
             }
             for (path, msg) in &check_panics {
@@ -606,6 +614,9 @@ fn run_check_project(
         }
         OutputFormat::Checkstyle => {
             print!("{}", output::render_checkstyle(&results));
+        }
+        OutputFormat::Junit => {
+            print!("{}", output::render_junit(&results));
         }
     }
 }

@@ -1200,7 +1200,7 @@ zero false positives on piwigo16.
 
 ## Performance & tooling
 
-CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
+CI-friendly output formats (`json`, `checkstyle`, `junit` - a failing test case per diagnostic and a passing one per clean file) and a `friendly` terminal format (each diagnostic framed by its surrounding source lines, span underlined, code syntax-highlighted on a colour terminal). Baseline suppression
 (`--generate-baseline`/`--baseline`, on by default reporting an
 unmatched baseline entry): entries record their occurrence count and
 absorb at most that many (reporting "expected N, found M" when fewer
@@ -3778,24 +3778,6 @@ reality) but is a distinct, separately-valuable idea:
   is closed, via a live HTTP call to Jira/GitHub Issues/YouTrack at
   analysis time — no existing phpstan-rs check does live I/O; scope
   and gate this separately from 153a/153b if pursued at all.
-
-### Phase 154 — Output-format additions
-
-Two small, self-contained `output::OutputFormat` additions, neither
-touching any diagnostic logic — reads the already-resolved file's own
-source text plus the diagnostic's already-known span/message:
-
-- **154a (small).** A JUnit-XML `ErrorFormatter` — each diagnostic
-  becomes a `<testcase>` (failure) in a `<testsuite>`, consumable
-  natively by Jenkins/GitLab-CI/GitHub Actions test-report UI widgets.
-  Add `Junit` as a 4th `OutputFormat` variant alongside the existing
-  `Text`/`Json`/`Checkstyle` (`mavimo/phpstan-junit`).
-- **154b (small).** A "friendly"/codeframe terminal formatter —
-  renders each diagnostic with a syntax-highlighted source-code frame
-  around the offending line, the same UX convention modern compilers
-  use (rustc, ESLint's codeframe formatter) versus the terse default
-  "file:line: message" one-liner (`yamadashy/phpstan-friendly-
-  formatter`).
 
 ### Phase 155 — Small, cheap opinionated additions (bucket)
 
