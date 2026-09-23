@@ -154,3 +154,11 @@ fn parses_a_sealed_tag_naming_a_union_of_classes() {
     let block = parse("/** @phpstan-sealed ChildA|ChildB */");
     assert_eq!(block.sealed, vec!["ChildA|ChildB".to_string()]);
 }
+
+#[test]
+fn templates_keep_first_appearance_order_across_prefixes() {
+    let d = parse(
+        "/**\n * @phpstan-template TKey of array-key\n * @template-covariant T\n * @template-extends IteratorAggregate<TKey, T>\n */",
+    );
+    assert_eq!(d.templates, ["TKey", "T"]);
+}

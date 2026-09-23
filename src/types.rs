@@ -303,6 +303,65 @@ pub struct CallableSig {
 }
 
 impl Type {
+    /// This type with `f` applied to each directly nested type (generic
+    /// arguments, array key/value, shape fields, union/intersection
+    /// members, callable parameters and return, conditional branches);
+    /// a leaf is returned unchanged. `f` decides whether to recurse.
+    pub(crate) fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
+        match self {
+            Type::Array(k, v) => Type::Array(Box::new(f(k)), Box::new(f(v))),
+            Type::ClassString(inner) => Type::ClassString(Box::new(f(inner))),
+            Type::ArrayShape(fields) => Type::ArrayShape(
+                fields
+                    .iter()
+                    .map(|(k, t, o)| (k.clone(), f(t), *o))
+                    .collect(),
+            ),
+            Type::ObjectShape(fields) => Type::ObjectShape(
+                fields
+                    .iter()
+                    .map(|(k, t, o)| (k.clone(), f(t), *o))
+                    .collect(),
+            ),
+            Type::Object(name, args) => {
+                Type::Object(name.clone(), args.iter().map(&mut *f).collect())
+            }
+            Type::Callable(Some(sig)) => Type::Callable(Some(Arc::new(CallableSig {
+                params: sig
+                    .params
+                    .iter()
+                    .map(|p| CallableParam {
+                        ty: f(&p.ty),
+                        ..p.clone()
+                    })
+                    .collect(),
+                return_type: Box::new(f(&sig.return_type)),
+            }))),
+            Type::Union(ms) => Type::Union(ms.iter().map(&mut *f).collect()),
+            Type::Intersection(ms) => Type::Intersection(ms.iter().map(&mut *f).collect()),
+            Type::HasOffsetValue(key, inner) => {
+                Type::HasOffsetValue(key.clone(), Box::new(f(inner)))
+            }
+            Type::ReflectedMember(owner, member) => {
+                Type::ReflectedMember(Box::new(f(owner)), member.clone())
+            }
+            Type::Conditional {
+                subject,
+                target,
+                if_true,
+                if_false,
+                negated,
+            } => Type::Conditional {
+                subject: subject.clone(),
+                target: Box::new(f(target)),
+                if_true: Box::new(f(if_true)),
+                if_false: Box::new(f(if_false)),
+                negated: *negated,
+            },
+            leaf => leaf.clone(),
+        }
+    }
+
     /// A closure/arrow-fn literal's own value: a real `Closure` instance
     /// (so `->bindTo()`/`->call()`/`instanceof Closure` keep resolving
     /// against the `Closure` class) that also carries the literal's own

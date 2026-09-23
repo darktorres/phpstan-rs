@@ -197,11 +197,10 @@ impl Registry {
             // entries every enum gets, see `ClassInfo::from_enum_decl`)
             // and any interface the enum itself declares.
             (Type::EnumCase(fqn, _), Type::Object(b, _)) => fqn == b || self.is_subclass_of(fqn, b),
-            // Two different cases of the same enum are never
-            // interchangeable (`types::is_subtype`'s own `a == b` fast
-            // path already covers the identical-case case) - no
-            // hierarchy to widen through beyond what's handled above.
-            (Type::EnumCase(_, _), Type::EnumCase(_, _)) => false,
+            // A case is only ever itself; no hierarchy to widen through.
+            (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
+                class_a == class_b && case_a == case_b
+            }
             // Same hierarchy-aware override as the plain Object-vs-Object
             // arm just above, one level up: `types::is_subtype`'s own
             // `ClassString` arm inherits its non-hierarchy-aware Object

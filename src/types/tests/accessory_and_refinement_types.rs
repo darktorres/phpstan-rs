@@ -456,7 +456,17 @@ fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
     };
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].0, "0");
-    assert_eq!(fields[0].1.to_string(), "callable(int): string");
+    assert_eq!(fields[0].1.to_string(), "Closure(int): string");
     assert!(!fields[0].2);
     assert_eq!(fields[1], ("1".to_string(), Type::Int, false));
+}
+
+#[test]
+fn a_positional_class_constant_field_is_not_read_as_a_key() {
+    let shape = parse_type_string("array{self::STRATEGY_*, non-empty-list<self::STRATEGY_*>}");
+    let Type::ArrayShape(fields) = &shape else {
+        panic!("expected an array shape, got {shape:?}");
+    };
+    let keys: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
+    assert_eq!(keys, ["0", "1"]);
 }

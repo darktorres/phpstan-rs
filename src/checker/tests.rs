@@ -59,6 +59,7 @@ mod operator_overloading;
 mod operator_validity;
 mod param_callable_tags;
 mod parent_constructor_call;
+mod phpdoc_native_compat;
 mod phpdoc_parse_errors;
 mod phpstan_api_method_calls;
 mod phpstan_assert_tags;

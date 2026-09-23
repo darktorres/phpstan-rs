@@ -286,7 +286,7 @@ fn a_class_constant_wildcard_keeps_its_sibling_union_members() {
             enum Level: int { case Debug = 100; case Info = 200; }
             class LogLevel { const DEBUG = 'debug'; const INFO = 'info'; const OTHER = 1; }
             /** @phpstan-param Level|LogLevel::* $level */
-            function b(string|Level $level): void {
+            function b(int|string|Level $level): void {
                 assertType("Level|'debug'|'info'|1", $level);
             }
             /** @param LogLevel::D* $level */

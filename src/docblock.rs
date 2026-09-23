@@ -393,6 +393,26 @@ pub fn parse(raw: &str) -> DocBlock {
         block.assert_if_true = source.assert_if_true;
         block.assert_if_false = source.assert_if_false;
     }
+    // Templates keep the order their names first appear in, whatever
+    // spelling wins (real PHPStan's `chooseTemplateTagValueNodesByPriority`
+    // overrides a name in place): `@phpstan-template TKey` then
+    // `@template-covariant T` is `<TKey, T>`, not plain tags first.
+    let first_seen = |name: &str| {
+        tag_lines.iter().position(|line| {
+            let Some(body) = line.strip_prefix('@') else {
+                return false;
+            };
+            let body = ["phpstan-", "psalm-", "phan-"]
+                .iter()
+                .find_map(|p| body.strip_prefix(p))
+                .unwrap_or(body);
+            let (tag, rest) = split_tag(body);
+            tag.starts_with("template") && rest.split_whitespace().next() == Some(name)
+        })
+    };
+    block
+        .templates
+        .sort_by_key(|name| first_seen(name).unwrap_or(usize::MAX));
 
     block
 }

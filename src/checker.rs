@@ -1171,6 +1171,7 @@ mod narrowing;
 mod noop;
 mod oop;
 mod operators;
+mod phpdoc_type_compat;
 pub(crate) mod phpstan_api;
 mod pipe_operator;
 mod preg_pattern_validity;

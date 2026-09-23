@@ -667,7 +667,9 @@ impl<'a> Checker<'a> {
                 4,
                 "function.impossibleType",
             );
-        } else if !is_exempt_last_condition && self.registry.is_assignable(&arg_ty, &target_ty) {
+        } else if !is_exempt_last_condition
+            && self.registry.is_super_type_of(&target_ty, &arg_ty) == crate::registry::Trinary::Yes
+        {
             self.report(
                 label.to_string(),
                 format!("Call to function {name}() with {arg_ty} will always evaluate to true."),

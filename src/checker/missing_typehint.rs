@@ -330,6 +330,15 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
             collect_callables_with_missing_signature(inner, out);
         }
         Type::ClassString(inner) => collect_callables_with_missing_signature(inner, out),
+        // A `Closure(...)` shape (`Closure&callable(...)`) carries its
+        // signature; only that signature's own types are walked.
+        Type::Intersection(members) if ty.callable_sig().is_some() => {
+            for m in members {
+                if matches!(m, Type::Callable(Some(_))) {
+                    collect_callables_with_missing_signature(m, out);
+                }
+            }
+        }
         Type::Union(members) | Type::Intersection(members) => {
             for m in members {
                 collect_callables_with_missing_signature(m, out);

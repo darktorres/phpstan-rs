@@ -381,7 +381,7 @@ fn a_callable_shape_doc_member_keeps_its_own_real_signature_alongside_the_closur
         );
     };
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].to_string(), "callable(mixed): bool");
+    assert_eq!(members[0].to_string(), "Closure(mixed): bool");
     assert_eq!(members[1], Type::Null);
 }
 

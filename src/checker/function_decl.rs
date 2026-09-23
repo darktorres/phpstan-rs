@@ -318,6 +318,7 @@ impl<'a> Checker<'a> {
             self.check_required_parameter_after_optional(f, &label);
             if let Some(sig) = sig {
                 self.check_default_parameter_types(f, sig, class_name, &label);
+                self.check_phpdoc_types_against_native(f, sig, class_name, &label);
             }
             // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-
             // validity family plus `method.shadowTemplate`, method-level -
@@ -456,7 +457,14 @@ impl<'a> Checker<'a> {
                     // `array` it collects into), the same reasoning the
                     // Closure/arrow-fn arms in `checker/expr.rs` share.
                     let subject = format!("parameter ${} of {label}()", param.name);
-                    self.check_type_class_names_exist(&ty, &subject, ast_param.span, &label);
+                    // The own PHPDoc type too: a member the native hint
+                    // excludes no longer reaches `ty`, but naming an
+                    // unknown class is still wrong.
+                    let checked = match &param.doc_ty {
+                        Some(doc) => Type::Union(vec![ty.clone(), doc.clone()]),
+                        None => ty.clone(),
+                    };
+                    self.check_type_class_names_exist(&checked, &subject, ast_param.span, &label);
                     self.check_type_trait_refs(
                         &ty,
                         &subject,
@@ -705,12 +713,12 @@ impl<'a> Checker<'a> {
         // falls-off-the-end check further down builds), same as every
         // other existence check in this function.
         let subject = format!("return type of {label}()");
-        self.check_type_class_names_exist(
-            declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
-            &subject,
-            f.span,
-            &label,
-        );
+        let declared = declared_return.clone().unwrap_or(Type::Mixed(false));
+        let checked = match sig.and_then(|s| s.return_doc_ty.as_ref()) {
+            Some(doc) => Type::Union(vec![declared, doc.clone()]),
+            None => declared,
+        };
+        self.check_type_class_names_exist(&checked, &subject, f.span, &label);
         self.check_type_class_name_case(&declared_return_case_refs, &label, f.span);
         self.check_type_internal_usage(&declared_return_case_refs, &label, f.span);
         self.check_type_trait_refs(

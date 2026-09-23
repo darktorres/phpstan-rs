@@ -186,8 +186,10 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 
 /// Whether a native union member is safe for `reconcile_with_native` to
 /// add back on its own "the docblock never addressed this alternative"
-/// theory - deliberately excludes *every* `Type::Object` native member,
-/// including the `object`/`resource` pseudo-types: a doc member naming a
+/// theory - deliberately excludes *every* `Type::Object` native member
+/// and the `self`/`static`/`parent` class references (a doc `static`
+/// already covers a native `self`), including the `object`/`resource`
+/// pseudo-types: a doc member naming a
 /// real *subclass* of that native class, or a plain instance covered by
 /// the native `object` pseudo-type's own "accepts any object" leniency,
 /// or (for `Closure` specifically) a `Closure(...)`-shaped doc member
@@ -213,7 +215,10 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 /// hierarchy needed (the actual target shape - a native `array|string`
 /// refined by `@param array<int, string>` - is one of these).
 fn native_member_addable(native_member: &Type) -> bool {
-    !matches!(native_member, Type::Object(_, _))
+    !matches!(
+        native_member,
+        Type::Object(_, _) | Type::SelfRef | Type::StaticRef | Type::ParentRef
+    )
 }
 
 /// A surviving `Type::Callable` member (kept only because
@@ -327,6 +332,12 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // narrower value than the generic Object case can safely give
         // here, this early in the pipeline).
         Type::Object(_, _) => true,
+        // `@return static` under a native `self`/`static`/class hint: the
+        // late-bound class is always an instance of the declaring one.
+        Type::StaticRef | Type::SelfRef => !matches!(
+            native_ty,
+            Type::Int | Type::Float | Type::String | Type::Bool | Type::Array(..) | Type::Null
+        ),
         // A PHPStan/Psalm callable-shape doc member (`Closure(int):
         // string`) degrades to plain `Type::Callable` at parse time
         // (`types::parse_type_atom`'s own documented simplification - no
@@ -392,7 +403,12 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
             (Some(elem), Type::Array(_, native_elem)) => {
                 member_possible_given_native(elem, native_elem)
             }
-            _ => types::is_subtype(m, native_ty),
+            (Some(_), _) => types::is_subtype(m, native_ty),
+            // A `Closure(...)` shape (`\Closure&callable(...)`) or any
+            // other object intersection: possible whenever one member is.
+            (None, _) => members
+                .iter()
+                .any(|inner| member_possible_given_native(inner, native_ty)),
         },
         _ => types::is_subtype(m, native_ty),
     }

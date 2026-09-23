@@ -446,7 +446,10 @@ pub(crate) fn callable_sig_is_subtype(
     let mixed_as_any = |sub: &Type, sup: &Type| {
         matches!(sub, Type::Mixed(_)) || matches!(sup, Type::Mixed(_)) || is_sub(sub, sup)
     };
-    if !mixed_as_any(&a.return_type, &b.return_type) {
+    // A `void` return accepts `null` (`VoidType::accepts`).
+    let returns_fit = mixed_as_any(&a.return_type, &b.return_type)
+        || (*b.return_type == Type::Void && *a.return_type == Type::Null);
+    if !returns_fit {
         return false;
     }
     let a_positions = match a.params.last() {

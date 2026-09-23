@@ -726,6 +726,45 @@ struct GeneratedStubData {
 /// already-built values, not re-parsing anything), so none of their
 /// public signatures - or any of their call sites, which all consume the
 /// returned `Vec` by value - change.
+/// `DateTime`/`DateTimeImmutable`'s fluent methods return an instance of
+/// the receiver's own class (the object itself, or a clone of it), so a
+/// subclass calling `parent::modify()` gets itself back. phpstorm-stubs
+/// types some of these by the base class name instead (the PHP 8.4
+/// tentative hint); the class member becomes `static`, keeping any
+/// `false` failure alternative.
+fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassInfo)]) {
+    const FLUENT: [&str; 9] = [
+        "modify",
+        "add",
+        "sub",
+        "setDate",
+        "setISODate",
+        "setTime",
+        "setTimestamp",
+        "setTimezone",
+        "setMicrosecond",
+    ];
+    for (name, info) in classes.iter_mut() {
+        if !matches!(name.as_ref(), "DateTime" | "DateTimeImmutable") {
+            continue;
+        }
+        let class = name.to_string();
+        for method in FLUENT {
+            let Some(sig) = info.methods.get_mut(method) else {
+                continue;
+            };
+            let to_static = |ty: &Type| match ty {
+                Type::Object(n, _) if *n == class => Type::StaticRef,
+                other => other.clone(),
+            };
+            sig.return_type = match &sig.return_type {
+                Type::Union(members) => Type::Union(members.iter().map(to_static).collect()),
+                other => to_static(other),
+            };
+        }
+    }
+}
+
 fn generated_stub_data() -> &'static GeneratedStubData {
     static CACHE: std::sync::LazyLock<GeneratedStubData> = std::sync::LazyLock::new(|| {
         let mut seen_functions = std::collections::HashSet::new();
@@ -775,6 +814,7 @@ fn generated_stub_data() -> &'static GeneratedStubData {
         patch_reflection_method_and_property_templates(&mut classes);
         patch_reflection_and_exception_list_types(&mut classes);
         patch_spl_iterator_templates(&mut classes);
+        patch_datetime_fluent_returns(&mut classes);
         GeneratedStubData {
             functions,
             classes,

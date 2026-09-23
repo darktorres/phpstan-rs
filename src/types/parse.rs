@@ -134,10 +134,18 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
             by_ref,
         });
     }
-    Some(Type::Callable(Some(Arc::new(CallableSig {
+    let sig = CallableSig {
         params,
         return_type: Box::new(parse_type_string(ret_text)),
-    }))))
+    };
+    // `Closure(...)` is a real `Closure` instance with that signature
+    // (PHPStan's `ClosureType`), stricter than `callable(...)`, which a
+    // string or invokable object satisfies too.
+    if stripped[..open].trim().eq_ignore_ascii_case("closure") {
+        Some(Type::closure_literal(sig))
+    } else {
+        Some(Type::Callable(Some(Arc::new(sig))))
+    }
 }
 
 /// Splits `s` on `sep`, but only where `sep` appears outside any
@@ -300,9 +308,11 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
         // numbers a real array literal's positional elements, so a
         // doc-declared shape and a real literal's inferred shape end up
         // structurally identical.
-        let keyed = field_str
-            .split_once(':')
-            .filter(|(key_part, _)| looks_like_shape_key(key_part.trim()));
+        // A `::` (`self::STRATEGY_*`) is a class-constant reference, not
+        // a `key:` separator.
+        let keyed = field_str.split_once(':').filter(|(key_part, type_part)| {
+            !type_part.starts_with(':') && looks_like_shape_key(key_part.trim())
+        });
         match keyed {
             Some((key_part, type_part)) => {
                 let key_part = key_part.trim();

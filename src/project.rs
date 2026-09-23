@@ -748,9 +748,11 @@ impl Project {
         // calls comment for why a single call at the very end (like
         // `precompute_ancestor_names`) isn't enough here.
         self.registry.precompute_member_owners();
-        self.registry.flatten_phpdoc_inheritance();
-        self.registry.resolve_deferred_value_of();
+        // Aliases and deferred value types resolve first, so inherited
+        // PHPDoc copies an ancestor's finished types.
         self.registry.resolve_deferred_type_imports();
+        self.registry.resolve_deferred_value_of();
+        self.registry.flatten_phpdoc_inheritance();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes
         // `lookup_method_with_owner`/`lookup_ancestor_method_with_owner`
@@ -765,6 +767,8 @@ impl Project {
         // needed.
         self.registry.resolve_transitive_purity();
         self.registry.precompute_ancestor_names();
+        self.registry.resolve_constant_named_types();
+        self.registry.drop_doc_members_excluded_by_native();
         let files: Vec<(&Path, &[Stmt])> = self
             .files
             .iter()
@@ -1026,9 +1030,11 @@ impl Project {
         // calls comment for why a single call at the very end (like
         // `precompute_ancestor_names`) isn't enough here.
         self.registry.precompute_member_owners();
-        self.registry.flatten_phpdoc_inheritance();
-        self.registry.resolve_deferred_value_of();
+        // Aliases and deferred value types resolve first, so inherited
+        // PHPDoc copies an ancestor's finished types.
         self.registry.resolve_deferred_type_imports();
+        self.registry.resolve_deferred_value_of();
+        self.registry.flatten_phpdoc_inheritance();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes a
         // lookup internally, so the member-owner maps need a second
@@ -1039,6 +1045,8 @@ impl Project {
         self.registry.precompute_member_owners();
         self.registry.resolve_transitive_purity();
         self.registry.precompute_ancestor_names();
+        self.registry.resolve_constant_named_types();
+        self.registry.drop_doc_members_excluded_by_native();
         {
             let mut files: Vec<(&Path, &[Stmt])> = self
                 .files

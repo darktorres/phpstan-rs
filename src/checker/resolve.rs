@@ -416,6 +416,21 @@ impl<'a> Checker<'a> {
                 if_false: Box::new(self.resolve_pseudo(if_false, defining_class)),
                 negated: *negated,
             },
+            // `Closure(self): static` - a callable shape's own parameter
+            // and return types.
+            Type::Callable(Some(sig)) => {
+                Type::Callable(Some(std::sync::Arc::new(types::CallableSig {
+                    params: sig
+                        .params
+                        .iter()
+                        .map(|p| types::CallableParam {
+                            ty: self.resolve_pseudo(&p.ty, defining_class),
+                            ..p.clone()
+                        })
+                        .collect(),
+                    return_type: Box::new(self.resolve_pseudo(&sig.return_type, defining_class)),
+                })))
+            }
             _ => ty.clone(),
         }
     }
@@ -763,6 +778,8 @@ impl<'a> Checker<'a> {
     ) {
         let mut unknown = Vec::new();
         self.collect_unknown_class_names(ty, &mut unknown);
+        let mut seen = std::collections::HashSet::new();
+        unknown.retain(|n| seen.insert(n.clone()));
         for name in unknown {
             self.report(
                 label.to_string(),
@@ -780,6 +797,8 @@ impl<'a> Checker<'a> {
         // appear in `unknown` above.
         let mut prefixed = Vec::new();
         collect_prefixed_class_names(ty, &mut prefixed);
+        let mut seen = std::collections::HashSet::new();
+        prefixed.retain(|(n, _)| seen.insert(*n));
         for (name, project) in prefixed {
             self.report_builder(
                 crate::checker::DiagnosticBuilder::new(

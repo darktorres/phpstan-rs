@@ -662,8 +662,9 @@ impl<'a> Checker<'a> {
                             this_ty,
                             None,
                         );
-                    } else if let Some(Type::Callable(Some(callable_sig))) =
-                        sig.and_then(|s| s.params.get(i)).map(|p| &p.ty)
+                    } else if let Some(callable_sig) = sig
+                        .and_then(|s| s.params.get(i))
+                        .and_then(|p| p.ty.callable_sig())
                         && matches!(
                             unwrap_grouping(&a.value).kind,
                             ExprKind::Closure { .. } | ExprKind::ArrowFn { .. }
@@ -2571,7 +2572,7 @@ impl<'a> Checker<'a> {
                         if let Type::EnumCase(ref case_class, ref case) = resolved_ty {
                             self.record_member_ref(e.span, case_class, case);
                         }
-                        self.resolve_pseudo(&resolved_ty, class)
+                        self.resolve_static_call_return(&resolved_ty, target, class)
                     }
                     _ => Type::Mixed(false),
                 }
@@ -4484,7 +4485,7 @@ impl<'a> Checker<'a> {
                             if let Type::EnumCase(ref case_class, ref case) = resolved {
                                 self.record_member_ref(e.span, case_class, case);
                             }
-                            self.resolve_pseudo(&resolved, &class)
+                            self.resolve_static_call_return(&resolved, target, &class)
                         })
                     })
                     .unwrap_or(Type::Mixed(false))
@@ -5316,8 +5317,10 @@ impl<'a> Checker<'a> {
             BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor => {
                 let lt = self.infer_expr(l, locals);
                 let rt = self.infer_expr(r, locals);
-                self.binary_operator_overload_result(op, &lt, &rt)
-                    .unwrap_or(Type::Int)
+                if let Some(ty) = self.binary_operator_overload_result(op, &lt, &rt) {
+                    return ty;
+                }
+                fold_bitwise_int_literals(op, &lt, &rt).unwrap_or(Type::Int)
             }
             BinOp::Shl | BinOp::Shr => {
                 let lt = self.infer_expr(l, locals);
@@ -5672,6 +5675,25 @@ impl<'a> Checker<'a> {
                 .infer_expr(callee, locals)
                 .callable_sig()
                 .map_or(Type::Mixed(false), |sig| (*sig.return_type).clone()),
+        }
+    }
+
+    /// A static call's return type with `self`/`static`/`parent`
+    /// resolved. Called through `parent::`/`self::`/`static::`, PHP
+    /// forwards the late static binding, so `static` is the calling class,
+    /// not the target.
+    fn resolve_static_call_return(&self, ty: &Type, target: &StaticTarget, class: &str) -> Type {
+        let forwards = matches!(
+            target,
+            StaticTarget::Name(n, _)
+                if matches!(n.to_ascii_lowercase().as_str(), "parent" | "self" | "static")
+        );
+        match (&self.current_class, forwards) {
+            (Some(current), true) => {
+                let bound = bind_static_ref(ty, current);
+                self.resolve_pseudo(&bound, class)
+            }
+            _ => self.resolve_pseudo(ty, class),
         }
     }
 
@@ -6194,9 +6216,11 @@ fn intersect_but_not_never(registry: &Registry, native: &Type, inferred: Type) -
 /// A non-generator closure literal's inferred return type, from the
 /// types its `return` statements produced - real PHPStan's `ClosureType`
 /// return: no `return` at all is `void`; explicit returns are unioned,
-/// with `null` added when the body can also fall off its end; a bare
-/// `return;` mixed with value returns reads as `null` there, since `void`
-/// only means "no value" when it's the whole story.
+/// with `null` added when the body can also fall off its end (what PHP
+/// really returns then - stricter than real PHPStan, which only counts
+/// return statements); a bare `return;` mixed with value returns reads as
+/// `null` there, since `void` only means "no value" when it's the whole
+/// story.
 fn closure_inferred_return_type(
     points: Vec<Type>,
     saw_explicit_return: bool,
@@ -6227,4 +6251,55 @@ fn closure_inferred_return_type(
         .into_iter()
         .reduce(union_types)
         .unwrap_or(Type::Void)
+}
+
+/// A bitwise `&`/`|`/`^` over int literals, folded to its exact values
+/// (`PREG_SPLIT_NO_EMPTY | PREG_SPLIT_DELIM_CAPTURE` is `3`), at most 64
+/// combinations. `$x & k` with a non-negative literal `k` is `int<0, k>`
+/// whatever `$x` is.
+fn fold_bitwise_int_literals(op: &BinOp, l: &Type, r: &Type) -> Option<Type> {
+    fn literals(ty: &Type) -> Option<Vec<i64>> {
+        match ty {
+            Type::IntLiteral(n) => Some(vec![*n]),
+            Type::True => Some(vec![1]),
+            Type::False | Type::Null => Some(vec![0]),
+            Type::Union(members) => members.iter().try_fold(Vec::new(), |mut acc, m| {
+                acc.extend(literals(m)?);
+                Some(acc)
+            }),
+            _ => None,
+        }
+    }
+    let apply = |a: i64, b: i64| match op {
+        BinOp::BitAnd => a & b,
+        BinOp::BitOr => a | b,
+        _ => a ^ b,
+    };
+    match (literals(l), literals(r)) {
+        (Some(ls), Some(rs)) if ls.len() * rs.len() <= 64 => {
+            let mut values: Vec<i64> = ls
+                .iter()
+                .flat_map(|a| rs.iter().map(move |b| apply(*a, *b)))
+                .collect();
+            values.sort_unstable();
+            values.dedup();
+            let mut members = values.into_iter().map(Type::IntLiteral);
+            let first = members.next()?;
+            Some(members.fold(first, union_types))
+        }
+        (_, Some(ks)) | (Some(ks), _)
+            if matches!(op, BinOp::BitAnd) && ks.len() == 1 && ks[0] >= 0 =>
+        {
+            Some(Type::IntRange(Some(0), Some(ks[0])))
+        }
+        _ => None,
+    }
+}
+
+/// `static` as `class`, everywhere in `ty`.
+fn bind_static_ref(ty: &Type, class: &str) -> Type {
+    match ty {
+        Type::StaticRef => Type::Object(class.to_string(), Vec::new()),
+        other => other.map_children(&mut |t| bind_static_ref(t, class)),
+    }
 }

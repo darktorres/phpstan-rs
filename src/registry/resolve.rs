@@ -396,32 +396,26 @@ impl Registry {
             let Some(mut info) = self.classes.remove(&class_name) else {
                 continue;
             };
-            for sig in info.methods.values_mut() {
-                for param in &mut sig.params {
-                    if type_contains_deferred_value_of(&param.ty) {
-                        let ty = bind_class_const_self(
-                            std::mem::replace(&mut param.ty, Type::Mixed(false)),
-                            &class_name,
-                            &own_consts,
-                        );
-                        param.ty = resolve_deferred_value_of_with_native_fallback(
-                            ty,
-                            &param.ty_native,
-                            &self.classes,
-                        );
-                    }
-                }
-                if type_contains_deferred_value_of(&sig.return_type) {
-                    let ty = bind_class_const_self(
-                        std::mem::replace(&mut sig.return_type, Type::Mixed(false)),
+            let resolve = |ty: &mut Type, native: &Type, classes: &_| {
+                if type_contains_deferred_value_of(ty) {
+                    let bound = bind_class_const_self(
+                        std::mem::replace(ty, Type::Mixed(false)),
                         &class_name,
                         &own_consts,
                     );
-                    sig.return_type = resolve_deferred_value_of_with_native_fallback(
-                        ty,
-                        &sig.return_type_native,
-                        &self.classes,
-                    );
+                    *ty = resolve_deferred_value_of_with_native_fallback(bound, native, classes);
+                }
+            };
+            for sig in info.methods.values_mut() {
+                for param in &mut sig.params {
+                    resolve(&mut param.ty, &param.ty_native, &self.classes);
+                    if let Some(doc_ty) = &mut param.doc_ty {
+                        resolve(doc_ty, &param.ty_native, &self.classes);
+                    }
+                }
+                resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
+                if let Some(doc_ty) = &mut sig.return_doc_ty {
+                    resolve(doc_ty, &sig.return_type_native, &self.classes);
                 }
             }
             for prop in info.properties.values_mut() {
@@ -464,26 +458,39 @@ impl Registry {
                     *bound = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
             }
-            self.classes.insert(class_name, info);
-        }
-        for sig in self.functions.values_mut() {
-            for param in &mut sig.params {
-                if type_contains_deferred_value_of(&param.ty) {
-                    let ty = std::mem::replace(&mut param.ty, Type::Mixed(false));
-                    param.ty = resolve_deferred_value_of_with_native_fallback(
-                        ty,
-                        &param.ty_native,
-                        &self.classes,
+            // `@extends Lexer<self::T_*>`: what inherited PHPDoc binds to.
+            let ancestor_args = info
+                .extends_args
+                .iter_mut()
+                .chain(info.implements_args.values_mut().flatten());
+            for arg in ancestor_args {
+                if type_contains_deferred_value_of(arg) {
+                    let ty = bind_class_const_self(
+                        std::mem::replace(arg, Type::Mixed(false)),
+                        &class_name,
+                        &own_consts,
                     );
+                    *arg = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
             }
-            if type_contains_deferred_value_of(&sig.return_type) {
-                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed(false));
-                sig.return_type = resolve_deferred_value_of_with_native_fallback(
-                    ty,
-                    &sig.return_type_native,
-                    &self.classes,
-                );
+            self.classes.insert(class_name, info);
+        }
+        let resolve = |ty: &mut Type, native: &Type, classes: &_| {
+            if type_contains_deferred_value_of(ty) {
+                let taken = std::mem::replace(ty, Type::Mixed(false));
+                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, classes);
+            }
+        };
+        for sig in self.functions.values_mut() {
+            for param in &mut sig.params {
+                resolve(&mut param.ty, &param.ty_native, &self.classes);
+                if let Some(doc_ty) = &mut param.doc_ty {
+                    resolve(doc_ty, &param.ty_native, &self.classes);
+                }
+            }
+            resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
+            if let Some(doc_ty) = &mut sig.return_doc_ty {
+                resolve(doc_ty, &sig.return_type_native, &self.classes);
             }
         }
     }
@@ -616,13 +623,21 @@ impl Registry {
             // no second chance coming; an empty `aliases` map here makes
             // every `substitute_type_aliases` call below a no-op.
             let aliases = by_class.remove(&class_name).unwrap_or_default();
+            let substitute = |ty: &mut Type| {
+                let taken = std::mem::replace(ty, Type::Mixed(false));
+                *ty = substitute_type_aliases(taken, &aliases);
+            };
             for sig in info.methods.values_mut() {
                 for param in &mut sig.params {
-                    let ty = std::mem::replace(&mut param.ty, Type::Mixed(false));
-                    param.ty = substitute_type_aliases(ty, &aliases);
+                    substitute(&mut param.ty);
+                    if let Some(doc_ty) = &mut param.doc_ty {
+                        substitute(doc_ty);
+                    }
                 }
-                let ty = std::mem::replace(&mut sig.return_type, Type::Mixed(false));
-                sig.return_type = substitute_type_aliases(ty, &aliases);
+                substitute(&mut sig.return_type);
+                if let Some(doc_ty) = &mut sig.return_doc_ty {
+                    substitute(doc_ty);
+                }
             }
             for prop in info.properties.values_mut() {
                 let ty = std::mem::replace(&mut prop.ty, Type::Mixed(false));
@@ -1086,7 +1101,7 @@ impl Registry {
                                         i,
                                         function_sig::reconcile_with_native(
                                             Registry::substitute_class_scoped_ancestor_templates(
-                                                &ancestor_param.ty,
+                                                &bind_self_ref(&ancestor_param.ty, &owner),
                                                 &ancestor_bindings,
                                             ),
                                             p.ty_native.clone(),
@@ -1120,7 +1135,7 @@ impl Registry {
                                         i,
                                         function_sig::reconcile_with_native(
                                             Registry::substitute_class_scoped_ancestor_templates(
-                                                &ancestor_param.ty,
+                                                &bind_self_ref(&ancestor_param.ty, &owner),
                                                 &ancestor_bindings,
                                             ),
                                             p.ty_native.clone(),
@@ -1153,7 +1168,7 @@ impl Registry {
                         (
                             function_sig::reconcile_with_native(
                                 Registry::substitute_class_scoped_ancestor_templates(
-                                    &ancestor_sig.return_type,
+                                    &bind_self_ref(&ancestor_sig.return_type, &owner),
                                     &ancestor_bindings,
                                 ),
                                 sig.return_type_native.clone(),
@@ -1338,18 +1353,30 @@ fn class_has_deferred_type(info: &ClassInfo) -> bool {
     info.methods.values().any(|sig| {
         type_contains_deferred_value_of(&sig.return_type)
             || sig
-                .params
-                .iter()
-                .any(|p| type_contains_deferred_value_of(&p.ty))
-    }) || info.properties.values().any(|p| {
-        type_contains_deferred_value_of(&p.ty)
-            || p.set_ty
+                .return_doc_ty
                 .as_ref()
                 .is_some_and(type_contains_deferred_value_of)
+            || sig.params.iter().any(|p| {
+                type_contains_deferred_value_of(&p.ty)
+                    || p.doc_ty
+                        .as_ref()
+                        .is_some_and(type_contains_deferred_value_of)
+            })
     }) || info
-        .consts
-        .values()
-        .any(|c| type_contains_deferred_value_of(&c.ty))
+        .extends_args
+        .iter()
+        .chain(info.implements_args.values().flatten())
+        .any(type_contains_deferred_value_of)
+        || info.properties.values().any(|p| {
+            type_contains_deferred_value_of(&p.ty)
+                || p.set_ty
+                    .as_ref()
+                    .is_some_and(type_contains_deferred_value_of)
+        })
+        || info
+            .consts
+            .values()
+            .any(|c| type_contains_deferred_value_of(&c.ty))
         || info
             .template_bounds
             .values()
@@ -1637,4 +1664,269 @@ impl ClassInfo {
             })
             .collect()
     }
+}
+
+/// `self` in a type inherited from `owner`'s PHPDoc means `owner`, the
+/// declaring class, wherever the type is later read; `static` keeps
+/// its late binding.
+fn bind_self_ref(ty: &Type, owner: &str) -> Type {
+    match ty {
+        Type::SelfRef => Type::Object(owner.to_string(), Vec::new()),
+        other => other.map_children(&mut |t| bind_self_ref(t, owner)),
+    }
+}
+
+impl Registry {
+    /// `reconcile_with_native` runs before the class hierarchy exists, so
+    /// it keeps every class-named PHPDoc member. Once every class is
+    /// indexed, a member the native hint provably excludes (`Schema` on a
+    /// `?ValidationContext` parameter) is dropped here; when none
+    /// survive, the native type stands, as PHP enforces it at runtime.
+    pub(crate) fn drop_doc_members_excluded_by_native(&mut self) {
+        // (class, method or function, parameter index or `None` for the
+        // return, corrected type)
+        type Fix = (Option<Arc<str>>, Arc<str>, Option<usize>, Type);
+        let mut fixes: Vec<Fix> = Vec::new();
+        let mut visit = |class: Option<&Arc<str>>, name: &Arc<str>, sig: &FunctionSig| {
+            for (i, p) in sig.params.iter().enumerate() {
+                if let Some(ty) = self.excluding_native(&p.ty, &p.ty_native, class) {
+                    fixes.push((class.cloned(), name.clone(), Some(i), ty));
+                }
+            }
+            if let Some(ty) =
+                self.excluding_native(&sig.return_type, &sig.return_type_native, class)
+            {
+                fixes.push((class.cloned(), name.clone(), None, ty));
+            }
+        };
+        for (class, info) in &self.classes {
+            for (name, sig) in &info.methods {
+                visit(Some(class), name, sig);
+            }
+        }
+        for (name, sig) in &self.functions {
+            visit(None, name, sig);
+        }
+        for (class, name, param, ty) in fixes {
+            let sig = match &class {
+                Some(c) => self
+                    .classes
+                    .get_mut(c)
+                    .and_then(|info| info.methods.get_mut(&name)),
+                None => self.functions.get_mut(&name),
+            };
+            let Some(sig) = sig else { continue };
+            match param {
+                Some(i) => sig.params[i].ty = ty,
+                None => sig.return_type = ty,
+            }
+        }
+    }
+
+    /// `ty` without the members `native` provably excludes, when any are
+    /// excluded; `None` when nothing changes.
+    fn excluding_native(&self, ty: &Type, native: &Type, class: Option<&Arc<str>>) -> Option<Type> {
+        if ty == native || matches!(native, Type::Mixed(_)) {
+            return None;
+        }
+        let bind = |t: &Type| match class {
+            Some(c) => bind_pseudo_refs(t, c),
+            None => t.clone(),
+        };
+        let unbound_native = native;
+        let native = bind(native);
+        let members: Vec<&Type> = match ty {
+            Type::Union(ms) => ms.iter().collect(),
+            other => vec![other],
+        };
+        let native_members: Vec<&Type> = match unbound_native {
+            Type::Union(ms) => ms.iter().collect(),
+            other => vec![other],
+        };
+        let mut kept: Vec<Type> = Vec::new();
+        let mut changed = false;
+        for m in &members {
+            let bound = bind(m);
+            let keep = match self.is_super_type_of(&native, &bound) {
+                super::Trinary::Yes => true,
+                super::Trinary::No => false,
+                // Two fully known class names only partly overlapping: the
+                // hint is what's guaranteed.
+                super::Trinary::Maybe => {
+                    !(self.is_fully_known_class_type(&bound)
+                        && self.is_fully_known_class_type(&native))
+                }
+            };
+            if keep {
+                kept.push((*m).clone());
+                continue;
+            }
+            changed = true;
+            // A wider doc member (`Node` on a `?Class_` hint) still covers
+            // the native alternatives it contains.
+            for n in &native_members {
+                if self.is_super_type_of(&bound, &bind(n)) == super::Trinary::Yes
+                    && !kept.contains(n)
+                {
+                    kept.push((*n).clone());
+                }
+            }
+        }
+        if !changed {
+            return None;
+        }
+        // Real PHPStan's `TypehintHelper::decideType`: a native
+        // alternative the result doesn't cover at all is added back
+        // (`?self` documented as `Schema|null` keeps its `self`).
+        let covered = |kept: &[Type], n: &Type| {
+            kept.iter()
+                .any(|k| self.is_super_type_of(&bind(n), &bind(k)) != super::Trinary::No)
+        };
+        for n in &native_members {
+            if !covered(&kept, n) {
+                kept.push((*n).clone());
+            }
+        }
+        Some(match kept.len() {
+            0 => unbound_native.clone(),
+            1 => kept.into_iter().next().unwrap(),
+            _ => Type::Union(kept),
+        })
+    }
+}
+
+impl Registry {
+    /// Whether `ty` is only class names (and `null`) whose whole
+    /// hierarchy the registry indexed - no template, shape, or unknown
+    /// class.
+    fn is_fully_known_class_type(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Null => true,
+            Type::Object(name, _) => {
+                name != "object"
+                    && self.lookup_class(name).is_some()
+                    && self
+                        .all_ancestor_names(name)
+                        .iter()
+                        .all(|a| self.lookup_class(a).is_some())
+            }
+            Type::Union(members) => members.iter().all(|m| self.is_fully_known_class_type(m)),
+            _ => false,
+        }
+    }
+}
+
+/// `self`/`static` as `class` - only for comparing against a native hint;
+/// the stored type keeps its late-bound `static`.
+fn bind_pseudo_refs(ty: &Type, class: &str) -> Type {
+    match ty {
+        Type::SelfRef | Type::StaticRef => Type::Object(class.to_string(), Vec::new()),
+        other => other.map_children(&mut |t| bind_pseudo_refs(t, class)),
+    }
+}
+
+impl Registry {
+    /// A PHPDoc name that isn't a class but spells a known global
+    /// constant (`@param FTP_ASCII|FTP_BINARY $mode`) means that
+    /// constant's value, as in real PHPStan's `TypeNodeResolver`
+    /// (`mightBeConstant`/`tryResolveConstant`): the namespaced name
+    /// first, then PHP's global fallback.
+    pub(crate) fn resolve_constant_named_types(&mut self) {
+        let lookup = |registry: &Registry, ty: &Type| resolve_constant_names(ty, registry);
+        let mut method_fixes = Vec::new();
+        for (class, info) in &self.classes {
+            for (name, sig) in &info.methods {
+                if let Some(fixed) = fixed_sig(self, sig, &lookup) {
+                    method_fixes.push((class.clone(), name.clone(), fixed));
+                }
+            }
+        }
+        let mut function_fixes = Vec::new();
+        for (name, sig) in &self.functions {
+            if let Some(fixed) = fixed_sig(self, sig, &lookup) {
+                function_fixes.push((name.clone(), fixed));
+            }
+        }
+        for (class, name, fixed) in method_fixes {
+            if let Some(sig) = self
+                .classes
+                .get_mut(&class)
+                .and_then(|i| i.methods.get_mut(&name))
+            {
+                *sig = fixed;
+            }
+        }
+        for (name, fixed) in function_fixes {
+            if let Some(sig) = self.functions.get_mut(&name) {
+                *sig = fixed;
+            }
+        }
+    }
+}
+
+/// `sig` with constant-named types resolved, when any are.
+fn fixed_sig(
+    registry: &Registry,
+    sig: &FunctionSig,
+    lookup: &dyn Fn(&Registry, &Type) -> Option<Type>,
+) -> Option<FunctionSig> {
+    let mut fixed: Option<FunctionSig> = None;
+    for (i, p) in sig.params.iter().enumerate() {
+        if let Some(ty) = lookup(registry, &p.ty) {
+            fixed.get_or_insert_with(|| sig.clone()).params[i].ty = ty;
+        }
+        if let Some(doc) = &p.doc_ty
+            && let Some(ty) = lookup(registry, doc)
+        {
+            fixed.get_or_insert_with(|| sig.clone()).params[i].doc_ty = Some(ty);
+        }
+    }
+    if let Some(ty) = lookup(registry, &sig.return_type) {
+        fixed.get_or_insert_with(|| sig.clone()).return_type = ty;
+    }
+    if let Some(doc) = &sig.return_doc_ty
+        && let Some(ty) = lookup(registry, doc)
+    {
+        fixed.get_or_insert_with(|| sig.clone()).return_doc_ty = Some(ty);
+    }
+    fixed
+}
+
+/// `ty` with every constant-named `Object` resolved; `None` when there
+/// is none.
+fn resolve_constant_names(ty: &Type, registry: &Registry) -> Option<Type> {
+    let mut changed = false;
+    let out = resolve_constant_names_rec(ty, registry, &mut changed);
+    changed.then_some(out)
+}
+
+fn resolve_constant_names_rec(ty: &Type, registry: &Registry, changed: &mut bool) -> Type {
+    if let Type::Object(name, args) = ty
+        && args.is_empty()
+        && let Some(value) = constant_named_type(name, registry)
+    {
+        *changed = true;
+        return value;
+    }
+    ty.map_children(&mut |t| resolve_constant_names_rec(t, registry, changed))
+}
+
+fn constant_named_type(name: &str, registry: &Registry) -> Option<Type> {
+    let short = name.rsplit('\\').next().unwrap_or(name);
+    let looks_constant = short
+        .chars()
+        .next()
+        .is_some_and(|c| c.is_ascii_uppercase() || c == '_')
+        && short
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+    if !looks_constant || registry.lookup_class(name).is_some() {
+        return None;
+    }
+    let name = name.trim_start_matches('\\');
+    registry
+        .global_constants
+        .get(name)
+        .or_else(|| registry.global_constants.get(short))
+        .cloned()
 }

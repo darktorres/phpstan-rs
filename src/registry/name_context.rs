@@ -367,6 +367,20 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|m| resolve_names_in_type(m, ctx))
                 .collect(),
         ),
+        // A `Closure(...)` shape names PHP's own global `Closure`, never
+        // a same-named class of the current namespace.
+        Type::Intersection(members)
+            if matches!(
+                members.as_slice(),
+                [Type::Object(name, args), Type::Callable(Some(_))]
+                    if name == "Closure" && args.is_empty()
+            ) =>
+        {
+            let mut members = members;
+            let sig = members.pop().unwrap();
+            members.push(resolve_names_in_type(sig, ctx));
+            Type::Intersection(members)
+        }
         Type::Intersection(members) => Type::Intersection(
             members
                 .into_iter()

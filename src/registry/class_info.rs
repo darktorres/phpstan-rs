@@ -1191,6 +1191,7 @@ impl ClassInfo {
                 // treats a synthesized enum method as an inheritance
                 // candidate.
                 return_has_own_doc: true,
+                return_doc_ty: None,
                 // No real docblock/native text behind any of these
                 // synthesized enum methods - nothing to check the case of.
                 return_case_refs: Vec::new(),
@@ -1228,6 +1229,7 @@ impl ClassInfo {
                 variadic: false,
                 has_default: false,
                 default_ty: None,
+                doc_ty: None,
                 by_ref: false,
                 has_own_doc: true,
                 explicit_mixed_hint: false,
@@ -1242,6 +1244,7 @@ impl ClassInfo {
                     return_type: self_ty.clone(),
                     return_type_native: self_ty.clone(),
                     return_has_own_doc: true,
+                    return_doc_ty: None,
                     return_case_refs: Vec::new(),
                     return_explicit_mixed_hint: false,
                     no_discard: false,
@@ -1272,6 +1275,7 @@ impl ClassInfo {
                     return_type: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_has_own_doc: true,
+                    return_doc_ty: None,
                     return_case_refs: Vec::new(),
                     return_explicit_mixed_hint: false,
                     no_discard: false,

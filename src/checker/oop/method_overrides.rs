@@ -608,12 +608,20 @@ impl<'a> Checker<'a> {
         // faithfully keeps the ancestor's native `array` while the
         // ancestor's interface had separately narrowed it to `list<...>`
         // via docblock alone.
+        // `self` is resolved on both sides as for parameters above: an
+        // interface's `: self` is that interface, which an implementation
+        // returning the interface by name satisfies.
+        let ancestor_pseudo_owner = if check_visibility {
+            &ancestor_owner
+        } else {
+            fqn
+        };
         if own_sig.return_type_native != Type::Mixed(false)
             && ancestor_sig.return_type_native != Type::Mixed(false)
             && !ancestor_return_uses_static(&ancestor_sig.return_type_native)
             && !self.registry.is_assignable(
-                &own_sig.return_type_native,
-                &ancestor_sig.return_type_native,
+                &self.resolve_pseudo(&own_sig.return_type_native, fqn),
+                &self.resolve_pseudo(&ancestor_sig.return_type_native, ancestor_pseudo_owner),
             )
         {
             self.report(fqn.to_string(), format!(

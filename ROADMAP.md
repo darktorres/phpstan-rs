@@ -203,6 +203,28 @@ parameter/covariant-return subtyping between two different `Closure(...)`
 shapes (`callable_sig_is_subtype`, reusing the identical variance-
 composition pattern generic template arguments already use).
 
+A PHPDoc type is resolved and kept apart from its native hint
+(`ParamSig::doc_ty`, `FunctionSig::return_doc_ty`), and once the whole
+hierarchy is indexed a member the native hint provably excludes - or a
+fully known, unrelated class name - is dropped from the effective type,
+with a wider member standing in for the native alternatives it covers
+and any untouched native alternative added back (real PHPStan's
+`TypehintHelper::decideType`, applied per member rather than all-or-
+nothing); `@return static` survives a native `self`. A constant-named
+PHPDoc type (`FTP_ASCII|FTP_BINARY`) is that constant's value
+(`mightBeConstant`), `@phpstan-import-type` aliases and deferred
+`value-of`/`Class::CONST` types (including `@extends`/`@implements`
+arguments) resolve before inheritance copies them, and templates keep
+their first-appearance order across `@template`/`@phpstan-template`
+spellings. `Closure(...)` parses as a real `Closure` with that signature
+(PHPStan's `ClosureType`), always the global class; `self` resolves
+inside callable shapes, an inherited `self` binds to its declaring
+class, and a `parent::`/`self::`/`static::` call's `static` return is
+the calling class (`DateTime`/`DateTimeImmutable`'s fluent methods are
+patched to return `static`, as they do at runtime). Bitwise `&`/`|`/`^`
+over int literals fold to exact values, and an enum case is assignable
+to itself inside generic arguments.
+
 PHPDoc-inheritance backfill: a method correctly omitting its own
 `@param`/`@return` in favor of an ancestor's/interface's tag resolves
 through that tag, including through anonymous classes and promoted-
@@ -909,7 +931,19 @@ must be assignable to its declared type, resolving a bare top-level
 reporting a default of unknown (`mixed`) type, which real PHPStan's
 direct `accepts()` call always accepts; the property check
 replicates real PHPStan's own untyped-property `null`-default exemption
-exactly. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
+exactly. **`parameter.phpDocType`/`return.phpDocType`/
+`parameter.notFound`/`parameter.notByRef`** (`IncompatiblePhpDocTypeRule`,
+level 2, `checker/phpdoc_type_compat.rs`): a function/method's own
+`@param`/`@param-out`/`@return` type must fit its native hint -
+"incompatible" when no value satisfies both, "not subtype" when only
+some do - via a trinary, hierarchy-aware `Registry::is_super_type_of`
+(unions, templates by bound, conditionals by branch, benevolent unions
+by member, final/interface-aware class relations, `No` only with the
+whole hierarchy indexed); a tag naming no parameter, or `@param-out` on
+a by-value one, is reported too, in tag order. Matches real PHPStan
+47/47 on the Piwigo corpus. **`function.alreadyNarrowedType`** answers
+"always true" through that strict relation, so `is_string()` on a
+benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
 provably constant, via a new shared `registry::identical_result`
 primitive - two operands reducing to the same single finite value decide
@@ -3562,15 +3596,13 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 130 — PhpDoc (`Rules/PhpDoc/` gaps)
 
-- `IncompatiblePhpDocTypeRule` family (param/property/property-hook/
-  class-constant) — a PHPDoc type incompatible with its own native type
-  hint; phpstan-rs silently reconciles/coerces instead of diagnosing.
-  **Quick-win sub-slice from the top-100 Packagist survey**:
-  `shipmonk/phpstan-rules`' `ForbidPhpDocNullabilityMismatchWithNative
-  TypehintRule` covers just the *nullability* disagreement between a
-  PHPDoc type and its native type hint — sharper-scoped and easier to
-  implement than the full family; worth building first as an early
-  win before tackling the general case.
+- `IncompatiblePhpDocTypeRule` family remainder — the function/method
+  `@param`/`@param-out`/`@return` half is built (see Done). Left: the
+  property and property-hook variants (`property.phpDocType`, needing a
+  native-only property type on `PropertySig`), the `*.unresolvableType`
+  family (an unresolvable PHPDoc type modeled as its own verdict rather
+  than today's lenient fallbacks), and `GenericCallableRuleHelper`'s
+  template checks on callable shapes.
 - `IncompatibleSelfOutTypeRule` — `@phpstan-self-out` is entirely
   unimplemented (only in the typo-detection whitelist). (Phase 88's U4
   is the *inference* half of this same tag family, once real tag
@@ -3595,12 +3627,10 @@ against this list, and added the real gaps the audit had missed.
   compatibility checks, only `varTag.type` is built.
   `varTag.nativeType` (the `@var` type against the expression's
   *native* type, not its PHPDoc-refined one) isn't.
-- `IncompatiblePhpDocTypeRule`'s identifiers, for reference when that
-  item above is built: `parameter.phpDocType`/`.unresolvableType`,
-  `return.phpDocType`/`.unresolvableType`, `property.phpDocType`/
-  `.unresolvableType`, `classConstant.phpDocType`/`.unresolvableType`,
+- Identifiers still to build: `parameter.unresolvableType`,
+  `return.unresolvableType`, `property.phpDocType`/`.unresolvableType`,
   and `selfOut.type`/`.static`/`.unresolvableType` for
-  `IncompatibleSelfOutTypeRule`. None exist yet.
+  `IncompatibleSelfOutTypeRule`.
 
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 

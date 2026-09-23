@@ -31,7 +31,10 @@ fn a_stale_resource_doc_comment_does_not_override_a_narrower_native_hint() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    // The stale tag itself is still reported, as real PHPStan's
+    // `IncompatiblePhpDocTypeRule` does; nothing downstream is.
+    let ids: Vec<&str> = d.iter().map(|x| x.identifier.as_str()).collect();
+    assert_eq!(ids, ["return.phpDocType"], "got: {d:?}");
 }
 
 // A property deliberately declared `private mixed $fileHandle = null;`

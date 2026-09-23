@@ -157,7 +157,10 @@ fn an_alias_narrowed_override_is_compared_by_its_native_type_not_the_expanded_al
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    // Only the alias's own disagreement with the native hint is
+    // reported, not an override incompatibility.
+    let ids: Vec<&str> = d.iter().map(|x| x.identifier.as_str()).collect();
+    assert_eq!(ids, ["parameter.phpDocType"], "got: {d:?}");
 }
 
 #[test]

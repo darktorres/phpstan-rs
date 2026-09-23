@@ -502,3 +502,47 @@ fn variance_flips_through_a_nested_contravariant_generic_argument() {
 fn obj(name: &str) -> Type {
     Type::Object(name.to_string(), Vec::new())
 }
+
+#[test]
+fn a_doc_class_the_registry_never_saw_is_kept_on_a_native_interface_hint() {
+    let r = build_registry(
+        r#"<?php
+            namespace App;
+            interface Node {}
+            class Rule {
+                /** @param \Vendor\CollectedDataNode $node */
+                public function processNode(Node $node): void {}
+            }
+            "#,
+    );
+    let ty = &r.classes["App\\Rule"].methods["processNode"].params[0].ty;
+    assert_eq!(ty.to_string(), "Vendor\\CollectedDataNode");
+}
+
+#[test]
+fn a_generic_argument_naming_an_enum_case_satisfies_a_bound_listing_that_case() {
+    let r = build_registry(
+        r#"<?php
+            namespace ProbeTb;
+            enum Id: string { case ARRAY = 'array'; case ITERABLE = 'iterable'; }
+            /** @template T of Id */
+            class Builtin {}
+            /** @template T of Builtin<Id::ARRAY>|Builtin<Id::ITERABLE> */
+            class Generic {}
+            /** @template T */
+            class Coll {}
+            /** @extends Coll<Generic<Builtin<Id::ARRAY>>> */
+            final class Shape extends Coll {}
+            "#,
+    );
+    let Type::Object(_, args) = &r.classes["ProbeTb\\Shape"].extends_args[0] else {
+        panic!("expected a generic parent");
+    };
+    let case = |c: &str| Type::EnumCase("ProbeTb\\Id".into(), c.into());
+    assert!(r.is_assignable(&case("ARRAY"), &case("ARRAY")));
+    assert!(!r.is_assignable(&case("ARRAY"), &case("ITERABLE")));
+    assert!(r.is_assignable(
+        &args[0],
+        &r.classes["ProbeTb\\Generic"].template_bounds["T"]
+    ));
+}

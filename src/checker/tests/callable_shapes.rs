@@ -11,7 +11,7 @@ fn a_closure_shaped_phpdoc_type_is_displayed_with_its_own_signature() {
             use function PHPStan\Testing\assertType;
             /** @param Closure(int): string $fn */
             function f($fn): void {
-                assertType('callable(int): string', $fn);
+                assertType('Closure(int): string', $fn);
             }
         "#,
     );
@@ -19,7 +19,10 @@ fn a_closure_shaped_phpdoc_type_is_displayed_with_its_own_signature() {
 }
 
 #[test]
-fn a_bare_callable_type_and_a_shaped_closure_type_are_mutually_assignable() {
+fn a_shaped_closure_fits_a_bare_callable_but_not_the_other_way_round() {
+    // Real PHPStan: `Closure(int): string` is a `Closure`, so a plain
+    // `callable` (a string or invokable object may satisfy it) doesn't
+    // fit it.
     let d = diagnostics_for(
         r#"<?php
             /** @param Closure(int): string $fn */
@@ -35,7 +38,12 @@ fn a_bare_callable_type_and_a_shaped_closure_type_are_mutually_assignable() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    let m: Vec<&str> = d.iter().map(|x| x.message.as_str()).collect();
+    assert_eq!(
+        m,
+        ["needsShaped() argument #1 ($fn) expects Closure(int): string, callable given"],
+        "got: {d:?}"
+    );
 }
 
 // Two *different* shapes against each other - real contravariant-

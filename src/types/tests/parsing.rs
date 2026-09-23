@@ -655,11 +655,11 @@ fn a_plain_list_is_not_a_subtype_of_a_non_empty_list_of_the_same_element_type() 
 fn closure_shape_syntax_parses_into_a_real_shape() {
     assert_eq!(
         parse_type_string("Closure(self):T").to_string(),
-        "callable(self): T"
+        "Closure(self): T"
     );
     assert_eq!(
         parse_type_string("Closure(int, string): bool").to_string(),
-        "callable(int, string): bool"
+        "Closure(int, string): bool"
     );
     assert_eq!(
         parse_type_string("callable(int): void").to_string(),
@@ -674,7 +674,7 @@ fn closure_shape_syntax_still_works_inside_a_union() {
         panic!("expected a top-level union, got {ty:?}");
     };
     assert_eq!(members.len(), 2);
-    assert_eq!(members[0].to_string(), "callable(self): T");
+    assert_eq!(members[0].to_string(), "Closure(self): T");
     assert_eq!(members[1], Type::Null);
 }
 
@@ -711,7 +711,7 @@ fn fully_qualified_closure_shape_syntax_with_no_return_type_degrades_to_plain_ca
 fn fully_qualified_closure_shape_syntax_with_a_return_type_parses_into_a_real_shape() {
     assert_eq!(
         parse_type_string("\\Closure(int, string): bool").to_string(),
-        "callable(int, string): bool"
+        "Closure(int, string): bool"
     );
 }
 

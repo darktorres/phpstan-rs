@@ -44,6 +44,11 @@ pub struct ParamSig {
     // (`sendMailNotifications()` with `$action = 'list_to_send'` picks the
     // `$action is 'send'` false branch).
     pub default_ty: Option<Type>,
+    // This declaration's own `@param` tag type, resolved but not
+    // reconciled with the native hint - what real PHPStan's
+    // `IncompatiblePhpDocTypeRule` compares against that hint. `None`
+    // without an own tag.
+    pub doc_ty: Option<Type>,
     pub by_ref: bool,
     // True when this parameter's own `@param` tag was present on this
     // declaration's docblock; `false` marks it eligible for
@@ -84,6 +89,8 @@ pub struct FunctionSig {
     pub return_type_native: Type,
     // `ParamSig::has_own_doc`'s return-position equivalent.
     pub return_has_own_doc: bool,
+    // `ParamSig::doc_ty`'s return-position equivalent.
+    pub return_doc_ty: Option<Type>,
     // `ParamSig::case_refs`'s return-position equivalent.
     pub return_case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `ParamSig::explicit_mixed_hint`'s return-position equivalent.
@@ -406,6 +413,12 @@ impl FunctionSig {
                 .or_insert_with(|| tp.clone());
         }
 
+        let resolve_doc_type = |raw: &String| {
+            let ty = types::parse_type_string(raw);
+            let ty = mark_template_params(ty, &template_params);
+            let ty = resolve_names_in_type(ty, ctx);
+            substitute_type_aliases(ty, class_type_aliases)
+        };
         let params = f
             .params
             .iter()
@@ -502,6 +515,10 @@ impl FunctionSig {
                     variadic: p.variadic,
                     has_default,
                     default_ty: p.default.as_ref().map(infer_const_type),
+                    doc_ty: doc
+                        .as_ref()
+                        .and_then(|d| d.params.get(p.name.as_ref()))
+                        .map(&resolve_doc_type),
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
                     explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
@@ -584,6 +601,10 @@ impl FunctionSig {
             return_type,
             return_type_native,
             return_has_own_doc: doc_return.is_some(),
+            return_doc_ty: doc
+                .as_ref()
+                .and_then(|d| d.return_type.as_ref())
+                .map(resolve_doc_type),
             return_case_refs,
             return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
                 f.return_type.as_deref(),
@@ -650,6 +671,7 @@ impl FunctionSig {
                     default_ty: (a.default_ty == b.default_ty)
                         .then(|| a.default_ty.clone())
                         .flatten(),
+                    doc_ty: b.doc_ty.or(a.doc_ty),
                     // Unlike the above, NOT permissive: `by_ref` is a
                     // restriction placed on the *caller* (an lvalue is
                     // required), not something being accepted - OR-ing it
@@ -698,6 +720,7 @@ impl FunctionSig {
             // Same permissive "either overload's own marker wins" as
             // `no_discard`/`is_internal` below.
             return_has_own_doc: self.return_has_own_doc || other.return_has_own_doc,
+            return_doc_ty: other.return_doc_ty.or(self.return_doc_ty),
             return_case_refs: self
                 .return_case_refs
                 .into_iter()

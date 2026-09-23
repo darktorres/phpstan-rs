@@ -89,6 +89,12 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     if members.contains(&Type::Mixed(false)) {
         return Type::Mixed(false);
     }
+    // `void` joined with `null` is just `null`, as in real PHPStan's
+    // `TypeCombinator::union` (a nullsafe call to a `void` method reads
+    // as `null`).
+    if members.contains(&Type::Null) {
+        members.retain(|m| *m != Type::Void);
+    }
     // Drop a literal member whenever its exact base type is also present
     // in the same union - a ternary's two branches
     // (`is_string($x) ? $x : ''`) build exactly this shape,

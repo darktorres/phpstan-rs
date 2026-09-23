@@ -16,6 +16,7 @@ mod index;
 mod name_context;
 mod purity;
 mod resolve;
+mod super_type;
 
 pub(crate) use anonymous_class::collect_anonymous_classes;
 pub(crate) use class_info::hook_body_references_property;
@@ -34,6 +35,7 @@ pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
+pub use super_type::Trinary;
 
 /// Real PHPStan's own `ApiRuleHelper::isPhpStanName()` - whether
 /// `fqn` is under the `PHPStan\` namespace itself (excluding the two
@@ -509,13 +511,17 @@ impl Registry {
         // member-owner maps must already reflect every name
         // `flatten_traits`/`resolve_method_tags` just added.
         registry.precompute_member_owners();
-        registry.flatten_phpdoc_inheritance();
-        registry.resolve_deferred_value_of();
+        // Aliases and deferred value types resolve first, so inherited
+        // PHPDoc copies an ancestor's finished types.
         registry.resolve_deferred_type_imports();
+        registry.resolve_deferred_value_of();
+        registry.flatten_phpdoc_inheritance();
         // Adds more method/property names (merges mixin members in) -
         // the member-owner maps need a second rebuild after this.
         registry.resolve_deferred_mixins();
         registry.precompute_ancestor_names();
+        registry.resolve_constant_named_types();
+        registry.drop_doc_members_excluded_by_native();
         registry.precompute_member_owners();
         registry.infer_global_variables(&[(std::path::Path::new("<flattened>"), program)]);
         registry
