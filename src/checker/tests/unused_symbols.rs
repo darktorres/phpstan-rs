@@ -874,7 +874,7 @@ fn interface_without_a_constructor_does_not_exempt_the_class() {
     assert!(
         d.iter().any(|x| x
             .message
-            .contains("constructor of Square has an unused parameter $side")),
+            .contains("Constructor of class Square has an unused parameter $side.")),
         "got: {d:?}"
     );
 }
@@ -893,8 +893,9 @@ fn anonymous_class_unused_constructor_parameter_names_the_anonymous_class() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message
-            == "constructor of an anonymous class has an unused parameter $seed"),
+        d.iter().any(
+            |x| x.message == "Constructor of an anonymous class has an unused parameter $seed."
+        ),
         "got: {d:?}"
     );
 }
@@ -912,5 +913,23 @@ fn empty_bodied_constructor_parameters_are_still_flagged() {
         d.iter()
             .any(|x| x.identifier == "constructor.unusedParameter"),
         "got: {d:?}"
+    );
+}
+
+#[test]
+fn an_eval_in_a_constructor_body_counts_as_using_every_parameter() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Scripted {
+                public function __construct(string $code, int $seed) {
+                    eval($code);
+                }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter()
+            .any(|x| x.identifier == "constructor.unusedParameter"),
+        "{d:?}"
     );
 }

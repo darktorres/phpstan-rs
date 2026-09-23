@@ -71,11 +71,14 @@ impl<'a> Checker<'a> {
             }
             let message = if is_anonymous {
                 format!(
-                    "constructor of an anonymous class has an unused parameter ${}",
+                    "Constructor of an anonymous class has an unused parameter ${}.",
                     p.name
                 )
             } else {
-                format!("constructor of {fqn} has an unused parameter ${}", p.name)
+                format!(
+                    "Constructor of class {fqn} has an unused parameter ${}.",
+                    p.name
+                )
             };
             self.report(
                 label.to_string(),

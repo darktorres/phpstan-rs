@@ -136,6 +136,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut HashSet<Arc<str>>, escaped: &mut 
                 || is_call_to(callee, "include_once")
                 || is_call_to(callee, "require")
                 || is_call_to(callee, "require_once")
+                || is_call_to(callee, "eval")
             {
                 *escaped = true;
             } else if is_call_to(callee, "compact") {
