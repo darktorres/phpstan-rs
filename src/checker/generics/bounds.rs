@@ -219,8 +219,14 @@ impl<'a> Checker<'a> {
                 // reuses this exact loop (same resolved `PropertySig::ty`,
                 // same real per-property span) rather than a second walk
                 // over `c.properties` elsewhere.
+                // The own PHPDoc type too: a member the native hint
+                // excludes no longer reaches `ty`.
+                let checked = match &prop_sig.doc_ty {
+                    Some(doc) => Type::Union(vec![prop_sig.ty.clone(), doc.clone()]),
+                    None => prop_sig.ty.clone(),
+                };
                 self.check_type_class_names_exist(
-                    &prop_sig.ty,
+                    &checked,
                     &format!("property {fqn}::${}", p.name),
                     p.span,
                     fqn,
@@ -240,6 +246,7 @@ impl<'a> Checker<'a> {
             }
         }
         self.check_property_tag_types(fqn, c);
+        self.check_property_phpdoc_types(fqn, c);
         self.check_ancestor_generic_bounds(fqn, c.span);
         // `TemplateTypeCheck`'s own declaration-validity family,
         // class-level (real PHPStan's per-kind rule split -

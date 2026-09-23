@@ -152,3 +152,54 @@ fn a_param_out_tag_on_a_by_value_parameter_is_reported() {
         ["Parameter $a for PHPDoc tag @param-out is not passed by reference."]
     );
 }
+
+#[test]
+fn a_property_var_tag_is_checked_against_its_native_type() {
+    let m = messages(
+        r#"<?php
+            interface Shape {}
+            class Circle implements Shape {}
+            class Holder {
+                /** @var string */
+                public int $count = 0;
+                /** @var Shape */
+                public Circle $circle;
+                /** @var list<int> */
+                public array $ids = [];
+                public function __construct(
+                    /** @var non-empty-string */
+                    public string $name,
+                    /** @var int */
+                    public string $label,
+                ) {}
+            }
+        "#,
+        "property.phpDocType",
+    );
+    assert_eq!(
+        m,
+        [
+            "PHPDoc tag @var for property Holder::$count with type string is incompatible with native type int.",
+            "PHPDoc tag @var for property Holder::$circle with type Shape is not subtype of native type Circle.",
+            "PHPDoc type for property Holder::$label with type int is incompatible with native type string.",
+        ]
+    );
+}
+
+#[test]
+fn a_property_doc_member_the_native_type_excludes_does_not_reach_its_type() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Holder {
+                /** @var int|string */
+                public int $count = 0;
+                public function f(): void { assertType('int', $this->count); }
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "phpstanRs.assertType"),
+        "got: {d:?}"
+    );
+}

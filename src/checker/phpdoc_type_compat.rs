@@ -5,6 +5,10 @@
 //! `@param-out`/`@return` type must fit its native hint
 //! (`parameter.phpDocType`/`return.phpDocType`) - "incompatible" when no
 //! value can satisfy both, "not subtype" when only some can.
+//! `IncompatiblePropertyPhpDocTypeRule` does the same for a property's
+//! `@var` (a promoted property's constructor `@param` or inline `@var`,
+//! reported as its "PHPDoc type") against its native type
+//! (`property.phpDocType`).
 
 use super::*;
 use crate::docblock;
@@ -105,6 +109,52 @@ impl<'a> Checker<'a> {
                 f.name_span,
                 label,
                 "return.phpDocType",
+            );
+        }
+    }
+
+    pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDecl) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let promoted = c
+            .methods
+            .iter()
+            .find(|m| m.function.name.as_ref() == "__construct")
+            .into_iter()
+            .flat_map(|m| m.function.params.iter())
+            .filter(|p| p.promoted_visibility.is_some())
+            .map(|p| (p.name.clone(), p.span, "PHPDoc type"));
+        let declared = c
+            .properties
+            .iter()
+            .map(|p| (p.name.clone(), p.span, "PHPDoc tag @var"));
+        let checks: Vec<(Type, Type, String, Span)> = declared
+            .chain(promoted)
+            .filter_map(|(name, span, description)| {
+                let prop = info.properties.get(name.as_ref())?;
+                if !prop.has_native_type {
+                    return None;
+                }
+                let doc = prop.doc_ty.clone()?;
+                Some((
+                    doc,
+                    prop.ty_native.clone(),
+                    format!("{description} for property {fqn}::${name}"),
+                    span,
+                ))
+            })
+            .collect();
+        for (doc, native, subject, span) in checks {
+            let doc = self.resolve_pseudo(&doc, fqn);
+            let native = self.resolve_pseudo(&native, fqn);
+            self.report_phpdoc_native_mismatch(
+                &subject,
+                &doc,
+                &native,
+                span,
+                fqn,
+                "property.phpDocType",
             );
         }
     }

@@ -113,6 +113,11 @@ pub struct PropertySig {
     // be a separate boolean rather than testing this field against
     // `Type::Mixed(false)`.
     pub ty_native: Type,
+    // This declaration's own PHPDoc type (`@var`, or for a promoted
+    // property its constructor `@param`/inline `@var`), resolved but not
+    // reconciled with the native hint - `ParamSig::doc_ty`'s property
+    // equivalent. `None` without one.
+    pub doc_ty: Option<Type>,
     pub has_native_type: bool,
     // `ParamSig::case_refs`'s property-position equivalent. Populated
     // identically at all three real construction sites (plain declared
@@ -612,6 +617,14 @@ impl ClassInfo {
                     resolve_names_in_type(t, ctx)
                 };
                 let ty = substitute_type_aliases(ty, &type_aliases);
+                let own_doc_ty = doc_ty
+                    .as_ref()
+                    .and_then(|d| d.var_type.as_deref())
+                    .map(|raw| {
+                        let t =
+                            mark_template_params(types::parse_type_string(raw), &template_params);
+                        substitute_type_aliases(resolve_names_in_type(t, ctx), &type_aliases)
+                    });
                 let (set_ty, set_case_refs) =
                     property_hook_set_type(p.hooks.as_ref(), &template_params, ctx);
                 let is_virtual = p
@@ -623,6 +636,7 @@ impl ClassInfo {
                     PropertySig {
                         ty,
                         ty_native,
+                        doc_ty: own_doc_ty,
                         has_native_type: p.type_hint.is_some(),
                         is_static: p.is_static,
                         // `@readonly` (`DocBlock::readonly`'s doc
@@ -704,6 +718,10 @@ impl ClassInfo {
                     resolve_names_in_type(t, ctx)
                 };
                 let ty = substitute_type_aliases(ty, &type_aliases);
+                let own_doc_ty = doc_ty.as_deref().map(|raw| {
+                    let t = mark_template_params(types::parse_type_string(raw), &template_params);
+                    substitute_type_aliases(resolve_names_in_type(t, ctx), &type_aliases)
+                });
                 let ty = apply_implicit_nullable_default(ty, p.default.as_ref());
                 let ty_native = apply_implicit_nullable_default(ty_native, p.default.as_ref());
                 // A promoted param's own inline `@readonly` - cheap to
@@ -729,6 +747,7 @@ impl ClassInfo {
                     PropertySig {
                         ty,
                         ty_native,
+                        doc_ty: own_doc_ty,
                         has_native_type: p.type_hint.is_some(),
                         is_static: false,
                         is_readonly: p.promoted_readonly || doc_readonly,
@@ -773,6 +792,7 @@ impl ClassInfo {
                     collect_class_name_case_refs(&ty, ctx, &mut case_refs);
                     let ty = resolve_names_in_type(ty, ctx);
                     PropertySig {
+                        doc_ty: None,
                         ty,
                         // A magic `@property` tag has no native
                         // declaration to check against - `false`,
@@ -1366,6 +1386,7 @@ impl ClassInfo {
         properties.insert(
             intern("name"),
             PropertySig {
+                doc_ty: None,
                 ty: Type::String,
                 // Every enum case's `->name` is language-guaranteed to
                 // be a real, natively-`string`-typed property - matching
@@ -1423,6 +1444,7 @@ impl ClassInfo {
             properties.insert(
                 intern("value"),
                 PropertySig {
+                    doc_ty: None,
                     ty: value_ty,
                     // Same reasoning as `->name` above - language-
                     // guaranteed, but here `ty_native` is the plain

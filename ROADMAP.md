@@ -941,7 +941,9 @@ some do - via a trinary, hierarchy-aware `Registry::is_super_type_of`
 by member, final/interface-aware class relations, `No` only with the
 whole hierarchy indexed); a tag naming no parameter, or `@param-out` on
 a by-value one, is reported too, in tag order. Matches real PHPStan
-47/47 on the Piwigo corpus. **`function.alreadyNarrowedType`** answers
+47/47 on the Piwigo corpus. `property.phpDocType` applies the same to a
+property's `@var` (a promoted property's constructor `@param`/inline
+`@var`, its "PHPDoc type"). **`function.alreadyNarrowedType`** answers
 "always true" through that strict relation, so `is_string()` on a
 benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
@@ -3597,9 +3599,9 @@ against this list, and added the real gaps the audit had missed.
 ### Phase 130 — PhpDoc (`Rules/PhpDoc/` gaps)
 
 - `IncompatiblePhpDocTypeRule` family remainder — the function/method
-  `@param`/`@param-out`/`@return` half is built (see Done). Left: the
-  property and property-hook variants (`property.phpDocType`, needing a
-  native-only property type on `PropertySig`), the `*.unresolvableType`
+  `@param`/`@param-out`/`@return` half and `property.phpDocType` are
+  built (see Done). Left: the property-hook variant
+  (`IncompatiblePropertyHookPhpDocTypeRule`), the `*.unresolvableType`
   family (an unresolvable PHPDoc type modeled as its own verdict rather
   than today's lenient fallbacks), and `GenericCallableRuleHelper`'s
   template checks on callable shapes.
@@ -3628,7 +3630,7 @@ against this list, and added the real gaps the audit had missed.
   `varTag.nativeType` (the `@var` type against the expression's
   *native* type, not its PHPDoc-refined one) isn't.
 - Identifiers still to build: `parameter.unresolvableType`,
-  `return.unresolvableType`, `property.phpDocType`/`.unresolvableType`,
+  `return.unresolvableType`, `property.unresolvableType`,
   and `selfOut.type`/`.static`/`.unresolvableType` for
   `IncompatibleSelfOutTypeRule`.
 

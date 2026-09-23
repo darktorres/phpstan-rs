@@ -427,6 +427,16 @@ impl Registry {
                     );
                     prop.ty = resolve_deferred_value_of_in_type(ty, &self.classes);
                 }
+                if let Some(doc) = &mut prop.doc_ty
+                    && type_contains_deferred_value_of(doc)
+                {
+                    let ty = bind_class_const_self(
+                        std::mem::replace(doc, Type::Mixed(false)),
+                        &class_name,
+                        &own_consts,
+                    );
+                    *doc = resolve_deferred_value_of_in_type(ty, &self.classes);
+                }
                 if let Some(set_ty) = &prop.set_ty
                     && type_contains_deferred_value_of(set_ty)
                 {
@@ -642,6 +652,9 @@ impl Registry {
             for prop in info.properties.values_mut() {
                 let ty = std::mem::replace(&mut prop.ty, Type::Mixed(false));
                 prop.ty = substitute_type_aliases(ty, &aliases);
+                if let Some(doc) = &mut prop.doc_ty {
+                    substitute(doc);
+                }
                 if let Some(set_ty) = prop.set_ty.take() {
                     prop.set_ty = Some(substitute_type_aliases(set_ty, &aliases));
                 }
@@ -1369,6 +1382,9 @@ fn class_has_deferred_type(info: &ClassInfo) -> bool {
         .any(type_contains_deferred_value_of)
         || info.properties.values().any(|p| {
             type_contains_deferred_value_of(&p.ty)
+                || p.doc_ty
+                    .as_ref()
+                    .is_some_and(type_contains_deferred_value_of)
                 || p.set_ty
                     .as_ref()
                     .is_some_and(type_contains_deferred_value_of)
@@ -1707,6 +1723,25 @@ impl Registry {
         for (name, sig) in &self.functions {
             visit(None, name, sig);
         }
+        let mut property_fixes = Vec::new();
+        for (class, info) in &self.classes {
+            for (name, prop) in &info.properties {
+                if prop.has_native_type
+                    && let Some(ty) = self.excluding_native(&prop.ty, &prop.ty_native, Some(class))
+                {
+                    property_fixes.push((class.clone(), name.clone(), ty));
+                }
+            }
+        }
+        for (class, name, ty) in property_fixes {
+            if let Some(prop) = self
+                .classes
+                .get_mut(&class)
+                .and_then(|i| i.properties.get_mut(&name))
+            {
+                prop.ty = ty;
+            }
+        }
         for (class, name, param, ty) in fixes {
             let sig = match &class {
                 Some(c) => self
@@ -1845,6 +1880,30 @@ impl Registry {
         for (name, sig) in &self.functions {
             if let Some(fixed) = fixed_sig(self, sig, &lookup) {
                 function_fixes.push((name.clone(), fixed));
+            }
+        }
+        let mut property_fixes = Vec::new();
+        for (class, info) in &self.classes {
+            for (name, prop) in &info.properties {
+                let ty = lookup(self, &prop.ty);
+                let doc = prop.doc_ty.as_ref().and_then(|d| lookup(self, d));
+                if ty.is_some() || doc.is_some() {
+                    property_fixes.push((class.clone(), name.clone(), ty, doc));
+                }
+            }
+        }
+        for (class, name, ty, doc) in property_fixes {
+            if let Some(prop) = self
+                .classes
+                .get_mut(&class)
+                .and_then(|i| i.properties.get_mut(&name))
+            {
+                if let Some(ty) = ty {
+                    prop.ty = ty;
+                }
+                if doc.is_some() {
+                    prop.doc_ty = doc;
+                }
             }
         }
         for (class, name, fixed) in method_fixes {
