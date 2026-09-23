@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_dynamic_static_calls: bool,
     check_illegal_constructor_calls: bool,
     check_enum_exhaustiveness: bool,
     check_null_coercion: bool,
@@ -256,6 +257,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_dynamic_static_calls(check_dynamic_static_calls);
     project.set_check_illegal_constructor_calls(check_illegal_constructor_calls);
     project.set_check_enum_exhaustiveness(check_enum_exhaustiveness);
     project.set_check_null_coercion(check_null_coercion);
@@ -725,6 +727,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_dynamic_static_calls: bool,
     check_illegal_constructor_calls: bool,
     check_enum_exhaustiveness: bool,
     check_null_coercion: bool,
@@ -865,6 +868,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_dynamic_static_calls =
+        check_dynamic_static_calls || config.check_dynamic_static_calls.unwrap_or(false);
     let check_illegal_constructor_calls =
         check_illegal_constructor_calls || config.check_illegal_constructor_calls.unwrap_or(false);
     let check_enum_exhaustiveness =
@@ -1121,6 +1126,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_dynamic_static_calls,
         check_illegal_constructor_calls,
         check_enum_exhaustiveness,
         check_null_coercion,

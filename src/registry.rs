@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (phpstan-strict-rules): a static method called through an instance, `$obj->staticMethod()` (`staticMethod.dynamicCall`).
+    pub check_dynamic_static_calls: bool,
     // Opt-in (phpstan-strict-rules): `__construct()` called on an existing object, or statically outside a parent-constructor call (`constructor.call`).
     pub check_illegal_constructor_calls: bool,
     // Opt-in: enum branching that defeats match exhaustiveness (a default arm, switch, or if-chains over enum cases).

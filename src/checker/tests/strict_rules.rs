@@ -59,3 +59,35 @@ function f(Child $c): void { $c->__construct(); }
     );
     assert_eq!(ids(src, |_| {}), Vec::<String>::new());
 }
+
+#[test]
+fn dynamic_calls_to_static_methods() {
+    let src = r#"<?php
+class Base { public static function make(): static { return new static(); } public function run(): void {} }
+class Child extends Base {
+    public function go(?Child $other): void {
+        $this->make();
+        $this->run();
+        static::make();
+        $other?->make();
+        $f = $this->make(...);
+    }
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_dynamic_static_calls = true;
+    assert_eq!(
+        ids(src, enabled),
+        vec![
+            "5 staticMethod.dynamicCall",
+            "8 staticMethod.dynamicCall",
+            "9 staticMethod.dynamicCall",
+        ]
+    );
+    let messages: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.identifier == "staticMethod.dynamicCall")
+        .map(|d| d.message)
+        .collect();
+    assert_eq!(messages[0], "Dynamic call to static method Base::make().");
+    assert_eq!(ids(src, |_| {}), Vec::<String>::new());
+}

@@ -262,7 +262,8 @@ impl<'a> Checker<'a> {
         if self.registry.check_null_coercion || self.registry.check_enum_exhaustiveness {
             self.check_strict_expression_idioms(e, locals, label);
         }
-        if self.registry.check_illegal_constructor_calls {
+        if self.registry.check_illegal_constructor_calls || self.registry.check_dynamic_static_calls
+        {
             self.check_strict_rules_expression(e, locals, label);
         }
         if !is_bare_statement && let ExprKind::Match { arms, default, .. } = &e.kind {

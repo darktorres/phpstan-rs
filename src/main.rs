@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag static methods called through an instance with ->.
+        #[arg(long)]
+        check_dynamic_static_calls: bool,
         /// Flag calls to __construct() other than a parent constructor call from a constructor.
         #[arg(long)]
         check_illegal_constructor_calls: bool,
@@ -459,6 +462,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_dynamic_static_calls,
             check_illegal_constructor_calls,
             check_enum_exhaustiveness,
             check_null_coercion,
@@ -516,6 +520,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_dynamic_static_calls,
             check_illegal_constructor_calls,
             check_enum_exhaustiveness,
             check_null_coercion,

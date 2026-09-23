@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_dynamic_static_calls`.
+    pub fn set_check_dynamic_static_calls(&mut self, enabled: bool) {
+        self.registry.check_dynamic_static_calls = enabled;
+    }
+
     /// See `Registry::check_illegal_constructor_calls`.
     pub fn set_check_illegal_constructor_calls(&mut self, enabled: bool) {
         self.registry.check_illegal_constructor_calls = enabled;
