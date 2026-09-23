@@ -517,6 +517,11 @@ impl Project {
         self.registry.check_psr3_logging = enabled;
     }
 
+    /// See `Registry::psr3_context_key_pattern`.
+    pub fn set_psr3_context_key_pattern(&mut self, pattern: Option<regex::Regex>) {
+        self.registry.psr3_context_key_pattern = pattern;
+    }
+
     /// See `Registry::check_magic_numbers`.
     pub fn set_check_magic_numbers(&mut self, enabled: bool) {
         self.registry.check_magic_numbers = enabled;

@@ -87,3 +87,17 @@ function f(LoggerInterface $logger): void {
         ]
     );
 }
+
+#[test]
+fn context_key_pattern() {
+    let body = r#"function f(LoggerInterface $logger): void {
+    $logger->info('ctx', ['user_id' => 1, 'userId' => 2]);
+}"#;
+    assert_eq!(
+        found(body, |r| {
+            r.check_psr3_logging = true;
+            r.psr3_context_key_pattern = Some(regex::Regex::new("^[a-z][a-z0-9_]*$").unwrap());
+        }),
+        vec!["2 psr3.contextKeyPattern"]
+    );
+}

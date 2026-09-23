@@ -17,6 +17,8 @@
 //!   levels;
 //! - `psr3.contextKeyNotString`: a context key that isn't a non-empty
 //!   string;
+//! - `psr3.contextKeyPattern`: a context key not matching
+//!   `psr3_context_key_pattern`;
 //! - `psr3.contextType`: an `exception` context value that isn't a
 //!   `Throwable`.
 //!
@@ -356,6 +358,20 @@ impl<'a> Checker<'a> {
                     span,
                     0,
                     "psr3.contextKeyNotString",
+                );
+            }
+            if let Some(pattern) = &self.registry.psr3_context_key_pattern
+                && !pattern.is_match(key)
+            {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Context key {key:?} of a logger call should match {}.",
+                        pattern.as_str()
+                    ),
+                    span,
+                    0,
+                    "psr3.contextKeyPattern",
                 );
             }
             if key == "exception" {

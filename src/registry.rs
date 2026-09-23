@@ -245,6 +245,8 @@ pub struct Registry {
     pub check_psr3_exception_context: bool,
     // Opt-in (staabm/phpstan-psr3, sfp-phpstan-psr-log): PSR-3 logger call hygiene - placeholders, message, level and context (`psr3.*`).
     pub check_psr3_logging: bool,
+    // `psr3.contextKeyPattern`'s required context-key shape.
+    pub psr3_context_key_pattern: Option<regex::Regex>,
     // Opt-in (sidz/phpstan-rules): a bare numeric literal outside a constant declaration, in any of 13 positions (`magicNumber.*`); `magic_number_exemptions` (default `[0, 1]`) and `magic_numbers_ignore_numeric_strings` tune it.
     pub check_magic_numbers: bool,
     // `check_magic_numbers`' exempt values and numeric-string opt-out.

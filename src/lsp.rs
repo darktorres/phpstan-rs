@@ -422,6 +422,12 @@ impl Server {
             .set_check_psr3_exception_context(resolved.check_psr3_exception_context);
         self.project
             .set_check_psr3_logging(resolved.check_psr3_logging);
+        self.project.set_psr3_context_key_pattern(
+            resolved
+                .psr3_context_key_pattern
+                .as_deref()
+                .and_then(|pattern| regex::Regex::new(pattern).ok()),
+        );
         self.project
             .set_check_magic_numbers(resolved.check_magic_numbers);
         self.project.set_magic_number_options(

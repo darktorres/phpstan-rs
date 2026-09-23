@@ -34,6 +34,7 @@
 //! check_exception_hygiene = false
 //! check_psr3_exception_context = false
 //! check_psr3_logging = false
+//! psr3_context_key_pattern = "^[a-z][a-z0-9_]*$"
 //! check_magic_numbers = false
 //! magic_number_exemptions = [0, 1]
 //! magic_numbers_ignore_numeric_strings = false
@@ -330,6 +331,9 @@ pub struct Config {
     pub check_psr3_exception_context: Option<bool>,
     /// Opt-in (staabm/phpstan-psr3, sfp-phpstan-psr-log): PSR-3 logger call hygiene - placeholders, message, level and context (`psr3.*`).
     pub check_psr3_logging: Option<bool>,
+    /// A regular expression (Rust `regex` syntax) every PSR-3 context key
+    /// must match, under `check_psr3_logging`.
+    pub psr3_context_key_pattern: Option<String>,
     /// Opt-in (sidz/phpstan-rules): a bare numeric literal outside a constant declaration, in any of 13 positions (`magicNumber.*`); `magic_number_exemptions` (default `[0, 1]`) and `magic_numbers_ignore_numeric_strings` tune it.
     pub check_magic_numbers: Option<bool>,
     /// Numbers `check_magic_numbers` accepts anywhere (default `[0, 1]`).

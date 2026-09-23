@@ -165,6 +165,7 @@ fn run_check_project(
     check_exception_hygiene: bool,
     check_psr3_exception_context: bool,
     check_psr3_logging: bool,
+    psr3_context_key_pattern: Option<regex::Regex>,
     check_magic_numbers: bool,
     magic_number_options: (Option<Vec<f64>>, bool),
     check_native_type_hints: bool,
@@ -275,6 +276,7 @@ fn run_check_project(
     project.set_check_exception_hygiene(check_exception_hygiene);
     project.set_check_psr3_exception_context(check_psr3_exception_context);
     project.set_check_psr3_logging(check_psr3_logging);
+    project.set_psr3_context_key_pattern(psr3_context_key_pattern);
     project.set_check_magic_numbers(check_magic_numbers);
     project.set_magic_number_options(magic_number_options.0, magic_number_options.1);
     project.set_check_native_type_hints(check_native_type_hints);
@@ -918,6 +920,18 @@ pub(crate) fn run_check_project_command(
     let check_psr3_exception_context =
         check_psr3_exception_context || config.check_psr3_exception_context.unwrap_or(false);
     let check_psr3_logging = check_psr3_logging || config.check_psr3_logging.unwrap_or(false);
+    let psr3_context_key_pattern = match config
+        .psr3_context_key_pattern
+        .as_deref()
+        .map(regex::Regex::new)
+    {
+        None => None,
+        Some(Ok(pattern)) => Some(pattern),
+        Some(Err(e)) => {
+            eprintln!("invalid psr3_context_key_pattern: {e}");
+            std::process::exit(1);
+        }
+    };
     let check_magic_numbers = check_magic_numbers || config.check_magic_numbers.unwrap_or(false);
     let magic_number_options = (
         config
@@ -1209,6 +1223,7 @@ pub(crate) fn run_check_project_command(
         check_exception_hygiene,
         check_psr3_exception_context,
         check_psr3_logging,
+        psr3_context_key_pattern,
         check_magic_numbers,
         magic_number_options,
         check_native_type_hints,
