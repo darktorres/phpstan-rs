@@ -10,6 +10,10 @@
 //! magic methods, whose signatures PHP fixes. Without a configured PHP
 //! version only types PHP 7.1 already has are suggested.
 //!
+//! From PHP 8.3 an untyped class constant gets the same suggestion from
+//! its `@var` or value type (`missingNativeType.classConstant`), unless a
+//! subclass redeclares it without a type inside the suggested one.
+//!
 //! A closure or arrow function passed where the callee's signature fixes
 //! its parameter types gets the same suggestion for each untyped
 //! parameter (unless that type is only `mixed`).
@@ -319,6 +323,62 @@ impl<'a> Checker<'a> {
                 param.name_span,
                 0,
                 "missingNativeType.parameter",
+            );
+        }
+    }
+
+    pub(crate) fn check_native_class_constant_types(&mut self, fqn: &str, consts: &[ClassConst]) {
+        if self.registry.php_version.is_none_or(|v| v < (8, 3)) {
+            return;
+        }
+        for constant in consts {
+            if constant.type_hint.is_some() {
+                continue;
+            }
+            let Some(sig) = self
+                .registry
+                .classes
+                .get(fqn)
+                .and_then(|info| info.consts.get(constant.name.as_ref()))
+            else {
+                continue;
+            };
+            if sig.native_ty.is_some() || contains_mixed_or_template(&sig.ty) {
+                continue;
+            }
+            let mut native = Native::default();
+            if !collect(&sig.ty, Position::Parameter, &mut native) {
+                continue;
+            }
+            let Some(suggested) = render(native, self.registry.php_version) else {
+                continue;
+            };
+            let suggested_ty = self.suggested_type(&suggested, Some(fqn));
+            let redeclared_incompatibly = self.registry.classes.iter().any(|(name, info)| {
+                name.as_ref() != fqn
+                    && self.registry.is_subclass_of(name, fqn)
+                    && info
+                        .consts
+                        .get(constant.name.as_ref())
+                        .is_some_and(|child| {
+                            child.native_ty.as_ref().is_none_or(|child_ty| {
+                                self.registry.is_super_type_of(&suggested_ty, child_ty)
+                                    != Trinary::Yes
+                            })
+                        })
+            });
+            if redeclared_incompatibly {
+                continue;
+            }
+            self.report(
+                fqn.to_string(),
+                format!(
+                    "Constant {fqn}::{} can be declared natively as {suggested}.",
+                    constant.name
+                ),
+                constant.name_span,
+                0,
+                "missingNativeType.classConstant",
             );
         }
     }

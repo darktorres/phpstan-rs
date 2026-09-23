@@ -1981,6 +1981,9 @@ impl<'a> Checker<'a> {
                         // never does).
                         self.check_missing_property_typehints(&fqn, &c.properties);
                         self.check_missing_class_constant_typehints(&fqn, &c.consts);
+                        if self.registry.check_native_type_hints {
+                            self.check_native_class_constant_types(&fqn, &c.consts);
+                        }
                     }
                     if c.kind == ClassKind::Trait {
                         self.check_trait_methods(&fqn, c);
@@ -2096,6 +2099,9 @@ impl<'a> Checker<'a> {
                         // are as real a missing-typehint candidate as a
                         // class's.
                         self.check_missing_class_constant_typehints(&fqn, &e.consts);
+                        if self.registry.check_native_type_hints {
+                            self.check_native_class_constant_types(&fqn, &e.consts);
+                        }
                     }
                     for m in &e.methods {
                         self.check_function(&m.function, Some(&fqn), m.is_static, !m.is_abstract);

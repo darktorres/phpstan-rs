@@ -121,3 +121,33 @@ function f(array $ints, array $unknown): void {
         ]
     );
 }
+
+#[test]
+fn class_constants_from_php_8_3() {
+    let src = r#"<?php
+enum Suit { case Hearts; }
+class Base {
+    const LIMIT = 10;
+    const NAMES = ['a', 'b'];
+    const int TYPED = 1;
+    /** @var non-empty-string */
+    const LABEL = 'x';
+    const SUIT = Suit::Hearts;
+    const REDECLARED = 1;
+}
+class Child extends Base {
+    const REDECLARED = 2;
+}
+"#;
+    assert_eq!(
+        found(src, Some((8, 3))),
+        vec![
+            "13 Constant Child::REDECLARED can be declared natively as int.",
+            "4 Constant Base::LIMIT can be declared natively as int.",
+            "5 Constant Base::NAMES can be declared natively as array.",
+            "8 Constant Base::LABEL can be declared natively as string.",
+            "9 Constant Base::SUIT can be declared natively as Suit.",
+        ]
+    );
+    assert_eq!(found(src, Some((8, 2))), Vec::<String>::new());
+}
