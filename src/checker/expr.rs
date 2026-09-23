@@ -269,6 +269,7 @@ impl<'a> Checker<'a> {
             || self.registry.check_dynamic_static_calls
             || self.registry.check_arithmetic_operands
             || self.registry.check_comparable_types
+            || self.registry.check_mixed_type_operands
         {
             self.check_strict_rules_expression(e, locals, label);
         }

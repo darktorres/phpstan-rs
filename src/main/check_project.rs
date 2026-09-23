@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_mixed_type_operands: bool,
     check_comparable_types: bool,
     check_arithmetic_operands: bool,
     check_identity_vs_equals: bool,
@@ -264,6 +265,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_mixed_type_operands(check_mixed_type_operands);
     project.set_check_comparable_types(check_comparable_types);
     project.set_check_arithmetic_operands(check_arithmetic_operands);
     project.set_check_identity_vs_equals(check_identity_vs_equals);
@@ -741,6 +743,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_mixed_type_operands: bool,
     check_comparable_types: bool,
     check_arithmetic_operands: bool,
     check_identity_vs_equals: bool,
@@ -889,6 +892,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_mixed_type_operands =
+        check_mixed_type_operands || config.check_mixed_type_operands.unwrap_or(false);
     let check_comparable_types =
         check_comparable_types || config.check_comparable_types.unwrap_or(false);
     let check_arithmetic_operands =
@@ -1161,6 +1166,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_mixed_type_operands,
         check_comparable_types,
         check_arithmetic_operands,
         check_identity_vs_equals,

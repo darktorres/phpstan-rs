@@ -332,3 +332,47 @@ function f(int $i, float $f, string $s, ?int $maybe, bool $b, \DateTimeImmutable
         ]
     );
 }
+
+#[test]
+fn mixed_type_operands() {
+    let src = r#"<?php
+final class Name { public function __toString(): string { return ''; } }
+function f(string $s, ?string $ns, int $i, array $a, Name $n, \stdClass $o, mixed $m): void {
+    $x = $s . $i;
+    $x = $s . $n;
+    $x = $s . $o;
+    $x = $s + $i;
+    $x = $s == $i;
+    $x = $s < $i;
+    $x = $s === $i;
+    $x = $s . $ns;
+    $x = $a + $i;
+    $x = $a + $a;
+    $x = $s . $m;
+    $s .= $i;
+    $s += $i;
+    $x = '' . $i;
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_mixed_type_operands = true;
+    assert_eq!(
+        ids_with(src, enabled, &["nonStringOperand", "nonArrayOperand"]),
+        vec![
+            "12 binaryOp.nonArrayOperand",
+            "16 assignOp.nonStringOperand",
+            "17 binaryOp.nonStringOperand",
+            "6 binaryOp.nonStringOperand",
+            "7 binaryOp.nonStringOperand",
+            "9 binaryOp.nonStringOperand",
+        ]
+    );
+    let messages: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.span.start.line == 7 && d.identifier.ends_with("Operand"))
+        .map(|d| d.message)
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["string (string) in combination with non-string (int) is not allowed."]
+    );
+}

@@ -27,6 +27,14 @@
 //!   `int|float|string|DateTimeInterface` or a list tuple of those
 //!   (`comparison.nonComparable`), or between two such types that don't
 //!   order against each other (`comparison.differentTypes`).
+//! - `check_mixed_type_operands` (from `voku/phpstan-rules`) - a string
+//!   operand combined with a non-string one, or an array operand with a
+//!   definite non-array, by any binary operator but `===`, `!==`, `??`,
+//!   `&&`, `||` and `|>`, or by a compound assignment
+//!   (`binaryOp.nonStringOperand`/`binaryOp.nonArrayOperand`,
+//!   `assignOp.nonStringOperand`/`assignOp.nonArrayOperand`).
+//!   Concatenation, `==` and `!=` accept any operand that converts to a
+//!   string. Trait bodies are skipped: their `$this` has no single type.
 
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder, Locals};
@@ -65,6 +73,27 @@ impl<'a> Checker<'a> {
             ) = &e.kind
         {
             self.check_comparable_types(op, l, r, e.span, locals, label);
+        }
+        if self.registry.check_mixed_type_operands && self.current_trait.is_none() {
+            match &e.kind {
+                ExprKind::Binary(op, l, r)
+                    if !matches!(
+                        op,
+                        BinOp::Identical
+                            | BinOp::NotIdentical
+                            | BinOp::Coalesce
+                            | BinOp::And
+                            | BinOp::Or
+                            | BinOp::Pipe
+                    ) =>
+                {
+                    self.check_mixed_type_operands(op, l, r, false, e.span, locals, label);
+                }
+                ExprKind::CompoundAssign(op, l, r) => {
+                    self.check_mixed_type_operands(op, l, r, true, e.span, locals, label);
+                }
+                _ => {}
+            }
         }
         if self.registry.check_illegal_constructor_calls {
             match &e.kind {
@@ -304,6 +333,78 @@ impl<'a> Checker<'a> {
                         .all(|(a, b)| self.is_comparable_together(a, b))
             })
         })
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn check_mixed_type_operands(
+        &mut self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        compound: bool,
+        span: crate::token::Span,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let left = self.infer_expr(l, locals);
+        let right = self.infer_expr(r, locals);
+        let converts_to_string_ok = if compound {
+            *op == BinOp::Concat
+        } else {
+            matches!(op, BinOp::Concat | BinOp::Eq | BinOp::NotEq)
+        };
+        let prefix = if compound { "assignOp" } else { "binaryOp" };
+        for (one, other) in [(&left, &right), (&right, &left)] {
+            let kind = if all_members(one, is_string)
+                && !matches!(other, Type::Mixed(_))
+                && !is_string_or_nullable_string(other)
+            {
+                if converts_to_string_ok
+                    && !matches!(one, Type::StringLiteral(s) if s.is_empty())
+                    && self.converts_to_string(other)
+                {
+                    continue;
+                }
+                "string"
+            } else if all_members(one, is_array)
+                && !matches!(other, Type::Mixed(_))
+                && !has_array(other)
+                && !contains_mixed(other)
+            {
+                "array"
+            } else {
+                continue;
+            };
+            let (id, capitalized) = if kind == "string" {
+                ("nonStringOperand", "non-string")
+            } else {
+                ("nonArrayOperand", "non-array")
+            };
+            self.report(
+                label.to_string(),
+                format!(
+                    "{kind} ({one}) in combination with {capitalized} ({other}) is not allowed."
+                ),
+                span,
+                0,
+                &format!("{prefix}.{id}"),
+            );
+            return;
+        }
+    }
+
+    /// Whether every value of `ty` has a string conversion.
+    fn converts_to_string(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Union(members) => members.iter().all(|m| self.converts_to_string(m)),
+            Type::Intersection(members) => members.iter().any(|m| self.converts_to_string(m)),
+            Type::Array(..) | Type::ArrayShape(_) | Type::ObjectShape(_) | Type::Callable(_) => {
+                false
+            }
+            Type::Object(class, _) => self.registry.lookup_method(class, "__toString").is_some(),
+            Type::EnumCase(..) => false,
+            _ => true,
+        }
     }
 
     /// `function.strict`, for one of the functions it covers.
@@ -714,4 +815,32 @@ fn list_tuples(ty: &Type) -> Option<Vec<Vec<Type>>> {
         return None;
     }
     constant_arrays(ty)
+}
+
+fn all_members(ty: &Type, f: fn(&Type) -> bool) -> bool {
+    match ty {
+        Type::Union(members) => members.iter().all(f),
+        other => f(other),
+    }
+}
+
+fn is_array(ty: &Type) -> bool {
+    match ty {
+        Type::Array(..) | Type::ArrayShape(_) => true,
+        Type::Intersection(members) => members.iter().any(is_array),
+        _ => false,
+    }
+}
+
+/// `string` or `?string` once literal values are generalized.
+fn is_string_or_nullable_string(ty: &Type) -> bool {
+    match ty {
+        Type::Union(members) => {
+            members
+                .iter()
+                .all(|m| is_string(m) || matches!(m, Type::Null))
+                && members.iter().any(is_string)
+        }
+        other => is_string(other),
+    }
 }
