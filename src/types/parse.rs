@@ -1088,6 +1088,16 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
             Type::Object("\\Closure".to_string(), Vec::new())
         }
         "callable" => Type::Callable(None),
+        // `self<T>`/`static<T>`: the current class with those arguments
+        // (a sentinel `resolve_pseudo` turns into the class itself).
+        "self" if !generic_args.is_empty() => Type::Object(
+            "$$self".to_string(),
+            generic_args.iter().map(|a| parse_type_string(a)).collect(),
+        ),
+        "static" | "$this" if !generic_args.is_empty() => Type::Object(
+            "$$static".to_string(),
+            generic_args.iter().map(|a| parse_type_string(a)).collect(),
+        ),
         "self" => Type::SelfRef,
         "parent" => Type::ParentRef,
         // `@return $this` is a real, PHPStan-documented PHPDoc

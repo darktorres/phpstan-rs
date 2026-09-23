@@ -12,7 +12,7 @@ use crate::checker::{
 };
 use crate::pest_config;
 use crate::regex_groups;
-use crate::registry::Registry;
+use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
 
@@ -1402,6 +1402,10 @@ impl<'a> Checker<'a> {
                 // `days: int` refinement the identical call written as
                 // one direct chain (`$a->diff($b)->days`) gets right.
                 let result = self.method_call_return_type(recv, &recv_ty, method, args, locals);
+                if let Some((class, _, _, s)) = &receiver {
+                    let s: &FunctionSig = std::borrow::Borrow::borrow(s);
+                    self.apply_self_out(recv, s, &resolved, locals, class);
+                }
                 // `$x?->method()` short-circuits to `null` when `$x` is
                 // null, on top of whatever the method's own return type
                 // is - real, implicit nullability a plain `->` doesn't
@@ -5922,6 +5926,30 @@ impl<'a> Checker<'a> {
                 .callable_sig()
                 .map_or(Type::Mixed(false), |sig| (*sig.return_type).clone()),
         }
+    }
+
+    /// `@phpstan-self-out`: after `$x->method(...)`, `$x` has the tag's
+    /// type, its templates bound as for a return type (the class's from
+    /// the receiver, the method's from the arguments).
+    fn apply_self_out(
+        &mut self,
+        recv: &Expr,
+        sig: &FunctionSig,
+        resolved: &[Option<&Expr>],
+        locals: &mut Locals,
+        class: &str,
+    ) {
+        let Some(out) = &sig.self_out else {
+            return;
+        };
+        let Some(key) = narrowing_key(recv) else {
+            return;
+        };
+        let mut as_return = sig.clone();
+        as_return.return_type = out.clone();
+        let ty = self.infer_call_return_type(&as_return, resolved, locals);
+        let ty = self.resolve_pseudo(&ty, class);
+        locals.insert(key, ty);
     }
 
     /// A static call's return type with `self`/`static`/`parent`

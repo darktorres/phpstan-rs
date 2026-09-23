@@ -90,6 +90,7 @@ pub(crate) fn method_tag_sig(
         return_type_native: return_type,
         return_has_own_doc: true,
         return_doc_ty: None,
+        self_out: None,
         return_case_refs,
         return_explicit_mixed_hint: false,
         no_discard: false,

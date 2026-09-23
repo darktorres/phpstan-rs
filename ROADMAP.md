@@ -1120,7 +1120,14 @@ class's type arguments, falling back to the template's declared default
 on an erased receiver. `Registry::is_super_type_of` compares arrays and
 shapes structurally (optional vs required keys), keeps `string` a
 `Maybe` for `class-string`, and treats an unresolved constant reference
-or unknown class name as proving nothing. **`function.alreadyNarrowedType`** answers
+or unknown class name as proving nothing. **`@phpstan-self-out`/
+`@phpstan-this-out`** (and the `@psalm-` spellings) are real: after
+`$x->method(...)`, `$x` (or a narrowable `$this->prop`) takes the tag's
+type, its templates bound as for a return type; `selfOut.type`/
+`.static`/`.unresolvableType` validate the declaration. `self<T>`/
+`static<T>` keep their type arguments (resolved to the class with those
+arguments) instead of dropping them, and a bare prefixed-only tag
+(`@assert`, `@self-out`, `@type`, ...) no longer applies. **`function.alreadyNarrowedType`** answers
 "always true" through that strict relation, so `is_string()` on a
 benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
@@ -3666,10 +3673,6 @@ against this list, and added the real gaps the audit had missed.
   built, with their `*.unresolvableType` siblings (see Done). Left: the
   property-hook variant (`IncompatiblePropertyHookPhpDocTypeRule`), and
   `GenericCallableRuleHelper`'s template checks on callable shapes.
-- `IncompatibleSelfOutTypeRule` — `@phpstan-self-out` is entirely
-  unimplemented (only in the typo-detection whitelist). (Phase 88's U4
-  is the *inference* half of this same tag family, once real tag
-  support exists.)
 - `InvalidPhpDocVarTagTypeRule`/`WrongVariableNameInVarTagRule`/
   `VarTagChangedExpressionTypeRule` — phpstan-rs's inline-`@var`
   checking is deliberately scoped to the plain-assignment case only;
@@ -3680,8 +3683,6 @@ against this list, and added the real gaps the audit had missed.
   compatibility checks, only `varTag.type` is built.
   `varTag.nativeType` (the `@var` type against the expression's
   *native* type, not its PHPDoc-refined one) isn't.
-- Identifiers still to build: `selfOut.type`/`.static`/
-  `.unresolvableType` for `IncompatibleSelfOutTypeRule`.
 
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 

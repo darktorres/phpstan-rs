@@ -346,6 +346,12 @@ impl<'a> Checker<'a> {
     pub(crate) fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
         match ty {
             Type::SelfRef | Type::StaticRef => Type::Object(defining_class.to_string(), Vec::new()),
+            Type::Object(name, args) if name == "$$self" || name == "$$static" => Type::Object(
+                defining_class.to_string(),
+                args.iter()
+                    .map(|a| self.resolve_pseudo(a, defining_class))
+                    .collect(),
+            ),
             Type::ParentRef => self
                 .registry
                 .classes
@@ -455,7 +461,13 @@ impl<'a> Checker<'a> {
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
         matches!(
             name,
-            "object" | "Traversable" | "resource" | "closed-resource" | "class@anonymous"
+            "object"
+                | "Traversable"
+                | "resource"
+                | "closed-resource"
+                | "class@anonymous"
+                | "$$self"
+                | "$$static"
         ) || self.registry.lookup_class(name).is_some()
     }
 

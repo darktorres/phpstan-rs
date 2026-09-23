@@ -436,3 +436,72 @@ fn a_second_declaration_of_a_function_is_checked_against_its_own_phpdoc() {
         ["Function twice() has parameter $a with no value type specified in iterable type array."]
     );
 }
+
+#[test]
+fn a_self_out_tag_retypes_the_receiver_after_the_call() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @template T */
+            class Bag {
+                /**
+                 * @template N
+                 * @param N $item
+                 * @phpstan-self-out self<T|N>
+                 */
+                public function add($item): void {}
+                /** @phpstan-this-out static */
+                public function reset(): void {}
+            }
+            /** @param Bag<int> $bag */
+            function f(Bag $bag): void {
+                $bag->add('x');
+                assertType("Bag<int|'x'>", $bag);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn an_invalid_self_out_declaration_is_reported() {
+    let m = messages_all(
+        r#"<?php
+            class Other {}
+            class Thing {
+                /** @phpstan-self-out Other */
+                public function a(): void {}
+                /** @phpstan-self-out self */
+                public static function b(): void {}
+                /** @phpstan-self-out string[optional] */
+                public function c(): void {}
+            }
+        "#,
+    );
+    let m: Vec<(&str, &str)> = m.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    assert_eq!(
+        m,
+        [
+            (
+                "selfOut.type",
+                "Self-out type Other of method Thing::a is not subtype of Thing."
+            ),
+            (
+                "selfOut.static",
+                "PHPDoc tag @phpstan-self-out is not supported above static method Thing::b()."
+            ),
+            (
+                "selfOut.unresolvableType",
+                "PHPDoc tag @phpstan-self-out for method Thing::c() contains unresolvable type."
+            ),
+        ]
+    );
+}
+
+fn messages_all(src: &str) -> Vec<(String, String)> {
+    diagnostics_for(src)
+        .into_iter()
+        .filter(|d| d.identifier.starts_with("selfOut."))
+        .map(|d| (d.identifier, d.message))
+        .collect()
+}

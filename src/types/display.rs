@@ -103,6 +103,11 @@ impl fmt::Display for Type {
                 write!(f, "contravariant {}", args[0])
             }
             Type::Object(name, args) => {
+                let name = match name.as_str() {
+                    "$$self" => "self",
+                    "$$static" => "static",
+                    other => other,
+                };
                 write!(f, "{name}")?;
                 if !args.is_empty() {
                     let parts: Vec<String> = args.iter().map(Type::to_string).collect();

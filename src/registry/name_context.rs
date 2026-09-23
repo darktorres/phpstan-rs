@@ -312,6 +312,14 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         Type::Object(name, args) if name == "resource" || name == "closed-resource" => {
             Type::Object(name, args)
         }
+        // `self<T>`/`static<T>` sentinels: only their arguments name
+        // classes.
+        Type::Object(name, args) if name == "$$self" || name == "$$static" => Type::Object(
+            name,
+            args.into_iter()
+                .map(|a| resolve_names_in_type(a, ctx))
+                .collect(),
+        ),
         // Same reasoning again: `"$$interface"`/`"$$trait"`
         // (`types::parse_type_keyword_or_class`'s own bare `interface-
         // string`/`trait-string` sentinels, always argument-less) are
@@ -480,7 +488,13 @@ pub(crate) fn collect_class_name_case_refs(
         Type::Object(name, _)
             if matches!(
                 name.as_str(),
-                "object" | "resource" | "closed-resource" | "$$interface" | "$$trait"
+                "object"
+                    | "resource"
+                    | "closed-resource"
+                    | "$$interface"
+                    | "$$trait"
+                    | "$$self"
+                    | "$$static"
             ) => {}
         Type::Object(name, args)
             if matches!(

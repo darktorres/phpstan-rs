@@ -354,6 +354,9 @@ impl<'a> Checker<'a> {
                 self.check_default_parameter_types(f, sig, class_name, &label);
                 self.check_phpdoc_types_against_native(f, sig, class_name, &label);
                 self.check_conditional_types(f, sig, class_name, &label);
+                if let Some(class) = class_name {
+                    self.check_self_out(f, sig, class, is_static, &label);
+                }
                 self.current_class = previous_class;
             }
             // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-

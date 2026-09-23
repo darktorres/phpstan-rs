@@ -432,6 +432,9 @@ impl Registry {
                 if let Some(doc_ty) = &mut sig.return_doc_ty {
                     resolve(doc_ty, &sig.return_type_native, &self.classes);
                 }
+                if let Some(out) = &mut sig.self_out {
+                    resolve(out, &Type::Mixed(false), &self.classes);
+                }
             }
             for prop in info.properties.values_mut() {
                 if type_contains_deferred_value_of(&prop.ty) {
@@ -670,6 +673,9 @@ impl Registry {
                 substitute(&mut sig.return_type);
                 if let Some(doc_ty) = &mut sig.return_doc_ty {
                     substitute(doc_ty);
+                }
+                if let Some(out) = &mut sig.self_out {
+                    substitute(out);
                 }
             }
             for prop in info.properties.values_mut() {
@@ -1388,10 +1394,10 @@ fn resolve_class_const_type(args: &[Type], classes: &FxHashMap<Arc<str>, ClassIn
 fn class_has_deferred_type(info: &ClassInfo) -> bool {
     info.methods.values().any(|sig| {
         type_contains_deferred_value_of(&sig.return_type)
-            || sig
-                .return_doc_ty
-                .as_ref()
-                .is_some_and(type_contains_deferred_value_of)
+            || [&sig.return_doc_ty, &sig.self_out]
+                .into_iter()
+                .flatten()
+                .any(type_contains_deferred_value_of)
             || sig.params.iter().any(|p| {
                 type_contains_deferred_value_of(&p.ty)
                     || [&p.doc_ty, &p.out_ty, &p.closure_this_type]
@@ -1980,6 +1986,11 @@ fn fixed_sig(
         && let Some(ty) = lookup(registry, doc)
     {
         fixed.get_or_insert_with(|| sig.clone()).return_doc_ty = Some(ty);
+    }
+    if let Some(out) = &sig.self_out
+        && let Some(ty) = lookup(registry, out)
+    {
+        fixed.get_or_insert_with(|| sig.clone()).self_out = Some(ty);
     }
     fixed
 }

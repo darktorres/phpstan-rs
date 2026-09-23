@@ -326,6 +326,71 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Real PHPStan's `IncompatibleSelfOutTypeRule`: a method's
+    /// `@phpstan-self-out` type must be its own class (or narrower), the
+    /// tag is meaningless on a static method, and the type must resolve.
+    pub(crate) fn check_self_out(
+        &mut self,
+        f: &FunctionDecl,
+        sig: &FunctionSig,
+        class: &str,
+        is_static: bool,
+        label: &str,
+    ) {
+        let Some(out) = &sig.self_out else {
+            return;
+        };
+        let raw = f
+            .doc_comment
+            .as_deref()
+            .and_then(|d| docblock::parse(d).self_out);
+        let unresolvable = raw.is_some_and(|raw| {
+            matches!(crate::phpdoc_grammar::parse_type_prefix(&raw),
+                (Some(node), _, _) if self.type_node_unresolvable(&node, Some(class)))
+        });
+        let class_ty = Type::Object(class.to_string(), Vec::new());
+        let resolved = self.resolve_pseudo(out, class);
+        // An unresolvable type is reported as such, not also as a
+        // mismatch against the class.
+        if !unresolvable && self.registry.is_super_type_of(&class_ty, &resolved) != Trinary::Yes {
+            self.report(
+                label.to_string(),
+                format!(
+                    "Self-out type {resolved} of method {class}::{} is not subtype of {class}.",
+                    f.name
+                ),
+                f.name_span,
+                2,
+                "selfOut.type",
+            );
+        }
+        if is_static {
+            self.report(
+                label.to_string(),
+                format!(
+                    "PHPDoc tag @phpstan-self-out is not supported above static method {class}::{}().",
+                    f.name
+                ),
+                f.name_span,
+                2,
+                "selfOut.static",
+            );
+        }
+        if unresolvable {
+            self.report(
+                label.to_string(),
+                format!(
+                    "PHPDoc tag @phpstan-self-out for method {class}::{}() contains unresolvable type.",
+                    f.name
+                ),
+                f.name_span,
+                2,
+                "selfOut.unresolvableType",
+            );
+        }
+        self.check_generic_bounds(&resolved, label, f.name_span);
+    }
+
     /// The `@template` names visible in `f`: its own and its class's.
     fn declared_template_names(&self, f: &FunctionDecl, class_name: Option<&str>) -> Vec<String> {
         let mut names: Vec<String> = f

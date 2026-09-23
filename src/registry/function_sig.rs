@@ -91,6 +91,9 @@ pub struct FunctionSig {
     pub return_has_own_doc: bool,
     // `ParamSig::doc_ty`'s return-position equivalent.
     pub return_doc_ty: Option<Type>,
+    // `@phpstan-self-out Type`: the receiver's type after a call to this
+    // method. `None` without the tag.
+    pub self_out: Option<Type>,
     // `ParamSig::case_refs`'s return-position equivalent.
     pub return_case_refs: Vec<(Arc<str>, Arc<str>)>,
     // `ParamSig::explicit_mixed_hint`'s return-position equivalent.
@@ -605,6 +608,10 @@ impl FunctionSig {
                 .as_ref()
                 .and_then(|d| d.return_type.as_ref())
                 .map(resolve_doc_type),
+            self_out: doc
+                .as_ref()
+                .and_then(|d| d.self_out.as_ref())
+                .map(resolve_doc_type),
             return_case_refs,
             return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
                 f.return_type.as_deref(),
@@ -721,6 +728,7 @@ impl FunctionSig {
             // `no_discard`/`is_internal` below.
             return_has_own_doc: self.return_has_own_doc || other.return_has_own_doc,
             return_doc_ty: other.return_doc_ty.or(self.return_doc_ty),
+            self_out: other.self_out.or(self.self_out),
             return_case_refs: self
                 .return_case_refs
                 .into_iter()

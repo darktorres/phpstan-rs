@@ -60,6 +60,7 @@ fn format_signature_includes_params_variadic_marker_and_return_type() {
         return_type_native: types::Type::Bool,
         return_has_own_doc: true,
         return_doc_ty: None,
+        self_out: None,
         return_case_refs: Vec::new(),
         return_explicit_mixed_hint: false,
         no_discard: false,

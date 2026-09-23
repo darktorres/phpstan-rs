@@ -160,6 +160,10 @@ pub struct DocBlock {
     // `__call`/`__get`). Resolved at `Registry::resolve_deferred_mixins`
     // time (the target may not be indexed yet at `from_decl` time).
     pub mixins: Vec<String>,
+    // `@phpstan-self-out Type`/`@phpstan-this-out Type` (and the
+    // `@psalm-` spellings): the type the receiver has after a call to
+    // this method.
+    pub self_out: Option<String>,
     // `@param-immediately-invoked-callable $name`/
     // `@param-later-invoked-callable $name` - merged into one map keyed
     // by parameter name, `true` for immediately-invoked. Declaration-time
@@ -349,6 +353,11 @@ pub fn parse(raw: &str) -> DocBlock {
             continue;
         }
         let (tag, rest) = split_tag(tag_body);
+        // Only the prefixed spelling means anything to PHPStan (a bare
+        // `@assert (1, 2) == 3` is PHPUnit's own annotation).
+        if PREFIXED_ONLY_TAGS_PHPSTAN_PARSES.contains(&tag) {
+            continue;
+        }
         apply_tag_recording_errors(&mut block, tag, tag, rest);
     }
     // The assert family is the one exception to "later spelling
@@ -513,6 +522,7 @@ impl DocBlock {
             sealed,
             method_tags,
             mixins,
+            self_out,
             param_immediately_invoked_callable,
             param_closure_this,
             parse_errors,
@@ -570,6 +580,9 @@ impl DocBlock {
         self.sealed.extend(sealed);
         self.method_tags.extend(method_tags);
         self.mixins.extend(mixins);
+        if self_out.is_some() {
+            self.self_out = self_out;
+        }
         self.param_immediately_invoked_callable
             .extend(param_immediately_invoked_callable);
         self.param_closure_this.extend(param_closure_this);
@@ -643,9 +656,7 @@ const PREFIXED_ONLY_TAGS_PHPSTAN_PARSES: &[&str] = &[
 /// prefixes is Psalm/Phan-only vocabulary with no PHPStan meaning
 /// (`@psalm-suppress`, `@psalm-internal` - a namespace argument, not
 /// `@internal`'s no-argument form - `@psalm-mutation-free`, ...) and is
-/// skipped. `@psalm-this-out`/
-/// `-self-out` aren't mapped because `apply_tag` has no self-out arm to
-/// map them onto yet.
+/// skipped.
 fn foreign_tag_canonical_name(prefix: &str, tag: &str) -> Option<&'static str> {
     let canonical = match (prefix, tag) {
         (_, "var") => "var",
@@ -674,6 +685,7 @@ fn foreign_tag_canonical_name(prefix: &str, tag: &str) -> Option<&'static str> {
         ("psalm-", "allow-private-mutation") => "allow-private-mutation",
         ("psalm-", "readonly-allow-private-mutation") => "readonly-allow-private-mutation",
         ("psalm-", "consistent-constructor") => "consistent-constructor",
+        ("psalm-", "self-out" | "this-out") => "self-out",
         _ => return None,
     };
     Some(canonical)
@@ -1059,6 +1071,13 @@ fn apply_tag(block: &mut DocBlock, tag: &str, rest: &str) {
                             })
                             .collect(),
                     });
+                }
+            }
+            "self-out" | "this-out" => {
+                let (ty, _remainder, errors) = phpdoc_grammar::parse_type_prefix(rest);
+                block.parse_errors.extend(errors);
+                if let Some(ty) = ty {
+                    block.self_out = Some(ty.to_source_string());
                 }
             }
             "mixin" => {

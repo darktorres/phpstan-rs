@@ -1274,6 +1274,7 @@ impl ClassInfo {
                 // candidate.
                 return_has_own_doc: true,
                 return_doc_ty: None,
+                self_out: None,
                 // No real docblock/native text behind any of these
                 // synthesized enum methods - nothing to check the case of.
                 return_case_refs: Vec::new(),
@@ -1327,6 +1328,7 @@ impl ClassInfo {
                     return_type_native: self_ty.clone(),
                     return_has_own_doc: true,
                     return_doc_ty: None,
+                    self_out: None,
                     return_case_refs: Vec::new(),
                     return_explicit_mixed_hint: false,
                     no_discard: false,
@@ -1358,6 +1360,7 @@ impl ClassInfo {
                     return_type_native: Type::Union(vec![self_ty.clone(), Type::Null]),
                     return_has_own_doc: true,
                     return_doc_ty: None,
+                    self_out: None,
                     return_case_refs: Vec::new(),
                     return_explicit_mixed_hint: false,
                     no_discard: false,
