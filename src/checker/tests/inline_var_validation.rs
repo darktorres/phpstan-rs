@@ -1,12 +1,24 @@
-//! Tests for the error-reporting half of an inline `@var` annotation on a
-//! plain assignment statement (`checker::stmt::check_inline_var_annotation_type`) -
-//! real PHPStan's `VarTagChangedExpressionTypeRule`, scoped to the single
-//! assignment-statement shape.
+//! Statement-level `@var` tags checked against the values they describe
+//! (`checker::var_tag_types`): `varTag.nativeType`, `varTag.type`,
+//! `varTag.trait` and `class.notFound`.
 use super::helpers::*;
+
+fn var_tag_messages(src: &str) -> Vec<(String, String)> {
+    diagnostics_for(src)
+        .into_iter()
+        .filter(|x| {
+            matches!(
+                x.identifier.as_str(),
+                "varTag.nativeType" | "varTag.type" | "varTag.trait" | "class.notFound"
+            )
+        })
+        .map(|x| (x.identifier, x.message))
+        .collect()
+}
 
 #[test]
 fn a_var_tag_contradicted_by_an_obviously_wrong_literal_is_flagged() {
-    let d = diagnostics_for(
+    let m = var_tag_messages(
         r#"<?php
             function f(): void {
                 /** @var int $x */
@@ -14,9 +26,12 @@ fn a_var_tag_contradicted_by_an_obviously_wrong_literal_is_flagged() {
             }
         "#,
     );
-    assert!(
-        d.iter().any(|x| x.identifier == "varTag.type"),
-        "got: {d:?}"
+    assert_eq!(
+        m,
+        [(
+            "varTag.nativeType".to_string(),
+            "PHPDoc tag @var with type int is not subtype of native type 'hello'.".to_string()
+        )]
     );
 }
 
@@ -31,7 +46,7 @@ fn a_bare_var_tag_with_no_name_is_also_checked() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "varTag.type"),
+        d.iter().any(|x| x.identifier == "varTag.nativeType"),
         "got: {d:?}"
     );
 }
@@ -173,22 +188,202 @@ fn a_bare_var_tag_on_a_foreach_header_resolves_to_the_loop_variable() {
 }
 
 #[test]
-fn a_var_tag_on_a_non_assignment_statement_is_never_checked_for_type_mismatch() {
-    // Scoped deliberately to the assign shape only - a `@var` on some
-    // other statement shape (foreach, static, ...) isn't validated here,
-    // a disclosed scope trim.
+fn a_foreach_value_tag_is_checked_against_the_element_type() {
+    let m = var_tag_messages(
+        r#"<?php
+            /** @param list<int> $xs */
+            function f(array $xs): void {
+                /** @var string $x */
+                foreach ($xs as $x) {}
+                /** @var int $y */
+                foreach ([1, 2] as $y) {}
+            }
+        "#,
+    );
+    assert_eq!(
+        m,
+        [(
+            "varTag.type".to_string(),
+            "PHPDoc tag @var with type string is incompatible with type int.".to_string()
+        )]
+    );
+}
+
+#[test]
+fn a_var_tag_is_checked_against_native_types_of_calls_parameters_and_properties() {
+    let m = var_tag_messages(
+        r#"<?php
+            class Foo {}
+            class Bar {}
+            class C {
+                public Foo $foo;
+                public function make(): Foo { return new Foo(); }
+                public function f(int $n): void {
+                    /** @var string $a */
+                    $a = $n;
+                    /** @var Bar $b */
+                    $b = $this->make();
+                    /** @var Bar $c */
+                    $c = $this->foo;
+                    /** @var list<int> $d */
+                    $d = g();
+                    /** @var string $e */
+                    $e = g();
+                }
+            }
+            function g(): array { return []; }
+        "#,
+    );
+    assert_eq!(
+        m,
+        [
+            (
+                "varTag.nativeType".to_string(),
+                "PHPDoc tag @var with type string is not subtype of native type int.".to_string()
+            ),
+            (
+                "varTag.nativeType".to_string(),
+                "PHPDoc tag @var with type Bar is not subtype of native type Foo.".to_string()
+            ),
+            (
+                "varTag.nativeType".to_string(),
+                "PHPDoc tag @var with type Bar is not subtype of native type Foo.".to_string()
+            ),
+            (
+                "varTag.nativeType".to_string(),
+                "PHPDoc tag @var with type string is not subtype of native type array.".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_var_tag_retyping_an_existing_variable_is_checked_against_its_current_type() {
+    let m = var_tag_messages(
+        r#"<?php
+            /** @return int */
+            function g() { return 1; }
+            function f(int $n): void {
+                $m = g();
+                $k = g();
+                /** @var string $n */
+                echo $n;
+                /** @var string $m */
+                echo $m;
+                /** @var int<0, max> $k */
+                echo $k;
+            }
+        "#,
+    );
+    assert_eq!(
+        m,
+        [
+            (
+                "varTag.nativeType".to_string(),
+                "PHPDoc tag @var with type string is not subtype of native type int.".to_string()
+            ),
+            (
+                "varTag.type".to_string(),
+                "PHPDoc tag @var with type string is incompatible with type int.".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_by_reference_argument_forgets_the_variables_native_type() {
+    let m = var_tag_messages(
+        r#"<?php
+            function fill(&$out): void { $out = 'x'; }
+            function f(int $n): void {
+                fill($n);
+                /** @var string $s */
+                $s = $n;
+            }
+        "#,
+    );
+    assert!(m.is_empty(), "unexpected: {m:?}");
+}
+
+#[test]
+fn a_var_tag_naming_a_trait_or_unknown_class_is_reported_on_any_statement() {
+    let m = var_tag_messages(
+        r#"<?php
+            trait T {}
+            function f($x): void {
+                /** @var T $x */
+                echo $x;
+                /** @var Missing $x */
+                return;
+            }
+        "#,
+    );
+    assert_eq!(
+        m,
+        [
+            (
+                "varTag.trait".to_string(),
+                "PHPDoc tag @var for variable $x has invalid type T.".to_string()
+            ),
+            (
+                "class.notFound".to_string(),
+                "PHPDoc tag @var for variable $x contains unknown class Missing.".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn every_named_var_tag_on_a_statement_is_applied() {
     let d = diagnostics_for(
         r#"<?php
-            function f(): void {
-                /** @var int $x */
-                foreach ([1, 2] as $x) {
-                    echo $x;
+            use function PHPStan\Testing\assertType;
+            function f($a, $b): void {
+                /**
+                 * @var int $a
+                 * @var string $b
+                 */
+                echo 1;
+                assertType('int', $a);
+                assertType('string', $b);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn psalm_and_phan_var_tags_are_applied_and_a_foreach_key_tag_types_the_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, int> $xs */
+            function f(string $a, string $b, array $xs): void {
+                /** @psalm-var non-empty-string $a */
+                $a = str_replace('_', '-', $a);
+                assertType('non-empty-string', $a);
+                /** @phan-var non-empty-string $b */
+                $b = str_replace('_', '-', $b);
+                assertType('non-empty-string', $b);
+                /** @var non-empty-string $k */
+                foreach ($xs as $k => $v) {
+                    assertType('non-empty-string', $k);
                 }
             }
         "#,
     );
-    assert!(
-        !d.iter().any(|x| x.identifier == "varTag.type"),
-        "unexpected diagnostics: {d:?}"
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_tag_overlapping_the_inferred_type_is_never_incompatible() {
+    let m = var_tag_messages(
+        r#"<?php
+            function f(string $c): void {
+                /** @var non-empty-string $c */
+                $c = strtolower($c);
+            }
+        "#,
     );
+    assert!(m.is_empty(), "unexpected: {m:?}");
 }

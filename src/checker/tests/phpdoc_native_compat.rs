@@ -279,6 +279,10 @@ fn resolvable_types_are_never_reported_unresolvable() {
                  * @return array<int, string>
                  */
                 public function f($a, $b, $c, $d, $e, $f, $g, $h, $i, $j, $k, $l, $m, $n) { return []; }
+                /** @psalm-return never-return */
+                public function g() { throw new \Exception(); }
+                /** @return no-return */
+                public function h() { throw new \Exception(); }
             }
         "#,
     );

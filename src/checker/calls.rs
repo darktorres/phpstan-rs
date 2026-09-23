@@ -119,6 +119,7 @@ impl<'a> Checker<'a> {
                 if !locals.contains_key(name) {
                     locals.declare(name.to_string(), Type::Mixed(false), arg.value.span);
                 }
+                locals.clear_native(name);
             }
             return;
         };
@@ -147,6 +148,9 @@ impl<'a> Checker<'a> {
                 locals.declare(name.to_string(), Type::Mixed(false), arg_expr.span);
                 continue;
             }
+            // The callee may write anything its own native type allows.
+            locals.clear_native(name);
+            locals.set_native(name, param.ty_native.clone());
             // Real PHPStan models the sort() family's own dynamic
             // type-specifying extensions rather than the generic
             // declared-param-type widening below: sort/rsort/usort/

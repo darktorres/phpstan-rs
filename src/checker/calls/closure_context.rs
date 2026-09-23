@@ -115,6 +115,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&case_refs, label, p.span);
                     arrow_locals.declare(p.name.to_string(), ty, p.name_span);
+                    arrow_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 let body_ty = self.check_expr(body, &mut arrow_locals, label);
                 if return_type.is_some() {
@@ -263,6 +264,7 @@ impl<'a> Checker<'a> {
                     );
                     self.check_type_class_name_case(&case_refs, &closure_label, p.span);
                     closure_locals.declare(p.name.to_string(), ty, p.name_span);
+                    closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -372,6 +374,8 @@ impl<'a> Checker<'a> {
                         }
                     } else {
                         locals.insert(u.name.to_string(), mutated);
+                        // The closure may write anything to it.
+                        locals.clear_native(&u.name);
                     }
                 }
                 true

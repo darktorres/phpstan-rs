@@ -1017,3 +1017,21 @@ fn preg_match_branch_reset_with_only_one_capturing_branch_types_correctly() {
         "expected group 2 ([a-z]+, renumbered correctly to 2) as non-empty-string, got: {d:?}"
     );
 }
+
+#[test]
+fn a_class_constant_pattern_types_the_matches_like_a_literal() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class Op {
+                private const PATTERN = '/^(?<op>[.])?(?<rest>.*)$/';
+                public static function f(string $e): void {
+                    if (preg_match(self::PATTERN, $e, $m)) {
+                        assertType("array{0: string, 1: non-empty-string|'', op: non-empty-string|'', 2: string, rest: string}", $m);
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

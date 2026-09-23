@@ -5250,3 +5250,38 @@ fn a_plain_list_typed_return_satisfies_a_conditional_return_type_with_no_discrim
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_negated_is_object_removes_every_class_member() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class TV {}
+            enum E { case A; }
+            /** @param TV|E|list<int>|string $x */
+            function f($x): void {
+                if (!is_object($x)) {
+                    assertType('list<int>|string', $x);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_later_match_true_arm_sees_every_condition_of_a_multi_condition_arm_false() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param int|string|null $x */
+            function f($x): int {
+                return match (true) {
+                    is_int($x), is_null($x) => 1,
+                    default => (function () use ($x) { assertType('string', $x); return 2; })(),
+                };
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

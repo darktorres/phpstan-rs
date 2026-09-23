@@ -372,6 +372,8 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // own `ObjectShape` arm handles that hierarchy/property-aware
         // direction; this function has no class context to consult.
         (Type::ObjectShape(_), Type::Object(name, _)) if name == "object" => true,
+        // Every class instance and enum case is an `object`.
+        (Type::Object(..) | Type::EnumCase(..), Type::Object(name, _)) if name == "object" => true,
 
         (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
 

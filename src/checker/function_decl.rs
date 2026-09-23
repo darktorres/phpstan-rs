@@ -546,6 +546,16 @@ impl<'a> Checker<'a> {
                     };
                     self.probe_hit_at(ast_param.name_span, &ty);
                     locals.declare(param.name.to_string(), ty, ast_param.name_span);
+                    let native = match class_name {
+                        Some(c) => self.resolve_pseudo(&param.ty_native, c),
+                        None => param.ty_native.clone(),
+                    };
+                    let native = if param.variadic {
+                        Type::Array(Box::new(Type::unknown_array_key()), Box::new(native))
+                    } else {
+                        native
+                    };
+                    locals.set_native(&param.name, native);
                 }
             }
             // This is exactly what every anonymous class method hits,
@@ -921,6 +931,16 @@ impl<'a> Checker<'a> {
         self.current_class = class_name.map(|s| s.to_string());
         let previous_method = self.current_method.take();
         self.current_method = Some(f.name.to_string());
+        let own_templates = match f.doc_comment.as_deref() {
+            Some(doc) if doc.contains("template") => crate::registry::build_template_params(
+                &crate::docblock::parse(doc),
+                &f.name,
+                &self.name_ctx,
+            ),
+            _ => std::collections::HashMap::new(),
+        };
+        let previous_method_templates =
+            std::mem::replace(&mut self.current_method_templates, own_templates);
         // `checker::restricted_symbol_usage`'s own attribute-context
         // matching - see `current_class_attrs`'s own doc comment.
         let previous_class_attrs = std::mem::take(&mut self.current_class_attrs);
@@ -1260,6 +1280,7 @@ impl<'a> Checker<'a> {
 
         self.current_class = previous_class;
         self.current_method = previous_method;
+        self.current_method_templates = previous_method_templates;
         self.current_class_attrs = previous_class_attrs;
         self.current_method_attrs = previous_method_attrs;
         self.current_scope_deprecated = previous_scope_deprecated;

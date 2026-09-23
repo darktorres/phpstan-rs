@@ -1113,7 +1113,23 @@ superglobals and a script's top-level `$argv`/`$argc` counted as
 defined, and `varTag.misplaced` above a class, interface, enum,
 function or method. Every doc comment directly above a statement is
 read, not only the last (`doc_comments_all`), and a bare `$` in a
-PHPDoc (`$$x`) is no variable name.
+PHPDoc (`$$x`) is no variable name. **`VarTagTypeRuleHelper`** and
+**`VarTagChangedExpressionTypeRule`** check every value a statement's
+`@var` tags describe - an assignment (and each destructured item), a
+`foreach` subject/key/value, a `static` default, a `return`/`throw`
+expression, and an existing variable a tag re-types: `varTag.nativeType`
+against the value's native type (literals only have to overlap, an empty
+array widens to `array`), then `varTag.type` when the tag shares no value
+with the inferred type (or, for a PHPStan `Type`, isn't a subtype, plus
+`phpstanApi.varTagAssumption`). Native types come from
+`Checker::native_expr_type` and a per-variable native map on `Locals`
+(parameters' hints, assignments; cleared by any rebind, by-ref argument
+or by-ref closure `use`; unioned at merges) - `mixed` whenever unknown,
+so it can only miss. `varTag.trait` and `class.notFound`/`class.prefixed`
+cover the tags of every statement. Every named tag on a statement is
+applied (not only the last), a `foreach` key tag types the key, and
+`@psalm-`/`@phan-` typed tags parse with the same grammar as `@phpstan-`
+ones.
 `missingType.iterableValue` reads "iterable type array" exactly as real
 PHPStan's descriptions do. A second declaration of a top-level function
 (another file, a polyfill branch, a merged overload) is checked against
@@ -3682,12 +3698,12 @@ against this list, and added the real gaps the audit had missed.
   built, with their `*.unresolvableType` siblings (see Done). Left: the
   property-hook variant (`IncompatiblePropertyHookPhpDocTypeRule`), and
   `GenericCallableRuleHelper`'s template checks on callable shapes.
-- `InvalidPhpDocVarTagTypeRule`/`VarTagChangedExpressionTypeRule`
-  remainder — the name-matching and misplaced-tag families and
-  `varTag.unresolvableType` are built (see Done). Left: `varTag.trait`,
-  and of `VarTagTypeRuleHelper`'s two compatibility checks
-  `varTag.nativeType` (the `@var` type against the expression's
-  *native* type, not its PHPDoc-refined one); `varTag.type` is built.
+
+- Nested writes through dynamic keys — `$h[$bus][$message] =
+  array_merge(...$byPriority)` inside `foreach ($h as $bus => ...)`
+  leaves `$h`'s element type at its pre-loop shape instead of the
+  written one (seen in symfony/messenger's `MessengerPass`, where it
+  surfaces as a spurious `Reference::__construct()` `argument.type`).
 
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 

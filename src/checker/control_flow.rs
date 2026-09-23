@@ -468,6 +468,12 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         })
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
+    // A native type survives only when both branches know one.
+    for (key, then_native) in then_locals.natives() {
+        if let Some(else_native) = else_locals.native(key) {
+            merged.set_native(key, union_types(then_native.clone(), else_native.clone()));
+        }
+    }
     // Same "both branches inherited the identical, unchanged alias"
     // dedup as `condition_aliases` above - a `QueryBuilder` alias has no
     // separate target to intersect against, just the one stored `Rc<Expr>`.

@@ -494,7 +494,7 @@ impl<'a> Checker<'a> {
     /// what real PHPStan's method-return-type-only resolution does,
     /// since the interface's declared generics are still a likely-correct
     /// answer in that case.
-    fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
+    pub(crate) fn iterable_element_type(&self, ty: &Type) -> Option<(Type, Type)> {
         match ty {
             Type::Object(name, args) => {
                 if self.registry.is_subclass_of(name, "IteratorAggregate") {
@@ -576,7 +576,7 @@ impl<'a> Checker<'a> {
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,
-        inline_var: Option<&(String, Type)>,
+        inline_var: &[(String, Type)],
     ) {
         // A bare `$variable` subject that the body mutates in place via
         // a nested write keyed by its own loop variable (`foreach
@@ -671,14 +671,15 @@ impl<'a> Checker<'a> {
         // every convergence pass below binds the loop variable to it,
         // not just whatever `check_stmt`'s own generic preamble happened
         // to insert before this function's own rebinding overwrote it.
-        let element_ty = match (&value.kind, inline_var) {
-            (ExprKind::Variable(name), Some((annotated_name, ty)))
-                if **name == **annotated_name =>
-            {
-                ty.clone()
-            }
-            _ => element_ty,
+        let annotated = |target: &Expr| match &target.kind {
+            ExprKind::Variable(name) => inline_var
+                .iter()
+                .find(|(n, _)| n.as_str() == name.as_ref())
+                .map(|(_, ty)| ty.clone()),
+            _ => None,
         };
+        let element_ty = annotated(value).unwrap_or(element_ty);
+        let key_ty = key.as_ref().and_then(annotated).unwrap_or(key_ty);
         // See `converge_loop_body`'s own doc comment: `Foreach` gets
         // the same "may run zero times" merge with the pre-loop state
         // `While`/`For` already had, for every variable *except*

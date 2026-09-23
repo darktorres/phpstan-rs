@@ -214,6 +214,12 @@ type DiscriminantArrayFactsMap = imbl::GenericHashMap<
 #[derive(Clone, Default)]
 pub(crate) struct Locals {
     types: LocalsMap,
+    // Each variable's native type - what PHP itself guarantees, ignoring
+    // PHPDoc - where known: a parameter's native hint, or the native type
+    // of the expression last assigned to it. Absent means unknown
+    // (`mixed`). Cleared by every rebind (`declare`); narrowing leaves it,
+    // which only keeps it wider than PHPStan's own native scope.
+    native: LocalsMap,
     provenance: ProvenanceMap,
     pub(crate) guarded_functions: GuardedFunctionSet,
     // Global constant names a `defined('NAME')` test proved defined.
@@ -290,6 +296,7 @@ impl Locals {
     /// `key`'s provenance with a fresh singleton `{span}`, since a rebind
     /// makes anything tracked before it a dead candidate.
     pub(crate) fn declare(&mut self, key: String, ty: Type, span: Span) -> Option<Type> {
+        self.native.remove(&key);
         if self.track {
             let mut set = ProvenanceSet::default();
             set.insert(span);
@@ -375,11 +382,32 @@ impl Locals {
 
     pub(crate) fn remove(&mut self, key: &str) -> Option<Type> {
         self.provenance.remove(key);
+        self.native.remove(key);
         self.types.remove(key)
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = (&String, &Type)> {
         self.types.iter()
+    }
+
+    /// Records `key`'s native type, right after the `declare` binding it.
+    /// `mixed` records nothing.
+    pub(crate) fn set_native(&mut self, key: &str, ty: Type) {
+        if !matches!(ty, Type::Mixed(_)) {
+            self.native.insert(key.to_string(), ty);
+        }
+    }
+
+    pub(crate) fn clear_native(&mut self, key: &str) {
+        self.native.remove(key);
+    }
+
+    pub(crate) fn native(&self, key: &str) -> Option<&Type> {
+        self.native.get(key)
+    }
+
+    pub(crate) fn natives(&self) -> impl Iterator<Item = (&String, &Type)> {
+        self.native.iter()
     }
 
     /// A fresh, empty scope that still carries `self`'s own `track` flag
@@ -389,6 +417,7 @@ impl Locals {
     pub(crate) fn fresh_scope(&self) -> Locals {
         Locals {
             types: LocalsMap::default(),
+            native: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),
             guarded_constants: GuardedFunctionSet::default(),
@@ -648,6 +677,11 @@ pub struct Checker<'a> {
     // happening inside its own declaring class's constructor (any write
     // outside that exact spot is flagged).
     pub(crate) current_method: Option<String>,
+    // The current function's own `@template`s, read from its doc - the
+    // only source for one the registry doesn't index (an anonymous
+    // class's method).
+    pub(crate) current_method_templates:
+        std::collections::HashMap<String, crate::types::TemplateParam>,
     // `checker::restricted_symbol_usage`'s own `allow_in_class_with_
     // attributes`/`allow_except_in_class_with_attributes` matching - the
     // enclosing class's own directly-declared attribute names (`Registry::
@@ -1229,6 +1263,7 @@ mod type_union;
 mod uninitialized;
 mod uninitialized_dataflow;
 mod unused;
+mod var_tag_types;
 mod visibility;
 mod whitespace;
 pub(crate) mod whole_program;
@@ -1285,6 +1320,7 @@ impl<'a> Checker<'a> {
             name_ctx: NameContext::default(),
             current_class: None,
             current_method: None,
+            current_method_templates: std::collections::HashMap::new(),
             current_class_attrs: Vec::new(),
             current_method_attrs: Vec::new(),
             current_trait: None,

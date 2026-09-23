@@ -309,7 +309,12 @@ impl TagParser {
     }
 
     fn parse_tag_value(&mut self, name: &str) -> PhpDocTagValue {
-        let bare = name.strip_prefix("phpstan-").unwrap_or(name);
+        // phpdoc-parser parses the `@psalm-`/`@phan-` spellings with the
+        // same grammar.
+        let bare = ["phpstan-", "psalm-", "phan-"]
+            .iter()
+            .find_map(|p| name.strip_prefix(p))
+            .unwrap_or(name);
         let lower = bare.to_ascii_lowercase();
         if TYPED_VAR_TAGS.contains(&lower.as_str()) {
             return self.parse_typed_var(&lower);

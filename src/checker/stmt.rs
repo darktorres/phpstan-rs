@@ -4,7 +4,6 @@ use crate::checker::{
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
     purge_stale_narrowing_for, union_types, unwrap_grouping,
 };
-use crate::docblock;
 use crate::types::Type;
 
 /// See `DiscriminantArrayFactsMap`'s own doc comment (`checker.rs`) - `e`
@@ -124,9 +123,10 @@ impl<'a> Checker<'a> {
     /// assigned ones, a `foreach`'s key/value/subject, a `static`/`global`
     /// list) or, elsewhere, a variable already defined; an unnamed tag
     /// needs exactly one candidate. `locals` is the scope before `stmt`.
-    fn check_statement_var_tag_names(&mut self, stmt: &Stmt, locals: &Locals, label: &str) {
+    /// Whether every tag's variable name checked out.
+    fn check_statement_var_tag_names(&mut self, stmt: &Stmt, locals: &Locals, label: &str) -> bool {
         let Some(doc) = stmt.doc_comment.as_deref() else {
-            return;
+            return true;
         };
         if !doc.contains("var")
             || matches!(
@@ -137,14 +137,14 @@ impl<'a> Checker<'a> {
                     | StmtKind::GlobalConst(_)
             )
         {
-            return;
+            return true;
         }
         let tags: Vec<Option<String>> = super::phpdoc_unresolvable::var_tag_nodes(doc)
             .into_iter()
             .map(|(name, _)| name)
             .collect();
         if tags.is_empty() {
-            return;
+            return true;
         }
         // Reported on the statement itself, unlike the comment-line
         // `varTag.unresolvableType`.
@@ -324,9 +324,11 @@ impl<'a> Checker<'a> {
                 }
             }
         }
+        let ok = found.is_empty();
         for (message, identifier) in found {
             self.report(label.to_string(), message, span, 2, identifier);
         }
+        ok
     }
 
     /// `InvalidPhpDocVarTagTypeRule`'s unresolvable half: every `@var` on
@@ -392,11 +394,15 @@ impl<'a> Checker<'a> {
     ) {
         self.check_statement_doc_tag_values(stmt, label);
         self.check_statement_var_tags_resolvable(stmt, label);
-        self.check_statement_var_tag_names(stmt, locals, label);
-        let inline_var = self.inline_var_annotation(stmt);
-        if let Some((name, ty)) = &inline_var {
+        let names_ok = self.check_statement_var_tag_names(stmt, locals, label);
+        let var_tags = self.statement_var_tags_of(stmt);
+        if !var_tags.is_empty() {
+            self.check_statement_var_tag_classes(stmt, &var_tags, label);
+            self.check_statement_var_tag_types(stmt, &var_tags, names_ok, locals, label);
+        }
+        let inline_var = inline_var_annotations(stmt, var_tags);
+        for (name, ty) in &inline_var {
             purge_stale_narrowing_for(locals, name);
-            self.check_inline_var_annotation_type(stmt, name, ty, locals, label);
             locals.insert(name.clone(), ty.clone());
         }
         match &stmt.kind {
@@ -407,9 +413,7 @@ impl<'a> Checker<'a> {
                     && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
                     && let ExprKind::Variable(name) = &lhs.kind
                     && ty != Type::Mixed(false)
-                    && !inline_var
-                        .as_ref()
-                        .is_some_and(|(n, _)| n.as_str() == name.as_ref())
+                    && !inline_var.iter().any(|(n, _)| n.as_str() == name.as_ref())
                 {
                     self.inlay_local_type_hints.push((lhs.span, ty.clone()));
                 }
@@ -740,7 +744,7 @@ impl<'a> Checker<'a> {
                 locals,
                 declared_return,
                 label,
-                inline_var.as_ref(),
+                &inline_var,
             ),
             StmtKind::Switch { subject, cases } => {
                 self.check_switch(subject, cases, stmt.span, locals, declared_return, label)
@@ -996,11 +1000,12 @@ impl<'a> Checker<'a> {
         // puts the tag on a statement *inside* the loop body, which the
         // before-dispatch application above already handles correctly
         // and completely on its own.
-        if let Some((name, ty)) = inline_var
-            && statement_defined_variable_names(&stmt.kind).contains(&name)
-        {
-            purge_stale_narrowing_for(locals, &name);
-            locals.insert(name, ty);
+        let defined = statement_defined_variable_names(&stmt.kind);
+        for (name, ty) in inline_var {
+            if defined.contains(&name) {
+                purge_stale_narrowing_for(locals, &name);
+                locals.insert(name, ty);
+            }
         }
     }
 
@@ -1257,140 +1262,49 @@ impl<'a> Checker<'a> {
         };
     }
 
-    /// Recognizes an inline `/** @var Type $name */` (or bare `/** @var
-    /// Type */`) doc comment sitting on `stmt` itself, and resolves it to
-    /// the `(name, type)` assertion it makes - `None` for a statement with
-    /// no doc comment, one with no `@var` tag, or a bare tag whose target
-    /// can't be inferred (see `statement_defined_variable_names`'s own
-    /// "don't guess" scope).
-    fn inline_var_annotation(&self, stmt: &Stmt) -> Option<(String, Type)> {
-        let doc = stmt.doc_comment.as_deref()?;
-        // A cheap substring pre-filter - `check_stmt` is already
-        // `#[hotpath::measure]`-instrumented, confirming this is a real
-        // hot path worth avoiding a full docblock parse on every
-        // statement's own `@param`/`@return`-only declaration comment.
-        // Matched without the leading `@` so `@phpstan-var`/`@psalm-var`/
-        // `@phan-var` pass too, not just a plain `@var`.
-        if !doc.contains("var") {
-            return None;
-        }
-        let block = docblock::parse(doc);
-        let ty_str = block.var_type?;
-        // A *named* tag (`@var Type $name`) always wins when present. The
-        // bare form (`@var Type`, no name) applies to whatever single
-        // variable the statement it precedes assigns, inferred from that
-        // statement's own left-hand side, not guessed at from thin air.
-        let name = block.var_name.or_else(|| {
-            match statement_defined_variable_names(&stmt.kind).as_slice() {
-                [single] => Some(single.clone()),
-                _ => None,
-            }
-        })?;
-        let ty = self.resolve_type_hint(Some(&ty_str));
-        // `resolve_type_hint` alone has no idea this text came from a
-        // docblock rather than a native hint, so it can't tell "Options"
-        // apart from a genuine, unresolvable class reference - a
-        // `@phpstan-type` alias declared on the current class needs the
-        // same expansion here that `ClassInfo::from_decl` already gives
-        // every member's own `@param`/`@return`/`@var`. Silently a no-op
-        // outside any class, or one with no `@phpstan-type` tags at all.
-        let ty = match &self.current_class {
-            Some(class) => match self.registry.classes.get(class.as_str()) {
-                Some(info) if !info.type_aliases.is_empty() => {
-                    crate::registry::substitute_type_aliases(ty, &info.type_aliases)
-                }
-                _ => ty,
-            },
-            None => ty,
+    /// A statement's resolved `@var` tags; none on a declaration, whose
+    /// own rules read its tags.
+    fn statement_var_tags_of(&self, stmt: &Stmt) -> Vec<(Option<String>, Type)> {
+        let Some(doc) = stmt.doc_comment.as_deref() else {
+            return Vec::new();
         };
-        Some((name, ty))
-    }
-
-    /// `@var Type $name` / bare `@var Type`'s own error-reporting half -
-    /// real PHPStan's `VarTagTypeRuleHelper`/`VarTagChangedExpressionTypeRule`,
-    /// scoped down to the single highest-value, most common real shape: a
-    /// plain assignment statement (`/** @var Type */ $x = expr;`) whose
-    /// own RHS's naturally-inferred type the declared tag can't possibly
-    /// be describing (not even a supertype of it) - a real, catchable
-    /// mistake (a typo'd type, a stale tag after a refactor). Real
-    /// PHPStan's own version covers substantially more (list/array
-    /// destructuring targets, a native-type-vs-docblock-type split with
-    /// its own separate identifier and config toggle, a
-    /// `containsPhpStanType`-specific "this exact type, don't widen"
-    /// assumption check) - deliberately not replicated, a disclosed scope
-    /// trim matching this project's own simpler type system (no native/
-    /// docblock type split at this granularity) and "favor false
-    /// negatives" precedent throughout. `Type::Mixed(false)` on either side is
-    /// never flagged - it means "no type declared at all" as often as
-    /// real `mixed` in this project's own overloaded convention (see
-    /// this file's own module doc comment), so a mismatch there is
-    /// usually not a real one.
-    fn check_inline_var_annotation_type(
-        &mut self,
-        stmt: &Stmt,
-        name: &str,
-        declared_ty: &Type,
-        locals: &Locals,
-        label: &str,
-    ) {
-        let StmtKind::Expression(e) = &stmt.kind else {
-            return;
-        };
-        let (ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs)) = &e.kind else {
-            return;
-        };
-        let ExprKind::Variable(lhs_name) = &lhs.kind else {
-            return;
-        };
-        if **lhs_name != *name {
-            return;
-        }
-        // `InvalidPhpDocVarTagTypeRule`'s own existence half - real
-        // PHPStan flags a `class.notFound` here independently of the
-        // `varTag.type` compatibility check just below, which this
-        // project's own inline-`@var` handling never did. Scoped to the
-        // identical narrow case `varTag.type` itself already is (a plain
-        // assignment statement), not real PHPStan's own broader `@var`
-        // surface (bare `@var Type` on a non-assignment statement, a
-        // property, ...) - that stays its own separate, larger, already-
-        // disclosed gap.
-        self.check_type_class_names_exist(
-            declared_ty,
-            &format!("PHPDoc tag @var for variable ${name}"),
-            lhs.span,
-            label,
-        );
-        if matches!(declared_ty, Type::Mixed(_)) {
-            return;
-        }
-        let rhs_ty = self.infer_expr(rhs, locals);
-        if matches!(rhs_ty, Type::Mixed(_)) {
-            return;
-        }
-        // `is_assignable(&rhs_ty, declared_ty)` alone would flag the most
-        // common real reason anyone writes an inline `@var` in the first
-        // place - refining a wide, less-precise inferred type (a bare
-        // `array`-returning call) into a narrower, perfectly compatible
-        // one (`list<array<string, mixed>>`) - a list is unconditionally
-        // still an array, not a genuine mismatch. `declared_ty` only
-        // ever needs to be some plausible relative of `rhs_ty` - a
-        // subtype (the refining case above) or a supertype (widening,
-        // rarer but equally legitimate) - so both directions have to
-        // fail before this is a real, catchable mistake.
-        if !self.registry.is_assignable(&rhs_ty, declared_ty)
-            && !self.registry.is_assignable(declared_ty, &rhs_ty)
+        if !doc.contains("var")
+            || matches!(
+                stmt.kind,
+                StmtKind::FunctionDecl(_)
+                    | StmtKind::ClassDecl(_)
+                    | StmtKind::EnumDecl(_)
+                    | StmtKind::GlobalConst(_)
+            )
         {
-            self.report(
-                label.to_string(),
-                format!(
-                    "PHPDoc tag @var with type {declared_ty} is not compatible with the assigned expression's own type {rhs_ty}."
-                ),
-                lhs.span,
-                2,
-                "varTag.type",
-            );
+            return Vec::new();
+        }
+        self.statement_var_tags(doc)
+    }
+}
+
+/// The `(name, type)` assertions a statement's `@var` tags make: each
+/// named tag, and a single unnamed one for the one variable the
+/// statement defines (see `statement_defined_variable_names`).
+fn inline_var_annotations(stmt: &Stmt, tags: Vec<(Option<String>, Type)>) -> Vec<(String, Type)> {
+    let unnamed_target = match statement_defined_variable_names(&stmt.kind).as_slice() {
+        [single] => Some(single.clone()),
+        _ => None,
+    };
+    let unnamed = tags.iter().filter(|(n, _)| n.is_none()).count();
+    let mut out: Vec<(String, Type)> = Vec::new();
+    for (name, ty) in tags {
+        match name {
+            Some(name) => out.push((name, ty)),
+            None if unnamed == 1 => {
+                if let Some(target) = &unnamed_target {
+                    out.push((target.clone(), ty));
+                }
+            }
+            None => {}
         }
     }
+    out
 }
 
 /// Every bare-variable name `kind` itself unconditionally (re)binds via a
@@ -1500,7 +1414,7 @@ fn static_variable_type(initializer: &Type) -> Type {
 
 /// The plain variables an assignment target writes: `$x`, or each of a
 /// `[$a, $b]`/`list($a, $b)` destructuring's.
-fn assigned_variable_names(target: &Expr) -> Vec<String> {
+pub(super) fn assigned_variable_names(target: &Expr) -> Vec<String> {
     match &target.kind {
         ExprKind::Variable(v) => vec![v.to_string()],
         ExprKind::ArrayLiteral(items) => items

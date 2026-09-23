@@ -207,6 +207,11 @@ fn bitwise_or_with_an_unresolvable_class_shaped_operand_is_never_flagged_dont_gu
             }
         "#,
     );
+    // The unknown class itself is reported as such.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "class.notFound")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
@@ -946,4 +951,17 @@ fn a_loop_counter_compared_with_not_identical_is_never_flagged() {
             || x.identifier == "notIdentical.alwaysTrue"),
         "unexpected diagnostics: {d:?}"
     );
+}
+
+#[test]
+fn plus_with_one_array_operand_is_an_array_union() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(mixed $a): void {
+                assertType('array<(int|string), mixed>', $a + ['x' => 1]);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

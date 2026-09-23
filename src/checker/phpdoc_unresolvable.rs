@@ -66,8 +66,13 @@ pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
 /// prefix precedence as `tag_type_nodes`.
 pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
     let node = phpdoc_grammar::parse(doc);
-    let mut out: Vec<(Option<String>, TypeNode)> = Vec::new();
+    let mut named: Vec<(Option<String>, TypeNode)> = Vec::new();
+    // When any tag is unnamed, only the unnamed tags of the last tag kind
+    // (`@var` < `@phan-var` < `@psalm-var` < `@phpstan-var`) that has one
+    // count; the named tags are dropped.
+    let mut unnamed: Vec<(Option<String>, TypeNode)> = Vec::new();
     for prefix in ["", "phan-", "psalm-", "phpstan-"] {
+        let mut group = Vec::new();
         for tag in &node.tags {
             let Some(name) = tag.name.strip_prefix(prefix) else {
                 continue;
@@ -86,18 +91,19 @@ pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
             if !prefix.is_empty() && prefix != "phpstan-" && contains_error(ty) {
                 continue;
             }
-            // Named tags are keyed by name (a later spelling replaces an
-            // earlier one); every unnamed tag stands on its own.
-            match out
-                .iter_mut()
-                .find(|(v, _)| variable.is_some() && v == variable)
-            {
-                Some(slot) => slot.1 = ty.clone(),
-                None => out.push((variable.clone(), ty.clone())),
+            match variable {
+                None => group.push((None, ty.clone())),
+                Some(_) => match named.iter_mut().find(|(v, _)| v == variable) {
+                    Some(slot) => slot.1 = ty.clone(),
+                    None => named.push((variable.clone(), ty.clone())),
+                },
             }
         }
+        if !group.is_empty() {
+            unnamed = group;
+        }
     }
-    out
+    if unnamed.is_empty() { named } else { unnamed }
 }
 
 fn has_known_prefix(name: &str) -> bool {

@@ -978,7 +978,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // resolving it to `MixedType(true)` too (confirmed directly
         // against `vendor/phpstan-src`).
         "mixed" => Type::Mixed(true),
-        "never" | "noreturn" => Type::Never,
+        "never" | "noreturn" | "never-return" | "never-returns" | "no-return" => Type::Never,
         // `array<K, V>`'s key argument is real
         // (`Type::Array`'s own key slot), not discarded. Bare `array`
         // still means "key unknown" - `Type::unknown_array_key()`.

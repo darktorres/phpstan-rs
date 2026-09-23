@@ -199,7 +199,7 @@ impl<'a> Checker<'a> {
                 .lookup_function(&self.name_ctx.declared_name(method_name)),
         };
         let Some(sig) = sig else {
-            return std::collections::HashMap::new();
+            return self.current_method_templates.clone();
         };
         let mut out = std::collections::HashMap::new();
         for p in &sig.params {
@@ -803,6 +803,11 @@ impl<'a> Checker<'a> {
                 "class.notFound",
             );
         }
+        self.check_type_prefixed_class_names(ty, span, label);
+    }
+
+    /// `class.prefixed` for every class `ty` names.
+    pub(crate) fn check_type_prefixed_class_names(&mut self, ty: &Type, span: Span, label: &str) {
         // `class.prefixed`: checked on the *successfully-resolved* name
         // too, unlike the `class.notFound` loop above (which only sees a
         // name `collect_unknown_class_names` couldn't find) - a leaked

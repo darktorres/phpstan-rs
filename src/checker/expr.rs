@@ -5,10 +5,9 @@ use crate::checker::{
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
     TemplateBindings, UsageTokenKind, binop_sigil, body_contains_yield, collect_goto_targets,
     expr_contains_yield, generator_template_param, is_known_single_value, is_language_construct,
-    is_real_variable_key, is_superglobal, literal_string_key, literal_string_value, merge_scopes,
-    narrow_type_excluding, narrowing_key, propagate_container_field_facts,
-    purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
-    superglobal_default_type, to_bitwise_not,
+    is_real_variable_key, is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding,
+    narrowing_key, propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
+    resolve_concat_type, string_type_has_accessory, superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -925,7 +924,7 @@ impl<'a> Checker<'a> {
                     && let Some(pattern_arg) = resolved.first().copied().flatten()
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(matches_name) = &matches_arg.kind
-                    && let Some(pattern_str) = literal_string_value(pattern_arg)
+                    && let Some(pattern_str) = self.constant_string_value(pattern_arg, locals)
                     && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
                     && let Some(flags) = resolved
                         .get(3)
@@ -976,7 +975,7 @@ impl<'a> Checker<'a> {
                     && let Some(pattern_arg) = resolved.first().copied().flatten()
                     && let Some(matches_arg) = resolved.get(2).copied().flatten()
                     && let ExprKind::Variable(matches_name) = &matches_arg.kind
-                    && let Some(pattern_str) = literal_string_value(pattern_arg)
+                    && let Some(pattern_str) = self.constant_string_value(pattern_arg, locals)
                     && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
                     && let Some(flags) = resolved
                         .get(3)
@@ -1936,7 +1935,16 @@ impl<'a> Checker<'a> {
                 // `check_by_ref_destructuring`'s own doc comment.
                 self.check_param_out_assignment(lhs, &rhs_ty, label);
                 self.check_by_ref_destructuring(lhs, &rhs_ty, label);
+                let native = match (&e.kind, &lhs.kind) {
+                    (ExprKind::Assign(..), ExprKind::Variable(name)) => {
+                        Some((name.clone(), self.native_expr_type(rhs, locals)))
+                    }
+                    _ => None,
+                };
                 self.bind_assignment_target(lhs, rhs_ty.clone(), locals);
+                if let Some((name, native)) = native {
+                    locals.set_native(&name, native);
+                }
                 self.record_condition_alias(lhs, rhs, locals);
                 self.record_query_builder_alias(lhs, rhs, locals);
                 // See `ContainerFieldFactsMap`'s own doc comment
@@ -2016,7 +2024,16 @@ impl<'a> Checker<'a> {
                 // Same by-ref-parameter check as plain `=`, against the
                 // compound operation's own real result.
                 self.check_param_out_assignment(lhs, &ty, label);
+                let native = match &lhs.kind {
+                    ExprKind::Variable(name) => {
+                        Some((name.clone(), self.native_expr_type(e, locals)))
+                    }
+                    _ => None,
+                };
                 self.bind_assignment_target(lhs, ty, locals);
+                if let Some((name, native)) = native {
+                    locals.set_native(&name, native);
+                }
                 Type::Mixed(false)
             }
             ExprKind::Ternary(cond, then_, else_) => {
@@ -3200,19 +3217,10 @@ impl<'a> Checker<'a> {
                 // itself as an `if`-style condition in that case;
                 // otherwise narrow via an implicit `subject === cond`
                 // equality, the same as an ordinary `switch` case.
-                // `match_true`'s own arm-condition exclusion stays
-                // restricted to a single-condition arm - a multi-
-                // condition `match(true)` arm's own conditions combine
-                // via OR, and narrowing each one's own false-branch in
-                // sequence would need the same "AND of each condition's
-                // own false branch" reasoning `narrow_match_arm_
-                // conditions` already gives the arm *body*, not attempted
-                // here for `accumulated`. The equality-exclusion side
-                // loops over every condition in the arm (not just a
-                // single one) - each exclusion is independent (excluding
-                // value A never depends on whether value B was also
-                // excluded), so there's no "combined OR" ambiguity the
-                // way narrowing *in* would have. Feeds every later arm's
+                // A later arm sees every condition of each earlier arm
+                // false: `match_true` applies each one's false branch in
+                // turn (`!(a || b)` is `!a && !b`), and the equality side
+                // excludes each earlier value. Feeds every later arm's
                 // own body-narrowing precision (e.g. `default`'s body
                 // seeing `subject` with every earlier arm's value already
                 // excluded) - the `match.unhandled` exhaustiveness check
@@ -3344,8 +3352,9 @@ impl<'a> Checker<'a> {
                         accumulated_before_last_arm = accumulated.clone();
                     }
                     if match_true {
-                        if let [only_cond] = conds.as_slice() {
-                            self.apply_narrowing(only_cond, &mut accumulated, false);
+                        // A skipped arm had every condition false.
+                        for c in conds {
+                            self.apply_narrowing(c, &mut accumulated, false);
                         }
                     } else {
                         for c in conds {
@@ -3651,6 +3660,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     closure_locals.declare(p.name.to_string(), ty, p.name_span);
+                    closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 let (declared_return_ty, declared_return_case_refs) =
                     self.resolve_type_hint_with_case_refs(return_type.as_deref());
@@ -3924,6 +3934,8 @@ impl<'a> Checker<'a> {
                         }
                     } else {
                         locals.insert(u.name.to_string(), mutated);
+                        // The closure may write anything to it.
+                        locals.clear_native(&u.name);
                     }
                 }
                 let inferred_return = (!closure_is_generator).then(|| {
@@ -3977,6 +3989,7 @@ impl<'a> Checker<'a> {
                         ty
                     };
                     arrow_locals.declare(p.name.to_string(), ty, p.name_span);
+                    arrow_locals.set_native(&p.name, self.closure_param_native(p));
                 }
                 // An arrow function's body is a single expression, not
                 // a `Vec<Stmt>` `body_contains_yield` can walk -
@@ -5410,8 +5423,14 @@ impl<'a> Checker<'a> {
                 // `non-empty-array<T>`-typed operand too - without it, a
                 // `list<T> + list<T>` would fall through to numeric
                 // addition instead of array union.
-                if Self::is_array_like(&lt) && Self::is_array_like(&rt) {
-                    let key_ty = match (Self::array_key_type(&lt), Self::array_key_type(&rt)) {
+                // One array operand is enough: any other operand than an
+                // array is a `TypeError`, so the value is still an array.
+                if Self::is_array_like(&lt) || Self::is_array_like(&rt) {
+                    // A non-array operand's keys and values are unknown.
+                    let both_arrays = Self::is_array_like(&lt) && Self::is_array_like(&rt);
+                    let key_of = |t: &Type| both_arrays.then(|| Self::array_key_type(t)).flatten();
+                    let key_ty = match (key_of(&lt), key_of(&rt)) {
+                        _ if !both_arrays => Type::benevolent_array_key(),
                         (Some(lk), Some(rk)) if lk == rk => lk,
                         (Some(lk), Some(rk)) => union_types(lk, rk),
                         (Some(k), None) | (None, Some(k)) => k,

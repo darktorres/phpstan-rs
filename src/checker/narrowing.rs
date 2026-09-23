@@ -535,7 +535,7 @@ impl<'a> Checker<'a> {
         // shape, not a silent double-narrowing.
         if let Some((pattern_arg, matches_arg, true_means_matched)) = preg_match_condition(cond)
             && let ExprKind::Variable(matches_name) = &matches_arg.kind
-            && let Some(pattern_str) = literal_string_value(pattern_arg)
+            && let Some(pattern_str) = self.constant_string_value(pattern_arg, locals)
             && let Some(parsed) = regex_groups::parse_capture_groups(&pattern_str)
         {
             let narrowed = if branch_true == true_means_matched {
@@ -1217,7 +1217,16 @@ impl<'a> Checker<'a> {
             // argument expects `int|null`, not `int<0, max>|false`).
             ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
                 let rhs_ty = self.infer_expr(rhs, locals);
+                let native = match (&cond.kind, &lhs.kind) {
+                    (ExprKind::Assign(..), ExprKind::Variable(name)) => {
+                        Some((name.clone(), self.native_expr_type(rhs, locals)))
+                    }
+                    _ => None,
+                };
                 self.bind_assignment_target(lhs, rhs_ty, locals);
+                if let Some((name, native)) = native {
+                    locals.set_native(&name, native);
+                }
                 if branch_true
                     && let Some(key) = narrowing_key(lhs)
                     && let Some(current) = locals.get(&key).cloned()

@@ -23,6 +23,7 @@ pub(crate) use anonymous_class::collect_anonymous_classes;
 pub(crate) use class_info::hook_body_references_property;
 pub(crate) use class_info::object_class_names;
 pub use class_info::{ClassInfo, ConstSig, PropertySig};
+pub(crate) use function_sig::apply_implicit_nullable_default;
 pub use function_sig::format_signature;
 pub(crate) use function_sig::is_allow_dynamic_properties_attribute_name;
 pub(crate) use function_sig::is_deprecated_attribute_name;
@@ -31,7 +32,9 @@ pub(crate) use function_sig::is_override_attribute_name;
 pub(crate) use function_sig::param_label;
 pub(crate) use function_sig::resolve_type;
 pub use function_sig::{AssertInfo, AssertTarget, FunctionSig, ParamSig};
-pub(crate) use function_sig::{infer_const_type, mark_template_params, substitute_type_aliases};
+pub(crate) use function_sig::{
+    build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
+};
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
 pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
