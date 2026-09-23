@@ -163,6 +163,8 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_magic_numbers: bool,
+    magic_number_options: (Option<Vec<f64>>, bool),
     check_native_type_hints: bool,
     check_implicit_array_creation: bool,
     check_useless_casts: bool,
@@ -269,6 +271,8 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_magic_numbers(check_magic_numbers);
+    project.set_magic_number_options(magic_number_options.0, magic_number_options.1);
     project.set_check_native_type_hints(check_native_type_hints);
     project.set_check_implicit_array_creation(check_implicit_array_creation);
     project.set_check_useless_casts(check_useless_casts);
@@ -751,6 +755,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_magic_numbers: bool,
     check_native_type_hints: bool,
     check_implicit_array_creation: bool,
     check_useless_casts: bool,
@@ -904,6 +909,14 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_magic_numbers = check_magic_numbers || config.check_magic_numbers.unwrap_or(false);
+    let magic_number_options = (
+        config
+            .magic_number_exemptions
+            .as_ref()
+            .map(|numbers| numbers.iter().map(|n| n.value()).collect()),
+        config.magic_numbers_ignore_numeric_strings.unwrap_or(false),
+    );
     let check_native_type_hints =
         check_native_type_hints || config.check_native_type_hints.unwrap_or(false);
     let check_implicit_array_creation =
@@ -1185,6 +1198,8 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_magic_numbers,
+        magic_number_options,
         check_native_type_hints,
         check_implicit_array_creation,
         check_useless_casts,

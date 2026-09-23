@@ -44,6 +44,9 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_throw_without_message: bool,
     pub(crate) check_throw_base_class: bool,
     pub(crate) check_exception_hygiene: bool,
+    pub(crate) check_magic_numbers: bool,
+    pub(crate) magic_number_exemptions: Option<Vec<f64>>,
+    pub(crate) magic_numbers_ignore_numeric_strings: bool,
     pub(crate) check_native_type_hints: bool,
     pub(crate) check_implicit_array_creation: bool,
     pub(crate) check_useless_casts: bool,
@@ -254,6 +257,14 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_throw_without_message: config.check_throw_without_message.unwrap_or(false),
         check_throw_base_class: config.check_throw_base_class.unwrap_or(false),
         check_exception_hygiene: config.check_exception_hygiene.unwrap_or(false),
+        check_magic_numbers: config.check_magic_numbers.unwrap_or(false),
+        magic_number_exemptions: config
+            .magic_number_exemptions
+            .as_ref()
+            .map(|numbers| numbers.iter().map(|n| n.value()).collect()),
+        magic_numbers_ignore_numeric_strings: config
+            .magic_numbers_ignore_numeric_strings
+            .unwrap_or(false),
         check_native_type_hints: config.check_native_type_hints.unwrap_or(false),
         check_implicit_array_creation: config.check_implicit_array_creation.unwrap_or(false),
         check_useless_casts: config.check_useless_casts.unwrap_or(false),

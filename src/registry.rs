@@ -241,6 +241,11 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (sidz/phpstan-rules): a bare numeric literal outside a constant declaration, in any of 13 positions (`magicNumber.*`); `magic_number_exemptions` (default `[0, 1]`) and `magic_numbers_ignore_numeric_strings` tune it.
+    pub check_magic_numbers: bool,
+    // `check_magic_numbers`' exempt values and numeric-string opt-out.
+    pub magic_number_exemptions: Option<Vec<f64>>,
+    pub magic_numbers_ignore_numeric_strings: bool,
     // Opt-in: a parameter or return type given only by PHPDoc that the configured PHP version can declare natively (`missingNativeType.parameter`/`missingNativeType.return`).
     pub check_native_type_hints: bool,
     // Opt-in (phpstan-strict-rules): `$x[...] = ...` creating the array `$x` implicitly because the variable does not or might not exist (`variable.implicitArray`).

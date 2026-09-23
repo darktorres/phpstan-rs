@@ -32,6 +32,9 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_magic_numbers = false
+//! magic_number_exemptions = [0, 1]
+//! magic_numbers_ignore_numeric_strings = false
 //! check_native_type_hints = false
 //! check_implicit_array_creation = false
 //! check_useless_casts = false
@@ -90,6 +93,23 @@ impl DynamicConstantNames {
                 .iter()
                 .map(|(n, t)| (n.clone(), Some(t.clone())))
                 .collect(),
+        }
+    }
+}
+
+/// A TOML integer or float.
+#[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
+#[serde(untagged)]
+pub enum ConfigNumber {
+    Int(i64),
+    Float(f64),
+}
+
+impl ConfigNumber {
+    pub fn value(self) -> f64 {
+        match self {
+            ConfigNumber::Int(i) => i as f64,
+            ConfigNumber::Float(f) => f,
         }
     }
 }
@@ -304,6 +324,12 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (sidz/phpstan-rules): a bare numeric literal outside a constant declaration, in any of 13 positions (`magicNumber.*`); `magic_number_exemptions` (default `[0, 1]`) and `magic_numbers_ignore_numeric_strings` tune it.
+    pub check_magic_numbers: Option<bool>,
+    /// Numbers `check_magic_numbers` accepts anywhere (default `[0, 1]`).
+    pub magic_number_exemptions: Option<Vec<ConfigNumber>>,
+    /// Whether `check_magic_numbers` leaves numeric strings alone.
+    pub magic_numbers_ignore_numeric_strings: Option<bool>,
     /// Opt-in: a parameter or return type given only by PHPDoc that the configured PHP version can declare natively (`missingNativeType.parameter`/`missingNativeType.return`).
     pub check_native_type_hints: Option<bool>,
     /// Opt-in (phpstan-strict-rules): `$x[...] = ...` creating the array `$x` implicitly because the variable does not or might not exist (`variable.implicitArray`).

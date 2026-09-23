@@ -1266,6 +1266,7 @@ pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;
 mod internal_usage;
 mod keywords;
+mod magic_numbers;
 mod missing_typehint;
 mod named_argument_renames;
 mod narrowing;
@@ -1893,6 +1894,9 @@ impl<'a> Checker<'a> {
                         self.check_sealed_hierarchy(&fqn, c.span);
                         self.check_sealed_tag_types(&fqn, c.doc_comment.as_deref(), c.span, false);
                         self.check_unknown_phpstan_tags_in_class(&fqn, c);
+                        if self.registry.check_magic_numbers {
+                            self.check_magic_numbers_in_properties(&c.properties, &fqn);
+                        }
                         self.check_property_hooks(&fqn, c);
                         self.check_property_variances(&fqn, c);
                         self.check_trait_conflicts(&fqn, c.span);

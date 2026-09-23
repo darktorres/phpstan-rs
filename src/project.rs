@@ -507,6 +507,21 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_magic_numbers`.
+    pub fn set_check_magic_numbers(&mut self, enabled: bool) {
+        self.registry.check_magic_numbers = enabled;
+    }
+
+    /// See `Registry::magic_number_exemptions`.
+    pub fn set_magic_number_options(
+        &mut self,
+        exemptions: Option<Vec<f64>>,
+        ignore_numeric_strings: bool,
+    ) {
+        self.registry.magic_number_exemptions = exemptions;
+        self.registry.magic_numbers_ignore_numeric_strings = ignore_numeric_strings;
+    }
+
     /// See `Registry::check_native_type_hints`.
     pub fn set_check_native_type_hints(&mut self, enabled: bool) {
         self.registry.check_native_type_hints = enabled;

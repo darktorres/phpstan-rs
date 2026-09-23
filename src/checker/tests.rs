@@ -55,6 +55,7 @@ mod internal_usage;
 mod invalid_assignment_targets;
 mod key_value_of;
 mod keywords;
+mod magic_numbers;
 mod method_and_mixin;
 mod misc_and_regressions;
 mod missing_typehint;

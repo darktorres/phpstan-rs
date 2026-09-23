@@ -89,6 +89,9 @@ impl<'a> Checker<'a> {
         if self.registry.check_enum_exhaustiveness {
             self.check_strict_statement_idioms(stmt, locals, label);
         }
+        if self.registry.check_magic_numbers {
+            self.check_magic_numbers_statement(stmt, label);
+        }
         if self.registry.check_loop_variable_overwrite || self.registry.check_switch_case_types {
             self.check_strict_rules_statement(stmt, locals, label);
         }
@@ -845,6 +848,9 @@ impl<'a> Checker<'a> {
             StmtKind::ClassDecl(c) => {
                 let fqn = self.name_ctx.declared_name(&c.name);
                 self.check_nested_class_declaration(&fqn, c);
+                if self.registry.check_magic_numbers {
+                    self.check_magic_numbers_in_properties(&c.properties, &fqn);
+                }
                 self.check_attributes(&c.attrs, &fqn);
                 self.check_attribute_targets(&c.attrs, ATTRIBUTE_TARGET_CLASS, "class", &fqn);
                 self.check_self_attribute_class_declaration(

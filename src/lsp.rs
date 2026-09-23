@@ -419,6 +419,12 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_magic_numbers(resolved.check_magic_numbers);
+        self.project.set_magic_number_options(
+            resolved.magic_number_exemptions.clone(),
+            resolved.magic_numbers_ignore_numeric_strings,
+        );
+        self.project
             .set_check_native_type_hints(resolved.check_native_type_hints);
         self.project
             .set_check_implicit_array_creation(resolved.check_implicit_array_creation);

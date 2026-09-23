@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag magic numbers: numeric literals outside constant declarations.
+        #[arg(long)]
+        check_magic_numbers: bool,
         /// Suggest native parameter and return types for PHPDoc-only types.
         #[arg(long)]
         check_native_type_hints: bool,
@@ -498,6 +501,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_magic_numbers,
             check_native_type_hints,
             check_implicit_array_creation,
             check_useless_casts,
@@ -568,6 +572,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_magic_numbers,
             check_native_type_hints,
             check_implicit_array_creation,
             check_useless_casts,
