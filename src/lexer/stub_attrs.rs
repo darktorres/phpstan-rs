@@ -178,8 +178,8 @@ impl<'a> Lexer<'a> {
     /// '8.3'` pair) is checked before attempting the parameter-fragment
     /// scan at all, via `upcoming_is_function_declaration` - see
     /// `skip_whole_versioned_declaration`'s own doc comment for that case.
-    pub(crate) fn skip_stub_availability_attribute(&mut self) {
-        self.pos += "#[PhpStormStubsElementAvailable(".len();
+    pub(crate) fn skip_stub_availability_attribute(&mut self, prefix_len: usize) {
+        self.pos += prefix_len;
         let attr_args_start = self.pos;
         let mut depth = 1i32;
         while depth > 0 && self.pos < self.src.len() {
@@ -246,7 +246,14 @@ impl<'a> Lexer<'a> {
             }
             self.pos += 1;
         }
-        if has_default {
+        let superseded = self
+            .variable_name_in(param_start, self.pos)
+            .is_some_and(|name| {
+                self.next_parameter_name_after(self.pos)
+                    .is_some_and(|next| next == name)
+                    || self.declared_earlier_in_parameter_list(param_start, name)
+            });
+        if has_default && !superseded {
             // Already counted correctly regardless of its version range.
             self.pos = param_start;
             return;
@@ -256,6 +263,61 @@ impl<'a> Lexer<'a> {
         if self.peek() == b',' {
             self.pos += 1;
         }
+    }
+
+    /// The `$name` of the parameter fragment `start..end`.
+    fn variable_name_in(&self, start: usize, end: usize) -> Option<&'a [u8]> {
+        let src: &'a [u8] = self.src;
+        let dollar = start + src[start..end].iter().position(|b| *b == b'$')?;
+        let mut name_end = dollar + 1;
+        while name_end < end && (src[name_end].is_ascii_alphanumeric() || src[name_end] == b'_') {
+            name_end += 1;
+        }
+        (name_end > dollar + 1).then(|| &src[dollar..name_end])
+    }
+
+    /// Whether `name` is already a parameter of the list `start` is in.
+    fn declared_earlier_in_parameter_list(&self, start: usize, name: &[u8]) -> bool {
+        let mut depth = 0i32;
+        let mut open = start;
+        while open > 0 {
+            open -= 1;
+            match self.src[open] {
+                b')' | b']' => depth += 1,
+                b'(' | b'[' if depth == 0 => break,
+                b'(' | b'[' => depth -= 1,
+                _ => {}
+            }
+        }
+        let list = &self.src[open..start];
+        list.windows(name.len()).enumerate().any(|(i, window)| {
+            window == name
+                && !list
+                    .get(i + name.len())
+                    .is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
+        })
+    }
+
+    /// The `$name` of the parameter after the one ending at `pos` (on its
+    /// `,`), past any attribute groups.
+    fn next_parameter_name_after(&self, pos: usize) -> Option<&'a [u8]> {
+        if self.src.get(pos) != Some(&b',') {
+            return None;
+        }
+        let mut p = pos + 1;
+        let mut depth = 0i32;
+        while p < self.src.len() {
+            match self.src[p] {
+                b'(' | b'[' => depth += 1,
+                b')' | b']' if depth == 0 => break,
+                b')' | b']' => depth -= 1,
+                b',' if depth == 0 => break,
+                b'$' if depth == 0 => return self.variable_name_in(p, self.src.len().min(p + 256)),
+                _ => {}
+            }
+            p += 1;
+        }
+        None
     }
 
     /// Whether the attribute just consumed by `skip_stub_availability_attribute`

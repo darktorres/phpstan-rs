@@ -255,3 +255,58 @@ fn a_general_attribute_group_is_not_fooled_by_an_unbalanced_bracket_in_a_string_
         ]
     );
 }
+
+#[test]
+fn a_closed_range_parameter_redeclared_by_the_next_one_is_dropped_even_with_a_default() {
+    let src = "<?php function mktime(#[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] int $hour = null, #[PhpStormStubsElementAvailable(from: '8.0')] int $hour, ?int $minute = null) {}";
+    let with_attr = Lexer::new(src).tokenize();
+    let without_attr =
+        Lexer::new("<?php function mktime(int $hour, ?int $minute = null) {}").tokenize();
+    assert_eq!(with_attr, without_attr);
+}
+
+#[test]
+fn a_closed_range_parameter_with_a_default_and_no_replacement_is_kept() {
+    let src = "<?php function f(int $a, #[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $b = null) {}";
+    let with_attr = Lexer::new(src).tokenize();
+    let without_attr = Lexer::new("<?php function f(int $a, $b = null) {}").tokenize();
+    assert_eq!(with_attr, without_attr);
+}
+
+#[test]
+fn an_imported_alias_of_the_availability_attribute_is_honored() {
+    let src = "<?php\nuse JetBrains\\PhpStorm\\Internal\\PhpStormStubsElementAvailable as ElementAvailable;\nfunction f(#[ElementAvailable(from: '5.3', to: '5.6')] $form, #[ElementAvailable(from: '7.0')] $form = 1) {}";
+    let with_attr = Lexer::new(src).tokenize();
+    let without_attr = Lexer::new(
+        "<?php\nuse JetBrains\\PhpStorm\\Internal\\PhpStormStubsElementAvailable as ElementAvailable;\nfunction f($form = 1) {}",
+    )
+    .tokenize();
+    assert_eq!(with_attr, without_attr);
+}
+
+#[test]
+fn an_imported_alias_of_the_type_aware_attribute_is_honored() {
+    let src = "<?php\nuse JetBrains\\PhpStorm\\Internal\\LanguageLevelTypeAware as LanguageAware;\nfunction f(#[LanguageAware(['8.0' => 'string'], default: '')] $s) {}";
+    let with_attr = Lexer::new(src).tokenize();
+    let without_attr = Lexer::new(
+        "<?php\nuse JetBrains\\PhpStorm\\Internal\\LanguageLevelTypeAware as LanguageAware;\nfunction f(string $s) {}",
+    )
+    .tokenize();
+    assert_eq!(with_attr, without_attr);
+}
+
+#[test]
+fn an_attribute_that_merely_shares_an_alias_name_is_left_alone() {
+    let src = "<?php\nfunction f(#[Available(from: '5.3', to: '5.6')] $x) {}";
+    let toks = Lexer::new(src).tokenize();
+    assert!(toks.contains(&Token::AttributeStart), "{toks:?}");
+}
+
+#[test]
+fn a_closed_range_parameter_redeclaring_an_earlier_one_is_dropped_even_with_a_default() {
+    let src = "<?php function pg_lo_import(#[PhpStormStubsElementAvailable(from: '8.0')] $connection, #[PhpStormStubsElementAvailable(from: '5.3', to: '7.4')] $connection = null, $pathname) {}";
+    let with_attr = Lexer::new(src).tokenize();
+    let without_attr =
+        Lexer::new("<?php function pg_lo_import($connection, $pathname) {}").tokenize();
+    assert_eq!(with_attr, without_attr);
+}

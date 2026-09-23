@@ -87,6 +87,10 @@ pub struct Lexer<'a> {
     // Byte ranges of every `//`, `#` and `/* */` comment skipped so far
     // (doc comments are tokens of their own).
     comments: Vec<(usize, usize)>,
+    // `#[Alias(` prefixes this file imports for the two stub attributes
+    // (`use JetBrains\PhpStorm\Internal\PhpStormStubsElementAvailable
+    // as Alias;`): (prefix, is the availability attribute).
+    stub_attribute_aliases: Vec<(String, bool)>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -127,6 +131,35 @@ fn compute_line_starts(src: &[u8]) -> Vec<usize> {
 /// A token, its span, and a keyword's original spelling.
 pub type SpannedToken = (Token, Span, Option<String>);
 
+/// The `#[Alias(` prefixes `src` imports for phpstorm-stubs' two
+/// version attributes, with whether each is the availability one.
+fn stub_attribute_aliases(src: &str) -> Vec<(String, bool)> {
+    const NAMESPACE: &str = "use JetBrains\\PhpStorm\\Internal\\";
+    let mut aliases = Vec::new();
+    if !src.contains(NAMESPACE) {
+        return aliases;
+    }
+    for (pos, _) in src.match_indices(NAMESPACE) {
+        let rest = &src[pos + NAMESPACE.len()..];
+        let Some(statement) = rest.split(';').next() else {
+            continue;
+        };
+        let Some((class, alias)) = statement.split_once(" as ") else {
+            continue;
+        };
+        let is_availability = match class.trim() {
+            "PhpStormStubsElementAvailable" => true,
+            "LanguageLevelTypeAware" => false,
+            _ => continue,
+        };
+        let alias = alias.trim();
+        if alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !alias.is_empty() {
+            aliases.push((format!("#[{alias}("), is_availability));
+        }
+    }
+    aliases
+}
+
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
         let bytes = src.as_bytes();
@@ -142,6 +175,7 @@ impl<'a> Lexer<'a> {
             pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
+            stub_attribute_aliases: stub_attribute_aliases(src),
         }
     }
 
@@ -162,6 +196,7 @@ impl<'a> Lexer<'a> {
             pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
+            stub_attribute_aliases: stub_attribute_aliases(src),
         }
     }
 
@@ -526,8 +561,19 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                 }
                 b'#' => {
-                    if self.starts_with("#[PhpStormStubsElementAvailable(") {
-                        self.skip_stub_availability_attribute();
+                    let alias = self
+                        .stub_attribute_aliases
+                        .iter()
+                        .find(|(prefix, _)| self.starts_with(prefix))
+                        .cloned();
+                    if let Some((prefix, true)) = &alias {
+                        self.skip_stub_availability_attribute(prefix.len());
+                    } else if let Some((prefix, false)) = &alias {
+                        self.skip_language_level_type_aware_attribute(prefix);
+                    } else if self.starts_with("#[PhpStormStubsElementAvailable(") {
+                        self.skip_stub_availability_attribute(
+                            "#[PhpStormStubsElementAvailable(".len(),
+                        );
                     } else if self.starts_with("#[LanguageLevelTypeAware(") {
                         self.skip_language_level_type_aware_attribute("#[LanguageLevelTypeAware(");
                     } else if self.starts_with("#[PhpVersionAware(") {
