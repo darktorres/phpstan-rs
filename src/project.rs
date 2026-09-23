@@ -16,6 +16,7 @@ use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
 use crate::token::Span;
 
+mod architecture;
 mod composer_hygiene;
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;

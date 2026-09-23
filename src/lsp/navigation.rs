@@ -51,7 +51,7 @@ use crate::token::{Position, Span};
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::text_split::{split_identifier_spans, type_hint_identifiers};
+use crate::text_split::{split_identifier_spans, type_hint_identifiers_qualified};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {
@@ -416,14 +416,20 @@ impl<'a> Walker<'a> {
         if !self.anchor.matches(span) {
             return;
         }
-        let names = type_hint_identifiers(hint);
+        let qualified = type_hint_identifiers_qualified(hint);
+        let names: Vec<String> = qualified.iter().map(|(n, _)| n.clone()).collect();
         let expected: Vec<&str> = names.iter().map(String::as_str).collect();
         let Some(spans) = split_identifier_spans(self.source, span, &expected) else {
             return;
         };
-        for (name, name_span) in names.iter().zip(spans.iter()) {
+        for ((name, fully_qualified), name_span) in qualified.iter().zip(spans.iter()) {
+            let written = if *fully_qualified {
+                format!("\\{name}")
+            } else {
+                name.clone()
+            };
             if self.anchor.matches(*name_span)
-                && let Some(fqn) = resolve_class_ref(name, current_class, ctx, self.registry)
+                && let Some(fqn) = resolve_class_ref(&written, current_class, ctx, self.registry)
             {
                 out.push((*name_span, Resolved::Class(fqn)));
             }

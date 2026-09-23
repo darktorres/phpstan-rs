@@ -158,6 +158,8 @@ pub struct Config {
     /// message = "use the Db\\Connection service instead"
     /// ```
     pub restricted_symbols: Option<Vec<crate::restricted_symbols::RestrictedSymbolEntry>>,
+    /// `[[architecture]]` rules - see `architecture`'s own doc comment.
+    pub architecture: Option<Vec<crate::architecture::ArchitectureRule>>,
     /// Mirrors real PHPStan's own `dynamicConstantNames`: global
     /// (`NAME`) or class (`Class::NAME`) constants whose declared value
     /// differs between environments, so their literal value is never

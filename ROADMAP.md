@@ -1262,6 +1262,20 @@ symlink out of `vendor/` instead of dropping it, promotes path-repository
 packages to analysed files, and runs once per analysed directory's own
 nearest `composer.json` root rather than only the working directory's.
 
+**Declarative architecture rules** (`[[architecture]]` in the config,
+`architecture.rs`/`project/architecture.rs`, the `carlosas/phpat`
+model): selectors over namespace/class-name patterns (prefix or
+`/regex/`), `extends`/`implements`/`uses_trait`/`applies_attribute`, and
+abstract/final/readonly/interface/trait/enum/exception/attribute/
+standard-class flags, each with nested `excluding`; relations
+`should_not_depend_on`/`can_only_depend_on`/`should_depend_on`,
+`should_not_construct`, `should_(not_)extend`/`implement`/`use_trait`,
+`should_be_final`/`abstract`/`readonly`, `should_be_named`,
+`should_apply_attribute`, and `should_have_only_one_public_method`. A
+class's dependencies are the classes its declaration and body name plus
+every class in its members' PHPDoc-refined types, built-ins excluded;
+each forbidden one is reported where it's used.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3309,42 +3323,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 141 — Declarative architecture/dependency-direction testing (new capability)
-
-A whole new, well-established category with no precedent anywhere else in
-this roadmap, confirmed by `carlosas/phpat` (1276
-favers — among the highest real-developer-approval counts in the entire
-top 100, not just a transitively-pulled-in download count). A fluent
-DSL over composable selectors:
-
-```
-PHPat::rule()
-  ->classes(Selector::inNamespace('App\Domain'))
-  ->shouldNotDependOn()
-  ->classes(Selector::inNamespace('App\Infrastructure'))
-```
-
-- **Selectors** compose: `inNamespace`, `classname`, `extends`,
-  `implements`, `isAbstract`/`isFinal`/`isInterface`/`isEnum`/
-  `isReadonly`/`isException`/`isTrait`/`isAttribute`/
-  `appliesAttribute`/`isStandardClass`, with `->excluding(...)`
-  exemptions.
-- **Relations**: `shouldDependOn`/`shouldNotDependOn`/`shouldImplement`/
-  `shouldExtend`/`beFinal`/`beReadonly`/etc.
-- **Effort: large** (a new rule-DSL layer), but the underlying
-  mechanism — resolving every class's own `use`-import/type-hint/
-  extends/implements references against a small set of configured
-  namespace/selector rules, flagging a forbidden dependency direction —
-  is a project-wide pass phpstan-rs's own closed-world, single-process
-  Registry is arguably *better* suited to than real PHPStan itself (the
-  same "whole-program fact PHPStan's architecture can't cheaply compute"
-  theme Part 1 already establishes repeatedly). Real corpus relevance is
-  plausible for Piwigo's own layered namespace structure — worth
-  checking at implementation time.
-- Genuinely distinct from `restricted_symbols` (per-symbol banning) and
-  from the `@internal` engine (package-boundary enforcement) — namespace
-  *layering direction* is a third, different axis.
 
 ### Phase 143 — Generalized "ban this construct/keyword/type" mechanism
 

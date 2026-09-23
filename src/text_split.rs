@@ -27,7 +27,7 @@ use crate::token::{Position, Span, Token};
 /// filtering it out here would silently break this function's own
 /// `expected`-count check for that whole family of references. Callers
 /// that *do* want primitive/pseudo-type filtering (a compound type hint's
-/// own class names) apply it themselves - see `type_hint_identifiers`.
+/// own class names) apply it themselves - see `type_hint_identifiers_qualified`.
 ///
 /// `expected` is the name count the caller already has from the AST
 /// (e.g. `[class_name, member]` for a `StaticAccess`) - this function
@@ -80,8 +80,9 @@ pub(crate) fn split_identifier_spans(
 /// Structured after (not sharing code with) `collect_type_hint`, for
 /// exactly the reason this whole module's own doc comment gives for
 /// `parse_qualified_name_spanned` rather than changing existing call
-/// sites.
-pub(crate) fn type_hint_identifiers(hint: &str) -> Vec<String> {
+/// sites. Each name comes with whether it was written fully qualified (a
+/// leading `\`), which name resolution must know.
+pub(crate) fn type_hint_identifiers_qualified(hint: &str) -> Vec<(String, bool)> {
     let mut names = Vec::new();
     let mut current = String::new();
     for c in hint.chars().chain(std::iter::once(' ')) {
@@ -90,7 +91,7 @@ pub(crate) fn type_hint_identifiers(hint: &str) -> Vec<String> {
         } else if !current.is_empty() {
             let name = current.trim_start_matches('\\');
             if !name.is_empty() && !is_primitive_type_name(name) {
-                names.push(name.to_string());
+                names.push((name.to_string(), current.starts_with('\\')));
             }
             current.clear();
         }
@@ -228,10 +229,14 @@ mod tests {
     #[test]
     fn type_hint_identifiers_skips_scalar_and_null_keywords() {
         // Unlike split_identifier_spans (which finds every token run
-        // unfiltered), type_hint_identifiers is specifically for a
+        // unfiltered), type_hint_identifiers_qualified is specifically for a
         // compound type hint's own *class* names - nothing real-class-
         // shaped in this hint at all.
-        assert!(type_hint_identifiers("int|string|null").is_empty());
+        assert!(type_hint_identifiers_qualified("int|string|null").is_empty());
+        assert_eq!(
+            type_hint_identifiers_qualified("?\\App\\Foo|Bar"),
+            vec![("App\\Foo".to_string(), true), ("Bar".to_string(), false)]
+        );
     }
 
     #[test]

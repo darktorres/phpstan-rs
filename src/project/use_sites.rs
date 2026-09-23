@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::registry::NameContext;
-use crate::text_split::{split_identifier_spans, type_hint_identifiers};
+use crate::text_split::{split_identifier_spans, type_hint_identifiers_qualified};
 use crate::token::Span;
 
 /// What a reference site points at - no local-variable variant (see
@@ -177,10 +177,18 @@ impl<'a> ClassFnRefWalker<'a> {
         current_class: Option<&str>,
         ctx: &NameContext,
     ) {
-        let names = type_hint_identifiers(hint);
+        let qualified = type_hint_identifiers_qualified(hint);
+        let names: Vec<String> = qualified.iter().map(|(n, _)| n.clone()).collect();
+        let written = |(name, fully_qualified): &(String, bool)| {
+            if *fully_qualified {
+                format!("\\{name}")
+            } else {
+                name.clone()
+            }
+        };
         let Some(source) = self.source else {
-            for name in &names {
-                if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+            for name in &qualified {
+                if let Some(fqn) = resolve_class_ref(&written(name), current_class, ctx) {
                     out.push((span, RefTarget::Class(fqn)));
                 }
             }
@@ -190,8 +198,8 @@ impl<'a> ClassFnRefWalker<'a> {
         let Some(spans) = split_identifier_spans(source, span, &expected) else {
             return;
         };
-        for (name, name_span) in names.iter().zip(spans.iter()) {
-            if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+        for (name, name_span) in qualified.iter().zip(spans.iter()) {
+            if let Some(fqn) = resolve_class_ref(&written(name), current_class, ctx) {
                 out.push((*name_span, RefTarget::Class(fqn)));
             }
         }

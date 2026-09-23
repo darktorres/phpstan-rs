@@ -172,6 +172,7 @@ fn run_check_project(
     check_renamed_named_arguments: bool,
     report_unmatched_ignored_errors: bool,
     composer_manifests: Vec<composer::manifest::ComposerManifest>,
+    architecture_rules: &[phpstan_rs::architecture::ArchitectureRule],
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -506,6 +507,11 @@ fn run_check_project(
         entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
     }
 
+    for (path, diags) in project.check_architecture(architecture_rules) {
+        let entry = results.entry(path).or_default();
+        entry.extend(diags);
+        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+    }
     for manifest in &composer_manifests {
         for (path, diags) in project.check_composer_hygiene(manifest) {
             let entry = results.entry(path).or_default();
@@ -854,6 +860,13 @@ pub(crate) fn run_check_project_command(
         baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
     let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
+    let architecture_rules = config.architecture.unwrap_or_default();
+    for rule in &architecture_rules {
+        if let Err(e) = rule.validate() {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    }
     let dynamic_constant_names = config
         .dynamic_constant_names
         .as_ref()
@@ -1028,6 +1041,7 @@ pub(crate) fn run_check_project_command(
         check_renamed_named_arguments,
         report_unmatched_ignored_errors,
         composer_manifests,
+        &architecture_rules,
         configured_level,
         &stub_dirs,
         php_version,
