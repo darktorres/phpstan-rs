@@ -372,7 +372,7 @@ pub struct UseImport {
 }
 
 /// See `UseImport::kind`'s own doc comment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum UseKind {
     Class,
     Function,

@@ -189,3 +189,46 @@ fn a_dynamic_fetch_with_a_literal_name_resolves_like_a_static_one() {
     let ids: Vec<&str> = d.iter().map(|x| x.identifier.as_str()).collect();
     assert_eq!(ids, vec!["classConstant.notFound"], "{d:?}");
 }
+
+#[test]
+fn a_use_const_import_resolves_an_unqualified_constant_reference() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Bar {
+                const ZED = 5;
+                function zed(): int { return 1; }
+            }
+            namespace Foo {
+                use const Bar\ZED;
+                use function Bar\zed;
+                use function PHPStan\Testing\assertType;
+                function run(): void {
+                    assertType('5', ZED);
+                    assertType('int', zed());
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_use_function_import_never_answers_a_constant_reference() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Bar {
+                function zed(): int { return 1; }
+            }
+            namespace Foo {
+                use function Bar\zed;
+                function run(): void {
+                    echo zed;
+                }
+            }
+        "#,
+    );
+    assert!(
+        d.iter().any(|x| x.identifier == "constant.notFound"),
+        "got: {d:?}"
+    );
+}

@@ -158,13 +158,10 @@ impl<'a> Checker<'a> {
             ExprKind::Literal(Literal::Int(n)) => Some(*n),
             ExprKind::Unary(UnaryOp::Neg, inner) => self.fold_int_flags(inner).map(|n| -n),
             ExprKind::Grouping(inner) => self.fold_int_flags(inner),
-            ExprKind::Name(name) => {
-                let bare = name.rsplit('\\').next().unwrap_or(name);
-                match self.registry.global_constants.get(bare) {
-                    Some(Type::IntLiteral(n)) => Some(*n),
-                    _ => None,
-                }
-            }
+            ExprKind::Name(name) => match self.global_constant_type(name) {
+                Some(Type::IntLiteral(n)) => Some(n),
+                _ => None,
+            },
             ExprKind::Binary(crate::ast::BinOp::BitOr, l, r) => {
                 Some(self.fold_int_flags(l)? | self.fold_int_flags(r)?)
             }

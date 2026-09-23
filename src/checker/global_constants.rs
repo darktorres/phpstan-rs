@@ -128,7 +128,7 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+        let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
         let guarded = |n: &str| locals.guarded_constants.contains(n);
         if guarded(bare)
             || guarded(primary.trim_start_matches('\\'))

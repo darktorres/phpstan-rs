@@ -44,7 +44,12 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let property_ty = prop_sig.set_ty.as_ref().unwrap_or(&prop_sig.ty);
+            // `self::`/`static::` in the default resolve against the
+            // declaring class, which isn't otherwise the current class
+            // outside a method body.
+            let previous_class = self.current_class.replace(fqn.to_string());
             let default_ty = self.infer_expr(default, &Locals::default());
+            self.current_class = previous_class;
             if self.registry.is_assignable(&default_ty, property_ty) {
                 continue;
             }

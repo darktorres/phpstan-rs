@@ -16,8 +16,8 @@ use crate::types::{CallableParam, CallableSig, Type};
 /// rationale, applied there to the checker's per-branch variable-type
 /// map instead of this registry-side use-import map.
 type UseMap = imbl::GenericHashMap<
+    (UseKind, String),
     String,
-    (String, UseKind),
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -70,10 +70,9 @@ pub(crate) struct NameContext {
     // is `imbl`-backed rather than `std::collections::HashMap` - see
     // `UseMap`'s own doc comment.
     namespace: Arc<str>,
-    // Short name (or `as Alias`) -> (the full path it was imported from,
-    // which of PHP's three `use`-namespaces it belongs to). The kind is
-    // load-bearing, not decorative - see `add_uses`'s own doc comment for
-    // why conflating them is unsafe.
+    // (which of PHP's three `use`-namespaces, short name or `as Alias`)
+    // -> the full path it was imported from. Each namespace is its own
+    // key space - see `add_uses`'s own doc comment.
     use_map: UseMap,
 }
 
@@ -135,46 +134,23 @@ impl NameContext {
     /// legitimately imported via a plain `use Foo;`, never `use function`/
     /// `use const`.
     pub(crate) fn is_use_imported(&self, first_segment: &str) -> bool {
-        matches!(
-            self.use_map.get(&first_segment.to_ascii_lowercase()),
-            Some((_, UseKind::Class))
-        )
+        self.use_map
+            .contains_key(&(UseKind::Class, first_segment.to_ascii_lowercase()))
     }
 
-    /// `use_map`'s own keys are stored lowercased - real PHP resolves a
-    /// `use`-imported class/interface/trait/enum name (and a
-    /// `use function` one) case-insensitively, the same rationale
-    /// `Registry::lookup_function`'s own doc comment already gives.
-    /// Unlike `lookup_function`'s exact-then-fallback-scan shape, a
-    /// straight lowercase-key store is correct and simpler here: PHP
-    /// forbids two *different* `use`-imports in one file colliding
-    /// case-insensitively, so there's no shadowing-order concern to
-    /// preserve. Disclosed, narrow residual: `use_map` is shared across
-    /// all three `use` namespaces (class/function/const - `UseImport::
-    /// kind` isn't consulted here), and real PHP constants *are* case-
-    /// sensitive - a file importing two differently-cased constant
-    /// aliases that collide only after lowercasing (e.g. `use const
-    /// Foo\BAR, Baz\bar;`) would now mis-resolve one of them. This is
-    /// exceptionally rare in practice (nobody names two distinct global
-    /// constants differing only by case and imports both in one file),
-    /// and constant existence is already, separately, never checked
-    /// against this map at all (see `UseImport::kind`'s own doc comment).
-    ///
-    /// `import.kind` is stored alongside the path (not discarded) and
-    /// consulted by every reader below: a file can declare `use function
-    /// assert;` (the global `assert()` function) and separately
-    /// `extends Assert` (an unrelated class in the same namespace,
-    /// needing no `use` of its own) - without tracking the kind, a
-    /// case-insensitive lookup would let the *function* import for
-    /// `assert` answer a *class* reference to `Assert`, silently
-    /// severing that inheritance link.
+    /// Keys are `(kind, name)`: PHP's class, function, and constant
+    /// imports live in three separate namespaces, so `use function
+    /// assert;` must never answer a class reference to `Assert`, nor
+    /// `use const Foo\BAR;` a function call `bar()`. Class and function
+    /// names resolve case-insensitively and are stored lowercased;
+    /// constant names are case-sensitive and stored as written.
     pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
             let path = strip_leading_backslash(&import.path);
             let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
             let short_name = import.alias.clone().unwrap_or_else(|| bare.clone().into());
             self.use_map
-                .insert(short_name.to_ascii_lowercase(), (path, import.kind));
+                .insert((import.kind, use_map_key(import.kind, &short_name)), path);
         }
     }
 
@@ -232,8 +208,13 @@ impl NameContext {
         let mut segments = name.splitn(2, '\\');
         let first = segments.next().unwrap_or(name);
         let rest = segments.next();
-        if let Some((imported_path, matched_kind)) = self.use_map.get(&first.to_ascii_lowercase())
-            && *matched_kind == kind
+        // A qualified name (`Foo\BAR`) always resolves its first segment
+        // through a class-kind (namespace) import, whatever the kind of
+        // the symbol it finally names.
+        let lookup_kind = if rest.is_some() { UseKind::Class } else { kind };
+        if let Some(imported_path) = self
+            .use_map
+            .get(&(lookup_kind, use_map_key(lookup_kind, first)))
         {
             return match rest {
                 Some(r) => format!("{imported_path}\\{r}"),
@@ -253,14 +234,23 @@ impl NameContext {
     /// global-namespace fallback candidate when that rule could apply
     /// (namespaced file, unqualified name, no matching import).
     pub(crate) fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
+        self.resolve_with_global_fallback(name, UseKind::Function)
+    }
+
+    /// The constant counterpart of `resolve_function_candidates` - real
+    /// PHP applies the identical current-namespace-then-global fallback
+    /// to an unqualified constant, but matches it against `use const`
+    /// imports, never `use function` ones.
+    pub(crate) fn resolve_constant_candidates(&self, name: &str) -> (String, Option<String>) {
+        self.resolve_with_global_fallback(name, UseKind::Const)
+    }
+
+    fn resolve_with_global_fallback(&self, name: &str, kind: UseKind) -> (String, Option<String>) {
         let is_unqualified = !name.contains('\\');
-        let use_matched = is_unqualified
-            && matches!(
-                self.use_map.get(&name.to_ascii_lowercase()),
-                Some((_, UseKind::Function))
-            );
+        let use_matched =
+            is_unqualified && self.use_map.contains_key(&(kind, use_map_key(kind, name)));
         if !is_unqualified || use_matched || self.namespace.is_empty() {
-            (self.resolve_as(name, UseKind::Function), None)
+            (self.resolve_as(name, kind), None)
         } else {
             (self.declared_name(name), Some(name.to_string()))
         }
@@ -564,5 +554,13 @@ pub(crate) fn collect_class_name_case_refs(
             collect_class_name_case_refs(if_false, ctx, out);
         }
         _ => {}
+    }
+}
+
+/// `NameContext::use_map`'s key normalization - see `add_uses`.
+fn use_map_key(kind: UseKind, name: &str) -> String {
+    match kind {
+        UseKind::Const => name.to_string(),
+        UseKind::Class | UseKind::Function => name.to_ascii_lowercase(),
     }
 }

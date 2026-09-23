@@ -17,15 +17,14 @@ impl<'a> Checker<'a> {
     /// Constants share the identical "check the current namespace first,
     /// fall back to the global namespace for an unqualified reference"
     /// resolution rule real PHP functions do (unlike class names, which
-    /// never fall back) - `resolve_function_candidates` already
-    /// implements exactly that rule, so it's reused here rather than
-    /// duplicated. `None` for anything not in the table (an engine-
+    /// never fall back), matched against `use const` imports -
+    /// `resolve_constant_candidates`. `None` for anything not in the table (an engine-
     /// provided constant like `PHP_EOL`, or a `const`/`define()` whose
     /// own value wasn't a plain literal - see `Registry::global_
     /// constants`'s own doc comment for the exact scope), leaving
     /// `bare_name_literal_type`'s existing `Mixed` fallback in place.
     pub(crate) fn global_constant_type(&self, name: &str) -> Option<Type> {
-        let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
+        let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
         // `PHP_VERSION_ID`'s own vendored `phpstorm-stubs` declaration
         // (`Core/Core_d.php`) is a literal `define('PHP_VERSION_ID',
         // 50306)` - phpstorm-stubs' own generation environment's actual

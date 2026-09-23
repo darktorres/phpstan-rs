@@ -137,3 +137,24 @@ fn a_property_with_no_default_is_never_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_self_class_constant_default_resolves_against_the_declaring_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {
+                public const X = 3;
+                public const int Y = 4;
+                public int $x = self::X;
+                public int $y = self::Y;
+                public string $bad = self::X;
+            }
+        "#,
+    );
+    let hits: Vec<_> = d
+        .iter()
+        .filter(|x| x.identifier == "property.defaultValue")
+        .collect();
+    assert_eq!(hits.len(), 1, "got: {d:?}");
+    assert!(hits[0].message.contains("$bad"), "got: {d:?}");
+}
