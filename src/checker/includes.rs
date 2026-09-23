@@ -250,9 +250,12 @@ impl<'a> Checker<'a> {
         if path.is_absolute() {
             return path.is_file();
         }
-        let from_cwd = std::env::current_dir().map(|d| d.join(path));
+        let from_cwd = match &self.working_dir {
+            Some(dir) => Some(dir.join(path)),
+            None => std::env::current_dir().ok().map(|d| d.join(path)),
+        };
         let from_file = self.current_dir_of_file().map(|d| d.join(path));
-        from_cwd.is_ok_and(|p| p.is_file())
+        from_cwd.is_some_and(|p| p.is_file())
             || from_file.is_some_and(|p| p.is_file())
             || self.include_path_dirs.iter().any(|dir| {
                 let dir = Path::new(dir);

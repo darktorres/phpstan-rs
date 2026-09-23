@@ -1,623 +1,707 @@
-use std::collections::{HashMap, HashSet};
-use std::fs;
+//! `check-project`: command-line flags overlaid onto the config file,
+//! run through `project::session::Session`, then baselined, fixed and
+//! printed.
+
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
 use output::OutputFormat;
-use phpstan_rs::{
-    baseline, checker, composer, config, doctrine_functions, ignore_errors, output, php_version,
-    project, restricted_symbols, sql_reflection_config, sql_reflection_reflector,
-    sql_reflection_schema, sql_reflection_schema_drift, token::Span,
-};
-use rayon::prelude::*;
+use phpstan_rs::project::session::{Overrides, Session};
+use phpstan_rs::{baseline, config, output};
 
-/// `phpstan-rs check-project <dir>` - loads every .php file under `dir`
-/// into a `Project` and runs the full checker over all of them at once
-/// (`Project::check_all`), printing every diagnostic. Unlike `check`
-/// (parse-only, no semantic checking) or `incremental-bench` (one file
-/// plus its dependents), this is the whole-corpus semantic-diagnostics
-/// view - the tool needed to spot-check new diagnostic rules for false
-/// positives against a real codebase before trusting them.
-/// The highest level this project's own `Diagnostic::level` tagging uses
-/// (see `checker::Diagnostic`'s own doc comment) - `--level` left unset
-/// means "report everything up to and including this", preserving this
-/// tool's original always-report-everything behavior rather than
-/// silently adopting real PHPStan's own stricter level-0 default.
-const MAX_LEVEL: u8 = 6;
-
-/// Filters every file's diagnostics down to `level` and below, in place -
-/// shared by both the normal report path and `--generate-baseline` (a
-/// baseline should record exactly what a normal run at this level would
-/// currently show, not every diagnostic regardless of level).
-fn apply_level_filter(
-    mut results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
-    level: u8,
-) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
-    for diagnostics in results.values_mut() {
-        diagnostics.retain(|d| d.level <= level);
-    }
-    results
-}
-
-/// Reads and parses one file, tolerating a read/parse failure by
-/// returning `None` rather than letting it crash the whole run - same end
-/// state as never having attempted it. Pure: touches no `Project`/shared
-/// registry state at all, so calling this for many files concurrently
-/// (the point of splitting it out from `Project::load_file`) is safe -
-/// deliberately unaware of `analyzed`/context-vs-first-party status, which
-/// only matters once a parsed file reaches the sequential insert loop
-/// below (`Project::insert_parsed_file`'s own `analyzed` parameter).
-/// `catch_unwind` guards the lexer's own, separate, still-panic-based
-/// error handling (the parser itself no longer panics on ordinary
-/// malformed syntax) - the identical precaution `check.rs`'s own lex+parse
-/// worker threads already take, needed here for the same reason.
-fn read_and_parse_file(path: &Path, is_stub: bool) -> Option<(String, project::ParsedFile)> {
-    let bytes = fs::read(path).ok()?;
-    let source = String::from_utf8_lossy(&bytes).into_owned();
-    let parsed = std::panic::catch_unwind(|| project::parse_file(path, &source, is_stub))
-        .ok()?
-        .ok()?;
-    Some((source, parsed))
-}
-
-/// The Composer project root of every analysed directory: the nearest
-/// ancestor (itself included) with a `composer.json`, else `cwd`.
-fn composer_roots(dirs: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
-    let mut roots: Vec<PathBuf> = Vec::new();
-    for dir in dirs {
-        let start = std::fs::canonicalize(dir).unwrap_or_else(|_| cwd.join(dir));
-        let start = if start.is_file() {
-            start.parent().map(Path::to_path_buf).unwrap_or(start)
-        } else {
-            start
-        };
-        let root = start
-            .ancestors()
-            .find(|a| a.join("composer.json").is_file())
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| cwd.to_path_buf());
-        if !roots.contains(&root) {
-            roots.push(root);
-        }
-    }
-    if roots.is_empty() {
-        roots.push(cwd.to_path_buf());
-    }
-    roots
-}
-
-/// Collects both file lists (`analyze_files`, sorted; `context_files`,
-/// sorted+deduped, seeded with `scan_files`) in one measured call, so the
-/// real cost of the whole single-threaded directory walk - entirely
-/// before this module's own rayon pool is built - shows up as a single,
-/// correctly-attributed number in the hotpath report (`collect_php_files`
-/// itself is deliberately left unmeasured - see its own doc comment for
-/// why a self-recursive function's own aggregate would be misleading).
-/// Small enough on a real monorepo that parallelizing isn't worth it next
-/// to the already-parallel parse/check phases, though collection order
-/// is discarded immediately by the `sort()`/`dedup()` calls right here,
-/// so it would be safe to if this ever became the dominant cost on a
-/// corpus with far more directories than files.
-#[hotpath::measure]
-fn collect_analyze_and_context_files(
-    dirs: &[PathBuf],
-    scan_dirs: &[PathBuf],
-    scan_files: &[PathBuf],
-) -> (Vec<PathBuf>, Vec<PathBuf>) {
-    let mut analyze_files = Vec::new();
-    for dir in dirs {
-        project::collect_php_files(dir, &mut analyze_files);
-    }
-    analyze_files.sort();
-
-    let mut context_files: Vec<PathBuf> = scan_files.to_vec();
-    for dir in scan_dirs {
-        project::collect_php_files(dir, &mut context_files);
-    }
-    context_files.sort();
-    context_files.dedup();
-
-    (analyze_files, context_files)
-}
-
-// Past clippy's default 7-argument threshold - every argument here is
-// already its own independently-meaningful CLI-level setting (not a
-// group crying out for a struct), so silencing the lint for this one,
-// single-call-site
-// wiring function reads clearer than a bag-of-fields options type would
-// (mirrors this project's own existing `#[allow(clippy::type_complexity)]`
-// precedent in `parser/classes.rs`: a real, deliberate exception, not a
-// blanket suppression).
-#[allow(clippy::too_many_arguments)]
-#[hotpath::measure]
-fn run_check_project(
-    dirs: &[PathBuf],
-    scan_dirs: &[PathBuf],
-    scan_files: &[PathBuf],
-    level: u8,
-    strict_mixed_arrays: bool,
-    check_uninitialized_properties: bool,
-    check_internal_usage: bool,
-    check_function_name_case: bool,
-    check_deprecated_usage: bool,
-    check_empty_method_bodies: bool,
-    check_missing_checked_exceptions: bool,
-    check_strict_printf_placeholder_types: bool,
-    check_too_wide_throw_type_in_protected_and_public_methods: bool,
-    check_too_wide_return_type_in_protected_and_public_methods: bool,
-    check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
-    check_method_throw_type_covariance: bool,
-    check_benevolent_union_types: bool,
-    check_missing_callable_signature: bool,
-    check_duplicate_function_declarations: bool,
-    check_duplicate_class_declarations: bool,
-    check_boolean_trap: bool,
-    check_array_key_cast: bool,
-    check_parent_constructor_call: bool,
-    check_promoted_property_suggestions: bool,
-    check_boolean_conditions: bool,
-    check_dynamic_properties: bool,
-    check_swapped_arguments: bool,
-    check_never_return_suggestions: bool,
-    check_switch_missing_default: bool,
-    check_throw_without_message: bool,
-    check_throw_base_class: bool,
-    check_exception_hygiene: bool,
-    check_current_time_dependence: bool,
+/// Load every .php file under the given paths and run the full checker
+/// over all of them, reporting every diagnostic.
+#[derive(clap::Args)]
+pub(crate) struct CheckProjectArgs {
+    // Not `required = true`: a TOML config file's own `paths` can
+    // supply these instead (see `run_check_project`'s resolution
+    // logic) - the "must know what to check" requirement is
+    // enforced there, once the config (if any) has been consulted,
+    // not statically by clap.
+    pub(crate) dirs: Vec<PathBuf>,
+    /// Report up to and including this level (see
+    /// checker::Diagnostic's own doc comment) - unset means
+    /// "report everything".
+    #[arg(long)]
+    pub(crate) level: Option<u8>,
+    #[arg(long)]
+    pub(crate) strict_mixed_arrays: bool,
+    /// Enables `property.uninitialized` (a typed property with no
+    /// default nothing in the class body ever assigns). Off by
+    /// default, mirroring real PHPStan's own opt-in
+    /// `checkUninitializedProperties` parameter - see
+    /// `registry::Registry::check_uninitialized_properties`'s own
+    /// doc comment for why.
+    #[arg(long)]
+    pub(crate) check_uninitialized_properties: bool,
+    /// Enables the `@internal` restricted-usage engine (`internal.*`
+    /// diagnostics) - restricts a symbol tagged `@internal` (or
+    /// declared inside an `@internal`-tagged class) to callers
+    /// sharing its own top-level namespace. Off by default,
+    /// mirroring real PHPStan's own opt-in `featureToggles.
+    /// internalTag` parameter - see `registry::Registry::
+    /// check_internal_usage`'s own doc comment for why.
+    #[arg(long)]
+    pub(crate) check_internal_usage: bool,
+    /// Enables `use function`'s own `function.nameCase` check (a
+    /// case-mismatched `use function` import, e.g. `use function
+    /// STRLEN;`). Off by default, mirroring real PHPStan's own
+    /// opt-in `checkFunctionNameCase` parameter - see `registry::
+    /// Registry::check_function_name_case`'s own doc comment for
+    /// why.
+    #[arg(long)]
+    pub(crate) check_function_name_case: bool,
+    /// Enables `@deprecated` usage warnings (`function.deprecated`/
+    /// `method.deprecated`/`staticMethod.deprecated`/
+    /// `property.deprecated`/`staticProperty.deprecated`/
+    /// `classConstant.deprecated`/`new.deprecated` diagnostics) -
+    /// flags a call/access/instantiation whose own doc comment (or,
+    /// for instantiation, the class's own doc comment) carries
+    /// `@deprecated`. Off by default - real PHPStan's own equivalent
+    /// isn't part of core `phpstan/phpstan` at all, but a separate,
+    /// opt-in Composer package (`phpstan/phpstan-deprecation-rules`),
+    /// see `registry::Registry::check_deprecated_usage`'s own doc
+    /// comment for why.
+    #[arg(long)]
+    pub(crate) check_deprecated_usage: bool,
+    /// Enables the reinstated empty-concrete-method-body completeness
+    /// check (`return.missing`/`return.never` now also firing on a
+    /// literal `{}` body, not just a real fall-through). Off by
+    /// default - see `registry::Registry::check_empty_method_bodies`'s
+    /// own doc comment for the confirmed corpus false-positive class
+    /// (IDE-stub/native-extension declaration files) this avoids.
+    #[arg(long)]
+    pub(crate) check_empty_method_bodies: bool,
+    /// Enables the opt-in "missing checked exception" family
+    /// (`throws.missingType` on a real, explicit `throw` whose own
+    /// type isn't covered by any `@throws` tag). Off by default - the
+    /// riskiest of this project's opt-in checks given the real
+    /// corpus's documented inconsistent `@throws` tagging, see
+    /// `registry::Registry::check_missing_checked_exceptions`'s own
+    /// doc comment for why.
+    #[arg(long)]
+    pub(crate) check_missing_checked_exceptions: bool,
+    /// Enables the strict (vs. the default, castable) printf
+    /// placeholder-type matching mode for `sprintf`/`printf`/
+    /// `vsprintf`/`vprintf`/`fprintf` argument-type checks. Off by
+    /// default - matches real PHPStan's own stock config exactly, see
+    /// `registry::Registry::check_strict_printf_placeholder_types`'s
+    /// own doc comment for why.
+    #[arg(long)]
+    pub(crate) check_strict_printf_placeholder_types: bool,
+    /// Enables `TooWideMethodThrowTypeRule`'s wider, re-declaration-
+    /// only mode for a protected/public method that isn't final (and
+    /// isn't on a final class). Off by default - matches real
+    /// PHPStan's own stock config exactly, see `registry::Registry::
+    /// check_too_wide_throw_type_in_protected_and_public_methods`'s
+    /// own doc comment for why.
+    #[arg(long)]
+    pub(crate) check_too_wide_throw_type_in_protected_and_public_methods: bool,
+    /// Enables `TooWideMethodReturnTypehintRule`'s wider, re-
+    /// declaration-only mode for a protected/public method that
+    /// isn't final (and isn't on a final class) - the return-type
+    /// analogue of the flag above. Off by default, same reason - see
+    /// `registry::Registry::check_too_wide_return_type_in_protected_and_public_methods`'s
+    /// own doc comment.
+    #[arg(long)]
+    pub(crate) check_too_wide_return_type_in_protected_and_public_methods: bool,
+    /// The by-ref-parameter analogue of the flag above
+    /// (`TooWideMethodParameterOutTypeRule`) - see `registry::Registry::
+    /// check_too_wide_by_ref_type_in_protected_and_public_methods`'s
+    /// own doc comment.
+    #[arg(long)]
+    pub(crate) check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
+    /// Enables `MethodThrowTypeCovarianceRule` (a method's own
+    /// `@throws` type must be covariant with its immediate parent
+    /// class/every transitive interface/abstract trait declaration's
+    /// own `@throws`). Off by default - see `registry::Registry::
+    /// check_method_throw_type_covariance`'s own doc comment for why.
+    #[arg(long)]
+    pub(crate) check_method_throw_type_covariance: bool,
+    /// Mirrors real PHPStan's own standalone `checkBenevolentUnionTypes`
+    /// parameter, opting into its stricter (non-default) behavior -
+    /// see `registry::Registry::check_benevolent_union_types`'s own
+    /// doc comment for why real PHPStan's own default is already
+    /// unconditionally lenient, matching this checker's status quo.
+    #[arg(long)]
+    pub(crate) check_benevolent_union_types: bool,
+    /// Mirrors real PHPStan's own `checkMissingCallableSignature`
+    /// parameter (`missingType.callable`) - see
+    /// `registry::Registry::check_missing_callable_signature`.
+    #[arg(long)]
+    pub(crate) check_missing_callable_signature: bool,
+    /// Enables opt-in whole-project duplicate top-level-function-
+    /// declaration detection (`function.duplicate`). Off by default:
+    /// real PHPStan's own `DuplicateFunctionDeclarationRule` is
+    /// `#[ValidatesStubFiles]` and never runs against ordinary
+    /// scanned files at all, so this checker has no general way to
+    /// rule out two same-named functions in separate files that are
+    /// never actually loaded together in the same PHP process,
+    /// hence off by default - see `registry::Registry::check_duplicate_function_
+    /// declarations`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_duplicate_function_declarations: bool,
+    /// Enables opt-in whole-project duplicate class/interface/trait/
+    /// enum-declaration detection (`class.duplicate`/etc.) - going
+    /// beyond real PHPStan, which has no whole-project equivalent of
+    /// this check at all (see `checker::duplicate_classes`'s own
+    /// module doc comment). Off by default: its one known corpus
+    /// false-positive shape (a vendored built-in stub override
+    /// colliding with the real extension's own class) needs
+    /// `--stub-path`/`stub_paths` correctly populated first - see
+    /// `registry::Registry::check_duplicate_class_declarations`'s own
+    /// doc comment.
+    #[arg(long)]
+    pub(crate) check_duplicate_class_declarations: bool,
+    /// Enables "boolean trap" detection - a bare `true`/`false`
+    /// literal passed positionally into a bare-`bool`-typed
+    /// parameter. Off by default: unambiguous single-bool-parameter
+    /// calls are common and would otherwise be pure noise - see
+    /// `registry::Registry::check_boolean_trap`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_boolean_trap: bool,
+    /// Enables array-key cast warnings (a literal float/bool/null/
+    /// numeric-string array key silently cast at runtime). Off by
+    /// default - real PHPStan itself only ever registers this in its
+    /// own private issue-bot config, never an installable package -
+    /// see `registry::Registry::check_array_key_cast`'s own doc
+    /// comment.
+    #[arg(long)]
+    pub(crate) check_array_key_cast: bool,
+    /// Enables `RequireParentConstructCallRule` (a concrete class's
+    /// own `__construct()` never calling `parent::__construct()`
+    /// when a real, callable parent constructor exists). Off by
+    /// default - real PHPStan ships this only via the separate,
+    /// opt-in `phpstan/phpstan-strict-rules` package - see
+    /// `registry::Registry::check_parent_constructor_call`'s own
+    /// doc comment.
+    #[arg(long)]
+    pub(crate) check_parent_constructor_call: bool,
+    /// Enables constructor-property-promotion suggestions for a
+    /// trivially-forwarding constructor. Off by default - a purely
+    /// stylistic suggestion, not a bug - see `registry::Registry::
+    /// check_promoted_property_suggestions`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_promoted_property_suggestions: bool,
+    /// Enables the "only booleans are allowed in a condition" family
+    /// (`if`/`elseif`/`while`/`do-while`/ternary conditions, `&&`/
+    /// `||` operands, negated booleans). Off by default - real
+    /// PHPStan ships this only via the separate, opt-in
+    /// `phpstan/phpstan-strict-rules` package - see `registry::
+    /// Registry::check_boolean_conditions`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_boolean_conditions: bool,
+    /// Enables strict `checkDynamicProperties` behavior inside
+    /// `isset()`/`empty()`/`??`/`??=` (still flags a property that
+    /// doesn't exist there, instead of real PHPStan's lenient
+    /// default of silently allowing the probe). Off by default,
+    /// mirroring real PHPStan's own opt-in `checkDynamicProperties`
+    /// parameter - see `registry::Registry::
+    /// check_dynamic_properties`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_dynamic_properties: bool,
+    /// Enables swapped-adjacent-argument-name detection (`resize
+    /// ($height, $width)` where the declared params are `(int
+    /// $width, int $height)`). Off by default - a real, disclosed
+    /// heuristic (two same-typed parameters are structurally
+    /// invisible to any type-system-based check as "different
+    /// roles"), not a soundness gap - see `registry::Registry::
+    /// check_swapped_arguments`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_swapped_arguments: bool,
+    /// Enables `never`-return-type suggestions for a function/method
+    /// that provably never returns normally but is declared `void`
+    /// (or left undeclared). Off by default - real PHPStan already
+    /// computes this exact fact, but never ships an installable
+    /// rule consuming it - see `registry::Registry::
+    /// check_never_return_suggestions`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_never_return_suggestions: bool,
+    /// Enables missing-`default:`-arm detection for `switch`
+    /// statements. Off by default - see `registry::Registry::
+    /// check_switch_missing_default`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_switch_missing_default: bool,
+    /// Enables missing-exception-message detection (`throw new
+    /// Exception()` with zero constructor arguments). Off by
+    /// default - see `registry::Registry::check_throw_without_
+    /// message`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_throw_without_message: bool,
+    /// Enables base-Exception/Error-class detection (`throw new
+    /// Exception(...)`/`throw new Error(...)` instead of a specific
+    /// subclass). Off by default - see `registry::Registry::
+    /// check_throw_base_class`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_throw_base_class: bool,
+    /// Requires a `catch` to pass the caught exception as the previous
+    /// exception of one it throws, and a catch of a base exception type
+    /// to rethrow.
+    #[arg(long)]
+    pub(crate) check_exception_hygiene: bool,
+    /// Flag implicit dependence on the current time instead of an injected clock.
+    #[arg(long)]
+    pub(crate) check_current_time_dependence: bool,
+    /// Flag PSR-3 logger calls that leave out an in-scope Throwable as the exception context key.
+    #[arg(long)]
     check_psr3_exception_context: bool,
+    /// Check PSR-3 logger calls: placeholders against context keys, static messages, levels and context shape.
+    #[arg(long)]
     check_psr3_logging: bool,
-    psr3_context_key_pattern: Option<regex::Regex>,
-    check_magic_numbers: bool,
-    magic_number_options: (Option<Vec<f64>>, bool),
-    check_native_type_hints: bool,
-    check_implicit_array_creation: bool,
-    check_useless_casts: bool,
-    check_strict_array_filter: bool,
-    check_mixed_type_operands: bool,
-    check_comparable_types: bool,
-    check_arithmetic_operands: bool,
-    check_identity_vs_equals: bool,
-    check_loose_haystack_comparison: bool,
-    check_strict_function_calls: bool,
-    check_switch_case_types: bool,
-    check_loop_variable_overwrite: bool,
-    check_dynamic_static_calls: bool,
-    check_illegal_constructor_calls: bool,
-    check_enum_exhaustiveness: bool,
-    check_null_coercion: bool,
-    check_new_exception_discarded: bool,
-    check_risky_tests: bool,
-    check_dead_enum_cases: bool,
-    check_dead_code: bool,
-    check_circular_dependencies: bool,
-    check_dead_abstract_classes: bool,
-    check_dead_members: bool,
-    check_renamed_named_arguments: bool,
-    report_unmatched_ignored_errors: bool,
-    composer_manifests: Vec<composer::manifest::ComposerManifest>,
-    architecture_rules: &[phpstan_rs::architecture::ArchitectureRule],
-    banned_constructs: &[phpstan_rs::banned::BannedConstruct],
-    banned_types: &[String],
-    check_closed_classes: bool,
-    parent_call_rules: &[phpstan_rs::parent_calls::ParentCallRule],
-    assertion_tables: (
-        Vec<phpstan_rs::assertion_tables::AssertionEntry>,
-        Vec<phpstan_rs::assertion_tables::ClassArgumentReturn>,
-    ),
-    mock_hygiene: Option<Vec<String>>,
-    configured_level: Option<u8>,
-    stub_dirs: &[PathBuf],
-    php_version: Option<php_version::PhpVersion>,
+    /// Flag magic numbers: numeric literals outside constant declarations.
+    #[arg(long)]
+    pub(crate) check_magic_numbers: bool,
+    /// Suggest native parameter and return types for PHPDoc-only types.
+    #[arg(long)]
+    pub(crate) check_native_type_hints: bool,
+    /// Flag offset assignments that implicitly create an array variable.
+    #[arg(long)]
+    pub(crate) check_implicit_array_creation: bool,
+    /// Flag casts to a type the expression already has.
+    #[arg(long)]
+    pub(crate) check_useless_casts: bool,
+    /// Flag array_filter() calls relying on loose truthiness.
+    #[arg(long)]
+    pub(crate) check_strict_array_filter: bool,
+    /// Flag operators combining a string with a non-string, or an array with a non-array.
+    #[arg(long)]
+    pub(crate) check_mixed_type_operands: bool,
+    /// Flag ordering comparisons between non-comparable or mismatched types.
+    #[arg(long)]
+    pub(crate) check_comparable_types: bool,
+    /// Flag non-numeric operands of arithmetic, unary +/- and ++/-- operators.
+    #[arg(long)]
+    pub(crate) check_arithmetic_operands: bool,
+    /// Flag === and !== between objects whose class defines a matching equals() method.
+    #[arg(long)]
+    pub(crate) check_identity_vs_equals: bool,
+    /// Flag loose in_array()/array_search()/array_keys() calls whose needle and haystack types compare differently under == and ===.
+    #[arg(long)]
+    pub(crate) check_loose_haystack_comparison: bool,
+    /// Flag in_array()/array_search()/array_keys()/base64_decode() calls without strict mode, and iterator_to_array() without preserve_keys.
+    #[arg(long)]
+    pub(crate) check_strict_function_calls: bool,
+    /// Flag switch cases whose type can never match the switch subject's.
+    #[arg(long)]
+    pub(crate) check_switch_case_types: bool,
+    /// Flag foreach/for loop variables that overwrite an already-defined variable.
+    #[arg(long)]
+    pub(crate) check_loop_variable_overwrite: bool,
+    /// Flag static methods called through an instance with ->.
+    #[arg(long)]
+    pub(crate) check_dynamic_static_calls: bool,
+    /// Flag calls to __construct() other than a parent constructor call from a constructor.
+    #[arg(long)]
+    pub(crate) check_illegal_constructor_calls: bool,
+    /// Reports a default arm in a match over an enum, and switch or if-chains over enum cases where a match would be exhaustive.
+    #[arg(long)]
+    pub(crate) check_enum_exhaustiveness: bool,
+    /// Reports isset()/empty() on objects and possibly-null values in string interpolation, concatenation, arithmetic and compound assignments.
+    #[arg(long)]
+    pub(crate) check_null_coercion: bool,
+    /// Enables discarded-`new`-exception detection (`new
+    /// SomeException(...);` sitting on its own line, never thrown).
+    /// Off by default - see `registry::Registry::check_new_exception_
+    /// discarded`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_new_exception_discarded: bool,
+    /// Enables assertion-less-test ("risky test") detection (a
+    /// PHPUnit test method/Pest test closure with zero assertion-
+    /// shaped calls anywhere in its body). Off by default - a test
+    /// that only ever calls a custom, differently-named assertion-
+    /// helper method is a real, disclosed false positive - see
+    /// `registry::Registry::check_risky_tests`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_risky_tests: bool,
+    /// Enables dead-enum-case detection (a declared case never
+    /// referenced via `EnumName::CaseName`, a `match`/`switch` arm
+    /// value, or a literal `::from()`/`::tryFrom()` argument,
+    /// project-wide). Off by default - see
+    /// `registry::Registry::check_dead_enum_cases`'s own doc comment
+    /// for the real, disclosed false-positive risks.
+    #[arg(long)]
+    pub(crate) check_dead_enum_cases: bool,
+    /// Enables dead-function/dead-class detection (a top-level
+    /// function or class/interface/trait/enum never referenced
+    /// anywhere in the project). Off by default - see
+    /// `registry::Registry::check_dead_code`'s own doc comment for
+    /// the real, disclosed false-positive risks.
+    #[arg(long)]
+    pub(crate) check_dead_code: bool,
+    /// Enables namespace-level circular-dependency detection (a
+    /// namespace with a class that `extends`/`implements`/`use`s a
+    /// class in another namespace that, via some other class pair,
+    /// has an edge back). Off by default - see `registry::Registry::
+    /// check_circular_dependencies`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_circular_dependencies: bool,
+    /// Enables dead-abstract-class detection (an `abstract class`
+    /// with zero concrete descendants anywhere in the project). Off
+    /// by default - see `registry::Registry::
+    /// check_dead_abstract_classes`'s own doc comment.
+    #[arg(long)]
+    pub(crate) check_dead_abstract_classes: bool,
+    /// Enables dead-protected/public-member detection (a method/
+    /// property/const never referenced anywhere in the project). Off
+    /// by default - see `registry::Registry::check_dead_members`'s
+    /// own doc comment for the real, disclosed false-positive risks.
+    #[arg(long)]
+    pub(crate) check_dead_members: bool,
+    /// Reports inline `@phpstan-ignore*` comments that suppress
+    /// nothing. Off by default - an ignore naming a rule this project
+    /// doesn't implement would always be unmatched.
+    #[arg(long)]
+    pub(crate) report_unmatched_ignored_errors: bool,
+    /// Checks the analysed code against the root composer.json:
+    /// undeclared, misplaced and unused dependencies, PSR-4 locations,
+    /// required extensions, `provide`, `scripts` and
+    /// `config.platform.php`. Off by default.
+    #[arg(long)]
+    pub(crate) check_composer_hygiene: bool,
+    /// Reports classes that aren't final, protected members of final
+    /// classes, and overridable concrete methods of abstract classes,
+    /// where nothing in the project extends or overrides them.
+    #[arg(long)]
+    pub(crate) check_closed_classes: bool,
+    /// Reports PHPUnit mock-builder misuse: ambiguous `expects($this->any())`,
+    /// unverified `with()` on stubs, conflicting return configurations,
+    /// mocks configured without expectations, and mock-typed unions.
+    #[arg(long)]
+    pub(crate) check_mock_hygiene: bool,
+    /// Enables named-argument-rename-collision detection (a named-
+    /// argument call site against a method an override elsewhere
+    /// renamed a parameter on). Off by default - see `registry::
+    /// Registry::check_renamed_named_arguments`'s own doc comment
+    /// for the real added cost.
+    #[arg(long)]
+    pub(crate) check_renamed_named_arguments: bool,
+    /// Target PHP version, as "major.minor" (e.g. "8.1") - gates the
+    /// portability rules that check "X is only supported on PHP Y.Z
+    /// and later" (see `php_version::PhpFeature`). Unset means no
+    /// such rule has anything to check against yet.
+    #[arg(long)]
+    pub(crate) php_version: Option<String>,
+    #[arg(long)]
+    pub(crate) generate_baseline: Option<PathBuf>,
+    #[arg(long)]
+    pub(crate) baseline: Option<PathBuf>,
+    /// Matches a baseline entry by its identifier when its message
+    /// text no longer matches, so rewording doesn't resurface it.
+    #[arg(long)]
+    pub(crate) baseline_match_identifier: bool,
+    /// Writes `--generate-baseline` as one file per identifier in a
+    /// directory named after the baseline file, which becomes an
+    /// index including them.
+    #[arg(long)]
+    pub(crate) baseline_per_identifier: bool,
+    /// Applies every suggested fix (the same ones the language server
+    /// offers as quick fixes) to the files on disk.
+    #[arg(long)]
+    pub(crate) fix: bool,
+    /// Writes every tracked variable's type after each statement of
+    /// every analysed file to this path (a regression-gate snapshot).
+    #[arg(long, hide = true)]
+    pub(crate) dump_types: Option<PathBuf>,
+    /// Extra directories loaded for type-resolution context only -
+    /// never analyzed or reported on. Repeatable.
+    #[arg(long = "scan-dir")]
+    pub(crate) scan_dirs: Vec<PathBuf>,
+    /// A directory (walked) or single file whose class-like
+    /// declarations are designated overrides, never a genuine
+    /// accidental duplicate (e.g. a vendored `Imagick.stub.php`) -
+    /// see `check_duplicate_class_declarations` above. Repeatable.
+    /// Also loaded for type-resolution context, exactly like
+    /// `--scan-dir` (unioned into it internally).
+    #[arg(long = "stub-path")]
+    pub(crate) stub_paths: Vec<PathBuf>,
+    /// Disables the automatic Composer-autoloader-based `vendor/`
+    /// context load (see `composer::discover_vendor_context`).
+    /// `--scan-dir` still works.
+    #[arg(long)]
+    pub(crate) no_composer: bool,
+    /// TOML config file (see src/config.rs) supplying defaults for
+    /// paths/level/baseline/strict_mixed_arrays/
+    /// check_uninitialized_properties/scan_paths/no_composer/
+    /// php_version - any flag above, when given, overrides the same
+    /// key in the config.
+    #[arg(long)]
+    pub(crate) config: Option<PathBuf>,
+    /// Output format: `text` (default, human-readable), `json`, or
+    /// `checkstyle` (XML) - the latter two for CI pipelines that want
+    /// to consume diagnostics as structured data rather than parsing
+    /// plain text. CLI-only, matching real PHPStan's own
+    /// `--error-format`: unlike `level`/`baseline`/etc., this isn't a
+    /// `config.rs` TOML key, since it's how one particular invocation
+    /// wants its output shaped, not a standing project setting.
+    #[arg(long)]
+    pub(crate) format: Option<OutputFormat>,
+}
+
+/// A flag given on the command line turns its config key on; one left
+/// off leaves the config's own value.
+fn overlay_flags(args: &CheckProjectArgs, config: &mut config::Config) {
+    if args.strict_mixed_arrays {
+        config.strict_mixed_arrays = Some(true);
+    }
+    if args.check_uninitialized_properties {
+        config.check_uninitialized_properties = Some(true);
+    }
+    if args.check_internal_usage {
+        config.check_internal_usage = Some(true);
+    }
+    if args.check_function_name_case {
+        config.check_function_name_case = Some(true);
+    }
+    if args.check_deprecated_usage {
+        config.check_deprecated_usage = Some(true);
+    }
+    if args.check_empty_method_bodies {
+        config.check_empty_method_bodies = Some(true);
+    }
+    if args.check_missing_checked_exceptions {
+        config.check_missing_checked_exceptions = Some(true);
+    }
+    if args.check_strict_printf_placeholder_types {
+        config.check_strict_printf_placeholder_types = Some(true);
+    }
+    if args.check_too_wide_throw_type_in_protected_and_public_methods {
+        config.check_too_wide_throw_type_in_protected_and_public_methods = Some(true);
+    }
+    if args.check_too_wide_return_type_in_protected_and_public_methods {
+        config.check_too_wide_return_type_in_protected_and_public_methods = Some(true);
+    }
+    if args.check_too_wide_by_ref_type_in_protected_and_public_methods {
+        config.check_too_wide_by_ref_type_in_protected_and_public_methods = Some(true);
+    }
+    if args.check_method_throw_type_covariance {
+        config.check_method_throw_type_covariance = Some(true);
+    }
+    if args.check_benevolent_union_types {
+        config.check_benevolent_union_types = Some(true);
+    }
+    if args.check_missing_callable_signature {
+        config.check_missing_callable_signature = Some(true);
+    }
+    if args.check_duplicate_function_declarations {
+        config.check_duplicate_function_declarations = Some(true);
+    }
+    if args.check_duplicate_class_declarations {
+        config.check_duplicate_class_declarations = Some(true);
+    }
+    if args.check_boolean_trap {
+        config.check_boolean_trap = Some(true);
+    }
+    if args.check_array_key_cast {
+        config.check_array_key_cast = Some(true);
+    }
+    if args.check_parent_constructor_call {
+        config.check_parent_constructor_call = Some(true);
+    }
+    if args.check_promoted_property_suggestions {
+        config.check_promoted_property_suggestions = Some(true);
+    }
+    if args.check_boolean_conditions {
+        config.check_boolean_conditions = Some(true);
+    }
+    if args.check_dynamic_properties {
+        config.check_dynamic_properties = Some(true);
+    }
+    if args.check_swapped_arguments {
+        config.check_swapped_arguments = Some(true);
+    }
+    if args.check_never_return_suggestions {
+        config.check_never_return_suggestions = Some(true);
+    }
+    if args.check_switch_missing_default {
+        config.check_switch_missing_default = Some(true);
+    }
+    if args.check_throw_without_message {
+        config.check_throw_without_message = Some(true);
+    }
+    if args.check_throw_base_class {
+        config.check_throw_base_class = Some(true);
+    }
+    if args.check_exception_hygiene {
+        config.check_exception_hygiene = Some(true);
+    }
+    if args.check_current_time_dependence {
+        config.check_current_time_dependence = Some(true);
+    }
+    if args.check_magic_numbers {
+        config.check_magic_numbers = Some(true);
+    }
+    if args.check_native_type_hints {
+        config.check_native_type_hints = Some(true);
+    }
+    if args.check_implicit_array_creation {
+        config.check_implicit_array_creation = Some(true);
+    }
+    if args.check_useless_casts {
+        config.check_useless_casts = Some(true);
+    }
+    if args.check_strict_array_filter {
+        config.check_strict_array_filter = Some(true);
+    }
+    if args.check_mixed_type_operands {
+        config.check_mixed_type_operands = Some(true);
+    }
+    if args.check_comparable_types {
+        config.check_comparable_types = Some(true);
+    }
+    if args.check_arithmetic_operands {
+        config.check_arithmetic_operands = Some(true);
+    }
+    if args.check_identity_vs_equals {
+        config.check_identity_vs_equals = Some(true);
+    }
+    if args.check_loose_haystack_comparison {
+        config.check_loose_haystack_comparison = Some(true);
+    }
+    if args.check_strict_function_calls {
+        config.check_strict_function_calls = Some(true);
+    }
+    if args.check_switch_case_types {
+        config.check_switch_case_types = Some(true);
+    }
+    if args.check_loop_variable_overwrite {
+        config.check_loop_variable_overwrite = Some(true);
+    }
+    if args.check_dynamic_static_calls {
+        config.check_dynamic_static_calls = Some(true);
+    }
+    if args.check_illegal_constructor_calls {
+        config.check_illegal_constructor_calls = Some(true);
+    }
+    if args.check_enum_exhaustiveness {
+        config.check_enum_exhaustiveness = Some(true);
+    }
+    if args.check_null_coercion {
+        config.check_null_coercion = Some(true);
+    }
+    if args.check_new_exception_discarded {
+        config.check_new_exception_discarded = Some(true);
+    }
+    if args.check_risky_tests {
+        config.check_risky_tests = Some(true);
+    }
+    if args.check_dead_enum_cases {
+        config.check_dead_enum_cases = Some(true);
+    }
+    if args.check_dead_code {
+        config.check_dead_code = Some(true);
+    }
+    if args.check_circular_dependencies {
+        config.check_circular_dependencies = Some(true);
+    }
+    if args.check_dead_abstract_classes {
+        config.check_dead_abstract_classes = Some(true);
+    }
+    if args.check_dead_members {
+        config.check_dead_members = Some(true);
+    }
+    if args.report_unmatched_ignored_errors {
+        config.report_unmatched_ignored_errors = Some(true);
+    }
+    if args.check_composer_hygiene {
+        config.check_composer_hygiene = Some(true);
+    }
+    if args.check_closed_classes {
+        config.check_closed_classes = Some(true);
+    }
+    if args.check_mock_hygiene {
+        config.check_mock_hygiene = Some(true);
+    }
+    if args.check_renamed_named_arguments {
+        config.check_renamed_named_arguments = Some(true);
+    }
+}
+
+pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
+    let config_dir = args
+        .config
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf);
+    let mut config = match &args.config {
+        Some(path) => match config::Config::load(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        },
+        None => config::Config::default(),
+    };
+    overlay_flags(&args, &mut config);
+    let resolve_against_config = |p: PathBuf| match &config_dir {
+        Some(dir) => dir.join(p),
+        None => p,
+    };
+    let baseline_path = args
+        .baseline
+        .clone()
+        .or(config.baseline.clone().map(resolve_against_config));
+    let baseline_mode =
+        if args.baseline_match_identifier || config.baseline_match_identifier.unwrap_or(false) {
+            baseline::MatchMode::Identifier
+        } else {
+            baseline::MatchMode::Message
+        };
+    let baseline_per_identifier =
+        args.baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
+    let overrides = Overrides {
+        paths: args.dirs.clone(),
+        scan_paths: args.scan_dirs.clone(),
+        stub_paths: args.stub_paths.clone(),
+        level: args.level,
+        report_level: None,
+        php_version: args.php_version.clone(),
+        no_composer: args.no_composer,
+    };
+    let session = match Session::resolve(config, config_dir, PathBuf::from("."), overrides) {
+        Ok(session) => session,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    for warning in &session.warnings {
+        eprintln!("{warning}");
+    }
+    let analysis = match session.run(args.dump_types.as_deref()) {
+        Ok(analysis) => analysis,
+        Err(e) => {
+            eprintln!("{e}");
+            return;
+        }
+    };
+    report(
+        analysis,
+        args.generate_baseline.as_deref(),
+        baseline_path.as_deref(),
+        baseline_mode,
+        baseline_per_identifier,
+        args.fix,
+        args.format.unwrap_or_default(),
+    );
+}
+
+fn report(
+    analysis: phpstan_rs::project::session::Analysis,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
     baseline_mode: baseline::MatchMode,
     baseline_per_identifier: bool,
     apply_fixes: bool,
-    dump_types: Option<&Path>,
-    ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
-    restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
-    dynamic_constant_names: &[(String, Option<String>)],
-    doctrine_custom_function_entries: &[doctrine_functions::DoctrineCustomFunctionEntry],
-    sql_reflection_config: Option<sql_reflection_config::SqlReflectionConfig>,
-    sql_reflection_schema: Option<sql_reflection_schema::SchemaCatalog>,
-    phpstan_api_check_enabled: bool,
     format: OutputFormat,
 ) {
-    // Deterministic load order matters now in a way it didn't for
-    // --check (parse-only): a real corpus can genuinely declare the same
-    // fully-qualified class name twice (e.g. multiple vendored copies of
-    // the same library bundled by different tools, none php-scoper-
-    // prefixed relative to each other) - readdir order is filesystem-
-    // dependent, so without sorting, which declaration
-    // "wins" the registry slot (and therefore which one's real methods
-    // are visible) could silently vary between runs on different
-    // machines or filesystems - `collect_analyze_and_context_files`'s own
-    // sort()/dedup() calls handle this.
-    let (analyze_files, context_files) =
-        collect_analyze_and_context_files(dirs, scan_dirs, scan_files);
-    if analyze_files.is_empty() {
-        let dirs: Vec<String> = dirs.iter().map(|d| d.display().to_string()).collect();
-        eprintln!("no .php files found under {}", dirs.join(", "));
-        return;
-    }
-
-    let mut project = project::Project::new();
-    project.set_strict_mixed_arrays(strict_mixed_arrays);
-    project.set_check_uninitialized_properties(check_uninitialized_properties);
-    project.set_check_internal_usage(check_internal_usage);
-    project.set_check_function_name_case(check_function_name_case);
-    project.set_check_deprecated_usage(check_deprecated_usage);
-    project.set_check_empty_method_bodies(check_empty_method_bodies);
-    project.set_check_missing_checked_exceptions(check_missing_checked_exceptions);
-    project.set_check_strict_printf_placeholder_types(check_strict_printf_placeholder_types);
-    project.set_check_too_wide_throw_type_in_protected_and_public_methods(
-        check_too_wide_throw_type_in_protected_and_public_methods,
-    );
-    project.set_check_too_wide_return_type_in_protected_and_public_methods(
-        check_too_wide_return_type_in_protected_and_public_methods,
-    );
-    project.set_check_too_wide_by_ref_type_in_protected_and_public_methods(
-        check_too_wide_by_ref_type_in_protected_and_public_methods,
-    );
-    project.set_check_method_throw_type_covariance(check_method_throw_type_covariance);
-    project.set_check_benevolent_union_types(check_benevolent_union_types);
-    project.set_check_missing_callable_signature(check_missing_callable_signature);
-    project.set_check_duplicate_function_declarations(check_duplicate_function_declarations);
-    project.set_check_duplicate_class_declarations(check_duplicate_class_declarations);
-    project.set_check_boolean_trap(check_boolean_trap);
-    project.set_check_array_key_cast(check_array_key_cast);
-    project.set_check_parent_constructor_call(check_parent_constructor_call);
-    project.set_check_promoted_property_suggestions(check_promoted_property_suggestions);
-    project.set_check_boolean_conditions(check_boolean_conditions);
-    project.set_check_dynamic_properties(check_dynamic_properties);
-    project.set_check_swapped_arguments(check_swapped_arguments);
-    project.set_check_never_return_suggestions(check_never_return_suggestions);
-    project.set_check_switch_missing_default(check_switch_missing_default);
-    project.set_check_throw_without_message(check_throw_without_message);
-    project.set_check_throw_base_class(check_throw_base_class);
-    project.set_check_exception_hygiene(check_exception_hygiene);
-    project.set_check_current_time_dependence(check_current_time_dependence);
-    project.set_check_psr3_exception_context(check_psr3_exception_context);
-    project.set_check_psr3_logging(check_psr3_logging);
-    project.set_psr3_context_key_pattern(psr3_context_key_pattern);
-    project.set_check_magic_numbers(check_magic_numbers);
-    project.set_magic_number_options(magic_number_options.0, magic_number_options.1);
-    project.set_check_native_type_hints(check_native_type_hints);
-    project.set_check_implicit_array_creation(check_implicit_array_creation);
-    project.set_check_useless_casts(check_useless_casts);
-    project.set_check_strict_array_filter(check_strict_array_filter);
-    project.set_check_mixed_type_operands(check_mixed_type_operands);
-    project.set_check_comparable_types(check_comparable_types);
-    project.set_check_arithmetic_operands(check_arithmetic_operands);
-    project.set_check_identity_vs_equals(check_identity_vs_equals);
-    project.set_check_loose_haystack_comparison(check_loose_haystack_comparison);
-    project.set_check_strict_function_calls(check_strict_function_calls);
-    project.set_check_switch_case_types(check_switch_case_types);
-    project.set_check_loop_variable_overwrite(check_loop_variable_overwrite);
-    project.set_check_dynamic_static_calls(check_dynamic_static_calls);
-    project.set_check_illegal_constructor_calls(check_illegal_constructor_calls);
-    project.set_check_enum_exhaustiveness(check_enum_exhaustiveness);
-    project.set_check_null_coercion(check_null_coercion);
-    project.set_check_new_exception_discarded(check_new_exception_discarded);
-    project.set_check_risky_tests(check_risky_tests);
-    project.set_check_dead_enum_cases(check_dead_enum_cases);
-    project.set_check_dead_code(check_dead_code);
-    project.set_check_circular_dependencies(check_circular_dependencies);
-    project.set_check_dead_abstract_classes(check_dead_abstract_classes);
-    project.set_check_dead_members(check_dead_members);
-    project.set_defer_inline_ignores(true);
-    project.set_assertion_tables(assertion_tables.0, assertion_tables.1);
-    project.set_check_renamed_named_arguments(check_renamed_named_arguments);
-    project.set_configured_level(configured_level);
-    project.set_restricted_symbols(restricted_symbol_entries);
-    project.set_dynamic_constant_names(dynamic_constant_names);
-    project.set_doctrine_custom_functions(doctrine_custom_function_entries);
-    project.set_sql_reflection_config(sql_reflection_config);
-    project.set_sql_reflection_schema(sql_reflection_schema);
-    project.set_php_version(php_version);
-    project.set_phpstan_api_check_enabled(phpstan_api_check_enabled);
-
-    // A bare rayon pool uses the default (small) OS worker-thread stack -
-    // the sibling `check` command's own `WORKER_STACK_SIZE` precedent
-    // (check.rs) records a real, non-adversarial stack overflow at
-    // ~200-300 levels of nested parens on a default-sized thread stack,
-    // well short of the parser's own `MAX_EXPR_DEPTH=1000` guard -
-    // relevant to both phases below, since parsing recurses
-    // through the same shape of nesting and the checker's own recursive
-    // AST walk (`checker/expr.rs` etc.) has no depth guard of its own
-    // either. One call-local pool (not `build_global()`) shared by both
-    // phases keeps this stack-size choice scoped to `check-project`
-    // instead of silently sizing every other future rayon caller in this
-    // binary, and avoids paying pool-construction cost twice.
-    const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
-    let pool = rayon::ThreadPoolBuilder::new()
-        .stack_size(WORKER_STACK_SIZE)
-        .build()
-        .expect("failed to build check-project worker pool");
-
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    // Lexing+parsing each file is embarrassingly parallel - a pure
-    // computation over one file's own source text, with no dependency on
-    // (or mutation of) `project`'s shared registry at all (see
-    // `read_and_parse_file`/`ParsedFile`'s own doc comments). Once
-    // `check_file` below is parallelized, sequential lexing+parsing
-    // becomes the dominant remaining cost on a large real-world monorepo,
-    // which is what this loop exists to close.
-    //
-    // `context_files` and `analyze_files` are parsed in one combined
-    // `par_iter()` call, not two separate ones - each `pool.install(||
-    // ...collect())` is a full synchronization barrier (every worker must
-    // finish its share of one list before any worker starts the other),
-    // and the two lists are rarely balanced (a real corpus's own vendor/
-    // context tree is typically a different size than its first-party
-    // analyzed tree), so threads that drain their share of the smaller
-    // list early sit idle instead of picking up the other list's work.
-    // `par_iter().collect()` on an indexed slice preserves original
-    // order, so `combined_parsed.split_off(context_files.len())` cleanly
-    // recovers each list's own results in their own original order - the
-    // downstream `zip(context_files.iter(), ...)`/`zip(analyze_files.
-    // iter(), ...)` insert loops below are unchanged either way.
-    // Every real on-disk file reachable through a configured
-    // `stub_paths` entry (a directory, walked, or a single file listed
-    // directly - `collect_php_files` already handles both) - tags
-    // `DuplicateClassSites`' own `is_stub` provenance per file, so a
-    // designated stub override (e.g. `Imagick.stub.php`) is never itself
-    // flagged by `check_duplicate_class_declarations` and never counts
-    // toward flagging the real declaration it overrides. `stub_dirs` is
-    // already unioned into `scan_dirs` by the caller (so these files load
-    // as context exactly as before) - this is purely an additional,
-    // parallel tagging pass, not a second file-collection pass.
-    let mut stub_files_vec = Vec::new();
-    for dir in stub_dirs {
-        project::collect_php_files(dir, &mut stub_files_vec);
-    }
-    let stub_files: std::collections::HashSet<PathBuf> = stub_files_vec.into_iter().collect();
-
-    let combined_files: Vec<&PathBuf> = context_files.iter().chain(analyze_files.iter()).collect();
-    let mut combined_parsed: Vec<Option<(String, project::ParsedFile)>> = pool.install(|| {
-        combined_files
-            .par_iter()
-            .map(|p| read_and_parse_file(p, stub_files.contains(p.as_path())))
-            .collect()
-    });
-    let analyze_parsed = combined_parsed.split_off(context_files.len());
-    let context_parsed = combined_parsed;
-    std::panic::set_hook(default_hook);
-
-    // Context files insert first: `Registry::index` resolves a
-    // fully-qualified-name collision with plain last-write-wins (a bare
-    // `HashMap::insert`, no existence check, no diagnostic), and while
-    // the vendor-only filter in `composer::discover_vendor_context`
-    // keeps a project's own first-party directories out of the context
-    // set, it can't prevent a genuinely different vendor package
-    // declaring a class under the same name as something in the user's
-    // own code (PHP allows unnamespaced global classes). Inserting
-    // context first guarantees the analyzed declaration - the one
-    // actually being reported on - always wins the registry slot on any
-    // such collision (`analyzed: true` for `analyze_files`, `false` for
-    // `context_files` - see `Project::insert_parsed_file`'s own `analyzed`
-    // parameter doc comment for why this has to reach all the way down to
-    // class indexing). This insertion loop is the one part of loading
-    // that stays sequential: `Registry::index` is order-sensitive by
-    // design, and `par_iter().collect()` above already preserved each
-    // parsed result's original (sorted) index order, so this `zip`
-    // inserts in exactly the same order the old fully-sequential loop
-    // did.
-    let mut skipped_context = 0usize;
-    for (path, parsed) in context_files.iter().zip(context_parsed) {
-        match parsed {
-            Some((source, parsed)) => {
-                project.insert_parsed_file(path.clone(), parsed, source, false)
-            }
-            None => skipped_context += 1,
-        }
-    }
-    // Source length, captured here (before `source` is moved into
-    // `insert_parsed_file`) rather than re-read from disk afterward -
-    // used only to order the check phase's own `par_iter()` below by
-    // descending size, so a handful of unusually large files (a real
-    // corpus's own long tail) get scheduled onto the pool first instead
-    // of last, shrinking the straggler tail rayon's work-stealing alone
-    // can't fully avoid when the default alphabetical order happens to
-    // put them late. A rough proxy for real check cost (AST complexity
-    // matters more than byte count), not a precise one - good enough to
-    // shrink the tail without needing real per-file timing data.
-    let mut analyze_sizes: HashMap<PathBuf, usize> = HashMap::with_capacity(analyze_files.len());
-    let mut skipped_analyze = 0usize;
-    for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
-        match parsed {
-            Some((source, parsed)) => {
-                analyze_sizes.insert(path.clone(), source.len());
-                project.insert_parsed_file(path.clone(), parsed, source, true)
-            }
-            None => skipped_analyze += 1,
-        }
-    }
-    project.finish_loading();
-
-    let mut analyze_files_by_size = analyze_files.clone();
-    analyze_files_by_size
-        .sort_by_key(|path| std::cmp::Reverse(analyze_sizes.get(path).copied().unwrap_or(0)));
-
-    // Mirrors `check.rs`'s own catch_unwind-with-silenced-hook pattern: a
-    // panic while checking one file is reported and skipped rather than
-    // aborting every other in-flight file's work, and (unlike a bare
-    // `unwrap_or_default()` on the join result) the panic is preserved as
-    // a real per-file error rather than silently discarded along with
-    // whatever else that worker thread hadn't finished yet. The hook is
-    // process-global, so this silences panics from every pool worker
-    // thread, not just whichever one calls `install`. `Project`/`Registry`
-    // have no interior mutability (no `Cell`/`RefCell`/etc. anywhere), so
-    // `&project` is `UnwindSafe` with no `AssertUnwindSafe` wrapper
-    // needed - a panic mid-check can't have left it half-mutated.
-    let default_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(|_| {}));
-    // The collect half of the two-pass (collect-then-consume) checking
-    // architecture - a trait-donated property write discovered while
-    // checking *any* loaded file must reach `check_too_wide_property_
-    // types` in whichever file declares the host using it, which a
-    // single per-file pass can't guarantee (see `Project::
-    // collect_property_assign_facts`'s own doc comment). Run before the
-    // real, diagnostic-producing pass below, which consumes the merge via
-    // `check_file_with_property_assign_facts` instead of `check_file`.
-    // `Registry.sql_reflector`'s only interior mutability is a plain
-    // `OnceLock` - if its own lazy-init closure panics mid-connection-
-    // attempt, the cell is left simply uninitialized (not corrupted;
-    // `OnceLock::get_or_init`'s own contract), so a later observer
-    // (including a `catch_unwind` recovering from an unrelated panic
-    // elsewhere in the same closure) sees either "not yet initialized"
-    // or a real, valid reflector - never a torn/partial one. Asserting
-    // `UnwindSafe` here is that specific, checked claim, not a blanket
-    // "trust me."
-    let property_assign_facts = Arc::new(
-        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            project.collect_property_assign_facts()
-        }))
-        .unwrap_or_default(),
-    );
-    // Widened to optionally carry Tier-2 member-ref/escaped-enum data
-    // alongside each file's diagnostics - `None` (the `check_dead_enum_
-    // cases`-off common case) costs nothing extra. Folding this into the
-    // primary pass, rather than letting `check_whole_program`'s own
-    // `ensure_member_index_built` call derive it via a wholly separate
-    // second `Checker` pass over every file afterward, is what keeps a
-    // whole-program check's own real cost to the per-node tracking work
-    // below, not a doubling of total check time - see `Project::check_
-    // whole_program`'s own doc comment.
-    type MemberRefData = (
-        Vec<(Span, String, String)>,
-        HashSet<String>,
-        HashSet<String>,
-    );
-    type CheckOutcome = Result<(Vec<checker::Diagnostic>, Option<MemberRefData>), String>;
-    let needs_tier_2 = check_dead_enum_cases || check_dead_members;
-    let checked_results: Vec<(PathBuf, CheckOutcome)> = pool.install(|| {
-        analyze_files_by_size
-            .par_iter()
-            .map(|path| {
-                let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    if needs_tier_2 {
-                        let (diagnostics, member_refs, escaped_enums, escaped_member_classes) =
-                            project.check_file_with_property_assign_facts_collecting_member_refs(
-                                path,
-                                &property_assign_facts,
-                            );
-                        (
-                            diagnostics,
-                            Some((member_refs, escaped_enums, escaped_member_classes)),
-                        )
-                    } else {
-                        (
-                            project.check_file_with_property_assign_facts(
-                                path,
-                                &property_assign_facts,
-                            ),
-                            None,
-                        )
-                    }
-                }));
-                let outcome = outcome.map_err(|payload| {
-                    payload
-                        .downcast_ref::<String>()
-                        .cloned()
-                        .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-                        .unwrap_or_else(|| "unknown panic".to_string())
-                });
-                (path.clone(), outcome)
-            })
-            .collect()
-    });
-    std::panic::set_hook(default_hook);
-
-    if let Some(out) = dump_types {
-        let mut dumps: Vec<(&PathBuf, Vec<String>)> = pool.install(|| {
-            analyze_files_by_size
-                .par_iter()
-                .map(|path| (path, project.dump_types(path)))
-                .collect()
-        });
-        dumps.sort_by(|a, b| a.0.cmp(b.0));
-        let mut text = String::new();
-        for (path, lines) in dumps {
-            for line in lines {
-                text.push_str(&format!("{}:{line}\n", path.display()));
-            }
-        }
-        if let Err(e) = std::fs::write(out, text) {
-            eprintln!("failed to write type dump {}: {e}", out.display());
-        }
-    }
-
-    let mut results: HashMap<PathBuf, Vec<checker::Diagnostic>> = HashMap::new();
-    let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
-    for (path, outcome) in checked_results {
-        match outcome {
-            Ok((diagnostics, member_data)) => {
-                if let Some((member_refs, escaped_enums, escaped_member_classes)) = member_data {
-                    project.seed_member_refs(
-                        &path,
-                        member_refs,
-                        escaped_enums,
-                        escaped_member_classes,
-                    );
-                }
-                results.insert(path, diagnostics);
-            }
-            Err(msg) => check_panics.push((path, msg)),
-        }
-    }
-    check_panics.sort();
-    if needs_tier_2 {
-        project.mark_member_index_built();
-    }
-
-    for (path, diags) in project.check_whole_program() {
-        let entry = results.entry(path).or_default();
-        entry.extend(diags);
-        // `check_file_impl` always leaves its own per-file diagnostics
-        // sorted by span - a plain `.extend()` here would silently break
-        // that invariant for any file that has both ordinary and
-        // whole-program diagnostics (the new ones would always print
-        // last, regardless of their own line).
-        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-    }
-
-    if let Some(banned) = &mock_hygiene {
-        for (path, diags) in project.check_mock_hygiene(banned) {
-            let entry = results.entry(path).or_default();
-            entry.extend(diags);
-            entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-        }
-    }
-    for (path, diags) in project.check_class_shapes(check_closed_classes, parent_call_rules) {
-        let entry = results.entry(path).or_default();
-        entry.extend(diags);
-        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-    }
-    for (path, diags) in project.check_banned(banned_constructs, banned_types) {
-        let entry = results.entry(path).or_default();
-        entry.extend(diags);
-        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-    }
-    for (path, diags) in project.check_architecture(architecture_rules) {
-        let entry = results.entry(path).or_default();
-        entry.extend(diags);
-        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-    }
-    for manifest in &composer_manifests {
-        for (path, diags) in project.check_composer_hygiene(manifest) {
-            let entry = results.entry(path).or_default();
-            entry.extend(diags);
-            entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
-        }
-    }
-
-    let mut results = apply_level_filter(results, level);
-    project.apply_inline_ignores(&mut results, report_unmatched_ignored_errors);
-    ignore_errors::filter(&mut results, ignore_error_entries);
-    restricted_symbols::filter_by_path(&mut results);
-
+    let phpstan_rs::project::session::Analysis {
+        mut results,
+        checked,
+        skipped_analyze,
+        skipped_context,
+        context_loaded,
+        check_panics,
+    } = analysis;
     if let Some(generate_baseline_path) = generate_baseline_path {
         let generated = if baseline_per_identifier {
             baseline::generate_per_identifier(generate_baseline_path, &results)
@@ -679,8 +763,6 @@ fn run_check_project(
         eprintln!("applied {applied_total} fix(es) in {fixed_files} file(s)");
     }
 
-    let checked = analyze_files.len() - skipped_analyze - check_panics.len();
-
     // Text is the only format carrying anything beyond raw diagnostics
     // (the "N more file(s) loaded for context"/"N file(s) skipped"/"N
     // file(s) errored while checking" prose) - `json`/`checkstyle` exist
@@ -720,7 +802,6 @@ fn run_check_project(
             }
             let mut summary = format!("\n{checked} file(s) checked, {total} diagnostic(s)");
             let mut extras = Vec::new();
-            let context_loaded = context_files.len() - skipped_context;
             if context_loaded > 0 {
                 extras.push(format!("{context_loaded} more file(s) loaded for context"));
             }
@@ -749,559 +830,4 @@ fn run_check_project(
             print!("{}", output::render_junit(&results));
         }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn run_check_project_command(
-    dirs: Vec<PathBuf>,
-    level: Option<u8>,
-    strict_mixed_arrays: bool,
-    check_uninitialized_properties: bool,
-    check_internal_usage: bool,
-    check_function_name_case: bool,
-    check_deprecated_usage: bool,
-    check_empty_method_bodies: bool,
-    check_missing_checked_exceptions: bool,
-    check_strict_printf_placeholder_types: bool,
-    check_too_wide_throw_type_in_protected_and_public_methods: bool,
-    check_too_wide_return_type_in_protected_and_public_methods: bool,
-    check_too_wide_by_ref_type_in_protected_and_public_methods: bool,
-    check_method_throw_type_covariance: bool,
-    check_benevolent_union_types: bool,
-    check_missing_callable_signature: bool,
-    check_duplicate_function_declarations: bool,
-    check_duplicate_class_declarations: bool,
-    check_boolean_trap: bool,
-    check_array_key_cast: bool,
-    check_parent_constructor_call: bool,
-    check_promoted_property_suggestions: bool,
-    check_boolean_conditions: bool,
-    check_dynamic_properties: bool,
-    check_swapped_arguments: bool,
-    check_never_return_suggestions: bool,
-    check_switch_missing_default: bool,
-    check_throw_without_message: bool,
-    check_throw_base_class: bool,
-    check_exception_hygiene: bool,
-    check_current_time_dependence: bool,
-    check_psr3_exception_context: bool,
-    check_psr3_logging: bool,
-    check_magic_numbers: bool,
-    check_native_type_hints: bool,
-    check_implicit_array_creation: bool,
-    check_useless_casts: bool,
-    check_strict_array_filter: bool,
-    check_mixed_type_operands: bool,
-    check_comparable_types: bool,
-    check_arithmetic_operands: bool,
-    check_identity_vs_equals: bool,
-    check_loose_haystack_comparison: bool,
-    check_strict_function_calls: bool,
-    check_switch_case_types: bool,
-    check_loop_variable_overwrite: bool,
-    check_dynamic_static_calls: bool,
-    check_illegal_constructor_calls: bool,
-    check_enum_exhaustiveness: bool,
-    check_null_coercion: bool,
-    check_new_exception_discarded: bool,
-    check_risky_tests: bool,
-    check_dead_enum_cases: bool,
-    check_dead_code: bool,
-    check_circular_dependencies: bool,
-    check_dead_abstract_classes: bool,
-    check_dead_members: bool,
-    check_renamed_named_arguments: bool,
-    report_unmatched_ignored_errors: bool,
-    check_composer_hygiene: bool,
-    check_closed_classes: bool,
-    check_mock_hygiene: bool,
-    php_version: Option<String>,
-    generate_baseline: Option<PathBuf>,
-    baseline: Option<PathBuf>,
-    baseline_match_identifier: bool,
-    baseline_per_identifier: bool,
-    fix: bool,
-    dump_types: Option<PathBuf>,
-    scan_dirs: Vec<PathBuf>,
-    stub_paths: Vec<PathBuf>,
-    no_composer: bool,
-    config: Option<PathBuf>,
-    format: Option<OutputFormat>,
-) {
-    // A config file's own `paths`/`baseline`/`scan_paths` are
-    // conventionally relative to the config file itself (matching every
-    // comparable format - .gitignore, tsconfig.json, real PHPStan's own
-    // neon includes), not to whatever directory the invoking shell
-    // happens to be in. Captured here, before `config` is shadowed by
-    // the loaded `config::Config` below, since the parsed struct itself
-    // doesn't carry its own source path.
-    let config_dir = config
-        .as_deref()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf);
-    let resolve_against_config = |p: PathBuf| match &config_dir {
-        Some(dir) => dir.join(p),
-        None => p,
-    };
-
-    let config = match config {
-        Some(path) => match config::Config::load(&path) {
-            Ok(c) => Some(c),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        },
-        None => None,
-    };
-    let config = config.unwrap_or_default();
-
-    let dirs = if !dirs.is_empty() {
-        dirs
-    } else {
-        config
-            .paths
-            .unwrap_or_default()
-            .into_iter()
-            .map(resolve_against_config)
-            .collect()
-    };
-    if dirs.is_empty() {
-        eprintln!("no paths given on the command line or in the config file");
-        std::process::exit(1);
-    }
-    // `configured_level` is the raw, pre-collapse value - `None` when
-    // neither the CLI flag nor the config key set one at all, distinct
-    // from `level` below (which always collapses to a concrete `u8`,
-    // defaulting to `MAX_LEVEL`, purely for diagnostic filtering).
-    let configured_level = level.or(config.level);
-    let level = level.or(config.level).unwrap_or(MAX_LEVEL);
-    let strict_mixed_arrays = strict_mixed_arrays || config.strict_mixed_arrays.unwrap_or(false);
-    let check_uninitialized_properties =
-        check_uninitialized_properties || config.check_uninitialized_properties.unwrap_or(false);
-    let check_internal_usage = check_internal_usage || config.check_internal_usage.unwrap_or(false);
-    let check_function_name_case =
-        check_function_name_case || config.check_function_name_case.unwrap_or(false);
-    let check_deprecated_usage =
-        check_deprecated_usage || config.check_deprecated_usage.unwrap_or(false);
-    let check_empty_method_bodies =
-        check_empty_method_bodies || config.check_empty_method_bodies.unwrap_or(false);
-    let check_missing_checked_exceptions = check_missing_checked_exceptions
-        || config.check_missing_checked_exceptions.unwrap_or(false);
-    let check_strict_printf_placeholder_types = check_strict_printf_placeholder_types
-        || config
-            .check_strict_printf_placeholder_types
-            .unwrap_or(false);
-    let check_too_wide_throw_type_in_protected_and_public_methods =
-        check_too_wide_throw_type_in_protected_and_public_methods
-            || config
-                .check_too_wide_throw_type_in_protected_and_public_methods
-                .unwrap_or(false);
-    let check_too_wide_return_type_in_protected_and_public_methods =
-        check_too_wide_return_type_in_protected_and_public_methods
-            || config
-                .check_too_wide_return_type_in_protected_and_public_methods
-                .unwrap_or(false);
-    let check_too_wide_by_ref_type_in_protected_and_public_methods =
-        check_too_wide_by_ref_type_in_protected_and_public_methods
-            || config
-                .check_too_wide_by_ref_type_in_protected_and_public_methods
-                .unwrap_or(false);
-    let check_method_throw_type_covariance = check_method_throw_type_covariance
-        || config.check_method_throw_type_covariance.unwrap_or(false);
-    let check_benevolent_union_types =
-        check_benevolent_union_types || config.check_benevolent_union_types.unwrap_or(false);
-    let check_missing_callable_signature = check_missing_callable_signature
-        || config.check_missing_callable_signature.unwrap_or(false);
-    let check_duplicate_function_declarations = check_duplicate_function_declarations
-        || config
-            .check_duplicate_function_declarations
-            .unwrap_or(false);
-    let check_duplicate_class_declarations = check_duplicate_class_declarations
-        || config.check_duplicate_class_declarations.unwrap_or(false);
-    let check_boolean_trap = check_boolean_trap || config.check_boolean_trap.unwrap_or(false);
-    let check_array_key_cast = check_array_key_cast || config.check_array_key_cast.unwrap_or(false);
-    let check_parent_constructor_call =
-        check_parent_constructor_call || config.check_parent_constructor_call.unwrap_or(false);
-    let check_promoted_property_suggestions = check_promoted_property_suggestions
-        || config.check_promoted_property_suggestions.unwrap_or(false);
-    let check_boolean_conditions =
-        check_boolean_conditions || config.check_boolean_conditions.unwrap_or(false);
-    let check_dynamic_properties =
-        check_dynamic_properties || config.check_dynamic_properties.unwrap_or(false);
-    let check_swapped_arguments =
-        check_swapped_arguments || config.check_swapped_arguments.unwrap_or(false);
-    let check_never_return_suggestions =
-        check_never_return_suggestions || config.check_never_return_suggestions.unwrap_or(false);
-    let check_switch_missing_default =
-        check_switch_missing_default || config.check_switch_missing_default.unwrap_or(false);
-    let check_throw_without_message =
-        check_throw_without_message || config.check_throw_without_message.unwrap_or(false);
-    let check_throw_base_class =
-        check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
-    let check_exception_hygiene =
-        check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
-    let check_current_time_dependence =
-        check_current_time_dependence || config.check_current_time_dependence.unwrap_or(false);
-    let check_psr3_exception_context =
-        check_psr3_exception_context || config.check_psr3_exception_context.unwrap_or(false);
-    let check_psr3_logging = check_psr3_logging || config.check_psr3_logging.unwrap_or(false);
-    let psr3_context_key_pattern = match config
-        .psr3_context_key_pattern
-        .as_deref()
-        .map(regex::Regex::new)
-    {
-        None => None,
-        Some(Ok(pattern)) => Some(pattern),
-        Some(Err(e)) => {
-            eprintln!("invalid psr3_context_key_pattern: {e}");
-            std::process::exit(1);
-        }
-    };
-    let check_magic_numbers = check_magic_numbers || config.check_magic_numbers.unwrap_or(false);
-    let magic_number_options = (
-        config
-            .magic_number_exemptions
-            .as_ref()
-            .map(|numbers| numbers.iter().map(|n| n.value()).collect()),
-        config.magic_numbers_ignore_numeric_strings.unwrap_or(false),
-    );
-    let check_native_type_hints =
-        check_native_type_hints || config.check_native_type_hints.unwrap_or(false);
-    let check_implicit_array_creation =
-        check_implicit_array_creation || config.check_implicit_array_creation.unwrap_or(false);
-    let check_useless_casts = check_useless_casts || config.check_useless_casts.unwrap_or(false);
-    let check_strict_array_filter =
-        check_strict_array_filter || config.check_strict_array_filter.unwrap_or(false);
-    let check_mixed_type_operands =
-        check_mixed_type_operands || config.check_mixed_type_operands.unwrap_or(false);
-    let check_comparable_types =
-        check_comparable_types || config.check_comparable_types.unwrap_or(false);
-    let check_arithmetic_operands =
-        check_arithmetic_operands || config.check_arithmetic_operands.unwrap_or(false);
-    let check_identity_vs_equals =
-        check_identity_vs_equals || config.check_identity_vs_equals.unwrap_or(false);
-    let check_loose_haystack_comparison =
-        check_loose_haystack_comparison || config.check_loose_haystack_comparison.unwrap_or(false);
-    let check_strict_function_calls =
-        check_strict_function_calls || config.check_strict_function_calls.unwrap_or(false);
-    let check_switch_case_types =
-        check_switch_case_types || config.check_switch_case_types.unwrap_or(false);
-    let check_loop_variable_overwrite =
-        check_loop_variable_overwrite || config.check_loop_variable_overwrite.unwrap_or(false);
-    let check_dynamic_static_calls =
-        check_dynamic_static_calls || config.check_dynamic_static_calls.unwrap_or(false);
-    let check_illegal_constructor_calls =
-        check_illegal_constructor_calls || config.check_illegal_constructor_calls.unwrap_or(false);
-    let check_enum_exhaustiveness =
-        check_enum_exhaustiveness || config.check_enum_exhaustiveness.unwrap_or(false);
-    let check_null_coercion = check_null_coercion || config.check_null_coercion.unwrap_or(false);
-    let check_new_exception_discarded =
-        check_new_exception_discarded || config.check_new_exception_discarded.unwrap_or(false);
-    let check_risky_tests = check_risky_tests || config.check_risky_tests.unwrap_or(false);
-    let check_dead_enum_cases =
-        check_dead_enum_cases || config.check_dead_enum_cases.unwrap_or(false);
-    let check_dead_code = check_dead_code || config.check_dead_code.unwrap_or(false);
-    let check_circular_dependencies =
-        check_circular_dependencies || config.check_circular_dependencies.unwrap_or(false);
-    let check_dead_abstract_classes =
-        check_dead_abstract_classes || config.check_dead_abstract_classes.unwrap_or(false);
-    let check_dead_members = check_dead_members || config.check_dead_members.unwrap_or(false);
-    let check_renamed_named_arguments =
-        check_renamed_named_arguments || config.check_renamed_named_arguments.unwrap_or(false);
-    let report_unmatched_ignored_errors =
-        report_unmatched_ignored_errors || config.report_unmatched_ignored_errors.unwrap_or(false);
-    let check_composer_hygiene =
-        check_composer_hygiene || config.check_composer_hygiene.unwrap_or(false);
-    let php_version = match php_version.or(config.php_version) {
-        Some(s) => match php_version::parse_php_version(&s) {
-            Ok(v) => Some(v),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        },
-        None => None,
-    };
-    let baseline = baseline.or(config.baseline.map(resolve_against_config));
-    let baseline_mode =
-        if baseline_match_identifier || config.baseline_match_identifier.unwrap_or(false) {
-            baseline::MatchMode::Identifier
-        } else {
-            baseline::MatchMode::Message
-        };
-    let baseline_per_identifier =
-        baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
-    let ignore_error_entries = config.ignore_errors.unwrap_or_default();
-    let mut restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
-    for preset in config.restricted_symbol_presets.unwrap_or_default() {
-        match phpstan_rs::banned::restricted_symbol_preset(&preset) {
-            Ok(entries) => restricted_symbol_entries.extend(entries),
-            Err(e) => {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-    }
-    let banned_constructs: Vec<phpstan_rs::banned::BannedConstruct> = match config
-        .banned_constructs
-        .unwrap_or_default()
-        .iter()
-        .map(|name| phpstan_rs::banned::BannedConstruct::parse(name))
-        .collect()
-    {
-        Ok(constructs) => constructs,
-        Err(e) => {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    };
-    let banned_types = config.banned_types.unwrap_or_default();
-    let check_closed_classes = check_closed_classes || config.check_closed_classes.unwrap_or(false);
-    let mock_hygiene = (check_mock_hygiene || config.check_mock_hygiene.unwrap_or(false))
-        .then(|| config.mock_banned_classes.clone().unwrap_or_default());
-    let assertion_entries = config.assertions.unwrap_or_default();
-    let class_argument_returns = config.class_argument_returns.unwrap_or_default();
-    if let Some(error) = assertion_entries
-        .iter()
-        .map(|e| e.validate())
-        .chain(class_argument_returns.iter().map(|e| e.validate()))
-        .find_map(Result::err)
-    {
-        eprintln!("{error}");
-        std::process::exit(1);
-    }
-    let mut parent_call_rules = config.parent_calls.unwrap_or_default();
-    if config.default_parent_calls.unwrap_or(true) {
-        parent_call_rules.extend(phpstan_rs::parent_calls::default_rules());
-    }
-    let architecture_rules = config.architecture.unwrap_or_default();
-    for rule in &architecture_rules {
-        if let Err(e) = rule.validate() {
-            eprintln!("{e}");
-            std::process::exit(1);
-        }
-    }
-    let dynamic_constant_names = config
-        .dynamic_constant_names
-        .as_ref()
-        .map(config::DynamicConstantNames::entries)
-        .unwrap_or_default();
-    let doctrine_custom_function_entries = config.doctrine_custom_functions.unwrap_or_default();
-    let sql_reflection_config = config.sql_reflection;
-    // A configured `schema_file` is a real, reachable-or-not schema
-    // source the same way a live connection would be - unreadable or
-    // unparseable-into-any-table is a hard error at startup, not a
-    // silent fall-through to today's fallback (the same fail-fast
-    // precedent a malformed `restricted_symbols` entry already has).
-    let sql_reflection_schema = match sql_reflection_config
-        .as_ref()
-        .and_then(|c| c.schema_file.as_ref().map(|f| (f.clone(), c.driver)))
-    {
-        Some((path, driver)) => {
-            let path = resolve_against_config(path);
-            match sql_reflection_schema::parse_ddl_file(&path, driver) {
-                Ok(catalog) => Some(catalog),
-                Err(e) => {
-                    eprintln!("{e}");
-                    std::process::exit(1);
-                }
-            }
-        }
-        None => None,
-    };
-    // Schema drift check: only meaningful when both a static schema
-    // *and* a live-connection config are configured together - a live
-    // connection is otherwise never opened eagerly at startup
-    // (`SqlReflectorHandle`'s own lazy-on-first-use design), but this
-    // check's whole point is comparing the two sources once, up front,
-    // so the eagerness here is scoped to exactly the case where the
-    // user already asked for both.
-    if let Some(schema) = &sql_reflection_schema
-        && let Some(config) = &sql_reflection_config
-    {
-        // `SqlReflectorHandle::get` already refuses a schema_file-only
-        // config with no real live intent (no `database`/`path`) -
-        // returning `None` there, same as it would for any other
-        // real caller, so nothing further needs to be checked here.
-        let handle = sql_reflection_reflector::SqlReflectorHandle::default();
-        if let Some(reflector) = handle.get(Some(config)) {
-            for warning in
-                sql_reflection_schema_drift::schema_drift_warnings(schema, reflector, config.driver)
-            {
-                eprintln!("{warning}");
-            }
-        }
-    }
-
-    let mut scan_dirs = if !scan_dirs.is_empty() {
-        scan_dirs
-    } else {
-        config
-            .scan_paths
-            .unwrap_or_default()
-            .into_iter()
-            .map(resolve_against_config)
-            .collect()
-    };
-    let no_composer = no_composer || config.no_composer.unwrap_or(false);
-
-    // Mirrors `scan_dirs`'s own resolution exactly (CLI flag wins, else
-    // the config key, resolved against the config file's own directory)
-    // - a `stub_paths` entry is unioned into `scan_dirs` below
-    // so it still loads for type-resolution context exactly as before
-    // (nothing about the existing merge-into-registry behavior changes),
-    // while also being kept separately so `run_check_project` can walk it
-    // a second time to tag `DuplicateClassSites`' own `is_stub`
-    // provenance per file.
-    let stub_dirs: Vec<PathBuf> = if !stub_paths.is_empty() {
-        stub_paths
-    } else {
-        config
-            .stub_paths
-            .unwrap_or_default()
-            .into_iter()
-            .map(resolve_against_config)
-            .collect()
-    };
-    scan_dirs.extend(stub_dirs.iter().cloned());
-
-    let mut scan_files = Vec::new();
-    // Gated the same way as the vendor-context load just above (both
-    // need the project's own `composer.json`, and `--no-composer`
-    // already means "don't consult Composer at all for this run") - a
-    // project with no real `phpstan/phpstan`/`phpstan/extension-
-    // installer` dependency has no backward-compatibility promise to
-    // check anything against.
-    let mut phpstan_api_check_enabled = false;
-    let mut composer_manifests = Vec::new();
-    let mut dirs = dirs;
-    if !no_composer {
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let canonical_cwd = std::fs::canonicalize(&cwd).unwrap_or_else(|_| cwd.clone());
-        let mut promoted: Vec<PathBuf> = Vec::new();
-        for root in composer_roots(&dirs, &canonical_cwd) {
-            let vendor_context = composer::discover_vendor_context(&root);
-            scan_dirs.extend(vendor_context.dirs);
-            scan_files.extend(vendor_context.files);
-            phpstan_api_check_enabled |= composer::detect_phpstan_dependency(&root);
-            let manifest_root = if root == canonical_cwd {
-                PathBuf::from(".")
-            } else {
-                root.clone()
-            };
-            if let Some(manifest) = composer::manifest::ComposerManifest::load(&manifest_root) {
-                promoted.extend(
-                    manifest
-                        .path_repository_packages()
-                        .into_iter()
-                        .map(|p| p.vendor_dir.clone()),
-                );
-                if check_composer_hygiene {
-                    composer_manifests.push(manifest);
-                }
-            }
-        }
-        if !promoted.is_empty() {
-            let is_promoted = |p: &Path| {
-                promoted
-                    .iter()
-                    .any(|dir| composer::manifest::path_starts_with(p, dir))
-            };
-            scan_dirs.retain(|d| !is_promoted(d));
-            scan_files.retain(|f| !is_promoted(f));
-            dirs.extend(promoted);
-        }
-    }
-
-    run_check_project(
-        &dirs,
-        &scan_dirs,
-        &scan_files,
-        level,
-        strict_mixed_arrays,
-        check_uninitialized_properties,
-        check_internal_usage,
-        check_function_name_case,
-        check_deprecated_usage,
-        check_empty_method_bodies,
-        check_missing_checked_exceptions,
-        check_strict_printf_placeholder_types,
-        check_too_wide_throw_type_in_protected_and_public_methods,
-        check_too_wide_return_type_in_protected_and_public_methods,
-        check_too_wide_by_ref_type_in_protected_and_public_methods,
-        check_method_throw_type_covariance,
-        check_benevolent_union_types,
-        check_missing_callable_signature,
-        check_duplicate_function_declarations,
-        check_duplicate_class_declarations,
-        check_boolean_trap,
-        check_array_key_cast,
-        check_parent_constructor_call,
-        check_promoted_property_suggestions,
-        check_boolean_conditions,
-        check_dynamic_properties,
-        check_swapped_arguments,
-        check_never_return_suggestions,
-        check_switch_missing_default,
-        check_throw_without_message,
-        check_throw_base_class,
-        check_exception_hygiene,
-        check_current_time_dependence,
-        check_psr3_exception_context,
-        check_psr3_logging,
-        psr3_context_key_pattern,
-        check_magic_numbers,
-        magic_number_options,
-        check_native_type_hints,
-        check_implicit_array_creation,
-        check_useless_casts,
-        check_strict_array_filter,
-        check_mixed_type_operands,
-        check_comparable_types,
-        check_arithmetic_operands,
-        check_identity_vs_equals,
-        check_loose_haystack_comparison,
-        check_strict_function_calls,
-        check_switch_case_types,
-        check_loop_variable_overwrite,
-        check_dynamic_static_calls,
-        check_illegal_constructor_calls,
-        check_enum_exhaustiveness,
-        check_null_coercion,
-        check_new_exception_discarded,
-        check_risky_tests,
-        check_dead_enum_cases,
-        check_dead_code,
-        check_circular_dependencies,
-        check_dead_abstract_classes,
-        check_dead_members,
-        check_renamed_named_arguments,
-        report_unmatched_ignored_errors,
-        composer_manifests,
-        &architecture_rules,
-        &banned_constructs,
-        &banned_types,
-        check_closed_classes,
-        &parent_call_rules,
-        (assertion_entries, class_argument_returns),
-        mock_hygiene,
-        configured_level,
-        &stub_dirs,
-        php_version,
-        generate_baseline.as_deref(),
-        baseline.as_deref(),
-        baseline_mode,
-        baseline_per_identifier,
-        fix,
-        dump_types.as_deref(),
-        &ignore_error_entries,
-        &restricted_symbol_entries,
-        &dynamic_constant_names,
-        &doctrine_custom_function_entries,
-        sql_reflection_config,
-        sql_reflection_schema,
-        phpstan_api_check_enabled,
-        format.unwrap_or_default(),
-    )
 }

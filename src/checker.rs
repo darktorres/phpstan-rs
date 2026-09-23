@@ -1019,6 +1019,9 @@ pub struct Checker<'a> {
     pub(crate) include_guarded_paths: HashSet<String>,
     // `include_path` directories for the file being checked.
     pub(crate) include_path_dirs: Vec<String>,
+    // What relative include paths resolve against first (see
+    // `Project::working_dir`); `None` is the process's working directory.
+    pub(crate) working_dir: Option<std::path::PathBuf>,
     // `includes::file_constant_initializers` for the file being checked.
     pub(crate) include_constant_initializers: HashMap<String, Expr>,
     // `if` statements already reported as the tail of an enum `if`/`elseif`
@@ -1447,6 +1450,7 @@ impl<'a> Checker<'a> {
             current_file: None,
             include_guarded_paths: HashSet::new(),
             include_path_dirs: Vec::new(),
+            working_dir: None,
             include_constant_initializers: HashMap::new(),
             enum_chain_tails: HashSet::new(),
             constant_facts: Default::default(),
@@ -1598,6 +1602,10 @@ impl<'a> Checker<'a> {
     /// `semantic_tokens` field's own doc comment.
     pub(crate) fn take_semantic_tokens(&mut self) -> Vec<semantic_tokens::UsageSemanticToken> {
         std::mem::take(&mut self.semantic_tokens)
+    }
+
+    pub(crate) fn set_working_dir(&mut self, dir: Option<std::path::PathBuf>) {
+        self.working_dir = dir;
     }
 
     pub(crate) fn set_dump_types(&mut self, enabled: bool) {

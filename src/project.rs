@@ -24,6 +24,7 @@ mod decl_locations;
 pub(crate) mod duplicate_class_sites;
 pub(crate) mod duplicate_fn_sites;
 mod mock_hygiene;
+pub mod session;
 pub(crate) mod use_sites;
 
 use decl_locations::DeclLocations;
@@ -89,6 +90,10 @@ pub struct Project {
     // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
     // own module doc comment for the full resolution algorithm.
     pest_config: PestConfig,
+    // The directory relative include paths resolve against first, as PHP
+    // resolves them against the working directory. `None` means the
+    // process's own working directory.
+    working_dir: Option<PathBuf>,
     // Gates `checker::phpstan_api::check_phpstan_api_usage` - set once
     // via `set_phpstan_api_check_enabled` rather than re-detected here on
     // every load/check, since `Project` itself has no fixed notion of
@@ -199,6 +204,7 @@ impl Project {
             dependents: FxHashMap::default(),
             registry,
             pest_config: PestConfig::default(),
+            working_dir: None,
             phpstan_api_check_enabled: false,
             defer_inline_ignores: false,
             retain_source: false,
@@ -264,6 +270,11 @@ impl Project {
     /// consults. Empty by default (no entries configured), so this is a
     /// zero-cost no-op call for every ordinary project.
     /// See `Registry::set_dynamic_constant_names`.
+    /// See `working_dir`.
+    pub fn set_working_dir(&mut self, dir: PathBuf) {
+        self.working_dir = Some(dir);
+    }
+
     pub fn set_dynamic_constant_names(&mut self, entries: &[(String, Option<String>)]) {
         self.registry.set_dynamic_constant_names(entries);
     }
@@ -1561,6 +1572,7 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         checker.set_current_file(path);
+        checker.set_working_dir(self.working_dir.clone());
         Some((checker, &file.ast))
     }
 
@@ -1604,6 +1616,7 @@ impl Project {
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
         checker.set_current_file(path);
+        checker.set_working_dir(self.working_dir.clone());
         if let Some(facts) = cross_file_property_assign_facts {
             checker.set_cross_file_property_assign_facts(Arc::clone(facts));
         }
