@@ -623,10 +623,14 @@ impl<'a> Checker<'a> {
                 || has_attr(&ancestor_sig.attrs, "ReturnTypeWillChange");
             let ancestor_ty = &ancestor_sig.return_type_native;
             let own_ty = &own_sig.return_type_native;
+            // The child's own `self`/`static` is its own class, which a
+            // built-in ancestor's class-named hint accepts.
             let compatible = matches!(ancestor_ty, Type::Mixed(_))
                 || ancestor_return_uses_static(ancestor_ty)
                 || (!matches!(own_ty, Type::Mixed(false))
-                    && self.registry.is_assignable(own_ty, ancestor_ty));
+                    && self
+                        .registry
+                        .is_assignable(&self.resolve_pseudo(own_ty, fqn), ancestor_ty));
             if !will_change && !compatible {
                 let own_display = if matches!(own_ty, Type::Mixed(false)) {
                     "mixed".to_string()

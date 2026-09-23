@@ -3470,3 +3470,20 @@ fn phpdoc_readonly_with_allowed_private_mutation_is_writable_only_inside_its_cla
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_self_return_satisfies_a_tentative_return_naming_the_built_in_class() {
+    let src = r#"<?php
+        class MyDateTime extends DateTime {
+            public function modify(string $modifier): self { return $this; }
+            public function setTimezone(DateTimeZone $timezone): self { return $this; }
+        }
+    "#;
+    for v in [(8, 1), (8, 3), (8, 4)] {
+        let d: Vec<_> = diagnostics_for_with(src, |r| r.php_version = Some(v))
+            .into_iter()
+            .filter(|x| x.identifier == "method.tentativeReturnType")
+            .collect();
+        assert!(d.is_empty(), "PHP {v:?}: {d:?}");
+    }
+}
