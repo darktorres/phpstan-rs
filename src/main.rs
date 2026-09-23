@@ -307,6 +307,12 @@ enum Command {
         /// doesn't implement would always be unmatched.
         #[arg(long)]
         report_unmatched_ignored_errors: bool,
+        /// Checks the analysed code against the root composer.json:
+        /// undeclared, misplaced and unused dependencies, PSR-4 locations,
+        /// required extensions, `provide`, `scripts` and
+        /// `config.platform.php`. Off by default.
+        #[arg(long)]
+        check_composer_hygiene: bool,
         /// Enables named-argument-rename-collision detection (a named-
         /// argument call site against a method an override elsewhere
         /// renamed a parameter on). Off by default - see `registry::
@@ -424,6 +430,7 @@ fn main() {
             check_dead_members,
             check_renamed_named_arguments,
             report_unmatched_ignored_errors,
+            check_composer_hygiene,
             php_version,
             generate_baseline,
             baseline,
@@ -471,6 +478,7 @@ fn main() {
             check_dead_members,
             check_renamed_named_arguments,
             report_unmatched_ignored_errors,
+            check_composer_hygiene,
             php_version,
             generate_baseline,
             baseline,

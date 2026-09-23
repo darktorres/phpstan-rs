@@ -173,3 +173,33 @@ fn dunder_dir_lexes_and_parses_as_a_bare_name() {
         other => panic!("expected a Return statement, got {other:?}"),
     }
 }
+
+#[cfg(unix)]
+#[test]
+fn a_path_repository_symlink_out_of_vendor_is_still_vendor_context() {
+    let dir = TempDir::new("path_repository");
+    dir.write("composer.json", "{}");
+    dir.write("packages/b/src/B.php", "<?php class B {}");
+    std::fs::create_dir_all(dir.path().join("vendor/acme")).unwrap();
+    std::os::unix::fs::symlink(
+        dir.path().join("packages/b"),
+        dir.path().join("vendor/acme/b"),
+    )
+    .unwrap();
+    dir.write(
+        "vendor/composer/autoload_psr4.php",
+        r#"<?php
+$vendorDir = dirname(__DIR__);
+$baseDir = dirname($vendorDir);
+return array(
+    'Acme\\B\\' => array($vendorDir . '/acme/b/src'),
+    'App\\' => array($baseDir . '/src'),
+);
+"#,
+    );
+    dir.write("src/App.php", "<?php class App {}");
+
+    let ctx = discover_vendor_context(dir.path());
+    assert_eq!(ctx.dirs.len(), 1, "{:?}", ctx.dirs);
+    assert!(ctx.dirs[0].ends_with("vendor/acme/b/src"), "{:?}", ctx.dirs);
+}

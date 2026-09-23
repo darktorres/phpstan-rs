@@ -40,6 +40,7 @@
 //! check_dead_members = false
 //! check_renamed_named_arguments = false
 //! report_unmatched_ignored_errors = false
+//! check_composer_hygiene = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -281,6 +282,12 @@ pub struct Config {
     /// `ignore.unmatchedIdentifier`). Off by default: an ignore naming a
     /// rule this project doesn't implement would always be unmatched.
     pub report_unmatched_ignored_errors: Option<bool>,
+    /// Opt-in checks of the analysed code against the root
+    /// `composer.json` (declared, unused and misplaced dependencies,
+    /// PSR-4 locations, required extensions, `provide`, `scripts`,
+    /// `config.platform.php`). Off by default: dependency usage through
+    /// framework configuration the analysis can't see reads as unused.
+    pub check_composer_hygiene: Option<bool>,
 }
 
 impl Config {

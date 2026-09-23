@@ -60,6 +60,32 @@ fn read_and_parse_file(path: &Path, is_stub: bool) -> Option<(String, project::P
     Some((source, parsed))
 }
 
+/// The Composer project root of every analysed directory: the nearest
+/// ancestor (itself included) with a `composer.json`, else `cwd`.
+fn composer_roots(dirs: &[PathBuf], cwd: &Path) -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for dir in dirs {
+        let start = std::fs::canonicalize(dir).unwrap_or_else(|_| cwd.join(dir));
+        let start = if start.is_file() {
+            start.parent().map(Path::to_path_buf).unwrap_or(start)
+        } else {
+            start
+        };
+        let root = start
+            .ancestors()
+            .find(|a| a.join("composer.json").is_file())
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| cwd.to_path_buf());
+        if !roots.contains(&root) {
+            roots.push(root);
+        }
+    }
+    if roots.is_empty() {
+        roots.push(cwd.to_path_buf());
+    }
+    roots
+}
+
 /// Collects both file lists (`analyze_files`, sorted; `context_files`,
 /// sorted+deduped, seeded with `scan_files`) in one measured call, so the
 /// real cost of the whole single-threaded directory walk - entirely
@@ -145,6 +171,7 @@ fn run_check_project(
     check_dead_members: bool,
     check_renamed_named_arguments: bool,
     report_unmatched_ignored_errors: bool,
+    composer_manifests: Vec<composer::manifest::ComposerManifest>,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -476,6 +503,14 @@ fn run_check_project(
         entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
     }
 
+    for manifest in &composer_manifests {
+        for (path, diags) in project.check_composer_hygiene(manifest) {
+            let entry = results.entry(path).or_default();
+            entry.extend(diags);
+            entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+        }
+    }
+
     let mut results = apply_level_filter(results, level);
     project.apply_inline_ignores(&mut results, report_unmatched_ignored_errors);
     ignore_errors::filter(&mut results, ignore_error_entries);
@@ -607,6 +642,7 @@ pub(crate) fn run_check_project_command(
     check_dead_members: bool,
     check_renamed_named_arguments: bool,
     report_unmatched_ignored_errors: bool,
+    check_composer_hygiene: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -742,6 +778,8 @@ pub(crate) fn run_check_project_command(
         check_renamed_named_arguments || config.check_renamed_named_arguments.unwrap_or(false);
     let report_unmatched_ignored_errors =
         report_unmatched_ignored_errors || config.report_unmatched_ignored_errors.unwrap_or(false);
+    let check_composer_hygiene =
+        check_composer_hygiene || config.check_composer_hygiene.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -847,12 +885,44 @@ pub(crate) fn run_check_project_command(
     // installer` dependency has no backward-compatibility promise to
     // check anything against.
     let mut phpstan_api_check_enabled = false;
+    let mut composer_manifests = Vec::new();
+    let mut dirs = dirs;
     if !no_composer {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let vendor_context = composer::discover_vendor_context(&cwd);
-        scan_dirs.extend(vendor_context.dirs);
-        scan_files.extend(vendor_context.files);
-        phpstan_api_check_enabled = composer::detect_phpstan_dependency(&cwd);
+        let canonical_cwd = std::fs::canonicalize(&cwd).unwrap_or_else(|_| cwd.clone());
+        let mut promoted: Vec<PathBuf> = Vec::new();
+        for root in composer_roots(&dirs, &canonical_cwd) {
+            let vendor_context = composer::discover_vendor_context(&root);
+            scan_dirs.extend(vendor_context.dirs);
+            scan_files.extend(vendor_context.files);
+            phpstan_api_check_enabled |= composer::detect_phpstan_dependency(&root);
+            let manifest_root = if root == canonical_cwd {
+                PathBuf::from(".")
+            } else {
+                root.clone()
+            };
+            if let Some(manifest) = composer::manifest::ComposerManifest::load(&manifest_root) {
+                promoted.extend(
+                    manifest
+                        .path_repository_packages()
+                        .into_iter()
+                        .map(|p| p.vendor_dir.clone()),
+                );
+                if check_composer_hygiene {
+                    composer_manifests.push(manifest);
+                }
+            }
+        }
+        if !promoted.is_empty() {
+            let is_promoted = |p: &Path| {
+                promoted
+                    .iter()
+                    .any(|dir| composer::manifest::path_starts_with(p, dir))
+            };
+            scan_dirs.retain(|d| !is_promoted(d));
+            scan_files.retain(|f| !is_promoted(f));
+            dirs.extend(promoted);
+        }
     }
 
     run_check_project(
@@ -896,6 +966,7 @@ pub(crate) fn run_check_project_command(
         check_dead_members,
         check_renamed_named_arguments,
         report_unmatched_ignored_errors,
+        composer_manifests,
         configured_level,
         &stub_dirs,
         php_version,

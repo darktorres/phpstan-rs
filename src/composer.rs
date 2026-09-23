@@ -22,6 +22,9 @@
 //! for context, never reported" and its bugs would stop being reported
 //! with no warning.
 
+pub mod constraint;
+pub mod manifest;
+
 use std::path::{Path, PathBuf};
 
 use crate::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
@@ -272,12 +275,34 @@ fn eval_path(
     generated_dir: &Path,
 ) -> Option<PathBuf> {
     let raw = eval_concat(expr, vendor_dir, base_dir, generated_dir)?;
-    let resolved = std::fs::canonicalize(raw).ok()?;
+    // Containment is decided on the path as written, not its canonical
+    // form: a path-repository package is a `vendor/<name>` symlink to a
+    // directory outside `vendor/`, and still belongs to vendor context.
+    let resolved = std::fs::canonicalize(&raw).ok()?;
     if resolved.starts_with(vendor_dir) {
-        Some(resolved)
-    } else {
-        None
+        return Some(resolved);
     }
+    let lexical = lexically_normalized(Path::new(&raw));
+    let vendor_as_written = lexically_normalized(&generated_dir.join(".."));
+    (lexical.starts_with(vendor_dir) || lexical.starts_with(&vendor_as_written)).then_some(lexical)
+}
+
+/// `path` with `.` and `..` components folded away, without resolving
+/// symlinks.
+fn lexically_normalized(path: &Path) -> PathBuf {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !out.pop() {
+                    out.push("..");
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 /// Recursively builds the literal string a generated autoloader file's

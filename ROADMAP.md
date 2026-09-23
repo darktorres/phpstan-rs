@@ -1225,6 +1225,35 @@ set are precomputed once the class graph freezes, so
 `lookup_method`/`lookup_property`/`lookup_const`/`is_subclass_of` no
 longer re-walk the ancestor BFS on every call.
 
+**Composer/dependency hygiene** (opt-in `check_composer_hygiene`,
+`project/composer_hygiene.rs`, reading the root `composer.json` and
+`vendor/composer/installed.json` through `composer/manifest.rs`), none
+of which PHPStan has: every class/function reference in first-party
+code is resolved to the installed package declaring it -
+`undeclared.composerDependency` (a package only installed transitively),
+`misplaced.composerDependency` (a `require-dev` package used from
+production-autoloaded code), `unused.composerDependency` (a `require`
+entry nothing references, class-name strings counting as use,
+symbol-less package types exempt), with `suggest` entries and
+`class_exists()`-probed uses accepted; `misplaced.autoloadDevSymbol`
+(production code using a class only `autoload-dev` loads);
+`psr4.pathMismatch`/`psr4.caseMismatch` (a class declared where its
+longest PSR-4 prefix doesn't map it, or only matching up to letter case,
+`classmap`/`files`/`exclude-from-classmap` respected);
+`provide.unimplemented` (the PSR virtual packages, the multi-interface
+http-message/http-factory ones requiring every interface);
+`ext.notRequired` (a built-in whose phpstorm-stubs directory is an
+optional extension - the build now records each stub's extension - with
+no `ext-*` requirement, `suggest`, required polyfill, or
+`extension_loaded()`/`function_exists()` probe);
+`composerScript.notFound`/`composerScript.notPublicStatic` for
+`Class::method` scripts; and `composer.platformPhpInconsistentWithRequire`
+through a Composer constraint evaluator (`composer/constraint.rs`).
+Vendor-context discovery follows a path repository's `vendor/<name>`
+symlink out of `vendor/` instead of dropping it, promotes path-repository
+packages to analysed files, and runs once per analysed directory's own
+nearest `composer.json` root rather than only the working directory's.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -1437,7 +1466,7 @@ parallel worker processes with no shared memory) makes expensive to compute
 that phpstan-rs's single live `Registry` gets nearly for free.
 
 **The shared prerequisite for every whole-program *diagnostic* phase
-(86-94, and Part 8's composer-hygiene phases 113-120) is already
+(86-94, and the composer-hygiene checks) is already
 built.** It was found and closed while implementing Phase 92; see Done's
 "Whole-program diagnostic-emission pipeline" for the full design. This
 project used to have no whole-project, non-per-file
@@ -2197,7 +2226,7 @@ in the same package as the `@internal` symbol" by comparing only the
 first `\`-delimited namespace segment of caller vs. target. Swap that for
 a real composer-package-boundary lookup using the
 `find_composer_package_name`/`detect_phpstan_dependency` infrastructure
-Part 8 (Composer/dependency hygiene) already establishes exists in this
+the composer-hygiene checks already establish exists in this
 codebase - resolve both the caller's file and the target's declaring file
 to their owning `composer.json` package name, and report only when the
 packages genuinely differ. Closes both directions of the mismatch: false
@@ -2213,7 +2242,7 @@ decides package membership purely via the bare first namespace segment,
 with no composer.json awareness anywhere: architecturally forced, since at
 the point a `Rule`/`Scope` processes one file, PHPStan's reflection layer
 has no persistent whole-program "which package declares this symbol" index
-to query (the same absence Part 8 independently confirms). phpstan-rs's
+to query (the same absence the composer-hygiene checks confirm). phpstan-rs's
 `internal_usage.rs` mirrors this exact heuristic on purpose today (its own
 doc comment names it "the common Composer-package-as-top-level-namespace
 convention") - but `composer::find_composer_package_name`
@@ -2750,7 +2779,7 @@ a file-explorer drag/move with no cursor position at all, and its core
 computation (deriving a new expected FQN from a new file path) is the
 *reverse* direction of what `rename` does - `rename` only ever resolves
 symbols already named in source text, never infers a name from a path.
-Also distinct from R1 in Part 8 (which flags a path/FQN mismatch as a
+Also distinct from `psr4.pathMismatch` (which flags a path/FQN mismatch as a
 diagnostic on files that already sit where they are - it never fires on
 a rename event, never computes a *new* FQN, and never rewrites anything):
 this performs an active edit at the moment of the rename gesture, using
@@ -2974,391 +3003,6 @@ duplicating or re-resolving any graph - the whole project, including
 cross-directory calls, stays in one pass with one shared registry.
 
 **Effort: large.**
-
----
-
-## Part 8: Composer/dependency hygiene
-
-Eight distinct axes, each keyed off a different `composer.json` section
-and a different failure mode. PHPStan's `Rules/` catalog has no
-package-declaration-aware check of any kind (grepping both vendored trees
-for "composer" as a rule concept turns up nothing beyond unrelated API/
-bootstrap code) - this is real and structural: PHPStan analyzes one
-process per run with no persistent whole-program "which package provides
-this symbol" index kept live to query against composer.json's
-declarations, and building one would duplicate work its own architecture
-discards after each run. phpstan-rs already has most of the underlying
-pieces independently built for other reasons: `composer::
-find_composer_package_name` (`src/composer.rs:144-155`) already walks a
-file's directory upward to its owning composer.json and returns its
-package name; `composer::detect_phpstan_dependency` (`composer.rs:
-112-127`) already parses `require`/`require-dev` via `serde_json`;
-`deps::referenced_names` (`src/deps.rs:26-32`) already collects every name
-a file references; `Project`'s `DeclLocations`
-(`project/decl_locations.rs:18-22`) already maps a declared FQN to its
-owning file, and is now populated for batch `check-project` runs too,
-not just behind the LSP-only `retain_source` gate (see Part 1's
-shared-prerequisite note).
-
-### Phase 113 — Composer declared-vs-used dependency hygiene (§K)
-
-Three diagnostics, all keyed off resolving "which composer package owns
-this symbol": `unused.composerDependency` (a `require` entry contributing
-zero symbols actually referenced in first-party code - only reachable
-transitively, or a stale leftover), `undeclared.composerDependency`
-(first-party code resolves to a `vendor/<pkg>/` file whose package isn't a
-`require`/`require-dev` key at all - only present because some *other*
-required package happens to pull it in transitively, so an unrelated
-`composer update` can silently break the build), and
-`misplaced.composerDependency` (a package declared only under
-`require-dev` whose symbols are referenced from non-test application code
-- breaks under a production `composer install --no-dev`).
-
-**Effort: large.**
-
-### Phase 114 — PSR-4 filesystem consistency (§R)
-
-Real PHPStan's only PSR-4 awareness is consuming `Psr4Mapping` purely to
-*locate* classes for its BetterReflection source locator
-(`Reflection/BetterReflection/SourceLocator/
-ComposerJsonAndInstalledJsonSourceLocatorMaker.php:90-192`) - it never
-validates that a class's actual location matches where PSR-4 says it
-should be. `Rules/Namespaces/` contains exactly 2 files, both about
-`use`-statement resolution; a case-insensitive grep for "psr-4"/"psr4"/
-"autoload" across every `Rules/` file in both vendored trees returns zero
-hits.
-
-#### R1. PSR-4 declared-namespace vs. file-path consistency (`psr4.pathMismatch`)
-
-For every declared class/interface/trait/enum FQN, resolve which
-`composer.json` `autoload.psr-4`/`autoload-dev.psr-4` prefix it should
-fall under (longest-prefix match), compute the file path PSR-4 requires,
-and compare against the file it was actually declared in (already
-resolved via `DeclLocations.classes: FxHashMap<FQN, (PathBuf, Span)>`).
-Flag a mismatch - the file loads fine today only because Composer's
-non-optimized/dev autoloader falls back to directory scanning; a
-production `composer dump-autoload --optimize` generates a static
-classmap purely from PSR-4 resolution and silently drops the class,
-producing a runtime "Class not found" with zero PHPStan-shaped warning
-today. phpstan-rs already computes almost every piece as a side effect of
-other work, just not wired together: `DeclLocations.classes` already maps
-every declared FQN to its real file path project-wide, now in batch
-`check-project` runs too; `composer::
-discover_vendor_context`'s `collect_dirs`/`eval_path`
-(`composer.rs:260-300`) already parses the same generated
-`prefixDirsPsr4` array Composer compiles from `composer.json`'s
-`autoload.psr-4` (root package included) - it just explicitly discards
-every entry that doesn't resolve under `vendor/`
-(`eval_path`'s `starts_with(vendor_dir)` filter, by design per the
-module's own doc comment), throwing away exactly the first-party
-`App\ => app/`-style rows this check needs. Building it: stop discarding
-those rows (or parse `composer.json`'s own `autoload`/`autoload-dev`
-sections directly via `serde_json`, the same pattern
-`detect_phpstan_dependency` already uses), and cross-reference against
-`DeclLocations` - no new filesystem-walking
-or parsing machinery. (AO1 above reuses this same prefix-map data for
-the reverse direction: deriving an expected FQN from a *new* file path on
-a rename.)
-
-**Effort: medium.**
-
-#### R2. PSR-4 exact-case path mismatch, as its own diagnostic (`psr4.caseMismatch`)
-
-Once R1 exists, add a narrower diagnostic for when the expected and
-actual paths match case-*insensitively* but differ in letter-casing on
-some segment (class `App\Http\Controller\UserController` declared in
-`app/Http/controller/UserController.php` - lowercase `controller`). Must
-use a byte-exact comparison against real, on-disk directory-entry casing
-(`std::fs::read_dir`, never `std::fs::canonicalize`, which silently
-normalizes case on a case-insensitive volume and would make the bug
-invisible on the very platforms where it happens to still work). Real
-PHPStan's `Psr4Mapping`-consuming lookup only needs to *find* the file at
-all - on the case-insensitive filesystems (macOS default, Windows) most
-PHPStan contributors and CI runners are equally likely to develop on, the
-lookup silently succeeds either way, so there is no PHPStan mechanism
-that would ever observe the mismatch. The real payoff: the "works on the
-author's laptop, breaks in the Linux/Docker production container" bug
-class, one real PHPStan structurally cannot report on because its own
-contributors and test infrastructure run on the same case-insensitive-by-
-default platforms that make the bug invisible to observe. Distinct from
-the existing `class.nameCase`/`method.nameCase` checks, which compare an
-in-source *reference*'s casing against its own declaration's casing
-within PHP text
-- this compares a declaration's casing against the real filesystem, a
-cross-domain (source-vs-disk) comparison neither touches.
-
-**Effort: small.**
-
-### Phase 115 — `misplaced.autoloadDevSymbol` (§AC)
-
-A third, distinct composer-hygiene axis from K (whole-*package*
-require/require-dev declaration hygiene) and R (a symbol's *own* declared
-location vs. where PSR-4 says it should live) - this asks whether a
-symbol is even loadable under a real production (`--no-dev`) install at
-all, given how the project's *own* `composer.json` splits
-`autoload.psr-4` vs `autoload-dev.psr-4`. For every resolved symbol
-reference, determine which PSR-4 root (if any) the *call-site file*
-falls under (production `autoload.psr-4` vs. dev-only
-`autoload-dev.psr-4`, longest-prefix match) and the same for the
-*declaration site*; flag when the caller resolves under production
-`autoload.psr-4` but the callee's only declared location resolves under
-`autoload-dev.psr-4` and not also under production - `composer
-dump-autoload --no-dev` drops the dev PSR-4 root entirely, so the class
-is simply absent from the generated classmap and the reference fatals at
-runtime with zero warning today, even though every normal dev-mode
-install (what CI and every local phpstan-rs/PHPStan invocation actually
-uses) resolves it fine. Real PHPStan's only autoload-dev-aware code reads
-a single `dev` boolean from `vendor/composer/installed.json` for the
-*entire current process* - it has no notion of "would this symbol still
-resolve under a *different*, hypothetical `--no-dev` install than the one
-actually running." A grep for "autoload-dev" across every `Rules/` file
-in both vendored trees returns zero hits. phpstan-rs already has every
-piece except the forward PSR-4-prefix-to-file lookup: `composer.rs`
-already parses a project's hand-authored `composer.json` via `serde_json`
-for `require`/`require-dev` and `name` - extending that same parse to
-also read `autoload.psr-4`/`autoload-dev.psr-4` is a direct extension of
-proven code. `DeclLocations.classes` (`project/decl_locations.rs:18-22`)
-already maps every declared symbol to its real file path project-wide
-(now populated in batch runs too). Notably sidesteps the "is this a test file"
-classification gap phpstan-rs has today (no general test-file heuristic
-exists, only `Pest.php`-runner-config detection) - the project's own
-composer.json already makes the production/dev split explicit and
-machine-readable, so a file covered by neither PSR-4 section just
-degrades to "no diagnostic," never a guess.
-
-**Effort: medium.**
-
-### Phase 116 — `provide.unimplemented` (§AG)
-
-Distinct from K, R, and AC. For every entry in the project's own root
-`composer.json` `"provide"` map, resolve the small set of formally-
-specified, stable 1:1 PHP-FIG virtual packages
-(`psr/log-implementation` -> `Psr\Log\LoggerInterface`,
-`psr/container-implementation` -> `Psr\Container\ContainerInterface`, and
-five siblings - each a single, PHP-FIG-published package-to-interface
-mapping, not a heuristic) to its target interface FQN via a small
-hardcoded table, then check via `Registry::is_subclass_of` (already
-transitive over `extends`+`implements`) whether *any* project-declared
-class implements it. Flag `provide.unimplemented` when a project claims
-e.g. `"provide": {"psr/log-implementation": "1.0"}` but zero class in the
-closed-world registry implements `Psr\Log\LoggerInterface` - a false
-claim any other package `require`-ing that virtual package would
-silently trust, a real library-authoring bug (an implementation
-refactored/renamed away without updating or removing a stale `provide`
-entry copied from a template). Deliberately excludes
-`psr/http-message-implementation`/`psr/http-factory-implementation`
-(each maps to several interfaces at once - a class-per-interface
-ambiguity needing a stricter all-N-satisfied rule to avoid false
-positives, kept out of v1 rather than shipped speculative). A
-case-insensitive grep for "provide"/"replace" as a composer-schema
-concept across both vendored trees returns zero hits. phpstan-rs already
-has every piece except the hardcoded PSR-virtual-package table:
-`composer::detect_phpstan_dependency`'s existing `serde_json`-parsing
-pattern extends directly to also read `provide`; `Registry::
-is_subclass_of` needs no new type-system machinery; `decl_locations`
-(now populated in batch runs too) already maps every declared FQN to
-its real location.
-
-**Effort: medium.**
-
-### Phase 117 — `ext.notRequired` (§AK)
-
-Distinct from K, R, AC, and AG - a completely different kind of
-dependency (a compiled PHP extension the runtime must have loaded),
-checked via a completely different data source (the phpstorm-stubs
-per-extension directory layout, never touched by any of the other four).
-For every call to a built-in function (or reference to a built-in class/
-constant) that phpstan-rs's stub pipeline sourced from a specific
-`vendor/phpstorm-stubs/<extension>/` directory (`curl_*`, `mb_*`, `gd_*`,
-Redis, Imagick, etc.), resolve the project's own root `composer.json`
-`require` section and flag when it declares neither `ext-<extension>` nor
-a covering polyfill - the classic "works on the author's machine because
-the extension happens to be installed" bug, dying with a raw PHP fatal
-and zero warning from any tool today. Real PHPStan's `Rules/` catalog has
-zero rule keyed on composer.json `require` vs. extension-function usage -
-grepping both vendored trees for "ext-" as a rule concept returns
-nothing; the one `ext-` string that does appear anywhere in PHPStan's own
-conf is its *own* bundled stub-naming convention (`ext-ds.stub`), not a
-rule checking an analyzed project's composer.json. The real ecosystem
-tool for this, `composer-require-checker`, is (like K's own precedent) a
-separate non-PHPStan tool entirely. phpstan-rs already parses
-composer.json generically via `serde_json` (`detect_phpstan_dependency`)
-- extending that same parse to also collect `ext-*`-prefixed keys is
-direct, proven extension of existing code. The honest gap: the
-per-function "which extension does this belong to" mapping does *not*
-already exist anywhere in phpstan-rs today (no `extension` field on
-`FunctionSig`/`ClassInfo`) - but the raw material sits one step upstream
-of where it's currently thrown away: `build.rs`'s `collect_php_files`
-already recursively walks `vendor/phpstorm-stubs/<extension>/*.php` and
-holds each file's real, extension-named parent directory in scope at
-exactly the point it decides what to write into the generated stub-source
-array, then discards that path entirely, writing only raw file contents.
-Threading the extension name through alongside each source string (or a
-standalone generated table keyed by file) is additive to a pipeline whose
-per-file path is already known and already discarded on purpose today. A
-handful of always-compiled-in extensions (`Core`, `SPL`, `Reflection`,
-etc.) must be excluded, since no `ext-core`-style Composer platform
-package exists to require - the mapping only becomes actionable for
-genuinely optional extensions.
-
-**Effort: large.**
-
-### Phase 118 — `composerScript.notFound`/`notPublicStatic` (§AL)
-
-Distinct from K, R, AC, AG, and AK (each keys off a different
-composer.json section and a different failure mode - none mentions
-"scripts" at all). Parse the project's root composer.json `"scripts"`
-map (a direct extension of the same `serde_json::Value`-reading pattern
-`detect_phpstan_dependency` already uses, just a different top-level
-key) and, for every string value matching the documented `Class::method`
-callable-string convention (a bare FQN, `::`, a bare identifier - no
-`$`, `(`, spaces, or shell metacharacters, disambiguating it from a
-plain shell-command string; the check is deliberately scoped to exactly
-this unambiguous form, never the shell-command or array-of-commands
-forms that carry no static contract), split and resolve against the
-closed-world registry: report `composerScript.notFound` when the class
-or method doesn't exist (mirroring the exact undefined-static-method-call
-precedent already in the checker, `__callStatic` suppression included,
-since Composer's own invocation is a plain `call_user_func` that magic
-method would legitimately intercept), and `composerScript.notPublicStatic`
-when the method resolves but isn't public (reusing `FunctionSig::
-visibility`, already threaded through since Phase 57) or isn't static -
-Composer instantiates nothing and calls the callable via reflection-free
-`call_user_func`, so a private/protected or non-static target throws or
-silently no-ops when Composer actually runs the script, with zero static
-warning today. PHPStan's own `Rules/` catalog has no composer.json-
-schema-reading code for the "scripts" section at all - a case-insensitive
-grep across both vendored trees returns exactly one hit, an unrelated
-code comment about CLI-invocation scripts in `Turbo/
-TurboExtensionEnabler.php`, confirming zero rule ever reads this key.
-phpstan-rs already has three of the four pieces this needs, each proven
-at a real call site: generic composer.json section-reading via
-`serde_json`; closed-world class-and-method existence plus visibility
-resolution via `Registry::lookup_method`; and a direct precedent for
-splitting a `Class::method`-shaped string and resolving it against the
-registry, already built for `call_user_func('Class::method')`-equivalent
-callables. The one honest gap: `FunctionSig` carries no `is_static` field
-at all today (every `sig.is_static` reference found elsewhere in the
-checker actually reads `PropertySig::is_static`, a different struct) -
-but the raw `MethodDecl::is_static` bool needed to fill it is already
-sitting unused in the exact iterator that discards it today (the same
-loop that reads `m.visibility` into `FunctionSig::from_decl` also reads
-`m.is_abstract` off the same `m` three lines later, just never
-`m.is_static`) - threading it through mirrors the already-completed
-Phase 57 visibility rollout exactly, not new machinery.
-
-**Effort: medium.**
-
-### Phase 119 — `composer.platformPhpInconsistentWithRequire` (§AN)
-
-composer.json's `config.platform.php` (a pinned PHP version string that
-overrides Composer's own dependency-resolution assumption about the
-runtime PHP version, distinct from the ordinary `require.php` semver
-*constraint*) checked against that same project's own `require.php` for
-internal consistency. When the pinned platform version doesn't satisfy
-the require constraint (platform says 8.1.0 while require demands
-`^8.3`, or vice versa), Composer resolves every dependency's version *as
-if* running the platform-pinned PHP - potentially installing older,
-less-capable package releases with different type signatures - while the
-project's own `require.php` declares a different minimum the analyzed
-code is written against: a real, silent self-contradiction in one config
-file, invisible to any tool today. Real PHPStan reads `config.platform.php`
-purely as a fallback *source* for its own analysis PHP version (used
-only when no explicit `phpVersion` config key is set, in a priority
-chain of explicit-config > `SOURCE_COMPOSER_PLATFORM_PHP` >
-runtime-`PHP_VERSION_ID`) - it never cross-checks that value against the
-project's own `require.php` constraint in the same file; grepping both
-vendored trees for "platform"/"config.platform" as a `Rules/` concept
-returns nothing beyond that one factory - confirming real PHPStan models
-the field only as an input to itself, never as something to validate for
-internal consistency against the rest of composer.json. Honest scope
-note: phpstan-rs does *not* currently derive its own `php_version` from
-composer.json at all in either direction (it's populated only from the
-`--php-version` CLI flag or config.rs's TOML key, mirroring real
-PHPStan's explicit-config path only, never its composer-platform
-fallback) - so this needs two genuinely new pieces: parsing the
-`config.platform.php` string (trivial, same `serde_json` pattern as
-existing composer.json reads) and evaluating it against the `require.php`
-semver-style constraint string, for which phpstan-rs has no existing
-parser at all - a small hand-rolled evaluator covering Composer's common
-constraint forms (`^X.Y`, `~X.Y`, `>=X.Y`, simple `||` OR-groups) is
-needed, a bounded, well-known finite grammar for a single X.Y.Z PHP
-version, not a general semver-range library.
-
-**Effort: medium.**
-
-### Phase 120 — Composer path-repository / monorepo workspace support (§S)
-
-#### S1. Fix the symlink-escaping vendor-context filter, then auto-promote path-repository siblings to first-party analyzed files
-
-Two parts. **Bug**: `eval_path` (`src/composer.rs:282-300`) resolves a
-candidate vendor path via `std::fs::canonicalize(raw)` then tests
-`resolved.starts_with(vendor_dir)` to decide whether it's genuinely
-vendor-scoped. For a Composer path-repository dependency, `vendor/<pkg>`
-is a real filesystem symlink to the sibling package's own source tree
-outside `vendor/`; canonicalize fully resolves that symlink, so the
-containment check always fails and the entire path-repo package is
-silently dropped from `ComposerContext` (confirmed with a live repro: a
-`vendor/acme/package-b` symlink to a sibling directory resolves to a path
-that never starts with the canonicalized `vendor_dir`). The fix needs to
-distinguish "legitimately in vendor/, but the directory happens to be a
-symlink" from "the raw string genuinely traverses outside vendor/" -
-checking containment on the un-resolved joined path's components, the way
-real PHPStan's own `PathRoutingParser` walks each path component with
-`is_link()` rather than canonicalize-then-prefix-test. **Feature**: once
-symlinks are followed correctly, read `composer.json`'s `repositories`
-array (today only `require`/`require-dev` are parsed,
-`detect_phpstan_dependency`, `composer.rs:119-126`) to recognize which
-`vendor/<pkg>` entries are local `type: path` siblings, and promote just
-those files from `scan_dirs` (context-only, never reported) into
-`analyze_files` (diagnostic-bearing) - one-pass, cross-package
-diagnostics with zero manual config. Real PHPStan's vendor-derived class
-info comes from a reflection-only `SourceLocator`
-(`ComposerJsonAndInstalledJsonSourceLocatorMaker::create`,
-`...SourceLocatorMaker.php:44-171`) never wired to the set of files a
-`Rule` actually runs against (that's `paths:`, a separate, manually
-authored config key) - a path-repo sibling's own bugs are invisible in
-package A's run unless someone manually adds the vendor-symlinked
-directory to `paths:` in every downstream consumer's own config, repeated
-per consumer, with no cross-process dedup since there's no monorepo
-concept anywhere in PHPStan (grepped, zero hits). phpstan-rs already has
-the exact analyze/context split this needs, working in one process with
-one shared `Registry` (`scan_dirs`/`analyze_files`,
-`check_project.rs:101-145`) - only the symlink bug and the
-`repositories`-array read are missing, both local, additive changes.
-
-**Effort: large.**
-
-#### S2. `check-project`'s vendor-context discovery is hardcoded to a single root, losing every sibling package's own dependencies in a real workspace
-
-`run_check_project_command` calls `composer::discover_vendor_context(&cwd)`
-and `composer::detect_phpstan_dependency(&cwd)` exactly once, against one
-directory (`check_project.rs:329,332`) - even though the underlying
-`run_check_project` function already accepts an arbitrary list of `dirs`
-to load into one shared `Project`/`Registry` and check together
-(`check_project.rs:63-64,82-84`), a multi-package capability with no
-real-PHPStan analogue at all. For a workspace of several independently-
-`composer install`-ed packages, invoking `check-project package-a/src
-package-b/src` today only discovers whichever ONE package's vendor/
-happens to be the process's `cwd`; the other package's own third-party
-dependencies (types it needs for correct inference) are silently missing.
-Real PHPStan resolves exactly one composer.json/vendor root per process
-(`ComposerHelper::getComposerConfig(string $root)`,
-`Internal/ComposerHelper.php:37-53`, a single `$root` string threaded from
-one CLI invocation's cwd) - a genuine multi-root workspace structurally
-requires one full separate PHPStan process (own DI container, own
-result-cache, own baseline) per package, zero shared type-resolution or
-diagnostic reasoning between them. phpstan-rs's multi-root capability is
-already ~90% built at the CLI-argument and Registry level - only the
-vendor-context-discovery call is hardcoded to a single `cwd`. Fix: for
-each entry in `dirs`, walk upward (reusing `find_composer_package_name`'s
-existing upward walk as the pattern) to find that entry's own nearest
-composer.json, discover its context once per root, and merge+dedup every
-resulting `ComposerContext` before loading - one extra loop, not a
-rebuilt container per root the way a faithful multi-invocation PHPStan
-setup would need.
-
-**Effort: medium.**
 
 ---
 
@@ -3948,8 +3592,8 @@ config file, and it needs no path/context-matching engine at all:
 - **145b.** Namespace-level sibling of 145a — declare a whole namespace/
   class visible only from specific other namespaces via attribute.
 - **145c.** `#[TestOnly]`-style marker on a method, flagging *production*
-  code that calls it — the inverse framing of Phase 115's autoload-
-  dev-symbol-reachability idea, keyed on an explicit author-written
+  code that calls it — the inverse framing of `misplaced.autoloadDevSymbol`'s autoload-
+  dev-symbol-reachability check, keyed on an explicit author-written
   marker instead of `composer.json`'s PSR-4 split.
 - **145d.** Restrict a trait to only be `use`d by a whitelisted set of
   classes — a novel, narrow access-control primitive with no existing
