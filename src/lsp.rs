@@ -419,6 +419,8 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_loose_haystack_comparison(resolved.check_loose_haystack_comparison);
+        self.project
             .set_check_strict_function_calls(resolved.check_strict_function_calls);
         self.project
             .set_check_switch_case_types(resolved.check_switch_case_types);

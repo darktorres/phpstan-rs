@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag loose in_array()/array_search()/array_keys() calls whose needle and haystack types compare differently under == and ===.
+        #[arg(long)]
+        check_loose_haystack_comparison: bool,
         /// Flag in_array()/array_search()/array_keys()/base64_decode() calls without strict mode, and iterator_to_array() without preserve_keys.
         #[arg(long)]
         check_strict_function_calls: bool,
@@ -471,6 +474,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_loose_haystack_comparison,
             check_strict_function_calls,
             check_switch_case_types,
             check_loop_variable_overwrite,
@@ -532,6 +536,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_loose_haystack_comparison,
             check_strict_function_calls,
             check_switch_case_types,
             check_loop_variable_overwrite,

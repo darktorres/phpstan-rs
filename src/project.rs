@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_loose_haystack_comparison`.
+    pub fn set_check_loose_haystack_comparison(&mut self, enabled: bool) {
+        self.registry.check_loose_haystack_comparison = enabled;
+    }
+
     /// See `Registry::check_strict_function_calls`.
     pub fn set_check_strict_function_calls(&mut self, enabled: bool) {
         self.registry.check_strict_function_calls = enabled;

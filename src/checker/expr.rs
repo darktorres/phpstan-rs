@@ -761,6 +761,13 @@ impl<'a> Checker<'a> {
                                     name, sig, args, locals, e.span, label,
                                 )
                             }
+                            "in_array" | "array_search" | "array_keys"
+                                if self.registry.check_loose_haystack_comparison =>
+                            {
+                                self.check_loose_haystack_comparison(
+                                    name, sig, args, locals, e.span, label,
+                                )
+                            }
                             _ => {}
                         }
                         // A spread argument (`f(...$args)`) means the

@@ -193,3 +193,42 @@ function f(array $a, bool $b, \Generator $g): void {
     );
     assert_eq!(ids(src, |_| {}), Vec::<String>::new());
 }
+
+#[test]
+fn loose_haystack_comparisons() {
+    let src = r#"<?php
+/**
+ * @param list<string> $names
+ * @param list<int> $ids
+ * @param list<'a'|'b'> $letters
+ * @param list<numeric-string> $numbers
+ * @param list<?int> $maybe
+ */
+function f(array $names, array $ids, array $letters, array $numbers, array $maybe, int $n, string $s, mixed $m): void {
+    in_array($s, $names);
+    in_array($n, $ids);
+    in_array($n, $letters);
+    in_array($n, $names);
+    in_array($s, $numbers);
+    in_array($n, $maybe);
+    in_array($n, $names, true);
+    in_array($m, $names);
+    array_search(1.5, $ids);
+    array_keys($ids, '1');
+}
+"#;
+    let run = |version: Option<(u8, u8)>| {
+        let mut v: Vec<String> = diagnostics_for_with(src, |r| {
+            r.check_loose_haystack_comparison = true;
+            r.php_version = version;
+        })
+        .into_iter()
+        .filter(|d| d.identifier == "function.looseComparison")
+        .map(|d| d.span.start.line.to_string())
+        .collect();
+        v.sort_by_key(|l| l.parse::<u32>().unwrap());
+        v
+    };
+    assert_eq!(run(Some((8, 3))), vec!["13", "14", "15", "18", "19"]);
+    assert_eq!(run(Some((7, 4))), vec!["12", "13", "14", "15", "18", "19"]);
+}

@@ -4,12 +4,19 @@
 //! (`ImpossibleInArrayHaystackFiniteTypesRule`,
 //! `function.impossibleHaystackValue`, level 4), and a void `match` used
 //! as a value (`UsageOfVoidMatchExpressionRule`).
+//!
+//! Opt-in `check_loose_haystack_comparison`: an `in_array()`/
+//! `array_search()`/`array_keys()` call comparing loosely where some
+//! needle/haystack value type pair can be `==` without being `===`
+//! (`function.looseComparison`).
 
 use crate::ast::Arg;
 use crate::checker::expr::ranges::loose_compare_literals;
 use crate::checker::{Checker, Locals};
+use crate::registry::FunctionSig;
 use crate::token::Span;
-use crate::types::Type;
+
+use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
 
 /// A value with a finite set of possible values - a literal, `bool`,
 /// `null`, or an enum case.
@@ -165,5 +172,190 @@ impl<'a> Checker<'a> {
                 "match.void",
             );
         }
+    }
+}
+
+/// How a value takes part in a loose `==` comparison.
+#[derive(Clone, PartialEq)]
+enum LooseKind {
+    Int,
+    Float,
+    /// A string literal PHP never reads as a number.
+    NonNumericString,
+    /// A numeric string literal, or a `numeric-string`.
+    NumericString,
+    /// A string that may or may not be numeric.
+    String,
+    Bool,
+    Null,
+    Array,
+    Enum,
+    Object(String),
+}
+
+fn loose_kinds(ty: &Type, out: &mut Vec<LooseKind>) -> bool {
+    let kind = match ty {
+        Type::Int | Type::IntLiteral(_) | Type::IntRange(..) => LooseKind::Int,
+        Type::Float | Type::FloatLiteral(_) => LooseKind::Float,
+        Type::StringLiteral(s) if is_numeric_string_literal(s) => LooseKind::NumericString,
+        Type::StringLiteral(_) => LooseKind::NonNumericString,
+        Type::String => LooseKind::String,
+        Type::Bool | Type::True | Type::False => LooseKind::Bool,
+        Type::Null => LooseKind::Null,
+        Type::Array(..) | Type::ArrayShape(_) => LooseKind::Array,
+        Type::EnumCase(..) => LooseKind::Enum,
+        Type::Object(class, _) => LooseKind::Object(class.clone()),
+        Type::Union(members) => return members.iter().all(|m| loose_kinds(m, out)),
+        Type::Intersection(members) => {
+            if members
+                .iter()
+                .any(|m| matches!(m, Type::Accessory(AccessoryKind::NumericString)))
+            {
+                LooseKind::NumericString
+            } else if let Some(base) = members
+                .iter()
+                .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
+            {
+                return loose_kinds(base, out);
+            } else {
+                return false;
+            }
+        }
+        _ => return false,
+    };
+    if !out.contains(&kind) {
+        out.push(kind);
+    }
+    true
+}
+
+impl<'a> Checker<'a> {
+    /// Whether values of kinds `a` and `b` can be `==` without being
+    /// `===`.
+    fn loose_comparison_differs(&self, a: &LooseKind, b: &LooseKind) -> bool {
+        use LooseKind::*;
+        let before_php8 = self.registry.php_version.is_none_or(|v| v < (8, 0));
+        let numeric = |k: &LooseKind| matches!(k, Int | Float);
+        let possibly_numeric_string = |k: &LooseKind| matches!(k, NumericString | String);
+        match (a, b) {
+            (Enum, _) | (_, Enum) => false,
+            (Bool, _) | (_, Bool) => true,
+            (Null, Null) => false,
+            (Null, Object(_)) | (Object(_), Null) => false,
+            (Null, _) | (_, Null) => true,
+            (Int, Int) | (Float, Float) => false,
+            (Int, Float) | (Float, Int) => true,
+            (x, y) if numeric(x) && possibly_numeric_string(y) => true,
+            (x, y) if numeric(y) && possibly_numeric_string(x) => true,
+            (x, NonNumericString) | (NonNumericString, x) if numeric(x) => before_php8,
+            (NumericString, NumericString | String) | (String, NumericString) => true,
+            (Array, Array) => true,
+            (Object(_), Object(_)) => true,
+            (Object(class), NonNumericString | NumericString | String)
+            | (NonNumericString | NumericString | String, Object(class)) => {
+                self.registry.lookup_method(class, "__toString").is_some()
+            }
+            _ => false,
+        }
+    }
+
+    /// `function.looseComparison`, for `in_array()`/`array_search()`/
+    /// `array_keys()`.
+    pub(crate) fn check_loose_haystack_comparison(
+        &mut self,
+        function: &str,
+        sig: &FunctionSig,
+        args: &[Arg],
+        locals: &Locals,
+        span: Span,
+        label: &str,
+    ) {
+        if args.iter().any(|a| a.spread) {
+            return;
+        }
+        let (needle_at, haystack_at) = match function {
+            "in_array" | "array_search" => (0, 1),
+            "array_keys" => (1, 0),
+            _ => return,
+        };
+        let bound = |position: usize| -> Option<&Arg> {
+            let positional = args.iter().take_while(|a| a.name.is_none()).count();
+            if position < positional {
+                return args.get(position);
+            }
+            let name = sig.params.get(position)?.name.as_ref();
+            args.iter().find(|a| {
+                a.name
+                    .as_deref()
+                    .is_some_and(|n| n.eq_ignore_ascii_case(name))
+            })
+        };
+        let (Some(needle), Some(haystack)) = (bound(needle_at), bound(haystack_at)) else {
+            return;
+        };
+        if let Some(strict) = bound(2)
+            && self.infer_expr(&strict.value, locals) != Type::False
+        {
+            return;
+        }
+        let needle_ty = self.infer_expr(&needle.value, locals);
+        let haystack_ty = self.infer_expr(&haystack.value, locals);
+        let mut values: Vec<Type> = Vec::new();
+        if !haystack_value_types(&haystack_ty, &mut values) {
+            return;
+        }
+        let mut needle_kinds = Vec::new();
+        if !loose_kinds(&needle_ty, &mut needle_kinds) {
+            return;
+        }
+        for value in &values {
+            let mut value_kinds = Vec::new();
+            if !loose_kinds(value, &mut value_kinds) {
+                continue;
+            }
+            let hazard = needle_kinds.iter().any(|n| {
+                value_kinds
+                    .iter()
+                    .any(|v| self.loose_comparison_differs(n, v))
+            });
+            if hazard {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Loose comparison in {function}() between needle {needle_ty} and haystack value {value} can match values that are not identical; pass true as the strict argument."
+                    ),
+                    span,
+                    0,
+                    "function.looseComparison",
+                );
+                return;
+            }
+        }
+    }
+}
+
+/// The value types an array type holds; `false` when `ty` isn't a known
+/// array.
+fn haystack_value_types(ty: &Type, out: &mut Vec<Type>) -> bool {
+    match ty {
+        Type::Array(_, value) => {
+            out.push((**value).clone());
+            true
+        }
+        Type::ArrayShape(fields) => {
+            out.extend(
+                fields
+                    .iter()
+                    .filter(|(key, ..)| key != "...")
+                    .map(|(_, value, _)| value.clone()),
+            );
+            true
+        }
+        Type::Union(members) => members.iter().all(|m| haystack_value_types(m, out)),
+        Type::Intersection(members) => members
+            .iter()
+            .find(|m| matches!(m, Type::Array(..) | Type::ArrayShape(_)))
+            .is_some_and(|base| haystack_value_types(base, out)),
+        _ => false,
     }
 }
