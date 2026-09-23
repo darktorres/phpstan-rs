@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_switch_case_types = false
 //! check_loop_variable_overwrite = false
 //! check_dynamic_static_calls = false
 //! check_illegal_constructor_calls = false
@@ -293,6 +294,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (phpstan-strict-rules): a `switch` case whose type can never match the subject's (`switch.type`).
+    pub check_switch_case_types: Option<bool>,
     /// Opt-in (phpstan-strict-rules): a `foreach` key/value variable or `for` initial assignment overwriting an already-defined variable (`foreach.keyOverwrite`/`foreach.valueOverwrite`/`for.variableOverwrite`).
     pub check_loop_variable_overwrite: Option<bool>,
     /// Opt-in (phpstan-strict-rules): a static method called through an instance, `$obj->staticMethod()` (`staticMethod.dynamicCall`).

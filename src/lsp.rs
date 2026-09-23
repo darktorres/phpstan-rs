@@ -419,6 +419,8 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_switch_case_types(resolved.check_switch_case_types);
+        self.project
             .set_check_loop_variable_overwrite(resolved.check_loop_variable_overwrite);
         self.project
             .set_check_dynamic_static_calls(resolved.check_dynamic_static_calls);

@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag switch cases whose type can never match the switch subject's.
+        #[arg(long)]
+        check_switch_case_types: bool,
         /// Flag foreach/for loop variables that overwrite an already-defined variable.
         #[arg(long)]
         check_loop_variable_overwrite: bool,
@@ -465,6 +468,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_switch_case_types,
             check_loop_variable_overwrite,
             check_dynamic_static_calls,
             check_illegal_constructor_calls,
@@ -524,6 +528,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_switch_case_types,
             check_loop_variable_overwrite,
             check_dynamic_static_calls,
             check_illegal_constructor_calls,

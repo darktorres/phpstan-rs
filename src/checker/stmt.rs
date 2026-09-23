@@ -89,7 +89,7 @@ impl<'a> Checker<'a> {
         if self.registry.check_enum_exhaustiveness {
             self.check_strict_statement_idioms(stmt, locals, label);
         }
-        if self.registry.check_loop_variable_overwrite {
+        if self.registry.check_loop_variable_overwrite || self.registry.check_switch_case_types {
             self.check_strict_rules_statement(stmt, locals, label);
         }
         self.check_stmt_impl(stmt, locals, declared_return, label);

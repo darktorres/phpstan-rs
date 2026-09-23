@@ -117,3 +117,35 @@ function f(array $rows, int $i, bool $b): void {
     );
     assert_eq!(ids(src, |_| {}), Vec::<String>::new());
 }
+
+#[test]
+fn switch_case_types() {
+    let src = r#"<?php
+function f(int $n, string $s, mixed $m): void {
+    switch ($n) {
+        case 1: break;
+        case 'one': break;
+        case null: break;
+        default: break;
+    }
+    switch ($s) { case 'a': case 2: break; }
+    switch ($m) { case 'a': case 2: break; }
+    switch (true) { case $n > 1: break; }
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_switch_case_types = true;
+    assert_eq!(
+        ids(src, enabled),
+        vec!["5 switch.type", "6 switch.type", "9 switch.type"]
+    );
+    let messages: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.identifier == "switch.type")
+        .map(|d| d.message)
+        .collect();
+    assert_eq!(
+        messages[0],
+        "Switch condition type (int) does not match case condition 'one' (string)."
+    );
+    assert_eq!(ids(src, |_| {}), Vec::<String>::new());
+}

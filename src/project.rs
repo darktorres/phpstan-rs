@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_switch_case_types`.
+    pub fn set_check_switch_case_types(&mut self, enabled: bool) {
+        self.registry.check_switch_case_types = enabled;
+    }
+
     /// See `Registry::check_loop_variable_overwrite`.
     pub fn set_check_loop_variable_overwrite(&mut self, enabled: bool) {
         self.registry.check_loop_variable_overwrite = enabled;

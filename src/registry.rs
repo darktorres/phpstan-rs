@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (phpstan-strict-rules): a `switch` case whose type can never match the subject's (`switch.type`).
+    pub check_switch_case_types: bool,
     // Opt-in (phpstan-strict-rules): a `foreach` key/value variable or `for` initial assignment overwriting an already-defined variable (`foreach.keyOverwrite`/`foreach.valueOverwrite`/`for.variableOverwrite`).
     pub check_loop_variable_overwrite: bool,
     // Opt-in (phpstan-strict-rules): a static method called through an instance, `$obj->staticMethod()` (`staticMethod.dynamicCall`).

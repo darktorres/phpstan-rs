@@ -10,9 +10,12 @@
 //!   (`foreach.keyOverwrite`/`foreach.valueOverwrite`) or a `for` loop's
 //!   initial assignment (`for.variableOverwrite`) replacing a variable
 //!   that is already defined.
+//! - `check_switch_case_types` - a `switch` case whose type can never be
+//!   the subject's (`switch.type`).
 
 use crate::ast::*;
 use crate::checker::{Checker, Locals};
+use crate::registry::Trinary;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -109,6 +112,31 @@ impl<'a> Checker<'a> {
             }
             for (span, id, message) in overwritten {
                 self.report(label.to_string(), message, span, 0, id);
+            }
+        }
+        if self.registry.check_switch_case_types
+            && let StmtKind::Switch { subject, cases } = &stmt.kind
+        {
+            let subject_ty = self.infer_expr(subject, locals);
+            for case in cases {
+                let Some(test) = &case.test else {
+                    continue;
+                };
+                let case_ty = self.infer_expr(test, locals);
+                if self.registry.is_super_type_of(&subject_ty, &case_ty) != Trinary::No {
+                    continue;
+                }
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Switch condition type ({subject_ty}) does not match case condition {} ({}).",
+                        crate::printer::print_expr(test),
+                        describe_type_only(&case_ty)
+                    ),
+                    case.span,
+                    0,
+                    "switch.type",
+                );
             }
         }
     }
@@ -253,5 +281,33 @@ fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, crate::token:
             .flat_map(|item| defined_targets(&item.value, locals))
             .collect(),
         _ => Vec::new(),
+    }
+}
+
+/// `VerbosityLevel::typeOnly()`: literal values and array shapes collapse
+/// to their plain type.
+fn describe_type_only(ty: &Type) -> String {
+    match ty {
+        Type::IntLiteral(_) | Type::IntRange(..) => "int".to_string(),
+        Type::FloatLiteral(_) => "float".to_string(),
+        Type::StringLiteral(_) => "string".to_string(),
+        Type::True | Type::False => "bool".to_string(),
+        Type::Array(..) | Type::ArrayShape(_) => "array".to_string(),
+        Type::Object(class, _) | Type::EnumCase(class, _) => class.clone(),
+        Type::Intersection(members) => members
+            .iter()
+            .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
+            .map_or_else(|| ty.to_string(), describe_type_only),
+        Type::Union(members) => {
+            let mut parts: Vec<String> = Vec::new();
+            for member in members {
+                let part = describe_type_only(member);
+                if !parts.contains(&part) {
+                    parts.push(part);
+                }
+            }
+            parts.join("|")
+        }
+        other => other.to_string(),
     }
 }
