@@ -391,6 +391,30 @@ impl<'a> Checker<'a> {
         self.check_generic_bounds(&resolved, label, f.name_span);
     }
 
+    /// `varTag.misplaced`: a `@var` in a declaration's own docblock (a
+    /// class, interface, enum, function or method) describes nothing.
+    pub(crate) fn check_misplaced_var_tag(
+        &mut self,
+        doc: Option<&str>,
+        description: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(doc) = doc else {
+            return;
+        };
+        if !doc.contains("var") || super::phpdoc_unresolvable::var_tag_nodes(doc).is_empty() {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!("PHPDoc tag @var above {description} has no effect."),
+            span,
+            2,
+            "varTag.misplaced",
+        );
+    }
+
     /// The `@template` names visible in `f`: its own and its class's.
     fn declared_template_names(&self, f: &FunctionDecl, class_name: Option<&str>) -> Vec<String> {
         let mut names: Vec<String> = f

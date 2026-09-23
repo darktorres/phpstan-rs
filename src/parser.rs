@@ -59,6 +59,11 @@ pub struct Parser {
     pub(crate) doc_comments: std::collections::HashMap<usize, Arc<str>>,
     // Each `doc_comments` entry's own start line, same keys.
     pub(crate) doc_comment_lines: std::collections::HashMap<usize, u32>,
+    // Where several doc comments directly precede one token, all of them
+    // folded into one comment, same keys. A statement reads every one
+    // (real PHPStan's `getComments()`); a declaration only its last
+    // (`getDocComment()`, `doc_comments` above).
+    pub(crate) doc_comments_all: std::collections::HashMap<usize, Arc<str>>,
     // Incremented/decremented around the parser's self-recursive
     // expression productions (parse_unary, parse_assignment,
     // parse_coalesce) - see MAX_EXPR_DEPTH.
@@ -86,14 +91,23 @@ impl Parser {
         let mut filtered_keyword_raw = Vec::with_capacity(tokens.len());
         let mut doc_comments = std::collections::HashMap::new();
         let mut doc_comment_lines = std::collections::HashMap::new();
-        let mut pending: Option<(Arc<str>, u32)> = None;
+        let mut doc_comments_all = std::collections::HashMap::new();
+        let mut pending: Vec<(Arc<str>, u32)> = Vec::new();
         for (tok, span, keyword_raw) in tokens {
             match tok {
-                Token::DocComment(s) => pending = Some((s, span.start.line)),
+                Token::DocComment(s) => pending.push((s, span.start.line)),
                 other => {
-                    if let Some((doc, line)) = pending.take() {
-                        doc_comments.insert(filtered.len(), doc);
-                        doc_comment_lines.insert(filtered.len(), line);
+                    if let Some((first_line, last)) = pending
+                        .first()
+                        .map(|(_, l)| *l)
+                        .zip(pending.last().cloned())
+                    {
+                        doc_comments.insert(filtered.len(), last.0);
+                        doc_comment_lines.insert(filtered.len(), first_line);
+                        if pending.len() > 1 {
+                            doc_comments_all.insert(filtered.len(), fold_doc_comments(&pending));
+                        }
+                        pending.clear();
                     }
                     filtered.push(other);
                     filtered_spans.push(span);
@@ -108,6 +122,7 @@ impl Parser {
             pos: 0,
             doc_comments,
             doc_comment_lines,
+            doc_comments_all,
             expr_depth: 0,
         }
     }
@@ -231,3 +246,13 @@ impl Parser {
 
 #[cfg(test)]
 mod tests;
+
+/// Several consecutive `/** ... */` comments as one: each one's body, in
+/// order, inside a single pair of delimiters.
+fn fold_doc_comments(docs: &[(Arc<str>, u32)]) -> Arc<str> {
+    let bodies: Vec<&str> = docs
+        .iter()
+        .map(|(d, _)| d.trim().trim_start_matches("/**").trim_end_matches("*/"))
+        .collect();
+    Arc::from(format!("/**{}\n*/", bodies.join("\n")).as_str())
+}

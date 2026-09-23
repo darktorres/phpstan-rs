@@ -23,7 +23,11 @@ impl Parser {
         // that's also a declaration (e.g. a function) consuming its own
         // doc comment for its own `@param`/`@return` tags further down is
         // unaffected, since the peek doesn't remove the map entry.
-        let leading_doc_comment = self.doc_comments.get(&self.pos).cloned();
+        let leading_doc_comment = self
+            .doc_comments_all
+            .get(&self.pos)
+            .or_else(|| self.doc_comments.get(&self.pos))
+            .cloned();
         let leading_doc_line = self.doc_comment_lines.get(&self.pos).copied();
         let mut stmt = match self.peek() {
             Token::InlineHtml(_) => {

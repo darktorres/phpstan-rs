@@ -86,7 +86,12 @@ pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
             if !prefix.is_empty() && prefix != "phpstan-" && contains_error(ty) {
                 continue;
             }
-            match out.iter_mut().find(|(v, _)| v == variable) {
+            // Named tags are keyed by name (a later spelling replaces an
+            // earlier one); every unnamed tag stands on its own.
+            match out
+                .iter_mut()
+                .find(|(v, _)| variable.is_some() && v == variable)
+            {
                 Some(slot) => slot.1 = ty.clone(),
                 None => out.push((variable.clone(), ty.clone())),
             }

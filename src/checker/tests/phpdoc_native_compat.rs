@@ -505,3 +505,114 @@ fn messages_all(src: &str) -> Vec<(String, String)> {
         .map(|d| (d.identifier, d.message))
         .collect()
 }
+
+#[test]
+fn var_tags_must_name_the_variables_their_statement_is_about() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(array $items): void {
+                /** @var int $wrong */
+                $x = g();
+                /** @var int $x */
+                $y = g();
+                /**
+                 * @var int
+                 * @var string
+                 */
+                $z = g();
+                /** @var int */
+                [$a, $b] = [1, 2];
+                /** @var string $nope */
+                foreach ($items as $k => $v) {}
+                /** @var int $ghost */
+                echo 1;
+                /** @var int */
+                echo 2;
+                /** @var int $x */
+                echo 3;
+                /** @var int $$w */
+                $w = g();
+            }
+            function g(): mixed { return 1; }
+        "#,
+    );
+    let m: Vec<(&str, &str)> = d
+        .iter()
+        .filter(|x| x.identifier.starts_with("varTag.") && x.identifier != "varTag.type")
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        m,
+        [
+            (
+                "varTag.differentVariable",
+                "Variable $wrong in PHPDoc tag @var does not match assigned variable $x."
+            ),
+            (
+                "varTag.multipleTags",
+                "Multiple PHPDoc @var tags above single variable assignment are not supported."
+            ),
+            (
+                "varTag.noVariable",
+                "PHPDoc tag @var above assignment does not specify variable name."
+            ),
+            (
+                "varTag.differentVariable",
+                "Variable $nope in PHPDoc tag @var does not match any variable in the foreach loop: $items, $k, $v"
+            ),
+            (
+                "varTag.variableNotFound",
+                "Variable $ghost in PHPDoc tag @var does not exist."
+            ),
+            (
+                "varTag.noVariable",
+                "PHPDoc tag @var does not specify variable name."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_var_tag_above_a_declaration_has_no_effect() {
+    let m = messages(
+        r#"<?php
+            /** @var int */
+            class C {
+                /** @var int */
+                public function m(): void {}
+            }
+            /** @var int */
+            function f(): void {}
+            /** @var int */
+            trait T {}
+        "#,
+        "varTag.misplaced",
+    );
+    assert_eq!(
+        m,
+        [
+            "PHPDoc tag @var above a class has no effect.",
+            "PHPDoc tag @var above a method has no effect.",
+            "PHPDoc tag @var above a function has no effect.",
+        ]
+    );
+}
+
+#[test]
+fn every_doc_comment_above_a_statement_is_read() {
+    let m = messages(
+        r#"<?php
+            /** @var string $type */
+            /** @var string $content */
+            [$a, $b] = [1, 2];
+        "#,
+        "varTag.variableNotFound",
+    );
+    assert_eq!(
+        m,
+        [
+            "Variable $type in PHPDoc tag @var does not exist.",
+            "Variable $content in PHPDoc tag @var does not exist.",
+        ]
+    );
+}

@@ -1774,6 +1774,19 @@ impl<'a> Checker<'a> {
                     self.record_named_argument_renames(&fqn, c);
                     if !self.facts_only {
                         self.check_class_generic_bounds(&fqn, c);
+                        let description = match c.kind {
+                            ClassKind::Interface => Some("an interface"),
+                            ClassKind::Trait => None,
+                            _ => Some("a class"),
+                        };
+                        if let Some(description) = description {
+                            self.check_misplaced_var_tag(
+                                c.doc_comment.as_deref(),
+                                description,
+                                c.name_span,
+                                &fqn,
+                            );
+                        }
                         self.check_class_completeness(&fqn, c.span);
                         self.check_inheritance_target_kinds(&fqn, false, &fqn, c.span);
                         self.check_readonly_class_version(c.is_readonly, false, &fqn, c.name_span);
@@ -1937,6 +1950,12 @@ impl<'a> Checker<'a> {
                         self.check_ancestor_generic_bounds(&fqn, e.span);
                         self.check_enum_template_tag(&fqn, e);
                         self.check_sealed_tag_types(&fqn, e.doc_comment.as_deref(), e.span, true);
+                        self.check_misplaced_var_tag(
+                            e.doc_comment.as_deref(),
+                            "an enum",
+                            e.name_span,
+                            &fqn,
+                        );
                         self.check_enum_case_values(&fqn, e);
                         self.check_enum_sanity(&fqn, e);
                         self.check_trait_conflicts(&fqn, e.span);

@@ -2902,6 +2902,12 @@ fn a_bare_inline_var_annotation_preceding_a_foreach_binding_two_names_is_a_no_op
             }
         "#,
     );
+    // Real PHPStan also counts the iterated variable as a candidate, so
+    // an unnamed tag here is `varTag.noVariable` - not this test's subject.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "varTag.noVariable")
+        .collect();
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 

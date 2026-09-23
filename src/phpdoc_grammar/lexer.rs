@@ -200,7 +200,12 @@ impl<'a> Lexer<'a> {
                 '$' => {
                     self.advance();
                     let name = self.lex_identifier();
-                    PhpDocToken::Variable(name)
+                    // A `$` not followed by a name (`$$x`) is no variable.
+                    if name.is_empty() {
+                        PhpDocToken::Unknown('$')
+                    } else {
+                        PhpDocToken::Variable(name)
+                    }
                 }
                 '|' => {
                     self.advance();

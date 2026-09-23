@@ -119,6 +119,216 @@ impl<'a> Checker<'a> {
         self.report_invalid_doc_tag_values(label, doc, stmt.span);
     }
 
+    /// Real PHPStan's `WrongVariableNameInVarTagRule`: a statement's
+    /// `@var` tags must name the variables that statement is about (the
+    /// assigned ones, a `foreach`'s key/value/subject, a `static`/`global`
+    /// list) or, elsewhere, a variable already defined; an unnamed tag
+    /// needs exactly one candidate. `locals` is the scope before `stmt`.
+    fn check_statement_var_tag_names(&mut self, stmt: &Stmt, locals: &Locals, label: &str) {
+        let Some(doc) = stmt.doc_comment.as_deref() else {
+            return;
+        };
+        if !doc.contains("var")
+            || matches!(
+                stmt.kind,
+                StmtKind::FunctionDecl(_)
+                    | StmtKind::ClassDecl(_)
+                    | StmtKind::EnumDecl(_)
+                    | StmtKind::GlobalConst(_)
+            )
+        {
+            return;
+        }
+        let tags: Vec<Option<String>> = super::phpdoc_unresolvable::var_tag_nodes(doc)
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect();
+        if tags.is_empty() {
+            return;
+        }
+        // Reported on the statement itself, unlike the comment-line
+        // `varTag.unresolvableType`.
+        let span = stmt.span;
+        let mut found: Vec<(String, &'static str)> = Vec::new();
+        // Superglobals always exist; `$argv`/`$argc` in a script's own
+        // top-level scope.
+        let top_level = label == "<main>";
+        let defined = |name: &str| {
+            locals.contains_key(name)
+                || matches!(
+                    name,
+                    "GLOBALS"
+                        | "_SERVER"
+                        | "_GET"
+                        | "_POST"
+                        | "_FILES"
+                        | "_COOKIE"
+                        | "_SESSION"
+                        | "_REQUEST"
+                        | "_ENV"
+                )
+                || (top_level && matches!(name, "argv" | "argc"))
+        };
+        let list = |names: &[String]| {
+            names
+                .iter()
+                .map(|n| format!("${n}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        match &stmt.kind {
+            StmtKind::Expression(e)
+                if matches!(
+                    e.kind,
+                    ExprKind::Assign(..) | ExprKind::AssignRef(..) | ExprKind::CompoundAssign(..)
+                ) =>
+            {
+                let (ExprKind::Assign(lhs, _)
+                | ExprKind::AssignRef(lhs, _)
+                | ExprKind::CompoundAssign(_, lhs, _)) = &e.kind
+                else {
+                    unreachable!()
+                };
+                let assigned = assigned_variable_names(lhs);
+                let mut reported_multiple = false;
+                for tag in &tags {
+                    match tag {
+                        None if tags.len() != 1 => {
+                            if !reported_multiple {
+                                found.push((
+                                    "Multiple PHPDoc @var tags above single variable assignment are not supported."
+                                        .to_string(),
+                                    "varTag.multipleTags",
+                                ));
+                                reported_multiple = true;
+                            }
+                        }
+                        None if assigned.len() != 1 => found.push((
+                            "PHPDoc tag @var above assignment does not specify variable name."
+                                .to_string(),
+                            "varTag.noVariable",
+                        )),
+                        None => {}
+                        Some(name) if defined(name) || assigned.contains(name) => {}
+                        Some(name) if assigned.len() == 1 && tags.len() == 1 => found.push((
+                            format!(
+                                "Variable ${name} in PHPDoc tag @var does not match assigned variable ${}.",
+                                assigned[0]
+                            ),
+                            "varTag.differentVariable",
+                        )),
+                        Some(name) => found.push((
+                            format!("Variable ${name} in PHPDoc tag @var does not exist."),
+                            "varTag.variableNotFound",
+                        )),
+                    }
+                }
+            }
+            StmtKind::Foreach {
+                subject,
+                key,
+                value,
+                ..
+            } => {
+                let mut names = Vec::new();
+                if let ExprKind::Variable(v) = &subject.kind {
+                    names.push(v.to_string());
+                }
+                if let Some(k) = key
+                    && let ExprKind::Variable(v) = &k.kind
+                {
+                    names.push(v.to_string());
+                }
+                names.extend(assigned_variable_names(value));
+                for tag in &tags {
+                    match tag {
+                        None if names.len() == 1 => {}
+                        None => found.push((
+                            "PHPDoc tag @var above foreach loop does not specify variable name."
+                                .to_string(),
+                            "varTag.noVariable",
+                        )),
+                        Some(name) if names.contains(name) => {}
+                        Some(name) => found.push((
+                            format!(
+                                "Variable ${name} in PHPDoc tag @var does not match any variable in the foreach loop: {}",
+                                list(&names)
+                            ),
+                            "varTag.differentVariable",
+                        )),
+                    }
+                }
+            }
+            StmtKind::StaticVar(vars) => {
+                let names: Vec<String> = vars.iter().map(|(n, _)| n.to_string()).collect();
+                for tag in &tags {
+                    match tag {
+                        None if names.len() == 1 => {}
+                        None => found.push((
+                            "PHPDoc tag @var above multiple static variables does not specify variable name."
+                                .to_string(),
+                            "varTag.noVariable",
+                        )),
+                        Some(name) if names.contains(name) => {}
+                        Some(name) => found.push((
+                            format!(
+                                "Variable ${name} in PHPDoc tag @var does not match any static variable: {}",
+                                list(&names)
+                            ),
+                            "varTag.differentVariable",
+                        )),
+                    }
+                }
+            }
+            StmtKind::Global(vars) => {
+                let names: Vec<String> = vars.clone();
+                for tag in &tags {
+                    match tag {
+                        None if names.len() == 1 => {}
+                        None => found.push((
+                            "PHPDoc tag @var above multiple global variables does not specify variable name."
+                                .to_string(),
+                            "varTag.noVariable",
+                        )),
+                        Some(name) if names.contains(name) => {}
+                        Some(name) => found.push((
+                            format!(
+                                "Variable ${name} in PHPDoc tag @var does not match any global variable: {}",
+                                list(&names)
+                            ),
+                            "varTag.differentVariable",
+                        )),
+                    }
+                }
+            }
+            other => {
+                // `return`/`throw` carry an expression an unnamed tag can
+                // describe; any other statement has none.
+                let has_expr = matches!(other, StmtKind::Return(Some(_)) | StmtKind::Throw(_));
+                let mut unnamed = 0;
+                for tag in &tags {
+                    match tag {
+                        None => unnamed += 1,
+                        Some(name) if defined(name) => {}
+                        Some(name) => found.push((
+                            format!("Variable ${name} in PHPDoc tag @var does not exist."),
+                            "varTag.variableNotFound",
+                        )),
+                    }
+                }
+                if unnamed > 0 && (unnamed != 1 || !has_expr) {
+                    found.push((
+                        "PHPDoc tag @var does not specify variable name.".to_string(),
+                        "varTag.noVariable",
+                    ));
+                }
+            }
+        }
+        for (message, identifier) in found {
+            self.report(label.to_string(), message, span, 2, identifier);
+        }
+    }
+
     /// `InvalidPhpDocVarTagTypeRule`'s unresolvable half: every `@var` on
     /// a statement (not a declaration, whose own rules check its tags),
     /// reported on the comment's own line.
@@ -182,6 +392,7 @@ impl<'a> Checker<'a> {
     ) {
         self.check_statement_doc_tag_values(stmt, label);
         self.check_statement_var_tags_resolvable(stmt, label);
+        self.check_statement_var_tag_names(stmt, locals, label);
         let inline_var = self.inline_var_annotation(stmt);
         if let Some((name, ty)) = &inline_var {
             purge_stale_narrowing_for(locals, name);
@@ -1284,5 +1495,18 @@ fn static_variable_type(initializer: &Type) -> Type {
             Box::new(Type::Mixed(false)),
         ),
         other => other.clone(),
+    }
+}
+
+/// The plain variables an assignment target writes: `$x`, or each of a
+/// `[$a, $b]`/`list($a, $b)` destructuring's.
+fn assigned_variable_names(target: &Expr) -> Vec<String> {
+    match &target.kind {
+        ExprKind::Variable(v) => vec![v.to_string()],
+        ExprKind::ArrayLiteral(items) => items
+            .iter()
+            .flat_map(|item| assigned_variable_names(&item.value))
+            .collect(),
+        _ => Vec::new(),
     }
 }
