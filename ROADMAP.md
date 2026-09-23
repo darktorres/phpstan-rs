@@ -1291,6 +1291,23 @@ typed constants, plus float literals and `(float)` casts for `float`
 adds the twelve byte-oriented string functions with `mb_*`
 counterparts to `restricted_symbols`.
 
+**Closed-by-default class shape** (opt-in `check_closed_classes`,
+`project/class_shape.rs`, `ergebnis`' `FinalRule`/
+`PrivateInFinalClassRule`/`FinalInAbstractClassRule`): `class.notFinal`,
+`method`/`property`/`classConstant.protectedInFinalClass` and
+`method.notFinalInAbstractClass` - skipping, from the closed-world
+registry, a class something extends, a method a subclass overrides, a
+member the parent declares, and Doctrine-mapped entities.
+**Parent-call requirements** (`[[parent_calls]]`: class, method,
+first/last/any/never invocation, yes/no/maybe content; built-in
+PHPUnit `setUp`/`tearDown`/`setUpBeforeClass`/`tearDownAfterClass`/
+`assertPre`/`PostConditions` and Codeception `_before`/`_after` entries
+on by default, `default_parent_calls = false` to drop them), each
+requiring the call only when the overridden implementation isn't
+empty: `parentCall.missing` (with a fix inserting the call when the
+parent needs no arguments), `.notFirst`, `.notLast`, `.forbidden`,
+`.noContent`, `.extraContent`.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3338,37 +3355,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 144 — "Closed by default" class shape + generalized parent-hook-call requirement
-
-- **144a (small).** Opinionated "closed by default" class-shape bundle:
-  every class `final` unless `abstract`; every member `private` unless
-  the class is `final` (no subclass exists to protect from); concrete
-  methods inside an `abstract` class themselves `final` (only
-  overridable via the class's own abstract methods) — `ergebnis/
-  phpstan-rules`' `FinalRule`/`PrivateInFinalClassRule`/
-  `FinalInAbstractClassRule`. Each a trivial class/member-shape check.
-- **144b (medium, generalizes and supersedes Phase 101's E3 scope).**
-  A fully generic "must invoke `parent::method()`" mechanism —
-  config-driven `{className, methodName, invocation: first|last|any|
-  never, hasContent: yes|no|maybe}` entries, walking up to the real
-  declaring parent class via reflection (not requiring an exact
-  class-name match). Ship with sensible defaults for PHPUnit's own
-  `setUp`/`tearDown`/`setUpBeforeClass`/`tearDownAfterClass`/
-  `assertPreConditions`/`assertPostConditions` and Codeception's
-  equivalent hooks — real, concrete value even with zero project
-  config. This is the canonical, best-designed version of the same
-  underlying idea independently reinvented three more times in the
-  survey: `phpstan/phpstan-phpunit`'s `ShouldCallParentMethodsRule`
-  (PHPUnit-only), `cambis/silverstan`'s
-  `RequireParentCallInOverridenMethodRule` (SilverStripe-only,
-  first/anywhere only, no last/never), and Phase 101's own E3
-  (`parent::__construct()` only, now shipped). Build against `ergebnis`'s shape
-  directly — it strictly subsumes all three narrower versions,
-  including E3 itself (a `{className: null (any), methodName:
-  '__construct', invocation: any}`-style entry, or keep E3 as its own
-  cheap special case if the generic form's config surface isn't worth
-  it yet).
 
 ### Phase 145 — Extended access-control primitives (attribute-based, complementing Phase 67's DSL)
 

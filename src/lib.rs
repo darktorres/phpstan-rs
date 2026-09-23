@@ -23,6 +23,7 @@ pub(crate) mod intern;
 pub mod lexer;
 pub mod lsp;
 pub mod output;
+pub mod parent_calls;
 pub mod parser;
 pub(crate) mod pcre_validate;
 pub mod pest_config;

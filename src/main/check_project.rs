@@ -175,6 +175,8 @@ fn run_check_project(
     architecture_rules: &[phpstan_rs::architecture::ArchitectureRule],
     banned_constructs: &[phpstan_rs::banned::BannedConstruct],
     banned_types: &[String],
+    check_closed_classes: bool,
+    parent_call_rules: &[phpstan_rs::parent_calls::ParentCallRule],
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -509,6 +511,11 @@ fn run_check_project(
         entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
     }
 
+    for (path, diags) in project.check_class_shapes(check_closed_classes, parent_call_rules) {
+        let entry = results.entry(path).or_default();
+        entry.extend(diags);
+        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+    }
     for (path, diags) in project.check_banned(banned_constructs, banned_types) {
         let entry = results.entry(path).or_default();
         entry.extend(diags);
@@ -706,6 +713,7 @@ pub(crate) fn run_check_project_command(
     check_renamed_named_arguments: bool,
     report_unmatched_ignored_errors: bool,
     check_composer_hygiene: bool,
+    check_closed_classes: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -890,6 +898,11 @@ pub(crate) fn run_check_project_command(
         }
     };
     let banned_types = config.banned_types.unwrap_or_default();
+    let check_closed_classes = check_closed_classes || config.check_closed_classes.unwrap_or(false);
+    let mut parent_call_rules = config.parent_calls.unwrap_or_default();
+    if config.default_parent_calls.unwrap_or(true) {
+        parent_call_rules.extend(phpstan_rs::parent_calls::default_rules());
+    }
     let architecture_rules = config.architecture.unwrap_or_default();
     for rule in &architecture_rules {
         if let Err(e) = rule.validate() {
@@ -1074,6 +1087,8 @@ pub(crate) fn run_check_project_command(
         &architecture_rules,
         &banned_constructs,
         &banned_types,
+        check_closed_classes,
+        &parent_call_rules,
         configured_level,
         &stub_dirs,
         php_version,

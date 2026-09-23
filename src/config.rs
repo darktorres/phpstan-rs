@@ -41,6 +41,8 @@
 //! check_renamed_named_arguments = false
 //! report_unmatched_ignored_errors = false
 //! check_composer_hygiene = false
+//! check_closed_classes = false
+//! default_parent_calls = true
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -168,6 +170,14 @@ pub struct Config {
     pub banned_types: Option<Vec<String>>,
     /// Built-in `restricted_symbols` sets to add (`multibyte-strings`).
     pub restricted_symbol_presets: Option<Vec<String>>,
+    /// Opt-in "closed by default" class shape - see
+    /// `project::class_shape`'s own doc comment.
+    pub check_closed_classes: Option<bool>,
+    /// `[[parent_calls]]` requirements - see `parent_calls`.
+    pub parent_calls: Option<Vec<crate::parent_calls::ParentCallRule>>,
+    /// Whether the built-in PHPUnit/Codeception hook requirements
+    /// (`parent_calls::default_rules`) apply; on unless set to false.
+    pub default_parent_calls: Option<bool>,
     /// Mirrors real PHPStan's own `dynamicConstantNames`: global
     /// (`NAME`) or class (`Class::NAME`) constants whose declared value
     /// differs between environments, so their literal value is never

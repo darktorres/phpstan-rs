@@ -313,6 +313,11 @@ enum Command {
         /// `config.platform.php`. Off by default.
         #[arg(long)]
         check_composer_hygiene: bool,
+        /// Reports classes that aren't final, protected members of final
+        /// classes, and overridable concrete methods of abstract classes,
+        /// where nothing in the project extends or overrides them.
+        #[arg(long)]
+        check_closed_classes: bool,
         /// Enables named-argument-rename-collision detection (a named-
         /// argument call site against a method an override elsewhere
         /// renamed a parameter on). Off by default - see `registry::
@@ -444,6 +449,7 @@ fn main() {
             check_renamed_named_arguments,
             report_unmatched_ignored_errors,
             check_composer_hygiene,
+            check_closed_classes,
             php_version,
             generate_baseline,
             baseline,
@@ -495,6 +501,7 @@ fn main() {
             check_renamed_named_arguments,
             report_unmatched_ignored_errors,
             check_composer_hygiene,
+            check_closed_classes,
             php_version,
             generate_baseline,
             baseline,

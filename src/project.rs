@@ -18,6 +18,7 @@ use crate::token::Span;
 
 mod architecture;
 mod banned;
+mod class_shape;
 mod composer_hygiene;
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
