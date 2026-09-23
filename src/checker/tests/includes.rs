@@ -202,3 +202,36 @@ fn keyword_casing_does_not_matter() {
     let d = f.check("<?php\nREQUIRE_ONCE __DIR__ . '/nope.php';\n");
     assert_eq!(d.len(), 1, "{d:?}");
 }
+
+#[test]
+fn include_path_set_in_the_file_is_searched() {
+    let f = Fixture::new("include-path");
+    let d = f.check(
+        r#"<?php
+set_include_path(get_include_path() . PATH_SEPARATOR . __DIR__ . '/lib');
+require 'present.php';
+require 'absent.php';
+"#,
+    );
+    assert_eq!(
+        d,
+        vec![
+            "require.fileNotFound: Path in require() \"absent.php\" is not a file or it does not exist."
+        ]
+    );
+    let d = f.check("<?php\nini_set('include_path', 'lib');\ninclude 'present.php';\n");
+    assert!(d.is_empty(), "{d:?}");
+}
+
+#[test]
+fn every_existence_probe_guards_its_path() {
+    let f = Fixture::new("probes");
+    let d = f.check(
+        r#"<?php
+if (is_writable('a.php')) { include 'a.php'; }
+if (is_writeable('b.php')) { include 'b.php'; }
+if (is_executable('c.php')) { include 'c.php'; }
+"#,
+    );
+    assert!(d.is_empty(), "{d:?}");
+}

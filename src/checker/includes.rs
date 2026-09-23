@@ -3,8 +3,10 @@
 //! Paths are resolved from string literals, constant string types,
 //! `__DIR__`/`__FILE__`, `dirname()`, and concatenations of these, then
 //! looked up relative to the working directory and the including file's
-//! own directory. A constant declared in the same file resolves through
-//! its initializer, so `__DIR__` in it means this file's directory. A path the file also tests with `file_exists()`/
+//! own directory, and each `include_path` entry - PHP's default plus any
+//! `set_include_path()`/`ini_set('include_path', ...)` in the file. A
+//! constant declared in the same file resolves through its initializer,
+//! so `__DIR__` in it means this file's directory. A path the file also tests with `file_exists()`/
 //! `is_file()`/`is_readable()` is left alone.
 
 use std::collections::{HashMap, HashSet};
@@ -16,7 +18,17 @@ use crate::checker::{Checker, Locals};
 use crate::token::Span;
 use crate::types::Type;
 
-const GUARD_FUNCTIONS: [&str; 3] = ["file_exists", "is_file", "is_readable"];
+const GUARD_FUNCTIONS: [&str; 6] = [
+    "file_exists",
+    "is_file",
+    "is_readable",
+    "is_writable",
+    "is_writeable",
+    "is_executable",
+];
+
+/// PHP's compiled-in default `include_path`.
+const DEFAULT_INCLUDE_PATH: &str = ".:/usr/share/php";
 
 const MAX_CONSTANT_DEPTH: usize = 8;
 
@@ -138,6 +150,16 @@ impl<'a> Checker<'a> {
         }
         match &e.kind {
             ExprKind::Grouping(inner) => self.resolve_paths_at(inner, locals, depth),
+            ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {
+                Some(vec![":".to_string()])
+            }
+            ExprKind::Call(callee, args)
+                if args.is_empty()
+                    && callee_name(callee)
+                        .is_some_and(|n| n.eq_ignore_ascii_case("get_include_path")) =>
+            {
+                Some(vec![DEFAULT_INCLUDE_PATH.to_string()])
+            }
             ExprKind::Name(n) if n.eq_ignore_ascii_case("__DIR__") => Some(vec![
                 self.current_dir_of_file()?.to_string_lossy().into_owned(),
             ]),
@@ -206,7 +228,20 @@ impl<'a> Checker<'a> {
         }
         let from_cwd = std::env::current_dir().map(|d| d.join(path));
         let from_file = self.current_dir_of_file().map(|d| d.join(path));
-        from_cwd.is_ok_and(|p| p.is_file()) || from_file.is_some_and(|p| p.is_file())
+        from_cwd.is_ok_and(|p| p.is_file())
+            || from_file.is_some_and(|p| p.is_file())
+            || self.include_path_dirs.iter().any(|dir| {
+                let dir = Path::new(dir);
+                let dir = if dir.is_absolute() {
+                    dir.to_path_buf()
+                } else {
+                    match self.current_dir_of_file() {
+                        Some(base) => base.join(dir),
+                        None => dir.to_path_buf(),
+                    }
+                };
+                dir.join(path).is_file()
+            })
     }
 
     pub(crate) fn check_include_path(
@@ -237,24 +272,52 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Every path `program` tests with `file_exists()`/`is_file()`/
-    /// `is_readable()`.
-    pub(crate) fn collect_include_guards(&self, program: &[Stmt]) -> HashSet<String> {
+    /// Every path `program` tests with a `GUARD_FUNCTIONS` call, and the
+    /// `include_path` directories: PHP's default plus every value the
+    /// file sets it to.
+    pub(crate) fn collect_include_guards(
+        &self,
+        program: &[Stmt],
+    ) -> (HashSet<String>, Vec<String>) {
         let locals = Locals::default();
         let mut guarded = HashSet::new();
-        let mut on_guard = |arg: &Expr| {
-            if let Some(paths) = self.resolve_include_paths(arg, &locals) {
-                guarded.extend(paths);
+        let mut include_dirs: Vec<String> = DEFAULT_INCLUDE_PATH
+            .split(':')
+            .map(str::to_string)
+            .collect();
+        let mut on_call = |call: IncludeCall| match call {
+            IncludeCall::Guard(arg) => {
+                if let Some(paths) = self.resolve_include_paths(arg, &locals) {
+                    guarded.extend(paths);
+                }
+            }
+            IncludeCall::SetIncludePath(arg) => {
+                for value in self
+                    .resolve_include_paths(arg, &locals)
+                    .into_iter()
+                    .flatten()
+                {
+                    for dir in value.split(':').filter(|d| !d.is_empty()) {
+                        if !include_dirs.iter().any(|d| d == dir) {
+                            include_dirs.push(dir.to_string());
+                        }
+                    }
+                }
             }
         };
         for stmt in program {
-            visit_guard_args_in_stmt(stmt, &mut on_guard);
+            visit_guard_args_in_stmt(stmt, &mut on_call);
         }
-        guarded
+        (guarded, include_dirs)
     }
 }
 
-fn visit_guard_args_in_stmt(stmt: &Stmt, out: &mut dyn FnMut(&Expr)) {
+enum IncludeCall<'e> {
+    Guard(&'e Expr),
+    SetIncludePath(&'e Expr),
+}
+
+fn visit_guard_args_in_stmt(stmt: &Stmt, out: &mut dyn FnMut(IncludeCall)) {
     match &stmt.kind {
         StmtKind::FunctionDecl(f) => f.body.iter().for_each(|s| visit_guard_args_in_stmt(s, out)),
         StmtKind::ClassDecl(c) => {
@@ -276,13 +339,19 @@ fn visit_guard_args_in_stmt(stmt: &Stmt, out: &mut dyn FnMut(&Expr)) {
     }
 }
 
-fn visit_guard_args_in_expr(e: &Expr, out: &mut dyn FnMut(&Expr)) {
+fn visit_guard_args_in_expr(e: &Expr, out: &mut dyn FnMut(IncludeCall)) {
     if let ExprKind::Call(callee, args) = &e.kind
-        && callee_name(callee)
-            .is_some_and(|n| GUARD_FUNCTIONS.iter().any(|g| n.eq_ignore_ascii_case(g)))
-        && let Some(arg) = args.first()
+        && let Some(name) = callee_name(callee)
     {
-        out(&arg.value);
+        let name = name.to_ascii_lowercase();
+        match (name.as_str(), args.as_slice()) {
+            (n, [arg, ..]) if GUARD_FUNCTIONS.contains(&n) => out(IncludeCall::Guard(&arg.value)),
+            ("set_include_path", [arg]) => out(IncludeCall::SetIncludePath(&arg.value)),
+            ("ini_set", [key, value]) if matches!(&key.value.kind, ExprKind::Literal(Literal::String(k)) if k.as_ref() == "include_path") => {
+                out(IncludeCall::SetIncludePath(&value.value))
+            }
+            _ => {}
+        }
     }
     if let ExprKind::Closure { body, .. } = &e.kind {
         body.iter().for_each(|s| visit_guard_args_in_stmt(s, out));

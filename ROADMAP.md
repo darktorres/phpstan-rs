@@ -610,9 +610,11 @@ require,requireOnce}.fileNotFound`): a path built from literals,
 constant string types (every member of a union), `__DIR__`/`__FILE__`,
 `dirname()` with levels, concatenation, and constants declared in the
 same file (resolved through their initializers, so `__DIR__` there is
-this file's), checked against the cwd and the file's own directory; a
-directory is not a file, and a path the file tests with
-`file_exists()`/`is_file()`/`is_readable()` is skipped.
+this file's), checked against the cwd, the file's own directory, and
+`include_path` (PHP's default plus any `set_include_path()`/
+`ini_set('include_path', ...)` in the file); a directory is not a file,
+and a path the file tests with `file_exists()`/`is_file()`/
+`is_readable()`/`is_writable()`/`is_executable()` is skipped.
 `FileWhitespaceRule`: a leading UTF-8 BOM (`whitespace.bom`), whitespace
 before the first `<?php` (`whitespace.fileStart`), and whitespace after
 the last `?>` of the file, a namespace, or a `declare` block

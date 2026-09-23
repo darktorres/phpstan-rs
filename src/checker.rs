@@ -904,6 +904,8 @@ pub struct Checker<'a> {
     pub(crate) current_file: Option<std::path::PathBuf>,
     // Paths the file tests with `file_exists()` and friends.
     pub(crate) include_guarded_paths: HashSet<String>,
+    // `include_path` directories for the file being checked.
+    pub(crate) include_path_dirs: Vec<String>,
     // `includes::file_constant_initializers` for the file being checked.
     pub(crate) include_constant_initializers: HashMap<String, Expr>,
     // `global_constants::constant_facts` for the file being checked.
@@ -1310,6 +1312,7 @@ impl<'a> Checker<'a> {
             current_anonymous_class: None,
             current_file: None,
             include_guarded_paths: HashSet::new(),
+            include_path_dirs: Vec::new(),
             include_constant_initializers: HashMap::new(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
@@ -1697,7 +1700,8 @@ impl<'a> Checker<'a> {
         if !self.facts_only {
             if self.current_file.is_some() {
                 self.include_constant_initializers = includes::file_constant_initializers(program);
-                self.include_guarded_paths = self.collect_include_guards(program);
+                (self.include_guarded_paths, self.include_path_dirs) =
+                    self.collect_include_guards(program);
             }
             self.check_declare_directives(program);
             self.check_file_whitespace(program);
