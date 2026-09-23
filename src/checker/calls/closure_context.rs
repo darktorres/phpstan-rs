@@ -231,6 +231,11 @@ impl<'a> Checker<'a> {
                         *self.probe_var_provenance.borrow_mut() =
                             Some(provenance.iter().copied().collect());
                     }
+                    let ty = if u.by_ref {
+                        crate::checker::expr::unseal_array_shapes(&ty)
+                    } else {
+                        ty
+                    };
                     closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
                 }
                 if !*is_static && let Some(this_ty) = locals.get("this") {

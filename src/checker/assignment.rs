@@ -544,7 +544,24 @@ impl<'a> Checker<'a> {
                             self.bind_assignment_target(base, new_base_ty, locals);
                         }
                     }
-                    _ => {}
+                    // A write through a narrowed property (`$this->p = [];
+                    // ... $this->p[$k] = $v;`) updates that narrowed type,
+                    // or it would stay the stale pre-write one.
+                    _ => {
+                        if let Some(key) = narrowing_key(base)
+                            && let Some(current) = locals.get(&key).cloned()
+                            && let Some(new_ty) = write_index_into(
+                                &current,
+                                idx.as_deref(),
+                                idx_ty.as_ref(),
+                                ty,
+                                false,
+                                self.loop_depth > 0,
+                            )
+                        {
+                            locals.insert(key, new_ty);
+                        }
+                    }
                 }
             }
             _ => {}
@@ -1357,6 +1374,9 @@ pub(crate) fn offset_verdict(container: &Type, dim: &Type) -> Option<bool> {
         Type::ArrayShape(fields) => {
             if is_unsealed_shape(fields) {
                 return None;
+            }
+            if fields.is_empty() && !matches!(dim, Type::Mixed(_) | Type::Never) {
+                return Some(false);
             }
             let (key, _) = normalized_literal_key(dim)?;
             match fields.iter().find(|(name, _, _)| *name == key) {

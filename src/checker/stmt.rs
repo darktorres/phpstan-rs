@@ -552,9 +552,12 @@ impl<'a> Checker<'a> {
                         );
                         continue;
                     }
+                    // The initializer only holds on a first call; later
+                    // calls see whatever an earlier call left behind, so
+                    // only its general type is known.
                     let ty = default
                         .as_ref()
-                        .map(|e| self.check_expr(e, locals, label))
+                        .map(|e| static_variable_type(&self.check_expr(e, locals, label)))
                         .unwrap_or(Type::Mixed(false));
                     purge_stale_narrowing_for(locals, name);
                     // Real declaration - no per-name span exists on
@@ -1212,5 +1215,32 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
             _ => Vec::new(),
         },
         _ => Vec::new(),
+    }
+}
+
+/// A static variable's type across calls: its initializer's general
+/// type, with `null` (the "not computed yet" sentinel) unknown.
+fn static_variable_type(initializer: &Type) -> Type {
+    match initializer {
+        Type::Null => Type::Mixed(false),
+        Type::IntLiteral(_) | Type::IntRange(..) => Type::Int,
+        Type::StringLiteral(_) => Type::String,
+        Type::FloatLiteral(_) => Type::Float,
+        Type::True | Type::False => Type::Bool,
+        Type::ArrayShape(_) => Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
+        Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
+            Type::Array(
+                Box::new(Type::unknown_array_key()),
+                Box::new(Type::Mixed(false)),
+            )
+        }
+        Type::Array(..) => Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
+        other => other.clone(),
     }
 }

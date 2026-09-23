@@ -2039,3 +2039,53 @@ fn destructuring_a_missing_key_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_dynamic_key_on_a_provably_empty_array_is_flagged() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(string $k): void {
+                $empty = [];
+                echo $empty[$k];
+            }
+        "#,
+    );
+    assert!(
+        d.iter()
+            .any(|x| x.message == "Offset string does not exist on array{}."),
+        "got: {d:?}"
+    );
+}
+
+#[test]
+fn static_variables_property_index_writes_and_by_ref_captures_are_not_frozen() {
+    let d = diagnostics_for(
+        r#"<?php
+            function memo(string $k): bool {
+                static $cache = [];
+                if (isset($cache[$k])) { return $cache[$k]; }
+                return $cache[$k] = true;
+            }
+            class Holder {
+                private array $p = [];
+                public function fill(array $items): void {
+                    $this->p = [];
+                    foreach ($items as $k => $v) {
+                        echo $this->p[$k] ?? 0;
+                        if (isset($this->p[$k])) { echo $this->p[$k]; }
+                        $this->p[$k] = $v;
+                    }
+                }
+            }
+            function job(): void {
+                $job = ['id' => 1];
+                $start = function () use (&$job): void { $job['process'] = 5; };
+                $stop = function () use (&$job): void { echo $job['process']; };
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "offsetAccess.notFound"),
+        "got: {d:?}"
+    );
+}

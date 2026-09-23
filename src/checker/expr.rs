@@ -3527,6 +3527,14 @@ impl<'a> Checker<'a> {
                     // two probes (`probe_hit`/`probe_var_provenance`) are
                     // independent.
                     self.probe_hit_at(u.span, &ty);
+                    // A by-reference capture can still gain keys from
+                    // anything else holding the reference before the
+                    // closure runs.
+                    let ty = if u.by_ref {
+                        unseal_array_shapes(&ty)
+                    } else {
+                        ty
+                    };
                     closure_locals.insert_with_provenance(u.name.to_string(), ty, provenance);
                 }
                 if !is_static && let Some(this_ty) = locals.get("this") {
@@ -6467,5 +6475,19 @@ fn bind_static_ref(ty: &Type, class: &str) -> Type {
     match ty {
         Type::StaticRef => Type::Object(class.to_string(), Vec::new()),
         other => other.map_children(&mut |t| bind_static_ref(t, class)),
+    }
+}
+
+/// `ty` with every sealed array shape marked unsealed (`types::parse`'s
+/// `"..."` field), so a key it doesn't list isn't proven absent.
+pub(crate) fn unseal_array_shapes(ty: &Type) -> Type {
+    match ty {
+        Type::ArrayShape(fields) if !fields.iter().any(|(k, _, _)| k == "...") => {
+            let mut fields = fields.clone();
+            fields.push(("...".to_string(), Type::Mixed(false), false));
+            Type::ArrayShape(fields)
+        }
+        Type::Union(members) => Type::Union(members.iter().map(unseal_array_shapes).collect()),
+        other => other.clone(),
     }
 }
