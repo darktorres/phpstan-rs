@@ -1258,6 +1258,7 @@ mod includes;
 mod ini_directives;
 mod instantiation;
 mod strict_idioms;
+mod strict_rules;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;
 mod internal_usage;

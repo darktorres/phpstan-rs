@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_illegal_constructor_calls: bool,
     check_enum_exhaustiveness: bool,
     check_null_coercion: bool,
     check_new_exception_discarded: bool,
@@ -255,6 +256,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_illegal_constructor_calls(check_illegal_constructor_calls);
     project.set_check_enum_exhaustiveness(check_enum_exhaustiveness);
     project.set_check_null_coercion(check_null_coercion);
     project.set_check_new_exception_discarded(check_new_exception_discarded);
@@ -723,6 +725,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_illegal_constructor_calls: bool,
     check_enum_exhaustiveness: bool,
     check_null_coercion: bool,
     check_new_exception_discarded: bool,
@@ -862,6 +865,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_illegal_constructor_calls =
+        check_illegal_constructor_calls || config.check_illegal_constructor_calls.unwrap_or(false);
     let check_enum_exhaustiveness =
         check_enum_exhaustiveness || config.check_enum_exhaustiveness.unwrap_or(false);
     let check_null_coercion = check_null_coercion || config.check_null_coercion.unwrap_or(false);
@@ -1116,6 +1121,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_illegal_constructor_calls,
         check_enum_exhaustiveness,
         check_null_coercion,
         check_new_exception_discarded,

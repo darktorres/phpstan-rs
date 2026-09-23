@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_illegal_constructor_calls`.
+    pub fn set_check_illegal_constructor_calls(&mut self, enabled: bool) {
+        self.registry.check_illegal_constructor_calls = enabled;
+    }
+
     /// See `Registry::check_enum_exhaustiveness`.
     pub fn set_check_enum_exhaustiveness(&mut self, enabled: bool) {
         self.registry.check_enum_exhaustiveness = enabled;

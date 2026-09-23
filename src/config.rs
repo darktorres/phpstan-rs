@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_illegal_constructor_calls = false
 //! check_enum_exhaustiveness = false
 //! check_null_coercion = false
 //! check_new_exception_discarded = false
@@ -290,6 +291,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (phpstan-strict-rules): `__construct()` called on an existing object, or statically outside a parent-constructor call (`constructor.call`).
+    pub check_illegal_constructor_calls: Option<bool>,
     /// Opt-in: enum branching that defeats match exhaustiveness (a default arm, switch, or if-chains over enum cases).
     pub check_enum_exhaustiveness: Option<bool>,
     /// Opt-in: isset()/empty() on objects and possibly-null values silently coerced by strings, operators and compound assignments.

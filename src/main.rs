@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag calls to __construct() other than a parent constructor call from a constructor.
+        #[arg(long)]
+        check_illegal_constructor_calls: bool,
         /// Reports a default arm in a match over an enum, and switch or if-chains over enum cases where a match would be exhaustive.
         #[arg(long)]
         check_enum_exhaustiveness: bool,
@@ -456,6 +459,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_illegal_constructor_calls,
             check_enum_exhaustiveness,
             check_null_coercion,
             check_new_exception_discarded,
@@ -512,6 +516,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_illegal_constructor_calls,
             check_enum_exhaustiveness,
             check_null_coercion,
             check_new_exception_discarded,

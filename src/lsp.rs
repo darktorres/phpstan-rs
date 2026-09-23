@@ -419,6 +419,8 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_illegal_constructor_calls(resolved.check_illegal_constructor_calls);
+        self.project
             .set_check_enum_exhaustiveness(resolved.check_enum_exhaustiveness);
         self.project
             .set_check_null_coercion(resolved.check_null_coercion);
