@@ -5285,3 +5285,27 @@ fn a_later_match_true_arm_sees_every_condition_of_a_multi_condition_arm_false() 
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn an_inline_var_tag_on_an_assignment_applies_after_the_right_hand_side() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<mixed> $sel */
+            function f(array $sel): void {
+                /** @var list<int|string> $sel */
+                $sel = array_values(array_filter(
+                    $sel,
+                    static fn ($item): bool => is_int($item) || is_string($item),
+                ));
+                assertType('list<int|string>', $sel);
+            }
+            function g(): void {
+                /** @var int $a */
+                [$a, $b] = [rand() ? 1 : 'x', 2];
+                assertType('int', $a);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

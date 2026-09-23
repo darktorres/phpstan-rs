@@ -410,7 +410,14 @@ impl<'a> Checker<'a> {
             self.check_statement_var_tag_types(stmt, &var_tags, names_ok, locals, label);
         }
         let inline_var = inline_var_annotations(stmt, var_tags);
+        // A tag naming a variable this statement assigns describes the
+        // assigned value, so it applies after the assignment (below) -
+        // the right-hand side still reads the variable's prior type.
+        let assigned = statement_assigned_variable_names(&stmt.kind);
         for (name, ty) in &inline_var {
+            if assigned.contains(name) {
+                continue;
+            }
             purge_stale_narrowing_for(locals, name);
             locals.insert(name.clone(), ty.clone());
         }
@@ -1364,13 +1371,7 @@ fn bare_assert_condition(e: &Expr) -> Option<&Expr> {
 
 fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
     match kind {
-        StmtKind::Expression(e) => match &e.kind {
-            ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => match &lhs.kind {
-                ExprKind::Variable(name) => vec![name.to_string()],
-                _ => Vec::new(),
-            },
-            _ => Vec::new(),
-        },
+        StmtKind::Expression(_) => statement_assigned_variable_names(kind),
         // `StmtKind::StaticVar`'s own arm above infers purely from the
         // declaration's default expression (`static $x = null;` types
         // `$x` as exactly `Null`), so it needs the same "trust the
@@ -1395,6 +1396,29 @@ fn statement_defined_variable_names(kind: &StmtKind) -> Vec<String> {
         },
         _ => Vec::new(),
     }
+}
+
+/// Every variable an assignment statement (`$x = ...`, `[$a, [$b]] =
+/// ...`, `$x = &...`) binds.
+fn statement_assigned_variable_names(kind: &StmtKind) -> Vec<String> {
+    fn collect(target: &Expr, out: &mut Vec<String>) {
+        match &target.kind {
+            ExprKind::Variable(name) => out.push(name.to_string()),
+            ExprKind::ArrayLiteral(items) => {
+                for item in items {
+                    collect(&item.value, out);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    if let StmtKind::Expression(e) = kind
+        && let ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) = &e.kind
+    {
+        collect(lhs, &mut out);
+    }
+    out
 }
 
 /// A static variable's type across calls: its initializer's general
