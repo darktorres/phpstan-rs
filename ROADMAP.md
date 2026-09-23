@@ -1436,6 +1436,44 @@ opt-in:
   is compared by value, sign included, which upstream's string
   comparison gets wrong for negative numbers.
 
+**PSR-3 logger calls** (`checker/psr3.rs`, from `staabm/phpstan-psr3` and
+`sfp-phpstan-psr-log`). They apply to `Psr\Log\LoggerInterface`
+receivers and Laravel's `Log` facade.
+- Opt-in `check_psr3_logging`:
+  - `psr3.interpolated`: a concatenated or interpolated value that isn't
+    a number, bool, literal string or enum. For a variable, its native
+    type is used.
+  - `psr3.messageNotStatic`.
+  - `psr3.placeholderDoubleBraces`/`psr3.placeholderInvalidChar`.
+  - `psr3.placeholderMissingContext`/`psr3.placeholderMissingKey`.
+  - `psr3.placeholderNotStringable`: a context value a placeholder
+    interpolates that has no string form.
+  - `psr3.invalidLevel`, `psr3.contextKeyNotString`, and
+    `psr3.contextType` (an `exception` value that isn't a `Throwable`).
+  - `psr3.contextKeyPattern`, against `psr3_context_key_pattern`.
+- Opt-in `check_psr3_exception_context`: `psr3.contextMissingException`,
+  a Throwable variable in scope but no `exception` context key.
+
+Context keys without a placeholder are not flagged: PSR-3 lets context
+carry arbitrary extra data.
+
+**Implicit current-time dependence** (`checker/current_time.rs`, opt-in
+`check_current_time_dependence`, from `slam/phpstan-extensions`):
+- `currentTime.time`: `time()`/`microtime()`.
+- `currentTime.defaultTimestamp`: `date`, `gmdate`, `idate`, `getdate`,
+  `localtime`, `strftime`, `gmstrftime` or `unixtojd` without their
+  timestamp or with `null`, and `mktime`/`gmmktime` with fewer than six
+  components.
+- `currentTime.relative`: `strtotime()` without a base, `date_create()`
+  and `new` of any `DateTimeInterface` class with no date or a relative
+  one. "Relative" follows `php_date_parser::depends_on_current_time`
+  (keywords, `+1 day`, `next monday`, `first day of ...`, a bare time of
+  day), not upstream's six fixed words.
+- `currentTime.createFromFormat`: a format with no `!`/`|`/`U`, whose
+  unparsed fields come from now.
+- `currentTime.requestTime`: `$_SERVER['REQUEST_TIME']` and
+  `REQUEST_TIME_FLOAT`.
+
 **Ini directives** (`checker/ini_directives.rs`): `ini.removed`
 (default on once `php_version` is set) and, under
 `check_deprecated_usage`, `ini.deprecated`, for `ini_get`/`ini_set`/
@@ -3457,50 +3495,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 151 — PSR-3 structured-logging hygiene family
-
-Confirmed and deepened independently by two real packages
-(`staabm/phpstan-psr3`, `struggle-for-php/sfp-phpstan-psr-log`) — same
-shape as phpstan-rs's own already-built printf/sprintf placeholder-type
-checking (`format_string.rs`), just PSR-3's `{key}`-brace syntax against
-a literal context array's own keys instead of positional arguments.
-Genuinely good real-corpus-value potential given how near-universal
-PSR-3 logging is in any DI-framework-based PHP app:
-
-- **151a (medium).** For any `Psr\Log\LoggerInterface` method call
-  (`log`/`debug`/`info`/`notice`/`warning`/`error`/`critical`/`alert`/
-  `emergency`), cross-check the message string's `{placeholder}` tokens
-  against the literal keys of the passed context array — flag a
-  placeholder with no matching key, and vice versa — plus checking
-  context values used for interpolation are stringable.
-- **151b (small).** Require the log message itself be a static/literal
-  string, not a dynamically-concatenated one — dynamic values belong in
-  the context array's own placeholders for structured-logging/log-
-  aggregation friendliness.
-- **151c (small).** Validate a log-level argument is a recognized PSR-3
-  level constant.
-- **151d (medium).** Validate the *structure* of the context array
-  itself — e.g. requiring a `context['exception']` key actually be a
-  `Throwable`.
-
-### Phase 152 — "No implicit current-time dependence" family
-
-A genuinely novel, valuable family: real, simple AST-shape/literal-
-argument checks with zero framework dependency, useful for testable,
-deterministic code (a function silently depending on wall-clock "now"
-is a classic source of flaky tests and hard-to-reproduce bugs)
-(`slam/phpstan-extensions`):
-
-- Bans `time()`.
-- Bans `strtotime('now'/'+1 day'/etc.)` — anything relative to the
-  current instant rather than a fixed, explicit reference.
-- Bans `new DateTime()`/`new DateTimeImmutable()` with no explicit
-  fixed date/reference.
-- Bans `date($format)` without its optional second `$timestamp`
-  argument, which implicitly uses the current time.
-- **Effort: small** overall — four independent literal-argument/
-  call-shape checks sharing no state.
 
 ### Phase 153 — Actionable TODO-comment family
 
