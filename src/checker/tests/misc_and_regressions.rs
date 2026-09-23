@@ -882,3 +882,35 @@ fn isset_and_empty_infer_as_bool_when_read_as_a_plain_value() {
     );
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
+
+#[test]
+fn get_defined_vars_after_an_include_can_hold_any_variable() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $file): void {
+                assertType('array{file: string}', get_defined_vars());
+                include $file;
+                assertType('array<string, mixed>', get_defined_vars());
+                $vars = get_defined_vars();
+                echo is_array($vars['lang'] ?? null) ? 'y' : 'n';
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn mysqli_query_is_typed_from_its_statement() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(mysqli $db, string $sql): void {
+                assertType('true', $db->query('SET NAMES utf8mb4'));
+                assertType('mysqli_result|true', $db->query($sql));
+                assertType('true', mysqli_query($db, 'DELETE FROM t'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -2,8 +2,8 @@ use crate::ast::*;
 use crate::checker::type_union::{has_offset_value_parts, union_types};
 use crate::checker::{
     Checker, Locals, is_real_variable_key, literal_string_key, literal_string_value,
-    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to, resolve_call_args,
-    string_type_has_accessory, to_absolute_number,
+    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to,
+    narrowing_type_for_predicate, resolve_call_args, string_type_has_accessory, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;
@@ -672,7 +672,31 @@ impl<'a> Checker<'a> {
             // `narrowing_key`'s own synthetic property-chain/array-index
             // keys, which share the same `Locals` map but were never a
             // real PHP variable `get_defined_vars()` could report.
+            "mysqli_query" if args.len() >= 2 => {
+                return self.mysqli_query_type(Some(&args[1].value), locals);
+            }
+            "mysqli_fetch_assoc"
+            | "mysqli_fetch_row"
+            | "mysqli_fetch_array"
+            | "mysqli_fetch_all"
+            | "mysqli_fetch_column"
+                if !args.is_empty() =>
+            {
+                if let Type::Object(class, type_args) = self.infer_expr(&args[0].value, locals)
+                    && class.eq_ignore_ascii_case("mysqli_result")
+                    && let Some(ty) = self.mysqli_fetch_type(
+                        name.trim_start_matches("mysqli_"),
+                        type_args.first(),
+                        args.get(1).map(|a| &a.value),
+                    )
+                {
+                    return ty;
+                }
+            }
             "get_defined_vars" if args.is_empty() => {
+                if locals.any_variable_may_exist {
+                    return Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
+                }
                 let fields: Vec<(String, Type, bool)> = locals
                     .iter()
                     .filter(|(name, _)| is_real_variable_key(name))
@@ -2074,10 +2098,38 @@ fn is_null_filter_callback(e: &Expr) -> bool {
 /// element type, not just the accessory markers every `array_filter`
 /// call already loses (`strip_accessory_markers`).
 fn strip_null_from_array_element(ty: Type) -> Type {
+    filter_array_elements(ty, &|elem| narrow_type_excluding(elem, &Type::Null))
+}
+
+/// An `array_filter` whose callback keeps exactly the elements `keep`
+/// narrows an element type to (`Never` when none survive): a plain
+/// array's element type narrows; a shape drops each field that can't
+/// survive and makes one that only might survive optional.
+fn filter_array_elements(ty: Type, keep: &dyn Fn(&Type) -> Type) -> Type {
     match ty {
-        Type::Array(key, elem) => {
-            Type::Array(key, Box::new(narrow_type_excluding(&elem, &Type::Null)))
-        }
+        Type::Array(key, elem) => Type::Array(key, Box::new(keep(&elem))),
+        Type::ArrayShape(fields) => Type::ArrayShape(
+            fields
+                .into_iter()
+                .filter_map(|(key, field_ty, optional)| {
+                    if key == "..." {
+                        return Some((key, field_ty, optional));
+                    }
+                    let narrowed = keep(&field_ty);
+                    if narrowed == Type::Never {
+                        return None;
+                    }
+                    let maybe_dropped = narrowed != field_ty;
+                    Some((key, narrowed, optional || maybe_dropped))
+                })
+                .collect(),
+        ),
+        Type::Union(members) => Type::Union(
+            members
+                .into_iter()
+                .map(|m| filter_array_elements(m, keep))
+                .collect(),
+        ),
         other => other,
     }
 }
@@ -2127,13 +2179,11 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
 /// `is_instanceof_filter_callback` handles, for consistency.
 fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
     fn type_for_predicate(name: &str) -> Option<Type> {
-        match name.trim_start_matches('\\').to_ascii_lowercase().as_str() {
-            "is_string" => Some(Type::String),
-            "is_int" | "is_integer" | "is_long" => Some(Type::Int),
-            "is_float" | "is_double" | "is_real" => Some(Type::Float),
-            "is_bool" => Some(Type::Bool),
+        let name = name.trim_start_matches('\\').to_ascii_lowercase();
+        match name.as_str() {
             "is_null" => Some(Type::Null),
-            _ => None,
+            "is_real" => Some(Type::Float),
+            _ => narrowing_type_for_predicate(&name),
         }
     }
     fn as_predicate_call<'a>(body: &'a Expr, param: &str) -> Option<&'a str> {
@@ -2148,6 +2198,8 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
         }
     }
     match &e.kind {
+        // `'is_int'` - a callable string naming the predicate.
+        ExprKind::Literal(Literal::String(name)) => type_for_predicate(name),
         ExprKind::FirstClassCallable(inner) => match &inner.kind {
             ExprKind::Call(callee, args) if args.is_empty() => match &callee.kind {
                 ExprKind::Name(name) => type_for_predicate(name),
@@ -2337,12 +2389,13 @@ fn contains_flag_name_with_options(e: &Expr, target: &str) -> bool {
 /// `is_instanceof_filter_callback` above) narrows the retained element
 /// type to `target` specifically.
 fn narrow_array_element_type_to(registry: &Registry, ty: Type, target: &Type) -> Type {
-    match ty {
-        Type::Array(key, elem) => {
-            Type::Array(key, Box::new(narrow_type_to(registry, &elem, target)))
+    filter_array_elements(ty, &|elem| {
+        if types::types_definitely_disjoint(elem, target) {
+            Type::Never
+        } else {
+            narrow_type_to(registry, elem, target)
         }
-        other => other,
-    }
+    })
 }
 
 /// `array_filter($x)` with no callback at all - real PHP's default,

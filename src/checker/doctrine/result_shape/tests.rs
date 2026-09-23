@@ -73,6 +73,8 @@ fn a_bare_entity_select_is_the_entity_object_directly() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -93,9 +95,12 @@ fn count_never_needs_its_operand_to_resolve() {
         joins: vec![JoinClause {
             target: "t.imageTags".to_string(),
             alias: "it".to_string(),
+            left: false,
         }],
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items =
         parse_select_items(&["t".to_string(), "COUNT(it.imageId) AS counter".to_string()]).unwrap();
@@ -126,9 +131,12 @@ fn sum_falls_back_to_mixed_when_its_operand_alias_never_resolves() {
         joins: vec![JoinClause {
             target: "t.imageTags".to_string(),
             alias: "it".to_string(),
+            left: false,
         }],
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["SUM(it.imageId)".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -147,9 +155,12 @@ fn an_entity_plus_scalar_field_from_a_real_join_alias() {
         joins: vec![JoinClause {
             target: "ImageTagEntity".to_string(),
             alias: "it".to_string(),
+            left: false,
         }],
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items =
         parse_select_items(&["t".to_string(), "COUNT(it.imageId) AS counter".to_string()]).unwrap();
@@ -181,6 +192,8 @@ fn identity_falls_back_to_mixed_never_the_targets_own_id_field_type() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["IDENTITY(it.tag) AS tagId".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -199,6 +212,8 @@ fn a_scalar_only_select_keys_each_unaliased_field_by_its_own_name() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t.id".to_string(), "t.name".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -224,6 +239,8 @@ fn an_unaliased_aggregate_keys_by_its_own_scalar_counter_not_its_list_position()
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items =
         parse_select_items(&["t.name AS n".to_string(), "COUNT(t.id)".to_string()]).unwrap();
@@ -246,6 +263,8 @@ fn a_reference_to_an_unknown_alias_falls_back_to_mixed_for_that_field() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["nope.field".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -264,6 +283,8 @@ fn a_bare_alias_select_on_an_unknown_alias_falls_back_to_plain_mixed() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["nope".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -279,6 +300,8 @@ fn an_empty_select_is_undecidable() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     assert_eq!(build_result_row_type(&checker, &chain, &[]), None);
 }
@@ -292,6 +315,8 @@ fn single_scalar_column_type_resolves_a_lone_scalar_field() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t.name".to_string()]).unwrap();
     assert_eq!(
@@ -309,6 +334,8 @@ fn single_scalar_column_type_rejects_a_whole_entity_select() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     assert_eq!(single_scalar_column_type(&checker, &chain, &items), None);
@@ -323,13 +350,15 @@ fn single_scalar_column_type_rejects_more_than_one_item() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t.id".to_string(), "t.name".to_string()]).unwrap();
     assert_eq!(single_scalar_column_type(&checker, &chain, &items), None);
 }
 
 #[test]
-fn array_result_converts_a_bare_entity_select_into_an_object_shape() {
+fn array_result_converts_a_bare_entity_select_into_an_array_shape() {
     let registry = build(ENTITIES);
     let checker = Checker::new(&registry);
     let chain = QueryBuilderChain {
@@ -337,12 +366,14 @@ fn array_result_converts_a_bare_entity_select_into_an_object_shape() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ObjectShape(vec![
+        Type::ArrayShape(vec![
             ("id".to_string(), Type::Int, false),
             ("name".to_string(), Type::String, false),
         ])
@@ -358,16 +389,18 @@ fn array_result_converts_a_to_one_association_into_an_identifier_only_shape() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["it".to_string()]).unwrap();
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
-        Type::ObjectShape(vec![
+        Type::ArrayShape(vec![
             ("imageId".to_string(), Type::Int, false),
             (
                 "tag".to_string(),
-                Type::ObjectShape(vec![("id".to_string(), Type::Int, false)]),
+                Type::ArrayShape(vec![("id".to_string(), Type::Int, false)]),
                 false
             ),
         ])
@@ -383,6 +416,8 @@ fn array_result_converts_an_entity_plus_aggregate_select_field_by_field() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t".to_string(), "COUNT(t.id) AS cnt".to_string()]).unwrap();
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
@@ -391,7 +426,7 @@ fn array_result_converts_an_entity_plus_aggregate_select_field_by_field() {
         Type::ArrayShape(vec![
             (
                 "0".to_string(),
-                Type::ObjectShape(vec![
+                Type::ArrayShape(vec![
                     ("id".to_string(), Type::Int, false),
                     ("name".to_string(), Type::String, false),
                 ]),
@@ -411,6 +446,8 @@ fn scalar_result_flattens_entity_fields_under_alias_prefixed_keys() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t".to_string(), "COUNT(t.id) AS cnt".to_string()]).unwrap();
     let ty = build_scalar_result_row_type(&checker, &chain, &items).unwrap();
@@ -437,6 +474,8 @@ fn a_declared_custom_function_resolves_to_its_own_category_type() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["DATE_FORMAT_YEAR_MONTH(t.name) AS ym".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -455,6 +494,8 @@ fn an_undeclared_custom_function_falls_back_to_mixed() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["SOME_UNDECLARED_FN(t.name) AS x".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -473,6 +514,8 @@ fn a_polymorphic_from_produces_a_union_across_every_mapped_subclass() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["a".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -494,6 +537,8 @@ fn an_ordinary_from_never_produces_a_union() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["t".to_string()]).unwrap();
     let ty = build_result_row_type(&checker, &chain, &items).unwrap();
@@ -531,14 +576,16 @@ fn array_result_converts_a_polymorphic_row_member_by_member() {
         joins: Vec::new(),
         select_args: Vec::new(),
         dml: false,
+        group_by: false,
+        index_by: None,
     };
     let items = parse_select_items(&["a".to_string()]).unwrap();
     let ty = build_array_result_row_type(&checker, &chain, &items).unwrap();
     assert_eq!(
         ty,
         Type::Union(vec![
-            Type::ObjectShape(vec![("id".to_string(), Type::Int, false)]),
-            Type::ObjectShape(vec![("id".to_string(), Type::Int, false)]),
+            Type::ArrayShape(vec![("id".to_string(), Type::Int, false)]),
+            Type::ArrayShape(vec![("id".to_string(), Type::Int, false)]),
         ])
     );
 }

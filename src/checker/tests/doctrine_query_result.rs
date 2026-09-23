@@ -31,13 +31,15 @@ const STUBS: &str = r#"
         class QueryBuilder {
             public function select(string ...$select): static {}
             public function addSelect(string ...$select): static {}
-            public function from(string $from, string $alias): static {}
-            public function join(string $join, string $alias): static {}
-            public function innerJoin(string $join, string $alias): static {}
-            public function leftJoin(string $join, string $alias): static {}
+            public function from(string $from, string $alias, ?string $indexBy = null): static {}
+            public function indexBy(string $alias, string $indexBy): static {}
+            public function join(string $join, string $alias, ?string $conditionType = null, ?string $condition = null, ?string $indexBy = null): static {}
+            public function innerJoin(string $join, string $alias, ?string $conditionType = null, ?string $condition = null, ?string $indexBy = null): static {}
+            public function leftJoin(string $join, string $alias, ?string $conditionType = null, ?string $condition = null, ?string $indexBy = null): static {}
             public function where(string $where): static {}
             public function andWhere(string $where): static {}
             public function groupBy(string $groupBy): static {}
+            public function addGroupBy(string $groupBy): static {}
             public function delete(?string $delete = null, ?string $alias = null): static {}
             public function update(?string $update = null, ?string $alias = null): static {}
             public function getQuery(): Query {}
@@ -45,7 +47,11 @@ const STUBS: &str = r#"
         abstract class AbstractQuery {
             const HYDRATE_OBJECT = 1;
             const HYDRATE_ARRAY = 2;
-            public function getResult(): mixed {}
+            const HYDRATE_SCALAR = 3;
+            const HYDRATE_SINGLE_SCALAR = 4;
+            const HYDRATE_SIMPLEOBJECT = 5;
+            const HYDRATE_SCALAR_COLUMN = 6;
+            public function getResult($hydrationMode = self::HYDRATE_OBJECT): mixed {}
             public function execute($parameters = null, $hydrationMode = null): mixed {}
             public function toIterable($parameters = [], $hydrationMode = null): iterable {}
             public function getOneOrNullResult($hydrationMode = null): mixed {}
@@ -61,7 +67,7 @@ const STUBS: &str = r#"
             public function createQuery(string $dql): Query;
         }
         class EntityRepository {
-            public function createQueryBuilder(string $alias): QueryBuilder {}
+            public function createQueryBuilder(string $alias, ?string $indexBy = null): QueryBuilder {}
             public function getEntityManager(): EntityManagerInterface {}
         }
     }
@@ -438,7 +444,7 @@ fn a_split_variable_delete_chain_is_still_a_plain_affected_row_count() {
 }
 
 #[test]
-fn execute_with_an_explicit_non_object_hydration_mode_falls_back_to_mixed() {
+fn execute_with_an_explicit_array_hydration_mode_types_array_rows() {
     let d = diagnostics_with_stubs(
         r#"
         namespace App;
@@ -457,10 +463,14 @@ fn execute_with_an_explicit_non_object_hydration_mode_falls_back_to_mixed() {
 
         class TagRepository extends EntityRepository
         {
+            private function mode(): int { return AbstractQuery::HYDRATE_ARRAY; }
+
             public function all(): void
             {
                 $rows = $this->createQueryBuilder('t')->getQuery()->execute(null, AbstractQuery::HYDRATE_ARRAY);
-                assertType('mixed', $rows);
+                assertType('list<array{id: int}>', $rows);
+                $dynamic = $this->createQueryBuilder('t')->getQuery()->execute(null, $this->mode());
+                assertType('mixed', $dynamic);
             }
         }
         "#,
@@ -491,7 +501,7 @@ fn an_undecidable_chain_falls_back_to_todays_shape_only_list_for_get_result() {
 }
 
 #[test]
-fn get_array_result_converts_the_entity_into_an_object_shape() {
+fn get_array_result_converts_the_entity_into_an_array_shape() {
     let d = diagnostics_with_stubs(
         r#"
         namespace App;
@@ -517,7 +527,7 @@ fn get_array_result_converts_the_entity_into_an_object_shape() {
             public function all(): void
             {
                 $rows = $this->createQueryBuilder('t')->getQuery()->getArrayResult();
-                assertType('list<object{id: int, name: string}>', $rows);
+                assertType('list<array{id: int, name: string}>', $rows);
             }
         }
         "#,
@@ -861,6 +871,71 @@ fn a_scalar_subquery_select_item_resolves_its_own_single_column_type() {
                     'SELECT t, (SELECT it.imageId FROM App\ImageTagEntity it) AS firstImageId FROM App\TagEntity t'
                 )->getResult();
                 assertType('list<array{0: App\TagEntity, firstImageId: int}>', $rows);
+            }
+        }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn hydration_modes_aggregates_left_joins_and_index_by_shape_results() {
+    let d = diagnostics_with_stubs(
+        r#"
+        namespace App;
+
+        use function PHPStan\Testing\assertType;
+        use Doctrine\ORM\Mapping as ORM;
+        use Doctrine\ORM\EntityRepository;
+        use Doctrine\ORM\Query;
+
+        #[ORM\Entity]
+        class NoteEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $body,
+            ) {}
+        }
+
+        #[ORM\Entity(repositoryClass: TagRepository::class)]
+        class TagEntity
+        {
+            #[ORM\Id]
+            public int $id;
+
+            public function __construct(
+                #[ORM\Column]
+                public string $name,
+            ) {}
+        }
+
+        class TagRepository extends EntityRepository
+        {
+            public function all(): void
+            {
+                $name = $this->createQueryBuilder('t')->select('t.name')->getQuery()
+                    ->getOneOrNullResult(Query::HYDRATE_SINGLE_SCALAR);
+                assertType('string|null', $name);
+
+                $range = $this->createQueryBuilder('t')->select('MIN(t.id) AS lo', 'MAX(t.id) AS hi')
+                    ->getQuery()->getSingleResult();
+                assertType('array{lo: int|null, hi: int|null}', $range);
+
+                $grouped = $this->createQueryBuilder('t')->select('t.name', 'MAX(t.id) AS hi')
+                    ->groupBy('t.name')->getQuery()->getResult();
+                assertType('list<array{name: string, hi: int}>', $grouped);
+
+                $joined = $this->createQueryBuilder('t')->select('t.id', 'n.body')
+                    ->leftJoin(NoteEntity::class, 'n', 'WITH', 'n.id = t.id')
+                    ->getQuery()->getResult();
+                assertType('list<array{id: int, body: string|null}>', $joined);
+
+                $indexed = $this->createQueryBuilder('t', 't.id')->getQuery()->getResult();
+                assertType('array<int, App\TagEntity>', $indexed);
             }
         }
         "#,

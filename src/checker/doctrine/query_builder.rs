@@ -45,6 +45,9 @@ fn looks_like_query_builder_chain(e: &Expr) -> bool {
 pub(crate) struct JoinClause {
     pub(crate) target: String,
     pub(crate) alias: String,
+    /// A `LEFT JOIN` - its alias may match no row, so everything read
+    /// through it can be `null`.
+    pub(crate) left: bool,
 }
 
 /// One `->getQuery()` call's own resolved `QueryBuilder` chain - `None`
@@ -73,6 +76,12 @@ pub(crate) struct QueryBuilderChain {
     /// (confirmed directly against `vendor/doctrine-orm`), so every
     /// select-shape field above is meaningless once this is `true`.
     pub(crate) dml: bool,
+    /// A `GROUP BY` is present - without one, an aggregate over zero
+    /// matching rows yields `null`.
+    pub(crate) group_by: bool,
+    /// The `INDEX BY` path (`alias.field`) the result collection is keyed
+    /// by, instead of a list.
+    pub(crate) index_by: Option<String>,
 }
 
 /// One collected fluent-chain call, in AST (outermost-first) order -
@@ -213,11 +222,17 @@ impl<'a> Checker<'a> {
             && let Some(current_class) = &self.current_class
             && let Some(entity) = self.registry.repository_entity(current_class)
         {
+            // `createQueryBuilder($alias, $indexBy)`.
+            let index_by = args
+                .get(1)
+                .and_then(|a| self.foldable_arg_string(a, locals));
             return Some(QueryBuilderChain {
                 from: Some((entity.to_string(), alias.clone())),
                 joins: Vec::new(),
                 select_args: vec![alias],
                 dml: false,
+                group_by: false,
+                index_by,
             });
         }
         // `$em->createQueryBuilder()` (or `$this->getEntityManager()->
@@ -261,6 +276,21 @@ impl<'a> Checker<'a> {
                     .get(1)
                     .and_then(|a| self.foldable_arg_string(a, locals))?;
                 chain.from = Some((entity, alias));
+                if let Some(index_by) = args
+                    .get(2)
+                    .and_then(|a| self.foldable_arg_string(a, locals))
+                {
+                    chain.index_by = Some(index_by);
+                }
+            }
+            "indexBy" => {
+                chain.index_by = Some(
+                    args.get(1)
+                        .and_then(|a| self.foldable_arg_string(a, locals))?,
+                );
+            }
+            "groupBy" | "addGroupBy" => {
+                chain.group_by = true;
             }
             "delete" | "update" => {
                 chain.dml = true;
@@ -276,7 +306,17 @@ impl<'a> Checker<'a> {
                 let alias = args
                     .get(1)
                     .and_then(|a| self.foldable_arg_string(a, locals))?;
-                chain.joins.push(JoinClause { target, alias });
+                if let Some(index_by) = args
+                    .get(4)
+                    .and_then(|a| self.foldable_arg_string(a, locals))
+                {
+                    chain.index_by = Some(index_by);
+                }
+                chain.joins.push(JoinClause {
+                    target,
+                    alias,
+                    left: method == "leftJoin",
+                });
             }
             _ => {}
         }

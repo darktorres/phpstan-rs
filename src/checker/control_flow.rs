@@ -409,6 +409,8 @@ impl<'a> Checker<'a> {
 #[hotpath::measure]
 pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals {
     let mut merged = then_locals.fresh_scope();
+    merged.any_variable_may_exist =
+        then_locals.any_variable_may_exist || else_locals.any_variable_may_exist;
     // A `function_exists()` guard only survives a merge
     // point when both incoming branches agree it's guaranteed - the same
     // reasoning every other narrowed fact here already gets (`union_types`

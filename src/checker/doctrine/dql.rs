@@ -521,8 +521,42 @@ fn parse_path_text(tokens: &[Token], pos: usize) -> Option<(String, usize)> {
     Some((first, pos))
 }
 
-const JOIN_BOUNDARY_KEYWORDS: [&str; 7] =
-    ["INNER", "LEFT", "OUTER", "JOIN", "WHERE", "GROUP", "ORDER"];
+/// An `INDEX BY alias.field` clause at `pos` - consumed, returning the
+/// path text.
+fn parse_index_by(tokens: &[Token], pos: &mut usize) -> Option<String> {
+    if !(ident_ci(tokens, *pos, "INDEX") && ident_ci(tokens, *pos + 1, "BY")) {
+        return None;
+    }
+    let (path, next) = parse_path_text(tokens, *pos + 2)?;
+    *pos = next;
+    Some(path)
+}
+
+/// Whether a `GROUP BY` follows at paren depth 0 from `start` - stopping
+/// at a closing `)` that ends an enclosing subquery.
+fn has_top_level_group_by(tokens: &[Token], start: usize) -> bool {
+    let mut depth = 0i32;
+    for (i, t) in tokens.iter().enumerate().skip(start) {
+        match t {
+            Token::LParen => depth += 1,
+            Token::RParen if depth == 0 => return false,
+            Token::RParen => depth -= 1,
+            Token::Ident(s)
+                if depth == 0
+                    && s.eq_ignore_ascii_case("GROUP")
+                    && ident_ci(tokens, i + 1, "BY") =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
+const JOIN_BOUNDARY_KEYWORDS: [&str; 8] = [
+    "INNER", "LEFT", "OUTER", "JOIN", "WHERE", "GROUP", "ORDER", "INDEX",
+];
 
 fn at_join_boundary(tokens: &[Token], pos: usize) -> bool {
     JOIN_BOUNDARY_KEYWORDS
@@ -589,6 +623,7 @@ fn parse_select_statement_tokens(
     };
     let from_alias = from_alias.clone();
     pos += 1;
+    let mut index_by = parse_index_by(tokens, &mut pos);
 
     let mut joins = Vec::new();
     while ident_ci(tokens, pos, "INNER")
@@ -596,6 +631,7 @@ fn parse_select_statement_tokens(
         || ident_ci(tokens, pos, "OUTER")
         || ident_ci(tokens, pos, "JOIN")
     {
+        let left = ident_ci(tokens, pos, "LEFT");
         while ident_ci(tokens, pos, "INNER")
             || ident_ci(tokens, pos, "LEFT")
             || ident_ci(tokens, pos, "OUTER")
@@ -614,8 +650,12 @@ fn parse_select_statement_tokens(
         joins.push(super::query_builder::JoinClause {
             target,
             alias: join_alias.clone(),
+            left,
         });
         pos += 1;
+        if let Some(join_index_by) = parse_index_by(tokens, &mut pos) {
+            index_by = Some(join_index_by);
+        }
         // `WITH <condition>` - the condition never affects row shape
         // (same WHERE-clause exclusion as everywhere else in this
         // phase) - skipped by running to the next real join/terminating
@@ -635,12 +675,15 @@ fn parse_select_statement_tokens(
         }
     }
 
+    let group_by = has_top_level_group_by(tokens, pos);
     Some((
         super::query_builder::QueryBuilderChain {
             from: Some((from_entity, from_alias)),
             joins,
             select_args: Vec::new(),
             dml: false,
+            group_by,
+            index_by,
         },
         items,
         pos,

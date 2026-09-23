@@ -22,7 +22,7 @@ use accessory_range::{
 pub(crate) use accessory_range::{resolve_concat_type, string_type_has_accessory};
 pub(crate) use array_shape::{
     array_value_type_for_key, is_unsealed_shape, narrow_array_shape_by_key_presence,
-    narrow_type_excluding_falsy,
+    narrow_isset_container, narrow_type_excluding_falsy,
 };
 use predicates::preg_match_condition;
 pub(crate) use predicates::{
@@ -239,6 +239,34 @@ fn truthiness_discriminant_subject(cond: &Expr) -> Option<String> {
 }
 
 impl<'a> Checker<'a> {
+    /// A true `isset($a['x'][$k])` also proves every container along the
+    /// chain held an offset - see `narrow_isset_container`.
+    fn narrow_isset_containers(&self, arg: &Expr, locals: &mut Locals) {
+        let mut e = unwrap_grouping(arg);
+        loop {
+            let (base, lit_key) = match &e.kind {
+                ExprKind::Index(base, Some(idx)) => (base, literal_string_key(idx)),
+                ExprKind::PropertyAccess(base, _, _) | ExprKind::DynamicPropertyAccess(base, _) => {
+                    if let Some(base_key) = narrowing_key(base) {
+                        let current = self.current_narrowed_type(base, &base_key, locals);
+                        locals.insert(base_key, narrow_type_excluding(&current, &Type::Null));
+                    }
+                    e = unwrap_grouping(base);
+                    continue;
+                }
+                _ => return,
+            };
+            if let Some(base_key) = narrowing_key(base) {
+                let current = self.current_narrowed_type(base, &base_key, locals);
+                let narrowed = narrow_isset_container(&current, lit_key.as_deref());
+                if narrowed != Type::Never {
+                    locals.insert(base_key, narrowed);
+                }
+            }
+            e = unwrap_grouping(base);
+        }
+    }
+
     /// A plain function call tagged `@phpstan-assert-if-true`/`-if-false`
     /// on its own docblock - see `FunctionSig::assert_if_true`'s own doc
     /// comment for the full picture. No `$this`/receiver here, so only a
@@ -870,6 +898,7 @@ impl<'a> Checker<'a> {
                             let current =
                                 self.current_narrowed_type(&single_arg.value, &key, locals);
                             locals.insert(key, narrow_type_excluding(&current, &Type::Null));
+                            self.narrow_isset_containers(&single_arg.value, locals);
                         }
                     } else if name == "count" && branch_true {
                         // A bare `if (count($x))`/`while
@@ -952,23 +981,23 @@ impl<'a> Checker<'a> {
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "in_array"
                     && let [needle, haystack, strict] = args.as_slice()
-                    // Only the strict, literal-array
-                    // form real PHPStan's own `InArrayFunctionTypeSpecifyingExtension`
-                    // narrows - a loose comparison's type-juggling would
-                    // make the real safe target wider than the literal
-                    // values listed here.
+                    // Only the strict form - a loose comparison's type
+                    // juggling makes the real match set wider than the
+                    // haystack's own values.
                     && matches!(&strict.value.kind, ExprKind::Literal(Literal::Bool(true)))
-                    && let ExprKind::ArrayLiteral(items) = &haystack.value.kind
-                    && let Some(target_ty) = self.in_array_target_type(items, locals)
+                    && let Some((target_ty, excluded_ty)) =
+                        self.in_array_narrowing(&haystack.value, locals)
                     && let Some(key) = narrowing_key(&needle.value)
                 {
                     let current = self.current_narrowed_type(&needle.value, &key, locals);
                     let narrowed = if branch_true {
-                        narrow_type_to(self.registry, &current, &target_ty)
+                        Some(narrow_type_to(self.registry, &current, &target_ty))
                     } else {
-                        narrow_type_excluding(&current, &target_ty)
+                        excluded_ty.map(|excluded| narrow_type_excluding(&current, &excluded))
                     };
-                    locals.insert(key, narrowed);
+                    if let Some(narrowed) = narrowed {
+                        locals.insert(key, narrowed);
+                    }
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "isset"
                     && branch_true
@@ -989,6 +1018,7 @@ impl<'a> Checker<'a> {
                             let current = self.current_narrowed_type(&arg.value, &key, locals);
                             locals.insert(key, narrow_type_excluding(&current, &Type::Null));
                         }
+                        self.narrow_isset_containers(&arg.value, locals);
                     }
                 } else if let ExprKind::Name(name) = &callee.kind
                     && name.trim_start_matches('\\') == "array_key_exists"

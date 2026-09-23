@@ -2689,7 +2689,10 @@ fn array_shape_writes_across_several_independent_branches_converge_instead_of_bl
                 if ($g) { $x['g'] = 6; }
                 if ($h) { $x['h'] = 7; }
                 assertType(
-                    "array{seed?: int, a?: 1, b?: 2, c?: 3, d?: 4, e?: 5, g?: 6, h?: 7, ...}",
+                    // `$x`'s open `...` part may already hold any of these
+                    // keys, so a branch that writes one only narrows it
+                    // to "maybe written".
+                    "array{seed?: int, a?: mixed, b?: mixed, c?: mixed, d?: mixed, e?: mixed, g?: mixed, h?: mixed, ...}",
                     $x
                 );
             }
@@ -2931,4 +2934,41 @@ fn array_arguments_that_are_implicitly_cast_must_hold_castable_values() {
         ],
         "got: {d:?}"
     );
+}
+
+#[test]
+fn array_filter_with_a_named_type_predicate_drops_non_matching_shape_fields() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(): void {
+                $items = [20, 50, 'all'];
+                assertType('array{0: 20, 1: 50}', array_filter($items, is_int(...)));
+                assertType('array{0: 20, 1: 50}', array_filter($items, 'is_int'));
+                if (! in_array(20, array_filter($items, is_int(...)), true)) {
+                    echo 'missing';
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn an_open_shape_join_keeps_the_tail_type_for_a_one_sided_key() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            enum Section { case Categories; case Tags; }
+            /** @param array<string, mixed> $parsed */
+            function f(array $parsed): void {
+                $page = array_merge(['items' => 1], $parsed);
+                if (! isset($page['section'])) {
+                    $page['section'] = Section::Categories;
+                }
+                assertType('array{items: mixed, section?: mixed, ...}', $page);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }

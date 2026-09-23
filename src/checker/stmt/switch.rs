@@ -40,17 +40,12 @@ impl<'a> Checker<'a> {
         // first case has no predecessor to fall through from, so
         // it's always reached via direct dispatch only).
         //
-        // A case reached only by direct dispatch (previous case
-        // terminates, or this is the first case) is checked
-        // against `narrowed_locals` plus its own positive
-        // "subject === test" narrowing. A case that might also be
-        // reached via fallthrough is checked against the plain
-        // fallthrough-inherited `running` state instead, without
-        // extra narrowing - conservative (it doesn't claim the
-        // precision of the direct-dispatch-only path when
-        // fallthrough is also possible), matching this project's
-        // general preference for missing precision over a false
-        // positive.
+        // Every case is reachable by direct dispatch, checked
+        // against `narrowed_locals` plus its own positive "subject
+        // === test" narrowing. A case whose predecessor doesn't
+        // terminate is also reachable by falling through, so its
+        // entry state is the merge of both paths - stacked labels
+        // (`case 'a': case 'b':`) see the subject as `'a'|'b'`.
         // A third thing tracked alongside the two above:
         // `exit_states` collects every case's own ending state
         // that legitimately reaches the code *after* the whole
@@ -93,14 +88,14 @@ impl<'a> Checker<'a> {
             if let Some(t) = &case.test {
                 self.check_expr(t, locals, label);
             }
+            let mut direct = narrowed_locals.clone();
+            if let Some(t) = &case.test {
+                self.apply_equality_narrowing(subject, t, &mut direct, true);
+            }
             let mut case_locals = if previous_terminates {
-                let mut nl = narrowed_locals.clone();
-                if let Some(t) = &case.test {
-                    self.apply_equality_narrowing(subject, t, &mut nl, true);
-                }
-                nl
+                direct
             } else {
-                running.clone()
+                merge_scopes(&running, &direct)
             };
             self.check_block(&case.body, &mut case_locals, declared_return, label);
             let last_stmt = case.body.last();

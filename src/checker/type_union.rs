@@ -394,7 +394,9 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
 /// if required on *both*, with its value types unioned; a key present on
 /// only one side becomes *optional* (not dropped - the value type it had
 /// on the one side that wrote it is still real, precise information)
-/// with that side's own value type kept as-is.
+/// with that side's own value type - unioned with the other side's
+/// `...` tail type when that side is unsealed, since the key may live
+/// there.
 ///
 /// Two shapes with genuinely incomparable key sets (neither a subset of
 /// the other - e.g. two unrelated parameter shapes merged in a ternary)
@@ -437,8 +439,11 @@ fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
     if !(is_subset(&names_a, &names_b) || is_subset(&names_b, &names_a)) {
         return None;
     }
-    let has_dotdotdot =
-        fa.iter().any(|(k, _, _)| k == "...") || fb.iter().any(|(k, _, _)| k == "...");
+    // An unsealed side's `...` tail can hold any key it doesn't name, so
+    // a key named only by the other side may exist there too, with the
+    // tail's value type.
+    let rest_a = field(fa, "...").map(|(_, t, _)| t.clone());
+    let rest_b = field(fb, "...").map(|(_, t, _)| t.clone());
     let mut all_names: Vec<&str> = names_a.clone();
     for n in &names_b {
         if !all_names.contains(n) {
@@ -455,14 +460,30 @@ fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
                     *oa || *ob,
                 ));
             }
-            (Some((_, ta, _)), None) | (None, Some((_, ta, _))) => {
-                merged.push((name.to_string(), ta.clone(), true));
+            (Some((_, ta, _)), None) => {
+                let ty = match &rest_b {
+                    Some(rest) => union_types(ta.clone(), rest.clone()),
+                    None => ta.clone(),
+                };
+                merged.push((name.to_string(), ty, true));
+            }
+            (None, Some((_, tb, _))) => {
+                let ty = match &rest_a {
+                    Some(rest) => union_types(tb.clone(), rest.clone()),
+                    None => tb.clone(),
+                };
+                merged.push((name.to_string(), ty, true));
             }
             (None, None) => unreachable!("name came from one of the two lists"),
         }
     }
-    if has_dotdotdot {
-        merged.push(("...".to_string(), Type::Mixed(false), false));
+    let rest = match (rest_a, rest_b) {
+        (Some(a), Some(b)) => Some(union_types(a, b)),
+        (Some(r), None) | (None, Some(r)) => Some(r),
+        (None, None) => None,
+    };
+    if let Some(rest) = rest {
+        merged.push(("...".to_string(), rest, false));
     }
     Some(Type::ArrayShape(merged))
 }

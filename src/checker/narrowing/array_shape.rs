@@ -71,6 +71,63 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
     }
 }
 
+/// The container half of a true `isset($c[key])`: `$c` held an offset
+/// whose value isn't `null`, so it's none of the scalar/null types an
+/// offset read always yields `null` for, and a shape with `key` listed
+/// has it present and non-null. `key` is `None` for a non-literal
+/// subscript.
+pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
+    match ty {
+        Type::Null
+        | Type::Void
+        | Type::Bool
+        | Type::True
+        | Type::False
+        | Type::Int
+        | Type::IntLiteral(_)
+        | Type::IntRange(..)
+        | Type::Float
+        | Type::FloatLiteral(_) => Type::Never,
+        Type::ArrayShape(_) => {
+            let Some(key) = key else {
+                return ty.clone();
+            };
+            match narrow_array_shape_by_key_presence(ty, key, true) {
+                Type::ArrayShape(fields) => Type::ArrayShape(
+                    fields
+                        .into_iter()
+                        .map(|(k, v, optional)| {
+                            if k == key {
+                                (
+                                    k,
+                                    crate::checker::narrow_type_excluding(&v, &Type::Null),
+                                    false,
+                                )
+                            } else {
+                                (k, v, optional)
+                            }
+                        })
+                        .collect(),
+                ),
+                other => other,
+            }
+        }
+        Type::Union(members) => {
+            let kept: Vec<Type> = members
+                .iter()
+                .map(|m| narrow_isset_container(m, key))
+                .filter(|m| *m != Type::Never)
+                .collect();
+            match kept.len() {
+                0 => Type::Never,
+                1 => kept.into_iter().next().unwrap(),
+                _ => Type::Union(kept),
+            }
+        }
+        _ => ty.clone(),
+    }
+}
+
 /// `HasOffsetValueType` equivalent, adapted to this
 /// project's own type system rather than replicating real PHPStan's -
 /// real PHPStan represents "definitely has offset `key`, value type `V`"

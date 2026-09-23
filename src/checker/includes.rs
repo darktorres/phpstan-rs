@@ -110,9 +110,17 @@ fn callee_name(e: &Expr) -> Option<&str> {
 }
 
 impl<'a> Checker<'a> {
+    /// The checked file's own absolute path - what PHP's `__FILE__`
+    /// holds, however the file was named on the command line or in the
+    /// config's `paths` (a relative path's `dirname()` chain would
+    /// otherwise walk off its top to `""`).
+    fn current_file_absolute(&self) -> Option<PathBuf> {
+        let file = self.current_file.as_ref()?;
+        Some(std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf()))
+    }
+
     fn current_dir_of_file(&self) -> Option<PathBuf> {
-        self.current_file
-            .as_ref()
+        self.current_file_absolute()
             .and_then(|f| f.parent().map(Path::to_path_buf))
     }
 
@@ -164,7 +172,7 @@ impl<'a> Checker<'a> {
                 self.current_dir_of_file()?.to_string_lossy().into_owned(),
             ]),
             ExprKind::Name(n) if n.eq_ignore_ascii_case("__FILE__") => Some(vec![
-                self.current_file.as_ref()?.to_string_lossy().into_owned(),
+                self.current_file_absolute()?.to_string_lossy().into_owned(),
             ]),
             ExprKind::Binary(BinOp::Concat, l, r) => {
                 let lefts = self.resolve_paths_at(l, locals, depth)?;

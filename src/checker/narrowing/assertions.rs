@@ -4,7 +4,7 @@ use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_ke
 use crate::checker::narrowing::type_ops::{
     is_known_single_value, narrow_type_excluding, narrow_type_to,
 };
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, Locals, unwrap_grouping};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -69,6 +69,49 @@ impl<'a> Checker<'a> {
     /// `infer_expr` on each element rather than duplicating the `Literal
     /// -> Type` mapping that already exists, verbatim, in `check_expr`'s
     /// and `infer_expr`'s own `Literal` arms.
+    /// A strict `in_array($needle, $haystack, true)`'s narrowing of
+    /// `$needle`: the type it has when found, and - only when every
+    /// possible haystack value is a single known value (a literal list,
+    /// a class constant holding one) - the type it can't have when not
+    /// found. A haystack of any other known array narrows the found
+    /// branch to its element type.
+    pub(crate) fn in_array_narrowing(
+        &self,
+        haystack: &Expr,
+        locals: &Locals,
+    ) -> Option<(Type, Option<Type>)> {
+        if let ExprKind::ArrayLiteral(items) = &unwrap_grouping(haystack).kind
+            && let Some(target) = self.in_array_target_type(items, locals)
+        {
+            return Some((target.clone(), Some(target)));
+        }
+        let haystack_ty = self.infer_expr(haystack, locals);
+        if let Type::ArrayShape(fields) = &haystack_ty
+            && !fields.is_empty()
+            && fields
+                .iter()
+                .all(|(k, v, _)| k != "..." && is_known_single_value(v))
+        {
+            let mut values: Vec<Type> = Vec::new();
+            for (_, v, _) in fields {
+                if !values.contains(v) {
+                    values.push(v.clone());
+                }
+            }
+            let target = if values.len() == 1 {
+                values.pop().unwrap()
+            } else {
+                Type::Union(values)
+            };
+            return Some((target.clone(), Some(target)));
+        }
+        let element = Self::array_element_type(&haystack_ty)?;
+        if matches!(element, Type::Mixed(_)) {
+            return None;
+        }
+        Some((element, None))
+    }
+
     pub(crate) fn in_array_target_type(
         &self,
         items: &[ArrayItem],

@@ -293,6 +293,7 @@ impl<'a> Checker<'a> {
         // array). Redundant with (but harmless alongside) the `Variable`
         // arm below, which does the same insert under the identical key
         // for that one case.
+        purge_aliased_index_entries(lhs, locals);
         if let Some(key) = narrowing_key(lhs) {
             // Also drops any deeper stale entry rooted at this exact
             // key (`"key->prop"`, `"key[lit]"`) or that used `key` as a
@@ -1011,6 +1012,40 @@ pub(crate) fn superglobal_default_type(name: &str) -> Type {
 /// internally, so both forms are compared the same way here). A
 /// non-literal index (a variable, a call, ...) returns `None`, since it
 /// can't be resolved against a shape's field names statically.
+/// An index write can change entries keyed differently than its own
+/// narrowing key: a write through a non-literal key (`$r[$k] = ...`, or
+/// `$r[$k]['x'] = ...`) may land on any existing key of that container,
+/// and a literal-key write (`$r['qs'] = ...`) may land on whatever a
+/// variable-subscript entry (`$r[$k]`) currently reads. Drops every
+/// such entry at each level of `lhs`'s index chain.
+fn purge_aliased_index_entries(lhs: &Expr, locals: &mut Locals) {
+    let ExprKind::Index(base, Some(idx)) = &lhs.kind else {
+        if let ExprKind::Index(base, None) = &lhs.kind {
+            purge_aliased_index_entries(base, locals);
+        }
+        return;
+    };
+    purge_aliased_index_entries(base, locals);
+    let Some(base_key) = narrowing_key(base) else {
+        return;
+    };
+    let siblings = format!("{base_key}[");
+    let variable_siblings = format!("{base_key}[$");
+    let prefix = if literal_string_key(idx).is_some() {
+        &variable_siblings
+    } else {
+        &siblings
+    };
+    let stale: Vec<String> = locals
+        .iter()
+        .filter(|(k, _)| k.starts_with(prefix.as_str()))
+        .map(|(k, _)| k.clone())
+        .collect();
+    for k in stale {
+        locals.remove(&k);
+    }
+}
+
 pub(crate) fn literal_string_key(e: &Expr) -> Option<String> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(s.to_string()),

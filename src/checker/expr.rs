@@ -18,6 +18,7 @@ use crate::types::{self, AccessoryKind, Type};
 mod array_ops;
 mod builtin_calls;
 mod member_resolution;
+mod mysqli;
 mod preg_shapes;
 mod probe_checks;
 pub(crate) mod ranges;
@@ -349,6 +350,19 @@ impl<'a> Checker<'a> {
                     && (name == "extract" || name == "eval")
                 {
                     self.saw_dynamic_var_construct = true;
+                }
+                if let ExprKind::Name(name) = &callee.kind
+                    && matches!(
+                        name.trim_start_matches('\\').to_ascii_lowercase().as_str(),
+                        "extract"
+                            | "eval"
+                            | "include"
+                            | "include_once"
+                            | "require"
+                            | "require_once"
+                    )
+                {
+                    locals.any_variable_may_exist = true;
                 }
                 // `print $x` desugars to this same synthetic `Call(Name
                 // ("print"), [$x])` node - checked here, since

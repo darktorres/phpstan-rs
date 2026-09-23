@@ -258,6 +258,11 @@ pub(crate) struct Locals {
     // surviving key through `insert_with_provenance`, so this needs no
     // separate per-field merge line to stay correct across branch joins.
     may_have_member_narrowing: bool,
+    // Set once an `include`/`require`/`extract()`/`eval()` has run on
+    // this path - any variable name may now be defined, with any value
+    // (real PHPStan's `afterExtractCall`). Flow-sensitive: a branch
+    // merge keeps it if either side has it.
+    pub(crate) any_variable_may_exist: bool,
     // Whether `declare`/`insert_with_provenance` do anything - `false` by
     // default for every ordinary check-project run, `true` only for the
     // LSP's own per-request variable-navigation probe. Carried on `Locals`
@@ -476,6 +481,7 @@ impl Locals {
             container_field_facts: ContainerFieldFactsMap::default(),
             discriminant_array_facts: DiscriminantArrayFactsMap::default(),
             may_have_member_narrowing: false,
+            any_variable_may_exist: false,
             track: self.track,
         }
     }

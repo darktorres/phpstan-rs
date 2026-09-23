@@ -1567,17 +1567,22 @@ fn in_array_without_the_strict_flag_narrows_nothing() {
 }
 
 #[test]
-fn in_array_strict_with_a_non_literal_haystack_element_narrows_nothing() {
+fn in_array_strict_with_a_non_literal_haystack_element_narrows_to_the_element_type() {
     let d = diagnostics_for(
         r#"<?php
+            use function PHPStan\Testing\assertType;
             function fromArray(?string $status_raw, string $other): string {
+                if (in_array($status_raw, [$other, 'public'], true)) {
+                    assertType('string', $status_raw);
+                } else {
+                    assertType('string|null', $status_raw);
+                }
                 $status = in_array($status_raw, [$other, 'public'], true) ? $status_raw : '';
                 return $status;
             }
         "#,
     );
-    assert_eq!(d.len(), 1, "got: {d:?}");
-    assert!(d[0].message.contains("null"), "got: {d:?}");
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
 
 #[test]
@@ -5347,6 +5352,93 @@ fn branch_implied_facts_do_not_survive_rebinding_the_variable_they_describe() {
                     }
                     $out[] = $row;
                 }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn stacked_switch_cases_see_every_label_they_can_be_entered_by() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array<string, mixed> $s */
+            function f(string $a, array $s): void {
+                switch ($a) {
+                    case 'a':
+                    case 'b':
+                        assertType("'a'|'b'", $a);
+                        break;
+                    case 'moderate':
+                        $s['p'] = [];
+                        // no break
+                    case 'validate':
+                        assertType("'moderate'|'validate'", $a);
+                        if (! isset($s['p']) || ! is_array($s['p'])) {
+                            $s['p'] = [];
+                        }
+                        break;
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn isset_on_an_offset_narrows_the_container_too() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param array{a?: int}|false $x */
+            function f($x, string $u): void {
+                if (isset($x['a'])) {
+                    assertType('array{a: int}', $x);
+                }
+                $parts = parse_url($u);
+                if (isset($parts['port'])) {
+                    echo $parts['port'];
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn strict_in_array_narrows_against_a_constant_haystack() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            final class C {
+                private const array ACTIONS = ['a', 'b'];
+                /** @param list<int> $ids */
+                public function f(string $s, int $n, array $ids): void {
+                    if (! in_array($s, self::ACTIONS, true)) {
+                        return;
+                    }
+                    assertType("'a'|'b'", $s);
+                    if (in_array($n, $ids, true)) {
+                        assertType('int', $n);
+                    }
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_dynamic_key_write_invalidates_narrowed_sibling_entries() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function f(string $k, int $v): void {
+                $r = ['qs' => ['q' => 'x']];
+                $r['qs']['z'] = 1;
+                $r[$k] = $v;
+                assertType("int|array{q: 'x', z: 1}", $r['qs']);
             }
         "#,
     );

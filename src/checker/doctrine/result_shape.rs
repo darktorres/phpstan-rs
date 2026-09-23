@@ -3,7 +3,7 @@
 //! 168a's entity metadata, computes one query row's own `Type`, mirroring
 //! real Doctrine's default `HYDRATE_OBJECT` hydration rules exactly.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
@@ -30,24 +30,45 @@ fn doctrine_custom_function_type(kind: DoctrineFunctionKind) -> Type {
 /// unresolvable join simply contributes no alias entry, so a later
 /// select item referencing that alias correctly resolves to `Mixed`
 /// instead (see `field_ref_type`'s own doc comment).
-fn build_alias_map(checker: &Checker, chain: &QueryBuilderChain) -> HashMap<String, String> {
-    let mut aliases = HashMap::new();
+struct AliasMap {
+    entities: HashMap<String, String>,
+    /// Aliases introduced by a `LEFT JOIN` - they may match no row.
+    nullable: HashSet<String>,
+    /// The query has a `GROUP BY` (see `QueryBuilderChain::group_by`).
+    group_by: bool,
+}
+
+impl AliasMap {
+    fn get(&self, alias: &str) -> Option<&String> {
+        self.entities.get(alias)
+    }
+
+    fn is_nullable(&self, alias: &str) -> bool {
+        self.nullable.contains(alias)
+    }
+}
+
+fn build_alias_map(checker: &Checker, chain: &QueryBuilderChain) -> AliasMap {
+    let mut aliases = AliasMap {
+        entities: HashMap::new(),
+        nullable: HashSet::new(),
+        group_by: chain.group_by,
+    };
     if let Some((entity, alias)) = &chain.from {
-        aliases.insert(alias.clone(), entity.clone());
+        aliases.entities.insert(alias.clone(), entity.clone());
     }
     for join in &chain.joins {
         if let Some(entity) = resolve_join_target(checker, &aliases, join) {
-            aliases.insert(join.alias.clone(), entity);
+            aliases.entities.insert(join.alias.clone(), entity);
+            if join.left {
+                aliases.nullable.insert(join.alias.clone());
+            }
         }
     }
     aliases
 }
 
-fn resolve_join_target(
-    checker: &Checker,
-    aliases: &HashMap<String, String>,
-    join: &JoinClause,
-) -> Option<String> {
+fn resolve_join_target(checker: &Checker, aliases: &AliasMap, join: &JoinClause) -> Option<String> {
     // `join(Entity::class, alias)` - 168b already resolved this to a
     // real class name; it names an entity directly when that class is
     // one.
@@ -145,24 +166,24 @@ fn entity_row_type(checker: &Checker, entity: &str) -> Type {
 /// type, not that the query itself is malformed), and real PHPStan's
 /// own reference implementation localizes exactly that kind of gap to
 /// `Mixed` rather than discarding an otherwise-precise row shape.
-fn field_ref_type(
-    checker: &Checker,
-    aliases: &HashMap<String, String>,
-    r: &FieldRef,
-) -> Option<Type> {
+fn field_ref_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option<Type> {
     match r {
         FieldRef::Alias(alias) => {
             let entity = aliases.get(alias)?;
-            Some(entity_row_type(checker, entity))
+            Some(nullable_if(
+                entity_row_type(checker, entity),
+                aliases.is_nullable(alias),
+            ))
         }
         FieldRef::Field(alias, field) => {
             let entity = aliases.get(alias)?;
-            entity_info(checker, entity)?
+            let ty = entity_info(checker, entity)?
                 .doctrine_entity
                 .as_ref()?
                 .fields
                 .get(field.as_str())
-                .cloned()
+                .cloned()?;
+            Some(nullable_if(ty, aliases.is_nullable(alias)))
         }
         // `IDENTITY()`'s own real Doctrine `SqlWalker` implementation
         // (`IdentityFunction::getSql`) doesn't implement `Expression
@@ -181,32 +202,15 @@ fn field_ref_type(
 /// One select item's own real-Doctrine-hydration type - infallible
 /// (see `field_ref_type`'s own doc comment for why: a metadata gap here
 /// localizes to `Mixed` for this one item, never a whole-query failure).
-/// `Aggregate`'s per-function return type is transcribed directly from
-/// real `phpstan-doctrine`'s own `QueryResultTypeWalker::
-/// walkAggregateExpression`, not inferred: `COUNT` is always `int<0,
-/// max>` (`IntegerRangeType::fromInterval(0, null)` there) *regardless*
-/// of whether its own operand resolves - real Doctrine's `COUNT` never
-/// actually depends on its operand's type at all. `SUM`/`AVG`/`MIN`/
-/// `MAX` all four resolve to the operand's own type instead (the real
-/// walker calls the identical `walkSimpleArithmeticExpression` on the
-/// operand for all four - there's no dedicated `SUM`/`AVG` output type),
-/// falling back to `Mixed` when the operand itself doesn't resolve.
-fn select_item_type(
-    checker: &Checker,
-    aliases: &HashMap<String, String>,
-    item: &SelectItem,
-) -> Type {
+/// Aggregates: see `aggregate_type`.
+fn select_item_type(checker: &Checker, aliases: &AliasMap, item: &SelectItem) -> Type {
     match &item.kind {
         SelectItemKind::Field(r) => {
             field_ref_type(checker, aliases, r).unwrap_or(Type::Mixed(false))
         }
-        SelectItemKind::Aggregate { func, operand } => match func {
-            AggregateFn::Count => Type::IntRange(Some(0), None),
-            AggregateFn::Sum | AggregateFn::Avg | AggregateFn::Min | AggregateFn::Max => operand
-                .as_ref()
-                .and_then(|r| field_ref_type(checker, aliases, r))
-                .unwrap_or(Type::Mixed(false)),
-        },
+        SelectItemKind::Aggregate { func, operand } => {
+            aggregate_type(checker, aliases, *func, operand.as_ref())
+        }
         SelectItemKind::Case {
             then_arms,
             else_arm,
@@ -253,6 +257,93 @@ fn select_item_type(
                 .unwrap_or(Type::Mixed(false))
         }
     }
+}
+
+/// An aggregate select item's value. `COUNT` is always `int<0, max>`.
+/// The others go through Doctrine's aggregate path, which isn't a typed
+/// expression, so `SqlWalker` maps them to the `string` DBAL type -
+/// whose conversion is a no-op: the value is the driver's raw one for
+/// the column, never the field's converted PHP type (`MIN(e.createdAt)`
+/// of a value-object date column is the database's date string). The
+/// raw type comes from the configured SQL schema when the column is in
+/// it; otherwise a field whose PHP type is a plain scalar is taken as
+/// its own raw type, and a converted (object) one is unknown. `SUM`/
+/// `AVG` may come back as a numeric string (MySQL's `DECIMAL`,
+/// PostgreSQL's `numeric`). Any of the four is `null` over zero rows,
+/// which only a `GROUP BY` rules out.
+fn aggregate_type(
+    checker: &Checker,
+    aliases: &AliasMap,
+    func: AggregateFn,
+    operand: Option<&FieldRef>,
+) -> Type {
+    if func == AggregateFn::Count {
+        return Type::IntRange(Some(0), None);
+    }
+    let Some((raw, raw_nullable)) = operand.and_then(|r| raw_field_type(checker, aliases, r))
+    else {
+        return Type::Mixed(false);
+    };
+    let numeric_string = crate::types::parse_type_string("numeric-string");
+    let value = match func {
+        AggregateFn::Min | AggregateFn::Max => raw,
+        AggregateFn::Sum => union_types(raw, numeric_string),
+        AggregateFn::Avg => union_types(Type::Float, numeric_string),
+        AggregateFn::Count => unreachable!(),
+    };
+    nullable_if(value, raw_nullable || !aliases.group_by)
+}
+
+/// The value a raw fetch of `r`'s column returns, plus whether it can be
+/// `null` - see `aggregate_type`.
+fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option<(Type, bool)> {
+    let FieldRef::Field(alias, field) = r else {
+        return None;
+    };
+    let entity = aliases.get(alias)?;
+    let de = entity_info(checker, entity)?.doctrine_entity.as_ref()?;
+    let join_nullable = aliases.is_nullable(alias);
+    if let Some(schema) = &checker.registry.sql_reflection_schema
+        && let Some(table) = &de.table_name
+        && let Some(column_name) = de.column_names.get(field.as_str())
+        && let Some(column) = schema.column(table, column_name)
+    {
+        return Some((column.ty.clone(), column.nullable || join_nullable));
+    }
+    let ty = de.fields.get(field.as_str())?;
+    if contains_object(ty) {
+        return None;
+    }
+    let non_null = crate::checker::narrow_type_excluding(ty, &Type::Null);
+    let nullable = non_null != *ty || join_nullable;
+    Some((non_null, nullable))
+}
+
+fn nullable_if(ty: Type, nullable: bool) -> Type {
+    if nullable {
+        union_types(ty, Type::Null)
+    } else {
+        ty
+    }
+}
+
+/// The key type of the result collection when the query has an `INDEX
+/// BY`: the raw value of the indexing column, as far as it's a valid
+/// array key.
+pub(crate) fn index_key_type(checker: &Checker, chain: &QueryBuilderChain) -> Option<Type> {
+    let path = chain.index_by.as_ref()?;
+    let (alias, field) = path.split_once('.')?;
+    let aliases = build_alias_map(checker, chain);
+    let raw = raw_field_type(
+        checker,
+        &aliases,
+        &FieldRef::Field(alias.to_string(), field.to_string()),
+    )
+    .map(|(ty, _)| ty);
+    Some(match raw {
+        Some(ty @ (Type::Int | Type::String | Type::IntRange(..))) => ty,
+        _ => Type::unknown_array_key(),
+    })
 }
 
 /// Builds one query row's own `Type` from its already-parsed select
@@ -399,7 +490,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
                     .and_then(|t| t.fields.get(id_field))
                     .cloned()
                     .unwrap_or(Type::Mixed(false));
-                Type::ObjectShape(vec![(id_field.to_string(), id_ty, false)])
+                Type::ArrayShape(vec![(id_field.to_string(), id_ty, false)])
             })
             .unwrap_or(Type::Mixed(false));
         fields.push((name.to_string(), shape, false));
@@ -407,7 +498,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
     // Deterministic order - a `HashMap`'s own iteration order is
     // unspecified, and this shape must render identically across runs.
     fields.sort_by(|a, b| a.0.cmp(&b.0));
-    Type::ObjectShape(fields)
+    Type::ArrayShape(fields)
 }
 
 /// Converts an entity object type to its own `HYDRATE_ARRAY` shape when
@@ -495,8 +586,13 @@ pub(crate) fn build_scalar_result_row_type(
                     .filter(|(name, _)| !de.associations.contains_key(*name))
                     .collect();
                 scalar_fields.sort_by(|a, b| a.0.cmp(b.0));
+                let nullable = aliases.is_nullable(entity_alias);
                 for (name, ty) in scalar_fields {
-                    fields.push((format!("{entity_alias}_{name}"), ty.clone(), false));
+                    fields.push((
+                        format!("{entity_alias}_{name}"),
+                        nullable_if(ty.clone(), nullable),
+                        false,
+                    ));
                 }
             }
             _ => {

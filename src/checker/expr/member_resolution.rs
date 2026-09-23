@@ -6,7 +6,7 @@ use crate::checker::expr::builtin_calls::{
 use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::expr::doctrine_query_result_list_type_of;
 use crate::checker::type_union::union_types;
-use crate::checker::{Checker, Locals, literal_string_value, resolve_call_args};
+use crate::checker::{Checker, Locals, literal_string_value, resolve_call_args, unwrap_grouping};
 use crate::registry::{FunctionSig, PropertySig};
 use crate::types::{self, Type};
 
@@ -451,26 +451,10 @@ impl<'a> Checker<'a> {
                         .registry
                         .is_subclass_of(class, "Doctrine\\ORM\\EntityManagerInterface") =>
             {
-                let row_type = args.first().and_then(|arg| {
-                    let dql = match literal_string_value(&arg.value) {
-                        Some(s) => Some(s.into_owned()),
-                        None => match self.infer_expr(&arg.value, locals) {
-                            Type::StringLiteral(s) => Some(s),
-                            _ => None,
-                        },
-                    }?;
-                    let (chain, items) =
-                        crate::checker::doctrine::dql::parse_select_statement(&dql)?;
-                    crate::checker::doctrine::result_shape::build_result_row_type(
-                        self, &chain, &items,
-                    )
-                });
-                match row_type {
-                    Some(row_type) => {
-                        Type::Object("Doctrine\\ORM\\Query".to_string(), vec![row_type])
-                    }
-                    None => Type::Object("Doctrine\\ORM\\Query".to_string(), Vec::new()),
-                }
+                let source = args
+                    .first()
+                    .and_then(|arg| self.doctrine_dql_source(&arg.value, locals));
+                self.doctrine_query_type(source)
             }
             // `QueryBuilder::getQuery()` (ROADMAP Phase 168 168e) -
             // resolves the fluent chain (168b), parses its own select
@@ -487,39 +471,11 @@ impl<'a> Checker<'a> {
                         .registry
                         .is_subclass_of(class, "Doctrine\\ORM\\QueryBuilder") =>
             {
-                let row_type = self
-                    .resolve_query_builder_chain(recv, locals)
-                    .and_then(|chain| {
-                        // A `->delete(...)`/`->update(...)` chain never
-                        // produces row data at all (see `QueryBuilderChain::
-                        // dml`'s own doc comment) - `Type::Never` marks
-                        // that here, read back by `getResult`/`execute`'s
-                        // own dispatch below.
-                        if chain.dml {
-                            return Some(Type::Never);
-                        }
-                        let items =
-                            crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
-                        crate::checker::doctrine::result_shape::build_result_row_type(
-                            self, &chain, &items,
-                        )
-                    });
-                match row_type {
-                    Some(row_type) => {
-                        Type::Object("Doctrine\\ORM\\Query".to_string(), vec![row_type])
-                    }
-                    None => Type::Object("Doctrine\\ORM\\Query".to_string(), Vec::new()),
-                }
+                let source = self.doctrine_query_builder_source(recv, locals);
+                self.doctrine_query_type(source)
             }
-            // The five `AbstractQuery` terminal methods real
-            // `phpstan-doctrine` itself resolves precisely via its own
-            // `QueryResultDynamicReturnTypeExtension` (ROADMAP
-            // Phase 168 168e) - checkable against that reference
-            // implementation's own `dumpType()` output.
-            // `getArrayResult`/`getSingleColumnResult`/
-            // `getSingleScalarResult`/`getScalarResult` (168f, beyond
-            // real PHPStan - none of those four get a dynamic-return-
-            // type extension there either) aren't handled here yet.
+            // `AbstractQuery`'s result methods, per hydration mode - see
+            // `doctrine_query_result`.
             Type::Object(class, type_args)
                 if matches!(
                     method,
@@ -528,90 +484,7 @@ impl<'a> Checker<'a> {
                         | "toIterable"
                         | "getOneOrNullResult"
                         | "getSingleResult"
-                ) && self
-                    .registry
-                    .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
-            {
-                let row_type = type_args.first();
-                match method {
-                    // `Type::Never` marks a `->delete(...)`/`->update(...)`
-                    // chain (`QueryBuilderChain::dml`'s own doc comment).
-                    // `getResult`/`getOneOrNullResult`/`getSingleResult`
-                    // all funnel through `execute()` internally in real
-                    // Doctrine (confirmed against `vendor/doctrine-orm`),
-                    // which returns a plain affected-row `int` for either
-                    // DML statement, bypassing hydration (and any `NoResult
-                    // Exception`/`NonUniqueResultException` wrapping)
-                    // entirely regardless of hydration mode - `toIterable`
-                    // is the one exception (calls `_doExecute()` directly,
-                    // with no such bypass, so a DML chain there is a real
-                    // runtime `TypeError` in real Doctrine, not a value
-                    // this project needs to type sensibly).
-                    "getResult" | "execute" | "getOneOrNullResult" | "getSingleResult"
-                        if matches!(row_type, Some(Type::Never)) =>
-                    {
-                        Type::IntRange(Some(0), None)
-                    }
-                    "getResult" => match row_type {
-                        Some(row_type) => doctrine_query_result_list_type_of(row_type.clone()),
-                        // Today's only previously-covered method - keep
-                        // its existing shape-only fallback rather than
-                        // regressing to bare `Mixed` when the chain
-                        // itself was undecidable.
-                        None => doctrine_query_result_list_type(),
-                    },
-                    "execute" => match resolve_hydration_mode_arg(args, 1) {
-                        HydrationMode::Object => row_type
-                            .cloned()
-                            .map(doctrine_query_result_list_type_of)
-                            .unwrap_or_else(doctrine_query_result_list_type),
-                        // The other hydration modes need 168f's own
-                        // per-mode transforms, not yet built.
-                        _ => Type::Mixed(false),
-                    },
-                    "toIterable" => match resolve_hydration_mode_arg(args, 0) {
-                        HydrationMode::Object => Type::Union(vec![
-                            Type::Array(
-                                Box::new(Type::unknown_array_key()),
-                                Box::new(row_type.cloned().unwrap_or(Type::Mixed(false))),
-                            ),
-                            Type::Object("Traversable".to_string(), Vec::new()),
-                        ]),
-                        _ => Type::Mixed(false),
-                    },
-                    "getOneOrNullResult" => {
-                        union_types(row_type.cloned().unwrap_or(Type::Mixed(false)), Type::Null)
-                    }
-                    "getSingleResult" => row_type.cloned().unwrap_or(Type::Mixed(false)),
-                    _ => unreachable!(),
-                }
-            }
-            // `getArrayResult`/`getSingleColumnResult`/
-            // `getSingleScalarResult`/`getScalarResult` (ROADMAP
-            // Phase 168 168f) - beyond real PHPStan (168e's own stub
-            // check confirms none of these four get a dynamic-return-
-            // type extension in real `phpstan-doctrine` either).
-            // Re-resolves the `QueryBuilder` chain directly from
-            // `->getQuery()`'s own receiver rather than reading back a
-            // pre-stored row type the way the five methods above do -
-            // every one of these four needs its own, differently-shaped
-            // hydration transform (`entity_array_shape`'s nested
-            // identifier-only associations, the flat `getScalarResult`
-            // key format), not a single fixed `HYDRATE_OBJECT` shape to
-            // reuse. Real corpus usage is overwhelmingly chain-shaped
-            // like `getResult()`'s own call sites, but not exclusively -
-            // `$qb = ...; ...; $qb->getQuery()->getSingleColumnResult()`
-            // is a real, confirmed Piwigo shape (`UserRepository::
-            // findAuthorizedFavoriteImageIds`) this design can't resolve
-            // (`resolve_query_builder_chain`'s own backward walk stops at
-            // a bare variable, with no way back to the assignment that
-            // built it) - degrades to `Mixed` for that one call site
-            // rather than a false claim, a real, disclosed coverage gap
-            // (see ROADMAP.md), not a design defect.
-            Type::Object(class, _)
-                if matches!(
-                    method,
-                    "getArrayResult"
+                        | "getArrayResult"
                         | "getSingleColumnResult"
                         | "getSingleScalarResult"
                         | "getScalarResult"
@@ -619,53 +492,7 @@ impl<'a> Checker<'a> {
                     .registry
                     .is_subclass_of(class, "Doctrine\\ORM\\AbstractQuery") =>
             {
-                let chain = doctrine_get_query_receiver(recv)
-                    .and_then(|qb_recv| self.resolve_query_builder_chain(qb_recv, locals));
-                // Every one of these four also funnels through `execute()`
-                // internally in real Doctrine (confirmed directly against
-                // `vendor/doctrine-orm`), so a `->delete(...)`/`->update(...)`
-                // chain returns a plain affected-row `int` here too,
-                // bypassing hydration regardless of which of these four was
-                // actually called - see `QueryBuilderChain::dml`'s own doc
-                // comment.
-                if matches!(&chain, Some(c) if c.dml) {
-                    return Type::IntRange(Some(0), None);
-                }
-                let resolved = chain.and_then(|chain| {
-                    let items =
-                        crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
-                    Some((chain, items))
-                });
-                match (method, resolved) {
-                    ("getArrayResult", Some((chain, items))) => {
-                        crate::checker::doctrine::result_shape::build_array_result_row_type(
-                            self, &chain, &items,
-                        )
-                        .map(doctrine_query_result_list_type_of)
-                        .unwrap_or_else(doctrine_query_result_list_type)
-                    }
-                    ("getSingleColumnResult", Some((chain, items))) => {
-                        crate::checker::doctrine::result_shape::raw_scalar_column_type(
-                            self, &chain, &items,
-                        )
-                        .map(doctrine_query_result_list_type_of)
-                        .unwrap_or_else(doctrine_query_result_list_type)
-                    }
-                    ("getSingleScalarResult", Some((chain, items))) => {
-                        crate::checker::doctrine::result_shape::single_scalar_column_type(
-                            self, &chain, &items,
-                        )
-                        .unwrap_or(Type::Mixed(false))
-                    }
-                    ("getScalarResult", Some((chain, items))) => {
-                        crate::checker::doctrine::result_shape::build_scalar_result_row_type(
-                            self, &chain, &items,
-                        )
-                        .map(doctrine_query_result_list_type_of)
-                        .unwrap_or_else(doctrine_query_result_list_type)
-                    }
-                    _ => Type::Mixed(false),
-                }
+                self.doctrine_query_result(recv, method, args, type_args, locals)
             }
             // `DateTimeInterface::format()`'s own already-
             // shipped `date()` format-character table applies verbatim -
@@ -930,6 +757,21 @@ impl<'a> Checker<'a> {
                     None => Type::Object("Doctrine\\DBAL\\Result".to_string(), Vec::new()),
                 }
             }
+            Type::Object(class, _)
+                if method == "query" && self.registry.is_subclass_of(class, "mysqli") =>
+            {
+                self.mysqli_query_type(args.first().map(|a| &a.value), locals)
+            }
+            Type::Object(class, type_args)
+                if class.eq_ignore_ascii_case("mysqli_result")
+                    && let Some(ty) = self.mysqli_fetch_type(
+                        method,
+                        type_args.first(),
+                        args.first().map(|a| &a.value),
+                    ) =>
+            {
+                ty
+            }
             Type::Object(class, type_args) => {
                 self.generic_object_method_return_type(class, type_args, method, args, locals)
             }
@@ -1119,47 +961,240 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
     }
 }
 
-/// Which of `AbstractQuery::HYDRATE_*` mode an `execute()`/`toIterable()`
-/// call's own hydration-mode argument names - `Object` both when it's
-/// omitted (real Doctrine's own default) and when it's the literal
-/// `HYDRATE_OBJECT` constant; `Unknown` for anything this project can't
-/// statically resolve (a runtime variable), which every caller treats as
-/// undecidable for that call, never guessed.
+/// An `AbstractQuery::HYDRATE_*` mode, or `Unknown` when the argument
+/// isn't statically resolvable - every caller treats that as
+/// undecidable, never guessed.
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum HydrationMode {
     Object,
+    Array,
+    Scalar,
+    SingleScalar,
+    SimpleObject,
+    ScalarColumn,
     Unknown,
 }
 
+/// The hydration mode argument at `index` - omitted or `null` is real
+/// Doctrine's default, `HYDRATE_OBJECT`. The constants' own values
+/// (`AbstractQuery`) are accepted as integer literals too.
 fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
-    match args.get(index) {
-        None => HydrationMode::Object,
-        Some(arg) => match &arg.value.kind {
-            ExprKind::Literal(Literal::Null) => HydrationMode::Object,
-            ExprKind::StaticAccess(_, member) if member == "HYDRATE_OBJECT" => {
-                HydrationMode::Object
-            }
+    let Some(arg) = args.get(index) else {
+        return HydrationMode::Object;
+    };
+    let by_name = |name: &str| match name {
+        "HYDRATE_OBJECT" => HydrationMode::Object,
+        "HYDRATE_ARRAY" => HydrationMode::Array,
+        "HYDRATE_SCALAR" => HydrationMode::Scalar,
+        "HYDRATE_SINGLE_SCALAR" => HydrationMode::SingleScalar,
+        "HYDRATE_SIMPLEOBJECT" => HydrationMode::SimpleObject,
+        "HYDRATE_SCALAR_COLUMN" => HydrationMode::ScalarColumn,
+        _ => HydrationMode::Unknown,
+    };
+    match &arg.value.kind {
+        ExprKind::Literal(Literal::Null) => HydrationMode::Object,
+        ExprKind::StaticAccess(_, member) => by_name(member),
+        ExprKind::Literal(Literal::Int(n)) => match n {
+            1 => HydrationMode::Object,
+            2 => HydrationMode::Array,
+            3 => HydrationMode::Scalar,
+            4 => HydrationMode::SingleScalar,
+            5 => HydrationMode::SimpleObject,
+            6 => HydrationMode::ScalarColumn,
             _ => HydrationMode::Unknown,
         },
+        _ => HydrationMode::Unknown,
     }
 }
 
-/// `recv`'s own `QueryBuilder` receiver, when `recv` is exactly a bare
-/// `->getQuery()` call (`MethodCall(qb, "getQuery", [], _)`) - used by
-/// the `getArrayResult`/`getSingleColumnResult`/`getSingleScalarResult`/
-/// `getScalarResult` dispatch (168f) to re-resolve the fluent chain
-/// directly, rather than reading back a row type `getQuery()`'s own
-/// dispatch already computed and stored for a different (`HYDRATE_
-/// OBJECT`) hydration mode. `None` for anything else, including a
-/// variable holding an already-built `Query` - a real, disclosed gap
-/// (see this function's own caller's doc comment), not a claim that
-/// shape never occurs.
-fn doctrine_get_query_receiver(recv: &Expr) -> Option<&Expr> {
-    match &recv.kind {
-        ExprKind::MethodCall(qb, method, call_args, _)
-            if **method == *"getQuery" && call_args.is_empty() =>
-        {
-            Some(qb)
+/// A resolved query: its chain (joins, `GROUP BY`, `INDEX BY`) and
+/// parsed select items.
+type DoctrineQuerySource = (
+    crate::checker::doctrine::query_builder::QueryBuilderChain,
+    Vec<crate::checker::doctrine::dql::SelectItem>,
+);
+
+impl<'a> Checker<'a> {
+    /// A `QueryBuilder` chain's query, when resolvable. A
+    /// `->delete()`/`->update()` chain has no select items to parse.
+    fn doctrine_query_builder_source(
+        &self,
+        qb: &Expr,
+        locals: &Locals,
+    ) -> Option<DoctrineQuerySource> {
+        let chain = self.resolve_query_builder_chain(qb, locals)?;
+        if chain.dml {
+            return Some((chain, Vec::new()));
         }
-        _ => None,
+        let items = crate::checker::doctrine::dql::parse_select_items(&chain.select_args)?;
+        Some((chain, items))
+    }
+
+    /// A literal `createQuery($dql)` string's query, when resolvable.
+    fn doctrine_dql_source(&self, dql: &Expr, locals: &Locals) -> Option<DoctrineQuerySource> {
+        let dql = match literal_string_value(dql) {
+            Some(s) => s.into_owned(),
+            None => match self.infer_expr(dql, locals) {
+                Type::StringLiteral(s) => s,
+                _ => return None,
+            },
+        };
+        crate::checker::doctrine::dql::parse_select_statement(&dql)
+    }
+
+    /// The query a result method's receiver was built from, when it's
+    /// a direct `->getQuery()`/`createQuery(...)` call.
+    fn doctrine_query_source_of(
+        &self,
+        recv: &Expr,
+        locals: &Locals,
+    ) -> Option<DoctrineQuerySource> {
+        match &unwrap_grouping(recv).kind {
+            ExprKind::MethodCall(qb, method, call_args, _)
+                if **method == *"getQuery" && call_args.is_empty() =>
+            {
+                self.doctrine_query_builder_source(qb, locals)
+            }
+            ExprKind::MethodCall(_, method, call_args, _) if **method == *"createQuery" => {
+                self.doctrine_dql_source(&call_args.first()?.value, locals)
+            }
+            _ => None,
+        }
+    }
+
+    /// `Doctrine\ORM\Query<TKey, TResult>` - `TKey` is the `INDEX BY`
+    /// column's key type (`null` without one), `TResult` the
+    /// `HYDRATE_OBJECT` row (`never` for a `DELETE`/`UPDATE`, which
+    /// returns an affected-row count instead). Bare `Query` when the
+    /// query isn't resolvable.
+    fn doctrine_query_type(&self, source: Option<DoctrineQuerySource>) -> Type {
+        let query = "Doctrine\\ORM\\Query".to_string();
+        let Some((chain, items)) = source else {
+            return Type::Object(query, Vec::new());
+        };
+        let key = crate::checker::doctrine::result_shape::index_key_type(self, &chain)
+            .unwrap_or(Type::Null);
+        let row = if chain.dml {
+            Some(Type::Never)
+        } else {
+            crate::checker::doctrine::result_shape::build_result_row_type(self, &chain, &items)
+        };
+        match row {
+            Some(row) => Type::Object(query, vec![key, row]),
+            None => Type::Object(query, Vec::new()),
+        }
+    }
+
+    /// One `AbstractQuery` result method's return type. The mode comes
+    /// from the method itself (`getArrayResult()` is `HYDRATE_ARRAY`) or
+    /// its hydration argument; `HYDRATE_OBJECT` reads the row the
+    /// `Query<TKey, TResult>` type carries, every other mode rebuilds its
+    /// own row shape from the receiver's query. Collections are lists,
+    /// or keyed by the `INDEX BY` column. A `DELETE`/`UPDATE` returns its
+    /// affected-row count from every method but `toIterable()`.
+    fn doctrine_query_result(
+        &self,
+        recv: &Expr,
+        method: &str,
+        args: &[Arg],
+        type_args: &[Type],
+        locals: &Locals,
+    ) -> Type {
+        use crate::checker::doctrine::result_shape as shape;
+        let mode = match method {
+            "getResult" | "getOneOrNullResult" | "getSingleResult" => {
+                resolve_hydration_mode_arg(args, 0)
+            }
+            "execute" | "toIterable" => resolve_hydration_mode_arg(args, 1),
+            "getArrayResult" => HydrationMode::Array,
+            "getSingleColumnResult" => HydrationMode::ScalarColumn,
+            "getSingleScalarResult" => HydrationMode::SingleScalar,
+            "getScalarResult" => HydrationMode::Scalar,
+            _ => HydrationMode::Unknown,
+        };
+        let (key, object_row) = match type_args {
+            [key, row] => (Some(key.clone()), Some(row.clone())),
+            _ => (None, None),
+        };
+        let source = if mode == HydrationMode::Object && object_row.is_some() {
+            None
+        } else {
+            self.doctrine_query_source_of(recv, locals)
+        };
+        let dml = matches!(object_row, Some(Type::Never))
+            || source.as_ref().is_some_and(|(chain, _)| chain.dml);
+        if dml && method != "toIterable" {
+            return Type::IntRange(Some(0), None);
+        }
+        let key = key.or_else(|| {
+            source
+                .as_ref()
+                .map(|(chain, _)| shape::index_key_type(self, chain).unwrap_or(Type::Null))
+        });
+        let element = match mode {
+            HydrationMode::Object | HydrationMode::SimpleObject => object_row.or_else(|| {
+                source
+                    .as_ref()
+                    .and_then(|(chain, items)| shape::build_result_row_type(self, chain, items))
+            }),
+            HydrationMode::Array => source
+                .as_ref()
+                .and_then(|(chain, items)| shape::build_array_result_row_type(self, chain, items)),
+            HydrationMode::Scalar => source
+                .as_ref()
+                .and_then(|(chain, items)| shape::build_scalar_result_row_type(self, chain, items)),
+            HydrationMode::ScalarColumn => source
+                .as_ref()
+                .and_then(|(chain, items)| shape::raw_scalar_column_type(self, chain, items)),
+            HydrationMode::SingleScalar => source
+                .as_ref()
+                .and_then(|(chain, items)| shape::single_scalar_column_type(self, chain, items)),
+            HydrationMode::Unknown => return Type::Mixed(false),
+        };
+        let element_or_mixed = element.clone().unwrap_or(Type::Mixed(false));
+        let collection = || {
+            // `fetchFirstColumn()` always yields a list.
+            let keyed = mode != HydrationMode::ScalarColumn;
+            // An unresolved query may carry an unseen `INDEX BY`, so only
+            // the always-list column mode (and `getResult()`'s long-
+            // standing shape-only fallback) still claims a list.
+            if element.is_none()
+                && key.is_none()
+                && !matches!(
+                    mode,
+                    HydrationMode::ScalarColumn
+                        | HydrationMode::Object
+                        | HydrationMode::SimpleObject
+                )
+            {
+                return Type::Mixed(false);
+            }
+            match (&element, &key) {
+                (Some(el), Some(key)) if keyed && *key != Type::Null => {
+                    Type::Array(Box::new(key.clone()), Box::new(el.clone()))
+                }
+                (Some(el), _) => doctrine_query_result_list_type_of(el.clone()),
+                (None, _) => doctrine_query_result_list_type(),
+            }
+        };
+        let single_scalar = mode == HydrationMode::SingleScalar;
+        match method {
+            "getSingleScalarResult" | "getSingleResult" => element_or_mixed,
+            "getOneOrNullResult" => union_types(element_or_mixed, Type::Null),
+            "toIterable" => Type::Union(vec![
+                Type::Array(
+                    Box::new(
+                        key.filter(|k| *k != Type::Null)
+                            .unwrap_or_else(Type::unknown_array_key),
+                    ),
+                    Box::new(element_or_mixed),
+                ),
+                Type::Object("Traversable".to_string(), Vec::new()),
+            ]),
+            // `getResult(HYDRATE_SINGLE_SCALAR)` hands back the scalar
+            // itself, not a collection.
+            _ if single_scalar => element_or_mixed,
+            _ => collection(),
+        }
     }
 }
