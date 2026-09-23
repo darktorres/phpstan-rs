@@ -30,6 +30,8 @@ fn main() -> ExitCode {
         Some("buildtime") => buildtime(),
         Some("tests") => test_manifest(),
         Some("baseline") => baseline_generate(),
+        Some("approve") => approve(&args[1..]),
+        Some("rekey") => rekey(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -49,7 +51,12 @@ const USAGE: &str = "usage: cargo xtask <command>
   perf                   record wall time and peak memory of the scoped run
   buildtime              record incremental rebuild times
   tests                  record and check the test-name manifest
-  baseline               generate the reference baselines (Stage A only)";
+  baseline               generate the reference baselines (Stage A only)
+  approve <slug> [--full]
+                         write HEAD's snapshot diffs against its parent to
+                         gates/approved/<slug>/ (then amend them in)
+  rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
+                         that only added gates/ files";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -519,6 +526,20 @@ fn unified_diff(old: &[u8], new: &[u8]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Every artifact `compare` checks, with its file extension.
+fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
+    let mut names = Vec::new();
+    for (config, level) in artifacts(full) {
+        let artifact = artifact_name(&config, level);
+        if level == "unset" && config.name != "unscoped" {
+            names.push((format!("types-{artifact}"), "txt.zst"));
+            names.push((format!("baseline-{artifact}"), "txt"));
+        }
+        names.push((artifact, "txt"));
+    }
+    names
+}
+
 fn compare(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     let against = match args.iter().position(|a| a == "--against") {
@@ -526,16 +547,8 @@ fn compare(args: &[String]) -> Result<(), String> {
         None => parent_hash()?,
     };
     let hash = head_hash()?;
-    let mut names: Vec<(String, &str)> = Vec::new();
-    for (config, level) in artifacts(full) {
-        let artifact = artifact_name(&config, level);
-        if level == "unset" && config.name != "unscoped" {
-            names.push((format!("types-{artifact}"), "txt.zst"));
-        }
-        names.push((artifact, "txt"));
-    }
     let mut failures = Vec::new();
-    for (artifact, ext) in &names {
+    for (artifact, ext) in &compared_artifacts(full) {
         let (Some(old), Some(new)) = (
             read_snapshot(artifact, &against, ext)?,
             read_snapshot(artifact, &hash, ext)?,
@@ -566,6 +579,70 @@ fn compare(args: &[String]) -> Result<(), String> {
     } else {
         Err(failures.join("\n\n"))
     }
+}
+
+/// Writes every artifact that differs between HEAD's snapshots and its
+/// parent's to `gates/approved/<slug>/<artifact>.diff`, for amending
+/// into the commit that makes the change.
+fn approve(args: &[String]) -> Result<(), String> {
+    let slug = args
+        .iter()
+        .find(|a| !a.starts_with("--"))
+        .ok_or("approve needs a slug")?;
+    let full = args.iter().any(|a| a == "--full");
+    let (parent, hash) = (parent_hash()?, head_hash()?);
+    let dir = root().join("gates/approved").join(slug);
+    let mut written = 0usize;
+    for (artifact, ext) in compared_artifacts(full) {
+        let (Some(old), Some(new)) = (
+            read_snapshot(&artifact, &parent, ext)?,
+            read_snapshot(&artifact, &hash, ext)?,
+        ) else {
+            return Err(format!(
+                "{artifact}: missing snapshot for {parent} or {hash}"
+            ));
+        };
+        if old != new {
+            write(
+                &dir.join(format!("{artifact}.diff")),
+                unified_diff(&old, &new)?.as_bytes(),
+            )?;
+            written += 1;
+        }
+    }
+    eprintln!("{written} approved delta(s) written to {}", dir.display());
+    Ok(())
+}
+
+/// After `git commit --amend` added only `gates/` files, HEAD's
+/// snapshots are still keyed by the pre-amend hash: move them.
+fn rekey(args: &[String]) -> Result<(), String> {
+    let old = args.first().ok_or("rekey needs the pre-amend hash")?;
+    let hash = head_hash()?;
+    let changed = git(&["diff", "--name-only", old, "HEAD"])?;
+    if let Some(path) = changed.lines().find(|p| !p.starts_with("gates/")) {
+        return Err(format!("{old}..HEAD changes {path}, not only gates/"));
+    }
+    let mut moved = 0usize;
+    for entry in std::fs::read_dir(gate_dir())
+        .map_err(|e| e.to_string())?
+        .flatten()
+    {
+        let dir = entry.path();
+        let Ok(files) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for file in files.flatten() {
+            let name = file.file_name().to_string_lossy().to_string();
+            if let Some(rest) = name.strip_prefix(&format!("{old}.")) {
+                std::fs::rename(file.path(), dir.join(format!("{hash}.{rest}")))
+                    .map_err(|e| e.to_string())?;
+                moved += 1;
+            }
+        }
+    }
+    eprintln!("moved {moved} snapshot file(s) from {old} to {hash}");
+    Ok(())
 }
 
 // --- performance -----------------------------------------------------------
