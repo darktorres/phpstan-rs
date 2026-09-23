@@ -686,10 +686,29 @@ Each index entry records:
 
 ## 4. Gates (permanent, per commit)
 
-Every gate below, once it exists, runs on every commit and stays forever.
-Feature work (ROADMAP) keeps landing, but only on the APIs that have landed.
-While a stage is in progress, feature work touching that stage's modules
-waits for it.
+Every gate below, once it exists, stays forever. Feature work (ROADMAP)
+keeps landing, but only on the APIs that have landed. While a stage is in
+progress, feature work touching that stage's modules waits for it.
+
+`cargo xtask gates` runs them in two tiers, because one scoped Piwigo run
+takes ~30 s and the full per-level matrix is 25 runs:
+
+- **quick** (every commit):
+  - gates 1–3 without `cargo hack`/`machete`/`deny`;
+  - the scoped and all-on corpus runs;
+  - the type snapshots;
+  - baseline compatibility.
+- **full** (`--full`, run at the end of every phase and on any commit
+  that touches levels, acceptance or performance-sensitive code):
+  - everything in quick;
+  - the unscoped run;
+  - levels 0–10 for scoped and all-on;
+  - `cargo hack`, `machete` and `deny`;
+  - performance and build time.
+
+CI (`.github/workflows/rust-ci.yml`) runs the build and test half. The
+corpus, type, baseline, performance and build-time gates need the frozen
+Piwigo checkout and a stable machine, so they run locally.
 
 1. **Build and lint:**
    - fmt;

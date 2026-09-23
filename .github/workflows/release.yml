@@ -56,6 +56,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
 
       # .cargo/config.toml links x86_64 Linux artifacts (including the
       # cross leg's own host-side build scripts) with mold.

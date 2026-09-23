@@ -2,25 +2,29 @@ name: Extension CI
 
 # Not yet exercised by a real CI run (this repo has no GitHub remote at
 # the time this workflow was authored - same caveat as release.yml).
-# Path filters cover the Rust LSP source too, not just editors/vscode/ -
-# a Rust-side regression in the LSP the extension drives should fail
-# this job just as loudly as a TypeScript-side one.
+# Path filters cover all Rust source, not just editors/vscode/: the LSP
+# the extension drives depends on the whole analyzer, so a Rust-side
+# regression anywhere should fail this job as loudly as a TypeScript one.
 on:
   push:
     paths:
       - "editors/vscode/**"
-      - "src/lsp.rs"
-      - "src/lsp/**"
+      - "src/**"
+      - "build.rs"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
       - ".github/workflows/extension-ci.yml"
   pull_request:
     paths:
       - "editors/vscode/**"
-      - "src/lsp.rs"
-      - "src/lsp/**"
+      - "src/**"
+      - "build.rs"
       - "Cargo.toml"
       - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - ".cargo/**"
       - ".github/workflows/extension-ci.yml"
 
 jobs:
@@ -51,6 +55,10 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
       - uses: actions/setup-node@v4
         with:
           node-version: "22"

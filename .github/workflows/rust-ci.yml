@@ -1,0 +1,57 @@
+name: Rust CI
+
+# The build and test half of `cargo xtask gates --full`. The corpus,
+# type-snapshot, baseline, performance and build-time gates need the
+# frozen Piwigo checkout and a stable machine, so they run locally
+# through `cargo xtask gates`.
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # build.rs embeds vendor/phpstan-src/src; the other submodules are
+      # test corpora the build never reads.
+      - name: Fetch the phpstan-src submodule
+        run: git submodule update --init --depth 1 vendor/phpstan-src
+
+      # rust-toolchain.toml pins the nightly (and its components);
+      # `rustup show` installs it.
+      - name: Install the pinned toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
+      - uses: rui314/setup-mold@v1
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-hack,cargo-machete,cargo-deny
+
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --workspace --all-targets
+      - name: Tests without default features
+        run: cargo test --workspace --no-default-features
+      - name: Docs
+        run: cargo doc --workspace --no-deps
+      - name: Benches compile
+        run: cargo bench --no-run
+      - name: Fuzz targets compile
+        run: cargo check --manifest-path fuzz/Cargo.toml --all-targets
+      - name: Each feature on its own
+        run: >
+          cargo hack check --workspace --each-feature --no-dev-deps
+          --mutually-exclusive-features dhat-heap,hotpath-alloc
+      - name: Unused dependencies
+        run: cargo machete
+      - name: Licenses, advisories, duplicate versions
+        run: cargo deny check
