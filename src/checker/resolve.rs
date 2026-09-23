@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
     /// recognize a class-level template by name before ever resolving
     /// names in a type string built independently of the registry's own
     /// pipeline. Empty outside any class, or for a non-generic one.
-    fn current_class_template_params(
+    pub(crate) fn current_class_template_params(
         &self,
     ) -> std::collections::HashMap<String, types::TemplateParam> {
         let Some(class) = &self.current_class else {
@@ -437,6 +437,7 @@ impl<'a> Checker<'a> {
                         })
                         .collect(),
                     return_type: Box::new(self.resolve_pseudo(&sig.return_type, defining_class)),
+                    templates: sig.templates.clone(),
                 })))
             }
             _ => ty.clone(),

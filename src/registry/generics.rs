@@ -297,6 +297,7 @@ impl Registry {
                         })
                         .collect(),
                     return_type: Box::new(sub(&sig.return_type)),
+                    templates: sig.templates.clone(),
                 })))
             }
             Type::Conditional {

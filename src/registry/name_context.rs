@@ -417,19 +417,34 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // equivalent arms - a class reference inside a `Closure(...)`
         // shape's own param/return types needs the same namespace
         // resolution as anywhere else.
-        Type::Callable(Some(sig)) => Type::Callable(Some(std::sync::Arc::new(CallableSig {
-            params: sig
-                .params
-                .iter()
-                .map(|p| CallableParam {
-                    ty: resolve_names_in_type(p.ty.clone(), ctx),
-                    variadic: p.variadic,
-                    optional: p.optional,
-                    by_ref: p.by_ref,
-                })
-                .collect(),
-            return_type: Box::new(resolve_names_in_type((*sig.return_type).clone(), ctx)),
-        }))),
+        Type::Callable(Some(sig)) => Type::Callable(Some(std::sync::Arc::new(
+            CallableSig {
+                params: sig
+                    .params
+                    .iter()
+                    .map(|p| CallableParam {
+                        ty: resolve_names_in_type(p.ty.clone(), ctx),
+                        variadic: p.variadic,
+                        optional: p.optional,
+                        by_ref: p.by_ref,
+                    })
+                    .collect(),
+                return_type: Box::new(resolve_names_in_type((*sig.return_type).clone(), ctx)),
+                templates: sig
+                    .templates
+                    .iter()
+                    .map(|t| crate::types::TemplateParam {
+                        bound: Box::new(resolve_names_in_type((*t.bound).clone(), ctx)),
+                        default: t
+                            .default
+                            .as_ref()
+                            .map(|d| Box::new(resolve_names_in_type((**d).clone(), ctx))),
+                        ..t.clone()
+                    })
+                    .collect(),
+            }
+            .rebind_templates(),
+        ))),
         // Mirrors `mark_template_params`/`substitute_type_aliases`'s own
         // identical arms - a real class reference inside one of a
         // conditional return type's own branches (e.g. `Connection` in

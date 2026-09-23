@@ -118,6 +118,7 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) ->
                 })
                 .collect(),
             return_type: Box::new(resolve_conditional(&sig.return_type, param_bindings)),
+            templates: sig.templates.clone(),
         }))),
         other => other.clone(),
     }

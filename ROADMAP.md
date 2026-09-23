@@ -1130,6 +1130,22 @@ cover the tags of every statement. Every named tag on a statement is
 applied (not only the last), a `foreach` key tag types the key, and
 `@psalm-`/`@phan-` typed tags parse with the same grammar as `@phpstan-`
 ones.
+**`IncompatiblePropertyHookPhpDocTypeRule`** checks a hook's own
+`@param`/`@param-out`/`@return` against its native signature (a `set`
+hook's explicit or implicit `$value`, returning `void`; a `get` hook
+returning the property's type). **Generic callables** -
+`callable<T of B = D>(T): T`, `Closure<...>(...)`, and the
+`pure-callable`/`pure-Closure` spellings - parse in both grammars and
+keep their templates (`CallableSig::templates`, scoped
+`CALLABLE_TEMPLATE_SCOPE`, never substituted or bound by an enclosing
+signature); calling one binds them from the arguments
+(`CallableSig::instantiated_return`). **`GenericCallableRuleHelper`**
+validates those templates like `@template` tags (existing class/alias
+name, unsupported bound, default outside its bound, required after
+optional) and reports `callable.shadowTemplate` against the function's,
+method's or class's templates, on `@param`/`@param-out`/`@return` and a
+property's `@var`. A plain function's own `@template` tags get the same
+declaration checks a method's always had.
 `missingType.iterableValue` reads "iterable type array" exactly as real
 PHPStan's descriptions do. A second declaration of a top-level function
 (another file, a polyfill branch, a merged overload) is checked against
@@ -1839,11 +1855,8 @@ ordinary `$this->prop = expr`, and exporting it as a per-method inferred
 fact that call-site handling can consult to narrow the receiver exactly
 the way a real tag would - falling back to an author-written tag when
 both exist, since a tag may assert more (e.g. generic widening) than the
-body alone proves. (`@phpstan-self-out` itself is currently entirely
-unparsed in phpstan-rs, listed only in a typo-detection tag whitelist -
-real tag support is Phase 130's `IncompatibleSelfOutTypeRule` item. This
-finding is about the inference half once tag support exists, not a
-claim that support already does.)
+body alone proves. (The tag itself is supported - `FunctionSig::self_out`,
+applied after each call - so this is only the inference half.)
 
 **Effort: large.**
 
@@ -3691,20 +3704,6 @@ identifier diff, direct `vendor/bin/phpstan analyse` (level 10) against
 with no matching literal anywhere in this project's source, checked it
 against this list, and added the real gaps the audit had missed.
 
-### Phase 130 — PhpDoc (`Rules/PhpDoc/` gaps)
-
-- `IncompatiblePhpDocTypeRule` family remainder — the function/method
-  `@param`/`@param-out`/`@return` half and `property.phpDocType` are
-  built, with their `*.unresolvableType` siblings (see Done). Left: the
-  property-hook variant (`IncompatiblePropertyHookPhpDocTypeRule`), and
-  `GenericCallableRuleHelper`'s template checks on callable shapes.
-
-- Nested writes through dynamic keys — `$h[$bus][$message] =
-  array_merge(...$byPriority)` inside `foreach ($h as $bus => ...)`
-  leaves `$h`'s element type at its pre-loop shape instead of the
-  written one (seen in symfony/messenger's `MessengerPass`, where it
-  surfaces as a spurious `Reference::__construct()` `argument.type`).
-
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 
 - `MethodTagTemplateTypeCheck` — a `@method` tag's own inline template
@@ -4996,6 +4995,11 @@ a specific, corpus-checked reason to stay deferred.
   intersect/remove or generic recursive type-tree traverse/map
   combinator (a refactor-timing call, revisit once several bespoke
   traverse/map functions accumulate).
+- **Nested writes through dynamic keys.** `$h[$bus][$message] =
+  array_merge(...$byPriority)` inside `foreach ($h as $bus => ...)`
+  leaves `$h`'s element type at its pre-loop shape instead of the
+  written one - symfony/messenger's `MessengerPass` shows it as a
+  spurious `Reference::__construct()` `argument.type` (unscoped corpus).
 - **140c remainder.** A `foreach ($arr as &$v) { $v['key'] = ...; }`
   by-reference mutation now does update `$arr`'s tracked element type
   (see Done's `CategoryCatsRenderer::render` entry), but only when the

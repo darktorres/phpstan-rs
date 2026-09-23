@@ -1,6 +1,6 @@
 use super::ast::{
-    ArrayShapeField, CallableParam, MethodTagParam, PhpDocNode, PhpDocParseError, PhpDocTag,
-    PhpDocTagValue, ShapeKey, TypeNode,
+    ArrayShapeField, CallableParam, CallableTemplate, MethodTagParam, PhpDocNode, PhpDocParseError,
+    PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
 };
 use super::lexer::{Lexer, PhpDocToken};
 use crate::token::{Position, Span};
@@ -751,10 +751,18 @@ impl TagParser {
         {
             return self.parse_array_shape(name);
         }
-        if matches!(self.peek(), PhpDocToken::LParen)
-            && matches!(lower.as_str(), "callable" | "closure")
+        let callable_keyword = matches!(
+            lower.as_str(),
+            "callable" | "closure" | "pure-callable" | "pure-closure"
+        );
+        if matches!(self.peek(), PhpDocToken::LParen) && callable_keyword {
+            return self.parse_callable(name, Vec::new());
+        }
+        if matches!(self.peek(), PhpDocToken::LAngle)
+            && callable_keyword
+            && let Some(templates) = self.try_parse_callable_templates()
         {
-            return self.parse_callable(name);
+            return self.parse_callable(name, templates);
         }
         if matches!(self.peek(), PhpDocToken::LAngle)
             && lower.ends_with("int")
@@ -1006,7 +1014,64 @@ impl TagParser {
         }
     }
 
-    fn parse_callable(&mut self, keyword: String) -> TypeNode {
+    /// `<T of Bound super Lower = Default, ...>` directly followed by a
+    /// callable's `(` - phpdoc-parser's `parseCallableTemplates`. Any
+    /// other `<...>` rolls back (a generic `Closure<...>` reference).
+    fn try_parse_callable_templates(&mut self) -> Option<Vec<CallableTemplate>> {
+        let checkpoint = self.pos;
+        let errors_checkpoint = self.errors.len();
+        let parsed = self.parse_callable_templates();
+        if parsed.is_some()
+            && self.errors.len() == errors_checkpoint
+            && matches!(self.peek(), PhpDocToken::LParen)
+        {
+            return parsed;
+        }
+        self.pos = checkpoint;
+        self.errors.truncate(errors_checkpoint);
+        None
+    }
+
+    fn parse_callable_templates(&mut self) -> Option<Vec<CallableTemplate>> {
+        self.advance(); // consume '<'
+        let mut templates = Vec::new();
+        loop {
+            let PhpDocToken::Identifier(name) = self.peek().clone() else {
+                return None;
+            };
+            self.advance();
+            let word = |p: &Self, w: &str| matches!(p.peek(), PhpDocToken::Identifier(s) if s == w);
+            let bound = if word(self, "of") || word(self, "as") {
+                self.advance();
+                Some(self.parse_type())
+            } else {
+                None
+            };
+            let lower = if word(self, "super") {
+                self.advance();
+                Some(self.parse_type())
+            } else {
+                None
+            };
+            let default = if self.eat(&PhpDocToken::Equals) {
+                Some(self.parse_type())
+            } else {
+                None
+            };
+            templates.push(CallableTemplate {
+                name,
+                bound,
+                lower,
+                default,
+            });
+            if !self.eat(&PhpDocToken::Comma) || matches!(self.peek(), PhpDocToken::RAngle) {
+                break;
+            }
+        }
+        self.eat(&PhpDocToken::RAngle).then_some(templates)
+    }
+
+    fn parse_callable(&mut self, keyword: String, templates: Vec<CallableTemplate>) -> TypeNode {
         self.advance(); // consume '('
         let mut params = Vec::new();
         if !matches!(self.peek(), PhpDocToken::RParen) {
@@ -1046,6 +1111,7 @@ impl TagParser {
         };
         TypeNode::Callable {
             keyword,
+            templates,
             params,
             return_type,
         }

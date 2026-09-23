@@ -37,6 +37,14 @@ impl<'a> Checker<'a> {
                 continue;
             };
             if let Some(body) = &hooks.get {
+                self.check_hook_phpdoc_types(
+                    fqn,
+                    p.type_hint.as_deref(),
+                    None,
+                    hooks.get_doc.as_deref(),
+                    p.span,
+                    &format!("{fqn}::${} (get hook)", p.name),
+                );
                 self.check_get_hook(
                     fqn,
                     &p.name,
@@ -79,6 +87,14 @@ impl<'a> Checker<'a> {
                     continue;
                 };
                 if let Some(body) = &hooks.get {
+                    self.check_hook_phpdoc_types(
+                        fqn,
+                        param.type_hint.as_deref(),
+                        None,
+                        hooks.get_doc.as_deref(),
+                        param.span,
+                        &format!("{fqn}::${} (get hook)", param.name),
+                    );
                     self.check_get_hook(
                         fqn,
                         &param.name,
@@ -368,6 +384,7 @@ impl<'a> Checker<'a> {
     ) {
         let label = format!("{fqn}::${name} (set hook)");
         self.check_hook_attributes(attrs, &label);
+        self.check_hook_phpdoc_types(fqn, type_hint, Some(param), doc, span, &label);
         // See `check_get_hook` - runs regardless of body.
         let throws = self.resolve_hook_throws(doc);
         if let Some(throws) = &throws {

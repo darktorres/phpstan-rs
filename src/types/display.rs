@@ -25,7 +25,25 @@ fn write_callable_sig(f: &mut fmt::Formatter<'_>, keyword: &str, sig: &CallableS
             s
         })
         .collect();
-    write!(f, "{keyword}({}): {}", parts.join(", "), sig.return_type)
+    write!(f, "{keyword}")?;
+    if !sig.templates.is_empty() {
+        let templates: Vec<String> = sig
+            .templates
+            .iter()
+            .map(|t| {
+                let mut s = t.name.clone();
+                if !matches!(*t.bound, Type::Mixed(_)) {
+                    s.push_str(&format!(" of {}", t.bound));
+                }
+                if let Some(default) = &t.default {
+                    s.push_str(&format!(" = {default}"));
+                }
+                s
+            })
+            .collect();
+        write!(f, "<{}>", templates.join(", "))?;
+    }
+    write!(f, "({}): {}", parts.join(", "), sig.return_type)
 }
 
 impl fmt::Display for Type {

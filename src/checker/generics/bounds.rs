@@ -267,7 +267,9 @@ impl<'a> Checker<'a> {
                 &bounds,
                 &defaults,
                 &type_aliases,
-                &display_name,
+                TemplateSubject::Declared {
+                    display_name: &display_name,
+                },
                 fqn,
                 c.span,
             );
@@ -610,7 +612,7 @@ impl<'a> Checker<'a> {
         bounds: &HashMap<std::sync::Arc<str>, Type>,
         defaults: &HashMap<std::sync::Arc<str>, Type>,
         type_aliases: &HashMap<std::sync::Arc<str>, Type>,
-        display_name: &str,
+        subject: TemplateSubject<'_>,
         label: &str,
         span: Span,
     ) {
@@ -619,9 +621,7 @@ impl<'a> Checker<'a> {
             if self.class_name_exists(name) {
                 self.report(
                     label.to_string(),
-                    format!(
-                        "PHPDoc tag @template for {display_name} cannot have existing class {name} as its name."
-                    ),
+                    subject.existing_class(name),
                     span,
                     6,
                     "generics.existingClass",
@@ -630,9 +630,7 @@ impl<'a> Checker<'a> {
             if type_aliases.contains_key(name) {
                 self.report(
                     label.to_string(),
-                    format!(
-                        "PHPDoc tag @template for {display_name} cannot have existing type alias {name} as its name."
-                    ),
+                    subject.existing_type_alias(name),
                     span,
                     6,
                     "generics.existingTypeAlias",
@@ -643,9 +641,7 @@ impl<'a> Checker<'a> {
             {
                 self.report(
                     label.to_string(),
-                    format!(
-                        "PHPDoc tag @template {name} for {display_name} with bound type {bound} is not supported."
-                    ),
+                    subject.unsupported_bound(name, bound),
                     span,
                     6,
                     "generics.notSupportedBound",
@@ -656,9 +652,7 @@ impl<'a> Checker<'a> {
                     if let Some(prev) = template_with_default {
                         self.report(
                             label.to_string(),
-                            format!(
-                                "PHPDoc tag @template {name} for {display_name} does not have a default type but follows an optional @template {prev}."
-                            ),
+                            subject.required_after_optional(name, prev),
                             span,
                             6,
                             "generics.requiredTypeAfterOptional",
@@ -674,9 +668,7 @@ impl<'a> Checker<'a> {
                     {
                         self.report(
                             label.to_string(),
-                            format!(
-                                "Default type {default} in PHPDoc tag @template {name} for {display_name} is not subtype of bound type {bound}."
-                            ),
+                            subject.default_out_of_bounds(name, default, bound),
                             span,
                             6,
                             "generics.templateDefaultOutOfBounds",
@@ -684,6 +676,91 @@ impl<'a> Checker<'a> {
                     }
                 }
             }
+        }
+    }
+}
+
+/// Whose templates `check_template_declaration_validity` checks, which
+/// decides its messages' wording.
+#[derive(Clone, Copy)]
+pub(crate) enum TemplateSubject<'s> {
+    /// A class's, function's or method's `@template` tags.
+    Declared { display_name: &'s str },
+    /// A callable type's own templates, in the tag at `location`.
+    Callable {
+        location: &'s str,
+        description: &'s str,
+    },
+}
+
+impl TemplateSubject<'_> {
+    fn existing_class(&self, name: &str) -> String {
+        match self {
+            TemplateSubject::Declared { display_name } => format!(
+                "PHPDoc tag @template for {display_name} cannot have existing class {name} as its name."
+            ),
+            TemplateSubject::Callable {
+                location,
+                description,
+            } => format!(
+                "PHPDoc tag {location} template of {description} cannot have existing class {name} as its name."
+            ),
+        }
+    }
+
+    fn existing_type_alias(&self, name: &str) -> String {
+        match self {
+            TemplateSubject::Declared { display_name } => format!(
+                "PHPDoc tag @template for {display_name} cannot have existing type alias {name} as its name."
+            ),
+            TemplateSubject::Callable {
+                location,
+                description,
+            } => format!(
+                "PHPDoc tag {location} template of {description} cannot have existing type alias {name} as its name."
+            ),
+        }
+    }
+
+    fn unsupported_bound(&self, name: &str, bound: &Type) -> String {
+        match self {
+            TemplateSubject::Declared { display_name } => format!(
+                "PHPDoc tag @template {name} for {display_name} with bound type {bound} is not supported."
+            ),
+            TemplateSubject::Callable {
+                location,
+                description,
+            } => format!(
+                "PHPDoc tag {location} template {name} of {description} with bound type {bound} is not supported."
+            ),
+        }
+    }
+
+    fn required_after_optional(&self, name: &str, prev: &str) -> String {
+        match self {
+            TemplateSubject::Declared { display_name } => format!(
+                "PHPDoc tag @template {name} for {display_name} does not have a default type but follows an optional @template {prev}."
+            ),
+            TemplateSubject::Callable {
+                location,
+                description,
+            } => format!(
+                "PHPDoc tag {location} template {name} of {description} does not have a default type but follows an optional template {prev}."
+            ),
+        }
+    }
+
+    fn default_out_of_bounds(&self, name: &str, default: &Type, bound: &Type) -> String {
+        match self {
+            TemplateSubject::Declared { display_name } => format!(
+                "Default type {default} in PHPDoc tag @template {name} for {display_name} is not subtype of bound type {bound}."
+            ),
+            TemplateSubject::Callable {
+                location,
+                description,
+            } => format!(
+                "Default type {default} in PHPDoc tag {location} template {name} of {description} is not subtype of bound type {bound}."
+            ),
         }
     }
 }

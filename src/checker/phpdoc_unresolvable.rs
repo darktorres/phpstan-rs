@@ -145,10 +145,16 @@ fn walk(node: &TypeNode, f: &mut dyn FnMut(&TypeNode)) {
             }
         }
         TypeNode::Callable {
+            templates,
             params,
             return_type,
             ..
         } => {
+            for t in templates {
+                for ty in [&t.bound, &t.lower, &t.default].into_iter().flatten() {
+                    walk(ty, f);
+                }
+            }
             params.iter().for_each(|p| walk(&p.ty, f));
             if let Some(ret) = return_type {
                 walk(ret, f);

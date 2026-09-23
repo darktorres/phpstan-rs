@@ -820,7 +820,10 @@ impl Registry {
         method_name: &str,
     ) -> bool {
         match ty {
-            Type::TemplateParam(tp) => tp.scope.as_deref() != Some(method_name),
+            Type::TemplateParam(tp) => !matches!(
+                tp.scope.as_deref(),
+                Some(s) if s == method_name || s == crate::types::CALLABLE_TEMPLATE_SCOPE
+            ),
             Type::Object(_, args) => args
                 .iter()
                 .any(|a| Registry::type_mentions_foreign_scoped_template_param(a, method_name)),
@@ -870,6 +873,7 @@ impl Registry {
         match ty {
             Type::TemplateParam(tp) => {
                 tp.scope.as_deref() == Some(method_name)
+                    || tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE)
                     || tp
                         .scope
                         .as_deref()

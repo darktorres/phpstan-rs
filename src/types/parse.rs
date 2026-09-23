@@ -47,37 +47,6 @@ pub fn parse_type_string(raw: &str) -> Type {
     }
 }
 
-/// The byte index of the `)` matching the FIRST `(` in `s`
-/// (`s` must start at or before that `(`), tracking bracket depth/quotes
-/// the same way `split_top_level` does - no existing helper answers "an
-/// opening bracket's own matching close" (`split_top_level` only ever
-/// splits *on* a top-level separator).
-fn find_matching_paren(s: &str) -> Option<usize> {
-    let open = s.find('(')?;
-    let mut depth = 0i32;
-    let mut quote: Option<char> = None;
-    for (i, c) in s[open..].char_indices() {
-        if let Some(q) = quote {
-            if c == q {
-                quote = None;
-            }
-            continue;
-        }
-        match c {
-            '\'' | '"' => quote = Some(c),
-            '<' | '{' | '(' | '[' => depth += 1,
-            '>' | '}' | ')' | ']' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(open + i);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
 /// Real structural parsing of a `Closure(...)`/`callable(...)` PHPDoc
 /// shape - `stripped` is `s` with any leading `\` already removed (case
 /// preserved, unlike the `lower` prefix-matching gate at this function's
@@ -88,8 +57,25 @@ fn find_matching_paren(s: &str) -> Option<usize> {
 /// marker, so a shape this doesn't recognize can only ever lose
 /// precision, never mis-parse.
 fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
-    let close = find_matching_paren(stripped)?;
-    let open = stripped.find('(')?;
+    let head_end = stripped.find(['(', '<'])?;
+    let keyword = stripped[..head_end].trim().to_ascii_lowercase();
+    let mut templates = Vec::new();
+    let mut open = head_end;
+    if stripped[head_end..].starts_with('<') {
+        let close = matching_close(stripped, head_end)?;
+        for raw in split_top_level(&stripped[head_end + 1..close], ',') {
+            if !raw.trim().is_empty() {
+                templates.push(parse_callable_template(raw.trim())?);
+            }
+        }
+        let after = &stripped[close + 1..];
+        let trimmed = after.trim_start();
+        if !trimmed.starts_with('(') {
+            return None;
+        }
+        open = close + 1 + (after.len() - trimmed.len());
+    }
+    let close = matching_close(stripped, open)?;
     let inner = &stripped[open + 1..close];
     let rest = stripped[close + 1..].trim_start();
     let ret_text = rest.strip_prefix(':')?;
@@ -137,11 +123,13 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
     let sig = CallableSig {
         params,
         return_type: Box::new(parse_type_string(ret_text)),
+        templates,
     };
+    let sig = mark_callable_templates(sig);
     // `Closure(...)` is a real `Closure` instance with that signature
     // (PHPStan's `ClosureType`), stricter than `callable(...)`, which a
     // string or invokable object satisfies too.
-    if stripped[..open].trim().eq_ignore_ascii_case("closure") {
+    if matches!(keyword.as_str(), "closure" | "pure-closure") {
         Some(Type::closure_literal(sig))
     } else {
         Some(Type::Callable(Some(Arc::new(sig))))
@@ -159,6 +147,126 @@ fn try_parse_callable_shape(stripped: &str) -> Option<Type> {
 /// otherwise be read as a real closing bracket, permanently
 /// decrementing `depth` below zero and swallowing every top-level
 /// separator for the rest of the string.
+/// The index of the bracket closing the one at `open`.
+fn matching_close(s: &str, open: usize) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, c) in s[open..].char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '<' | '{' | '(' | '[' => depth += 1,
+            '>' | '}' | ')' | ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(open + i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// One `T [of|as Bound] [super Lower] [= Default]` entry of a callable's
+/// template list; the lower bound is read and dropped, as PHPStan does
+/// for callables.
+fn parse_callable_template(raw: &str) -> Option<crate::types::TemplateParam> {
+    let name_end = raw
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
+        .unwrap_or(raw.len());
+    let name = &raw[..name_end];
+    if name.is_empty() {
+        return None;
+    }
+    let mut rest = raw[name_end..].trim();
+    let mut default = None;
+    if let Some(eq) = top_level_find(rest, "=") {
+        default = Some(Box::new(parse_type_string(rest[eq + 1..].trim())));
+        rest = rest[..eq].trim();
+    }
+    if rest.starts_with("super ") {
+        rest = "";
+    } else if let Some(sup) = top_level_find(rest, " super ") {
+        rest = rest[..sup].trim();
+    }
+    let bound = match rest
+        .strip_prefix("of ")
+        .or_else(|| rest.strip_prefix("as "))
+    {
+        Some(b) => parse_type_string(b.trim()),
+        None if rest.is_empty() => Type::Mixed(false),
+        None => return None,
+    };
+    Some(crate::types::TemplateParam {
+        name: name.to_string(),
+        bound: Box::new(bound),
+        variance: crate::types::Variance::Invariant,
+        scope: Some(crate::types::CALLABLE_TEMPLATE_SCOPE.to_string()),
+        default,
+    })
+}
+
+/// The byte index of `pat` in `s` outside any bracket or quote.
+fn top_level_find(s: &str, pat: &str) -> Option<usize> {
+    let mut depth = 0i32;
+    let mut quote: Option<char> = None;
+    for (i, c) in s.char_indices() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => quote = Some(c),
+            '<' | '{' | '(' | '[' => depth += 1,
+            '>' | '}' | ')' | ']' => depth -= 1,
+            _ if depth == 0 && s[i..].starts_with(pat) => return Some(i),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Turns every bare reference to one of `sig`'s own templates into its
+/// `TemplateParam`.
+fn mark_callable_templates(sig: CallableSig) -> CallableSig {
+    fn mark(ty: &Type, templates: &[crate::types::TemplateParam]) -> Type {
+        match ty {
+            Type::Object(name, args) if args.is_empty() => {
+                match templates.iter().find(|t| t.name == *name) {
+                    Some(t) => Type::TemplateParam(t.clone()),
+                    None => ty.clone(),
+                }
+            }
+            other => other.map_children(&mut |c| mark(c, templates)),
+        }
+    }
+    if sig.templates.is_empty() {
+        return sig;
+    }
+    let params = sig
+        .params
+        .iter()
+        .map(|p| CallableParam {
+            ty: mark(&p.ty, &sig.templates),
+            ..p.clone()
+        })
+        .collect();
+    let return_type = Box::new(mark(&sig.return_type, &sig.templates));
+    CallableSig {
+        params,
+        return_type,
+        templates: sig.templates,
+    }
+}
+
 fn split_top_level(s: &str, sep: char) -> Vec<&str> {
     let mut parts = Vec::new();
     let mut depth = 0i32;
@@ -572,12 +680,21 @@ fn parse_type_atom(s: &str) -> Type {
     // fully qualified (amphp/amp's own convention throughout).
     let stripped = s.trim_start_matches('\\');
     let lower = stripped.to_ascii_lowercase();
-    if lower.starts_with("closure(")
-        || lower.starts_with("closure (")
-        || lower.starts_with("callable(")
-        || lower.starts_with("callable (")
-    {
-        return try_parse_callable_shape(stripped).unwrap_or(Type::Callable(None));
+    let callable_head = ["closure", "callable", "pure-closure", "pure-callable"]
+        .iter()
+        .find_map(|k| lower.strip_prefix(k))
+        .map(str::trim_start);
+    if let Some(rest) = callable_head {
+        if rest.starts_with('(') {
+            return try_parse_callable_shape(stripped).unwrap_or(Type::Callable(None));
+        }
+        // `callable<T>(T): T`; `Closure<...>` not followed by a
+        // parameter list stays a generic reference.
+        if rest.starts_with('<')
+            && let Some(ty) = try_parse_callable_shape(stripped)
+        {
+            return ty;
+        }
     }
 
     // A real, documented PHPStan/Psalm convention: a quoted literal

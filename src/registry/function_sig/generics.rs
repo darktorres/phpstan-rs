@@ -82,6 +82,7 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<Arc<str>, Type
                 })
                 .collect(),
             return_type: Box::new(substitute_type_aliases((*sig.return_type).clone(), aliases)),
+            templates: sig.templates.clone(),
         }))),
         // Recurses into `target`/`if_true`/`if_false`, same as
         // `mark_template_params`/`resolve_names_in_type`'s own identical
@@ -250,6 +251,7 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
                 })
                 .collect(),
             return_type: Box::new(mark_template_params((*sig.return_type).clone(), params)),
+            templates: sig.templates.clone(),
         }))),
         // Recurses into `target`/`if_true`/`if_false` - e.g.
         // `@phpstan-return ($params is array{wrapperClass:

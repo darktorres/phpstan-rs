@@ -137,6 +137,8 @@ pub enum TypeNode {
     /// both parsed identically otherwise) `: ReturnType`.
     Callable {
         keyword: String,
+        /// `callable<T of Bound = Default>(...)`'s own templates.
+        templates: Vec<CallableTemplate>,
         params: Vec<CallableParam>,
         return_type: Option<Box<TypeNode>>,
     },
@@ -274,9 +276,31 @@ impl TypeNode {
             }
             TypeNode::Callable {
                 keyword,
+                templates,
                 params,
                 return_type,
             } => {
+                let keyword = if templates.is_empty() {
+                    keyword.clone()
+                } else {
+                    let list: Vec<String> = templates
+                        .iter()
+                        .map(|t| {
+                            let mut s = t.name.clone();
+                            if let Some(b) = &t.bound {
+                                s.push_str(&format!(" of {}", b.to_source_string()));
+                            }
+                            if let Some(l) = &t.lower {
+                                s.push_str(&format!(" super {}", l.to_source_string()));
+                            }
+                            if let Some(d) = &t.default {
+                                s.push_str(&format!(" = {}", d.to_source_string()));
+                            }
+                            s
+                        })
+                        .collect();
+                    format!("{keyword}<{}>", list.join(", "))
+                };
                 let params_str = params
                     .iter()
                     .map(|p| {
@@ -345,6 +369,15 @@ pub enum ShapeKey {
     Int(i64),
     String(String),
     Identifier(String),
+}
+
+/// One entry of a callable type's template list.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CallableTemplate {
+    pub name: String,
+    pub bound: Option<TypeNode>,
+    pub lower: Option<TypeNode>,
+    pub default: Option<TypeNode>,
 }
 
 #[derive(Debug, Clone, PartialEq)]

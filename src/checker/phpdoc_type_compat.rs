@@ -115,6 +115,14 @@ impl<'a> Checker<'a> {
                     label,
                     "parameter.phpDocType",
                 );
+                self.check_generic_callables(
+                    &doc_ty,
+                    &format!("{tag} for parameter ${name}"),
+                    Some((f.name.as_ref(), block.templates.as_slice())),
+                    class_name,
+                    f.name_span,
+                    label,
+                );
             }
         }
         if nodes
@@ -140,7 +148,206 @@ impl<'a> Checker<'a> {
                 label,
                 "return.phpDocType",
             );
+            self.check_generic_callables(
+                &doc_ty,
+                "@return",
+                Some((f.name.as_ref(), block.templates.as_slice())),
+                class_name,
+                f.name_span,
+                label,
+            );
         }
+    }
+
+    /// `GenericCallableRuleHelper`: every callable type with its own
+    /// templates inside `ty` (the type of the tag at `location`) - their
+    /// declarations validated like `@template` tags, and none may reuse
+    /// the name of `function`'s (name, templates) or `class`'s templates
+    /// (`callable.shadowTemplate`).
+    pub(crate) fn check_generic_callables(
+        &mut self,
+        ty: &Type,
+        location: &str,
+        function: Option<(&str, &[String])>,
+        class: Option<&str>,
+        span: Span,
+        label: &str,
+    ) {
+        fn collect(ty: &Type, out: &mut Vec<Type>) {
+            if let Some(sig) = ty.callable_sig()
+                && matches!(ty, Type::Callable(_) | Type::Intersection(_))
+            {
+                if !sig.templates.is_empty() {
+                    out.push(ty.clone());
+                }
+                for p in &sig.params {
+                    collect(&p.ty, out);
+                }
+                collect(&sig.return_type, out);
+                return;
+            }
+            let _ = ty.map_children(&mut |c| {
+                collect(c, out);
+                c.clone()
+            });
+        }
+        let mut callables = Vec::new();
+        collect(ty, &mut callables);
+        if callables.is_empty() {
+            return;
+        }
+        let class_info = class.and_then(|c| self.registry.classes.get(c));
+        let type_aliases = class_info
+            .map(|info| info.type_aliases.clone())
+            .unwrap_or_default();
+        let class_templates: Vec<String> = class_info
+            .map(|info| info.templates.iter().map(|t| t.to_string()).collect())
+            .unwrap_or_default();
+        for callable in callables {
+            let Some(sig) = callable.callable_sig() else {
+                continue;
+            };
+            let description = callable.to_string();
+            let names: Vec<std::sync::Arc<str>> = sig
+                .templates
+                .iter()
+                .map(|t| t.name.as_str().into())
+                .collect();
+            let bounds = sig
+                .templates
+                .iter()
+                .filter(|t| !matches!(*t.bound, Type::Mixed(_)))
+                .map(|t| (t.name.as_str().into(), (*t.bound).clone()))
+                .collect();
+            let defaults = sig
+                .templates
+                .iter()
+                .filter_map(|t| Some((t.name.as_str().into(), (**t.default.as_ref()?).clone())))
+                .collect();
+            self.check_template_declaration_validity(
+                &names,
+                &bounds,
+                &defaults,
+                &type_aliases,
+                crate::checker::generics::TemplateSubject::Callable {
+                    location,
+                    description: &description,
+                },
+                label,
+                span,
+            );
+            let mut shadowed = Vec::new();
+            if let Some((function_name, function_templates)) = function {
+                let owner = match class {
+                    Some(c) => format!("method {c}::{function_name}"),
+                    None => format!("function {}", self.name_ctx.declared_name(function_name)),
+                };
+                for t in function_templates {
+                    if sig.templates.iter().any(|ct| ct.name == *t) {
+                        shadowed.push(format!(
+                            "PHPDoc tag {location} template {t} of {description} shadows @template {t} for {owner}."
+                        ));
+                    }
+                }
+            }
+            if let Some(c) = class {
+                for t in &class_templates {
+                    if sig.templates.iter().any(|ct| ct.name == *t) {
+                        shadowed.push(format!(
+                            "PHPDoc tag {location} template {t} of {description} shadows @template {t} for class {c}."
+                        ));
+                    }
+                }
+            }
+            for message in shadowed {
+                self.report(
+                    label.to_string(),
+                    message,
+                    span,
+                    2,
+                    "callable.shadowTemplate",
+                );
+            }
+        }
+    }
+
+    /// `IncompatiblePropertyHookPhpDocTypeRule`: a hook's own `@param`/
+    /// `@return` tags checked like a method's, against the hook's native
+    /// signature - a `set` hook's `$value` (explicit, or implicitly typed
+    /// like the property) returning `void`, a `get` hook returning the
+    /// property's type. No hook parameter is by reference.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn check_hook_phpdoc_types(
+        &mut self,
+        fqn: &str,
+        property_type_hint: Option<&str>,
+        set_param: Option<Option<&Param>>,
+        doc: Option<&str>,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(doc) = doc else {
+            return;
+        };
+        if !doc.contains('@') {
+            return;
+        }
+        let (name, params, return_type) = match set_param {
+            Some(param) => {
+                let value = match param {
+                    Some(p) => p.clone(),
+                    None => Param {
+                        name: "value".into(),
+                        name_span: span,
+                        type_hint: property_type_hint.map(str::to_string),
+                        type_hint_span: None,
+                        default: None,
+                        by_ref: false,
+                        variadic: false,
+                        promoted_visibility: None,
+                        promoted_readonly: false,
+                        promoted_final: false,
+                        hooks: None,
+                        attrs: Vec::new(),
+                        doc_comment: None,
+                        span,
+                    },
+                };
+                ("set", vec![value], Some("void".to_string()))
+            }
+            None => ("get", Vec::new(), property_type_hint.map(str::to_string)),
+        };
+        let decl = FunctionDecl {
+            name: name.into(),
+            name_span: span,
+            params,
+            return_type,
+            return_type_span: None,
+            body: std::sync::Arc::new(Vec::new()),
+            has_body: false,
+            by_ref: false,
+            doc_comment: Some(doc.into()),
+            attrs: Vec::new(),
+            span,
+        };
+        let previous_class = self.current_class.replace(fqn.to_string());
+        let class_templates = self.current_class_template_params();
+        self.current_class = previous_class;
+        let aliases = self
+            .registry
+            .classes
+            .get(fqn)
+            .map(|info| info.type_aliases.clone())
+            .unwrap_or_default();
+        let sig = FunctionSig::from_decl(
+            &decl,
+            &self.name_ctx,
+            &class_templates,
+            &aliases,
+            Visibility::Public,
+        );
+        let sig = self.registry.finalize_standalone_sig(sig);
+        self.check_phpdoc_types_against_native(&decl, &sig, Some(fqn), label);
     }
 
     pub(crate) fn check_property_phpdoc_types(&mut self, fqn: &str, c: &ClassDecl) {
@@ -178,6 +385,7 @@ impl<'a> Checker<'a> {
         });
         let entries: Vec<_> = declared.chain(promoted).collect();
         let mut checks: Vec<(Type, Type, String, Span)> = Vec::new();
+        let mut callables: Vec<(Type, Span)> = Vec::new();
         for (name, span, description, node) in entries {
             let subject = format!("{description} for property {fqn}::${name}");
             if node.is_some_and(|n| self.type_node_unresolvable(&n, Some(fqn))) {
@@ -198,6 +406,11 @@ impl<'a> Checker<'a> {
             else {
                 continue;
             };
+            if description == "PHPDoc tag @var"
+                && let Some(doc) = &prop.doc_ty
+            {
+                callables.push((doc.clone(), span));
+            }
             if !prop.has_native_type {
                 continue;
             }
@@ -205,6 +418,9 @@ impl<'a> Checker<'a> {
                 continue;
             };
             checks.push((doc, prop.ty_native.clone(), subject, span));
+        }
+        for (doc, span) in callables {
+            self.check_generic_callables(&doc, "@var", None, Some(fqn), span, fqn);
         }
         for (doc, native, subject, span) in checks {
             let doc = self.resolve_pseudo(&doc, fqn);

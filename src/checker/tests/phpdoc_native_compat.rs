@@ -620,3 +620,127 @@ fn every_doc_comment_above_a_statement_is_read() {
         ]
     );
 }
+
+#[test]
+fn a_property_hooks_own_phpdoc_is_checked_against_its_native_signature() {
+    let d = diagnostics_for(
+        r#"<?php
+            class C {
+                public int $a {
+                    /** @return string */
+                    get => 1;
+                    /** @param string $value */
+                    set(int $value) { $this->a = $value; }
+                }
+                public int $b {
+                    /**
+                     * @param int<0, max> $value
+                     * @param int $other
+                     * @param-out int $value
+                     */
+                    set { $this->b = $value; }
+                }
+            }
+        "#,
+    );
+    let m: Vec<(&str, &str)> = d
+        .iter()
+        .filter(|x| x.identifier.starts_with("return.") || x.identifier.starts_with("parameter."))
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        m,
+        [
+            (
+                "return.phpDocType",
+                "PHPDoc tag @return with type string is incompatible with native type int."
+            ),
+            (
+                "parameter.phpDocType",
+                "PHPDoc tag @param for parameter $value with type string is incompatible with native type int."
+            ),
+            (
+                "parameter.notFound",
+                "PHPDoc tag @param references unknown parameter: $other"
+            ),
+            (
+                "parameter.notByRef",
+                "Parameter $value for PHPDoc tag @param-out is not passed by reference."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_generic_callable_type_keeps_its_templates_and_binds_them_per_call() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace App;
+            use function PHPStan\Testing\assertType;
+            class Foo {}
+            /**
+             * @param callable<T>(T): T $f
+             * @param \Closure<T of Foo>(T): list<T> $g
+             * @param pure-callable(int): string $h
+             */
+            function f(callable $f, \Closure $g, callable $h): void {
+                assertType('callable<T>(T): T', $f);
+                assertType('Closure<T of App\Foo>(T): list<T>', $g);
+                assertType('callable(int): string', $h);
+                assertType('5', $f(5));
+                assertType('list<App\Foo>', $g(new Foo()));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_generic_callables_templates_are_validated() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Foo {}
+            /** @template T */
+            class Box {
+                /** @var callable<T>(T): T */
+                public $f;
+                /**
+                 * @template U
+                 * @param callable<U>(U): U $a
+                 * @param callable<Foo>(Foo): void $b
+                 * @param callable<V = int, W>(V): W $c
+                 * @param callable<X of callable>(X): X $d
+                 * @return Closure<Y of int = string>(Y): Y
+                 */
+                public function m(callable $a, callable $b, callable $c, callable $d): Closure { return fn($y) => $y; }
+            }
+            /** @template T
+             *  @param callable<T>(T): T $a */
+            function g(callable $a): void {}
+            /** @template T of Foo */
+            function h(): void {}
+            /** @template Foo */
+            function k(): void {}
+        "#,
+    );
+    let m: Vec<&str> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("generics.") || x.identifier == "callable.shadowTemplate"
+        })
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        m,
+        [
+            "PHPDoc tag @var template T of callable<T>(T): T shadows @template T for class Box.",
+            "PHPDoc tag @param for parameter $a template U of callable<U>(U): U shadows @template U for method Box::m.",
+            "PHPDoc tag @param for parameter $b template of callable<Foo>(Foo): void cannot have existing class Foo as its name.",
+            "PHPDoc tag @param for parameter $c template W of callable<V = int, W>(V): W does not have a default type but follows an optional template V.",
+            "PHPDoc tag @param for parameter $d template X of callable<X of callable>(X): X with bound type callable is not supported.",
+            "Default type string in PHPDoc tag @return template Y of Closure<Y of int = string>(Y): Y is not subtype of bound type int.",
+            "PHPDoc tag @param for parameter $a template T of callable<T>(T): T shadows @template T for function g.",
+            "PHPDoc tag @template for function k() cannot have existing class Foo as its name.",
+        ]
+    );
+}

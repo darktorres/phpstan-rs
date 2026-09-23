@@ -13,6 +13,8 @@ use crate::types::{CallableParam, CallableSig, TemplateParam, Type};
 /// same `T` across multiple params aren't reconciled (no union-widening).
 pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMap<String, Type>) {
     match param_ty {
+        Type::TemplateParam(tp)
+            if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) => {}
         Type::TemplateParam(tp) => {
             // Reject a bare `T` binding to a *definite scalar* when `T`'s
             // own declared bound requires an object (`@template T of
@@ -160,6 +162,41 @@ pub fn promote_class_string_literals(
 /// substitute_scoped` mirrors this same fallback for the separate
 /// class-level substitution path (an "erased" - too-few-arguments, or
 /// bare - generic class reference).
+impl CallableSig {
+    /// The return type of calling a value of this callable type with
+    /// arguments of `arg_types`: its own templates bound from them, an
+    /// unbound one falling back to its bound.
+    pub(crate) fn instantiated_return(&self, arg_types: &[Type]) -> Type {
+        if self.templates.is_empty() {
+            return (*self.return_type).clone();
+        }
+        fn open(ty: &Type) -> Type {
+            match ty {
+                Type::TemplateParam(tp)
+                    if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) =>
+                {
+                    Type::TemplateParam(TemplateParam {
+                        scope: None,
+                        ..tp.clone()
+                    })
+                }
+                other => other.map_children(&mut open),
+            }
+        }
+        let mut bindings = HashMap::new();
+        for (i, arg) in arg_types.iter().enumerate() {
+            let param = self
+                .params
+                .get(i)
+                .or_else(|| self.params.last().filter(|p| p.variadic));
+            if let Some(param) = param {
+                bind_template_param(&open(&param.ty), arg, &mut bindings);
+            }
+        }
+        substitute(&open(&self.return_type), &bindings, &|_| true)
+    }
+}
+
 pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
     substitute(ty, bindings, &|_| false)
 }
@@ -186,6 +223,13 @@ fn substitute(
     to_bound: &dyn Fn(&TemplateParam) -> bool,
 ) -> Type {
     match ty {
+        // A callable type's own template stays until that callable is
+        // itself called.
+        Type::TemplateParam(tp)
+            if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) =>
+        {
+            ty.clone()
+        }
         Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {
             let fallback = match tp.default.as_deref() {
                 Some(default) => default,
@@ -265,6 +309,7 @@ fn substitute(
                 })
                 .collect(),
             return_type: Box::new(substitute(&sig.return_type, bindings, to_bound)),
+            templates: sig.templates.clone(),
         }))),
         // Recurses into `target`/`if_true`/`if_false` -
         // `subject` is a raw parameter name, not a `Type`, so there's

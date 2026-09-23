@@ -301,12 +301,45 @@ pub struct CallableParam {
 }
 
 /// A parsed `Closure(...)`/`callable(...)` PHPDoc shape's params-plus-
-/// return-type slice - deliberately not the rest of what real PHPStan's
-/// `CallableType` tracks (template-type map, purity, assertions).
+/// return-type slice, with its own templates (`callable<T>(T): T`) -
+/// deliberately not the rest of what real PHPStan's `CallableType`
+/// tracks (purity, assertions).
 #[derive(Debug, Clone, PartialEq)]
 pub struct CallableSig {
     pub params: Vec<CallableParam>,
     pub return_type: Box<Type>,
+    /// The callable's own templates; every occurrence inside `params`/
+    /// `return_type` is a `TemplateParam` scoped `CALLABLE_TEMPLATE_SCOPE`.
+    pub templates: Vec<TemplateParam>,
+}
+
+/// The `TemplateParam::scope` of a callable type's own template.
+pub(crate) const CALLABLE_TEMPLATE_SCOPE: &str = "callable";
+
+impl CallableSig {
+    /// `self` with every occurrence of its own templates replaced by the
+    /// current `templates` entries - after their bounds changed.
+    pub(crate) fn rebind_templates(mut self) -> CallableSig {
+        fn rebind(ty: &Type, templates: &[TemplateParam]) -> Type {
+            match ty {
+                Type::TemplateParam(tp) if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) => {
+                    match templates.iter().find(|t| t.name == tp.name) {
+                        Some(t) => Type::TemplateParam(t.clone()),
+                        None => ty.clone(),
+                    }
+                }
+                other => other.map_children(&mut |c| rebind(c, templates)),
+            }
+        }
+        if self.templates.is_empty() {
+            return self;
+        }
+        for p in &mut self.params {
+            p.ty = rebind(&p.ty, &self.templates);
+        }
+        self.return_type = Box::new(rebind(&self.return_type, &self.templates));
+        self
+    }
 }
 
 impl Type {
@@ -343,6 +376,7 @@ impl Type {
                     })
                     .collect(),
                 return_type: Box::new(f(&sig.return_type)),
+                templates: sig.templates.clone(),
             }))),
             Type::Union(ms) => Type::Union(ms.iter().map(&mut *f).collect()),
             Type::Intersection(ms) => Type::Intersection(ms.iter().map(&mut *f).collect()),

@@ -274,6 +274,7 @@ fn a_callable_signature_parses() {
             keyword,
             params,
             return_type: Some(ret),
+            ..
         } => {
             assert_eq!(keyword, "callable");
             assert_eq!(params.len(), 3);

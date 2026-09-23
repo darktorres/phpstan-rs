@@ -392,8 +392,7 @@ impl<'a> Checker<'a> {
                 .doc_comment
                 .as_deref()
                 .is_some_and(|d| d.contains("template"));
-            if let Some(c) = class_name
-                && has_own_template
+            if has_own_template
                 && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
                 && !doc.templates.is_empty()
             {
@@ -422,25 +421,30 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
                     .collect();
-                let type_aliases = self
-                    .registry
-                    .classes
-                    .get(c)
+                let type_aliases = class_name
+                    .and_then(|c| self.registry.classes.get(c))
                     .map(|info| info.type_aliases.clone())
                     .unwrap_or_default();
-                let display_name = format!("method {c}::{}()", f.name);
+                let display_name = match class_name {
+                    Some(c) => format!("method {c}::{}()", f.name),
+                    None => format!("function {}()", self.name_ctx.declared_name(&f.name)),
+                };
                 self.check_template_declaration_validity(
                     &templates,
                     &bounds,
                     &defaults,
                     &type_aliases,
-                    &display_name,
+                    crate::checker::generics::TemplateSubject::Declared {
+                        display_name: &display_name,
+                    },
                     &label,
                     f.span,
                 );
                 // `method.shadowTemplate`: a method-level `@template` reusing
                 // a name already declared on the enclosing class.
-                if let Some(info) = self.registry.classes.get(c) {
+                if let Some(c) = class_name
+                    && let Some(info) = self.registry.classes.get(c)
+                {
                     let mut shadowed: Vec<&String> = doc
                         .templates
                         .iter()

@@ -1047,7 +1047,7 @@ impl<'a> Checker<'a> {
                             locals,
                         )
                     })
-                    .unwrap_or_else(|| self.call_fallback_return_type(callee, locals));
+                    .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals));
                 match array_shift_pop_pre_widen_ty.and_then(|pre_widen_ty| {
                     Self::array_element_type(&pre_widen_ty).map(|elem_ty| {
                         Self::array_pointer_result(&pre_widen_ty, elem_ty, Type::Null, false)
@@ -4655,9 +4655,9 @@ impl<'a> Checker<'a> {
                         .map(|(resolved_name, sig)| {
                             self.infer_builtin_call_return_type(resolved_name, sig, args, locals)
                         })
-                        .unwrap_or_else(|| self.call_fallback_return_type(callee, locals))
+                        .unwrap_or_else(|| self.call_fallback_return_type(callee, args, locals))
                 }
-                _ => self.call_fallback_return_type(callee, locals),
+                _ => self.call_fallback_return_type(callee, args, locals),
             },
             ExprKind::MethodCall(recv, method, args, nullsafe) => {
                 // A nullsafe receiver is virtually always nullable
@@ -5919,7 +5919,7 @@ impl<'a> Checker<'a> {
     /// shape's declared return type instead of `Mixed` - the same fix
     /// `check_expr`'s dynamic-call branch makes on the diagnostic-producing
     /// side.
-    fn call_fallback_return_type(&self, callee: &Expr, locals: &Locals) -> Type {
+    fn call_fallback_return_type(&self, callee: &Expr, args: &[Arg], locals: &Locals) -> Type {
         match &callee.kind {
             ExprKind::Name(name)
                 if matches!(name.to_ascii_lowercase().as_str(), "exit" | "die") =>
@@ -5943,7 +5943,16 @@ impl<'a> Checker<'a> {
             _ => self
                 .infer_expr(callee, locals)
                 .callable_sig()
-                .map_or(Type::Mixed(false), |sig| (*sig.return_type).clone()),
+                .map_or(Type::Mixed(false), |sig| {
+                    if sig.templates.is_empty() {
+                        return (*sig.return_type).clone();
+                    }
+                    let arg_types: Vec<Type> = args
+                        .iter()
+                        .map(|a| self.infer_expr(&a.value, locals))
+                        .collect();
+                    sig.instantiated_return(&arg_types)
+                }),
         }
     }
 
@@ -6036,6 +6045,7 @@ impl<'a> Checker<'a> {
                 }
                 (hint, None) => resolve(hint),
             }),
+            templates: Vec::new(),
         })
     }
 
