@@ -929,6 +929,11 @@ impl<'a> Checker<'a> {
                 declared_return.as_ref(),
                 sig.or(ancestor_sig_hint),
             );
+            if self.registry.check_native_type_hints
+                && let Some(sig) = sig
+            {
+                self.check_native_type_hints(f, class_name, &label, sig);
+            }
         }
 
         let previous_class = self.current_class.take();

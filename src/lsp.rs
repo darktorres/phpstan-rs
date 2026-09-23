@@ -419,6 +419,8 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_native_type_hints(resolved.check_native_type_hints);
+        self.project
             .set_check_implicit_array_creation(resolved.check_implicit_array_creation);
         self.project
             .set_check_useless_casts(resolved.check_useless_casts);

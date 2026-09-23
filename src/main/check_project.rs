@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_native_type_hints: bool,
     check_implicit_array_creation: bool,
     check_useless_casts: bool,
     check_strict_array_filter: bool,
@@ -268,6 +269,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_native_type_hints(check_native_type_hints);
     project.set_check_implicit_array_creation(check_implicit_array_creation);
     project.set_check_useless_casts(check_useless_casts);
     project.set_check_strict_array_filter(check_strict_array_filter);
@@ -749,6 +751,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_native_type_hints: bool,
     check_implicit_array_creation: bool,
     check_useless_casts: bool,
     check_strict_array_filter: bool,
@@ -901,6 +904,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_native_type_hints =
+        check_native_type_hints || config.check_native_type_hints.unwrap_or(false);
     let check_implicit_array_creation =
         check_implicit_array_creation || config.check_implicit_array_creation.unwrap_or(false);
     let check_useless_casts = check_useless_casts || config.check_useless_casts.unwrap_or(false);
@@ -1180,6 +1185,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_native_type_hints,
         check_implicit_array_creation,
         check_useless_casts,
         check_strict_array_filter,

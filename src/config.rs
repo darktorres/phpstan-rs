@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_native_type_hints = false
 //! check_implicit_array_creation = false
 //! check_useless_casts = false
 //! check_strict_array_filter = false
@@ -303,6 +304,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in: a parameter or return type given only by PHPDoc that the configured PHP version can declare natively (`missingNativeType.parameter`/`missingNativeType.return`).
+    pub check_native_type_hints: Option<bool>,
     /// Opt-in (phpstan-strict-rules): `$x[...] = ...` creating the array `$x` implicitly because the variable does not or might not exist (`variable.implicitArray`).
     pub check_implicit_array_creation: Option<bool>,
     /// Opt-in (phpstan-strict-rules): a cast to a type the expression already has (`cast.useless`).

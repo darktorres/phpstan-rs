@@ -59,6 +59,7 @@ mod method_and_mixin;
 mod misc_and_regressions;
 mod missing_typehint;
 mod narrowing;
+mod native_type_hints;
 mod never_return_suggestion;
 mod new_exception_discarded;
 mod noop;

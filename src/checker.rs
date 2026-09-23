@@ -1269,6 +1269,7 @@ mod keywords;
 mod missing_typehint;
 mod named_argument_renames;
 mod narrowing;
+mod native_type_hints;
 mod noop;
 mod offset_assignment;
 mod oop;

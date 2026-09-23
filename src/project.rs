@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_native_type_hints`.
+    pub fn set_check_native_type_hints(&mut self, enabled: bool) {
+        self.registry.check_native_type_hints = enabled;
+    }
+
     /// See `Registry::check_implicit_array_creation`.
     pub fn set_check_implicit_array_creation(&mut self, enabled: bool) {
         self.registry.check_implicit_array_creation = enabled;
