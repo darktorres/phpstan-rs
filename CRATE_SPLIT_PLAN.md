@@ -163,8 +163,8 @@ explicitly asks for it.
 
 There is one merge rule and one invalidation rule (rebinding a variable
 drops every holder whose expression or condition mentions it) instead of
-per-map rules. `query_builder_aliases` goes to `ext-doctrine`'s scope
-slot. The `Scope` API exposes this model directly.
+per-map rules. `query_builder_aliases` is replaced by extension type
+data (below). The `Scope` API exposes this model directly.
 
 **Levels.** A level is a rule set plus a parameter set, as in PHPStan's
 `level0.neon`…`level10.neon`. Each rule declares the lowest level it's
@@ -219,11 +219,16 @@ references. These leave `Checker` for `lsp`.
   methods);
 - read/write property extension.
 
-Each extension may also ship rules and collectors. Extensions that carry
-state through a function body (Doctrine query-builder aliases) get a
-typed per-extension slot in the scope, merged at control-flow joins by
-the extension's own merge function. That replaces
-`Locals.query_builder_aliases`.
+Each extension may also ship rules and collectors.
+
+**Extension type data.** Extension state rides on the type, as PHPStan's
+`QueryBuilderType` does, not on a variable. `types` gains an opaque
+payload on object types: `Arc<dyn ExtensionTypeData>` with
+equality/hash, display, subtyping and a merge function the extension
+supplies. `ext-doctrine` stores the QueryBuilder chain there, so it
+survives method returns, properties, arguments and array elements, which
+`Locals.query_builder_aliases` (keyed by variable name) loses today. The
+engine needs no per-extension scope slots.
 
 Built-in and third-party rules, collectors, observers and extensions all
 register the same way. The existing external `Rule`/`ReflectionRule`
@@ -316,18 +321,19 @@ path get updated; the memory test command becomes
 Phase 0 timings.
 
 **Phase 10: scope model.** `Locals` → expression holders + conditional
-expressions, as above. The nine special maps and their per-map merge and
-purge code go away; `query_builder_aliases` waits in a generic
-extension-slot map for Phase 12.
+expressions, as above. The eight narrowing maps and their per-map merge
+and purge code go away. `query_builder_aliases` becomes Doctrine
+extension type data on the builder's object type (still inside the
+analyser until Phase 12 moves it out).
 
 **Phase 11: engine APIs (no moves).** `Scope` over the new model;
 `Rule` with the derived nodes and declared identifiers and levels;
-`Collector`, `Observer`, the extension traits, per-extension scope slots,
-the dispatch tables, and `AnalysisContext`. Port the existing
+`Collector`, `Observer`, the extension traits, extension type data, the
+dispatch tables, and `AnalysisContext`. Port the existing
 `Rule`/`ReflectionRule` users.
 
 **Phase 12: extension crates, one commit each:** `ext-php`, `ext-sql`
-(takes over the `SqlContext`), `ext-doctrine` (scope slot, takes
+(takes over the `SqlContext`), `ext-doctrine` (its builder type data, takes
 `doctrine_functions`), `ext-pest` (takes `pest_config` and the pest
 `Checker` fields), `ext-phpunit`, `ext-mockery` (takes the Mockery
 assertion entries), `ext-strict-rules`, `ext-deprecation-rules`. Each
