@@ -4,6 +4,45 @@ Gitignored (large, environment-specific, not source) - lives here rather
 than a session scratchpad so it survives across sessions and never needs
 rebuilding an old commit just to re-diff against it.
 
+## Regression gates (`cargo xtask`)
+
+The gates of `CRATE_SPLIT_PLAN.md` §4 record their snapshots under
+`.corpus-runs/gate/<artifact>/<commit>.<ext>`, keyed by the short hash of
+a committed tree (`xtask` refuses a dirty tree):
+
+    cargo xtask gates            # quick tier: build/test gates, scoped +
+                                 # all-on corpus, type snapshots, baseline
+    cargo xtask gates --full     # + unscoped, levels 0-10, hack/machete/
+                                 # deny, performance, build time
+    cargo xtask corpus [--full]  # record snapshots only
+    cargo xtask compare [--full] [--against <hash>]
+
+Artifacts:
+
+- `scoped`, `all-on`, `unscoped`, `<config>-L<n>`: `check-project
+  --format json`, normalized to one line per diagnostic in output order:
+  `path, line, col, level, identifier, location, message, tip`
+  (tab-separated; `\t`/`\n`/`\\` escaped). The first line records
+  `files_checked`. Stderr is kept separately as `<commit>.err`.
+- `types-scoped`, `types-all-on`: `--dump-types` output (every tracked
+  variable's type and native type after each statement), zstd-compressed.
+- `baseline-scoped`, `baseline-all-on`: the run with the reference
+  baselines from `cargo xtask baseline` (generated once, by the Stage A
+  binary). It must stay empty with no stale entries.
+- `perf/`, `buildtime/`, `tests/`: hyperfine + peak RSS of the scoped
+  run, incremental rebuild times, and the test-name manifest.
+
+`all-on` is the scoped path set with every opt-in check enabled; `xtask`
+writes it to `<corpus>/.phpstan-rs-gate-all-on.toml`. The corpus runs use
+the `gate` profile (`target/gate/phpstan-rs`); the performance gate
+measures `release`.
+
+A commit that intentionally changes an artifact adds
+`gates/approved/<slug>/<artifact>.diff` holding exactly the `diff -u`
+(labels `old`/`new`) from its parent's snapshot. A commit that removes or
+renames tests adds `gates/test-renames/<slug>.txt` (`old -> new` or
+`old -> REMOVED: reason`).
+
 ## Layout
 
     .corpus-runs/scoped/<commit-hash>.txt    - phpstan-rs.toml-scoped run

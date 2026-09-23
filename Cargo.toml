@@ -6,6 +6,7 @@ exclude = ["fuzz", "third_party/hotpath"]
 name = "phpstan-rs"
 version = "0.1.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
@@ -70,6 +71,22 @@ proptest = "1.11.0"
 [[bench]]
 name = "vendored_corpus"
 harness = false
+
+# Thin LTO with one codegen unit: about 5% faster on the scoped Piwigo
+# run (26.7 s vs 28.0 s) for a ~3x longer release build, and it keeps
+# cross-crate inlining once the workspace splits into crates.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+
+# The regression gates' corpus, type and baseline snapshots: release
+# optimizations without LTO, since those outputs don't depend on
+# optimization and the gate rebuilds on every commit. The performance
+# gate measures `release`.
+[profile.gate]
+inherits = "release"
+lto = false
+codegen-units = 16
 
 # Release-speed build that keeps debug info, so `dhat-heap`'s output can
 # symbolicate call stacks - `cargo build --profile dhat --features dhat-heap`.

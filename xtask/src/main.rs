@@ -68,7 +68,14 @@ fn gate_dir() -> PathBuf {
     root().join(".corpus-runs/gate")
 }
 
+/// The `gate` profile's binary: what the corpus, type and baseline
+/// snapshots run.
 fn binary() -> PathBuf {
+    root().join("target/gate/phpstan-rs")
+}
+
+/// The shipped `release` binary: what the performance gate measures.
+fn release_binary() -> PathBuf {
     root().join("target/release/phpstan-rs")
 }
 
@@ -126,6 +133,10 @@ fn require_clean_tree() -> Result<(), String> {
             dirty.join(", ")
         ))
     }
+}
+
+fn build_gate() -> Result<(), String> {
+    run(cargo().args(["build", "--profile", "gate", "--bin", "phpstan-rs"]))
 }
 
 fn build_release() -> Result<(), String> {
@@ -345,7 +356,7 @@ fn corpus(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     require_clean_tree()?;
     let hash = head_hash()?;
-    build_release()?;
+    build_gate()?;
     write_all_on_config()?;
     for (config, level) in artifacts(full) {
         let artifact = artifact_name(&config, level);
@@ -391,7 +402,7 @@ fn baseline_file(config: &str) -> PathBuf {
 /// later commit must keep them producing no diagnostics and no stale
 /// entries.
 fn baseline_generate() -> Result<(), String> {
-    build_release()?;
+    build_gate()?;
     write_all_on_config()?;
     for config in [SCOPED, ALL_ON] {
         let file = baseline_file(config.name);
@@ -559,7 +570,7 @@ fn perf() -> Result<(), String> {
     let json = dir.join(format!("{hash}.hyperfine.json"));
     let command = format!(
         "{} check-project --config phpstan-rs.toml --format json",
-        binary().display()
+        release_binary().display()
     );
     run(Command::new("hyperfine")
         .current_dir(corpus_dir())
@@ -572,7 +583,7 @@ fn perf() -> Result<(), String> {
     let rss = Command::new("/usr/bin/time")
         .current_dir(corpus_dir())
         .args(["-f", "%M"])
-        .arg(binary())
+        .arg(release_binary())
         .args([
             "check-project",
             "--config",
