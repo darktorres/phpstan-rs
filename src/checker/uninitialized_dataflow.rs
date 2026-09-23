@@ -53,7 +53,7 @@
 //! initialization chain with nothing value-gated about it - trading one
 //! false-positive class for another isn't a real fix.
 
-use std::collections::HashSet as StdHashSet;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -85,14 +85,14 @@ struct PropertyInitCtx<'a, 'b> {
     /// Qualifying property names the existing `class_ever_assigns_property`
     /// heuristic already confirms are genuinely assigned somewhere in this
     /// class's own body - the only names this walker ever reports on.
-    candidates: StdHashSet<String>,
+    candidates: FxHashSet<String>,
     /// `(declaring class FQN, lowercase method name)` pairs currently
     /// being recursed into, for the whole top-level walk - a re-entrant
     /// call while already visiting contributes nothing further rather
     /// than recursing infinitely. Sound but incomplete versus a full
     /// fixed point over the whole call graph: can only under-approximate
     /// absorption, never over-approximate it.
-    visiting: StdHashSet<(String, String)>,
+    visiting: FxHashSet<(String, String)>,
     /// Every `(property name, read span)` found reachable from the
     /// constructor's own call graph, before it's known-initialized on
     /// that path.
@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
         else {
             return;
         };
-        let candidates: StdHashSet<String> = c
+        let candidates: FxHashSet<String> = c
             .properties
             .iter()
             .filter(|p| {
@@ -138,7 +138,7 @@ impl<'a> Checker<'a> {
             checker: &*self,
             checked_class: fqn.to_string(),
             candidates,
-            visiting: StdHashSet::from([(fqn.to_ascii_lowercase(), "__construct".to_string())]),
+            visiting: FxHashSet::from_iter([(fqn.to_ascii_lowercase(), "__construct".to_string())]),
             premature_reads: Vec::new(),
         };
         walk_stmts(

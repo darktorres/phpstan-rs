@@ -18,8 +18,8 @@ use crate::types;
 /// earlier one, and a foreign spelling that didn't parse skipped.
 #[derive(Default)]
 pub(crate) struct TagTypeNodes {
-    pub params: HashMap<String, TypeNode>,
-    pub param_out: HashMap<String, TypeNode>,
+    pub params: FxHashMap<String, TypeNode>,
+    pub param_out: FxHashMap<String, TypeNode>,
     pub return_type: Option<TypeNode>,
     pub var: Option<TypeNode>,
 }

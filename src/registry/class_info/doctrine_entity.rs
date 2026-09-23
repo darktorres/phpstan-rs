@@ -19,7 +19,7 @@
 //! corpus incidence affects verification confidence, never whether a
 //! real, well-defined Doctrine feature gets built at all.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal};
@@ -58,8 +58,8 @@ pub struct DoctrineEntity {
     /// keyed by property name, association properties included too
     /// (their "field type" is the association's own declared type,
     /// consulted only via `associations` below in practice).
-    pub fields: HashMap<Arc<str>, Type>,
-    pub associations: HashMap<Arc<str>, DoctrineAssociation>,
+    pub fields: FxHashMap<Arc<str>, Type>,
+    pub associations: FxHashMap<Arc<str>, DoctrineAssociation>,
     /// `#[ORM\Table(name: '...')]`'s own argument - `None` when absent
     /// (real Doctrine would then fall back to its own default naming
     /// strategy, generally the bare class name, which this project
@@ -79,7 +79,7 @@ pub struct DoctrineEntity {
     /// `associations` - a raw SQL column is never itself another
     /// entity's own object identity, so there's nothing this cross-
     /// reference would need an association's own column name for.
-    pub column_names: HashMap<Arc<str>, Arc<str>>,
+    pub column_names: FxHashMap<Arc<str>, Arc<str>>,
     /// `#[ORM\Entity(repositoryClass: ...)]`'s own argument, if present -
     /// resolved to a fully-qualified class name.
     pub repository_class: Option<Arc<str>>,
@@ -90,7 +90,7 @@ pub struct DoctrineEntity {
     /// arbitrary literal discriminator tag (developer-chosen, not a
     /// source identifier), so it stays `String`; the value is a real
     /// class FQN.
-    pub discriminator_map: HashMap<String, Arc<str>>,
+    pub discriminator_map: FxHashMap<String, Arc<str>>,
 }
 
 fn resolved_attr_name(ctx: &NameContext, attr: &Attribute) -> String {
@@ -161,7 +161,7 @@ fn class_name_of_class_const(e: &Expr) -> Option<&str> {
 /// literal string, or a value that isn't a `SomeClass::class` reference,
 /// is simply skipped rather than guessed - the same "don't guess"
 /// leniency this module applies everywhere else.
-fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String, Arc<str>> {
+fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> FxHashMap<String, Arc<str>> {
     let array = attr
         .args
         .iter()
@@ -172,7 +172,7 @@ fn discriminator_map_arg(ctx: &NameContext, attr: &Attribute) -> HashMap<String,
             _ => None,
         });
     let Some(items) = array else {
-        return HashMap::new();
+        return FxHashMap::default();
     };
     items
         .iter()
@@ -209,7 +209,7 @@ fn association_target_from_native_type(ty: &Type) -> Option<String> {
 pub(crate) fn compute_doctrine_entity(
     c: &ClassDecl,
     ctx: &NameContext,
-    properties: &HashMap<Arc<str>, PropertySig>,
+    properties: &FxHashMap<Arc<str>, PropertySig>,
 ) -> Option<DoctrineEntity> {
     let entity_attr = find_orm_attribute(ctx, &c.attrs, "Entity")?;
     let repository_class =
@@ -226,7 +226,7 @@ pub(crate) fn compute_doctrine_entity(
     // different AST shapes with no shared trait, so this collects both
     // into one (name -> attrs) map up front rather than duplicating the
     // attribute-matching logic below for each source.
-    let mut attrs_by_property: HashMap<&str, &[Attribute]> = HashMap::new();
+    let mut attrs_by_property: FxHashMap<&str, &[Attribute]> = FxHashMap::default();
     for p in &c.properties {
         attrs_by_property.insert(&p.name, &p.attrs);
     }
@@ -243,9 +243,9 @@ pub(crate) fn compute_doctrine_entity(
     }
 
     let mut id_fields: Vec<Arc<str>> = Vec::new();
-    let mut fields: HashMap<Arc<str>, Type> = HashMap::new();
-    let mut column_names: HashMap<Arc<str>, Arc<str>> = HashMap::new();
-    let mut associations: HashMap<Arc<str>, DoctrineAssociation> = HashMap::new();
+    let mut fields: FxHashMap<Arc<str>, Type> = FxHashMap::default();
+    let mut column_names: FxHashMap<Arc<str>, Arc<str>> = FxHashMap::default();
+    let mut associations: FxHashMap<Arc<str>, DoctrineAssociation> = FxHashMap::default();
     for (name, attrs) in &attrs_by_property {
         let Some(sig) = properties.get(*name) else {
             continue;

@@ -22,7 +22,7 @@
 //! Every judgment call below is made in the "favor false negatives
 //! over false positives" direction this project has held throughout.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
 use crate::registry::ClassInfo;
@@ -66,14 +66,14 @@ impl<'a> Checker<'a> {
         // `substitute_template` leave it alone instead.
         let own_bindings = identity_template_bindings(root_info, fqn);
 
-        let mut found: HashMap<String, Vec<Type>> = HashMap::new();
+        let mut found: FxHashMap<String, Vec<Type>> = FxHashMap::default();
         let mut diagnostics: Vec<(String, usize, Type, Type)> = Vec::new();
         self.walk_for_interface_conflicts(
             fqn,
             &own_bindings,
             &mut found,
             &mut diagnostics,
-            &HashSet::new(),
+            &FxHashSet::default(),
         );
 
         for (iface, idx, new_ty, old_ty) in diagnostics {
@@ -114,10 +114,10 @@ impl<'a> Checker<'a> {
     fn walk_for_interface_conflicts(
         &self,
         class: &str,
-        own_bindings: &HashMap<String, Type>,
-        found: &mut HashMap<String, Vec<Type>>,
+        own_bindings: &FxHashMap<String, Type>,
+        found: &mut FxHashMap<String, Vec<Type>>,
         diagnostics: &mut Vec<(String, usize, Type, Type)>,
-        visited: &HashSet<String>,
+        visited: &FxHashSet<String>,
     ) {
         if visited.contains(class) {
             return;
@@ -180,9 +180,9 @@ impl<'a> Checker<'a> {
         &self,
         name: &str,
         concrete_args: &[Type],
-        found: &mut HashMap<String, Vec<Type>>,
+        found: &mut FxHashMap<String, Vec<Type>>,
         diagnostics: &mut Vec<(String, usize, Type, Type)>,
-        visited: &HashSet<String>,
+        visited: &FxHashSet<String>,
     ) {
         let Some(info) = self.registry.classes.get(name) else {
             return;
@@ -208,7 +208,7 @@ impl<'a> Checker<'a> {
                 }
             }
         }
-        let next_bindings: HashMap<String, Type> = info
+        let next_bindings: FxHashMap<String, Type> = info
             .templates
             .iter()
             .map(|s| s.to_string())
@@ -218,7 +218,7 @@ impl<'a> Checker<'a> {
     }
 }
 
-fn identity_template_bindings(info: &ClassInfo, class: &str) -> HashMap<String, Type> {
+fn identity_template_bindings(info: &ClassInfo, class: &str) -> FxHashMap<String, Type> {
     info.templates
         .iter()
         .map(|name| name.to_string())

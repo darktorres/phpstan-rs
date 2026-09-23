@@ -1,5 +1,4 @@
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::ast::Stmt;
@@ -487,7 +486,7 @@ pub struct Registry {
     // "this name's entry is only a conditional stub, so the first real
     // unconditional declaration should replace it outright" - both look
     // identical from `self.classes.contains_key(&name)` alone.
-    unconditionally_declared_classes: HashSet<Arc<str>>,
+    unconditionally_declared_classes: FxHashSet<Arc<str>>,
     // Names `merge_stub_classes` provided a built-in native-class stub
     // for (jetbrains/phpstorm-stubs) - a *subset* of
     // `unconditionally_declared_classes` above, distinguishing "a
@@ -498,7 +497,7 @@ pub struct Registry {
     // class (`PHPUnit\Framework\TestCase`-vs-`class_exists`-guarded-
     // fallback) would wrongly leak a defensive fallback's members onto
     // the real class everything else sees.
-    pub(crate) built_in_stub_classes: HashSet<Arc<str>>,
+    pub(crate) built_in_stub_classes: FxHashSet<Arc<str>>,
     // The function-side sibling of the tracking set above -
     // phpstorm-stubs represents a real PHP internal function overload
     // (different signatures by argument shape, not version) as two
@@ -507,7 +506,7 @@ pub struct Registry {
     // `array $replace_pairs` form). Needed so the second declaration
     // merges into a callable accepting either shape, instead of a blind
     // `self.functions.insert` discarding the first's params.
-    unconditionally_declared_functions: HashSet<Arc<str>>,
+    unconditionally_declared_functions: FxHashSet<Arc<str>>,
     // The declaration (its name's `(line, col)`) a `functions` slot was
     // built from - `None` once two declarations merged into it. Lets the
     // checker tell a second same-named declaration from the one the slot
@@ -522,7 +521,7 @@ pub struct Registry {
     // symfony/polyfill-php80) doesn't lose its real, more-precise
     // (here, nullable) parameter types to `entry(...).or_insert_with(...)`
     // being a no-op once the built-in stub already occupies the slot.
-    stub_provided_functions: HashSet<Arc<str>>,
+    stub_provided_functions: FxHashSet<Arc<str>>,
     // Every bare function/method name with a non-empty `assert` list
     // on some indexed `FunctionSig`. `@phpstan-assert` is rare in real
     // corpora (zero occurrences across the full Symfony monorepo plus
@@ -533,7 +532,7 @@ pub struct Registry {
     // `remove_declarations` - a harmless, rare false positive (still a
     // "may still do the real check" set, not a "known good" one), never
     // a false negative.
-    pub(crate) names_with_assert_tags: HashSet<Arc<str>>,
+    pub(crate) names_with_assert_tags: FxHashSet<Arc<str>>,
     // Every class's precomputed `extends`+`implements` transitive
     // closure - see `is_subclass_of`/`precompute_ancestor_names`
     // (`registry/hierarchy.rs`). Rebuilt whenever the class graph could

@@ -26,7 +26,7 @@ impl Rule for FlagsVariableNamed {
                 identifier: "test.flagged".to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: std::collections::HashMap::new(),
+                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             };
             1
@@ -51,7 +51,7 @@ impl Rule for FlagsEchoStatements {
             identifier: "test.echoFlagged".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: std::collections::HashMap::new(),
+            metadata: rustc_hash::FxHashMap::default(),
             fix: None,
         }]
     }
@@ -147,7 +147,7 @@ fn scope_exposes_the_current_class_and_method_and_the_variable_s_own_local_type(
                 identifier: "test.scope".to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: std::collections::HashMap::new(),
+                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             }]
         }
@@ -191,7 +191,7 @@ fn is_function_guarded_reflects_a_real_function_exists_narrowing() {
                 identifier: "test.guard".to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: std::collections::HashMap::new(),
+                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             }]
         }

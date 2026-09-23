@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 use std::str::FromStr;
@@ -327,13 +326,17 @@ pub(crate) fn diagnostic_fix_to_code_action(
         kind: Some(CodeActionKind::QUICKFIX),
         diagnostics: Some(vec![to_lsp_diagnostic(d)]),
         edit: Some(WorkspaceEdit {
-            changes: Some(HashMap::from([(
-                uri.clone(),
-                vec![TextEdit {
-                    range: to_lsp_range(span),
-                    new_text: fix.replacement.clone(),
-                }],
-            )])),
+            changes: Some(
+                [(
+                    uri.clone(),
+                    vec![TextEdit {
+                        range: to_lsp_range(span),
+                        new_text: fix.replacement.clone(),
+                    }],
+                )]
+                .into_iter()
+                .collect(),
+            ),
             ..Default::default()
         }),
         is_preferred: Some(true),

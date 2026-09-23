@@ -5,7 +5,7 @@ use super::helpers::*;
 
 #[test]
 fn generate_then_load_filters_out_every_recorded_diagnostic() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("a.php"),
         vec![
@@ -32,7 +32,7 @@ fn generate_then_load_filters_out_every_recorded_diagnostic() {
 
 #[test]
 fn filter_keeps_a_new_diagnostic_not_in_the_baseline() {
-    let mut baselined = HashMap::new();
+    let mut baselined = FxHashMap::default();
     baselined.insert(
         PathBuf::from("a.php"),
         vec![diag("Foo::bar", "undefined variable $x")],
@@ -41,7 +41,7 @@ fn filter_keeps_a_new_diagnostic_not_in_the_baseline() {
     generate(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("a.php"),
         vec![
@@ -66,7 +66,7 @@ fn the_same_location_and_message_in_a_different_file_is_not_baselined() {
     // top-level script diagnostics - the file path has to be part of
     // the key, or baselining one file's finding would silently
     // suppress an unrelated file's identical-looking one too.
-    let mut baselined = HashMap::new();
+    let mut baselined = FxHashMap::default();
     baselined.insert(
         PathBuf::from("a.php"),
         vec![diag("<main>", "undefined variable $x")],
@@ -75,7 +75,7 @@ fn the_same_location_and_message_in_a_different_file_is_not_baselined() {
     generate(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("b.php"),
         vec![diag("<main>", "undefined variable $x")],
@@ -88,7 +88,7 @@ fn the_same_location_and_message_in_a_different_file_is_not_baselined() {
 
 #[test]
 fn generating_twice_over_the_same_results_produces_a_byte_identical_file() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("z.php"),
         vec![diag("Z::m", "one"), diag("Z::m", "two")],
@@ -107,7 +107,7 @@ fn generating_twice_over_the_same_results_produces_a_byte_identical_file() {
 
 #[test]
 fn a_differently_spelled_but_identical_path_is_still_matched() {
-    let mut baselined = HashMap::new();
+    let mut baselined = FxHashMap::default();
     baselined.insert(
         PathBuf::from("./t.php"),
         vec![diag("f", "undefined variable $x")],
@@ -116,7 +116,7 @@ fn a_differently_spelled_but_identical_path_is_still_matched() {
     generate(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("././t.php"),
         vec![diag("f", "undefined variable $x")],
@@ -129,7 +129,7 @@ fn a_differently_spelled_but_identical_path_is_still_matched() {
 
 #[test]
 fn filter_reports_a_baseline_entry_no_current_diagnostic_matches() {
-    let mut baselined = HashMap::new();
+    let mut baselined = FxHashMap::default();
     baselined.insert(
         PathBuf::from("a.php"),
         vec![diag("Foo::bar", "undefined variable $x")],
@@ -138,7 +138,7 @@ fn filter_reports_a_baseline_entry_no_current_diagnostic_matches() {
     generate(&path, &baselined).unwrap();
     let baseline = Baseline::load(&path).unwrap();
 
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(PathBuf::from("a.php"), vec![]);
     let stale = filter(&mut results, &baseline);
     assert_eq!(stale.len(), 1);
@@ -150,7 +150,7 @@ fn filter_reports_a_baseline_entry_no_current_diagnostic_matches() {
 
 #[test]
 fn filter_reports_nothing_stale_when_every_entry_still_matches() {
-    let mut baselined = HashMap::new();
+    let mut baselined = FxHashMap::default();
     baselined.insert(
         PathBuf::from("a.php"),
         vec![diag("Foo::bar", "undefined variable $x")],
@@ -181,8 +181,8 @@ fn normalize_path_resolves_dot_and_dotdot_segments() {
     assert_eq!(normalize_path(Path::new("./.")), PathBuf::from("."));
 }
 
-fn results_of(file: &str, diagnostics: Vec<Diagnostic>) -> HashMap<PathBuf, Vec<Diagnostic>> {
-    HashMap::from([(PathBuf::from(file), diagnostics)])
+fn results_of(file: &str, diagnostics: Vec<Diagnostic>) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+    FxHashMap::from_iter([(PathBuf::from(file), diagnostics)])
 }
 
 #[test]

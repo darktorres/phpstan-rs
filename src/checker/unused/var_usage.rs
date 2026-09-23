@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -16,7 +16,7 @@ use crate::ast_walk::{expr_children, stmt_children};
 /// ever being read again is a subtler bug than an unused-parameter check
 /// is meant to catch.
 pub(crate) enum VarUsage {
-    Names(HashSet<Arc<str>>),
+    Names(FxHashSet<Arc<str>>),
     /// Something that reads variables by a name this walk can't resolve
     /// statically was seen anywhere in the body - `func_get_args()`,
     /// `compact(...)` with a non-literal argument, `get_defined_vars()`,
@@ -41,7 +41,7 @@ impl VarUsage {
 }
 
 pub(crate) fn collect_var_usage(stmts: &[Stmt]) -> VarUsage {
-    let mut names = HashSet::new();
+    let mut names = FxHashSet::default();
     let mut escaped = false;
     for stmt in stmts {
         walk_stmt_for_vars(stmt, &mut names, &mut escaped);
@@ -57,7 +57,7 @@ fn is_call_to(callee: &Expr, target: &str) -> bool {
     matches!(&callee.kind, ExprKind::Name(n) if n.trim_start_matches('\\').eq_ignore_ascii_case(target))
 }
 
-fn walk_stmt_for_vars(stmt: &Stmt, names: &mut HashSet<Arc<str>>, escaped: &mut bool) {
+fn walk_stmt_for_vars(stmt: &Stmt, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
     match &stmt.kind {
         StmtKind::Expression(e) | StmtKind::Throw(e) => walk_expr_for_vars(e, names, escaped),
         StmtKind::Return(Some(e)) => walk_expr_for_vars(e, names, escaped),
@@ -115,7 +115,7 @@ fn walk_stmt_for_vars(stmt: &Stmt, names: &mut HashSet<Arc<str>>, escaped: &mut 
     }
 }
 
-fn walk_expr_for_vars(expr: &Expr, names: &mut HashSet<Arc<str>>, escaped: &mut bool) {
+fn walk_expr_for_vars(expr: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
     match &expr.kind {
         ExprKind::Variable(name) => {
             if **name != *"this" {
@@ -198,7 +198,7 @@ fn walk_expr_for_vars(expr: &Expr, names: &mut HashSet<Arc<str>>, escaped: &mut 
 /// spread, ...) has no static name to resolve here, so it escalates to the
 /// same blanket "everything is used" fallback as `func_get_args()`/
 /// `get_defined_vars()` rather than risk a false "unused" report.
-fn collect_compact_names(e: &Expr, names: &mut HashSet<Arc<str>>, escaped: &mut bool) {
+fn collect_compact_names(e: &Expr, names: &mut FxHashSet<Arc<str>>, escaped: &mut bool) {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => {
             names.insert(s.clone());

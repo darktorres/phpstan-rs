@@ -1,5 +1,5 @@
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -151,7 +151,7 @@ type QueryBuilderAliasMap = imbl::GenericHashMap<
 // that actually ran.
 type ContainerFieldFactsMap = imbl::GenericHashMap<
     String,
-    std::rc::Rc<HashMap<String, Type>>,
+    std::rc::Rc<FxHashMap<String, Type>>,
     rustc_hash::FxBuildHasher,
     imbl::shared_ptr::DefaultSharedPtr,
 >;
@@ -515,7 +515,7 @@ impl PartialEq for Locals {
 /// per-branch the way `Locals` is. A plain `std::collections::HashMap`,
 /// since this use case has none of the "cloned once per branch" cost
 /// profile that motivates `Locals`'s persistent-map backing.
-pub(crate) type TemplateBindings = std::collections::HashMap<String, Type>;
+pub(crate) type TemplateBindings = rustc_hash::FxHashMap<String, Type>;
 
 /// Loosely mirrors PHPStan's own rule-gating levels (0 lowest/laxest,
 /// per `conf/config.levelN.neon`): 0 for the
@@ -562,7 +562,7 @@ pub struct Diagnostic {
     /// Free-form structured data a rule wants attached without inventing a
     /// new `Diagnostic` field - a `HashMap`, not `Vec<(String, Value)>`,
     /// since a consumer looks up one known key rather than iterating all.
-    pub metadata: HashMap<String, serde_json::Value>,
+    pub metadata: FxHashMap<String, serde_json::Value>,
     /// A suggested textual auto-fix. This project has no code-generation-
     /// from-AST facility, so a fix is a literal source-text replacement
     /// over a `Span` rather than a replacement AST node.
@@ -626,7 +626,7 @@ pub struct DiagnosticBuilder {
     identifier: String,
     tip: Option<String>,
     non_ignorable: bool,
-    metadata: HashMap<String, serde_json::Value>,
+    metadata: FxHashMap<String, serde_json::Value>,
     fix: Option<DiagnosticFix>,
 }
 
@@ -650,7 +650,7 @@ impl DiagnosticBuilder {
             identifier: identifier.into(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         }
     }
@@ -746,7 +746,7 @@ impl DiagnosticBuilder {
 /// comments. Both keys are identity-like text (interned `Arc<str>`, not
 /// `String`); `Arc<str>: Borrow<str>` keeps every `&str` lookup/`.get()`
 /// call site unchanged.
-pub(crate) type PropertyAssignFacts = HashMap<Arc<str>, HashMap<Arc<str>, Vec<Type>>>;
+pub(crate) type PropertyAssignFacts = FxHashMap<Arc<str>, FxHashMap<Arc<str>, Vec<Type>>>;
 
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
@@ -781,8 +781,7 @@ pub struct Checker<'a> {
     // The current function's own `@template`s, read from its doc - the
     // only source for one the registry doesn't index (an anonymous
     // class's method).
-    pub(crate) current_method_templates:
-        std::collections::HashMap<String, crate::types::TemplateParam>,
+    pub(crate) current_method_templates: rustc_hash::FxHashMap<String, crate::types::TemplateParam>,
     // `checker::restricted_symbol_usage`'s own `allow_in_class_with_
     // attributes`/`allow_except_in_class_with_attributes` matching - the
     // enclosing class's own directly-declared attribute names (`Registry::
@@ -913,7 +912,7 @@ pub struct Checker<'a> {
     // function/method/closure (native type, or `@param-out` when the tag
     // supplies one - see `ParamSig::out_ty`'s doc comment), set/restored
     // at the same choke point as `current_declared_return_type`.
-    pub(crate) current_function_by_ref_params: std::collections::HashMap<Arc<str>, Type>,
+    pub(crate) current_function_by_ref_params: rustc_hash::FxHashMap<Arc<str>, Type>,
     // Every by-ref parameter's own `locals`-tracked type, snapshotted at
     // each real execution-end point of the enclosing body (an explicit
     // `return`, with or without a value, and the implicit falls-off-the-
@@ -931,8 +930,7 @@ pub struct Checker<'a> {
     // ever actually observe by the time the function returns. Consumed
     // by `check_by_ref_execution_end`/`check_by_ref_too_wide`
     // (`checker/by_ref_params.rs`).
-    pub(crate) current_function_by_ref_exit_snapshots:
-        std::collections::HashMap<Arc<str>, Vec<Type>>,
+    pub(crate) current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap<Arc<str>, Vec<Type>>,
     // The subset of `current_function_by_ref_params` that actually
     // declares a real `@param-out` tag (its own resolved out-type, not
     // just a native-type fallback) - real `ParameterOutExecutionEndTypeRule`
@@ -940,7 +938,7 @@ pub struct Checker<'a> {
     // with no `@param-out` tag, unlike the tag-independent direct-
     // assignment rule (`check_by_ref_value`) which happily falls back to
     // the native type. Consulted by `check_by_ref_execution_end` only.
-    pub(crate) current_function_by_ref_params_with_tag: std::collections::HashMap<Arc<str>, Type>,
+    pub(crate) current_function_by_ref_params_with_tag: rustc_hash::FxHashMap<Arc<str>, Type>,
     // Every name `record_by_ref_exit_snapshot` should snapshot at each
     // real execution-end point - a superset of `current_function_by_ref_
     // params`'s own keys (kept as a separate set, not folded into that
@@ -958,7 +956,7 @@ pub struct Checker<'a> {
     // body happened to fall off the end at - which, for the common
     // `if (cond) { $x[] = ...; return ...; } return ...;` guard-clause
     // shape, is never the branch that actually mutated `$x` at all.
-    pub(crate) current_function_byref_snapshot_names: std::collections::HashSet<Arc<str>>,
+    pub(crate) current_function_byref_snapshot_names: rustc_hash::FxHashSet<Arc<str>>,
     // Set for the duration of one function/method/closure body to every
     // label name `goto`-targeted anywhere in it (see
     // `collect_goto_targets`'s doc comment for the real corpus false
@@ -966,7 +964,7 @@ pub struct Checker<'a> {
     // `deadCode.unreachable` check, which has no direct access to the
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
-    pub(crate) current_function_goto_targets: std::collections::HashSet<Arc<str>>,
+    pub(crate) current_function_goto_targets: rustc_hash::FxHashSet<Arc<str>>,
     // Every variable assignment site in the current function body, for
     // `variable.implicitArray`; empty unless that check is enabled.
     pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
@@ -1021,7 +1019,7 @@ pub struct Checker<'a> {
     // unioned (not overridden - a property-name set has no "most specific
     // wins" precedence) with whatever file-local `beforeEach(...)` calls
     // `check_program` itself finds. Defaults empty.
-    pub(crate) pest_hook_properties: HashSet<Arc<str>>,
+    pub(crate) pest_hook_properties: FxHashSet<Arc<str>>,
     // `NewAnonymousClass` expression span -> its own stable synthetic
     // registry name, computed once at parse time
     // (`registry::collect_anonymous_classes`) and set via
@@ -1031,7 +1029,7 @@ pub struct Checker<'a> {
     // existing test, the same "no signal, stay quiet" leniency
     // `pest_this_type`'s own default gets - a lookup miss just falls back
     // to `Type::Mixed(false)`, matching today's unconditional behavior.
-    pub(crate) anonymous_class_names: HashMap<crate::token::Span, String>,
+    pub(crate) anonymous_class_names: FxHashMap<crate::token::Span, String>,
     // The registry name (`anonymous_class_names`' value) of the anonymous
     // class whose own methods are currently being checked - its methods
     // are checked under the placeholder `"class@anonymous"` class name,
@@ -1041,25 +1039,24 @@ pub struct Checker<'a> {
     // The file being checked, for resolving `include`/`require` paths.
     pub(crate) current_file: Option<std::path::PathBuf>,
     // Paths the file tests with `file_exists()` and friends.
-    pub(crate) include_guarded_paths: HashSet<String>,
+    pub(crate) include_guarded_paths: FxHashSet<String>,
     // `include_path` directories for the file being checked.
     pub(crate) include_path_dirs: Vec<String>,
     // What relative include paths resolve against first (see
     // `Project::working_dir`); `None` is the process's working directory.
     pub(crate) working_dir: Option<std::path::PathBuf>,
     // `includes::file_constant_initializers` for the file being checked.
-    pub(crate) include_constant_initializers: HashMap<String, Expr>,
+    pub(crate) include_constant_initializers: FxHashMap<String, Expr>,
     // `if` statements already reported as the tail of an enum `if`/`elseif`
     // chain (`strict_idioms`).
-    pub(crate) enum_chain_tails: HashSet<Span>,
+    pub(crate) enum_chain_tails: FxHashSet<Span>,
     // `global_constants::constant_facts` for the file being checked.
     pub(crate) constant_facts: global_constants::ConstantFacts,
     // `$a[]` argument spans bound to a by-reference (or unknown)
     // parameter, recorded by `predefine_byref_or_unknown_args` before the
     // arguments are checked - the one read-looking position where PHP
     // accepts an empty dim, since it creates the element.
-    pub(crate) by_ref_empty_dim_args:
-        std::cell::RefCell<std::collections::HashSet<crate::token::Span>>,
+    pub(crate) by_ref_empty_dim_args: std::cell::RefCell<rustc_hash::FxHashSet<crate::token::Span>>,
     // Every private property write's own assigned type, discovered
     // anywhere in this file's own `check_program` run - keyed by
     // (declaring class fqn, property name), never reset per-class:
@@ -1185,7 +1182,7 @@ pub struct Checker<'a> {
     // this shape too). Accumulated across the whole file rather than
     // reset per function/closure - a stale entry only costs a missed
     // diagnostic on an unrelated later local sharing the same name.
-    pub(crate) static_var_names: HashSet<Arc<str>>,
+    pub(crate) static_var_names: FxHashSet<Arc<str>>,
     // Every class named as the resolved `$scope` of a `Closure::
     // bind(...)`/`->bindTo(...)` call anywhere in the file being checked
     // (`unused::scan_program_for_rebind_targets`, built once per
@@ -1198,7 +1195,7 @@ pub struct Checker<'a> {
     // every class's private-member check for the whole file than risk a
     // false "unused" report on a member a rebound closure actually
     // reaches.
-    pub(crate) rebind_target_classes: HashSet<Arc<str>>,
+    pub(crate) rebind_target_classes: FxHashSet<Arc<str>>,
     pub(crate) rebind_escape_all: bool,
     // The LSP's one-off "what type is this instance receiver" probe.
     // `probe_span` is the exact `Span` of the receiver `Expr` the caller
@@ -1231,7 +1228,7 @@ pub struct Checker<'a> {
     // (every ordinary call site) is a complete no-op - see `Locals::track`'s
     // doc comment for why declaration tracking itself is also gated off
     // whenever no probe is active.
-    pub(crate) probe_var_provenance: RefCell<Option<HashSet<Span>>>,
+    pub(crate) probe_var_provenance: RefCell<Option<FxHashSet<Span>>>,
     // The LSP's `textDocument/inlayHint` collection mode. `false` (every
     // ordinary check) is a complete no-op; `Checker::checker_for` is the
     // only place that sets it. Populated by `maybe_record_param_name_hints`
@@ -1258,7 +1255,7 @@ pub struct Checker<'a> {
     // the same site.
     pub(crate) collect_member_refs: bool,
     #[allow(clippy::type_complexity)]
-    member_ref_sites: RefCell<HashSet<(Span, String, String)>>,
+    member_ref_sites: RefCell<FxHashSet<(Span, String, String)>>,
     // Phase 92's own escape hatch: every real `Enum` class this file's
     // check pass saw a `::cases()` call or a dynamic (`{dynamic}`)
     // member access against - either one means "some case of this enum
@@ -1270,7 +1267,7 @@ pub struct Checker<'a> {
     // `record_enum_escape` self-gates on it internally, mirroring
     // `record_member_ref`'s own pattern, so every plain call site below
     // stays unconditional.
-    escaped_enums: RefCell<HashSet<String>>,
+    escaped_enums: RefCell<FxHashSet<String>>,
     // Phase 86's B1 own escape hatch: every class (and each of its own
     // ancestors/real subclasses - see `Checker::escape_targets_for_
     // receiver_type`) this file's check pass saw reached through a
@@ -1284,7 +1281,7 @@ pub struct Checker<'a> {
     // cases. Populated only when `collect_member_refs` is on -
     // `record_member_class_escape` self-gates on it internally,
     // mirroring `record_enum_escape`'s own pattern.
-    escaped_member_classes: RefCell<HashSet<String>>,
+    escaped_member_classes: RefCell<FxHashSet<String>>,
     // A `Call(callee, ...)` node's resolved `(primary, fallback)` name
     // pair, keyed by `callee`'s span - `check_expr`'s `Call` arm and
     // `infer_expr`'s separate `Call` arm both independently re-derive this
@@ -1298,7 +1295,7 @@ pub struct Checker<'a> {
     // graph. Scoped to one `Checker` (one file), so it never leaks across
     // files.
     #[allow(clippy::type_complexity)]
-    call_candidate_cache: RefCell<HashMap<Span, (Arc<str>, Option<Arc<str>>)>>,
+    call_candidate_cache: RefCell<FxHashMap<Span, (Arc<str>, Option<Arc<str>>)>>,
     // Disjunctive-syllogism narrowing: a stack, not a `Locals` field,
     // since it's scoped to the *traversal position* (currently inside
     // an outer `if ($a || $b)`'s own true branch, at any nesting depth)
@@ -1444,7 +1441,7 @@ impl<'a> Checker<'a> {
             name_ctx: NameContext::default(),
             current_class: None,
             current_method: None,
-            current_method_templates: std::collections::HashMap::new(),
+            current_method_templates: rustc_hash::FxHashMap::default(),
             current_class_attrs: Vec::new(),
             current_method_attrs: Vec::new(),
             current_trait: None,
@@ -1459,29 +1456,29 @@ impl<'a> Checker<'a> {
             current_function_explicit_throw_points: Vec::new(),
             current_function_return_points: Vec::new(),
             current_function_saw_explicit_return: false,
-            current_function_by_ref_params: std::collections::HashMap::new(),
-            current_function_by_ref_exit_snapshots: std::collections::HashMap::new(),
-            current_function_by_ref_params_with_tag: std::collections::HashMap::new(),
-            current_function_byref_snapshot_names: std::collections::HashSet::new(),
-            current_function_goto_targets: std::collections::HashSet::new(),
+            current_function_by_ref_params: rustc_hash::FxHashMap::default(),
+            current_function_by_ref_exit_snapshots: rustc_hash::FxHashMap::default(),
+            current_function_by_ref_params_with_tag: rustc_hash::FxHashMap::default(),
+            current_function_byref_snapshot_names: rustc_hash::FxHashSet::default(),
+            current_function_goto_targets: rustc_hash::FxHashSet::default(),
             current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
             pest_this_type: Type::Mixed(false),
-            pest_hook_properties: HashSet::new(),
-            anonymous_class_names: HashMap::new(),
+            pest_hook_properties: FxHashSet::default(),
+            anonymous_class_names: FxHashMap::default(),
             current_anonymous_class: None,
             current_file: None,
-            include_guarded_paths: HashSet::new(),
+            include_guarded_paths: FxHashSet::default(),
             include_path_dirs: Vec::new(),
             working_dir: None,
-            include_constant_initializers: HashMap::new(),
-            enum_chain_tails: HashSet::new(),
+            include_constant_initializers: FxHashMap::default(),
+            enum_chain_tails: FxHashSet::default(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
-            property_assign_facts: HashMap::new(),
-            named_argument_call_facts: HashMap::new(),
+            property_assign_facts: FxHashMap::default(),
+            named_argument_call_facts: FxHashMap::default(),
             renamed_parameter_override_facts: Vec::new(),
             cross_file_property_assign_facts: None,
             facts_only: false,
@@ -1491,8 +1488,8 @@ impl<'a> Checker<'a> {
             loop_depth: 0,
             in_range_index_writes: Vec::new(),
             active_discriminant: Vec::new(),
-            static_var_names: HashSet::new(),
-            rebind_target_classes: HashSet::new(),
+            static_var_names: FxHashSet::default(),
+            rebind_target_classes: FxHashSet::default(),
             rebind_escape_all: false,
             probe_span: Cell::new(None),
             probe_hit: RefCell::new(None),
@@ -1501,11 +1498,11 @@ impl<'a> Checker<'a> {
             inlay_param_name_hints: Vec::new(),
             inlay_local_type_hints: Vec::new(),
             collect_member_refs: false,
-            member_ref_sites: RefCell::new(HashSet::new()),
-            escaped_enums: RefCell::new(HashSet::new()),
-            escaped_member_classes: RefCell::new(HashSet::new()),
+            member_ref_sites: RefCell::new(FxHashSet::default()),
+            escaped_enums: RefCell::new(FxHashSet::default()),
+            escaped_member_classes: RefCell::new(FxHashSet::default()),
             semantic_tokens: Vec::new(),
-            call_candidate_cache: RefCell::new(HashMap::new()),
+            call_candidate_cache: RefCell::new(FxHashMap::default()),
             pending_or_disjunctions: Vec::new(),
             type_dump: None,
         }
@@ -1559,7 +1556,7 @@ impl<'a> Checker<'a> {
     /// type is unchanged) and interns each one into the shared `Arc<str>`
     /// table on the way in, matching the field's own interned
     /// representation.
-    pub fn set_pest_hook_properties(&mut self, props: HashSet<String>) {
+    pub fn set_pest_hook_properties(&mut self, props: FxHashSet<String>) {
         self.pest_hook_properties = props
             .into_iter()
             .map(|p| crate::intern::intern(&p))
@@ -1574,7 +1571,7 @@ impl<'a> Checker<'a> {
         self.current_file = Some(path.to_path_buf());
     }
 
-    pub fn set_anonymous_class_names(&mut self, names: HashMap<crate::token::Span, String>) {
+    pub fn set_anonymous_class_names(&mut self, names: FxHashMap<crate::token::Span, String>) {
         self.anonymous_class_names = names;
     }
 
@@ -1712,7 +1709,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `take_member_ref_sites`'s own sibling for `escaped_enums`.
-    pub(crate) fn take_escaped_enums(&mut self) -> HashSet<String> {
+    pub(crate) fn take_escaped_enums(&mut self) -> FxHashSet<String> {
         self.escaped_enums.take()
     }
 
@@ -1731,7 +1728,7 @@ impl<'a> Checker<'a> {
     }
 
     /// `take_escaped_enums`'s own sibling for `escaped_member_classes`.
-    pub(crate) fn take_escaped_member_classes(&mut self) -> HashSet<String> {
+    pub(crate) fn take_escaped_member_classes(&mut self) -> FxHashSet<String> {
         self.escaped_member_classes.take()
     }
 

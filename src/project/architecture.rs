@@ -5,7 +5,7 @@
 //! PHPDoc-refined types of its methods and properties; built-in classes
 //! and the class itself don't count.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
@@ -31,7 +31,7 @@ struct Declared<'a> {
 fn collect_declared<'a>(
     stmts: &'a [Stmt],
     ctx: &mut NameContext,
-    out: &mut HashMap<String, Declared<'a>>,
+    out: &mut FxHashMap<String, Declared<'a>>,
 ) {
     for stmt in stmts {
         match &stmt.kind {
@@ -87,13 +87,13 @@ fn contains(outer: Span, inner: Span) -> bool {
 }
 
 /// Spans of the class operand of every `new` in `stmts`.
-fn new_class_spans(stmts: &[Stmt], out: &mut HashSet<Span>) {
+fn new_class_spans(stmts: &[Stmt], out: &mut FxHashSet<Span>) {
     for stmt in stmts {
         new_class_spans_in_stmt(stmt, out);
     }
 }
 
-fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut HashSet<Span>) {
+fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut FxHashSet<Span>) {
     match &stmt.kind {
         StmtKind::FunctionDecl(f) => new_class_spans(&f.body, out),
         StmtKind::ClassDecl(c) => {
@@ -122,7 +122,7 @@ fn new_class_spans_in_stmt(stmt: &Stmt, out: &mut HashSet<Span>) {
     }
 }
 
-fn new_class_spans_in_expr(e: &Expr, out: &mut HashSet<Span>) {
+fn new_class_spans_in_expr(e: &Expr, out: &mut FxHashSet<Span>) {
     match &e.kind {
         ExprKind::New(class, _) => {
             out.insert(class.span);
@@ -184,8 +184,8 @@ struct Dependency {
 
 struct Context<'p> {
     project: &'p Project,
-    declared: HashMap<String, Declared<'p>>,
-    patterns: HashMap<String, NamePattern>,
+    declared: FxHashMap<String, Declared<'p>>,
+    patterns: FxHashMap<String, NamePattern>,
 }
 
 impl<'p> Context<'p> {
@@ -207,7 +207,7 @@ impl<'p> Context<'p> {
     fn extends_chain(&self, fqn: &str) -> Vec<String> {
         let mut out = Vec::new();
         let mut current = self.canonical(fqn);
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         while let Some((_, info)) = self.project.registry.lookup_class(&current) {
             if info.kind != ClassKind::Class {
                 break;
@@ -343,32 +343,32 @@ impl Project {
     pub fn check_architecture(
         &self,
         rules: &[ArchitectureRule],
-    ) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         if rules.is_empty() {
             return out;
         }
-        let mut declared = HashMap::new();
+        let mut declared = FxHashMap::default();
         for file in self.files.values() {
             collect_declared(&file.ast, &mut NameContext::default(), &mut declared);
         }
         let mut ctx = Context {
             project: self,
             declared,
-            patterns: HashMap::new(),
+            patterns: FxHashMap::default(),
         };
 
         let mut analyzed: Vec<(&PathBuf, &super::FileState)> =
             self.files.iter().filter(|(_, f)| f.analyzed).collect();
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
         for (path, file) in analyzed {
-            let mut classes = HashMap::new();
+            let mut classes = FxHashMap::default();
             collect_declared(&file.ast, &mut NameContext::default(), &mut classes);
             if classes.is_empty() {
                 continue;
             }
             let refs = index_class_fn_refs_without_source(&file.ast);
-            let mut constructed = HashSet::new();
+            let mut constructed = FxHashSet::default();
             new_class_spans(&file.ast, &mut constructed);
             let mut class_names: Vec<&String> = classes.keys().collect();
             class_names.sort();
@@ -405,10 +405,10 @@ impl Project {
         fqn: &str,
         decl: &Declared,
         refs: &[(Span, RefTarget)],
-        constructed: &HashSet<Span>,
+        constructed: &FxHashSet<Span>,
     ) -> Vec<Dependency> {
         let mut deps: Vec<Dependency> = Vec::new();
-        let mut index: HashMap<String, usize> = HashMap::new();
+        let mut index: FxHashMap<String, usize> = FxHashMap::default();
         let mut push = |target: String, span: Span, is_new: bool, deps: &mut Vec<Dependency>| {
             let Some((canonical, _)) = self.registry.lookup_class(target.trim_start_matches('\\'))
             else {

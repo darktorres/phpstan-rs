@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::types::{CallableParam, CallableSig, TemplateParam, Type};
@@ -11,7 +11,7 @@ use crate::types::{CallableParam, CallableSig, TemplateParam, Type};
 /// since `substitute_template` falls back to `Mixed` for anything left
 /// unbound. First binding for a given name wins; conflicting uses of the
 /// same `T` across multiple params aren't reconciled (no union-widening).
-pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut HashMap<String, Type>) {
+pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHashMap<String, Type>) {
     match param_ty {
         Type::TemplateParam(tp)
             if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) => {}
@@ -183,7 +183,7 @@ impl CallableSig {
                 other => other.map_children(&mut open),
             }
         }
-        let mut bindings = HashMap::new();
+        let mut bindings = FxHashMap::default();
         for (i, arg) in arg_types.iter().enumerate() {
             let param = self
                 .params
@@ -197,7 +197,7 @@ impl CallableSig {
     }
 }
 
-pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type {
+pub fn substitute_template(ty: &Type, bindings: &FxHashMap<String, Type>) -> Type {
     substitute(ty, bindings, &|_| false)
 }
 
@@ -211,7 +211,7 @@ pub fn substitute_template(ty: &Type, bindings: &HashMap<String, Type>) -> Type 
 /// an erased class's arguments compare as.
 pub fn substitute_template_resolving_to_bounds(
     ty: &Type,
-    bindings: &HashMap<String, Type>,
+    bindings: &FxHashMap<String, Type>,
     to_bound: &dyn Fn(&TemplateParam) -> bool,
 ) -> Type {
     substitute(ty, bindings, to_bound)
@@ -219,7 +219,7 @@ pub fn substitute_template_resolving_to_bounds(
 
 fn substitute(
     ty: &Type,
-    bindings: &HashMap<String, Type>,
+    bindings: &FxHashMap<String, Type>,
     to_bound: &dyn Fn(&TemplateParam) -> bool,
 ) -> Type {
     match ty {

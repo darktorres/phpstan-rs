@@ -56,16 +56,16 @@ pub struct Parser {
     // lexer's own interned `Token::DocComment` value through unchanged -
     // converting to `String` here and back to `Arc<str>` at the AST
     // fields that ultimately store it would be a pure wash.
-    pub(crate) doc_comments: std::collections::HashMap<usize, Arc<str>>,
+    pub(crate) doc_comments: rustc_hash::FxHashMap<usize, Arc<str>>,
     // Each `doc_comments` entry's own start line, same keys.
-    pub(crate) doc_comment_lines: std::collections::HashMap<usize, u32>,
+    pub(crate) doc_comment_lines: rustc_hash::FxHashMap<usize, u32>,
     // Where several doc comments directly precede one token, all of them
     // folded into one comment, same keys. A statement reads every one
     // (real PHPStan's `getComments()`); a declaration only its last
     // (`getDocComment()`, `doc_comments` above).
-    pub(crate) doc_comments_all: std::collections::HashMap<usize, Arc<str>>,
+    pub(crate) doc_comments_all: rustc_hash::FxHashMap<usize, Arc<str>>,
     // Where the (first) doc comment in `doc_comments` starts, same keys.
-    pub(crate) doc_comment_starts: std::collections::HashMap<usize, crate::token::Position>,
+    pub(crate) doc_comment_starts: rustc_hash::FxHashMap<usize, crate::token::Position>,
     // Incremented/decremented around the parser's self-recursive
     // expression productions (parse_unary, parse_assignment,
     // parse_coalesce) - see MAX_EXPR_DEPTH.
@@ -101,10 +101,10 @@ impl Parser {
         let mut filtered = Vec::with_capacity(tokens.len());
         let mut filtered_spans = Vec::with_capacity(tokens.len());
         let mut filtered_keyword_raw = Vec::with_capacity(tokens.len());
-        let mut doc_comments = std::collections::HashMap::new();
-        let mut doc_comment_lines = std::collections::HashMap::new();
-        let mut doc_comments_all = std::collections::HashMap::new();
-        let mut doc_comment_starts = std::collections::HashMap::new();
+        let mut doc_comments = rustc_hash::FxHashMap::default();
+        let mut doc_comment_lines = rustc_hash::FxHashMap::default();
+        let mut doc_comments_all = rustc_hash::FxHashMap::default();
+        let mut doc_comment_starts = rustc_hash::FxHashMap::default();
         let mut pending: Vec<(Arc<str>, crate::token::Position)> = Vec::new();
         for (tok, span, keyword_raw) in tokens {
             match tok {

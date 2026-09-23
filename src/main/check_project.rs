@@ -401,6 +401,10 @@ pub(crate) struct CheckProjectArgs {
     /// every analysed file to this path (a regression-gate snapshot).
     #[arg(long, hide = true)]
     pub(crate) dump_types: Option<PathBuf>,
+    /// Prints each file's diagnostics in the order the checks emitted them
+    /// (a determinism check), not the usual total order.
+    #[arg(long, hide = true)]
+    pub(crate) emission_order: bool,
     /// Extra directories loaded for type-resolution context only -
     /// never analyzed or reported on. Repeatable.
     #[arg(long = "scan-dir")]
@@ -656,6 +660,7 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
         report_level: None,
         php_version: args.php_version.clone(),
         no_composer: args.no_composer,
+        emission_order: args.emission_order,
     };
     let session = match Session::resolve(config, config_dir, PathBuf::from("."), overrides) {
         Ok(session) => session,

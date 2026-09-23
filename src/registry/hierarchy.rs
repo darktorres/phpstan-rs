@@ -1,8 +1,8 @@
-use std::collections::{HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 use std::sync::Arc;
 
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::ClassKind;
 use crate::intern::intern;
@@ -78,7 +78,7 @@ impl Registry {
     /// real PHPStan's own `ClassReflection::isImmutable()` (walks
     /// `getParentClass()` only, never `implements`/`uses`).
     pub(crate) fn class_is_immutable(&self, class: &str) -> bool {
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut stack = vec![intern(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -102,10 +102,10 @@ impl Registry {
     /// Needed by `checker::oop::check_require_tags`: real PHPStan's
     /// `getInterfaces()`/`getTraits(true)` are both transitive the
     /// identical way.
-    pub(crate) fn all_ancestor_names(&self, class: &str) -> HashSet<Arc<str>> {
-        let mut seen = HashSet::new();
+    pub(crate) fn all_ancestor_names(&self, class: &str) -> FxHashSet<Arc<str>> {
+        let mut seen = FxHashSet::default();
         let mut stack = vec![intern(class)];
-        let mut result = HashSet::new();
+        let mut result = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -135,7 +135,7 @@ impl Registry {
     pub(crate) fn classes_using_trait(&self, trait_fqn: &str) -> Vec<Arc<str>> {
         let mut result = Vec::new();
         let mut stack = vec![intern(trait_fqn)];
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
                 continue;
@@ -187,7 +187,7 @@ impl Registry {
         let mut method_owner = FxHashMap::default();
         let mut property_owner = FxHashMap::default();
         let mut const_owner = FxHashMap::default();
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut queue = VecDeque::new();
         queue.push_back(intern(class));
         while let Some(current) = queue.pop_front() {
@@ -638,7 +638,7 @@ impl Registry {
         let Some(info) = self.classes.get(class) else {
             return false;
         };
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut queue: VecDeque<Arc<str>> = info
             .extends
             .iter()
@@ -698,7 +698,7 @@ impl Registry {
         method: &str,
     ) -> Option<(Arc<str>, bool)> {
         let info = self.classes.get(class)?;
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut stack: Vec<Arc<str>> = info.extends.clone();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -731,7 +731,7 @@ impl Registry {
         property: &str,
     ) -> Option<(Arc<str>, bool)> {
         let info = self.classes.get(class)?;
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut stack: Vec<Arc<str>> = info.extends.clone();
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -763,10 +763,10 @@ impl Registry {
         class: &str,
         method: &str,
     ) -> Vec<(Arc<str>, &FunctionSig)> {
-        let mut seen_classes = HashSet::new();
+        let mut seen_classes = FxHashSet::default();
         let mut class_queue: VecDeque<Arc<str>> = VecDeque::new();
         class_queue.push_back(intern(class));
-        let mut seen_ifaces = HashSet::new();
+        let mut seen_ifaces = FxHashSet::default();
         let mut result = Vec::new();
         while let Some(c) = class_queue.pop_front() {
             if !seen_classes.insert(c.clone()) {
@@ -806,8 +806,8 @@ impl Registry {
     /// here already covers it, with no separate trait-specific case
     /// needed.
     pub fn required_abstract_methods(&self, class: &str) -> Vec<Arc<str>> {
-        let mut required = HashSet::new();
-        let mut seen = HashSet::new();
+        let mut required = FxHashSet::default();
+        let mut seen = FxHashSet::default();
         let mut stack = vec![intern(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {
@@ -851,7 +851,7 @@ impl Registry {
     /// interface's own bodyless declaration, even though a real
     /// implementation is reachable elsewhere.
     pub fn has_concrete_implementation(&self, class: &str, method: &str) -> bool {
-        let mut seen = HashSet::new();
+        let mut seen = FxHashSet::default();
         let mut stack = vec![intern(class)];
         while let Some(current) = stack.pop() {
             if !seen.insert(current.clone()) {

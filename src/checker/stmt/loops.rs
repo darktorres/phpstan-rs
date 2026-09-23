@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 use crate::ast::*;
@@ -744,7 +744,7 @@ impl<'a> Checker<'a> {
         // already wouldn't survive that iteration's own internal
         // `merge_scopes` join, so it's correctly absent from `pass_locals`
         // by the time this reads it.
-        let mut last_field_facts: HashMap<String, Type> = HashMap::new();
+        let mut last_field_facts: FxHashMap<String, Type> = FxHashMap::default();
         let (body_locals, break_states) = self.converge_loop_body(
             &entry,
             declared_return,

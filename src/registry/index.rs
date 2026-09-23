@@ -616,8 +616,8 @@ fn build_declarations_with_context(
                 let sig = FunctionSig::from_decl(
                     f,
                     ctx,
-                    &std::collections::HashMap::new(),
-                    &std::collections::HashMap::new(),
+                    &rustc_hash::FxHashMap::default(),
+                    &rustc_hash::FxHashMap::default(),
                     Visibility::Public,
                 );
                 out.push(BuiltDecl::Function {

@@ -14,7 +14,7 @@
 //! code) - real PHPStan reports nothing there because of this config,
 //! not because nothing would otherwise be found.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use serde::Deserialize;
@@ -132,7 +132,7 @@ pub(crate) fn glob_matches(pattern: &str, path: &str) -> bool {
 /// `@phpstan-ignore-line` suppression already applies - a config-level
 /// entry must never suppress a diagnostic real PHPStan itself would
 /// refuse to let any ignore mechanism touch.
-pub fn filter(results: &mut HashMap<PathBuf, Vec<Diagnostic>>, entries: &[IgnoreErrorEntry]) {
+pub fn filter(results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>, entries: &[IgnoreErrorEntry]) {
     if entries.is_empty() {
         return;
     }

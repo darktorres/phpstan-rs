@@ -17,12 +17,12 @@
 //! profiling Stages 1-3 first once they've actually landed, not assumed
 //! upfront.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::sync::{Arc, Mutex, OnceLock};
 
-fn table() -> &'static Mutex<HashSet<Arc<str>>> {
-    static TABLE: OnceLock<Mutex<HashSet<Arc<str>>>> = OnceLock::new();
-    TABLE.get_or_init(|| Mutex::new(HashSet::new()))
+fn table() -> &'static Mutex<FxHashSet<Arc<str>>> {
+    static TABLE: OnceLock<Mutex<FxHashSet<Arc<str>>>> = OnceLock::new();
+    TABLE.get_or_init(|| Mutex::new(FxHashSet::default()))
 }
 
 /// Returns a shared `Arc<str>` for `s`'s own text. The first call for a

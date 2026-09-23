@@ -40,7 +40,7 @@
 //! narrowing from the dropped tail is lost) even though it can't
 //! precisely re-run partial per-statement edits.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
@@ -423,7 +423,7 @@ pub(super) fn enumerate_members(
 ) -> Vec<CompletionItem> {
     let mut classes = Vec::new();
     type_to_class_names(ty, &mut classes);
-    let mut seen: HashSet<(u8, String)> = HashSet::new();
+    let mut seen: FxHashSet<(u8, String)> = FxHashSet::default();
     let mut items = Vec::new();
 
     for class in &classes {
@@ -580,7 +580,7 @@ pub(super) fn enumerate_bare(
     current_stmts: &[Stmt],
 ) -> Vec<CompletionItem> {
     let registry = project.registry();
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen: FxHashSet<String> = FxHashSet::default();
     let mut items = Vec::new();
 
     for (fqn, info) in &registry.classes {

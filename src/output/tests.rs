@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use super::*;
@@ -27,7 +27,7 @@ fn diag_with_identifier(
         identifier: identifier.to_string(),
         tip: None,
         non_ignorable: false,
-        metadata: HashMap::new(),
+        metadata: FxHashMap::default(),
         fix: None,
     }
 }
@@ -43,7 +43,7 @@ fn diagnostic_line_matches_this_projects_original_text_shape() {
 
 #[test]
 fn render_json_includes_totals_and_per_file_messages() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("src/bad.php"),
         vec![diag("f", "undefined variable: $x", 3, 12, 0)],
@@ -68,7 +68,7 @@ fn render_json_includes_totals_and_per_file_messages() {
 
 #[test]
 fn render_json_omits_clean_files_but_counts_them_in_files_checked() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(PathBuf::from("src/clean.php"), vec![]);
     results.insert(
         PathBuf::from("src/bad.php"),
@@ -91,7 +91,7 @@ fn render_json_omits_clean_files_but_counts_them_in_files_checked() {
 
 #[test]
 fn render_json_report_with_zero_diagnostics_is_still_valid_and_empty() {
-    let results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+    let results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
     let json = render_json(&results, 0);
     let parsed: serde_json::Value = serde_json::from_str(&json).expect("valid JSON");
     assert_eq!(parsed["totals"]["files_checked"], 0);
@@ -101,7 +101,7 @@ fn render_json_report_with_zero_diagnostics_is_still_valid_and_empty() {
 
 #[test]
 fn render_checkstyle_produces_well_formed_xml_with_one_error_per_diagnostic() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("src/bad.php"),
         vec![
@@ -135,7 +135,7 @@ fn render_checkstyle_produces_well_formed_xml_with_one_error_per_diagnostic() {
 
 #[test]
 fn render_checkstyle_escapes_special_characters_in_messages() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("src/bad.php"),
         vec![diag(
@@ -154,7 +154,7 @@ fn render_checkstyle_escapes_special_characters_in_messages() {
 
 #[test]
 fn render_checkstyle_omits_files_with_zero_diagnostics() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(PathBuf::from("src/clean.php"), vec![]);
 
     let xml = render_checkstyle(&results);
@@ -175,7 +175,7 @@ fn a_multi_line_message_stays_one_line_in_text_but_intact_in_json_and_checkstyle
         diagnostic_line(&d),
         "1:1: f: value (first second third): bad (variable.undefined)"
     );
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(PathBuf::from("a.php"), vec![d]);
     assert!(render_json(&results, 1).contains(r#"value (first\nsecond\r\nthird): bad"#));
     assert!(render_checkstyle(&results).contains("value (first&#10;second&#13;&#10;third): bad"));
@@ -183,7 +183,7 @@ fn a_multi_line_message_stays_one_line_in_text_but_intact_in_json_and_checkstyle
 
 #[test]
 fn junit_reports_each_diagnostic_as_a_failing_case_and_clean_files_as_passing() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("src/a.php"),
         vec![diag_with_identifier(
@@ -228,7 +228,7 @@ fn friendly_frames_the_reported_line_with_its_span_underlined() {
     let mut d = diag_with_identifier("f", "Wrong return.", 4, 12, 0, "return.type");
     d.span.end = Position { line: 4, col: 18 };
     d.tip = Some("Return a string.".to_string());
-    let results = HashMap::from([(path.clone(), vec![d])]);
+    let results = FxHashMap::from_iter([(path.clone(), vec![d])]);
     let text = render_friendly(&results, false);
     let expected = format!(
         " ✖ Wrong return.\n  {}:4:12 · f · return.type\n    2 | // note\n    3 | function f(int $x): string {{\n  > 4 |     return $x + 1;\n      |            ^^^^^^\n    5 | }}\n  💡 Return a string.\n\n",
@@ -241,7 +241,7 @@ fn friendly_frames_the_reported_line_with_its_span_underlined() {
 #[test]
 fn friendly_highlights_code_when_colour_is_on() {
     let path = friendly_fixture("colour");
-    let results = HashMap::from([(
+    let results = FxHashMap::from_iter([(
         path.clone(),
         vec![diag_with_identifier(
             "f",

@@ -19,7 +19,7 @@
 //! overwhelming majority of real PHP source), not a correctness bug worth
 //! blocking on.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -164,7 +164,7 @@ struct Server {
     // event - neither carries a document version, only `didOpen`/
     // `didChange` do), so `publishDiagnostics` can be stamped with it -
     // see `uri_and_version_for`.
-    open_uris: HashMap<PathBuf, (Uri, Option<i32>)>,
+    open_uris: FxHashMap<PathBuf, (Uri, Option<i32>)>,
     // The last-computed, post-`apply_post_filters` diagnostic set for
     // every path this server has ever checked - `code_actions` reads
     // this instead of re-running a whole-file checker pass per request
@@ -177,7 +177,7 @@ struct Server {
     // `codeAction` request can only ever see whatever the most recently
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
-    last_diagnostics: HashMap<PathBuf, Vec<checker::Diagnostic>>,
+    last_diagnostics: FxHashMap<PathBuf, Vec<checker::Diagnostic>>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
     // regardless of whether it parses - `Project::source`/`Project::ast`
     // only ever reflect the last *successfully parsed* version, but
@@ -186,7 +186,7 @@ struct Server {
     // error) buffer text to tokenize and to extract a receiver
     // expression's own text from. See `completion`'s own module doc
     // comment for the full mechanism this feeds.
-    latest_text: HashMap<PathBuf, String>,
+    latest_text: FxHashMap<PathBuf, String>,
     // Set once a real `shutdown` request has been handled - `run_loop`'s
     // own `exit` arm consults this to pick the LSP spec's mandated
     // process exit code (0 if `shutdown` preceded `exit`, 1 otherwise).
@@ -282,14 +282,14 @@ struct Server {
     // changed this session (only ever seen via the workspace scan) has an
     // implicit version of 0, consistent with its first request computing
     // and caching at that same version.
-    file_versions: HashMap<PathBuf, u64>,
+    file_versions: FxHashMap<PathBuf, u64>,
     // `textDocument/inlayHint`'s version-keyed whole-file hint cache - see
     // `inlay_hints`'s own doc comment for why a cache is needed at all
     // (VS Code re-pulls inlay hints on edits, not just scroll/viewport
     // changes, so serving a request against an unchanged document from
     // cache is what actually saves a repeated `check_program` pass).
     #[allow(clippy::type_complexity)]
-    inlay_hint_cache: HashMap<PathBuf, (u64, Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)>,
+    inlay_hint_cache: FxHashMap<PathBuf, (u64, Vec<(Span, Arc<str>)>, Vec<(Span, Type)>)>,
 }
 
 impl Server {
@@ -301,9 +301,9 @@ impl Server {
         project.set_retain_source(true);
         Server {
             project,
-            open_uris: HashMap::new(),
-            last_diagnostics: HashMap::new(),
-            latest_text: HashMap::new(),
+            open_uris: FxHashMap::default(),
+            last_diagnostics: FxHashMap::default(),
+            latest_text: FxHashMap::default(),
             shutdown_received: false,
             pending_requests: lsp_server::ReqQueue::default(),
             // `Incoming<I>` has no public constructor or `Default` impl
@@ -325,8 +325,8 @@ impl Server {
             last_applied_config: None,
             last_warned_pending_config: None,
             supports_watched_files: false,
-            file_versions: HashMap::new(),
-            inlay_hint_cache: HashMap::new(),
+            file_versions: FxHashMap::default(),
+            inlay_hint_cache: FxHashMap::default(),
         }
     }
 
@@ -515,8 +515,8 @@ impl Server {
     /// default, not a provable-correct one, for either.
     fn apply_post_filters(
         &self,
-        mut results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
-    ) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
+        mut results: FxHashMap<PathBuf, Vec<checker::Diagnostic>>,
+    ) -> FxHashMap<PathBuf, Vec<checker::Diagnostic>> {
         if let Some(cutoff) = self.level_cutoff {
             for diagnostics in results.values_mut() {
                 diagnostics.retain(|d| d.level <= cutoff);
@@ -533,7 +533,7 @@ impl Server {
                 .map(Path::to_path_buf)
                 .unwrap_or(path)
         };
-        let mut relative: HashMap<PathBuf, Vec<checker::Diagnostic>> = results
+        let mut relative: FxHashMap<PathBuf, Vec<checker::Diagnostic>> = results
             .into_iter()
             .map(|(path, diags)| (to_relative(path), diags))
             .collect();
@@ -615,7 +615,7 @@ impl Server {
         context: &workspace_config::WorkspaceContextPaths,
     ) -> Vec<Message> {
         let mut messages = Vec::new();
-        let mut loaded: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        let mut loaded: rustc_hash::FxHashSet<PathBuf> = rustc_hash::FxHashSet::default();
 
         let mut context_files = context.vendor.files.clone();
         for dir in context.vendor.dirs.iter().chain(context.extra_dirs.iter()) {
@@ -753,10 +753,10 @@ impl Server {
     /// (which then drops empty results) and `republish_known_files`
     /// (which must not, so a file previously flagged and now clean gets
     /// an explicit clearing notification).
-    fn check_all_analyzed_paths(&mut self) -> HashMap<PathBuf, Vec<checker::Diagnostic>> {
+    fn check_all_analyzed_paths(&mut self) -> FxHashMap<PathBuf, Vec<checker::Diagnostic>> {
         let mut paths = self.project.analyzed_paths();
         if paths.is_empty() {
-            return HashMap::new();
+            return FxHashMap::default();
         }
         // Deterministic order (matches load_workspace's own `files.sort()`
         // rationale) - HashMap/HashSet iteration order would otherwise
@@ -931,7 +931,8 @@ impl Server {
     /// matters (this is intra-batch coalescing only, not a cross-
     /// notification debounce - see this item's own doc comment).
     fn handle_watched_files_changed(&mut self, changes: Vec<lsp_types::FileEvent>) -> Vec<Message> {
-        let mut last_by_path: HashMap<PathBuf, (Uri, lsp_types::FileChangeType)> = HashMap::new();
+        let mut last_by_path: FxHashMap<PathBuf, (Uri, lsp_types::FileChangeType)> =
+            FxHashMap::default();
         for change in changes {
             let Some(path) = uri_to_path(&change.uri) else {
                 continue;
@@ -988,7 +989,7 @@ impl Server {
     /// `remove_workspace_folders`'s own recheck step.
     fn publish_diagnostics_for(
         &mut self,
-        results: HashMap<PathBuf, Vec<checker::Diagnostic>>,
+        results: FxHashMap<PathBuf, Vec<checker::Diagnostic>>,
     ) -> Vec<Message> {
         results
             .into_iter()
@@ -1501,7 +1502,7 @@ impl Server {
             _ => return None,
         };
         self.project.ensure_member_index_built();
-        let mut changes: HashMap<Uri, Vec<lsp_types::TextEdit>> = HashMap::new();
+        let mut changes: FxHashMap<Uri, Vec<lsp_types::TextEdit>> = FxHashMap::default();
         for (p, span) in self.project.use_sites().references(&target) {
             let (edit_uri, _) = self.uri_and_version_for(p);
             changes
@@ -1526,7 +1527,8 @@ impl Server {
             return None;
         }
         Some(lsp_types::WorkspaceEdit {
-            changes: Some(changes),
+            // `lsp_types` fixes the map type; entry order isn't observable.
+            changes: Some(changes.into_iter().collect()),
             ..Default::default()
         })
     }
@@ -1868,7 +1870,7 @@ impl Server {
         let path = uri_to_path(uri)?;
         if !self.last_diagnostics.contains_key(&path) {
             let raw = self.project.check_file(&path);
-            let filtered = self.apply_post_filters(HashMap::from([(path.clone(), raw)]));
+            let filtered = self.apply_post_filters(FxHashMap::from_iter([(path.clone(), raw)]));
             let diags = filtered.into_values().next().unwrap_or_default();
             self.last_diagnostics.insert(path.clone(), diags);
         }

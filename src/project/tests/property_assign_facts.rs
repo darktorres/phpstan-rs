@@ -117,7 +117,7 @@ fn collect_property_assign_facts_with_mode(
     project: &Project,
     facts_only: bool,
 ) -> PropertyAssignFacts {
-    let mut merged: PropertyAssignFacts = HashMap::new();
+    let mut merged: PropertyAssignFacts = FxHashMap::default();
     for path in project.files.keys() {
         let Some(file) = project.files.get(path) else {
             continue;

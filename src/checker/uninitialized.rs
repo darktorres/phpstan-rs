@@ -20,7 +20,7 @@
 //! heuristic is considerably simpler than a real dataflow analysis and
 //! isn't safe to run unconditionally.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::ast::*;
 use crate::ast_walk::stmt_children;
@@ -113,7 +113,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
         .classes
         .get(fqn)
         .and_then(|info| info.extends.first().cloned());
-    let mut seen = HashSet::new();
+    let mut seen = FxHashSet::default();
     while let Some(ancestor) = current {
         if !seen.insert(ancestor.clone()) {
             break; // cycle guard for a malformed/circular hierarchy
@@ -135,7 +135,7 @@ pub(super) fn property_assigned_anywhere_in_hierarchy(
     false
 }
 
-fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &HashSet<String>) -> bool {
+fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &FxHashSet<String>) -> bool {
     stmts
         .iter()
         .any(|s| stmt_ever_assigns_property(s, prop, self_vars))
@@ -149,7 +149,7 @@ fn body_ever_assigns_property(stmts: &[Stmt], prop: &str, self_vars: &HashSet<St
 /// guarantee. Doesn't descend into a closure/arrow-fn's own body
 /// (`stmt_children`'s documented boundary); a property assigned only
 /// inside one is an accepted gap.
-fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &HashSet<String>) -> bool {
+fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     let own =
         matches!(&stmt.kind, StmtKind::Expression(e) if initializes_property(e, prop, self_vars));
     own || stmt_children(stmt)
@@ -157,7 +157,7 @@ fn stmt_ever_assigns_property(stmt: &Stmt, prop: &str, self_vars: &HashSet<Strin
         .any(|s| stmt_ever_assigns_property(s, prop, self_vars))
 }
 
-fn initializes_property(e: &Expr, prop: &str, self_vars: &HashSet<String>) -> bool {
+fn initializes_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     match &e.kind {
         ExprKind::Assign(lhs, _) | ExprKind::AssignRef(lhs, _) => {
             is_tracked_property(lhs, prop, self_vars)
@@ -174,7 +174,7 @@ fn initializes_property(e: &Expr, prop: &str, self_vars: &HashSet<String>) -> bo
     }
 }
 
-fn is_tracked_property(e: &Expr, prop: &str, self_vars: &HashSet<String>) -> bool {
+fn is_tracked_property(e: &Expr, prop: &str, self_vars: &FxHashSet<String>) -> bool {
     let ExprKind::PropertyAccess(base, name, _) = &e.kind else {
         return false;
     };
@@ -191,13 +191,13 @@ fn is_tracked_property(e: &Expr, prop: &str, self_vars: &HashSet<String>) -> boo
 /// static(...)`/a bare `new <ThisClass>(...)` anywhere in `stmts` -
 /// scoped to the single, common `$var = new ...;` expression-statement
 /// shape, not e.g. a ternary-wrapped `new`.
-fn collect_self_instance_vars(stmts: &[Stmt], class_name: &str) -> HashSet<String> {
-    let mut vars = HashSet::new();
+fn collect_self_instance_vars(stmts: &[Stmt], class_name: &str) -> FxHashSet<String> {
+    let mut vars = FxHashSet::default();
     collect_self_instance_vars_into(stmts, class_name, &mut vars);
     vars
 }
 
-fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut HashSet<String>) {
+fn collect_self_instance_vars_into(stmts: &[Stmt], class_name: &str, vars: &mut FxHashSet<String>) {
     for s in stmts {
         if let StmtKind::Expression(e) = &s.kind
             && let ExprKind::Assign(lhs, rhs) = &e.kind

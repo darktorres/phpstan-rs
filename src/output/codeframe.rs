@@ -2,7 +2,7 @@
 //! lines around it, the reported span underlined, and (on a colour
 //! terminal) the code syntax-highlighted.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
@@ -24,7 +24,7 @@ const GRAY: &str = "\x1b[90m";
 
 /// `(first column, last column exclusive or `None` for end of line,
 /// colour)` per line.
-type Highlights = HashMap<u32, Vec<(u32, Option<u32>, &'static str)>>;
+type Highlights = FxHashMap<u32, Vec<(u32, Option<u32>, &'static str)>>;
 
 fn token_colour(token: &Token) -> Option<&'static str> {
     match token {
@@ -46,7 +46,7 @@ fn add_range(highlights: &mut Highlights, start: Position, end: Position, colour
 }
 
 fn highlights_for(source: &str) -> Highlights {
-    let mut highlights = Highlights::new();
+    let mut highlights = Highlights::default();
     let (tokens, comments) = Lexer::new(source).tokenize_with_comments();
     for (token, span, _) in &tokens {
         if let Some(colour) = token_colour(token) {
@@ -162,7 +162,7 @@ fn frame(
 
 /// Renders `results` in the `friendly` format; `colour` adds ANSI colours
 /// and syntax highlighting. Source text is read from each file's path.
-pub fn render_friendly(results: &HashMap<PathBuf, Vec<Diagnostic>>, colour: bool) -> String {
+pub fn render_friendly(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, colour: bool) -> String {
     let painter = Painter { colour };
     let mut paths: Vec<&PathBuf> = results.keys().filter(|p| !results[*p].is_empty()).collect();
     paths.sort();

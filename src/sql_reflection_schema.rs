@@ -186,8 +186,8 @@ fn object_name_to_string(name: &ObjectName) -> String {
 /// Columns named by a table-level `PRIMARY KEY (...)` constraint are
 /// implicitly `NOT NULL` by real SQL rule, even on a real dump that
 /// doesn't also spell out `NOT NULL` on the column itself.
-fn primary_key_column_names(constraints: &[TableConstraint]) -> std::collections::HashSet<String> {
-    let mut names = std::collections::HashSet::new();
+fn primary_key_column_names(constraints: &[TableConstraint]) -> rustc_hash::FxHashSet<String> {
+    let mut names = rustc_hash::FxHashSet::default();
     for constraint in constraints {
         if let TableConstraint::PrimaryKey(pk) = constraint {
             for indexed in &pk.columns {
@@ -208,7 +208,7 @@ fn column_is_not_null(options: &[ColumnOptionDef]) -> bool {
 
 fn schema_column(
     col: &ColumnDef,
-    primary_key_columns: &std::collections::HashSet<String>,
+    primary_key_columns: &rustc_hash::FxHashSet<String>,
 ) -> SchemaColumn {
     let nullable =
         !(column_is_not_null(&col.options) || primary_key_columns.contains(&col.name.value));

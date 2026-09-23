@@ -18,7 +18,7 @@
 //!   the expected calls;
 //! - `mock.bannedClass`: mocking a class `mock_banned_classes` lists.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use crate::ast::*;
@@ -83,7 +83,7 @@ struct Walker<'a> {
     out: Vec<Diagnostic>,
     // `$name` / `this->prop` -> whether it holds a mock (`true`) or a
     // stub (`false`), from what it was assigned.
-    origins: HashMap<String, bool>,
+    origins: FxHashMap<String, bool>,
 }
 
 /// Whether `e` creates a mock (`Some(true)`) or a stub (`Some(false)`).
@@ -121,8 +121,8 @@ fn origin_key(e: &Expr) -> Option<String> {
     }
 }
 
-fn collect_origins(stmts: &[Stmt], out: &mut HashMap<String, bool>) {
-    fn in_expr(e: &Expr, out: &mut HashMap<String, bool>) {
+fn collect_origins(stmts: &[Stmt], out: &mut FxHashMap<String, bool>) {
+    fn in_expr(e: &Expr, out: &mut FxHashMap<String, bool>) {
         if let ExprKind::Assign(target, value) = &e.kind
             && let (Some(key), Some(is_mock)) = (origin_key(target), mock_origin(value))
         {
@@ -243,7 +243,7 @@ impl<'a> Walker<'a> {
                 "mock.onlyMockProperties",
             );
         }
-        let mut class_origins = HashMap::new();
+        let mut class_origins = FxHashMap::default();
         for m in &c.methods {
             collect_origins(&m.function.body, &mut class_origins);
         }
@@ -370,8 +370,8 @@ impl<'a> Walker<'a> {
 impl Project {
     /// PHPUnit mock-builder misuse in the analysed files; `banned` lists
     /// classes that must not be mocked.
-    pub fn check_mock_hygiene(&self, banned: &[String]) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out = HashMap::new();
+    pub fn check_mock_hygiene(&self, banned: &[String]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut out = FxHashMap::default();
         for (path, file) in &self.files {
             if !file.analyzed {
                 continue;
@@ -380,7 +380,7 @@ impl Project {
                 banned,
                 ctx: NameContext::default(),
                 out: Vec::new(),
-                origins: HashMap::new(),
+                origins: FxHashMap::default(),
             };
             walker.stmts(&file.ast);
             if !walker.out.is_empty() {

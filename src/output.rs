@@ -21,7 +21,8 @@
 //! a rule name for grouping/suppression), with `location` folded into
 //! the message text there instead so neither piece of context is lost.
 
-use std::collections::{BTreeMap, HashMap};
+use rustc_hash::FxHashMap;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use serde::Serialize;
@@ -130,7 +131,7 @@ struct JsonReport<'a> {
 /// be noise for a CI consumer skimming this for failures) - `totals.
 /// files_checked` remains the one place the full checked-file count is
 /// recorded.
-pub fn render_json(results: &HashMap<PathBuf, Vec<Diagnostic>>, files_checked: usize) -> String {
+pub fn render_json(results: &FxHashMap<PathBuf, Vec<Diagnostic>>, files_checked: usize) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().collect();
     paths.sort();
 
@@ -185,7 +186,7 @@ pub fn render_json(results: &HashMap<PathBuf, Vec<Diagnostic>>, files_checked: u
 /// consuming tools group/suppress by, so a real rule identifier belongs
 /// there, not the `location` context label. `location` is folded into the
 /// message text instead so that breadcrumb isn't lost.
-pub fn render_checkstyle(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String {
+pub fn render_checkstyle(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().filter(|p| !results[*p].is_empty()).collect();
     paths.sort();
 
@@ -215,7 +216,7 @@ pub fn render_checkstyle(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String 
 /// cases are every diagnostic (a `<failure>`, named `path:line` and
 /// classed by identifier) plus one passing case per file without any, so
 /// CI test-report views show both.
-pub fn render_junit(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> String {
+pub fn render_junit(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> String {
     let mut paths: Vec<&PathBuf> = results.keys().collect();
     paths.sort();
     let failures: usize = results.values().map(Vec::len).sum();

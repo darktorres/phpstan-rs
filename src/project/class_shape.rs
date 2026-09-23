@@ -7,7 +7,7 @@
 //! class something extends, a member a subclass overrides or inherits
 //! as protected, a Doctrine entity its proxies subclass).
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::ast::*;
@@ -95,19 +95,19 @@ impl Project {
         &self,
         closed_classes: bool,
         parent_calls: &[ParentCallRule],
-    ) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         if !closed_classes && parent_calls.is_empty() {
             return out;
         }
-        let mut subclassed: HashSet<String> = HashSet::new();
-        let mut overridden: HashSet<(String, String)> = HashSet::new();
+        let mut subclassed: FxHashSet<String> = FxHashSet::default();
+        let mut overridden: FxHashSet<(String, String)> = FxHashSet::default();
         for info in self.registry.classes.values() {
             if let Some(parent) = info.extends.first() {
                 subclassed.insert(parent.to_ascii_lowercase());
             }
             let mut ancestor = info.extends.first().cloned();
-            let mut seen = HashSet::new();
+            let mut seen = FxHashSet::default();
             while let Some(a) = ancestor {
                 if !seen.insert(a.to_ascii_lowercase()) {
                     break;
@@ -150,8 +150,8 @@ impl Project {
         &self,
         fqn: &str,
         c: &ClassDecl,
-        subclassed: &HashSet<String>,
-        overridden: &HashSet<(String, String)>,
+        subclassed: &FxHashSet<String>,
+        overridden: &FxHashSet<(String, String)>,
         out: &mut Vec<Diagnostic>,
     ) {
         if c.kind != ClassKind::Class {

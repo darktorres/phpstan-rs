@@ -7,16 +7,16 @@
 //! own last line. A malformed identifier list suppresses nothing and is
 //! reported as `ignore.parseError` instead.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::token::{Position, Span, Token};
 
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub(crate) struct IgnoreComments {
     /// Lines every diagnostic on which is suppressed.
-    pub(crate) lines: HashSet<u32>,
+    pub(crate) lines: FxHashSet<u32>,
     /// Lines on which only the listed identifiers are suppressed.
-    pub(crate) identifiers: HashMap<u32, Vec<String>>,
+    pub(crate) identifiers: FxHashMap<u32, Vec<String>>,
     /// `(line, message)` for each malformed identifier list.
     pub(crate) parse_errors: Vec<(u32, String)>,
     /// Where each `@` error-suppression operator is (the parser drops
@@ -182,7 +182,7 @@ fn newlines(text: &str) -> u32 {
 
 /// Every occurrence of `marker` in a doc comment starting on `line`
 /// suppresses its own line, or the one after it.
-fn mark_each_marker(lines: &mut HashSet<u32>, text: &str, line: u32, marker: &str, next: bool) {
+fn mark_each_marker(lines: &mut FxHashSet<u32>, text: &str, line: u32, marker: &str, next: bool) {
     for (pos, _) in text.match_indices(marker) {
         lines.insert(line + newlines(&text[..pos]) + u32::from(next));
     }
@@ -399,19 +399,19 @@ mod tests {
     #[test]
     fn a_trailing_line_comment_ignores_its_own_line() {
         let source = "<?php\n$x = 1 / 0; // @phpstan-ignore-line\necho $x;\n";
-        assert_eq!(scan(source).lines, HashSet::from([2]));
+        assert_eq!(scan(source).lines, FxHashSet::from_iter([2]));
     }
 
     #[test]
     fn a_standalone_comment_ignores_the_next_line() {
         let source = "<?php\n// @phpstan-ignore-next-line\n$x = 1 / 0;\n";
-        assert_eq!(scan(source).lines, HashSet::from([3]));
+        assert_eq!(scan(source).lines, FxHashSet::from_iter([3]));
     }
 
     #[test]
     fn a_doc_comment_s_closing_line_ignores_its_own_line() {
         let source = "<?php\n/**\n * Some note.\n * @phpstan-ignore-line\n */\n$x = 1 / 0;\n";
-        assert_eq!(scan(source).lines, HashSet::from([4]));
+        assert_eq!(scan(source).lines, FxHashSet::from_iter([4]));
     }
 
     #[test]
@@ -432,7 +432,7 @@ mod tests {
     #[test]
     fn multiple_markers_in_one_file_are_all_collected() {
         let source = "<?php\n$a = 1 / 0; // @phpstan-ignore-line\n// @phpstan-ignore-next-line\n$b = 1 / 0;\n";
-        assert_eq!(scan(source).lines, HashSet::from([2, 4]));
+        assert_eq!(scan(source).lines, FxHashSet::from_iter([2, 4]));
     }
 
     #[test]
@@ -440,7 +440,7 @@ mod tests {
         let source = "<?php\n$x = \"a\" + 1; // @phpstan-ignore binaryOp.invalid\n";
         assert_eq!(
             scan(source).identifiers,
-            HashMap::from([(2, vec!["binaryOp.invalid".to_string()])])
+            FxHashMap::from_iter([(2, vec!["binaryOp.invalid".to_string()])])
         );
     }
 
@@ -449,7 +449,7 @@ mod tests {
         let source = "<?php\n// @phpstan-ignore binaryOp.invalid\n$x = \"a\" + 1;\n";
         assert_eq!(
             scan(source).identifiers,
-            HashMap::from([(3, vec!["binaryOp.invalid".to_string()])])
+            FxHashMap::from_iter([(3, vec!["binaryOp.invalid".to_string()])])
         );
     }
 
@@ -458,7 +458,7 @@ mod tests {
         let source = "<?php\n/**\n * @phpstan-ignore binaryOp.invalid\n */\n$x = \"a\" + 1;\n";
         assert_eq!(
             scan(source).identifiers,
-            HashMap::from([(5, vec!["binaryOp.invalid".to_string()])])
+            FxHashMap::from_iter([(5, vec!["binaryOp.invalid".to_string()])])
         );
     }
 
@@ -467,7 +467,7 @@ mod tests {
         let source = "<?php\n$x = \"a\" + 1; // @phpstan-ignore binaryOp.invalid, argument.type\n";
         assert_eq!(
             scan(source).identifiers,
-            HashMap::from([(
+            FxHashMap::from_iter([(
                 2,
                 vec!["binaryOp.invalid".to_string(), "argument.type".to_string()]
             )])
@@ -479,7 +479,7 @@ mod tests {
         let source = "<?php\n$x = \"a\" + 1; // @phpstan-ignore binaryOp.invalid (known, tracked in JIRA-123)\n";
         assert_eq!(
             scan(source).identifiers,
-            HashMap::from([(2, vec!["binaryOp.invalid".to_string()])])
+            FxHashMap::from_iter([(2, vec!["binaryOp.invalid".to_string()])])
         );
     }
 
@@ -568,7 +568,7 @@ mod tests {
         let source = "<?php\n// @phpstan-ignore foo.bar\n\n$x = 1;\n";
         assert_eq!(
             scan(source).identifiers,
-            HashMap::from([(2, vec!["foo.bar".to_string()])])
+            FxHashMap::from_iter([(2, vec!["foo.bar".to_string()])])
         );
     }
 
@@ -577,10 +577,10 @@ mod tests {
         let source =
             "<?php\n$a = 1; # @phpstan-ignore-line\n/* @phpstan-ignore foo.bar */\n$b = 1;\n";
         let scanned = scan(source);
-        assert_eq!(scanned.lines, HashSet::from([2]));
+        assert_eq!(scanned.lines, FxHashSet::from_iter([2]));
         assert_eq!(
             scanned.identifiers,
-            HashMap::from([(4, vec!["foo.bar".to_string()])])
+            FxHashMap::from_iter([(4, vec!["foo.bar".to_string()])])
         );
     }
 

@@ -90,7 +90,7 @@ pub(crate) fn check_duplicate_class_declarations(
                 identifier: identifier.clone(),
                 tip: None,
                 non_ignorable: true,
-                metadata: std::collections::HashMap::new(),
+                metadata: rustc_hash::FxHashMap::default(),
                 fix: None,
             });
         }

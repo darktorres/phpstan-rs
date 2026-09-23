@@ -126,10 +126,10 @@ impl<'a> Checker<'a> {
     /// pipeline. Empty outside any class, or for a non-generic one.
     pub(crate) fn current_class_template_params(
         &self,
-    ) -> std::collections::HashMap<String, types::TemplateParam> {
+    ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
         match &self.current_class {
             Some(class) => self.class_template_params_for(class),
-            None => std::collections::HashMap::new(),
+            None => rustc_hash::FxHashMap::default(),
         }
     }
 
@@ -137,10 +137,10 @@ impl<'a> Checker<'a> {
     pub(crate) fn class_template_params_for(
         &self,
         class: &str,
-    ) -> std::collections::HashMap<String, types::TemplateParam> {
+    ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
         let class = &class.to_string();
         let Some(info) = self.registry.classes.get(class.as_str()) else {
-            return std::collections::HashMap::new();
+            return rustc_hash::FxHashMap::default();
         };
         info.templates
             .iter()
@@ -189,9 +189,9 @@ impl<'a> Checker<'a> {
     /// `@var`, never in the signature, isn't reachable this way.
     fn current_function_template_params(
         &self,
-    ) -> std::collections::HashMap<String, types::TemplateParam> {
+    ) -> rustc_hash::FxHashMap<String, types::TemplateParam> {
         let Some(method_name) = &self.current_method else {
-            return std::collections::HashMap::new();
+            return rustc_hash::FxHashMap::default();
         };
         let sig = match &self.current_class {
             Some(class) => self.registry.lookup_method(class, method_name),
@@ -210,7 +210,7 @@ impl<'a> Checker<'a> {
         let Some(sig) = sig else {
             return self.current_method_templates.clone();
         };
-        let mut out = std::collections::HashMap::new();
+        let mut out = rustc_hash::FxHashMap::default();
         for p in &sig.params {
             collect_scoped_template_params(&p.ty, method_name, &mut out);
         }
@@ -242,7 +242,7 @@ impl<'a> Checker<'a> {
         label: &str,
         span: Span,
     ) {
-        let mut in_params = std::collections::HashMap::new();
+        let mut in_params = rustc_hash::FxHashMap::default();
         for p in &sig.params {
             collect_scoped_template_params(&p.ty, bare_name, &mut in_params);
         }
@@ -847,7 +847,7 @@ impl<'a> Checker<'a> {
     ) {
         let mut unknown = Vec::new();
         self.collect_unknown_class_names(ty, &mut unknown);
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = rustc_hash::FxHashSet::default();
         unknown.retain(|n| seen.insert(n.clone()));
         for name in unknown {
             self.report(
@@ -871,7 +871,7 @@ impl<'a> Checker<'a> {
         // appear in `unknown` above.
         let mut prefixed = Vec::new();
         collect_prefixed_class_names(ty, &mut prefixed);
-        let mut seen = std::collections::HashSet::new();
+        let mut seen = rustc_hash::FxHashSet::default();
         prefixed.retain(|(n, _)| seen.insert(*n));
         for (name, project) in prefixed {
             self.report_builder(
@@ -931,7 +931,7 @@ fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'stat
 fn collect_scoped_template_params(
     ty: &Type,
     scope: &str,
-    out: &mut std::collections::HashMap<String, types::TemplateParam>,
+    out: &mut rustc_hash::FxHashMap<String, types::TemplateParam>,
 ) {
     match ty {
         Type::TemplateParam(tp) if tp.scope.as_deref() == Some(scope) => {

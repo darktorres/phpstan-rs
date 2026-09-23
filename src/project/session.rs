@@ -5,7 +5,7 @@
 //! both drive it, so a fixture exercises exactly what `check-project`
 //! runs.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -41,6 +41,10 @@ pub struct Overrides {
     pub report_level: Option<u8>,
     pub php_version: Option<String>,
     pub no_composer: bool,
+    /// Leaves each file's diagnostics in the order the checks emitted them
+    /// instead of `checker::diagnostic_order`: the determinism gate runs
+    /// twice with this and requires identical output.
+    pub emission_order: bool,
 }
 
 /// A fully resolved `check-project` run: every path, setting and derived
@@ -54,6 +58,7 @@ pub struct Session {
     stub_dirs: Vec<PathBuf>,
     level: u8,
     configured_level: Option<u8>,
+    emission_order: bool,
     php_version: Option<php_version::PhpVersion>,
     psr3_context_key_pattern: Option<regex::Regex>,
     restricted_symbol_entries: Vec<restricted_symbols::RestrictedSymbolEntry>,
@@ -75,7 +80,7 @@ pub struct Session {
 /// What one run produced, after the full post-processing chain.
 pub struct Analysis {
     /// Per-file diagnostics in `checker::diagnostic_order`.
-    pub results: HashMap<PathBuf, Vec<Diagnostic>>,
+    pub results: FxHashMap<PathBuf, Vec<Diagnostic>>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
     pub skipped_analyze: usize,
@@ -299,6 +304,7 @@ impl Session {
             stub_dirs,
             level,
             configured_level,
+            emission_order: overrides.emission_order,
             php_version,
             psr3_context_key_pattern,
             restricted_symbol_entries,
@@ -470,7 +476,7 @@ impl Session {
         for dir in &self.stub_dirs {
             super::collect_php_files(dir, &mut stub_files_vec);
         }
-        let stub_files: HashSet<PathBuf> = stub_files_vec.into_iter().collect();
+        let stub_files: FxHashSet<PathBuf> = stub_files_vec.into_iter().collect();
 
         // Caught parse/check panics are reported per file; don't also print
         // each one's default panic message.
@@ -499,8 +505,8 @@ impl Session {
                 None => skipped_context += 1,
             }
         }
-        let mut analyze_sizes: HashMap<PathBuf, usize> =
-            HashMap::with_capacity(analyze_files.len());
+        let mut analyze_sizes: FxHashMap<PathBuf, usize> =
+            FxHashMap::with_capacity_and_hasher(analyze_files.len(), Default::default());
         let mut skipped_analyze = 0usize;
         for (path, parsed) in analyze_files.iter().zip(analyze_parsed) {
             match parsed {
@@ -531,8 +537,8 @@ impl Session {
         std::panic::set_hook(Box::new(|_| {}));
         type MemberRefData = (
             Vec<(Span, String, String)>,
-            HashSet<String>,
-            HashSet<String>,
+            FxHashSet<String>,
+            FxHashSet<String>,
         );
         type CheckOutcome = Result<(Vec<Diagnostic>, Option<MemberRefData>), String>;
         let needs_tier_2 = Self::flag(self.config.check_dead_enum_cases)
@@ -595,7 +601,7 @@ impl Session {
             }
         }
 
-        let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+        let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         let mut check_panics: Vec<(PathBuf, String)> = Vec::new();
         for (path, outcome) in checked_results {
             match outcome {
@@ -619,7 +625,7 @@ impl Session {
             project.mark_member_index_built();
         }
 
-        let mut extend = |found: HashMap<PathBuf, Vec<Diagnostic>>| {
+        let mut extend = |found: FxHashMap<PathBuf, Vec<Diagnostic>>| {
             for (path, diags) in found {
                 results.entry(path).or_default().extend(diags);
             }
@@ -654,8 +660,10 @@ impl Session {
             &self.config.ignore_errors.clone().unwrap_or_default(),
         );
         restricted_symbols::filter_by_path(&mut results);
-        for diagnostics in results.values_mut() {
-            checker::sort_diagnostics(diagnostics);
+        if !self.emission_order {
+            for diagnostics in results.values_mut() {
+                checker::sort_diagnostics(diagnostics);
+            }
         }
 
         Ok(Analysis {

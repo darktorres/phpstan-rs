@@ -35,7 +35,7 @@ impl<'a> Checker<'a> {
             None => ty.clone(),
         };
         // Reported in the order the tags are written.
-        let in_doc_order = |map: &std::collections::HashMap<String, String>| {
+        let in_doc_order = |map: &rustc_hash::FxHashMap<String, String>| {
             let mut names: Vec<String> = map.keys().cloned().collect();
             names.sort_by_key(|n| doc.find(&format!("${n}")).unwrap_or(usize::MAX));
             names

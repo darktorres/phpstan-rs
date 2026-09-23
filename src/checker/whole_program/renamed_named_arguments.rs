@@ -13,7 +13,7 @@
 
 use crate::checker::{RenamedParameterOverride, RenamedParameterOverrideFacts};
 use crate::token::Span;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -22,7 +22,7 @@ use std::sync::Arc;
 /// `Checker` has no notion of its own path - `Project::collect_named_
 /// argument_facts` attaches it while merging).
 pub(crate) type NamedArgumentCallFactsWithPath =
-    HashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<(PathBuf, Span)>>;
+    FxHashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<(PathBuf, Span)>>;
 
 pub(crate) fn find_renamed_named_argument_collisions(
     calls: &NamedArgumentCallFactsWithPath,

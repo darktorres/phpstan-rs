@@ -26,7 +26,7 @@
 //! namespace edge is skipped when building the graph in the first place,
 //! so a namespace never gets a self-loop from its own internal structure.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::registry::Registry;
 
@@ -50,11 +50,11 @@ pub(crate) struct NamespaceCycle {
 }
 
 pub(crate) fn find_namespace_cycles(registry: &Registry) -> Vec<NamespaceCycle> {
-    let mut graph: HashMap<String, Vec<String>> = HashMap::new();
+    let mut graph: FxHashMap<String, Vec<String>> = FxHashMap::default();
     // The alphabetically-first class contributing each distinct
     // namespace-pair edge - used to pick a cycle's own representative
     // once its member namespaces are known.
-    let mut edge_representative: HashMap<(String, String), String> = HashMap::new();
+    let mut edge_representative: FxHashMap<(String, String), String> = FxHashMap::default();
 
     for (fqn, info) in &registry.classes {
         let from_ns = namespace_of(fqn).to_string();
@@ -114,14 +114,14 @@ pub(crate) fn find_namespace_cycles(registry: &Registry) -> Vec<NamespaceCycle> 
 /// Namespace counts are small (nowhere near deep enough to risk a stack
 /// overflow the way this project's own unguarded-recursive AST walk
 /// needed a large worker stack for), so recursion is fine here.
-fn tarjan_sccs(graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
+fn tarjan_sccs(graph: &FxHashMap<String, Vec<String>>) -> Vec<Vec<String>> {
     struct State<'a> {
-        graph: &'a HashMap<String, Vec<String>>,
+        graph: &'a FxHashMap<String, Vec<String>>,
         counter: usize,
         stack: Vec<String>,
-        on_stack: std::collections::HashSet<String>,
-        index: HashMap<String, usize>,
-        lowlink: HashMap<String, usize>,
+        on_stack: rustc_hash::FxHashSet<String>,
+        index: FxHashMap<String, usize>,
+        lowlink: FxHashMap<String, usize>,
         sccs: Vec<Vec<String>>,
     }
 
@@ -173,9 +173,9 @@ fn tarjan_sccs(graph: &HashMap<String, Vec<String>>) -> Vec<Vec<String>> {
         graph,
         counter: 0,
         stack: Vec::new(),
-        on_stack: std::collections::HashSet::new(),
-        index: HashMap::new(),
-        lowlink: HashMap::new(),
+        on_stack: rustc_hash::FxHashSet::default(),
+        index: FxHashMap::default(),
+        lowlink: FxHashMap::default(),
         sccs: Vec::new(),
     };
     let mut nodes: Vec<&String> = graph.keys().collect();

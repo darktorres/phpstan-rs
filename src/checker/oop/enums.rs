@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::ast::*;
 use crate::checker::{Checker, DiagnosticBuilder};
@@ -42,7 +42,7 @@ impl<'a> Checker<'a> {
     /// otherwise non-literal case value isn't evaluated, matching this
     /// project's usual "don't guess" leniency.
     pub(crate) fn check_enum_case_values(&mut self, fqn: &str, e: &EnumDecl) {
-        let mut seen: HashMap<(bool, String), &str> = HashMap::new();
+        let mut seen: FxHashMap<(bool, String), &str> = FxHashMap::default();
         for case in &e.cases {
             let Some(value) = &case.value else {
                 continue;

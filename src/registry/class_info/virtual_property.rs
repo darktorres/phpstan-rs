@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
@@ -21,7 +21,7 @@ use crate::types::{TemplateParam, Type};
 #[allow(clippy::type_complexity)]
 pub(crate) fn property_hook_set_type(
     hooks: Option<&PropertyHooks>,
-    template_params: &HashMap<String, TemplateParam>,
+    template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> (Option<Type>, Vec<(Arc<str>, Arc<str>)>) {
     let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {

@@ -7,7 +7,7 @@
 //! `DebounceQueue` - keeping this module trivially unit-testable with
 //! fake `Instant`s and no real sleeping at all.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
@@ -28,16 +28,16 @@ pub(super) struct PendingEdit {
 /// bounded by project size (how many distinct files a real editing
 /// session touches), not by edit count.
 pub(super) struct DebounceQueue {
-    pending: HashMap<PathBuf, PendingEdit>,
-    generations: HashMap<PathBuf, u64>,
+    pending: FxHashMap<PathBuf, PendingEdit>,
+    generations: FxHashMap<PathBuf, u64>,
     debounce: Duration,
 }
 
 impl DebounceQueue {
     pub(super) fn new(debounce: Duration) -> Self {
         DebounceQueue {
-            pending: HashMap::new(),
-            generations: HashMap::new(),
+            pending: FxHashMap::default(),
+            generations: FxHashMap::default(),
             debounce,
         }
     }

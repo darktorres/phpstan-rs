@@ -588,8 +588,8 @@ impl<'a> Checker<'a> {
         locals: &Locals,
     ) -> Type {
         let mut bindings: TemplateBindings = TemplateBindings::default();
-        let mut param_bindings: std::collections::HashMap<String, Type> =
-            std::collections::HashMap::new();
+        let mut param_bindings: rustc_hash::FxHashMap<String, Type> =
+            rustc_hash::FxHashMap::default();
         for (param, slot) in sig.params.iter().zip(resolved.iter()) {
             let Some(arg) = slot else {
                 // An omitted argument's conditional-return subject is its

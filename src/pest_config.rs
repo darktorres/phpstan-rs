@@ -30,7 +30,7 @@
 //! sibling module with its own predicate and resolver, without touching
 //! this one.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Arg, Expr, ExprKind, Stmt, StmtKind};
@@ -127,8 +127,8 @@ pub(crate) fn file_local_this_type(program: &[Stmt], ctx: &NameContext) -> Optio
 /// as undefined, matching this project's own established "safe default"
 /// pattern for a definition whose real type isn't worth modeling
 /// precisely (see `predefine_byref_or_unknown_args`).
-pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> HashSet<String> {
-    let mut props = HashSet::new();
+pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> FxHashSet<String> {
+    let mut props = FxHashSet::default();
     for stmt in program {
         let StmtKind::Expression(e) = &stmt.kind else {
             continue;
@@ -155,7 +155,7 @@ pub(crate) fn file_local_hook_properties(program: &[Stmt]) -> HashSet<String> {
 /// literal `$this` expression only (unlike the real reader, which
 /// resolves by the property base's *type* via PHPStan's own `Scope` -
 /// an aliased `$self = $this; $self->prop` isn't covered here).
-fn collect_hook_closure_properties(expr: &Expr, props: &mut HashSet<String>) {
+fn collect_hook_closure_properties(expr: &Expr, props: &mut FxHashSet<String>) {
     let ExprKind::Closure { body, .. } = &expr.kind else {
         return;
     };
@@ -185,7 +185,7 @@ fn collect_hook_closure_properties(expr: &Expr, props: &mut HashSet<String>) {
 /// call's own receiver is - returns the base `uses(...)` call's own
 /// arguments, or `None` if the chain doesn't bottom out in a real
 /// `uses(...)` call.
-fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut HashSet<String>) -> Option<&'e [Arg]> {
+fn walk_uses_chain<'e>(expr: &'e Expr, hook_props: &mut FxHashSet<String>) -> Option<&'e [Arg]> {
     match &unwrap_grouping(expr).kind {
         ExprKind::Call(callee, args) => {
             let ExprKind::Name(name) = &callee.kind else {
@@ -243,7 +243,7 @@ impl PestConfig {
                 if **method != *"in" {
                     continue;
                 }
-                let mut chain_props = HashSet::new();
+                let mut chain_props = FxHashSet::default();
                 let Some(uses_args) = walk_uses_chain(inner, &mut chain_props) else {
                     continue;
                 };
@@ -315,7 +315,7 @@ impl PestConfig {
     /// single-value class slot, a property-name set has no "most
     /// specific wins" precedence to apply - the caller unions this with
     /// whatever `file_local_hook_properties` finds too).
-    pub fn resolve_hook_properties(&self, file_path: &Path) -> HashSet<String> {
+    pub fn resolve_hook_properties(&self, file_path: &Path) -> FxHashSet<String> {
         self.hook_properties
             .iter()
             .filter(|(prefix, _)| file_path.starts_with(prefix))

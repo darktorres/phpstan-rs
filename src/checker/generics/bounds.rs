@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::ast::*;
 use crate::checker::{
@@ -608,9 +608,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_template_declaration_validity(
         &mut self,
         templates: &[std::sync::Arc<str>],
-        bounds: &HashMap<std::sync::Arc<str>, Type>,
-        defaults: &HashMap<std::sync::Arc<str>, Type>,
-        type_aliases: &HashMap<std::sync::Arc<str>, Type>,
+        bounds: &FxHashMap<std::sync::Arc<str>, Type>,
+        defaults: &FxHashMap<std::sync::Arc<str>, Type>,
+        type_aliases: &FxHashMap<std::sync::Arc<str>, Type>,
         subject: TemplateSubject<'_>,
         label: &str,
         span: Span,

@@ -15,7 +15,7 @@
 //! work, so this needed no new one) rather than a `.neon` file - this
 //! project doesn't have a NEON parser and one isn't otherwise justified.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -110,8 +110,8 @@ fn normalize_path(path: &Path) -> PathBuf {
 /// One entry per distinct `(file, location, message, identifier)`, with
 /// its occurrence count, sorted so regenerating an unchanged codebase is
 /// byte-identical.
-fn entries_for(results: &HashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
-    let mut counts: HashMap<Entry, usize> = HashMap::new();
+fn entries_for(results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> Vec<Entry> {
+    let mut counts: FxHashMap<Entry, usize> = FxHashMap::default();
     for (file, diagnostics) in results {
         let file = normalize_path(file).display().to_string();
         for d in diagnostics {
@@ -151,7 +151,7 @@ fn write_entries(path: &Path, entries: &[Entry]) -> io::Result<()> {
 
 /// Writes every diagnostic in `results` to `path` as a baseline file and
 /// returns the number of diagnostics recorded.
-pub fn generate(path: &Path, results: &HashMap<PathBuf, Vec<Diagnostic>>) -> io::Result<usize> {
+pub fn generate(path: &Path, results: &FxHashMap<PathBuf, Vec<Diagnostic>>) -> io::Result<usize> {
     let entries = entries_for(results);
     write_entries(path, &entries)?;
     Ok(entries.iter().map(|e| e.count).sum())
@@ -163,7 +163,7 @@ pub fn generate(path: &Path, results: &HashMap<PathBuf, Vec<Diagnostic>>) -> io:
 /// removed.
 pub fn generate_per_identifier(
     path: &Path,
-    results: &HashMap<PathBuf, Vec<Diagnostic>>,
+    results: &FxHashMap<PathBuf, Vec<Diagnostic>>,
 ) -> io::Result<usize> {
     let entries = entries_for(results);
     let parent = path.parent().unwrap_or(Path::new(""));
@@ -221,7 +221,7 @@ impl Baseline {
     pub fn load(path: &Path) -> io::Result<Baseline> {
         let mut entries = Vec::new();
         load_into(path, &mut entries, 0)?;
-        let mut merged: HashMap<Entry, usize> = HashMap::new();
+        let mut merged: FxHashMap<Entry, usize> = FxHashMap::default();
         let mut order: Vec<Entry> = Vec::new();
         for entry in entries {
             let count = entry.count;
@@ -283,9 +283,12 @@ fn load_into(path: &Path, out: &mut Vec<Entry>, depth: usize) -> io::Result<()> 
 /// formatted `file:location: message` (with the expected and actual
 /// counts when some but not all occurred) - so an entry left behind by
 /// fixed code is reported instead of silently masking nothing.
-pub fn filter(results: &mut HashMap<PathBuf, Vec<Diagnostic>>, baseline: &Baseline) -> Vec<String> {
-    let mut by_message: HashMap<MessageKey, Vec<usize>> = HashMap::new();
-    let mut by_identifier: HashMap<IdentifierKey, Vec<usize>> = HashMap::new();
+pub fn filter(
+    results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
+    baseline: &Baseline,
+) -> Vec<String> {
+    let mut by_message: FxHashMap<MessageKey, Vec<usize>> = FxHashMap::default();
+    let mut by_identifier: FxHashMap<IdentifierKey, Vec<usize>> = FxHashMap::default();
     for (i, e) in baseline.entries.iter().enumerate() {
         by_message
             .entry((e.file.clone(), e.location.clone(), e.message.clone()))

@@ -48,7 +48,7 @@ use crate::ast_walk::{expr_children, stmt_children};
 use crate::project::Project;
 use crate::registry::{NameContext, Registry};
 use crate::token::{Position, Span};
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::path::Path;
 
 use crate::text_split::{split_identifier_spans, type_hint_identifiers_qualified};
@@ -236,7 +236,7 @@ enum ScopeFrame {
     /// variable, so resolution keeps walking outward past this frame.
     Closure {
         id: u32,
-        transparent: HashSet<Arc<str>>,
+        transparent: FxHashSet<Arc<str>>,
     },
     /// An arrow function's implicit-capture-by-value boundary: PHP's
     /// `fn() => ...` auto-captures every outer variable it reads BY
@@ -244,7 +244,7 @@ enum ScopeFrame {
     /// consult - only its own declared parameters (`owns`) belong to a
     /// genuinely new scope; every other name resolves as the SAME
     /// variable as whatever it refers to outside the arrow function.
-    ArrowFn { id: u32, owns: HashSet<Arc<str>> },
+    ArrowFn { id: u32, owns: FxHashSet<Arc<str>> },
 }
 
 struct Walker<'a> {

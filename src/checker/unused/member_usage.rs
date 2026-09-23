@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -21,10 +21,10 @@ use crate::registry::NameContext;
 /// a member that dynamic code actually does reach.
 #[derive(Default)]
 pub(crate) struct MemberUsage {
-    pub(crate) consts: HashSet<Arc<str>>,
-    pub(crate) methods: HashSet<Arc<str>>,
-    pub(crate) reads: HashSet<Arc<str>>,
-    pub(crate) writes: HashSet<Arc<str>>,
+    pub(crate) consts: FxHashSet<Arc<str>>,
+    pub(crate) methods: FxHashSet<Arc<str>>,
+    pub(crate) reads: FxHashSet<Arc<str>>,
+    pub(crate) writes: FxHashSet<Arc<str>>,
     pub(crate) escaped: bool,
     /// Local variable names, scoped to the one function/hook body
     /// currently being scanned, syntactically proven (never via real type
@@ -37,7 +37,7 @@ pub(crate) struct MemberUsage {
     /// class-wide, so the caller (`check_unused_private_members`) clears
     /// this before each function/hook body's own scan rather than letting
     /// it accumulate across bodies.
-    pub(crate) aliases: HashSet<Arc<str>>,
+    pub(crate) aliases: FxHashSet<Arc<str>>,
 }
 
 /// Whether `class_ref` (the class name half of a `Foo::bar`/`self::bar`/

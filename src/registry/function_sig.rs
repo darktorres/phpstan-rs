@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::{ExprKind, FunctionDecl, Stmt, Visibility};
@@ -401,12 +401,12 @@ impl FunctionSig {
     pub(crate) fn from_decl(
         f: &FunctionDecl,
         ctx: &NameContext,
-        class_templates: &HashMap<String, TemplateParam>,
-        class_type_aliases: &HashMap<Arc<str>, Type>,
+        class_templates: &FxHashMap<String, TemplateParam>,
+        class_type_aliases: &FxHashMap<Arc<str>, Type>,
         visibility: Visibility,
     ) -> FunctionSig {
         let doc: Option<DocBlock> = f.doc_comment.as_deref().map(docblock::parse);
-        let mut template_params: HashMap<String, TemplateParam> = doc
+        let mut template_params: FxHashMap<String, TemplateParam> = doc
             .as_ref()
             .map(|d| build_template_params(d, &f.name, ctx))
             .unwrap_or_default();
@@ -822,7 +822,7 @@ impl FunctionSig {
 /// shifted.
 fn dedup_versioned_params(params: Vec<ParamSig>) -> Vec<ParamSig> {
     let mut order: Vec<Arc<str>> = Vec::new();
-    let mut by_name: HashMap<Arc<str>, ParamSig> = HashMap::new();
+    let mut by_name: FxHashMap<Arc<str>, ParamSig> = FxHashMap::default();
     for p in params {
         if !by_name.contains_key(&p.name) {
             order.push(p.name.clone());

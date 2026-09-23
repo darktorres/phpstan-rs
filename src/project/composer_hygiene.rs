@@ -22,7 +22,7 @@
 //! - `composer.platformPhpInconsistentWithRequire`: `config.platform.php`
 //!   outside the `require.php` constraint.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
@@ -156,8 +156,8 @@ fn diagnostic(location: &str, message: String, span: Span, identifier: &str) -> 
 #[derive(Default)]
 struct FileFacts {
     strings: Vec<String>,
-    probed_extensions: HashSet<String>,
-    probed_symbols: HashSet<String>,
+    probed_extensions: FxHashSet<String>,
+    probed_symbols: FxHashSet<String>,
 }
 
 fn collect_facts_in_stmts(stmts: &[Stmt], facts: &mut FileFacts) {
@@ -279,7 +279,7 @@ fn normalized(path: &Path) -> String {
 /// `ComposerManifest::owning_package`, memoized per file.
 struct OwnerCache<'m> {
     manifest: &'m ComposerManifest,
-    cache: HashMap<PathBuf, Option<usize>>,
+    cache: FxHashMap<PathBuf, Option<usize>>,
 }
 
 impl<'m> OwnerCache<'m> {
@@ -301,9 +301,9 @@ impl Project {
     pub fn check_composer_hygiene(
         &self,
         manifest: &ComposerManifest,
-    ) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
-        let classes_by_lower: HashMap<String, (&str, &Path, Span)> = self
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut out: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
+        let classes_by_lower: FxHashMap<String, (&str, &Path, Span)> = self
             .decl_locations
             .classes
             .iter()
@@ -314,7 +314,7 @@ impl Project {
                 )
             })
             .collect();
-        let functions_by_lower: HashMap<String, (&str, &Path)> = self
+        let functions_by_lower: FxHashMap<String, (&str, &Path)> = self
             .decl_locations
             .functions
             .iter()
@@ -322,11 +322,11 @@ impl Project {
             .collect();
         let mut owners = OwnerCache {
             manifest,
-            cache: HashMap::new(),
+            cache: FxHashMap::default(),
         };
 
-        let mut used_packages: HashSet<String> = HashSet::new();
-        let mut used_outside_dev: HashSet<String> = HashSet::new();
+        let mut used_packages: FxHashSet<String> = FxHashSet::default();
+        let mut used_outside_dev: FxHashSet<String> = FxHashSet::default();
         let mut analyzed: Vec<(&PathBuf, &super::FileState)> =
             self.files.iter().filter(|(_, f)| f.analyzed).collect();
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
@@ -338,7 +338,7 @@ impl Project {
         for (path, file) in &analyzed {
             let production = manifest.autoload.covers(path);
             let dev_only = !production && manifest.autoload_dev.covers(path);
-            let used_before: HashSet<String> = used_packages.clone();
+            let used_before: FxHashSet<String> = used_packages.clone();
             let mut facts = FileFacts::default();
             collect_facts_in_stmts(&file.ast, &mut facts);
             // Class names written as strings (service wiring, config)
@@ -353,9 +353,9 @@ impl Project {
                     used_packages.insert(package.name.to_ascii_lowercase());
                 }
             }
-            let mut reported_packages: HashSet<String> = HashSet::new();
-            let mut reported_extensions: HashSet<String> = HashSet::new();
-            let mut reported_dev_symbols: HashSet<String> = HashSet::new();
+            let mut reported_packages: FxHashSet<String> = FxHashSet::default();
+            let mut reported_extensions: FxHashSet<String> = FxHashSet::default();
+            let mut reported_dev_symbols: FxHashSet<String> = FxHashSet::default();
             let diagnostics = out.entry((*path).clone()).or_default();
             for (span, target) in index_class_fn_refs_without_source(&file.ast) {
                 let (kind, display, declared_in, builtin_extension) = match &target {

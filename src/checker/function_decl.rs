@@ -50,13 +50,10 @@ impl<'a> Checker<'a> {
         // reconstruction for the common non-duplicated-trait case.
         let own_info = ClassInfo::from_decl(c, &self.name_ctx);
         let host_count = contexts.len();
-        let mut family_verdicts_by_span: std::collections::HashMap<
+        let mut family_verdicts_by_span: rustc_hash::FxHashMap<
             Span,
-            (
-                std::collections::HashSet<usize>,
-                std::collections::HashSet<bool>,
-            ),
-        > = std::collections::HashMap::new();
+            (rustc_hash::FxHashSet<usize>, rustc_hash::FxHashSet<bool>),
+        > = rustc_hash::FxHashMap::default();
         for (host_index, host) in contexts.into_iter().enumerate() {
             let host_start = self.diagnostics.len();
             for m in &c.methods {
@@ -236,8 +233,8 @@ impl<'a> Checker<'a> {
         let fresh = FunctionSig::from_decl(
             f,
             &self.name_ctx,
-            &std::collections::HashMap::new(),
-            &std::collections::HashMap::new(),
+            &rustc_hash::FxHashMap::default(),
+            &rustc_hash::FxHashMap::default(),
             crate::ast::Visibility::Public,
         );
         Some(self.registry.finalize_standalone_sig(fresh))
@@ -399,7 +396,7 @@ impl<'a> Checker<'a> {
                 && let Some(doc) = f.doc_comment.as_deref().map(docblock::parse)
                 && !doc.templates.is_empty()
             {
-                let shallow: std::collections::HashMap<String, types::TemplateParam> = doc
+                let shallow: rustc_hash::FxHashMap<String, types::TemplateParam> = doc
                     .templates
                     .iter()
                     .map(|n| (n.clone(), types::TemplateParam::unbounded(n.clone())))
@@ -414,12 +411,12 @@ impl<'a> Checker<'a> {
                     .iter()
                     .map(|s| crate::intern::intern(s))
                     .collect();
-                let bounds: std::collections::HashMap<std::sync::Arc<str>, Type> = doc
+                let bounds: rustc_hash::FxHashMap<std::sync::Arc<str>, Type> = doc
                     .template_bounds
                     .iter()
                     .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
                     .collect();
-                let defaults: std::collections::HashMap<std::sync::Arc<str>, Type> = doc
+                let defaults: rustc_hash::FxHashMap<std::sync::Arc<str>, Type> = doc
                     .template_defaults
                     .iter()
                     .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
@@ -955,7 +952,7 @@ impl<'a> Checker<'a> {
                 &f.name,
                 &self.name_ctx,
             ),
-            _ => std::collections::HashMap::new(),
+            _ => rustc_hash::FxHashMap::default(),
         };
         let previous_method_templates =
             std::mem::replace(&mut self.current_method_templates, own_templates);

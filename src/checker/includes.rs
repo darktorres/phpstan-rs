@@ -9,7 +9,7 @@
 //! so `__DIR__` in it means this file's directory. A path the file also tests with `file_exists()`/
 //! `is_file()`/`is_readable()` is left alone.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::ast::*;
@@ -44,8 +44,8 @@ fn class_constant_key(class: &str, constant: &str) -> String {
 /// with a literal name, and class/enum constants - keyed by short name
 /// (`Class::NAME` lowercased on the class). A name declared twice is
 /// dropped.
-pub(crate) fn file_constant_initializers(program: &[Stmt]) -> HashMap<String, Expr> {
-    let mut found: HashMap<String, Option<Expr>> = HashMap::new();
+pub(crate) fn file_constant_initializers(program: &[Stmt]) -> FxHashMap<String, Expr> {
+    let mut found: FxHashMap<String, Option<Expr>> = FxHashMap::default();
     let mut add = |key: String, value: &Expr| {
         found
             .entry(key)
@@ -308,9 +308,9 @@ impl<'a> Checker<'a> {
     pub(crate) fn collect_include_guards(
         &self,
         program: &[Stmt],
-    ) -> (HashSet<String>, Vec<String>) {
+    ) -> (FxHashSet<String>, Vec<String>) {
         let locals = Locals::default();
-        let mut guarded = HashSet::new();
+        let mut guarded = FxHashSet::default();
         let mut include_dirs: Vec<String> = DEFAULT_INCLUDE_PATH
             .split(':')
             .map(str::to_string)

@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
         cases: &[EnumCase],
         consts: &[ClassConst],
     ) {
-        let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+        let mut seen: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
         for case in cases {
             if !seen.insert(case.name.as_ref()) {
                 self.report_builder(
@@ -84,8 +84,7 @@ impl<'a> Checker<'a> {
         properties: &[PropertyDecl],
         methods: &[MethodDecl],
     ) {
-        let mut seen: std::collections::HashMap<&str, &PropertyDecl> =
-            std::collections::HashMap::new();
+        let mut seen: rustc_hash::FxHashMap<&str, &PropertyDecl> = rustc_hash::FxHashMap::default();
         for p in properties {
             if let Some(prev) = seen.insert(p.name.as_ref(), p)
                 && !property_shapes_differ(prev, p)
@@ -107,8 +106,8 @@ impl<'a> Checker<'a> {
         // `$declaredProperties` set for exactly this reason. Only ever
         // compared against another promoted collision, since a plain
         // property's shape isn't directly comparable to a `Param`'s.
-        let mut seen_promoted: std::collections::HashMap<&str, &Param> =
-            std::collections::HashMap::new();
+        let mut seen_promoted: rustc_hash::FxHashMap<&str, &Param> =
+            rustc_hash::FxHashMap::default();
         for m in methods {
             if !m.function.name.eq_ignore_ascii_case("__construct") {
                 continue;
@@ -151,8 +150,7 @@ impl<'a> Checker<'a> {
     fn check_duplicate_methods(&mut self, fqn: &str, kind: &str, methods: &[MethodDecl]) {
         // Case-insensitive, matching real PHP's own method-name lookup
         // rules (and real PHPStan's own `strtolower` in the same spot).
-        let mut seen: std::collections::HashMap<String, &MethodDecl> =
-            std::collections::HashMap::new();
+        let mut seen: rustc_hash::FxHashMap<String, &MethodDecl> = rustc_hash::FxHashMap::default();
         for m in methods {
             let lower = m.function.name.to_ascii_lowercase();
             if let Some(prev) = seen.insert(lower, m)

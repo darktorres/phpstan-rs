@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::Visibility;
@@ -38,7 +38,7 @@ pub(crate) fn object_class_names(ty: Type) -> Vec<String> {
 /// place (it's already fully resolved, not merged from anywhere).
 pub(crate) fn method_tag_sig(
     tag: &docblock::MethodTag,
-    template_params: &HashMap<String, TemplateParam>,
+    template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> FunctionSig {
     // Also collects `(raw, resolved)` case refs alongside the resolved

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -320,7 +320,7 @@ impl<'a> Checker<'a> {
             // already-narrower-typed argument turns into. Anything else
             // falls back to `Mixed`, matching the undefined-variable case
             // above.
-            let substituted = types::substitute_template(&param.ty, &HashMap::new());
+            let substituted = types::substitute_template(&param.ty, &FxHashMap::default());
             // `Checker::is_array_like` also trusts a `list<T>`/
             // `non-empty-array<T>`-declared by-ref parameter (an
             // `Intersection`), rather than falling into the "anything
@@ -856,7 +856,7 @@ impl<'a> Checker<'a> {
         let variadic = sig.params.last().is_some_and(|p| p.variadic);
         let mut named_seen = false;
         let mut spread_seen = false;
-        let mut used_param_names: HashSet<&str> = HashSet::new();
+        let mut used_param_names: FxHashSet<&str> = FxHashSet::default();
         let mut positional_index = 0usize;
 
         for arg in args {

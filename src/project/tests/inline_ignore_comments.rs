@@ -219,7 +219,7 @@ fn deferred_results(source: &str, report_unmatched: bool) -> Vec<(u32, String, S
     let path = PathBuf::from("f.php");
     project.load_analyzed_file(path.clone(), source).unwrap();
     project.finish_loading();
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(path.clone(), project.check_file(&path));
     project.apply_inline_ignores(&mut results, report_unmatched);
     results

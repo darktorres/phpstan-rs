@@ -1,5 +1,5 @@
 use indexmap::IndexMap;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
@@ -202,8 +202,8 @@ pub struct ClassInfo {
     pub is_immutable: bool,
     pub extends: Vec<Arc<str>>,
     pub implements: Vec<Arc<str>>,
-    pub methods: HashMap<Arc<str>, FunctionSig>,
-    pub properties: HashMap<Arc<str>, PropertySig>,
+    pub methods: FxHashMap<Arc<str>, FunctionSig>,
+    pub properties: FxHashMap<Arc<str>, PropertySig>,
     // Declaration order is kept: a listing of constants (a `match`
     // remainder, a `Foo::X_*` wildcard) follows source order, as in real
     // PHPStan.
@@ -212,22 +212,22 @@ pub struct ClassInfo {
     // Method names declared `abstract` in this class's own body (not
     // walked up the hierarchy - a completeness check needs to walk
     // `extends`/`implements` itself and consult each ancestor's own set).
-    pub abstract_methods: HashSet<Arc<str>>,
+    pub abstract_methods: FxHashSet<Arc<str>>,
     // Method names declared `final` in this class's own body.
-    pub final_methods: HashSet<Arc<str>>,
+    pub final_methods: FxHashSet<Arc<str>>,
     // Method names declared `static` in this class's own body - same
     // "not walked up the hierarchy" shape as `abstract_methods`/
     // `final_methods` above, used by `check_one_method_override`'s
     // `method.nonStatic`/`method.static` check, mirroring real PHPStan's
     // `OverridingMethodRule`: an override must match its ancestor's
     // static-ness exactly, either direction.
-    pub static_methods: HashSet<Arc<str>>,
+    pub static_methods: FxHashSet<Arc<str>>,
     // Property names declared `final` in this class's own body (PHP 8.4) -
     // same "not walked up the hierarchy" shape as `final_methods` above;
     // `Registry::find_final_ancestor_property` does that walk. Real PHP
     // fatals overriding a `final` property in a subclass exactly like a
     // `final` method.
-    pub final_properties: HashSet<Arc<str>>,
+    pub final_properties: FxHashSet<Arc<str>>,
     // `@final`'s docblock-only siblings to `final_methods`/
     // `final_properties` above - real PHP never enforces this convention
     // (no engine-level guarantee backs it, unlike the native keyword), so
@@ -235,8 +235,8 @@ pub struct ClassInfo {
     // (`Registry::find_final_ancestor_method`/
     // `find_final_ancestor_property`, real keyword taking priority when
     // both somehow apply on the same ancestor).
-    pub final_methods_by_phpdoc: HashSet<Arc<str>>,
-    pub final_properties_by_phpdoc: HashSet<Arc<str>>,
+    pub final_methods_by_phpdoc: FxHashSet<Arc<str>>,
+    pub final_properties_by_phpdoc: FxHashSet<Arc<str>>,
     // `use A, B { B::hello as helloB; }` - each entry's `trait_name` (when
     // present) is already resolved to the same fully-qualified name
     // `uses` itself is keyed under, so `flatten_traits` can look it up in
@@ -247,7 +247,7 @@ pub struct ClassInfo {
     // these as already addressed by the class author, even for
     // `insteadof` (whose actual trait-selection this project doesn't
     // otherwise model).
-    pub resolved_trait_conflicts: HashSet<Arc<str>>,
+    pub resolved_trait_conflicts: FxHashSet<Arc<str>>,
     // This class's own `@template T` names, in declaration order - order
     // matters, since a generic reference (`Collection<User>`) binds its
     // type arguments to these positionally (`checker::
@@ -269,7 +269,7 @@ pub struct ClassInfo {
     // `@implements Iface<Arg, ...>` tag applies to (a class can implement
     // more than one at once) - the key is resolved to the same
     // fully-qualified name `implements` itself uses, so the two agree.
-    pub implements_args: HashMap<Arc<str>, Vec<Type>>,
+    pub implements_args: FxHashMap<Arc<str>, Vec<Type>>,
     // Same idea again, but for a generic trait named in an `@use
     // Trait<Arg, ...>` tag - keyed the same way as `implements_args`.
     // Unlike `extends`/`implements`, which are both written on the
@@ -279,12 +279,12 @@ pub struct ClassInfo {
     // TemplateTypeTrait;`, not the class's separate `/** @api */`
     // docblock above it) - see `ClassDecl::uses_doc_comments`'s doc
     // comment for where this project captures that.
-    pub uses_args: HashMap<Arc<str>, Vec<Type>>,
+    pub uses_args: FxHashMap<Arc<str>, Vec<Type>>,
     // `@template T of Bound` - the resolved bound for whichever of
     // `templates` above declared one. Checked by
     // `checker::check_generic_bounds` wherever this class is referenced
     // with concrete type arguments (`Collection<Foo>`).
-    pub template_bounds: HashMap<Arc<str>, Type>,
+    pub template_bounds: FxHashMap<Arc<str>, Type>,
     // `@template T = Default` - the resolved default for whichever of
     // `templates` above declared one, mirroring `template_bounds`'s
     // shape/construction exactly. A generic reference supplying fewer
@@ -292,12 +292,12 @@ pub struct ClassInfo {
     // (`check_generic_reference_arity`, `checker/generics.rs`) for a
     // template name absent from this map - one with a default is
     // legitimately optional to supply.
-    pub template_defaults: HashMap<Arc<str>, Type>,
+    pub template_defaults: FxHashMap<Arc<str>, Type>,
     // Names from `templates` above additionally declared
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant.
-    pub covariant_templates: HashSet<Arc<str>>,
-    pub contravariant_templates: HashSet<Arc<str>>,
+    pub covariant_templates: FxHashSet<Arc<str>>,
+    pub contravariant_templates: FxHashSet<Arc<str>>,
     // This class/interface/trait's own docblock carries `@api` (or,
     // equivalently, `@api-do-not-implement`, which implies it - see
     // `DocBlock::api`'s doc comment). Consulted only by
@@ -350,7 +350,7 @@ pub struct ClassInfo {
     // `->value` union-of-literals property type applies) - empty for a
     // non-enum, an unbacked enum, or a backed enum with any non-literal
     // case value (a case naming a class constant).
-    pub enum_case_values: HashMap<Arc<str>, Type>,
+    pub enum_case_values: FxHashMap<Arc<str>, Type>,
     // This class's own `@phpstan-type Name TypeExpr` local alias table
     // (`function_sig::build_type_aliases`), keyed by each alias's own
     // resolved FQN - already spliced into every member's `ty` at
@@ -359,7 +359,7 @@ pub struct ClassInfo {
     // check-time `@var` resolution path, which needs the same table to
     // expand a local variable annotated `/** @var Name $x */` inside one
     // of this class's method bodies. Empty for a class with no such tags.
-    pub type_aliases: HashMap<Arc<str>, Type>,
+    pub type_aliases: FxHashMap<Arc<str>, Type>,
     // `ParamSig::case_refs`'s `@phpstan-type` equivalent - keyed the
     // same way `type_aliases` itself is (the alias's resolved local
     // name), `(raw, resolved)` pairs for every class-name reference the
@@ -367,7 +367,7 @@ pub struct ClassInfo {
     // elsewhere - that's this same mechanism at whatever
     // `@param`/`@return`/property tag actually uses the alias, via its
     // own `case_refs`).
-    pub type_alias_case_refs: HashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>,
+    pub type_alias_case_refs: FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>,
     // This class's own `@phpstan-import-type` tags, name-resolved
     // (`from` to the source class's FQN, the imported name to the local
     // key this class's members already reference it by) but not yet
@@ -402,7 +402,7 @@ pub struct ClassInfo {
     pub access: crate::registry::access_attributes::AccessAttributes,
     /// Each method's, keyed by lowercased method name (only methods that
     /// have any).
-    pub method_access: HashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes>,
+    pub method_access: FxHashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes>,
     // `@mixin Type` - resolved FQNs, same shape/flattening as the three
     // above. Not yet looked up in the target's own `methods`/`properties`
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
@@ -448,8 +448,8 @@ pub struct ResolvedTypeImport {
 /// last declaration is the unrelated `($isostr, $options = 0)` form).
 fn collect_merged_methods(
     methods: impl Iterator<Item = (Arc<str>, FunctionSig)>,
-) -> HashMap<Arc<str>, FunctionSig> {
-    let mut out: HashMap<Arc<str>, FunctionSig> = HashMap::new();
+) -> FxHashMap<Arc<str>, FunctionSig> {
+    let mut out: FxHashMap<Arc<str>, FunctionSig> = FxHashMap::default();
     for (name, sig) in methods {
         match out.remove(&name) {
             Some(existing) => {
@@ -480,7 +480,7 @@ impl ClassInfo {
         // method's params/return type below) carries the real metadata
         // from here instead of a bare name.
         let class_scope = ctx.declared_name(&c.name);
-        let template_params: HashMap<String, TemplateParam> = class_doc
+        let template_params: FxHashMap<String, TemplateParam> = class_doc
             .as_ref()
             .map(|d| build_template_params(d, &class_scope, ctx))
             .unwrap_or_default();
@@ -519,10 +519,10 @@ impl ClassInfo {
         // every method in the class being filtered/name-cloned once per
         // set across 5 separate iterations.
         let mut methods_vec: Vec<(Arc<str>, FunctionSig)> = Vec::with_capacity(c.methods.len());
-        let mut abstract_methods: HashSet<Arc<str>> = HashSet::new();
-        let mut final_methods: HashSet<Arc<str>> = HashSet::new();
-        let mut static_methods: HashSet<Arc<str>> = HashSet::new();
-        let mut final_methods_by_phpdoc: HashSet<Arc<str>> = HashSet::new();
+        let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut final_methods_by_phpdoc: FxHashSet<Arc<str>> = FxHashSet::default();
         for m in &c.methods {
             let name = m.function.name.clone();
             if m.is_abstract {
@@ -566,13 +566,13 @@ impl ClassInfo {
             );
             methods_vec.push((name.clone(), sig));
         }
-        let methods: HashMap<Arc<str>, FunctionSig> =
+        let methods: FxHashMap<Arc<str>, FunctionSig> =
             collect_merged_methods(methods_vec.into_iter());
         // Same private-is-not-overridable exemption `final_methods`
         // above applies, one member kind over - a private property
         // (final or not) is never part of a subclass's overridable
         // surface either.
-        let mut final_properties: HashSet<Arc<str>> = c
+        let mut final_properties: FxHashSet<Arc<str>> = c
             .properties
             .iter()
             .filter(|p| p.is_final && p.visibility != Visibility::Private)
@@ -602,7 +602,7 @@ impl ClassInfo {
 
         // `@final`'s docblock-only sibling to `final_properties` above -
         // same private-is-not-overridable exemption.
-        let mut final_properties_by_phpdoc: HashSet<Arc<str>> = c
+        let mut final_properties_by_phpdoc: FxHashSet<Arc<str>> = c
             .properties
             .iter()
             .filter(|p| {
@@ -634,7 +634,7 @@ impl ClassInfo {
             );
         }
 
-        let mut properties: HashMap<Arc<str>, PropertySig> = c
+        let mut properties: FxHashMap<Arc<str>, PropertySig> = c
             .properties
             .iter()
             .map(|p| {
@@ -983,7 +983,7 @@ impl ClassInfo {
                 _ => Vec::new(),
             })
             .unwrap_or_default();
-        let implements_args: HashMap<Arc<str>, Vec<Type>> = class_doc
+        let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(|raw| match resolve_generic_tag(raw) {
@@ -998,11 +998,11 @@ impl ClassInfo {
         // name in a multi-name `use A, B;` statement, so dedup (collect
         // into a `HashSet` first) before re-parsing each distinct doc
         // comment only once.
-        let uses_args: HashMap<Arc<str>, Vec<Type>> = c
+        let uses_args: FxHashMap<Arc<str>, Vec<Type>> = c
             .uses_doc_comments
             .iter()
             .filter_map(|d| d.as_deref())
-            .collect::<HashSet<_>>()
+            .collect::<FxHashSet<_>>()
             .into_iter()
             .map(docblock::parse)
             .flat_map(|d| d.uses)
@@ -1011,7 +1011,7 @@ impl ClassInfo {
                 _ => None,
             })
             .collect();
-        let template_bounds: HashMap<Arc<str>, Type> = class_doc
+        let template_bounds: FxHashMap<Arc<str>, Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_bounds
@@ -1020,7 +1020,7 @@ impl ClassInfo {
                     .collect()
             })
             .unwrap_or_default();
-        let template_defaults: HashMap<Arc<str>, Type> = class_doc
+        let template_defaults: FxHashMap<Arc<str>, Type> = class_doc
             .as_ref()
             .map(|d| {
                 d.template_defaults
@@ -1029,11 +1029,11 @@ impl ClassInfo {
                     .collect()
             })
             .unwrap_or_default();
-        let covariant_templates: HashSet<Arc<str>> = class_doc
+        let covariant_templates: FxHashSet<Arc<str>> = class_doc
             .as_ref()
             .map(|d| d.covariant_templates.iter().map(|s| intern(s)).collect())
             .unwrap_or_default();
-        let contravariant_templates: HashSet<Arc<str>> = class_doc
+        let contravariant_templates: FxHashSet<Arc<str>> = class_doc
             .as_ref()
             .map(|d| {
                 d.contravariant_templates
@@ -1191,7 +1191,7 @@ impl ClassInfo {
             deprecated,
             attribute_targets,
             attrs: c.attrs.iter().map(|a| intern(&a.name)).collect(),
-            enum_case_values: HashMap::new(),
+            enum_case_values: FxHashMap::default(),
             type_aliases,
             type_alias_case_refs,
             type_imports,
@@ -1219,7 +1219,7 @@ impl ClassInfo {
         // level template a tag's argument could reference.
         let fqn = ctx.declared_name(&e.name);
         let class_doc: Option<DocBlock> = e.doc_comment.as_deref().map(docblock::parse);
-        let implements_args: HashMap<Arc<str>, Vec<Type>> = class_doc
+        let implements_args: FxHashMap<Arc<str>, Vec<Type>> = class_doc
             .iter()
             .flat_map(|d| &d.implements)
             .filter_map(
@@ -1233,11 +1233,11 @@ impl ClassInfo {
         // construction - the reasoning (`@use` lives on the `use`
         // statement's own doc comment) is unrelated to whether the
         // enclosing declaration is a class or an enum.
-        let uses_args: HashMap<Arc<str>, Vec<Type>> = e
+        let uses_args: FxHashMap<Arc<str>, Vec<Type>> = e
             .uses_doc_comments
             .iter()
             .filter_map(|d| d.as_deref())
-            .collect::<HashSet<_>>()
+            .collect::<FxHashSet<_>>()
             .into_iter()
             .map(docblock::parse)
             .flat_map(|d| d.uses)
@@ -1248,15 +1248,15 @@ impl ClassInfo {
                 },
             )
             .collect();
-        let mut methods: HashMap<Arc<str>, FunctionSig> =
+        let mut methods: FxHashMap<Arc<str>, FunctionSig> =
             collect_merged_methods(e.methods.iter().map(|m| {
                 (
                     m.function.name.clone(),
                     FunctionSig::from_decl(
                         &m.function,
                         ctx,
-                        &HashMap::new(),
-                        &HashMap::new(),
+                        &FxHashMap::default(),
+                        &FxHashMap::default(),
                         m.visibility.clone(),
                     ),
                 )
@@ -1467,7 +1467,7 @@ impl ClassInfo {
         // `::from()`/`::tryFrom()` narrowing only needs to know a given
         // literal argument's matching case, if any, and a partial map
         // still answers that for the literal-valued cases it covers.
-        let enum_case_values: HashMap<Arc<str>, Type> = e
+        let enum_case_values: FxHashMap<Arc<str>, Type> = e
             .cases
             .iter()
             .filter_map(|c| {
@@ -1488,7 +1488,7 @@ impl ClassInfo {
         // itself (`UnitEnum`/`BackedEnum`). Without registering these as
         // properties, undefined-property-on-read detection would flag
         // every real `$case->value` access.
-        let mut properties = HashMap::new();
+        let mut properties = FxHashMap::default();
         properties.insert(
             intern("name"),
             PropertySig {
@@ -1610,9 +1610,9 @@ impl ClassInfo {
         // One pass over `e.methods` instead of 3 separate filtered ones -
         // see `ClassInfo::from_decl`'s equivalent loop for the same
         // reasoning.
-        let mut abstract_methods: HashSet<Arc<str>> = HashSet::new();
-        let mut final_methods: HashSet<Arc<str>> = HashSet::new();
-        let mut static_methods: HashSet<Arc<str>> = HashSet::new();
+        let mut abstract_methods: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut final_methods: FxHashSet<Arc<str>> = FxHashSet::default();
+        let mut static_methods: FxHashSet<Arc<str>> = FxHashSet::default();
         for m in &e.methods {
             if m.is_abstract {
                 abstract_methods.insert(m.function.name.clone());
@@ -1669,22 +1669,22 @@ impl ClassInfo {
             // An enum can't declare instance properties at all (see
             // `ast::EnumDecl`'s doc comment) - never a `final`-property
             // candidate either.
-            final_properties: HashSet::new(),
+            final_properties: FxHashSet::default(),
             // An enum can never be `extends`-subclassed by anything
             // (`is_final: true` above already reflects this) - no
             // ancestor walk could ever reach these sets.
-            final_methods_by_phpdoc: HashSet::new(),
-            final_properties_by_phpdoc: HashSet::new(),
+            final_methods_by_phpdoc: FxHashSet::default(),
+            final_properties_by_phpdoc: FxHashSet::default(),
             trait_aliases,
             resolved_trait_conflicts: e.resolved_trait_conflicts.iter().cloned().collect(),
             templates: Vec::new(),
             extends_args: Vec::new(),
             implements_args,
             uses_args,
-            template_bounds: HashMap::new(),
-            template_defaults: HashMap::new(),
-            covariant_templates: HashSet::new(),
-            contravariant_templates: HashSet::new(),
+            template_bounds: FxHashMap::default(),
+            template_defaults: FxHashMap::default(),
+            covariant_templates: FxHashSet::default(),
+            contravariant_templates: FxHashSet::default(),
             // Real PHPStan's API surface has no enums to mark `@api`
             // anyway.
             is_api: false,
@@ -1719,8 +1719,8 @@ impl ClassInfo {
             attribute_targets: compute_attribute_targets(&e.attrs),
             attrs: e.attrs.iter().map(|a| intern(&a.name)).collect(),
             enum_case_values,
-            type_aliases: HashMap::new(),
-            type_alias_case_refs: HashMap::new(),
+            type_aliases: FxHashMap::default(),
+            type_alias_case_refs: FxHashMap::default(),
             type_imports: Vec::new(),
             // Same scope trim as `mixins` above - a real `@method` on an
             // enum's own docblock is a rare combination not modeled here.

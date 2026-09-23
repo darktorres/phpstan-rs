@@ -7,7 +7,7 @@
 //! directives (`DeclareStrictTypesRule`, plus block-mode `strict_types`
 //! and unknown directives).
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -32,7 +32,7 @@ struct Scope {
     frames: Vec<(FrameKind, usize)>,
     finallies: Vec<usize>,
     next_id: usize,
-    labels: HashMap<Arc<str>, Placement>,
+    labels: FxHashMap<Arc<str>, Placement>,
     duplicate_labels: Vec<(Arc<str>, Span)>,
     gotos: Vec<(Arc<str>, Placement)>,
     jumps: Vec<(&'static str, Span, String)>,
@@ -180,7 +180,7 @@ impl<'a> Checker<'a> {
                 "label.duplicate",
             );
         }
-        let mut used: HashSet<Arc<str>> = HashSet::new();
+        let mut used: FxHashSet<Arc<str>> = FxHashSet::default();
         for (name, goto) in &scope.gotos {
             let Some(target) = scope.labels.get(name) else {
                 self.report_keyword(

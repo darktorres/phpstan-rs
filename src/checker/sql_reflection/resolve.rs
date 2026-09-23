@@ -33,7 +33,7 @@
 //! any configured live connection already answers all of it) has no
 //! way to verify against. A real, disclosed gap, not a decline.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use sqlparser::ast::{
     Expr, ObjectNamePart, Select, SelectItem, SetExpr, Statement, TableFactor, UnaryOperator, Value,
@@ -403,8 +403,8 @@ fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type>
 fn resolve_ctes_from_static_schema(
     schema: &SchemaCatalog,
     query: &sqlparser::ast::Query,
-) -> Option<HashMap<String, Vec<SchemaColumn>>> {
-    let mut ctes = HashMap::new();
+) -> Option<FxHashMap<String, Vec<SchemaColumn>>> {
+    let mut ctes = FxHashMap::default();
     if let Some(with) = &query.with {
         if with.recursive {
             return None;
@@ -442,7 +442,7 @@ fn column_value_type(col: &SchemaColumn) -> Type {
 fn resolve_select_from_static_schema(
     schema: &SchemaCatalog,
     select: &Select,
-    ctes: &HashMap<String, Vec<SchemaColumn>>,
+    ctes: &FxHashMap<String, Vec<SchemaColumn>>,
 ) -> Option<Vec<(String, Type, bool)>> {
     if select.from.len() != 1 || !select.from[0].joins.is_empty() {
         return None;

@@ -1,13 +1,13 @@
 //! Template type substitution.
 use super::super::*;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 #[test]
 fn substitute_template_recurses_into_array_and_intersection_types() {
     // Covers substitute_template's Array and Intersection arms - not
     // exercised by substituting a bare TemplateParam or one nested in a
     // Union, only `T[]`/`array<T>` or an intersection type mentioning T.
-    let mut bindings = HashMap::new();
+    let mut bindings = FxHashMap::default();
     bindings.insert("T".to_string(), Type::String);
 
     let array_of_t = Type::Array(
@@ -39,7 +39,7 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
     // `substitute_template` must substitute through `Type::Object(name,
     // args)`: `T -> int` through `Box<T>` should produce `Box<int>`,
     // not leave it unchanged.
-    let mut bindings = HashMap::new();
+    let mut bindings = FxHashMap::default();
     bindings.insert("T".to_string(), Type::Int);
 
     let box_of_t = Type::Object(
@@ -60,7 +60,7 @@ fn substitute_template_recurses_into_a_generic_class_reference() {
 // left untouched.
 #[test]
 fn substitute_template_recurses_into_a_conditional_types_branches() {
-    let mut bindings = HashMap::new();
+    let mut bindings = FxHashMap::default();
     bindings.insert("T".to_string(), Type::Int);
 
     let t = || Type::TemplateParam(TemplateParam::unbounded("T".to_string()));

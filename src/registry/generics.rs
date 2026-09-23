@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::registry::Registry;
@@ -103,8 +103,8 @@ impl Registry {
         class: &str,
         type_args: &[Type],
         target: &str,
-    ) -> HashMap<String, Type> {
-        let mut seen = HashSet::new();
+    ) -> FxHashMap<String, Type> {
+        let mut seen = FxHashSet::default();
         self.class_template_bindings_rec(class, type_args, target, &mut seen)
             .unwrap_or_default()
     }
@@ -124,13 +124,13 @@ impl Registry {
         class: &str,
         type_args: &[Type],
         target: &str,
-        seen: &mut HashSet<String>,
-    ) -> Option<HashMap<String, Type>> {
+        seen: &mut FxHashSet<String>,
+    ) -> Option<FxHashMap<String, Type>> {
         if !seen.insert(class.to_string()) {
             return None;
         }
         let info = self.classes.get(class)?;
-        let own_bindings: HashMap<String, Type> = info
+        let own_bindings: FxHashMap<String, Type> = info
             .templates
             .iter()
             .map(|s| s.to_string())
@@ -206,7 +206,7 @@ impl Registry {
     /// the (at least two) paths reads the signature next.
     pub(crate) fn substitute_class_scoped_ancestor_templates(
         ty: &Type,
-        ancestor_bindings: &HashMap<Arc<str>, HashMap<String, Type>>,
+        ancestor_bindings: &FxHashMap<Arc<str>, FxHashMap<String, Type>>,
     ) -> Type {
         match ty {
             Type::TemplateParam(tp) => tp

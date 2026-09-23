@@ -17,7 +17,7 @@ impl ReflectionRule for FlagsEveryPublicClass {
             identifier: "test.sawClass".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: std::collections::HashMap::new(),
+            metadata: rustc_hash::FxHashMap::default(),
             fix: None,
         }]
     }
@@ -35,7 +35,7 @@ impl ReflectionRule for FlagsEveryFunction {
             identifier: "test.sawFunction".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: std::collections::HashMap::new(),
+            metadata: rustc_hash::FxHashMap::default(),
             fix: None,
         }]
     }

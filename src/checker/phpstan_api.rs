@@ -64,7 +64,7 @@
 //! `#[RegisteredRule]`-style attribute, not actually "using" its API
 //! surface - without that nuance would be pure noise.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::Path;
 
 use crate::ast::*;
@@ -82,7 +82,7 @@ use crate::token::Span;
 /// other reference kind's own `resolve_if_phpstan` check) - collection
 /// stays reusable/simple, and every lookup site re-checks the namespace
 /// itself.
-type ParamTypes = HashMap<String, String>;
+type ParamTypes = FxHashMap<String, String>;
 
 /// `file_path` is `None` in every existing test (`Walker::
 /// tests`'s own `diagnostics_for` has no real file on disk to point at) -
@@ -104,12 +104,12 @@ pub(crate) fn check_phpstan_api_usage(
     let mut walker = Walker {
         registry,
         diagnostics: Vec::new(),
-        current_prop_types: ParamTypes::new(),
+        current_prop_types: ParamTypes::default(),
         current_class_implements_phpstan_interface: false,
         current_class_fqn: None,
         file_path,
     };
-    let empty = ParamTypes::new();
+    let empty = ParamTypes::default();
     for stmt in program {
         walker.check_stmt(stmt, &ctx, &empty, "<main>");
     }
@@ -416,7 +416,7 @@ fn resolved_class_from_hint(hint: Option<&str>, ctx: &NameContext) -> Option<Str
 /// matching the module's own documented "known, disclosed gap" note on
 /// this exact case.
 fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
-    let mut out = ParamTypes::new();
+    let mut out = ParamTypes::default();
     for p in &c.properties {
         if let Some(fqn) = resolved_class_from_hint(p.type_hint.as_deref(), ctx) {
             out.insert(p.name.to_string(), fqn);
@@ -706,7 +706,7 @@ impl<'a> Walker<'a> {
                     .to_string(),
             ),
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -750,7 +750,7 @@ impl<'a> Walker<'a> {
             identifier: identifier.to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -810,7 +810,7 @@ impl<'a> Walker<'a> {
             identifier: "phpstanApi.method".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -843,7 +843,7 @@ impl<'a> Walker<'a> {
             identifier: identifier.to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -890,7 +890,7 @@ impl<'a> Walker<'a> {
                 identifier: identifier.to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: HashMap::new(),
+                metadata: FxHashMap::default(),
                 fix: None,
             });
             return;
@@ -906,14 +906,14 @@ impl<'a> Walker<'a> {
                 identifier: identifier.to_string(),
                 tip: None,
                 non_ignorable: false,
-                metadata: HashMap::new(),
+                metadata: FxHashMap::default(),
                 fix: None,
             });
         }
     }
 
     fn check_function(&mut self, f: &FunctionDecl, ctx: &NameContext, label: &str) {
-        let param_types = param_types_with(&ParamTypes::new(), &f.params, ctx);
+        let param_types = param_types_with(&ParamTypes::default(), &f.params, ctx);
         for s in f.body.iter() {
             self.check_stmt(s, ctx, &param_types, label);
         }
@@ -988,7 +988,7 @@ impl<'a> Walker<'a> {
                 self.report_always(&ufqn, &action, c.span, &fqn, "phpstanApi.trait", ctx);
             }
         }
-        let empty = ParamTypes::new();
+        let empty = ParamTypes::default();
         for p in &c.properties {
             if let Some(d) = &p.default {
                 self.check_expr(d, ctx, &empty, &fqn);
@@ -1005,7 +1005,7 @@ impl<'a> Walker<'a> {
             let method_label = format!("{fqn}::{}", m.function.name);
             self.check_function(&m.function, ctx, &method_label);
         }
-        self.current_prop_types = ParamTypes::new();
+        self.current_prop_types = ParamTypes::default();
         self.current_class_implements_phpstan_interface = false;
         self.current_class_fqn = None;
     }
@@ -1034,7 +1034,7 @@ impl<'a> Walker<'a> {
                 self.report_always(&ufqn, &action, e.span, &fqn, "phpstanApi.trait", ctx);
             }
         }
-        let empty = ParamTypes::new();
+        let empty = ParamTypes::default();
         for cst in &e.consts {
             self.check_expr(&cst.value, ctx, &empty, &fqn);
         }
@@ -1085,7 +1085,7 @@ impl<'a> Walker<'a> {
                     .to_string(),
             ),
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1115,7 +1115,7 @@ impl<'a> Walker<'a> {
             identifier: "phpParser.classRenamed".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1142,7 +1142,7 @@ impl<'a> Walker<'a> {
             identifier: "phpstanApi.runtimeReflection".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1175,7 +1175,7 @@ impl<'a> Walker<'a> {
             identifier: "phpstanApi.runtimeReflection".to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         });
     }
@@ -1423,7 +1423,7 @@ impl<'a> Walker<'a> {
                             identifier: "phpstanApi.instanceofAssumption".to_string(),
                             tip: None,
                             non_ignorable: false,
-                            metadata: HashMap::new(),
+                            metadata: FxHashMap::default(),
                             fix: None,
                         });
                     }

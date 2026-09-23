@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
@@ -23,8 +23,8 @@ use crate::ast_walk::{expr_children, stmt_children};
 /// resolved through `types::parse_type_string`, which does strip a
 /// leading backslash, so the names pulled out of them are stripped the
 /// same way to stay consistent with that.
-pub fn referenced_names(stmts: &[Stmt]) -> HashSet<String> {
-    let mut names = HashSet::new();
+pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
+    let mut names = FxHashSet::default();
     for stmt in stmts {
         collect_stmt(stmt, &mut names);
     }
@@ -67,7 +67,7 @@ pub(crate) fn is_primitive_type_name(name: &str) -> bool {
 /// that isn't part of a bare/qualified identifier and discarding the
 /// primitive type keywords - good enough for "does this file mention that
 /// name anywhere", which is all this is used for.
-fn collect_type_hint(hint: &str, names: &mut HashSet<String>) {
+fn collect_type_hint(hint: &str, names: &mut FxHashSet<String>) {
     let mut current = String::new();
     for c in hint.chars().chain(std::iter::once(' ')) {
         if c.is_alphanumeric() || c == '_' || c == '\\' {
@@ -86,7 +86,7 @@ fn collect_type_hint(hint: &str, names: &mut HashSet<String>) {
 /// (`#[MyAttribute]` on some other declaration) has no `Name`/`New`/
 /// `StaticAccess` node anywhere pointing at it, so without this it would
 /// look identically unreferenced to a genuinely dead class.
-fn collect_attrs(attrs: &[Attribute], names: &mut HashSet<String>) {
+fn collect_attrs(attrs: &[Attribute], names: &mut FxHashSet<String>) {
     for a in attrs {
         names.insert(a.name.clone());
         for arg in &a.args {
@@ -95,7 +95,7 @@ fn collect_attrs(attrs: &[Attribute], names: &mut HashSet<String>) {
     }
 }
 
-fn collect_param(p: &Param, names: &mut HashSet<String>) {
+fn collect_param(p: &Param, names: &mut FxHashSet<String>) {
     collect_attrs(&p.attrs, names);
     if let Some(h) = &p.type_hint {
         collect_type_hint(h, names);
@@ -108,7 +108,7 @@ fn collect_param(p: &Param, names: &mut HashSet<String>) {
     }
 }
 
-fn collect_property_hooks(hooks: &PropertyHooks, names: &mut HashSet<String>) {
+fn collect_property_hooks(hooks: &PropertyHooks, names: &mut FxHashSet<String>) {
     collect_attrs(&hooks.get_attrs, names);
     collect_attrs(&hooks.set_attrs, names);
     if let Some(body) = &hooks.get {
@@ -122,7 +122,7 @@ fn collect_property_hooks(hooks: &PropertyHooks, names: &mut HashSet<String>) {
     }
 }
 
-fn collect_hook_body(body: &PropertyHookBody, names: &mut HashSet<String>) {
+fn collect_hook_body(body: &PropertyHookBody, names: &mut FxHashSet<String>) {
     match body {
         PropertyHookBody::Arrow(e) => collect_expr(e, names),
         PropertyHookBody::Block(stmts) => {
@@ -135,7 +135,7 @@ fn collect_hook_body(body: &PropertyHookBody, names: &mut HashSet<String>) {
     }
 }
 
-fn collect_function(f: &FunctionDecl, names: &mut HashSet<String>) {
+fn collect_function(f: &FunctionDecl, names: &mut FxHashSet<String>) {
     collect_attrs(&f.attrs, names);
     for p in &f.params {
         collect_param(p, names);
@@ -148,7 +148,7 @@ fn collect_function(f: &FunctionDecl, names: &mut HashSet<String>) {
     }
 }
 
-fn collect_class(c: &ClassDecl, names: &mut HashSet<String>) {
+fn collect_class(c: &ClassDecl, names: &mut FxHashSet<String>) {
     collect_attrs(&c.attrs, names);
     names.extend(c.extends.iter().cloned());
     names.extend(c.implements.iter().cloned());
@@ -174,7 +174,7 @@ fn collect_class(c: &ClassDecl, names: &mut HashSet<String>) {
     }
 }
 
-fn collect_enum(e: &EnumDecl, names: &mut HashSet<String>) {
+fn collect_enum(e: &EnumDecl, names: &mut FxHashSet<String>) {
     collect_attrs(&e.attrs, names);
     names.extend(e.implements.iter().cloned());
     names.extend(e.uses.iter().cloned());
@@ -203,7 +203,7 @@ fn collect_enum(e: &EnumDecl, names: &mut HashSet<String>) {
 // dedicated declaration-walker), so this calls
 // `collect_function`/`collect_class`/`collect_enum` directly instead of
 // relying on the trailing loop.
-fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
+fn collect_stmt(stmt: &Stmt, names: &mut FxHashSet<String>) {
     match &stmt.kind {
         StmtKind::Block(_)
         | StmtKind::InlineHtml(_)
@@ -292,7 +292,7 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
 // for (`Closure`/`ArrowFn`/`NewAnonymousClass`, each needing its own
 // non-`Vec<&Expr>`-shaped walk - see `ast_walk`'s own module doc
 // comment for why).
-fn collect_expr(expr: &Expr, names: &mut HashSet<String>) {
+fn collect_expr(expr: &Expr, names: &mut FxHashSet<String>) {
     match &expr.kind {
         ExprKind::StaticAccess(class, _) => {
             names.insert(class.clone());

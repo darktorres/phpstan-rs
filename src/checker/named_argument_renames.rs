@@ -32,7 +32,7 @@
 //! surrounding diagnostic work is exactly what the facts-only pass
 //! exists to skip.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::{Arg, ClassDecl, Visibility};
@@ -47,7 +47,7 @@ use crate::token::Span;
 /// a private method, or one on/marked `final`, can never actually
 /// dispatch to a different override at runtime, so no rename collision
 /// is possible there at all.
-pub(crate) type NamedArgumentCallFacts = HashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<Span>>;
+pub(crate) type NamedArgumentCallFacts = FxHashMap<(Arc<str>, Arc<str>, Arc<str>), Vec<Span>>;
 
 /// One override anywhere in this file that renames a parameter
 /// relative to its own nearest ancestor prototype (`Registry::find_
@@ -136,7 +136,7 @@ impl<'a> Checker<'a> {
             let Some(info) = self.registry.classes.get(fqn) else {
                 return;
             };
-            let own_method_names: std::collections::HashSet<&str> =
+            let own_method_names: rustc_hash::FxHashSet<&str> =
                 c.methods.iter().map(|m| m.function.name.as_ref()).collect();
             let mut trait_method_names: Vec<Arc<str>> = info
                 .methods

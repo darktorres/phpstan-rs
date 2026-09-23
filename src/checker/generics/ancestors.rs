@@ -13,7 +13,7 @@ use crate::registry;
 use crate::token::Span;
 use crate::types::{self, Type};
 
-type Templates = std::collections::HashMap<String, types::TemplateParam>;
+type Templates = rustc_hash::FxHashMap<String, types::TemplateParam>;
 
 #[derive(Clone, Copy, PartialEq)]
 enum AncestorTag {
@@ -264,7 +264,7 @@ impl<'a> Checker<'a> {
             Some(doc) if doc.contains("template") => {
                 registry::build_template_params(&crate::docblock::parse(doc), fqn, &self.name_ctx)
             }
-            _ => Templates::new(),
+            _ => Templates::default(),
         }
     }
 
@@ -413,7 +413,7 @@ impl<'a> Checker<'a> {
             }
             let mut referenced = Vec::new();
             collect_class_names(ty, &mut referenced);
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = rustc_hash::FxHashSet::default();
             for name in referenced {
                 if !seen.insert(name.clone()) {
                     continue;

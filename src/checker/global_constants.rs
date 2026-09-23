@@ -6,7 +6,7 @@
 //! `MagicConstantContextRule` flags a magic constant used where it's
 //! always empty.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::ast::*;
 use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
@@ -31,7 +31,7 @@ const MAGIC_CONSTANTS: [&str; 10] = [
 pub(crate) struct ConstantFacts {
     /// Spans of `__FUNCTION__`/`__METHOD__` inside a closure or arrow
     /// function, where they name `{closure}`.
-    pub(crate) magic_in_closure: HashSet<Span>,
+    pub(crate) magic_in_closure: FxHashSet<Span>,
 }
 
 pub(crate) fn constant_facts(program: &[Stmt]) -> ConstantFacts {

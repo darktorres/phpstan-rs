@@ -394,12 +394,12 @@ impl QueryReflector for PostgresReflector {
 fn postgres_nullability(
     conn: &mut postgres::Client,
     columns: &[postgres::Column],
-) -> std::collections::HashMap<(u32, i16), bool> {
+) -> rustc_hash::FxHashMap<(u32, i16), bool> {
     let pairs: Vec<(u32, i16)> = columns
         .iter()
         .filter_map(|c| Some((c.table_oid()?, c.column_id()?)))
         .collect();
-    let mut map = std::collections::HashMap::new();
+    let mut map = rustc_hash::FxHashMap::default();
     if pairs.is_empty() {
         return map;
     }

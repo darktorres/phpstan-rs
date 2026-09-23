@@ -5,7 +5,7 @@ use super::helpers::*;
 
 #[test]
 fn identifier_only_drops_a_matching_diagnostic_and_keeps_a_non_matching_one() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("a.php"),
         vec![
@@ -25,7 +25,7 @@ fn identifier_only_drops_a_matching_diagnostic_and_keeps_a_non_matching_one() {
 
 #[test]
 fn identifier_and_path_are_and_combined_not_or() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("_analysis/phpstan-latte/foo.php"),
         vec![diag("missingType.iterableValue", "no value type specified")],
@@ -46,7 +46,7 @@ fn identifier_and_path_are_and_combined_not_or() {
 
 #[test]
 fn a_message_regex_only_matches_the_intended_message() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("a.latte.php"),
         vec![
@@ -72,7 +72,7 @@ fn a_message_regex_only_matches_the_intended_message() {
 
 #[test]
 fn non_ignorable_diagnostics_are_never_dropped() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("a.php"),
         vec![non_ignorable_diag("class.duplicate", "duplicate class Foo")],
@@ -87,7 +87,7 @@ fn non_ignorable_diagnostics_are_never_dropped() {
 
 #[test]
 fn two_entries_each_only_catch_their_own_shape() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("_analysis/phpstan-latte/foo.php"),
         vec![
@@ -116,7 +116,7 @@ fn two_entries_each_only_catch_their_own_shape() {
 
 #[test]
 fn no_entries_at_all_changes_nothing() {
-    let mut results = HashMap::new();
+    let mut results = FxHashMap::default();
     results.insert(
         PathBuf::from("a.php"),
         vec![diag("argument.type", "expects int, string given")],

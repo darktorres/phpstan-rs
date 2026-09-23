@@ -195,7 +195,7 @@ fn overrides_an_ancestor_method(registry: &Registry, fqn: &str, method_name: &st
 pub(crate) fn find_dead_members(
     registry: &Registry,
     use_sites: &UseSiteIndex,
-    escaped_classes: &std::collections::HashSet<String>,
+    escaped_classes: &rustc_hash::FxHashSet<String>,
 ) -> Vec<(String, String, MemberKind)> {
     let mut dead = Vec::new();
     for (fqn, info) in &registry.classes {

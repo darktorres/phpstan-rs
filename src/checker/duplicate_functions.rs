@@ -91,7 +91,7 @@ pub(crate) fn check_duplicate_function_declarations(
                     identifier: "function.duplicate".to_string(),
                     tip: None,
                     non_ignorable: true,
-                    metadata: std::collections::HashMap::new(),
+                    metadata: rustc_hash::FxHashMap::default(),
                     fix: None,
                 });
             }

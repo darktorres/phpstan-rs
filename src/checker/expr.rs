@@ -3719,7 +3719,7 @@ impl<'a> Checker<'a> {
                 // spuriously `.insert()` it into `closure_locals`,
                 // masking a real `variable.undefined` on an unrelated,
                 // genuinely-uncaptured reference to the same bare name.
-                let captured_names: std::collections::HashSet<&str> =
+                let captured_names: rustc_hash::FxHashSet<&str> =
                     uses.iter().map(|u| u.name.as_ref()).collect();
                 for (key, implied) in locals.branch_implied_facts.iter() {
                     let filtered: Vec<(String, Type)> = implied

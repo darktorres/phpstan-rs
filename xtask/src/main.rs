@@ -405,6 +405,33 @@ fn corpus(args: &[String]) -> Result<(), String> {
         );
     }
     baseline_check(&hash)?;
+    determinism_check(full)?;
+    Ok(())
+}
+
+/// Runs a configuration twice with `--emission-order` (each file's
+/// diagnostics in the order the checks produced them, no final sort) and
+/// requires identical output: the engine itself must be reproducible,
+/// not just the sorted report.
+fn determinism_check(full: bool) -> Result<(), String> {
+    let mut configs = vec![ALL_ON];
+    if full {
+        configs.push(UNSCOPED);
+    }
+    for config in configs {
+        let flag = ["--emission-order".to_string()];
+        let (first, first_err) = run_corpus(&config, "unset", &flag)?;
+        let (second, second_err) = run_corpus(&config, "unset", &flag)?;
+        if first != second || first_err != second_err {
+            let diff = unified_diff(first.as_bytes(), second.as_bytes())?;
+            let shown: String = diff.lines().take(40).collect::<Vec<_>>().join("\n");
+            return Err(format!(
+                "{}: two runs emitted different output\n{shown}",
+                config.name
+            ));
+        }
+        eprintln!("{}: emission order reproducible", config.name);
+    }
     Ok(())
 }
 
@@ -816,7 +843,7 @@ fn test_manifest() -> Result<(), String> {
         eprintln!("no manifest recorded for {parent}; nothing to compare");
         return Ok(());
     };
-    let mut renames = std::collections::HashMap::new();
+    let mut renames = std::collections::BTreeMap::new();
     let changed = git(&["show", "--name-only", "--format=", "HEAD"])?;
     for path in changed
         .lines()

@@ -866,9 +866,9 @@ fn patch_datetime_fluent_returns(classes: &mut [(Arc<str>, ClassInfo)]) {
 
 fn generated_stub_data() -> &'static GeneratedStubData {
     static CACHE: std::sync::LazyLock<GeneratedStubData> = std::sync::LazyLock::new(|| {
-        let mut seen_functions = std::collections::HashSet::new();
+        let mut seen_functions = rustc_hash::FxHashSet::default();
         let mut functions = Vec::new();
-        let mut seen_classes = std::collections::HashSet::new();
+        let mut seen_classes = rustc_hash::FxHashSet::default();
         let mut classes = Vec::new();
         let mut merged_constants: rustc_hash::FxHashMap<Arc<str>, Type> =
             rustc_hash::FxHashMap::default();

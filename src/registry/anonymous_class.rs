@@ -23,7 +23,7 @@
 //! this walks every function/method/closure/arrow-fn body too - an
 //! anonymous class can appear anywhere an expression can.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
@@ -50,21 +50,21 @@ pub(crate) fn synthetic_name(
 pub(crate) fn collect_anonymous_classes(
     stmts: &[Stmt],
     relative_file: &str,
-) -> (Vec<BuiltDecl>, HashMap<Span, String>) {
+) -> (Vec<BuiltDecl>, FxHashMap<Span, String>) {
     let ctx = NameContext::build(stmts);
     let mut found: Vec<(&Expr, &ClassDecl)> = Vec::new();
     for stmt in stmts {
         walk_stmt(stmt, &mut found);
     }
 
-    let mut per_line: HashMap<u32, u32> = HashMap::new();
+    let mut per_line: FxHashMap<u32, u32> = FxHashMap::default();
     for (expr, _) in &found {
         *per_line.entry(expr.span.start.line).or_insert(0) += 1;
     }
 
-    let mut seen_on_line: HashMap<u32, u32> = HashMap::new();
+    let mut seen_on_line: FxHashMap<u32, u32> = FxHashMap::default();
     let mut decls = Vec::new();
-    let mut names = HashMap::new();
+    let mut names = FxHashMap::default();
     for (expr, decl) in found {
         let line = expr.span.start.line;
         let line_index = if per_line[&line] > 1 {

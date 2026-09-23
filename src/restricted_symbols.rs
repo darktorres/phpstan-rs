@@ -36,12 +36,10 @@
 //! needing its own separate investigation.
 
 use crate::checker::Diagnostic;
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use serde::Deserialize;
-
-use rustc_hash::FxHashMap;
 
 /// PHP's own case-(in)sensitivity rules govern the lookup-key casing
 /// below: function/method/static-method/class names are case-insensitive
@@ -500,7 +498,7 @@ const PARAMS_IN_ALLOWED_GATE_METADATA_KEY: &str = "restrictedSymbol.paramsInAllo
 /// call sites across 6 files, and the ordinary per-file checking walk
 /// has no other need to know its own path at all. Scoped to `restrictedSymbol.*`
 /// identifiers only - every other diagnostic family is untouched.
-pub fn filter_by_path(results: &mut HashMap<PathBuf, Vec<Diagnostic>>) {
+pub fn filter_by_path(results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>) {
     for (file, diagnostics) in results.iter_mut() {
         let path = file.display().to_string();
         diagnostics.retain(|d| !is_allowed_by_path(d, &path));
@@ -645,7 +643,7 @@ mod tests {
         allow_in: &[&str],
         allow_except_in: &[&str],
     ) -> crate::checker::Diagnostic {
-        let mut metadata = std::collections::HashMap::new();
+        let mut metadata = rustc_hash::FxHashMap::default();
         if !allow_in.is_empty() {
             metadata.insert(
                 ALLOW_IN_METADATA_KEY.to_string(),
@@ -703,7 +701,7 @@ mod tests {
 
     #[test]
     fn filter_by_path_drops_only_the_allowed_entries() {
-        let mut results: HashMap<PathBuf, Vec<crate::checker::Diagnostic>> = HashMap::new();
+        let mut results: FxHashMap<PathBuf, Vec<crate::checker::Diagnostic>> = FxHashMap::default();
         results.insert(
             PathBuf::from("tests/Foo.php"),
             vec![restricted_diagnostic(&["tests/*.php"], &[])],

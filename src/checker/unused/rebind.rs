@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
@@ -22,8 +22,8 @@ use crate::registry::NameContext;
 pub(crate) fn scan_program_for_rebind_targets(
     program: &[Stmt],
     ctx: &NameContext,
-) -> (HashSet<Arc<str>>, bool) {
-    let mut targets = HashSet::new();
+) -> (FxHashSet<Arc<str>>, bool) {
+    let mut targets = FxHashSet::default();
     let mut escape_all = false;
     for stmt in program {
         scan_stmt_for_rebinds(stmt, ctx, &mut targets, &mut escape_all);
@@ -34,7 +34,7 @@ pub(crate) fn scan_program_for_rebind_targets(
 fn scan_stmts_for_rebinds(
     body: &[Stmt],
     ctx: &NameContext,
-    targets: &mut HashSet<Arc<str>>,
+    targets: &mut FxHashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     for s in body {
@@ -45,7 +45,7 @@ fn scan_stmts_for_rebinds(
 fn scan_stmt_for_rebinds(
     stmt: &Stmt,
     ctx: &NameContext,
-    targets: &mut HashSet<Arc<str>>,
+    targets: &mut FxHashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     match &stmt.kind {
@@ -136,7 +136,7 @@ fn scan_stmt_for_rebinds(
 fn scan_expr_for_rebinds(
     expr: &Expr,
     ctx: &NameContext,
-    targets: &mut HashSet<Arc<str>>,
+    targets: &mut FxHashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     match &expr.kind {
@@ -178,7 +178,7 @@ fn scan_expr_for_rebinds(
 fn record_rebind_scope(
     scope_arg: Option<&Arg>,
     ctx: &NameContext,
-    targets: &mut HashSet<Arc<str>>,
+    targets: &mut FxHashSet<Arc<str>>,
     escape_all: &mut bool,
 ) {
     match scope_arg.map(|a| &a.value.kind) {

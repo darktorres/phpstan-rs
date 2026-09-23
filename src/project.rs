@@ -1,5 +1,4 @@
-use rustc_hash::FxHashMap;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -41,14 +40,14 @@ struct FileState {
     ast: Vec<Stmt>,
     functions: Vec<String>,
     classes: Vec<String>,
-    references: HashSet<String>,
+    references: FxHashSet<String>,
     // Inline `@phpstan-ignore*` comments, read while the file was lexed
     // (the AST carries no comment text).
     ignores: ignore_comments::IgnoreComments,
     // See `ParsedFile::anonymous_class_names`'s own doc comment - carried
     // here too so `Project::check_file_impl` can hand it to a fresh
     // `Checker` on every re-check, not just the initial load.
-    anonymous_class_names: HashMap<crate::token::Span, String>,
+    anonymous_class_names: FxHashMap<crate::token::Span, String>,
     // This file's own raw source text, kept only when
     // `Project::retain_source` is on (see that field's own doc comment) -
     // `None` for every ordinary `check-project` batch run, which never
@@ -83,7 +82,7 @@ struct FileState {
 /// in practice.
 pub struct Project {
     files: FxHashMap<PathBuf, FileState>,
-    dependents: FxHashMap<String, HashSet<PathBuf>>,
+    dependents: FxHashMap<String, FxHashSet<PathBuf>>,
     registry: Registry,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
     // currently-loaded `Pest.php` file whenever the loaded file set could
@@ -166,18 +165,18 @@ pub struct Project {
     // index_built`'s own loop, or `seed_member_refs` fed from `check-
     // project`'s primary pass). Consulted by `checker::whole_program::
     // dead_enum_cases::find_dead_cases`.
-    escaped_enum_cases: HashSet<String>,
+    escaped_enum_cases: FxHashSet<String>,
     // `Checker::escaped_member_classes`'s own project-wide merge -
     // exactly the same shape/population paths as `escaped_enum_cases`
     // above, just for Phase 86's B1 (`checker::whole_program::
     // dead_members::find_dead_members`) instead of Phase 92.
-    escaped_member_classes: HashSet<String>,
+    escaped_member_classes: FxHashSet<String>,
 }
 
 /// The result of `Project::check_paths_isolating_panics`: successful
 /// per-file diagnostics, plus every path whose own check panicked
 /// (message, not a diagnostic list) instead of completing.
-pub type CheckPathsIsolatingPanics = (HashMap<PathBuf, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
+pub type CheckPathsIsolatingPanics = (FxHashMap<PathBuf, Vec<Diagnostic>>, Vec<(PathBuf, String)>);
 
 /// The result of `check_file_impl`'s own Tier-2-collecting mode
 /// (`check_file_and_member_refs`/`check_file_with_property_assign_
@@ -189,8 +188,8 @@ pub type CheckPathsIsolatingPanics = (HashMap<PathBuf, Vec<Diagnostic>>, Vec<(Pa
 pub type CheckWithMemberRefs = (
     Vec<Diagnostic>,
     Vec<(Span, String, String)>,
-    HashSet<String>,
-    HashSet<String>,
+    FxHashSet<String>,
+    FxHashSet<String>,
 );
 
 impl Project {
@@ -213,8 +212,8 @@ impl Project {
             duplicate_class_sites: DuplicateClassSites::default(),
             use_sites: UseSiteIndex::default(),
             member_index_built: false,
-            escaped_enum_cases: HashSet::new(),
-            escaped_member_classes: HashSet::new(),
+            escaped_enum_cases: FxHashSet::default(),
+            escaped_member_classes: FxHashSet::default(),
         }
     }
 
@@ -706,7 +705,7 @@ impl Project {
     /// except inside a trait, whose diagnostics depend on its users.
     pub fn apply_inline_ignores(
         &self,
-        results: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+        results: &mut FxHashMap<PathBuf, Vec<Diagnostic>>,
         report_unmatched: bool,
     ) {
         for (path, file) in &self.files {
@@ -714,8 +713,8 @@ impl Project {
                 continue;
             }
             let ignores = &file.ignores;
-            let mut matched_lines: HashSet<u32> = HashSet::new();
-            let mut matched_ids: HashSet<(u32, &str)> = HashSet::new();
+            let mut matched_lines: FxHashSet<u32> = FxHashSet::default();
+            let mut matched_ids: FxHashSet<(u32, &str)> = FxHashSet::default();
             if let Some(diagnostics) = results.get_mut(path) {
                 diagnostics.retain(|d| {
                     if d.non_ignorable {
@@ -1036,7 +1035,7 @@ impl Project {
     /// extending `changed_symbols` with every bare name it owned.
     /// Returns whether `path` was actually loaded (a no-op, `false`
     /// return otherwise - both callers treat that as "nothing to undo").
-    fn unindex_file(&mut self, path: &Path, changed_symbols: &mut HashSet<String>) -> bool {
+    fn unindex_file(&mut self, path: &Path, changed_symbols: &mut FxHashSet<String>) -> bool {
         let Some(old) = self.files.remove(path) else {
             return false;
         };
@@ -1136,8 +1135,8 @@ impl Project {
         &mut self,
         path: &Path,
         member_refs: Vec<(Span, String, String)>,
-        escaped_enums: HashSet<String>,
-        escaped_member_classes: HashSet<String>,
+        escaped_enums: FxHashSet<String>,
+        escaped_member_classes: FxHashSet<String>,
     ) {
         for (span, owner, member) in member_refs {
             self.use_sites
@@ -1161,7 +1160,7 @@ impl Project {
         &mut self,
         path: &Path,
         new_source: &str,
-    ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+    ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         self.update_file_cancellable(path, new_source, || false)
     }
 
@@ -1178,7 +1177,7 @@ impl Project {
         path: &Path,
         new_source: &str,
         mut should_abort: impl FnMut() -> bool,
-    ) -> Result<HashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
+    ) -> Result<FxHashMap<PathBuf, Vec<Diagnostic>>, ParseError> {
         // Parse BEFORE unindexing anything - on a parse failure (the
         // normal, common state while a file is mid-edit, not an edge
         // case), this must leave every existing registry/decl_locations/
@@ -1196,7 +1195,7 @@ impl Project {
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
         let (ast, ignores) = parse_with_ignores(new_source)?;
-        let mut changed_symbols: HashSet<String> = HashSet::new();
+        let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
@@ -1317,7 +1316,7 @@ impl Project {
         );
         self.rebuild_pest_config();
 
-        let mut results = HashMap::new();
+        let mut results = FxHashMap::default();
         for p in self.transitive_affected_files(path, changed_symbols) {
             if should_abort() {
                 break;
@@ -1382,7 +1381,7 @@ impl Project {
     /// prior loaded-state check, and exactly the empty
     /// `publishDiagnostics` payload needed to clear whatever the editor
     /// was last showing for a file that no longer exists.
-    pub fn remove_file(&mut self, path: &Path) -> HashMap<PathBuf, Vec<Diagnostic>> {
+    pub fn remove_file(&mut self, path: &Path) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         self.remove_files(std::slice::from_ref(&path.to_path_buf()))
     }
 
@@ -1398,13 +1397,13 @@ impl Project {
     /// that no longer exists), even when none of them were actually
     /// loaded - but the recompute/BFS itself is skipped entirely in that
     /// case, since there is nothing for it to discover.
-    pub fn remove_files(&mut self, paths: &[PathBuf]) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut changed_symbols: HashSet<String> = HashSet::new();
+    pub fn remove_files(&mut self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         let mut any_removed = false;
         for path in paths {
             any_removed |= self.unindex_file(path, &mut changed_symbols);
         }
-        let mut affected: HashSet<PathBuf> = paths.iter().cloned().collect();
+        let mut affected: FxHashSet<PathBuf> = paths.iter().cloned().collect();
         if any_removed {
             self.finish_loading();
             affected.extend(self.transitive_affected_files_from(changed_symbols));
@@ -1442,8 +1441,8 @@ impl Project {
     fn transitive_affected_files(
         &self,
         changed_file: &Path,
-        seed_symbols: HashSet<String>,
-    ) -> HashSet<PathBuf> {
+        seed_symbols: FxHashSet<String>,
+    ) -> FxHashSet<PathBuf> {
         let mut affected = self.transitive_affected_files_from(seed_symbols);
         affected.insert(changed_file.to_path_buf());
         affected
@@ -1453,10 +1452,13 @@ impl Project {
     /// method's own anchor-file insertion - for a caller with no single
     /// surviving "the file that changed" to seed with (`remove_files`'s
     /// batch of files that no longer exist to check).
-    fn transitive_affected_files_from(&self, seed_symbols: HashSet<String>) -> HashSet<PathBuf> {
-        let mut affected = HashSet::new();
+    fn transitive_affected_files_from(
+        &self,
+        seed_symbols: FxHashSet<String>,
+    ) -> FxHashSet<PathBuf> {
+        let mut affected = FxHashSet::default();
 
-        let mut seen_symbols = HashSet::new();
+        let mut seen_symbols = FxHashSet::default();
         let mut frontier: Vec<String> = Vec::new();
         for symbol in seed_symbols {
             if seen_symbols.insert(symbol.clone()) {
@@ -1609,7 +1611,12 @@ impl Project {
         collect_member_refs: bool,
     ) -> CheckWithMemberRefs {
         let Some(file) = self.files.get(path) else {
-            return (Vec::new(), Vec::new(), HashSet::new(), HashSet::new());
+            return (
+                Vec::new(),
+                Vec::new(),
+                FxHashSet::default(),
+                FxHashSet::default(),
+            );
         };
         let mut checker = Checker::new(&self.registry);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
@@ -1808,7 +1815,7 @@ impl Project {
     /// own doc comment), so merging here needs no extra trait-awareness
     /// of its own - just concatenating every file's own per-key `Vec`.
     pub fn collect_property_assign_facts(&self) -> PropertyAssignFacts {
-        let mut merged: PropertyAssignFacts = HashMap::new();
+        let mut merged: PropertyAssignFacts = FxHashMap::default();
         for path in self.files.keys() {
             let Some(file) = self.files.get(path) else {
                 continue;
@@ -1846,7 +1853,7 @@ impl Project {
         NamedArgumentCallFactsWithPath,
         checker::RenamedParameterOverrideFacts,
     ) {
-        let mut calls: NamedArgumentCallFactsWithPath = HashMap::new();
+        let mut calls: NamedArgumentCallFactsWithPath = FxHashMap::default();
         let mut overrides: checker::RenamedParameterOverrideFacts = Vec::new();
         for path in self.files.keys() {
             let Some(file) = self.files.get(path) else {
@@ -1877,7 +1884,7 @@ impl Project {
     /// inside it). Panic-transparent - a real checker panic propagates
     /// to the caller, which is what a unit test wants; see
     /// `check_paths_isolating_panics` for the batch-safe counterpart.
-    pub fn check_paths(&self, paths: &[PathBuf]) -> HashMap<PathBuf, Vec<Diagnostic>> {
+    pub fn check_paths(&self, paths: &[PathBuf]) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         let facts = Arc::new(self.collect_property_assign_facts());
         paths
             .iter()
@@ -1932,7 +1939,7 @@ impl Project {
             .collect();
         std::panic::set_hook(default_hook);
 
-        let mut results = HashMap::new();
+        let mut results = FxHashMap::default();
         let mut panics = Vec::new();
         for (path, outcome) in outcomes {
             match outcome {
@@ -1955,7 +1962,7 @@ impl Project {
     /// corpus at once, rather than one file (and its
     /// transitively-affected dependents) at a time the way `update_file`
     /// does.
-    pub fn check_all(&self) -> HashMap<PathBuf, Vec<Diagnostic>> {
+    pub fn check_all(&self) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
         self.check_paths(&self.files.keys().cloned().collect::<Vec<_>>())
     }
 
@@ -2003,7 +2010,7 @@ impl Project {
             identifier: identifier.to_string(),
             tip: None,
             non_ignorable: false,
-            metadata: HashMap::new(),
+            metadata: FxHashMap::default(),
             fix: None,
         })
     }
@@ -2038,8 +2045,8 @@ impl Project {
     /// directly off `Registry.classes`' own already-resolved fields, so
     /// each costs nothing beyond its own traversal regardless of how
     /// large the project is.
-    pub fn check_whole_program(&mut self) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut results: HashMap<PathBuf, Vec<Diagnostic>> = HashMap::new();
+    pub fn check_whole_program(&mut self) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
 
         if self.registry.check_dead_enum_cases {
             self.ensure_member_index_built();
@@ -2291,7 +2298,7 @@ pub struct ParsedFile {
     ast: Vec<Stmt>,
     functions: Vec<String>,
     classes: Vec<String>,
-    references: HashSet<String>,
+    references: FxHashSet<String>,
     ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassInfo`/`FunctionSig`/`Type` values (see
@@ -2326,7 +2333,7 @@ pub struct ParsedFile {
     // `registry::anonymous_class` for why that matters). Carried on
     // `FileState` (below) rather than only used transiently here, since
     // `check_file_impl` needs it again on every re-check.
-    anonymous_class_names: HashMap<crate::token::Span, String>,
+    anonymous_class_names: FxHashMap<crate::token::Span, String>,
     // The class-like counterpart to `duplicate_fn_sites` above, built the
     // same way and for the same reason - `parse_file`'s own `is_stub`
     // parameter is baked into every `ClassDeclSite` here (see that
@@ -2512,9 +2519,9 @@ fn declared_names_with_context(
 }
 
 fn register_references(
-    dependents: &mut FxHashMap<String, HashSet<PathBuf>>,
+    dependents: &mut FxHashMap<String, FxHashSet<PathBuf>>,
     path: &Path,
-    references: &HashSet<String>,
+    references: &FxHashSet<String>,
 ) {
     for name in references {
         dependents
@@ -2525,9 +2532,9 @@ fn register_references(
 }
 
 fn unregister_references(
-    dependents: &mut FxHashMap<String, HashSet<PathBuf>>,
+    dependents: &mut FxHashMap<String, FxHashSet<PathBuf>>,
     path: &Path,
-    references: &HashSet<String>,
+    references: &FxHashSet<String>,
 ) {
     for name in references {
         if let Some(files) = dependents.get_mut(name) {

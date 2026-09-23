@@ -24,7 +24,7 @@ fn generates_a_real_json_signature() {
 #[test]
 fn generated_stub_classes_cover_real_built_in_classes() {
     let classes = generated_stub_classes();
-    let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_ref()).collect();
+    let names: rustc_hash::FxHashSet<&str> = classes.iter().map(|(n, _)| n.as_ref()).collect();
     assert!(names.contains("Exception"));
     assert!(names.contains("ArrayObject"));
     assert!(names.contains("PDO"));
@@ -38,7 +38,7 @@ fn patch_spl_iterator_templates_gives_real_generic_spl_classes_their_missing_tem
     // project's own vendored phpstorm-stubs, yet real PHPStan resolves
     // every one as generic with exactly this template list.
     let classes = generated_stub_classes();
-    let by_name: std::collections::HashMap<&str, &Vec<std::sync::Arc<str>>> = classes
+    let by_name: rustc_hash::FxHashMap<&str, &Vec<std::sync::Arc<str>>> = classes
         .iter()
         .map(|(n, info)| (n.as_ref(), &info.templates))
         .collect();
@@ -65,7 +65,7 @@ fn generated_stub_classes_cover_real_phpstan_src_classes() {
     // confirms PHPSTAN_SRC_SOURCES is actually wired in, not just
     // declared.
     let classes = generated_stub_classes();
-    let names: std::collections::HashSet<&str> = classes.iter().map(|(n, _)| n.as_ref()).collect();
+    let names: rustc_hash::FxHashSet<&str> = classes.iter().map(|(n, _)| n.as_ref()).collect();
     assert!(names.contains("PHPStan\\Type\\StringType"));
     assert!(names.contains("PHPStan\\Rules\\Rule"));
 }
@@ -73,7 +73,7 @@ fn generated_stub_classes_cover_real_phpstan_src_classes() {
 #[test]
 fn generated_stubs_cover_hundreds_of_functions_across_the_full_corpus() {
     let stubs = generated_stubs();
-    let names: std::collections::HashSet<&str> = stubs.iter().map(|(n, _)| n.as_ref()).collect();
+    let names: rustc_hash::FxHashSet<&str> = stubs.iter().map(|(n, _)| n.as_ref()).collect();
     // Spot-check functions from extensions far apart in the corpus,
     // not just ctype/json (the only two the old two-file pipeline
     // covered) - proof the full vendored tree is actually being read.

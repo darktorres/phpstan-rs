@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock::DocBlock;
@@ -22,7 +22,7 @@ use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
 /// re-resolving *its own* values further - each entry is inserted once,
 /// already fully resolved, and never touched by `resolve_names_in_type`
 /// again after that.
-pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<Arc<str>, Type>) -> Type {
+pub(crate) fn substitute_type_aliases(ty: Type, aliases: &FxHashMap<Arc<str>, Type>) -> Type {
     match ty {
         Type::Object(name, _) if aliases.contains_key(name.as_str()) => {
             aliases[name.as_str()].clone()
@@ -139,18 +139,18 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<Arc<str>, Type
 /// aliases' own values - a sibling alias reference inside this one's RHS
 /// isn't itself a class-name reference to case-check (it's resolved
 /// separately, when *that* alias's own entry is built).
-pub(crate) type TypeAliasCaseRefs = HashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>;
+pub(crate) type TypeAliasCaseRefs = FxHashMap<Arc<str>, Vec<(Arc<str>, Arc<str>)>>;
 
 pub(crate) fn build_type_aliases(
     class_doc: Option<&DocBlock>,
-    template_params: &HashMap<String, TemplateParam>,
+    template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
-) -> (HashMap<Arc<str>, Type>, TypeAliasCaseRefs) {
+) -> (FxHashMap<Arc<str>, Type>, TypeAliasCaseRefs) {
     let Some(class_doc) = class_doc else {
-        return (HashMap::new(), HashMap::new());
+        return (FxHashMap::default(), FxHashMap::default());
     };
-    let mut case_refs: TypeAliasCaseRefs = HashMap::new();
-    let raw: HashMap<Arc<str>, Type> = class_doc
+    let mut case_refs: TypeAliasCaseRefs = FxHashMap::default();
+    let raw: FxHashMap<Arc<str>, Type> = class_doc
         .type_aliases
         .iter()
         .map(|(name, ty_text)| {
@@ -185,7 +185,7 @@ pub(crate) fn build_type_aliases(
 /// occurrence of a given name gets the *same* cloned metadata, since it's
 /// one declaration (`@template T of Shape`) applying everywhere `T` is
 /// written, not a fresh one per site.
-pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplateParam>) -> Type {
+pub(crate) fn mark_template_params(ty: Type, params: &FxHashMap<String, TemplateParam>) -> Type {
     match ty {
         Type::Object(name, _) if params.contains_key(&name) => {
             Type::TemplateParam(params[&name].clone())
@@ -293,7 +293,7 @@ pub(crate) fn build_template_params(
     doc: &DocBlock,
     scope: &str,
     ctx: &NameContext,
-) -> HashMap<String, TemplateParam> {
+) -> FxHashMap<String, TemplateParam> {
     // A bound or default can itself reference a sibling template
     // declared on the very same docblock (`@template A` `@template B of
     // A`, or `@template B = A`) - this shallow, metadata-free pass
@@ -304,7 +304,7 @@ pub(crate) fn build_template_params(
     // require resolving every template before any single one of them is
     // done - substitution later replaces the whole node by name
     // regardless of what placeholder metadata it carried here.
-    let shallow: HashMap<String, TemplateParam> = doc
+    let shallow: FxHashMap<String, TemplateParam> = doc
         .templates
         .iter()
         .map(|n| (n.clone(), TemplateParam::unbounded(n.clone())))

@@ -3,7 +3,7 @@
 //! 168a's entity metadata, computes one query row's own `Type`, mirroring
 //! real Doctrine's default `HYDRATE_OBJECT` hydration rules exactly.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
@@ -31,9 +31,9 @@ fn doctrine_custom_function_type(kind: DoctrineFunctionKind) -> Type {
 /// select item referencing that alias correctly resolves to `Mixed`
 /// instead (see `field_ref_type`'s own doc comment).
 struct AliasMap {
-    entities: HashMap<String, String>,
+    entities: FxHashMap<String, String>,
     /// Aliases introduced by a `LEFT JOIN` - they may match no row.
-    nullable: HashSet<String>,
+    nullable: FxHashSet<String>,
     /// The query has a `GROUP BY` (see `QueryBuilderChain::group_by`).
     group_by: bool,
 }
@@ -50,8 +50,8 @@ impl AliasMap {
 
 fn build_alias_map(checker: &Checker, chain: &QueryBuilderChain) -> AliasMap {
     let mut aliases = AliasMap {
-        entities: HashMap::new(),
-        nullable: HashSet::new(),
+        entities: FxHashMap::default(),
+        nullable: FxHashSet::default(),
         group_by: chain.group_by,
     };
     if let Some((entity, alias)) = &chain.from {

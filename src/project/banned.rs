@@ -4,7 +4,7 @@
 //! constants' native types, and - for `float` - in float literals and
 //! `(float)` casts.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::ast::*;
@@ -52,7 +52,7 @@ fn type_mentions(ty: &Type, name: &str) -> bool {
 }
 
 struct Walker<'a> {
-    constructs: &'a HashSet<BannedConstruct>,
+    constructs: &'a FxHashSet<BannedConstruct>,
     types: &'a [String],
     registry: &'a Registry,
     out: Vec<Diagnostic>,
@@ -427,12 +427,12 @@ impl Project {
         &self,
         constructs: &[BannedConstruct],
         types: &[String],
-    ) -> HashMap<PathBuf, Vec<Diagnostic>> {
-        let mut out = HashMap::new();
+    ) -> FxHashMap<PathBuf, Vec<Diagnostic>> {
+        let mut out = FxHashMap::default();
         if constructs.is_empty() && types.is_empty() {
             return out;
         }
-        let constructs: HashSet<BannedConstruct> = constructs.iter().copied().collect();
+        let constructs: FxHashSet<BannedConstruct> = constructs.iter().copied().collect();
         let types: Vec<String> = types
             .iter()
             .map(|t| t.trim_start_matches('\\').to_ascii_lowercase())

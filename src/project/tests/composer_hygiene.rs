@@ -1,6 +1,6 @@
 //! `Project::check_composer_hygiene` against a fixture Composer project.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use crate::composer::manifest::ComposerManifest;
@@ -65,7 +65,8 @@ impl Fixture {
         }
         project.finish_loading();
         let manifest = ComposerManifest::load(&self.root).expect("composer.json loads");
-        let results: HashMap<PathBuf, Vec<Diagnostic>> = project.check_composer_hygiene(&manifest);
+        let results: FxHashMap<PathBuf, Vec<Diagnostic>> =
+            project.check_composer_hygiene(&manifest);
         let mut out: Vec<String> = results
             .into_iter()
             .flat_map(|(path, diagnostics)| {

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::ast::*;
 use crate::checker::{
@@ -160,7 +160,7 @@ impl<'a> Checker<'a> {
         target_name: &str,
         label: &str,
     ) {
-        let mut seen_non_repeatable: HashSet<String> = HashSet::new();
+        let mut seen_non_repeatable: FxHashSet<String> = FxHashSet::default();
         for attr in attrs {
             let fqn = self.name_ctx.resolve(&attr.name);
             let Some(info) = self.registry.classes.get(fqn.as_str()) else {

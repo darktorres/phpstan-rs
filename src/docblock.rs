@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::phpdoc_grammar::{self, PhpDocParseError, PhpDocTagValue};
 
@@ -12,10 +12,10 @@ use crate::phpdoc_grammar::{self, PhpDocParseError, PhpDocTagValue};
 /// real per-call-site type parameter binding, not just parsing.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct DocBlock {
-    pub params: HashMap<String, String>,
+    pub params: FxHashMap<String, String>,
     // `@param-out Type $name` - the widened type a by-ref parameter's
     // value is guaranteed to hold once the function returns.
-    pub param_out: HashMap<String, String>,
+    pub param_out: FxHashMap<String, String>,
     pub return_type: Option<String>,
     pub var_type: Option<String>,
     // The `$name` half of `@var Type $name`, when present - used when an
@@ -26,20 +26,20 @@ pub struct DocBlock {
     // see `registry::ClassInfo::templates`).
     pub templates: Vec<String>,
     // `@template T of Bound` - the bound text, when declared.
-    pub template_bounds: HashMap<String, String>,
+    pub template_bounds: FxHashMap<String, String>,
     // `@template T = Default` - the default-type text, used when an
     // "erased" reference leaves this name unbound instead of falling
     // back to `Mixed`.
-    pub template_defaults: HashMap<String, String>,
+    pub template_defaults: FxHashMap<String, String>,
     // `@template-covariant`/`@template-contravariant` - a name absent
     // from both stays invariant, this project's default.
-    pub covariant_templates: HashSet<String>,
-    pub contravariant_templates: HashSet<String>,
+    pub covariant_templates: FxHashSet<String>,
+    pub contravariant_templates: FxHashSet<String>,
     // Names of `@param`s tagged `[optional]` - marks a native parameter
     // as conceptually optional with no `= value` default (phpstorm-stubs
     // models several functions, e.g. `mt_rand`'s `$max`, only as their
     // highest-arity overload this way).
-    pub optional_params: HashSet<String>,
+    pub optional_params: FxHashSet<String>,
     // `@extends Parent<Arg, ...>` - fixes the parent class's own
     // `@template` names. At most one is meaningful (a class has a single
     // native `extends`), so the last seen wins.
@@ -128,7 +128,7 @@ pub struct DocBlock {
     // `@phpstan-type Name TypeExpr` - a local type alias, referenced bare
     // from that same class's `@param`/`@return`/`@var` tags. Resolved
     // into a real `Type` at `ClassInfo::from_decl` time.
-    pub type_aliases: HashMap<String, String>,
+    pub type_aliases: FxHashMap<String, String>,
     // `@phpstan-import-type Name from Class [as Alias]` - imports another
     // class's own local alias. Resolved once
     // `Registry::resolve_deferred_type_imports` can see every class's
@@ -170,13 +170,13 @@ pub struct DocBlock {
     // validity is checked by
     // `checker::noop::check_declared_param_callable_tags`; the runtime
     // scope-threading effect these drive in real PHPStan isn't modeled.
-    pub param_immediately_invoked_callable: HashMap<String, bool>,
+    pub param_immediately_invoked_callable: FxHashMap<String, bool>,
     // `@param-closure-this Type $name` - the type `$this` becomes inside
     // a `Closure`-typed parameter's own literal argument. Seeds `$this`
     // via `checker::calls::check_closure_literal_with_this_and_scope`,
     // the same mechanism `Closure::bind`/`->bindTo()` use - see
     // `registry::function_sig::ParamSig::closure_this_type`.
-    pub param_closure_this: HashMap<String, String>,
+    pub param_closure_this: FxHashMap<String, String>,
     // Every real, recoverable parse error `phpdoc_grammar` produced while
     // parsing this docblock's own type expressions - real PHPStan's own
     // `phpDoc.parseError`, structurally available now that Stage B (see

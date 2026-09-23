@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use crate::ast::*;
 use crate::ast_walk::any_stmt_child;
@@ -654,8 +654,8 @@ impl<'a> Checker<'a> {
             return;
         }
 
-        let mut seen_props: HashMap<&str, (&str, &PropertySig)> = HashMap::new();
-        let mut seen_methods: HashMap<&str, (&str, &FunctionSig)> = HashMap::new();
+        let mut seen_props: FxHashMap<&str, (&str, &PropertySig)> = FxHashMap::default();
+        let mut seen_methods: FxHashMap<&str, (&str, &FunctionSig)> = FxHashMap::default();
         for trait_name in &info.uses {
             let Some(trait_info) = self.registry.classes.get(trait_name) else {
                 continue;

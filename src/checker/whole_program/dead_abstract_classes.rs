@@ -35,10 +35,10 @@
 
 use crate::ast::ClassKind;
 use crate::registry::Registry;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 pub(crate) fn find_dead_abstract_classes(registry: &Registry) -> Vec<String> {
-    let mut has_concrete_descendant: HashSet<std::sync::Arc<str>> = HashSet::new();
+    let mut has_concrete_descendant: FxHashSet<std::sync::Arc<str>> = FxHashSet::default();
     for (fqn, info) in &registry.classes {
         // Only a real, instantiable class counts as a witness - an
         // abstract subclass, an interface, or a trait proves nothing

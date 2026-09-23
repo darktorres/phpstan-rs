@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::ast::{ClassKind, Visibility};
@@ -41,7 +40,7 @@ impl Registry {
     /// (no remove/reinsert dance) is sound to run concurrently.
     #[hotpath::measure]
     pub(crate) fn canonicalize_class_name_case(&mut self) {
-        let mut canonical_by_lower: HashMap<String, Arc<str>> = HashMap::new();
+        let mut canonical_by_lower: FxHashMap<String, Arc<str>> = FxHashMap::default();
         for key in self.classes.keys() {
             canonical_by_lower
                 .entry(key.to_ascii_lowercase())
@@ -135,8 +134,8 @@ impl Registry {
             Vec<(Arc<str>, FunctionSig)>,
             Vec<(Arc<str>, PropertySig)>,
             Vec<(Arc<str>, ConstSig)>,
-            HashSet<Arc<str>>,
-            HashSet<Arc<str>>,
+            FxHashSet<Arc<str>>,
+            FxHashSet<Arc<str>>,
         );
 
         let class_names: Vec<Arc<str>> = self.classes.keys().cloned().collect();
@@ -155,7 +154,7 @@ impl Registry {
                 // before any trait's contribution is applied) always wins,
                 // matching the same `or_insert` "first/own wins" semantics
                 // `methods` itself already uses below.
-                let own_method_names: HashSet<Arc<str>> = registry.classes[class_name]
+                let own_method_names: FxHashSet<Arc<str>> = registry.classes[class_name]
                     .methods
                     .keys()
                     .cloned()
@@ -163,7 +162,7 @@ impl Registry {
                 let mut methods = Vec::new();
                 let mut properties = Vec::new();
                 let mut consts = Vec::new();
-                let mut abstract_from_traits: HashSet<Arc<str>> = HashSet::new();
+                let mut abstract_from_traits: FxHashSet<Arc<str>> = FxHashSet::default();
                 // `static_methods` needs the identical trait-flattening
                 // treatment `abstract_from_traits` gets below - without
                 // it, a using class's own `static_methods` set would
@@ -171,7 +170,7 @@ impl Registry {
                 // doesn't also redeclare itself, even though that
                 // method's (correctly flattened-in) `FunctionSig` is
                 // right there in `info.methods`.
-                let mut static_from_traits: HashSet<Arc<str>> = HashSet::new();
+                let mut static_from_traits: FxHashSet<Arc<str>> = FxHashSet::default();
                 for trait_name in &uses {
                     if let Some(trait_info) = registry.classes.get(trait_name) {
                         for (name, sig) in &trait_info.methods {
@@ -642,7 +641,7 @@ impl Registry {
         if classes_with_imports.is_empty() {
             return;
         }
-        let mut by_class: HashMap<Arc<str>, HashMap<Arc<str>, Type>> = HashMap::new();
+        let mut by_class: FxHashMap<Arc<str>, FxHashMap<Arc<str>, Type>> = FxHashMap::default();
         for (class_name, local_key, ty) in resolved {
             by_class
                 .entry(class_name)
@@ -868,7 +867,7 @@ impl Registry {
     pub(crate) fn template_param_scopes_all_safe_to_backfill(
         ty: &Type,
         method_name: &str,
-        ancestor_bindings: &HashMap<Arc<str>, HashMap<String, Type>>,
+        ancestor_bindings: &FxHashMap<Arc<str>, FxHashMap<String, Type>>,
     ) -> bool {
         match ty {
             Type::TemplateParam(tp) => {
@@ -1071,7 +1070,7 @@ impl Registry {
                     // `@template-implements Factory<CMTemplate>` class
                     // rather than losing `T` to `Mixed`.
                     let own_args = info.own_template_args(class_name);
-                    let ancestor_bindings: HashMap<Arc<str>, HashMap<String, Type>> = registry
+                    let ancestor_bindings: FxHashMap<Arc<str>, FxHashMap<String, Type>> = registry
                         .all_ancestor_names(class_name)
                         .into_iter()
                         .filter(|a| {
@@ -1443,7 +1442,7 @@ fn visible_class_consts(
     classes: &FxHashMap<Arc<str>, ClassInfo>,
 ) -> IndexMap<Arc<str>, ConstSig> {
     let mut consts: IndexMap<Arc<str>, ConstSig> = IndexMap::new();
-    let mut seen: HashSet<Arc<str>> = HashSet::new();
+    let mut seen: FxHashSet<Arc<str>> = FxHashSet::default();
     let mut queue: std::collections::VecDeque<Arc<str>> = std::collections::VecDeque::new();
     queue.push_back(Arc::from(fqn));
     while let Some(name) = queue.pop_front() {

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::DiagnosticBuilder;
 use crate::ast::*;
@@ -215,7 +215,7 @@ impl<'a> Checker<'a> {
         // case-insensitive) kept side by side.
         let mut current_namespace = String::new();
         let mut current_namespace_lower = String::new();
-        let mut used_names: HashMap<String, HashSet<String>> = HashMap::new();
+        let mut used_names: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
         for stmt in program {
             match &stmt.kind {
                 StmtKind::Namespace(name) => {

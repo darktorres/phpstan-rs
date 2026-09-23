@@ -33,7 +33,7 @@
 //! resolve to a real class name at all (a dynamic *class* half, e.g.
 //! `$class::CONST`).
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::ast::ClassKind;
 use crate::project::use_sites::{RefTarget, UseSiteIndex};
@@ -49,7 +49,7 @@ use crate::types::Type;
 pub(crate) fn find_dead_cases(
     registry: &Registry,
     use_sites: &UseSiteIndex,
-    escaped_enum_cases: &HashSet<String>,
+    escaped_enum_cases: &FxHashSet<String>,
 ) -> Vec<(String, String)> {
     let mut dead = Vec::new();
     for (fqn, info) in &registry.classes {

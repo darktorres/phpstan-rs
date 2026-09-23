@@ -377,7 +377,7 @@ impl<'a> Checker<'a> {
             self.collect_unknown_class_names(ty, &mut unknown);
             let mut traits = Vec::new();
             self.collect_trait_class_names(ty, &mut traits);
-            let mut seen = std::collections::HashSet::new();
+            let mut seen = rustc_hash::FxHashSet::default();
             for class in traits {
                 if seen.insert(class.clone()) {
                     self.report(

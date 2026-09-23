@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::types::{CallableParam, CallableSig, Type};
@@ -44,7 +44,7 @@ pub(crate) fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> 
     matches.map(|m| m != negated)
 }
 
-pub fn resolve_conditional(ty: &Type, param_bindings: &HashMap<String, Type>) -> Type {
+pub fn resolve_conditional(ty: &Type, param_bindings: &FxHashMap<String, Type>) -> Type {
     match ty {
         Type::Conditional {
             subject,

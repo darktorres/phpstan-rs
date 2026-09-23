@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock;
@@ -105,7 +105,7 @@ fn classify_assert_target(target: &str, param_names: &[&str]) -> AssertTarget {
 pub(crate) fn resolve_assert_tags(
     tags: &[docblock::AssertTag],
     param_names: &[&str],
-    template_params: &HashMap<String, TemplateParam>,
+    template_params: &FxHashMap<String, TemplateParam>,
     ctx: &NameContext,
 ) -> Vec<AssertInfo> {
     tags.iter()
