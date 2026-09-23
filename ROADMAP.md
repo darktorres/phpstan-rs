@@ -1423,7 +1423,18 @@ opt-in:
   left out: untyped overridden parameters, overriding methods lacking a
   compatible return type, incompatible defaults, magic methods. A
   closure parameter whose type the callee fixes gets the same
-  suggestion.
+  suggestion. From PHP 8.3 an untyped class constant gets one too
+  (`missingNativeType.classConstant`), unless a subclass redeclares it
+  outside the suggested type.
+- `check_magic_numbers` (`sidz/phpstan-rules`): the `magicNumber.*`
+  family covers numeric literals (also under unary `+`/`-`, a `(string)`
+  cast, and numeric strings unless `magic_numbers_ignore_numeric_strings`)
+  in 13 positions: call and `new` arguments (not `define()`'s), property
+  and parameter defaults, arithmetic/bitwise/comparison/logical
+  operands, `return`, assignment, ternary branches, and `switch`/`match`
+  subjects and conditions. `magic_number_exemptions` (default `[0, 1]`)
+  is compared by value, sign included, which upstream's string
+  comparison gets wrong for negative numbers.
 
 **Ini directives** (`checker/ini_directives.rs`): `ini.removed`
 (default on once `php_version` is set) and, under
@@ -3446,24 +3457,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 150 — "No magic numbers" + typed-class-constants families
-
-- **150a (medium, novel, comprehensive, zero existing equivalent).** Ban
-  a bare numeric literal (int/float, configurable exempt-numbers list
-  e.g. `[0, 1, -1]`, optional numeric-string variant) across ~12
-  distinct AST positions: assignment, ternary, switch case, return,
-  match, logical/comparison/bitwise/arithmetic operators, default
-  parameter value, property assignment, function argument. One shared
-  base-class detection predicate (handling unary `+`/`-`, string-casts,
-  optional numeric-string literals) reused across all position-specific
-  checks — one shared helper plus N small call-site checks
-  (`sidz/phpstan-rules`).
-- **150b (small, easy).** Require every class constant carry an
-  explicit PHP 8.3 native type declaration (`const int FOO = 5;`, not
-  bare `const FOO = 5;`) — a natural sibling of phpstan-rs's own
-  `missingType.*` family if class constants aren't already covered
-  (`hiperdk/phpstan-rules`).
 
 ### Phase 151 — PSR-3 structured-logging hygiene family
 
