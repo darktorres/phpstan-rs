@@ -146,3 +146,53 @@ level-10 PHPStan gate, and developers may treat them as noise.
 ## Tooling notes
 
 - Corpus-context probe: a scratch dir with `vendor`, `src`, `install` and `phpstan-stubs` symlinked from the corpus, plus a toml of `paths = ["probe"]`, `scan_paths = ["src", "phpstan-stubs"]` and the same `[sql_reflection]` block. A copied corpus file can then be probed with `assertType` (about 35s per run).
+
+## Results (after the fix round)
+
+All 22 root causes are fixed, plus the latent issues and a few gaps the
+fixes exposed. Every triaged false-positive location is gone from the
+scoped run.
+
+| Run | Before (`ab4c2b5`) | After |
+|---|---|---|
+| Scoped (`phpstan-rs.toml`) | 235 | 159 |
+| Unscoped (whole checkout incl. `vendor/`) | 44,921 | 43,330 |
+
+### Beyond the original 22
+
+- **Latent issues, now built:** LEFT-joined fields are nullable; Doctrine
+  `INDEX BY` keys the result collection (`Query<TKey, TResult>`).
+- **Doctrine hydration modes:** every result method dispatches on its
+  hydration mode (`HYDRATE_ARRAY`, `HYDRATE_SCALAR`,
+  `HYDRATE_SINGLE_SCALAR`, `HYDRATE_SCALAR_COLUMN`); entity
+  `HYDRATE_ARRAY` rows are arrays (they were object shapes).
+- **mysqli:** `mysqli::query()`/`mysqli_query()` typed from their SQL
+  (`mysqli_result<Row>` vs `true`, no `false` under PHP 8.1+ exception
+  mode), with SQL-typed `fetch_*` methods.
+- **Qualified function calls through namespace imports** (`use Amp\Future;
+  Future\awaitAll()`): a side effect of keying imports by kind; about 495
+  unscoped `function.notFound` false positives disappeared.
+- **Gaps exposed by better resolution, fixed:** nameless `@var` on a
+  `return`; a write making an optional shape key present; `isset()` adding
+  a key an open shape/array didn't list; `array_merge(...)` over a
+  non-empty list of non-empty lists; `return.unusedType` comparing each
+  return point instead of their merged union; `phar://` includes and
+  `DIRECTORY_SEPARATOR` in include paths.
+- **`return.unusedType`** now uses PHPStan's trinary logic per return
+  point: a declared member a returned type merely overlaps (`Node` when a
+  `Name` is returned) counts as used, which removed 256 unscoped reports.
+- **Build:** pinned `nightly-2026-09-22`, mold linker, `-Z threads=8`;
+  incremental debug test rebuild ~18s (was ~123s). Pre-commit hook removed.
+
+### New findings that are correct
+
+- 25 more `arrayValues.list`: `array_values()` around
+  `getSingleColumnResult()` in chains whose root the query-builder resolver
+  can't follow - `fetchFirstColumn()` always returns a list regardless.
+- `SectionPopulator.php:679` `argument.type`: `$page` merges
+  `parseSectionUrl()`'s `array<string, mixed>`, so `chronology_date` can
+  hold anything; `is_array()` only proves `array`, not the
+  `list<int|string>` the callee declares.
+- Unscoped: vendor dev scripts requiring autoloaders absent from the
+  installed packages; Rector/ECS scoped vendor code whose docblocks weren't
+  prefixed (visible now that prefixed function calls resolve).
