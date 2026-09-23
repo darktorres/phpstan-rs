@@ -900,6 +900,12 @@ pub struct Checker<'a> {
     // which never resolves against the registry. `None` outside an
     // anonymous class's methods, or when its span has no entry.
     pub(crate) current_anonymous_class: Option<String>,
+    // The file being checked, for resolving `include`/`require` paths.
+    pub(crate) current_file: Option<std::path::PathBuf>,
+    // Paths the file tests with `file_exists()` and friends.
+    pub(crate) include_guarded_paths: HashSet<String>,
+    // `includes::file_constant_initializers` for the file being checked.
+    pub(crate) include_constant_initializers: HashMap<String, Expr>,
     // `global_constants::constant_facts` for the file being checked.
     pub(crate) constant_facts: global_constants::ConstantFacts,
     // `$a[]` argument spans bound to a by-reference (or unknown)
@@ -1185,6 +1191,7 @@ mod generics;
 mod global_constants;
 mod imports;
 mod impossible_instanceof;
+mod includes;
 mod instantiation;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;
@@ -1299,6 +1306,9 @@ impl<'a> Checker<'a> {
             pest_hook_properties: HashSet::new(),
             anonymous_class_names: HashMap::new(),
             current_anonymous_class: None,
+            current_file: None,
+            include_guarded_paths: HashSet::new(),
+            include_constant_initializers: HashMap::new(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
             property_assign_facts: HashMap::new(),
@@ -1389,6 +1399,11 @@ impl<'a> Checker<'a> {
     /// Seeds the `NewAnonymousClass`-span -> synthetic-name map - see
     /// `anonymous_class_names`'s own doc comment. A setter for the same
     /// reason `set_pest_this_type` is one.
+    /// See `current_file`.
+    pub fn set_current_file(&mut self, path: &std::path::Path) {
+        self.current_file = Some(path.to_path_buf());
+    }
+
     pub fn set_anonymous_class_names(&mut self, names: HashMap<crate::token::Span, String>) {
         self.anonymous_class_names = names;
     }
@@ -1678,6 +1693,10 @@ impl<'a> Checker<'a> {
         let whole_file_ctx = NameContext::build(program);
         self.constant_facts = global_constants::constant_facts(program);
         if !self.facts_only {
+            if self.current_file.is_some() {
+                self.include_constant_initializers = includes::file_constant_initializers(program);
+                self.include_guarded_paths = self.collect_include_guards(program);
+            }
             self.check_declare_directives(program);
             self.check_statement_keywords(program, "<main>");
         }

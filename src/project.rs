@@ -1333,6 +1333,7 @@ impl Project {
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
+        checker.set_current_file(path);
         Some((checker, &file.ast))
     }
 
@@ -1364,6 +1365,7 @@ impl Project {
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
+        checker.set_current_file(path);
         if let Some(facts) = cross_file_property_assign_facts {
             checker.set_cross_file_property_assign_facts(Arc::clone(facts));
         }

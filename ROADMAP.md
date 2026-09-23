@@ -605,7 +605,14 @@ non-positive level and `continue.switch`), `GotoUndefinedLabelRule`/
 `switch`, or a `finally`, or out of a `finally`), and
 `DeclareStrictTypesRule` (plus block-mode `strict_types`, `ticks`/
 `encoding` value types, and unknown directives) from a new
-`StmtKind::Declare`.
+`StmtKind::Declare`. `RequireFileExistsRule` (`{include,includeOnce,
+require,requireOnce}.fileNotFound`): a path built from literals,
+constant string types (every member of a union), `__DIR__`/`__FILE__`,
+`dirname()` with levels, concatenation, and constants declared in the
+same file (resolved through their initializers, so `__DIR__` there is
+this file's), checked against the cwd and the file's own directory; a
+directory is not a file, and a path the file tests with
+`file_exists()`/`is_file()`/`is_readable()` is skipped.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3671,19 +3678,6 @@ against this list, and added the real gaps the audit had missed.
 (`VariableCloningRule` — `clone.nonObject` — is now built; see Done,
 receiver-type-checks phase.)
 
-### Phase 137 — Keywords+Debug (`Rules/Keywords/`, `Rules/Debug/` gaps)
-
-- `RequireFileExistsRule` — resolving `require`/`include`(`_once`) path
-  expressions (including the `__DIR__ . 'x'` idiom) against cwd/
-  include_path/the file's own directory.
-- `{Dump,DumpNative,DumpPhpDoc}TypeRule`/`DebugScopeRule` — PHPStan's
-  own ad hoc developer-debugging hooks (`\PHPStan\dumpType()` and
-  siblings). (Phase 110's T1/T2 and the already-shipped hover-type
-  lookup (Phase 17/108-AM2, see Done) are phpstan-rs's own,
-  materially more capable, interactive answer to this same need — this
-  entry stays here only as the parity-audit's own finding, not a
-  separate build.)
-
 ### Phase 139 — DeadCode+EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace (mixed small gaps)
 
 - `Rules/DeadCode/NoopRule`'s generic fallback — `noop.rs` covers a set
@@ -4817,8 +4811,8 @@ change:
 - **`CheckType`/`Trace`/`UndefinedTrace`** - Psalm's own `@psalm-check-type`/
   `@psalm-trace` debugging annotations, the same category as real
   PHPStan's own `\PHPStan\dumpType()`/`debugScope()` developer-debug
-  helpers (already noted as out of scope under Phase 137
-  (Keywords+Debug)) - not a user-facing code check at all.
+  helpers (out of scope: the hover-type lookup and Phase 110's T1/T2
+  are phpstan-rs's own answer to that need) - not a user-facing code check at all.
 - **`UnrecognizedExpression`/`UnrecognizedStatement`/`PsalmInternalError`/
   `ParseError`/`UnresolvableConstant`/`UnresolvableInclude`** - Psalm's
   own "I can't make sense of this" internal fallbacks and giving-up

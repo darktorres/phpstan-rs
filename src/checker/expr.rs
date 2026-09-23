@@ -265,6 +265,12 @@ impl<'a> Checker<'a> {
         }
         match &e.kind {
             ExprKind::Call(callee, args) => {
+                if let ExprKind::Name(name) = &callee.kind
+                    && let Some(kind) = crate::checker::includes::include_kind(name)
+                    && let [arg] = args.as_slice()
+                {
+                    self.check_include_path(kind, &arg.value, locals, e.span, label);
+                }
                 // `unset($x)` genuinely removes `$x` from scope in real
                 // PHP - a real bug if it's used afterward. Checked before
                 // anything else below: `predefine_byref_or_unknown_args`

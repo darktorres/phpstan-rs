@@ -122,3 +122,19 @@ pub(super) fn all_diagnostics_for_with(
     checker.check_program(&program);
     checker.into_diagnostics()
 }
+
+/// `diagnostics_for`, checking `src` as if it were the file at `path`.
+pub(super) fn diagnostics_for_file(src: &str, path: &std::path::Path) -> Vec<Diagnostic> {
+    let tokens = Lexer::new(src).tokenize_with_spans();
+    let program = Parser::new(tokens).parse_program().unwrap();
+    let mut registry = Registry::build(&program);
+    registry.merge_stubs(crate::php_stubs::generated_stubs());
+    registry.merge_stub_classes(crate::php_stubs::generated_stub_classes());
+    registry.merge_stub_constants(crate::php_stubs::generated_stub_constants());
+    registry.precompute_ancestor_names();
+    registry.precompute_member_owners();
+    let mut checker = Checker::new(&registry);
+    checker.set_current_file(path);
+    checker.check_program(&program);
+    checker.into_diagnostics()
+}
