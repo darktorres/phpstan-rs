@@ -2966,7 +2966,21 @@ fn an_open_shape_join_keeps_the_tail_type_for_a_one_sided_key() {
                 if (! isset($page['section'])) {
                     $page['section'] = Section::Categories;
                 }
-                assertType('array{items: mixed, section?: mixed, ...}', $page);
+                assertType('array{items: mixed, section: mixed, ...}', $page);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn array_merge_of_a_spread_non_empty_list_of_non_empty_lists_is_non_empty() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /** @param non-empty-list<non-empty-list<int>> $parts */
+            function f(array $parts): void {
+                assertType('non-empty-list<int>', array_merge(...$parts));
             }
         "#,
     );

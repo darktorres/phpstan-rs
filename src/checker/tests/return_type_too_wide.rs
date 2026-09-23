@@ -559,3 +559,28 @@ fn a_closure_literals_own_returns_do_not_count_toward_the_enclosing_function() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn each_return_point_counts_even_when_their_shapes_would_merge() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @param 'r'|'w' $mode
+             * @return array{0: 'pipe', 1: 'r'|'w'}|array{0: 'file', 1: non-empty-string, 2: 'r'|'w'}|resource
+             */
+            function descriptor(bool $piped, bool $tty, string $mode): mixed {
+                if ($piped) {
+                    return ['pipe', $mode];
+                }
+                if ($tty) {
+                    return ['file', '/dev/tty', $mode];
+                }
+                return STDIN;
+            }
+        "#,
+    );
+    assert!(
+        !d.iter().any(|x| x.identifier == "return.unusedType"),
+        "got: {d:?}"
+    );
+}

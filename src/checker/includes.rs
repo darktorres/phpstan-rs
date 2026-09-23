@@ -109,6 +109,17 @@ fn callee_name(e: &Expr) -> Option<&str> {
     }
 }
 
+/// A stream-wrapper URL (`phar://...`, `data://...`) - not a path on
+/// this filesystem.
+fn is_stream_wrapper_path(path: &str) -> bool {
+    path.split_once("://").is_some_and(|(scheme, _)| {
+        !scheme.is_empty()
+            && scheme
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'))
+    })
+}
+
 impl<'a> Checker<'a> {
     /// The checked file's own absolute path - what PHP's `__FILE__`
     /// holds, however the file was named on the command line or in the
@@ -158,8 +169,13 @@ impl<'a> Checker<'a> {
         }
         match &e.kind {
             ExprKind::Grouping(inner) => self.resolve_paths_at(inner, locals, depth),
+            // The platform's own separators - the paths are checked
+            // against this machine's filesystem.
             ExprKind::Name(n) if n.trim_start_matches('\\') == "PATH_SEPARATOR" => {
                 Some(vec![":".to_string()])
+            }
+            ExprKind::Name(n) if n.trim_start_matches('\\') == "DIRECTORY_SEPARATOR" => {
+                Some(vec![std::path::MAIN_SEPARATOR.to_string()])
             }
             ExprKind::Call(callee, args)
                 if args.is_empty()
@@ -267,7 +283,10 @@ impl<'a> Checker<'a> {
             return;
         };
         for path in paths {
-            if self.include_guarded_paths.contains(&path) || self.include_target_exists(&path) {
+            if is_stream_wrapper_path(&path)
+                || self.include_guarded_paths.contains(&path)
+                || self.include_target_exists(&path)
+            {
                 continue;
             }
             self.report(

@@ -251,3 +251,15 @@ fn dirname_of_dir_resolves_from_a_relative_file_path() {
     .collect();
     assert!(d.is_empty(), "{d:?}");
 }
+
+#[test]
+fn stream_wrapper_and_directory_separator_paths_are_not_misread() {
+    let d: Vec<_> = diagnostics_for_file(
+        "<?php\nrequire 'phar://' . __DIR__ . '/app.phar/vendor/autoload.php';\nrequire dirname(__DIR__, 3) . DIRECTORY_SEPARATOR . 'Cargo.toml';\n",
+        std::path::Path::new("src/checker/tests/main.php"),
+    )
+    .into_iter()
+    .filter(|d| d.identifier.ends_with(".fileNotFound"))
+    .collect();
+    assert!(d.is_empty(), "{d:?}");
+}

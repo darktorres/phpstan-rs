@@ -93,23 +93,59 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
                 return ty.clone();
             };
             match narrow_array_shape_by_key_presence(ty, key, true) {
-                Type::ArrayShape(fields) => Type::ArrayShape(
-                    fields
-                        .into_iter()
-                        .map(|(k, v, optional)| {
-                            if k == key {
-                                (
-                                    k,
-                                    crate::checker::narrow_type_excluding(&v, &Type::Null),
-                                    false,
-                                )
-                            } else {
-                                (k, v, optional)
+                Type::ArrayShape(mut fields) => {
+                    match fields.iter_mut().find(|(k, _, _)| k == key) {
+                        Some(field) => {
+                            field.1 = crate::checker::narrow_type_excluding(&field.1, &Type::Null);
+                            field.2 = false;
+                        }
+                        // An unsealed shape's `...` tail held it.
+                        None => {
+                            let tail = fields
+                                .iter()
+                                .find(|(k, _, _)| k == "...")
+                                .map(|(_, t, _)| t.clone())
+                                .unwrap_or(Type::Mixed(false));
+                            let value = crate::checker::narrow_type_excluding(&tail, &Type::Null);
+                            let entry = (key.to_string(), value, false);
+                            match fields.iter().position(|(k, _, _)| k == "...") {
+                                Some(i) => fields.insert(i, entry),
+                                None => fields.push(entry),
                             }
-                        })
-                        .collect(),
-                ),
+                        }
+                    }
+                    Type::ArrayShape(fields)
+                }
                 other => other,
+            }
+        }
+        // A general array now has that key, with a non-null value.
+        Type::Array(_, value) => match key {
+            Some(key) => Type::Intersection(vec![
+                ty.clone(),
+                Type::HasOffsetValue(
+                    key.to_string(),
+                    Box::new(crate::checker::narrow_type_excluding(value, &Type::Null)),
+                ),
+            ]),
+            None => ty.clone(),
+        },
+        // `list<T>`/`non-empty-array<T>` - an accessory-marked array.
+        Type::Intersection(members) => {
+            let element = members.iter().find_map(|m| match m {
+                Type::Array(_, value) => Some(value),
+                _ => None,
+            });
+            match (key, element) {
+                (Some(key), Some(value)) => {
+                    let mut members = members.clone();
+                    members.push(Type::HasOffsetValue(
+                        key.to_string(),
+                        Box::new(crate::checker::narrow_type_excluding(value, &Type::Null)),
+                    ));
+                    Type::Intersection(members)
+                }
+                _ => ty.clone(),
             }
         }
         Type::Union(members) => {

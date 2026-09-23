@@ -409,6 +409,12 @@ impl<'a> Checker<'a> {
             self.check_statement_var_tag_classes(stmt, &var_tags, label);
             self.check_statement_var_tag_types(stmt, &var_tags, names_ok, locals, label);
         }
+        // A lone nameless `/** @var T */` on `return expr;` types the
+        // returned value itself.
+        let return_var_tag = match (&stmt.kind, var_tags.as_slice()) {
+            (StmtKind::Return(Some(_)), [(None, ty)]) => Some(ty.clone()),
+            _ => None,
+        };
         let inline_var = inline_var_annotations(stmt, var_tags);
         // A tag naming a variable this statement assigns describes the
         // assigned value, so it applies after the assignment (below) -
@@ -510,7 +516,8 @@ impl<'a> Checker<'a> {
                 }
             }
             StmtKind::Return(Some(e)) => {
-                let actual = self.check_expr(e, locals, label);
+                let checked = self.check_expr(e, locals, label);
+                let actual = return_var_tag.clone().unwrap_or(checked);
                 // Real PHPStan pushes the actual returned value's type
                 // onto its per-declaration "actually returned"
                 // accumulator here - never for a generator (`return $x;`

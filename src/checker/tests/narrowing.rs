@@ -5444,3 +5444,40 @@ fn a_dynamic_key_write_invalidates_narrowed_sibling_entries() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_write_makes_an_optional_key_present_and_isset_adds_an_unlisted_one() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @param array{usage?: int, region?: string|null} $cache
+             * @param array<string, int|null> $counts
+             */
+            function f(array $cache, array $counts, int $d): void {
+                if (! isset($cache['usage'])) {
+                    $cache['usage'] = $d;
+                }
+                assertType('array{usage: int, region?: string|null}', $cache);
+                if (isset($counts['x'])) {
+                    assertType("array<string, int|null>&hasOffsetValue('x', int)", $counts);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
+
+#[test]
+fn a_nameless_var_tag_on_a_return_types_the_returned_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            /** @return non-empty-string */
+            function f(string $s): string {
+                /** @var non-empty-string */
+                return strtolower($s);
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

@@ -1083,13 +1083,18 @@ impl<'a> Checker<'a> {
                         // Each element of the spread source is one of the
                         // arrays actually being merged - its own element
                         // (and key) type is one level further down than
-                        // the spread source's own. List-ness/non-
-                        // emptiness aren't provable this way (an unknown
-                        // number of arrays, of unknown emptiness).
+                        // the spread source's own. The result is non-empty
+                        // when at least one array is merged and every one
+                        // of them is non-empty.
                         match Checker::array_element_type(arg_ty) {
                             Some(inner_ty) => {
                                 if !Self::is_list_safe_array_merge_argument(&inner_ty) {
                                     all_list = false;
+                                }
+                                if Self::is_known_non_empty_array(arg_ty)
+                                    && Self::is_known_non_empty_array(&inner_ty)
+                                {
+                                    any_non_empty = true;
                                 }
                                 note_key_type(Self::array_key_type(&inner_ty));
                                 match Checker::array_element_type(&inner_ty) {

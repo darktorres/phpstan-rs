@@ -105,19 +105,24 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let actual_members = flatten_union(&actual);
+        // Each return point's own members - not their union, whose shape
+        // merging (`array{0: 'a', 1: X}|array{0: 'b', 1: Y, 2: Z}` into one
+        // `array{0: 'a'|'b', ...}`) would stop matching either member.
+        let actual_members: Vec<Type> = self
+            .current_function_return_points
+            .iter()
+            .flat_map(flatten_union)
+            .cloned()
+            .collect();
         for member in declared_members {
             // "Unused" is decided via trinary logic: only a definite No
-            // flags a member, a Maybe keeps it. Since `is_assignable` is a
-            // plain bool with no "unknown" state, an actual side of
-            // `Mixed` must be treated as "could be anything, including
-            // this member" explicitly, rather than as a hard `false`
-            // ("Mixed isn't assignable to a narrower type") that would
-            // wrongly flag every declared member whenever the actual type
-            // widens to `Mixed`.
-            let is_used = actual_members
-                .iter()
-                .any(|a| **a == Type::Mixed(false) || self.registry.is_assignable(a, member));
+            // flags a member, a Maybe keeps it - a returned type that fits
+            // the member, or merely overlaps it, uses it.
+            let is_used = actual_members.iter().any(|a| {
+                *a == Type::Mixed(false)
+                    || self.registry.is_assignable(a, member)
+                    || !crate::types::types_definitely_disjoint(a, member)
+            });
             if is_used {
                 continue;
             }

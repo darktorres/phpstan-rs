@@ -1155,8 +1155,13 @@ fn write_index_into(
         {
             Some(key) => {
                 let mut fields = fields.clone();
+                // A written key is present afterwards, even one the shape
+                // only had as optional.
                 match fields.iter_mut().find(|(k, _, _)| *k == key) {
-                    Some(field) => field.1 = value_ty,
+                    Some(field) => {
+                        field.1 = value_ty;
+                        field.2 = false;
+                    }
                     None => fields.push((key, value_ty, false)),
                 }
                 Some(Type::ArrayShape(fields))

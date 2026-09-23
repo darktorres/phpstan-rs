@@ -258,3 +258,21 @@ fn platform_dependent_predefined_constants_get_their_general_type() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_qualified_function_call_resolves_through_a_namespace_import() {
+    let d = diagnostics_for(
+        r#"<?php
+            namespace Amp\Future {
+                function awaitAll(array $futures): array { return $futures; }
+            }
+            namespace App {
+                use Amp\Future;
+                function run(): array {
+                    return Future\awaitAll([]);
+                }
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}
