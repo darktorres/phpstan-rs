@@ -1308,6 +1308,22 @@ empty: `parentCall.missing` (with a fix inserting the call when the
 parent needs no arguments), `.notFirst`, `.notLast`, `.forbidden`,
 `.noContent`, `.extraContent`.
 
+**`php-language-extensions` access attributes**
+(`registry/access_attributes.rs` into `ClassInfo::access`/
+`method_access`, enforced by `checker/access_attributes.rs`):
+`#[Friend(...)]` (`attribute.friend`: only listed classes may call a
+method or construct the class), `#[NamespaceVisibility]`/`#[Package]`
+(`attribute.namespaceVisibility`), `#[TestTag]` (`attribute.testTag`:
+only test code - a PHPUnit/Codeception test class, a `Test(s)`
+namespace segment, a `test(s)` directory or `*Test.php` file),
+`#[RestrictTraitTo(...)]` (`attribute.restrictTraitTo`),
+`#[InjectableVersion]`/`#[CheckInjectableVersion]`
+(`attribute.injectableVersion`, element types of collections
+included), `#[Sealed([...])]` feeding the `@phpstan-sealed` check, and
+`#[MustUseResult]` feeding the discarded-result check; a class may
+always use its own members. (The package-boundary visibility item is
+Phase 94 P2's.)
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3355,36 +3371,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 145 — Extended access-control primitives (attribute-based, complementing Phase 67's DSL)
-
-`dave-liddament/phpstan-php-language-extensions` ships a materially
-*simpler*, attribute-based design for the same underlying need Phase
-67's `spaze`-style allow/disallow-in DSL solves generically. That DSL
-is built (`restricted_symbols`, `allow_in`/`allow_except_in` and the
-rest, see Done). This is a complementary design, where the restriction
-lives on the target symbol as an attribute rather than in a central
-config file, and it needs no path/context-matching engine at all:
-
-- **145a.** `#[Friend(AllowedCaller::class)]` on a method/class —
-  explicit whitelist of which *other* specific classes may call it (the
-  classic C++ `friend` concept via attributes). The whitelist lives on
-  the target itself, not in a separate global config file.
-- **145b.** Namespace-level sibling of 145a — declare a whole namespace/
-  class visible only from specific other namespaces via attribute.
-- **145c.** `#[TestOnly]`-style marker on a method, flagging *production*
-  code that calls it — the inverse framing of `misplaced.autoloadDevSymbol`'s autoload-
-  dev-symbol-reachability check, keyed on an explicit author-written
-  marker instead of `composer.json`'s PSR-4 split.
-- **145d.** Restrict a trait to only be `use`d by a whitelisted set of
-  classes — a novel, narrow access-control primitive with no existing
-  phpstan-rs equivalent.
-- **145e.** Composer-package-boundary visibility enforcement — directly
-  overlaps Phase 94's P2 above; share one implementation.
-- **Effort: medium** — an attribute-reading pass plus a caller-identity
-  check at each of the relevant call/instantiate/extend sites, reusing
-  the same call-site inventory the `@internal` engine (Phase 67) and
-  `restricted_symbols` already walk.
 
 ### Phase 146 — Pluggable assertion/mock-narrowing tables + PHPUnit native mock-builder hygiene
 

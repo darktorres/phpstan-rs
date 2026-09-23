@@ -5,6 +5,7 @@ use std::sync::Arc;
 use crate::ast::Stmt;
 use crate::types::Type;
 
+pub mod access_attributes;
 mod anonymous_class;
 mod assignability;
 mod class_info;

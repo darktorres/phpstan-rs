@@ -561,7 +561,8 @@ impl FunctionSig {
         let no_discard = f
             .attrs
             .iter()
-            .any(|a| is_no_discard_attribute_name(&a.name));
+            .any(|a| is_no_discard_attribute_name(&a.name))
+            || crate::registry::access_attributes::has_must_use_result(&f.attrs, ctx);
         let has_override_attr = f.attrs.iter().any(|a| is_override_attribute_name(&a.name));
         let attrs: Vec<Arc<str>> = f
             .attrs

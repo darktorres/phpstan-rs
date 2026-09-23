@@ -117,6 +117,13 @@ impl<'a> Checker<'a> {
         span: Span,
         label: &str,
     ) {
+        self.check_access_attributes(
+            owner,
+            method_name,
+            sig.visibility == crate::ast::Visibility::Public,
+            span,
+            label,
+        );
         if !self.registry.check_internal_usage {
             return;
         }
@@ -286,6 +293,14 @@ impl<'a> Checker<'a> {
     /// (`extends`/`implements`/param-and-return-type-hints/first-class-
     /// callables aren't checked here).
     pub(crate) fn check_internal_instantiation(&mut self, class: &str, span: Span, label: &str) {
+        if let Some((canonical, _)) = self.registry.lookup_class(class) {
+            let canonical = canonical.to_string();
+            let is_public = self
+                .registry
+                .lookup_method(&canonical, "__construct")
+                .is_none_or(|sig| sig.visibility == crate::ast::Visibility::Public);
+            self.check_access_attributes(&canonical, "__construct", is_public, span, label);
+        }
         self.check_internal_class_name_usage(class, "Instantiation of", "new", span, label);
     }
 

@@ -1,3 +1,4 @@
+mod access_attributes;
 mod accessory_and_refinement_types;
 mod arity_and_signatures;
 mod array_functions;

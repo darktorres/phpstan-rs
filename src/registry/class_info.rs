@@ -398,6 +398,11 @@ pub struct ClassInfo {
     pub require_extends: Vec<Arc<str>>,
     pub require_implements: Vec<Arc<str>>,
     pub sealed: Vec<Arc<str>>,
+    /// The class's own `php-language-extensions` access attributes.
+    pub access: crate::registry::access_attributes::AccessAttributes,
+    /// Each method's, keyed by lowercased method name (only methods that
+    /// have any).
+    pub method_access: HashMap<Arc<str>, crate::registry::access_attributes::AccessAttributes>,
     // `@mixin Type` - resolved FQNs, same shape/flattening as the three
     // above. Not yet looked up in the target's own `methods`/`properties`
     // (may not be indexed yet) - `Registry::resolve_deferred_mixins`,
@@ -1104,10 +1109,21 @@ impl ClassInfo {
             .as_ref()
             .map(|d| resolve_tag_types(&d.require_implements))
             .unwrap_or_default();
-        let sealed = class_doc
+        let access = crate::registry::access_attributes::access_attributes(&c.attrs, ctx);
+        let method_access = c
+            .methods
+            .iter()
+            .filter_map(|m| {
+                let a =
+                    crate::registry::access_attributes::access_attributes(&m.function.attrs, ctx);
+                (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
+            })
+            .collect();
+        let mut sealed = class_doc
             .as_ref()
             .map(|d| resolve_tag_types(&d.sealed))
             .unwrap_or_default();
+        sealed.extend(access.sealed.iter().cloned());
         let mixins = class_doc
             .as_ref()
             .map(|d| resolve_tag_types(&d.mixins))
@@ -1168,6 +1184,8 @@ impl ClassInfo {
             require_extends,
             require_implements,
             sealed,
+            access,
+            method_access,
             mixins,
             mixin_case_refs,
             deprecated,
@@ -1681,6 +1699,18 @@ impl ClassInfo {
             require_extends: Vec::new(),
             require_implements: Vec::new(),
             sealed: Vec::new(),
+            access: crate::registry::access_attributes::access_attributes(&e.attrs, ctx),
+            method_access: e
+                .methods
+                .iter()
+                .filter_map(|m| {
+                    let a = crate::registry::access_attributes::access_attributes(
+                        &m.function.attrs,
+                        ctx,
+                    );
+                    (!a.is_empty()).then(|| (intern(&m.function.name.to_ascii_lowercase()), a))
+                })
+                .collect(),
             // An enum can `@mixin` in real PHPStan's grammar, but this is
             // a rare combination not modeled here.
             mixins: Vec::new(),

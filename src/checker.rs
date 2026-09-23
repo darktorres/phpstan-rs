@@ -1228,6 +1228,7 @@ pub struct Checker<'a> {
     pub(crate) pending_or_disjunctions: Vec<(Expr, Expr)>,
 }
 
+mod access_attributes;
 mod assignment;
 mod by_ref_params;
 mod callable_values;
@@ -1986,6 +1987,7 @@ impl<'a> Checker<'a> {
                             );
                             self.check_too_wide_property_types(&fqn, c);
                             self.check_parent_constructor_call(&fqn, c);
+                            self.check_class_access_attributes(&fqn, c);
                             self.check_promoted_property_candidate(&fqn, c);
                         }
                     }
