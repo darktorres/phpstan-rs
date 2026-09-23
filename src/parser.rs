@@ -64,6 +64,8 @@ pub struct Parser {
     // (real PHPStan's `getComments()`); a declaration only its last
     // (`getDocComment()`, `doc_comments` above).
     pub(crate) doc_comments_all: std::collections::HashMap<usize, Arc<str>>,
+    // Where the (first) doc comment in `doc_comments` starts, same keys.
+    pub(crate) doc_comment_starts: std::collections::HashMap<usize, crate::token::Position>,
     // Incremented/decremented around the parser's self-recursive
     // expression productions (parse_unary, parse_assignment,
     // parse_coalesce) - see MAX_EXPR_DEPTH.
@@ -84,6 +86,16 @@ mod stmt;
 mod tokens;
 mod type_hints;
 
+/// Where a class member's parse began: its first token and how many
+/// members of each kind existed before it.
+#[derive(Clone, Copy)]
+pub(crate) struct MemberStart {
+    pub(crate) first_token: usize,
+    pub(crate) properties: usize,
+    pub(crate) methods: usize,
+    pub(crate) consts: usize,
+}
+
 impl Parser {
     pub fn new(tokens: Vec<(Token, Span, Option<String>)>) -> Self {
         let mut filtered = Vec::with_capacity(tokens.len());
@@ -92,20 +104,26 @@ impl Parser {
         let mut doc_comments = std::collections::HashMap::new();
         let mut doc_comment_lines = std::collections::HashMap::new();
         let mut doc_comments_all = std::collections::HashMap::new();
-        let mut pending: Vec<(Arc<str>, u32)> = Vec::new();
+        let mut doc_comment_starts = std::collections::HashMap::new();
+        let mut pending: Vec<(Arc<str>, crate::token::Position)> = Vec::new();
         for (tok, span, keyword_raw) in tokens {
             match tok {
-                Token::DocComment(s) => pending.push((s, span.start.line)),
+                Token::DocComment(s) => pending.push((s, span.start)),
                 other => {
-                    if let Some((first_line, last)) = pending
+                    if let Some((first_start, last)) = pending
                         .first()
-                        .map(|(_, l)| *l)
+                        .map(|(_, start)| *start)
                         .zip(pending.last().cloned())
                     {
                         doc_comments.insert(filtered.len(), last.0);
-                        doc_comment_lines.insert(filtered.len(), first_line);
+                        doc_comment_lines.insert(filtered.len(), first_start.line);
+                        doc_comment_starts.insert(filtered.len(), first_start);
                         if pending.len() > 1 {
-                            doc_comments_all.insert(filtered.len(), fold_doc_comments(&pending));
+                            let lines: Vec<(Arc<str>, u32)> = pending
+                                .iter()
+                                .map(|(doc, start)| (doc.clone(), start.line))
+                                .collect();
+                            doc_comments_all.insert(filtered.len(), fold_doc_comments(&lines));
                         }
                         pending.clear();
                     }
@@ -123,6 +141,7 @@ impl Parser {
             doc_comments,
             doc_comment_lines,
             doc_comments_all,
+            doc_comment_starts,
             expr_depth: 0,
         }
     }
@@ -139,6 +158,62 @@ impl Parser {
             .or_else(|| self.spans.last())
             .map(|s| s.start)
             .unwrap_or_default()
+    }
+
+    /// What deleting a class member removes, for a member whose first
+    /// token (after any doc comment) was `first_token` and whose last is
+    /// the token just consumed: whole lines when nothing else shares
+    /// them, else from its start up to the next token.
+    pub(crate) fn member_removal_span(&self, first_token: usize) -> Span {
+        let start = self
+            .doc_comment_starts
+            .get(&first_token)
+            .copied()
+            .or_else(|| self.spans.get(first_token).map(|s| s.start))
+            .unwrap_or_default();
+        let previous_line = first_token
+            .checked_sub(1)
+            .and_then(|i| self.spans.get(i))
+            .map_or(0, |s| s.end.line);
+        let end = self.previous_end();
+        let next = self.current_pos();
+        if previous_line < start.line && next.line > end.line {
+            Span {
+                start: Position {
+                    line: start.line,
+                    col: 1,
+                },
+                end: Position {
+                    line: end.line + 1,
+                    col: 1,
+                },
+            }
+        } else {
+            Span { start, end: next }
+        }
+    }
+
+    /// Gives the member begun at `start` its `removal_span`, when it was
+    /// the only member its declaration produced.
+    pub(crate) fn finish_member(
+        &self,
+        start: MemberStart,
+        properties: &mut [PropertyDecl],
+        methods: &mut [MethodDecl],
+        consts: &mut [ClassConst],
+    ) {
+        let added = (
+            properties.len() - start.properties,
+            methods.len() - start.methods,
+            consts.len() - start.consts,
+        );
+        let span = Some(self.member_removal_span(start.first_token));
+        match added {
+            (1, 0, 0) => properties[start.properties].removal_span = span,
+            (0, 1, 0) => methods[start.methods].removal_span = span,
+            (0, 0, 1) => consts[start.consts].removal_span = span,
+            _ => {}
+        }
     }
 
     /// The end of the last token actually consumed - call right before

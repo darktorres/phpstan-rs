@@ -1819,11 +1819,12 @@ impl Server {
             self.last_diagnostics.insert(path.clone(), diags);
         }
         let diagnostics = self.last_diagnostics.get(&path)?;
+        let source = self.project.source(&path);
         Some(
             diagnostics
                 .iter()
                 .filter(|d| d.fix.is_some() && ranges_overlap(to_lsp_range(d.span), range))
-                .filter_map(|d| diagnostic_fix_to_code_action(uri, d))
+                .filter_map(|d| diagnostic_fix_to_code_action(uri, d, source))
                 .collect(),
         )
     }

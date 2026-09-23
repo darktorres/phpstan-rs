@@ -1,5 +1,5 @@
 use crate::ast::StaticTarget;
-use crate::checker::{Checker, Locals, class_type_word};
+use crate::checker::{Checker, DiagnosticBuilder, Locals, class_type_word};
 use crate::registry::{self, FunctionSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -495,6 +495,35 @@ impl<'a> Checker<'a> {
     /// source (needed fresh here, not `ClassInfo::extends`/etc., which
     /// `Registry::canonicalize_class_name_case` already rewrites to
     /// canonical case at registry-build time).
+    /// A fix rewriting the name `raw`, written at `span`, to `canonical`'s
+    /// casing - keeping `raw`'s own qualification (only its segments'
+    /// letter case changes). Offered only when `span` is exactly `raw`'s
+    /// width on one line, so the edit can't touch anything else.
+    pub(crate) fn name_case_fix(
+        raw: &str,
+        canonical: &str,
+        span: Span,
+    ) -> Option<(Span, String, String)> {
+        let leading = raw.starts_with('\\');
+        let written = raw.trim_start_matches('\\');
+        let segments = written.split('\\').count();
+        let canonical_segments: Vec<&str> =
+            canonical.trim_start_matches('\\').split('\\').collect();
+        let tail = canonical_segments
+            .get(canonical_segments.len().checked_sub(segments)?..)?
+            .join("\\");
+        if !tail.eq_ignore_ascii_case(written) || tail == written {
+            return None;
+        }
+        let width = raw.chars().count() as u32;
+        if span.start.line != span.end.line || span.end.col.checked_sub(span.start.col)? != width {
+            return None;
+        }
+        let replacement = if leading { format!("\\{tail}") } else { tail };
+        let description = format!("Use {replacement}");
+        Some((span, replacement, description))
+    }
+
     pub(crate) fn check_class_name_case(&mut self, fqn: &str, raw: &str, span: Span) {
         let mut segments = raw.trim_start_matches('\\').splitn(2, '\\');
         let first_segment = segments.next().unwrap_or(raw);
@@ -510,13 +539,19 @@ impl<'a> Checker<'a> {
         }
         if canonical != resolved {
             let type_word = class_type_word(info.kind);
-            self.report(
+            let mut builder = DiagnosticBuilder::new(
                 fqn.to_string(),
                 format!("{type_word} referenced with incorrect case: {resolved}."),
                 span,
                 0,
-                &format!("{}.nameCase", type_word.to_lowercase()),
+                format!("{}.nameCase", type_word.to_lowercase()),
             );
+            if let Some((span, replacement, description)) =
+                Self::name_case_fix(raw, canonical, span)
+            {
+                builder = builder.fix(span, replacement, description);
+            }
+            self.report_builder(builder);
         }
     }
 
@@ -548,11 +583,14 @@ impl<'a> Checker<'a> {
     /// check_function_name_case` flag as `use function`'s own check.
     /// `Registry::lookup_method_canonical_name` mirrors `lookup_class`'s
     /// case-insensitive-fallback shape.
+    /// `name_region` is the part of the call after its receiver, where
+    /// the written method name is.
     pub(crate) fn check_call_site_method_name_case(
         &mut self,
         class: &str,
         method: &str,
         span: Span,
+        name_region: Span,
         label: &str,
     ) {
         if !self.registry.check_function_name_case {
@@ -562,13 +600,20 @@ impl<'a> Checker<'a> {
             return;
         };
         if canonical != method {
-            self.report(
+            let mut builder = DiagnosticBuilder::new(
                 label.to_string(),
                 format!("Call to method {class}::{canonical}() with incorrect case: {method}."),
                 span,
                 0,
                 "method.nameCase",
             );
+            builder = builder.fix_within(
+                name_region,
+                method,
+                canonical.to_string(),
+                format!("Use {canonical}"),
+            );
+            self.report_builder(builder);
         }
     }
 

@@ -12,7 +12,7 @@
 //! parameter, ... all routinely go unused without being a bug).
 
 use crate::ast::*;
-use crate::checker::Checker;
+use crate::checker::{Checker, DiagnosticBuilder};
 use crate::token::Span;
 
 mod member_usage;
@@ -232,13 +232,17 @@ impl<'a> Checker<'a> {
             if c.visibility != Visibility::Private || usage.consts.contains(c.name.as_ref()) {
                 continue;
             }
-            self.report(
+            let mut builder = DiagnosticBuilder::new(
                 fqn.to_string(),
                 format!("private constant {fqn}::{} is unused", c.name),
                 c.span,
                 4,
                 "classConstant.unused",
             );
+            if let Some(removal) = c.removal_span {
+                builder = builder.fix(removal, "", format!("Remove constant {}", c.name));
+            }
+            self.report_builder(builder);
         }
 
         for m in methods {
@@ -254,13 +258,17 @@ impl<'a> Checker<'a> {
             } else {
                 "private method"
             };
-            self.report(
+            let mut builder = DiagnosticBuilder::new(
                 fqn.to_string(),
                 format!("{kind_word} {fqn}::{}() is unused", m.function.name),
                 m.function.span,
                 4,
                 "method.unused",
             );
+            if let Some(removal) = m.removal_span {
+                builder = builder.fix(removal, "", format!("Remove method {}()", m.function.name));
+            }
+            self.report_builder(builder);
         }
 
         // PHP 8.4 asymmetric visibility (`public private(set)`): a
@@ -314,6 +322,7 @@ impl<'a> Checker<'a> {
                 only_writable,
                 p.doc_comment.as_deref(),
                 p.span,
+                p.removal_span,
                 &usage,
             );
         }
@@ -336,6 +345,7 @@ impl<'a> Checker<'a> {
                     only_writable,
                     None,
                     param.span,
+                    None,
                     &usage,
                 );
             }
@@ -359,6 +369,7 @@ impl<'a> Checker<'a> {
         only_writable: bool,
         doc_comment: Option<&str>,
         span: Span,
+        removal: Option<Span>,
         usage: &MemberUsage,
     ) {
         let tag_always_read = doc_comment.is_some_and(|d| d.contains("@phpstan-always-read"));
@@ -404,6 +415,12 @@ impl<'a> Checker<'a> {
         } else {
             return;
         };
-        self.report(fqn.to_string(), message, span, 4, identifier);
+        let mut builder = DiagnosticBuilder::new(fqn.to_string(), message, span, 4, identifier);
+        if identifier == "property.unused"
+            && let Some(removal) = removal
+        {
+            builder = builder.fix(removal, "", format!("Remove property ${name}"));
+        }
+        self.report_builder(builder);
     }
 }

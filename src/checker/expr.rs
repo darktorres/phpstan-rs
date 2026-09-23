@@ -383,13 +383,20 @@ impl<'a> Checker<'a> {
                     && let Some((canonical, _)) = self.registry.lookup_function_with_name(resolved)
                     && canonical != resolved.as_ref()
                 {
-                    self.report(
+                    let mut builder = DiagnosticBuilder::new(
                         label.to_string(),
                         format!("Function {canonical} used with incorrect case: {resolved}."),
                         callee.span,
                         0,
                         "function.nameCase",
                     );
+                    if let ExprKind::Name(written) = &callee.kind
+                        && let Some((span, replacement, description)) =
+                            Self::name_case_fix(written, canonical, callee.span)
+                    {
+                        builder = builder.fix(span, replacement, description);
+                    }
+                    self.report_builder(builder);
                 }
                 // Resolves the call's arguments against the real
                 // signature (named/reordered-named arguments no longer
@@ -1350,7 +1357,16 @@ impl<'a> Checker<'a> {
                             e.span,
                         );
                         self.record_member_ref(e.span, owner, method);
-                        self.check_call_site_method_name_case(class, method, e.span, label);
+                        self.check_call_site_method_name_case(
+                            class,
+                            method,
+                            e.span,
+                            Span {
+                                start: recv.span.end,
+                                end: e.span.end,
+                            },
+                            label,
+                        );
                         // `DOMDocument::createElement()`'s tag-name
                         // validation - independent of the internal/
                         // deprecated checks above.
@@ -2648,7 +2664,16 @@ impl<'a> Checker<'a> {
                                 );
                             }
                         }
-                        self.check_call_site_method_name_case(class, method, e.span, label);
+                        self.check_call_site_method_name_case(
+                            class,
+                            method,
+                            e.span,
+                            Span {
+                                start: static_target_end(target),
+                                end: e.span.end,
+                            },
+                            label,
+                        );
                         // See the identical comment on the plain-
                         // function Call arm above - `check_args` is
                         // spread-aware, so it's always worth calling.
@@ -4297,7 +4322,16 @@ impl<'a> Checker<'a> {
                                     sig.is_internal,
                                     e.span,
                                 );
-                                self.check_call_site_method_name_case(class, method, e.span, label);
+                                self.check_call_site_method_name_case(
+                                    class,
+                                    method,
+                                    e.span,
+                                    Span {
+                                        start: recv.span.end,
+                                        end: e.span.end,
+                                    },
+                                    label,
+                                );
                             }
                         }
                     }
@@ -4305,7 +4339,16 @@ impl<'a> Checker<'a> {
                         if let Some(class) = self.resolve_static_target_class(target, locals, label)
                             && self.registry.classes.contains_key(class.as_str())
                         {
-                            self.check_call_site_method_name_case(&class, method, e.span, label);
+                            self.check_call_site_method_name_case(
+                                &class,
+                                method,
+                                e.span,
+                                Span {
+                                    start: static_target_end(target),
+                                    end: e.span.end,
+                                },
+                                label,
+                            );
                             if self.registry.lookup_method(&class, method).is_none()
                                 && self
                                     .registry
@@ -6618,5 +6661,14 @@ pub(crate) fn unseal_array_shapes(ty: &Type) -> Type {
         }
         Type::Union(members) => Type::Union(members.iter().map(unseal_array_shapes).collect()),
         other => other.clone(),
+    }
+}
+
+/// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj` in
+/// `$obj::bar()`) ends.
+fn static_target_end(target: &StaticTarget) -> crate::token::Position {
+    match target {
+        StaticTarget::Name(_, span) => span.end,
+        StaticTarget::Expr(expr) => expr.span.end,
     }
 }

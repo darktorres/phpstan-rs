@@ -319,7 +319,9 @@ impl Parser {
     pub(crate) fn parse_attributes(&mut self) -> Result<Vec<Attribute>, ParseError> {
         let mut attrs = Vec::new();
         while self.check(&Token::AttributeStart) {
+            let group_start = self.current_pos();
             self.skip();
+            let first_in_group = attrs.len();
             loop {
                 let attr_start = self.current_pos();
                 let name = self.parse_qualified_name();
@@ -328,13 +330,15 @@ impl Parser {
                 } else {
                     Vec::new()
                 };
+                let span = Span {
+                    start: attr_start,
+                    end: self.previous_end(),
+                };
                 attrs.push(Attribute {
                     name,
                     args,
-                    span: Span {
-                        start: attr_start,
-                        end: self.previous_end(),
-                    },
+                    span,
+                    removal_span: span,
                 });
                 // A trailing comma before the closing `]` is valid PHP
                 // (`#[A, B,]`), same as a call's own trailing comma.
@@ -343,6 +347,32 @@ impl Parser {
                 }
             }
             self.expect(&Token::RBracket)?;
+            let after_group = self.current_pos();
+            let group = &mut attrs[first_in_group..];
+            if let [only] = group {
+                only.removal_span = Span {
+                    start: group_start,
+                    end: after_group,
+                };
+            } else {
+                let starts: Vec<crate::token::Position> =
+                    group.iter().map(|a| a.span.start).collect();
+                let last = group.len() - 1;
+                let previous_end = group[last - 1].span.end;
+                for (i, attr) in group.iter_mut().enumerate() {
+                    attr.removal_span = if i < last {
+                        Span {
+                            start: attr.span.start,
+                            end: starts[i + 1],
+                        }
+                    } else {
+                        Span {
+                            start: previous_end,
+                            end: attr.span.end,
+                        }
+                    };
+                }
+            }
         }
         Ok(attrs)
     }

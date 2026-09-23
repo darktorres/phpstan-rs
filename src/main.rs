@@ -339,6 +339,10 @@ enum Command {
         /// index including them.
         #[arg(long)]
         baseline_per_identifier: bool,
+        /// Applies every suggested fix (the same ones the language server
+        /// offers as quick fixes) to the files on disk.
+        #[arg(long)]
+        fix: bool,
         /// Extra directories loaded for type-resolution context only -
         /// never analyzed or reported on. Repeatable.
         #[arg(long = "scan-dir")]
@@ -445,6 +449,7 @@ fn main() {
             baseline,
             baseline_match_identifier,
             baseline_per_identifier,
+            fix,
             scan_dirs,
             stub_paths,
             no_composer,
@@ -495,6 +500,7 @@ fn main() {
             baseline,
             baseline_match_identifier,
             baseline_per_identifier,
+            fix,
             scan_dirs,
             stub_paths,
             no_composer,

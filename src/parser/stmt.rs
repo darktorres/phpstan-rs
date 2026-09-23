@@ -187,7 +187,7 @@ impl Parser {
                 } else {
                     UseKind::Class
                 };
-                let name = self.parse_qualified_name();
+                let (name, name_span) = self.parse_qualified_name_spanned();
                 // Group use: `use Foo\{const BAR, function baz, Qux as
                 // Quux};`, with an optional trailing comma before the
                 // closing brace. Every member expands to its own
@@ -216,7 +216,7 @@ impl Parser {
                         } else {
                             default_kind
                         };
-                        let member = self.parse_qualified_name();
+                        let (member, member_span) = self.parse_qualified_name_spanned();
                         let alias = if self.eat(&Token::Keyword(Keyword::As)) {
                             Some(self.expect_ident()?)
                         } else {
@@ -224,6 +224,8 @@ impl Parser {
                         };
                         imports.push(UseImport {
                             path: format!("{group_prefix}\\{member}"),
+                            written: member,
+                            written_span: member_span,
                             alias,
                             kind,
                         });
@@ -241,6 +243,8 @@ impl Parser {
                     None
                 };
                 let mut imports = vec![UseImport {
+                    written: name.clone(),
+                    written_span: name_span,
                     path: name,
                     alias,
                     kind: default_kind,
@@ -250,13 +254,15 @@ impl Parser {
                 // group form above (each member here is a full path of its
                 // own, not relative to a shared prefix).
                 while self.eat(&Token::Comma) {
-                    let path = self.parse_qualified_name();
+                    let (path, path_span) = self.parse_qualified_name_spanned();
                     let alias = if self.eat(&Token::Keyword(Keyword::As)) {
                         Some(self.expect_ident()?)
                     } else {
                         None
                     };
                     imports.push(UseImport {
+                        written: path.clone(),
+                        written_span: path_span,
                         path,
                         alias,
                         kind: default_kind,
@@ -279,6 +285,7 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
+                        removal_span: None,
                         name,
                         name_span,
                         value,

@@ -14,6 +14,7 @@ pub mod config;
 pub mod deps;
 pub mod docblock;
 pub mod doctrine_functions;
+pub mod fix;
 pub mod ignore_comments;
 pub mod ignore_errors;
 pub(crate) mod intern;

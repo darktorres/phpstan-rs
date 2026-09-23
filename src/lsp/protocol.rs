@@ -314,8 +314,14 @@ pub(crate) fn ranges_overlap(a: LspRange, b: LspRange) -> bool {
 pub(crate) fn diagnostic_fix_to_code_action(
     uri: &Uri,
     d: &Diagnostic,
+    source: Option<&str>,
 ) -> Option<CodeActionOrCommand> {
     let fix = d.fix.as_ref()?;
+    let span = match source {
+        Some(source) => crate::fix::resolve_span(source, fix)?,
+        None if fix.within.is_none() => fix.span,
+        None => return None,
+    };
     Some(CodeActionOrCommand::CodeAction(CodeAction {
         title: fix.description.clone(),
         kind: Some(CodeActionKind::QUICKFIX),
@@ -324,7 +330,7 @@ pub(crate) fn diagnostic_fix_to_code_action(
             changes: Some(HashMap::from([(
                 uri.clone(),
                 vec![TextEdit {
-                    range: to_lsp_range(fix.span),
+                    range: to_lsp_range(span),
                     new_text: fix.replacement.clone(),
                 }],
             )])),

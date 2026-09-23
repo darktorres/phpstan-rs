@@ -52,7 +52,17 @@ impl Parser {
         let mut trait_aliases = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
 
+        let mut pending_member: Option<crate::parser::MemberStart> = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
+            if let Some(member) = pending_member.take() {
+                self.finish_member(member, &mut [], &mut methods, &mut consts);
+            }
+            pending_member = Some(crate::parser::MemberStart {
+                first_token: self.pos,
+                properties: 0,
+                methods: methods.len(),
+                consts: consts.len(),
+            });
             let member_start = self.current_pos();
             // See the identical handling in `parse_class_body`.
             let attrs = self.parse_leading_attributes()?;
@@ -170,6 +180,7 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
+                        removal_span: None,
                         name: cname,
                         name_span: cname_span,
                         value,
@@ -197,6 +208,7 @@ impl Parser {
                 function.doc_comment = doc;
                 function.attrs = attrs;
                 methods.push(MethodDecl {
+                    removal_span: None,
                     visibility,
                     is_static,
                     is_abstract: is_abstract_member,
@@ -214,6 +226,9 @@ impl Parser {
             // token and keep going rather than loop forever or panic on
             // whatever unexpected thing is here.
             self.skip();
+        }
+        if let Some(member) = pending_member.take() {
+            self.finish_member(member, &mut [], &mut methods, &mut consts);
         }
         self.expect(&Token::RBrace)?;
 

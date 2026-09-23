@@ -74,13 +74,19 @@ impl<'a> Checker<'a> {
                             && real_name.eq_ignore_ascii_case(fqn)
                             && real_name != fqn =>
                     {
-                        self.report(
+                        let mut builder = DiagnosticBuilder::new(
                             "<main>".to_string(),
                             format!("Function {real_name} used with incorrect case: {fqn}."),
                             stmt.span,
                             0,
                             "function.nameCase",
                         );
+                        if let Some((span, replacement, description)) =
+                            Self::name_case_fix(&import.written, real_name, import.written_span)
+                        {
+                            builder = builder.fix(span, replacement, description);
+                        }
+                        self.report_builder(builder);
                     }
                     Some(_) => {}
                 }

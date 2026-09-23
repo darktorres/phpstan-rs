@@ -11,6 +11,10 @@ pub struct Attribute {
     pub name: String,
     pub args: Vec<Arg>,
     pub span: Span,
+    // What deleting this attribute removes: its whole `#[...]` group up
+    // to the next token when it's alone in the group, else its own entry
+    // with the comma separating it from a neighbour.
+    pub removal_span: Span,
 }
 
 /// A statement, plus the real source span it occupies - `kind` carries the
@@ -228,6 +232,8 @@ pub struct FunctionDecl {
     // `false` for a bodiless `function f();` declaration (abstract and
     // interface methods), distinct from an empty `{}` body.
     pub has_body: bool,
+    // The body's opening `{`, when it has one.
+    pub body_open: Option<Span>,
     // `function &f()` - returns by reference.
     pub by_ref: bool,
     // Raw `/** ... */` text immediately preceding this declaration, if any.
@@ -284,6 +290,10 @@ pub struct PropertyDecl {
     // `#[Attr]` groups preceding this property declaration.
     pub attrs: Vec<Attribute>,
     pub span: Span,
+    // What deleting this member removes (its doc comment and attributes
+    // included, and its whole lines when it has them to itself); `None`
+    // when it shares a declaration with other members.
+    pub removal_span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
@@ -334,11 +344,19 @@ pub struct MethodDecl {
     pub is_final: bool,
     pub function: FunctionDecl,
     pub span: Span,
+    // What deleting this member removes (its doc comment and attributes
+    // included, and its whole lines when it has them to itself); `None`
+    // when it shares a declaration with other members.
+    pub removal_span: Option<Span>,
 }
 
 #[derive(Debug, Clone)]
 pub struct UseImport {
     pub path: String,
+    // The name as written in source (a group member's own part only) and
+    // its span.
+    pub written: String,
+    pub written_span: Span,
     // Always taken via `Parser::expect_ident` (a single-token name, never
     // namespace-qualified) - see `FunctionDecl::name`'s own doc comment.
     pub alias: Option<Arc<str>>,
@@ -407,6 +425,10 @@ pub struct ClassConst {
     // has no `final` syntax there at all.
     pub is_final: bool,
     pub span: Span,
+    // What deleting this member removes (its doc comment and attributes
+    // included, and its whole lines when it has them to itself); `None`
+    // when it shares a declaration with other members.
+    pub removal_span: Option<Span>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

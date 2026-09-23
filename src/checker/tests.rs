@@ -14,6 +14,7 @@ mod callable_shapes;
 mod cast_and_coercion;
 mod class_constant_sanity;
 mod closures_and_callables;
+mod codemods;
 mod conditional_types;
 mod constant_conditions;
 mod contextual_callback_params;

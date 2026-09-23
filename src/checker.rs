@@ -517,14 +517,18 @@ pub struct Diagnostic {
 }
 
 /// A single suggested textual replacement: replace whatever source text
-/// `span` covers with `replacement`. `description` is a short human label
-/// for the fix itself (real PHPStan's own fixer CLI output shows one per
-/// applied fix, e.g. "Add missing return statement").
+/// `span` covers with `replacement` - or, with `within`, only the first
+/// whole-word occurrence of that text inside `span` (for a name whose own
+/// span isn't known, resolved against the source by `fix::resolve_span`).
+/// `description` is a short human label for the fix itself (real
+/// PHPStan's own fixer CLI output shows one per applied fix, e.g. "Add
+/// missing return statement").
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiagnosticFix {
     pub span: Span,
     pub replacement: String,
     pub description: String,
+    pub within: Option<String>,
 }
 
 /// Fluent assembly for a [`Diagnostic`], mirroring real PHPStan's own
@@ -598,6 +602,25 @@ impl DiagnosticBuilder {
             span,
             replacement: replacement.into(),
             description: description.into(),
+            within: None,
+        });
+        self
+    }
+
+    /// `fix` replacing only the first whole-word occurrence of `text`
+    /// inside `span`.
+    pub fn fix_within(
+        mut self,
+        span: Span,
+        text: impl Into<String>,
+        replacement: impl Into<String>,
+        description: impl Into<String>,
+    ) -> Self {
+        self.fix = Some(DiagnosticFix {
+            span,
+            replacement: replacement.into(),
+            description: description.into(),
+            within: Some(text.into()),
         });
         self
     }

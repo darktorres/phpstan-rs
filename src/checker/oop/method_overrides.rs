@@ -10,7 +10,22 @@ impl<'a> Checker<'a> {
             return;
         };
         for m in &c.methods {
-            self.check_one_method_override(fqn, &m.function.name, &m.visibility, m.span);
+            let decl = DeclSpans {
+                name: m.function.name_span,
+                override_removal: m
+                    .function
+                    .attrs
+                    .iter()
+                    .find(|a| crate::registry::is_override_attribute_name(&a.name))
+                    .map(|a| a.removal_span),
+            };
+            self.check_one_method_override(
+                fqn,
+                &m.function.name,
+                &m.visibility,
+                m.span,
+                Some(decl),
+            );
         }
         // A method a trait supplies but the class itself never
         // textually re-declares still needs the identical override-
@@ -45,7 +60,7 @@ impl<'a> Checker<'a> {
                 else {
                     continue;
                 };
-                self.check_one_method_override(fqn, &name, &own_visibility, c.span);
+                self.check_one_method_override(fqn, &name, &own_visibility, c.span, None);
             }
         }
     }
@@ -171,7 +186,9 @@ impl<'a> Checker<'a> {
         method_name: &str,
         own_visibility: &Visibility,
         span: Span,
+        decl: Option<DeclSpans>,
     ) {
+        let override_removal = decl.and_then(|d| d.override_removal);
         // Dispatched through `internal_rules`'s
         // `Vec<Box<dyn InternalRule>>` rather than called directly - see
         // that module's doc comment.
@@ -218,7 +235,7 @@ impl<'a> Checker<'a> {
             .registry
             .find_case_mismatched_ancestor_method(fqn, method_name)
         {
-            self.report(
+            let mut builder = DiagnosticBuilder::new(
                 fqn.to_string(),
                 format!(
                     "Method {fqn}::{method_name}() overrides {ancestor_owner}::{ancestor_name}() with different letter casing"
@@ -227,6 +244,13 @@ impl<'a> Checker<'a> {
                 4,
                 "method.nameCase",
             );
+            if let Some(decl) = decl
+                && let Some((span, replacement, description)) =
+                    Self::name_case_fix(method_name, &ancestor_name, decl.name)
+            {
+                builder = builder.fix(span, replacement, description);
+            }
+            self.report_builder(builder);
         }
         // Mirrors real PHPStan's `MethodPrototypeFinder` priority order
         // (immediately-implemented interface, then a used trait's own
@@ -275,7 +299,7 @@ impl<'a> Checker<'a> {
             && info.kind != ClassKind::Trait
             && !self.registry.has_unresolvable_ancestor(fqn)
         {
-            self.report(
+            let mut builder = DiagnosticBuilder::new(
                 fqn.to_string(),
                 format!(
                     "{fqn}::{method_name}() has #[\\Override] attribute but does not override any method"
@@ -284,6 +308,10 @@ impl<'a> Checker<'a> {
                 0,
                 "method.override",
             );
+            if let Some(removal) = override_removal {
+                builder = builder.fix(removal, "", "Remove #[\\Override]");
+            }
+            self.report_builder(builder);
         }
         // `method.nonStatic`/`method.static`, mirroring real PHPStan's
         // `OverridingMethodRule`: an override must match its ancestor's
@@ -679,6 +707,13 @@ impl<'a> Checker<'a> {
 
 /// Whether `attrs` (raw, as-written attribute names) contains `name`,
 /// ignoring any namespace qualification.
+/// Spans of a method's own textual declaration.
+#[derive(Clone, Copy)]
+struct DeclSpans {
+    name: Span,
+    override_removal: Option<Span>,
+}
+
 fn has_attr(attrs: &[std::sync::Arc<str>], name: &str) -> bool {
     attrs.iter().any(|a| {
         a.rsplit('\\')

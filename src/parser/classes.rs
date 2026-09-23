@@ -169,7 +169,17 @@ impl Parser {
         let mut trait_aliases = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
 
+        let mut pending_member: Option<crate::parser::MemberStart> = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
+            if let Some(member) = pending_member.take() {
+                self.finish_member(member, &mut properties, &mut methods, &mut consts);
+            }
+            pending_member = Some(crate::parser::MemberStart {
+                first_token: self.pos,
+                properties: properties.len(),
+                methods: methods.len(),
+                consts: consts.len(),
+            });
             let member_start = self.current_pos();
             // `#[Attr]` groups precede everything else about a member
             // (even its visibility/`static`/... modifiers) - parsed
@@ -307,6 +317,7 @@ impl Parser {
                     self.expect(&Token::Equals)?;
                     let value = self.parse_expression()?;
                     consts.push(ClassConst {
+                        removal_span: None,
                         name: cname,
                         name_span: cname_span,
                         value,
@@ -347,6 +358,7 @@ impl Parser {
                     }
                 }
                 methods.push(MethodDecl {
+                    removal_span: None,
                     visibility,
                     is_static,
                     is_abstract: is_abstract_member,
@@ -388,6 +400,7 @@ impl Parser {
                 if self.check(&Token::LBrace) {
                     let hooks = self.parse_property_hooks()?;
                     properties.push(PropertyDecl {
+                        removal_span: None,
                         name,
                         name_span,
                         visibility: visibility.clone(),
@@ -410,6 +423,7 @@ impl Parser {
                     break;
                 }
                 properties.push(PropertyDecl {
+                    removal_span: None,
                     name,
                     name_span,
                     visibility: visibility.clone(),
@@ -434,6 +448,9 @@ impl Parser {
                     break;
                 }
             }
+        }
+        if let Some(member) = pending_member.take() {
+            self.finish_member(member, &mut properties, &mut methods, &mut consts);
         }
         self.expect(&Token::RBrace)?;
 

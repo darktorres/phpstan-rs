@@ -1272,9 +1272,17 @@ every genuine syntactic binding site and merged through the same
 trusts, so every branch-merge/loop/termination-pruning nuance is
 inherited for free).
 
-**LSP completeness**: `textDocument/codeAction` fix wiring (the
-production `Diagnostic.fix` population itself remains a separate, open
-job); whole-project `textDocument/references`/`rename` backed by a real
+**LSP completeness**: `textDocument/codeAction` fix wiring, with
+fixes populated for (and `check-project --fix` applying): every
+`*.nameCase` mismatch (same-width rewrite keeping the written
+qualification, a call-site method name located within the call by a
+`within` fix resolved against the source), a `#[\Override]` overriding
+nothing (removing its attribute group, or just its entry in a shared
+group), a wholly unused private constant/method/property (deleting the
+declaration with its doc comment and attributes, whole lines when it
+has them to itself, only when it isn't sharing a declaration), and a
+missing `parent::__construct()` when the parent constructor needs no
+arguments; whole-project `textDocument/references`/`rename` backed by a real
 two-tier use-site index (Tier 1 syntactic, kept live; Tier 2 needs
 receiver-type resolution, built lazily); `signatureHelp`; `workspace/
 symbol`; `documentHighlight`; `semanticTokens` (unconditional `@internal`/
@@ -2878,81 +2886,6 @@ before/after diff there is retaining data that already exists for one more
 statement's worth of scope, not computing anything new.
 
 **Effort: medium.**
-
----
-
-## Part 6: Codemods
-
-Four concrete fixes, each attaching to an existing diagnostic via the
-already-shipped `DiagnosticFix`/`codeAction` plumbing (see Done) - only
-the per-check `.fix()` population below remains open.
-Real PHPStan's entire autofix surface (`RuleErrorBuilder::
-fixNode`) is used by only 4 rule files project-wide (`grep -rl fixNode
-vendor/phpstan-src/src/Rules/` -> two `Overriding*Rule.php`, `Operators/
-BacktickRule.php`, `Playground/PromoteParameterRule.php`) - none of the
-diagnostic families below have any real-PHPStan autofix at all.
-
-### Phase 111 — Codemods attached to diagnostics phpstan-rs already ships (§I)
-
-#### I1. Byte-exact same-length splice for every `*.nameCase` mismatch
-
-phpstan-rs already reports `class.nameCase`/etc. (`src/checker/resolve.rs:
-341-352`) and already knows the canonical casing via `NameContext`'s
-use-import table (`registry/name_context.rs:100-124`). Because identifier
-casing changes never change byte count, this is the safest codemod shape
-possible: overwrite `[span.start, span.end)` with the canonical-cased
-string in place, zero length delta, zero downstream-span invalidation.
-Scales directly to the now-shipped `method.nameCase` inherited-casing
-check with the same mechanism. Real PHPStan's nameCase rule family has zero
-`fixNode` usage anywhere.
-
-**Effort: small.**
-
-#### I2. Delete-attribute-group codemod for the already-shipped invalid-`#[Override]` diagnostic
-
-`method.override`/property equivalent already fire when `#[Override]` is
-present with no real ancestor (`checker/oop/method_overrides.rs:137-149`,
-`property_overrides.rs:100-104`). The fix is a pure span deletion of the
-attribute group's own source text - no reprinting of the declaration
-needed. Real PHPStan's fix for the identical rule instead rebuilds the
-*whole* node via `filterOverrideAttribute` and reprints it through
-PhpParser's printer (`OverridingMethodRule.php:119-124`,
-`Fixable/Patcher.php:1-80`) - a whole node-reprint-and-merge pipeline built
-because PHPStan's AST has no reliable way to splice just the attribute
-group's range. phpstan-rs's attribute-group node already carries its own
-span independent of the declaration span (`src/ast.rs:178-198`), so the
-fix is strictly smaller and safer than PHPStan's own approach to the
-identical rule.
-
-**Effort: small.**
-
-#### I3. Whole-declaration deletion for the zero-usage subset of unused-private-member diagnostics
-
-`classConstant.unused`/`method.unused`/`property.unused`
-(`checker/unused.rs:184-212,293-298`) mean the member is referenced
-*nowhere at all* - safe to delete the full declaration span, unlike the
-sibling `property.neverRead`/`property.onlyWritten` identifiers
-(`unused.rs:299-309`), which must NOT be auto-deleted since the member is
-still genuinely used somewhere. Real PHPStan's `UnusedPrivate*Rule` family
-has zero `fixNode` usage. The one real nuance: a preceding doc-comment/
-attribute-group isn't included in the declaration span
-(`src/ast.rs:194-198`), so a correct codemod must walk backward past any
-immediately-preceding doc-comment text before deleting.
-
-**Effort: medium.**
-
-#### I4. Conditional single-line insertion codemod for the now-shipped `constructor.missingParentCall` check
-
-The fix is inserting `parent::__construct();` as the constructor body's
-first statement - but only when the resolved parent constructor's
-`FunctionSig.params` has zero required entries; otherwise the correct
-call needs argument values the checker can't invent, and the codemod
-must decline rather than guess. `phpstan-strict-rules` has zero
-`fixNode` usage anywhere (`grep -rl fixNode vendor/phpstan-strict-rules/src/`
-- empty), confirming this fix was never attempted upstream despite being
-as mechanically simple as I2's.
-
-**Effort: small.**
 
 ---
 

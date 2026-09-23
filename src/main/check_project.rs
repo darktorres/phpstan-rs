@@ -179,6 +179,7 @@ fn run_check_project(
     baseline_path: Option<&Path>,
     baseline_mode: baseline::MatchMode,
     baseline_per_identifier: bool,
+    apply_fixes: bool,
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
     dynamic_constant_names: &[(String, Option<String>)],
@@ -549,6 +550,36 @@ fn run_check_project(
         }
     }
 
+    if apply_fixes {
+        let mut fixed_files = 0usize;
+        let mut applied_total = 0usize;
+        let mut paths: Vec<&PathBuf> = results.keys().collect();
+        paths.sort();
+        for path in paths {
+            let diagnostics = &results[path];
+            if !diagnostics.iter().any(|d| d.fix.is_some()) {
+                continue;
+            }
+            let Ok(source) = std::fs::read_to_string(path) else {
+                eprintln!("failed to read {} to apply fixes", path.display());
+                continue;
+            };
+            let (fixed, applied) =
+                phpstan_rs::fix::apply_fixes(&source, phpstan_rs::fix::fixes_of(diagnostics));
+            if applied == 0 || fixed == source {
+                continue;
+            }
+            match std::fs::write(path, fixed) {
+                Ok(()) => {
+                    fixed_files += 1;
+                    applied_total += applied;
+                }
+                Err(e) => eprintln!("failed to write fixes to {}: {e}", path.display()),
+            }
+        }
+        eprintln!("applied {applied_total} fix(es) in {fixed_files} file(s)");
+    }
+
     let checked = analyze_files.len() - skipped_analyze - check_panics.len();
 
     // Text is the only format carrying anything beyond raw diagnostics
@@ -667,6 +698,7 @@ pub(crate) fn run_check_project_command(
     baseline: Option<PathBuf>,
     baseline_match_identifier: bool,
     baseline_per_identifier: bool,
+    fix: bool,
     scan_dirs: Vec<PathBuf>,
     stub_paths: Vec<PathBuf>,
     no_composer: bool,
@@ -1003,6 +1035,7 @@ pub(crate) fn run_check_project_command(
         baseline.as_deref(),
         baseline_mode,
         baseline_per_identifier,
+        fix,
         &ignore_error_entries,
         &restricted_symbol_entries,
         &dynamic_constant_names,

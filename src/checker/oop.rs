@@ -1714,13 +1714,21 @@ impl<'a> Checker<'a> {
         if body_calls_parent_construct(&ctor.function.body) {
             return;
         }
-        self.report(
+        let mut builder = DiagnosticBuilder::new(
             fqn.to_string(),
             format!("{fqn}::__construct() does not call parent constructor from {ancestor}."),
             ctor.function.span,
             4,
             "constructor.missingParentCall",
         );
+        let needs_arguments = ancestor_sig
+            .params
+            .iter()
+            .any(|p| !p.has_default && !p.variadic);
+        if !needs_arguments && let Some((span, text)) = parent_call_insertion(ctor) {
+            builder = builder.fix(span, text, "Call parent::__construct()");
+        }
+        self.report_builder(builder);
     }
 
     /// Suggests constructor property promotion for a trivially-
@@ -1994,4 +2002,29 @@ fn value_type_is_constant(ty: &Type) -> bool {
         Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| value_type_is_constant(t)),
         _ => false,
     }
+}
+
+/// Where and what to insert so `ctor`'s body starts with
+/// `parent::__construct();`: before its first statement at that
+/// statement's indentation, or, for an empty body, the body rewritten
+/// onto its own lines.
+fn parent_call_insertion(ctor: &MethodDecl) -> Option<(Span, String)> {
+    const CALL: &str = "parent::__construct();";
+    if let Some(first) = ctor.function.body.first() {
+        let at = first.span.start;
+        let indent = " ".repeat(at.col.saturating_sub(1) as usize);
+        return Some((Span { start: at, end: at }, format!("{CALL}\n{indent}")));
+    }
+    let open = ctor.function.body_open?;
+    let close = ctor.function.span.end;
+    let member_indent = ctor.span.start.col.saturating_sub(1) as usize;
+    let outer = " ".repeat(member_indent);
+    let inner = " ".repeat(member_indent + 4);
+    Some((
+        Span {
+            start: open.start,
+            end: close,
+        },
+        format!("{{\n{inner}{CALL}\n{outer}}}"),
+    ))
 }

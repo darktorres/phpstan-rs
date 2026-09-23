@@ -73,12 +73,12 @@ impl<'a> Checker<'a> {
         attrs: &[Attribute],
         span: Span,
     ) {
-        if !attrs
+        let Some(override_attr) = attrs
             .iter()
-            .any(|a| crate::registry::is_override_attribute_name(&a.name))
-        {
+            .find(|a| crate::registry::is_override_attribute_name(&a.name))
+        else {
             return;
-        }
+        };
         // `#[\Override]` on a property is only real PHP syntax from 8.5
         // on, mirroring real PHPStan's `PropertyAttributesRule` - below
         // that, real PHPStan flags this unconditionally, independent of
@@ -112,14 +112,17 @@ impl<'a> Checker<'a> {
             .lookup_ancestor_property_with_owner(fqn, name)
             .is_some_and(|(_, sig)| sig.visibility != Visibility::Private);
         if !has_real_ancestor {
-            self.report(
-                fqn.to_string(),
-                format!(
-                    "Property {fqn}::${name} has #[\\Override] attribute, but no matching parent property exists"
-                ),
-                span,
-                0,
-                "property.override",
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    fqn.to_string(),
+                    format!(
+                        "Property {fqn}::${name} has #[\\Override] attribute, but no matching parent property exists"
+                    ),
+                    span,
+                    0,
+                    "property.override",
+                )
+                .fix(override_attr.removal_span, "", "Remove #[\\Override]"),
             );
         }
     }

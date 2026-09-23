@@ -50,7 +50,8 @@ fn diagnostic_with_fix_becomes_a_quickfix_code_action() {
     .fix(dummy_span(), "CorrectCasing", "Fix casing")
     .build();
 
-    let Some(CodeActionOrCommand::CodeAction(action)) = diagnostic_fix_to_code_action(&uri, &diag)
+    let Some(CodeActionOrCommand::CodeAction(action)) =
+        diagnostic_fix_to_code_action(&uri, &diag, None)
     else {
         panic!("expected a CodeAction for a diagnostic with a fix");
     };
@@ -86,7 +87,7 @@ fn diagnostic_without_fix_yields_no_code_action() {
         "some.identifier",
     )
     .build();
-    assert!(diagnostic_fix_to_code_action(&uri, &diag).is_none());
+    assert!(diagnostic_fix_to_code_action(&uri, &diag, None).is_none());
 }
 
 #[test]
