@@ -46,6 +46,8 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_new_exception_discarded: bool,
     pub(crate) check_risky_tests: bool,
     pub(crate) php_version: Option<crate::php_version::PhpVersion>,
+    pub(crate) assertion_entries: Vec<crate::assertion_tables::AssertionEntry>,
+    pub(crate) class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     pub(crate) restricted_symbol_entries: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
     pub(crate) dynamic_constant_names: Vec<(String, Option<String>)>,
     pub(crate) doctrine_custom_function_entries:
@@ -237,6 +239,8 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_new_exception_discarded: config.check_new_exception_discarded.unwrap_or(false),
         check_risky_tests: config.check_risky_tests.unwrap_or(false),
         php_version,
+        assertion_entries: config.assertions.take().unwrap_or_default(),
+        class_argument_returns: config.class_argument_returns.take().unwrap_or_default(),
         restricted_symbol_entries,
         dynamic_constant_names: config
             .dynamic_constant_names

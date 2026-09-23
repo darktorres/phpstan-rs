@@ -2735,7 +2735,10 @@ impl<'a> Checker<'a> {
                         if let Type::EnumCase(ref case_class, ref case) = resolved_ty {
                             self.record_member_ref(e.span, case_class, case);
                         }
-                        self.resolve_static_call_return(&resolved_ty, target, class)
+                        match self.class_argument_return(class, method, args, locals) {
+                            Some(ty) => ty,
+                            None => self.resolve_static_call_return(&resolved_ty, target, class),
+                        }
                     }
                     _ => Type::Mixed(false),
                 }
@@ -4758,6 +4761,11 @@ impl<'a> Checker<'a> {
                             // `narrow_enum_from_call`.
                             if let Type::EnumCase(ref case_class, ref case) = resolved {
                                 self.record_member_ref(e.span, case_class, case);
+                            }
+                            if let Some(ty) =
+                                self.class_argument_return(&class, method, args, locals)
+                            {
+                                return ty;
                             }
                             self.resolve_static_call_return(&resolved, target, &class)
                         })

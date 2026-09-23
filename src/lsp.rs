@@ -433,6 +433,8 @@ impl Server {
             .set_sql_reflection_schema(resolved.sql_reflection_schema);
         self.project.set_php_version(resolved.php_version);
         self.project
+            .set_assertion_tables(resolved.assertion_entries, resolved.class_argument_returns);
+        self.project
             .set_phpstan_api_check_enabled(resolved.phpstan_api_check_enabled);
 
         self.root = Some(root.to_path_buf());

@@ -178,6 +178,10 @@ pub struct Config {
     /// Whether the built-in PHPUnit/Codeception hook requirements
     /// (`parent_calls::default_rules`) apply; on unless set to false.
     pub default_parent_calls: Option<bool>,
+    /// `[[assertions]]` - see `assertion_tables`.
+    pub assertions: Option<Vec<crate::assertion_tables::AssertionEntry>>,
+    /// `[[class_argument_returns]]` - see `assertion_tables`.
+    pub class_argument_returns: Option<Vec<crate::assertion_tables::ClassArgumentReturn>>,
     /// Mirrors real PHPStan's own `dynamicConstantNames`: global
     /// (`NAME`) or class (`Class::NAME`) constants whose declared value
     /// differs between environments, so their literal value is never

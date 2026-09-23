@@ -4,6 +4,7 @@ mod arity_and_signatures;
 mod array_functions;
 mod array_key_validity;
 mod array_literals_and_shapes;
+mod assertion_tables;
 mod attributes;
 mod backtick_operator;
 mod boolean_conditions_strict;

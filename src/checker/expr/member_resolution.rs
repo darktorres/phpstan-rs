@@ -383,6 +383,45 @@ impl<'a> Checker<'a> {
     /// (a `Union` value is only ever one of its members at a time, so
     /// calling the same method name on two different possible runtime
     /// types can genuinely return two different types).
+    /// The instance a `[[class_argument_returns]]` method returns: the
+    /// class its configured argument names (`Foo::class` or a string
+    /// naming a known class), intersected with the entry's extra types.
+    pub(crate) fn class_argument_return(
+        &self,
+        class: &str,
+        method: &str,
+        args: &[Arg],
+        locals: &Locals,
+    ) -> Option<Type> {
+        let entry = self.registry.class_argument_returns().find(|entry| {
+            entry.method.eq_ignore_ascii_case(method)
+                && (class.eq_ignore_ascii_case(&entry.class)
+                    || self.registry.is_subclass_of(class, &entry.class))
+        })?;
+        let arg = args.get(entry.argument.checked_sub(1)?)?;
+        let named = match self.infer_expr(&arg.value, locals) {
+            Type::ClassString(inner) => match *inner {
+                Type::Object(name, _) => name,
+                _ => return None,
+            },
+            Type::StringLiteral(name) => name.trim_start_matches('\\').to_string(),
+            _ => return None,
+        };
+        let (canonical, _) = self.registry.lookup_class(&named)?;
+        let object = Type::Object(canonical.to_string(), Vec::new());
+        if entry.intersect.is_empty() {
+            return Some(object);
+        }
+        let mut members = vec![object];
+        members.extend(
+            entry
+                .intersect
+                .iter()
+                .map(|t| Type::Object(t.trim_start_matches('\\').to_string(), Vec::new())),
+        );
+        Some(Type::Intersection(members))
+    }
+
     pub(crate) fn method_call_return_type(
         &self,
         recv: &Expr,
@@ -391,6 +430,11 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
     ) -> Type {
+        if let Type::Object(class, _) = recv_ty
+            && let Some(ty) = self.class_argument_return(class, method, args, locals)
+        {
+            return ty;
+        }
         match recv_ty {
             // `EntityManager::createQuery($dql)` (ROADMAP Phase 168
             // 168g) - the same DQL-aware row-shape inference as

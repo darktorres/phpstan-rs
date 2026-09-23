@@ -6,6 +6,7 @@
 //! module paths remain available either way.
 
 pub mod architecture;
+pub mod assertion_tables;
 pub mod ast;
 pub mod ast_walk;
 pub mod banned;

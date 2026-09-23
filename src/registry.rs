@@ -7,6 +7,7 @@ use crate::types::Type;
 
 pub mod access_attributes;
 mod anonymous_class;
+mod assertion_table;
 mod assignability;
 mod class_info;
 mod dynamic_constants;
@@ -71,6 +72,10 @@ pub(crate) fn is_phpstan_namespace(fqn: &str) -> bool {
 #[derive(Debug, Default)]
 pub struct Registry {
     pub classes: FxHashMap<Arc<str>, ClassInfo>,
+    // Configured `[[assertions]]`/`[[class_argument_returns]]` entries,
+    // on top of the built-in ones (`assertion_table`).
+    pub(crate) configured_assertions: Vec<crate::assertion_tables::AssertionEntry>,
+    pub(crate) configured_class_argument_returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
     pub functions: FxHashMap<Arc<str>, FunctionSig>,
     // Global-constant name -> inferred-value-type table, covering both
     // `const NAME = value;` and `define('NAME', value)` (keyed like
@@ -530,6 +535,7 @@ impl Registry {
         registry.resolve_deferred_type_imports();
         registry.resolve_deferred_value_of();
         registry.flatten_phpdoc_inheritance();
+        registry.apply_assertion_table();
         // Adds more method/property names (merges mixin members in) -
         // the member-owner maps need a second rebuild after this.
         registry.resolve_deferred_mixins();

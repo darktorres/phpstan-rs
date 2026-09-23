@@ -1324,6 +1324,18 @@ included), `#[Sealed([...])]` feeding the `@phpstan-sealed` check, and
 always use its own members. (The package-boundary visibility item is
 Phase 94 P2's.)
 
+**Assertion and class-argument-return tables** (`assertion_tables.rs`,
+`registry/assertion_table.rs`): `[[assertions]]` entries (function or
+class+method, parameter, type with `!` for negation, always/true/false)
+become `@phpstan-assert`-family infos on the named declaration, applied
+once per registry rebuild; built-in entries cover Nette Tester's
+`Assert`. `[[class_argument_returns]]` entries make a method return the
+class its argument names (`Foo::class` or a string naming a known
+class), optionally intersected; built-in entries cover Mockery's
+`mock`/`spy`/`namedMock`/`instanceMock` (`&Mockery\MockInterface`). A
+container's `get()` is left to configuration, since PSR-11 promises
+nothing about what an id resolves to.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3374,22 +3386,6 @@ already scoped above (folded in there instead of repeated here).
 
 ### Phase 146 — Pluggable assertion/mock-narrowing tables + PHPUnit native mock-builder hygiene
 
-- **146a (medium).** Generalize phpstan-rs's existing
-  `apply_phpunit_assertion_narrowing` mechanism into a **pluggable
-  table design** rather than one hardcoded library. Confirmed by real,
-  independent demand across at least 6 separate assertion/mock
-  libraries surveyed, each needing only a new table entry once the
-  mechanism is pluggable: `webmozart/assert` (~64 static methods —
-  `string`/`nullOr`-prefixed/`all`-prefixed variants of each basic
-  type/shape check; genuinely likely in Piwigo's own transitive
-  dependency tree, worth checking first), `beberlei/assert` (same
-  fluent shape), `azjezz/psl` (PHP Standard Library), Mockery,
-  Prophecy, Nette Tester's `Assert::*`, and `eloquent/phony`'s
-  MockBuilder/InstanceHandle fluent API. `webmozart/assert` and
-  `beberlei/assert` annotate every method with `@psalm-assert`, which
-  Phase 179 (see Done) already honors, so they need no table entry.
-  146a's table is only needed for libraries that don't carry assert
-  tags.
 - **146b (medium, new family, entirely generic, no new mechanism
   needed).** PHPUnit-native mock-builder-API misuse detection —
   distinct from 146a (this catches mock-*configuration* mistakes, not

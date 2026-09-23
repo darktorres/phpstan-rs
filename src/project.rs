@@ -552,6 +552,16 @@ impl Project {
         self.registry.check_dead_members = enabled;
     }
 
+    /// Configured `[[assertions]]`/`[[class_argument_returns]]` entries;
+    /// set before loading so the registry applies them.
+    pub fn set_assertion_tables(
+        &mut self,
+        assertions: Vec<crate::assertion_tables::AssertionEntry>,
+        returns: Vec<crate::assertion_tables::ClassArgumentReturn>,
+    ) {
+        self.registry.set_assertion_tables(assertions, returns);
+    }
+
     /// Leaves inline ignore comments to one final `apply_inline_ignores`
     /// pass over every file's complete diagnostics.
     pub fn set_defer_inline_ignores(&mut self, deferred: bool) {
@@ -855,6 +865,7 @@ impl Project {
         self.registry.resolve_deferred_type_imports();
         self.registry.resolve_deferred_value_of();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.apply_assertion_table();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes
         // `lookup_method_with_owner`/`lookup_ancestor_method_with_owner`
@@ -1135,6 +1146,7 @@ impl Project {
         self.registry.resolve_deferred_type_imports();
         self.registry.resolve_deferred_value_of();
         self.registry.flatten_phpdoc_inheritance();
+        self.registry.apply_assertion_table();
         // Adds more method/property names (mixin members) -
         // `resolve_transitive_purity` right after this also consumes a
         // lookup internally, so the member-owner maps need a second

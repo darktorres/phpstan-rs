@@ -177,6 +177,10 @@ fn run_check_project(
     banned_types: &[String],
     check_closed_classes: bool,
     parent_call_rules: &[phpstan_rs::parent_calls::ParentCallRule],
+    assertion_tables: (
+        Vec<phpstan_rs::assertion_tables::AssertionEntry>,
+        Vec<phpstan_rs::assertion_tables::ClassArgumentReturn>,
+    ),
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -254,6 +258,7 @@ fn run_check_project(
     project.set_check_dead_abstract_classes(check_dead_abstract_classes);
     project.set_check_dead_members(check_dead_members);
     project.set_defer_inline_ignores(true);
+    project.set_assertion_tables(assertion_tables.0, assertion_tables.1);
     project.set_check_renamed_named_arguments(check_renamed_named_arguments);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
@@ -899,6 +904,17 @@ pub(crate) fn run_check_project_command(
     };
     let banned_types = config.banned_types.unwrap_or_default();
     let check_closed_classes = check_closed_classes || config.check_closed_classes.unwrap_or(false);
+    let assertion_entries = config.assertions.unwrap_or_default();
+    let class_argument_returns = config.class_argument_returns.unwrap_or_default();
+    if let Some(error) = assertion_entries
+        .iter()
+        .map(|e| e.validate())
+        .chain(class_argument_returns.iter().map(|e| e.validate()))
+        .find_map(Result::err)
+    {
+        eprintln!("{error}");
+        std::process::exit(1);
+    }
     let mut parent_call_rules = config.parent_calls.unwrap_or_default();
     if config.default_parent_calls.unwrap_or(true) {
         parent_call_rules.extend(phpstan_rs::parent_calls::default_rules());
@@ -1089,6 +1105,7 @@ pub(crate) fn run_check_project_command(
         &banned_types,
         check_closed_classes,
         &parent_call_rules,
+        (assertion_entries, class_argument_returns),
         configured_level,
         &stub_dirs,
         php_version,
