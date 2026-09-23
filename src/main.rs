@@ -254,6 +254,11 @@ enum Command {
         /// check_throw_base_class`'s own doc comment.
         #[arg(long)]
         check_throw_base_class: bool,
+        /// Requires a `catch` to pass the caught exception as the previous
+        /// exception of one it throws, and a catch of a base exception type
+        /// to rethrow.
+        #[arg(long)]
+        check_exception_hygiene: bool,
         /// Enables discarded-`new`-exception detection (`new
         /// SomeException(...);` sitting on its own line, never thrown).
         /// Off by default - see `registry::Registry::check_new_exception_
@@ -444,6 +449,7 @@ fn main() {
             check_switch_missing_default,
             check_throw_without_message,
             check_throw_base_class,
+            check_exception_hygiene,
             check_new_exception_discarded,
             check_risky_tests,
             check_dead_enum_cases,
@@ -497,6 +503,7 @@ fn main() {
             check_switch_missing_default,
             check_throw_without_message,
             check_throw_base_class,
+            check_exception_hygiene,
             check_new_exception_discarded,
             check_risky_tests,
             check_dead_enum_cases,

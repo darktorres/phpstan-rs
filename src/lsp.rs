@@ -417,6 +417,8 @@ impl Server {
         self.project
             .set_check_throw_base_class(resolved.check_throw_base_class);
         self.project
+            .set_check_exception_hygiene(resolved.check_exception_hygiene);
+        self.project
             .set_check_new_exception_discarded(resolved.check_new_exception_discarded);
         self.project
             .set_check_risky_tests(resolved.check_risky_tests);

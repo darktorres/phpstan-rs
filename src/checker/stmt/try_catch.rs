@@ -3,6 +3,7 @@ use crate::checker::{
     Checker, Locals, collect_exit_point_statements, exit_point_description, merge_scopes,
     purge_stale_narrowing_for,
 };
+use crate::token::Span;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -210,6 +211,9 @@ impl<'a> Checker<'a> {
                 catch_locals.declare(var.to_string(), ty, var_span);
             }
             self.check_block(&c.body, &mut catch_locals, declared_return, label);
+            if self.registry.check_exception_hygiene {
+                self.check_catch_hygiene(c, label);
+            }
             let catch_terminates = c
                 .body
                 .last()
@@ -346,5 +350,122 @@ impl<'a> Checker<'a> {
         self.current_function_explicit_throw_points
             .push((thrown_ty.clone(), e.span));
         self.current_function_throw_points.push(thrown_ty);
+    }
+}
+
+/// Every `throw` in `stmts` with whether it's a direct statement of
+/// `stmts` itself, not reaching into nested functions, classes, or
+/// nested `catch` clauses (checked on their own).
+fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Span, bool)>) {
+    fn in_expr<'e>(e: &'e Expr, out: &mut Vec<(&'e Expr, Span, bool)>) {
+        if let ExprKind::Throw(inner) = &e.kind {
+            out.push((inner, e.span, false));
+        }
+        for child in crate::ast_walk::expr_children(e) {
+            in_expr(child, out);
+        }
+    }
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Throw(e) => {
+                out.push((e, stmt.span, top));
+                in_expr(e, out);
+            }
+            StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => {}
+            StmtKind::Try { body, finally, .. } => {
+                collect_throws(body, false, out);
+                if let Some(finally) = finally {
+                    collect_throws(finally, false, out);
+                }
+            }
+            _ => {
+                for e in crate::ast_walk::stmt_own_exprs(stmt) {
+                    in_expr(e, out);
+                }
+                for child in crate::ast_walk::stmt_children(stmt) {
+                    collect_throws(std::slice::from_ref(child), false, out);
+                }
+            }
+        }
+    }
+}
+
+fn mentions_variable(e: &Expr, name: &str) -> bool {
+    matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name)
+        || crate::ast_walk::expr_children(e)
+            .into_iter()
+            .any(|child| mentions_variable(child, name))
+}
+
+const BASE_EXCEPTIONS: [&str; 3] = ["Throwable", "Exception", "Error"];
+
+impl<'a> Checker<'a> {
+    /// A `throw new X(...)` inside the catch that doesn't pass the caught
+    /// exception on as `X`'s previous exception, and a catch of a base
+    /// exception type with no unconditional rethrow.
+    fn check_catch_hygiene(&mut self, c: &CatchClause, label: &str) {
+        let mut throws = Vec::new();
+        collect_throws(&c.body, true, &mut throws);
+        if let Some(var) = &c.var {
+            for (thrown, span, _) in &throws {
+                let ExprKind::New(class, args) = &thrown.kind else {
+                    continue;
+                };
+                if args.iter().any(|a| mentions_variable(&a.value, var)) {
+                    continue;
+                }
+                let ExprKind::Name(raw) = &class.kind else {
+                    continue;
+                };
+                let Type::Object(class, _) = self.resolve_name_expr(raw) else {
+                    continue;
+                };
+                let accepts_previous = self
+                    .registry
+                    .lookup_method(&class, "__construct")
+                    .is_some_and(|ctor| {
+                        ctor.params.iter().any(|p| {
+                            p.name.eq_ignore_ascii_case("previous")
+                                || crate::registry::object_class_names(p.ty.clone())
+                                    .iter()
+                                    .any(|n| {
+                                        self.registry.is_subclass_of(n, "Throwable")
+                                            || n == "Throwable"
+                                    })
+                        })
+                    });
+                if accepts_previous {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "{class} is thrown from the catch of ${var} without ${var} as its previous exception; the original cause and trace are lost."
+                        ),
+                        *span,
+                        4,
+                        "catch.previousNotPassed",
+                    );
+                }
+            }
+        }
+        let base = c.types.iter().find_map(|t| {
+            let Type::Object(class, _) = self.resolve_name_expr(t) else {
+                return None;
+            };
+            BASE_EXCEPTIONS
+                .iter()
+                .any(|b| class.eq_ignore_ascii_case(b))
+                .then_some(class)
+        });
+        if let Some(base) = base
+            && !throws.iter().any(|(_, _, top)| *top)
+        {
+            self.report(
+                label.to_string(),
+                format!("Catching {base} swallows every such exception unless the catch rethrows; add an unconditional throw."),
+                c.span,
+                4,
+                "catch.baseWithoutRethrow",
+            );
+        }
     }
 }

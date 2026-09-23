@@ -31,6 +31,7 @@
 //! check_switch_missing_default = false
 //! check_throw_without_message = false
 //! check_throw_base_class = false
+//! check_exception_hygiene = false
 //! check_new_exception_discarded = false
 //! check_risky_tests = false
 //! check_dead_enum_cases = false
@@ -284,6 +285,9 @@ pub struct Config {
     /// `registry::Registry::check_throw_base_class`'s own doc comment
     /// for why.
     pub check_throw_base_class: Option<bool>,
+    /// Opt-in: a `catch` must chain the caught exception into one it
+    /// throws, and a catch of a base exception type must rethrow.
+    pub check_exception_hygiene: Option<bool>,
     /// Opt-in discarded-`new`-exception detection - see
     /// `registry::Registry::check_new_exception_discarded`'s own doc
     /// comment for why.

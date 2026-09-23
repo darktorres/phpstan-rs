@@ -502,6 +502,11 @@ impl Project {
         self.registry.check_throw_base_class = enabled;
     }
 
+    /// See `Registry::check_exception_hygiene`.
+    pub fn set_check_exception_hygiene(&mut self, enabled: bool) {
+        self.registry.check_exception_hygiene = enabled;
+    }
+
     /// Opts the whole project's checking into discarded-`new`-exception
     /// detection - see `registry::Registry::check_new_exception_
     /// discarded`'s own doc comment for why this defaults to `false`.

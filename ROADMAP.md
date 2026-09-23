@@ -1347,6 +1347,14 @@ expectations), `mock.unionPropertyType` (native or `@var` union of a
 mock and a real class), `mock.onlyMockProperties`, and
 `mock.bannedClass` for `mock_banned_classes`.
 
+**Exception hygiene** (opt-in `check_exception_hygiene`, the Nette/
+`thecodingmachine`/`shipmonk` family): `catch.previousNotPassed` (a
+`throw new X(...)` inside a `catch` that never passes the caught
+variable, when `X`'s constructor accepts a previous exception; nested
+catches are checked on their own) and `catch.baseWithoutRethrow` (a
+catch of `Throwable`/`Exception`/`Error` with no unconditional
+top-level `throw` in its body).
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3395,26 +3403,6 @@ nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
 
-### Phase 147 — Exception-hygiene family (consolidates 3 independent confirmations)
-
-Entirely generic, zero framework dependency, confirmed independently by
-`nette/nette` (RethrowExceptionRule), `thecodingmachine/phpstan-strict-
-rules`, and `shipmonk/phpstan-rules` — three separate real tools
-converging on the same small set of checks is a strong signal this is
-real, widely-valued, and cheap:
-
-- **147a (small, easy, high value).** Inside a `catch` block, a newly
-  thrown *wrapping* exception must pass the caught variable as its own
-  `$previous` constructor argument somewhere — otherwise the original
-  stack trace/cause is silently lost. Walk a catch body's own
-  `throw new Exception(...)` sites, check the caught variable appears
-  in the constructor call's own args.
-- **147b (small).** Catching the base `\Exception`/`\RuntimeException`/
-  `\Throwable` requires an unconditional rethrow somewhere in the catch
-  body, unless deliberately building an exception handler — the
-  unconditional sibling of Phase 88 U2's Nette-rethrow consumer (which
-  only fires when a *more specific* exception was thrown and
-  swallowed).
 ### Phase 148 — "No mixed member access" + null-coercion-safety + enum-exhaustiveness-enforcement families
 
 Confirmed independently by `rector/type-perfect` and `shipmonk/

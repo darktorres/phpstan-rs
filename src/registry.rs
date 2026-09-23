@@ -238,6 +238,9 @@ pub struct Registry {
     // exception hierarchy at all) is a legitimate style choice, not
     // necessarily an oversight.
     pub check_throw_base_class: bool,
+    // Opt-in exception hygiene in `catch` blocks - see
+    // `checker::stmt::try_catch::check_catch_hygiene`.
+    pub check_exception_hygiene: bool,
     // `new SomeException(...)` constructed but discarded as a bare
     // statement, never thrown - opt-in, since a plain `new Foo();`
     // statement for a class with a genuine constructor side effect is
