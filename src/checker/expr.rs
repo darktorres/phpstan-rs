@@ -259,7 +259,10 @@ impl<'a> Checker<'a> {
         // "take, not just read" reasoning as `is_bare_statement` above.
         let is_condition_position = std::mem::take(&mut self.in_condition_position);
         let is_exempt_last_condition = std::mem::take(&mut self.in_exempt_last_condition);
-        if self.registry.check_null_coercion || self.registry.check_enum_exhaustiveness {
+        if self.registry.check_null_coercion
+            || self.registry.check_enum_exhaustiveness
+            || self.registry.check_identity_vs_equals
+        {
             self.check_strict_expression_idioms(e, locals, label);
         }
         if self.registry.check_illegal_constructor_calls || self.registry.check_dynamic_static_calls

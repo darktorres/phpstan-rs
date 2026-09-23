@@ -85,3 +85,34 @@ function g(Suit $s): string {
         vec!["4 match.enumDefault", "6 enum.switch", "9 enum.ifChain"]
     );
 }
+
+#[test]
+fn identity_comparison_of_value_objects() {
+    let src = r#"<?php
+final class Money {
+    public function equals(Money $other): bool { return $this === $other || true; }
+}
+final class Plain {}
+enum Suit { case Hearts; public function equals(Suit $o): bool { return true; } }
+function f(Money $a, Money $b, ?Money $c, Plain $p, Plain $q, Suit $s): void {
+    var_dump($a === $b);
+    var_dump($b !== $a);
+    var_dump($c === null);
+    var_dump($p === $q);
+    var_dump($s === Suit::Hearts);
+    var_dump($a === $p);
+}
+"#;
+    let found: Vec<String> = diagnostics_for_with(src, |r| r.check_identity_vs_equals = true)
+        .into_iter()
+        .filter(|d| d.identifier == "identical.equalsMethod")
+        .map(|d| format!("{} {}", d.span.start.line, d.message))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "8 === between Money objects compares identity; Money defines equals() to compare values, use $a->equals($b).",
+            "9 !== between Money objects compares identity; Money defines equals() to compare values, use !$b->equals($a).",
+        ]
+    );
+}

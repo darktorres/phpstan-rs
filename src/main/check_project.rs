@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_identity_vs_equals: bool,
     check_loose_haystack_comparison: bool,
     check_strict_function_calls: bool,
     check_switch_case_types: bool,
@@ -261,6 +262,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_identity_vs_equals(check_identity_vs_equals);
     project.set_check_loose_haystack_comparison(check_loose_haystack_comparison);
     project.set_check_strict_function_calls(check_strict_function_calls);
     project.set_check_switch_case_types(check_switch_case_types);
@@ -735,6 +737,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_identity_vs_equals: bool,
     check_loose_haystack_comparison: bool,
     check_strict_function_calls: bool,
     check_switch_case_types: bool,
@@ -880,6 +883,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_identity_vs_equals =
+        check_identity_vs_equals || config.check_identity_vs_equals.unwrap_or(false);
     let check_loose_haystack_comparison =
         check_loose_haystack_comparison || config.check_loose_haystack_comparison.unwrap_or(false);
     let check_strict_function_calls =
@@ -1146,6 +1151,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_identity_vs_equals,
         check_loose_haystack_comparison,
         check_strict_function_calls,
         check_switch_case_types,

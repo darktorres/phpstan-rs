@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in: `===`/`!==` between objects whose class defines an `equals()` method accepting the other side (`identical.equalsMethod`).
+    pub check_identity_vs_equals: bool,
     // Opt-in: `in_array()`/`array_search()`/`array_keys()` compared loosely where the needle and haystack value types can be `==` without being `===` (`function.looseComparison`).
     pub check_loose_haystack_comparison: bool,
     // Opt-in (phpstan-strict-rules): `in_array()`/`array_search()`/`array_keys()`/`base64_decode()` without their strict argument set to `true`, and `iterator_to_array()` without `$preserve_keys` (`function.strict`).

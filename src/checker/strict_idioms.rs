@@ -12,6 +12,11 @@
 //! a `switch` (`enum.switch`) or an `if`/`elseif` chain of `===`
 //! comparisons (`enum.ifChain`) over enum cases, where a `match` would be
 //! checked for exhaustiveness.
+//!
+//! `check_identity_vs_equals` - `===`/`!==` between two objects whose
+//! class defines an `equals()` method accepting the other side
+//! (`identical.equalsMethod`): the class compares by value, identity
+//! only holds for the very same instance.
 
 use crate::ast::*;
 use crate::checker::{Checker, Locals};
@@ -60,6 +65,53 @@ impl<'a> Checker<'a> {
             .get(class.as_str())
             .is_some_and(|i| i.kind == ClassKind::Enum)
             .then_some(class)
+    }
+
+    /// The class of `ty`, when it declares a public instance `equals()`
+    /// taking one required argument `other` can be passed as; `None`
+    /// inside that class's own `equals()`, which may use identity as its
+    /// fast path.
+    fn equals_method_owner(&self, ty: &Type, other: &Type) -> Option<String> {
+        let Type::Object(class, _) = ty else {
+            return None;
+        };
+        if !matches!(other, Type::Object(..)) {
+            return None;
+        }
+        let info = self.registry.classes.get(class.as_str())?;
+        if info.kind == ClassKind::Enum {
+            return None;
+        }
+        let name = self
+            .registry
+            .lookup_method_canonical_name(class, "equals")?;
+        let (owner, sig) = self.registry.lookup_method_with_owner(class, "equals")?;
+        let is_static = self
+            .registry
+            .classes
+            .get(owner.as_ref())
+            .is_some_and(|o| o.static_methods.contains(name));
+        let required = sig
+            .params
+            .iter()
+            .filter(|p| !p.has_default && !p.variadic)
+            .count();
+        if is_static
+            || sig.visibility != Visibility::Public
+            || required != 1
+            || !self.registry.is_assignable(other, &sig.params[0].ty)
+        {
+            return None;
+        }
+        let inside_equals = self
+            .current_method
+            .as_deref()
+            .is_some_and(|m| m.eq_ignore_ascii_case("equals"))
+            && self.current_class.as_deref().is_some_and(|c| {
+                self.registry.is_subclass_of(c, owner.as_ref())
+                    || self.registry.is_subclass_of(owner.as_ref(), c)
+            });
+        (!inside_equals).then(|| class.clone())
     }
 
     fn nullable_operand(
@@ -177,6 +229,36 @@ impl<'a> Checker<'a> {
                     }
                 }
                 _ => {}
+            }
+        }
+        if self.registry.check_identity_vs_equals
+            && let ExprKind::Binary(op @ (BinOp::Identical | BinOp::NotIdentical), l, r) = &e.kind
+        {
+            let left = self.infer_expr(l, locals);
+            let right = self.infer_expr(r, locals);
+            let owner = match self.equals_method_owner(&left, &right) {
+                Some(class) => Some((class, l, r)),
+                None => self
+                    .equals_method_owner(&right, &left)
+                    .map(|class| (class, r, l)),
+            };
+            if let Some((class, receiver, argument)) = owner {
+                let (operator, negation) = if *op == BinOp::Identical {
+                    ("===", "")
+                } else {
+                    ("!==", "!")
+                };
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "{operator} between {class} objects compares identity; {class} defines equals() to compare values, use {negation}{}->equals({}).",
+                        crate::printer::print_expr(receiver),
+                        crate::printer::print_expr(argument)
+                    ),
+                    e.span,
+                    0,
+                    "identical.equalsMethod",
+                );
             }
         }
         if self.registry.check_enum_exhaustiveness

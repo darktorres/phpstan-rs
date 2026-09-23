@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag === and !== between objects whose class defines a matching equals() method.
+        #[arg(long)]
+        check_identity_vs_equals: bool,
         /// Flag loose in_array()/array_search()/array_keys() calls whose needle and haystack types compare differently under == and ===.
         #[arg(long)]
         check_loose_haystack_comparison: bool,
@@ -474,6 +477,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_identity_vs_equals,
             check_loose_haystack_comparison,
             check_strict_function_calls,
             check_switch_case_types,
@@ -536,6 +540,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_identity_vs_equals,
             check_loose_haystack_comparison,
             check_strict_function_calls,
             check_switch_case_types,

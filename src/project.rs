@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_identity_vs_equals`.
+    pub fn set_check_identity_vs_equals(&mut self, enabled: bool) {
+        self.registry.check_identity_vs_equals = enabled;
+    }
+
     /// See `Registry::check_loose_haystack_comparison`.
     pub fn set_check_loose_haystack_comparison(&mut self, enabled: bool) {
         self.registry.check_loose_haystack_comparison = enabled;
