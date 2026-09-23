@@ -53,6 +53,13 @@ fn is_pure_call_result_unused_diagnostic(d: &Diagnostic) -> bool {
     )
 }
 
+/// NoopRule's generic `expr.resultUnused` fires on a bare `$a + $b;`,
+/// which is how many fixtures probe an expression's own diagnostics.
+/// `checker/tests/noop.rs` uses `all_diagnostics_for` to see it.
+fn is_generic_noop_diagnostic(d: &Diagnostic) -> bool {
+    d.identifier == "expr.resultUnused"
+}
+
 /// `TooWideFunctionReturnTypehintRule`'s own
 /// `return.unusedType` fires unconditionally for a plain function (no
 /// opt-in gate the way the method-side variant has) whenever a declared
@@ -86,6 +93,7 @@ pub(super) fn diagnostics_for_with(
     diagnostics.retain(|d| {
         !is_missing_typehint_diagnostic(d)
             && !is_pure_call_result_unused_diagnostic(d)
+            && !is_generic_noop_diagnostic(d)
             && !is_too_wide_return_type_diagnostic(d)
             && !is_too_wide_property_type_diagnostic(d)
     });

@@ -625,10 +625,15 @@ division/modulo-by-literal-zero detection.
 which functions/methods/constructors are provably effect-free, flagging
 a discarded statement-level call to one - a call only resolves as a
 dependency when its target is knowable without type inference. Same-
-family bare-statement `NoopRule` (`xor`/`&&`/`||`/`and`/`or`/ternary
-result-unused, the word-spelling pair honoring real PHPStan's own
-`logicalAnd`/`logicalOr` identifiers - see the `and`/`or` word-operator
-entry below). `@phpstan-impure` tag validation (one-directional: flags a
+family bare-statement `NoopRule`: `xor`/`and`/`or` (reported even when
+the statement assigns a local, with the precedence tip), `&&`/`||`,
+ternary, and the generic `expr.resultUnused` naming the expression
+through a php-parser-style expression printer (`printer.rs`,
+first line plus `…` for multi-line constructs). Its purity gate treats
+`isset`/`empty` as pure and `exit`/`die` as effects, and adds effects
+only types reveal: a property read through `__get` or a `get` hook, an
+object offset read through `offsetGet`, and an object stringified
+through `__toString`. `@phpstan-impure` tag validation (one-directional: flags a
 tagged-impure declaration this project's classifier can *prove* pure).
 For a declaration real PHPStan considers pure, every real impure-point
 occurrence its body actually contains is reported
@@ -3680,11 +3685,6 @@ receiver-type-checks phase.)
 
 ### Phase 139 — DeadCode+EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace (mixed small gaps)
 
-- `Rules/DeadCode/NoopRule`'s generic fallback — `noop.rs` covers a set
-  of specific, named side-effect-free-statement cases but has no
-  generic catch-all (`expr.resultUnused`) for every *other* provably
-  side-effect-free expression statement (a bare comparison, a bare
-  arithmetic expression, a bare property/variable read).
 - `Rules/Whitespace/FileWhitespaceRule` — a leading UTF-8 BOM
   (`whitespace.bom`) and a whitespace-only closing-tag remnant as the
   file's last statement (`whitespace.fileEnd`).

@@ -1,137 +1,233 @@
-//! Real PHPStan's `Rules\DeadCode\NoopRule`, narrowed
-//! to the slice this project's own AST can support without ambiguity.
+//! Real PHPStan's `Rules\DeadCode\NoopRule`: a bare expression statement
+//! whose result is discarded and which does nothing else.
 //!
-//! **The gate that matters most**: `NoopRule` doesn't itself decide
-//! whether a bare-statement expression "does nothing" - it only runs at
-//! all once `Analyser\StmtHandler\ExpressionHandler` has already
-//! established the whole expression has zero impure points and zero
-//! explicit throw points. Without an equivalent gate here, this check
-//! would misfire on `$cond || $this->die('message');`'s own well-known
-//! "guard or die" idiom, whose top-level shape (a bare `||` statement)
-//! is otherwise indistinguishable from a genuine no-op.
-//! `expr_is_side_effect_free` below is a syntactic approximation of that
-//! same "zero impure points" precondition - no attempt at real purity
-//! inference (`@phpstan-pure` tags, transitive call-graph purity), just
-//! a conservative "does this subtree contain anything that could
-//! possibly do something" scan. Conservative in the safe direction
-//! throughout: anything this can't prove side-effect-free is treated as
-//! side-effecting, never the other way around.
+//! The gate is "no side effects": `expr_side_effects` scans the whole
+//! statement, and `Checker::expr_has_hidden_effects` adds the effects
+//! only types reveal - a property read through `__get` or a `get` hook,
+//! an offset read through `ArrayAccess::offsetGet`, and an object
+//! stringified through `__toString`. Anything not provably free of
+//! effects is treated as having one.
 //!
-//! Real PHPStan's version additionally splits `and`/`or`
-//! (`Node\Expr\BinaryOp\LogicalAnd`/`LogicalOr`, this project's own
-//! `BinOp::LogicalAnd`/`LogicalOr`) from `&&`/`||` (`BooleanAnd`/
-//! `BooleanOr`, `BinOp::And`/`Or`) into two different identifiers -
-//! `logicalAnd.resultUnused`/`logicalOr.resultUnused` vs `booleanAnd.
-//! resultUnused`/`booleanOr.resultUnused` - which this project now also
-//! does. Real PHPStan additionally gives the two spellings two different
-//! *gates* on top of the shared purity one above: the word spelling
-//! fires regardless of whether the statement also contains an
-//! assignment (the whole point, since `$x = a() and b();` parses as
-//! `($x = a()) and b();` and silently discards `b()`'s own result -
-//! though note `a()`/`b()` being real calls means this exact example
-//! still wouldn't reach `NoopRule` at all, per the purity gate above;
-//! the distinction only matters for a side-effect-free assignment
-//! target, e.g. `$x = true and someCheck();` where `someCheck()`
-//! genuinely has no side effects), while the symbol spelling requires
-//! the *additional* absence of any assignment anywhere in the
-//! statement. That second, gate-level distinction is *not* replicated
-//! here - both spellings share the exact same strict
-//! `expr_is_side_effect_free` gate (which already treats any assignment
-//! as disqualifying), so the word spelling's own wider real trigger
-//! condition stays a disclosed, never-wrong subset of the real rule.
-//!
-//! `xor` (`BinOp::LogicalXor`) has no competing spelling - PHP's `xor`
-//! keyword is the only way to write it - so it needs no such
-//! disambiguation, just the shared purity gate.
-//!
-//! Still open: the four `CallToFunctionStatementWithoutSideEffectsRule`/
-//! `*MethodStatement*`/`*StaticMethodStatement*`/`*ConstructorStatement*`
-//! rules (a call/`new` whose own signature is known to have no side
-//! effects - needs real purity data this project doesn't track yet),
-//! and the generic "any other side-effect-free bare expression"
-//! `expr.resultUnused` fallback (needs a source-expression printer this
-//! project doesn't have, to name the useless expression in the
-//! message).
+//! `and`/`or`/`xor` are reported even when the statement assigns a local
+//! variable (`$x = true and $y;` discards `$y`), with a precedence tip;
+//! `&&`/`||`, the ternary, and every other expression (`expr.resultUnused`,
+//! naming the expression) only when the statement assigns nothing.
+//! Calls and `new` are left to `check_pure_call_without_effect`.
 
 use crate::ast::{BinOp, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::docblock;
 use crate::registry::{FunctionSig, collect_impure_points};
 use crate::types::Type;
 
-/// Whether `e`'s own subtree provably has no observable side effect at
-/// all - see the module doc comment for why this exists and what it
-/// approximates. `expr_children`'s own "stops at a nested `Closure`/
-/// `ArrowFn`/`NewAnonymousClass` boundary" semantics apply here too
-/// (matching `expr_contains_yield`'s identical, already-established
-/// precedent): merely *constructing* a closure/anonymous-class value
-/// has no side effect of its own - only calling it would, which is a
-/// separate expression this same recursion would independently flag if
-/// it appeared directly in `e`'s own subtree.
-fn expr_is_side_effect_free(e: &Expr) -> bool {
-    let self_free = !matches!(
-        e.kind,
+const PRECEDENCE_TIP: &str =
+    "This operator has unexpected precedence, try disambiguating the logic with parentheses ().";
+
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+enum Effects {
+    None,
+    LocalAssignOnly,
+    Some,
+}
+
+fn is_pure_language_construct(callee: &Expr) -> bool {
+    matches!(&callee.kind, ExprKind::Name(n) if n.eq_ignore_ascii_case("isset") || n.eq_ignore_ascii_case("empty"))
+}
+
+fn is_local_assign_target(target: &Expr) -> bool {
+    match &target.kind {
+        ExprKind::Variable(name) => name.as_ref() != "this",
+        ExprKind::ArrayLiteral(items) => items.iter().all(|item| {
+            item.key
+                .as_ref()
+                .is_none_or(|k| expr_side_effects(k) == Effects::None)
+                && is_local_assign_target(&item.value)
+        }),
+        _ => false,
+    }
+}
+
+/// The strongest effect anywhere in `e`'s subtree. A nested closure or
+/// anonymous class's body doesn't run by being constructed, so it
+/// doesn't count.
+fn expr_side_effects(e: &Expr) -> Effects {
+    let own = match &e.kind {
+        ExprKind::Call(callee, _) if is_pure_language_construct(callee) => Effects::None,
+        ExprKind::Name(n) if n.eq_ignore_ascii_case("exit") || n.eq_ignore_ascii_case("die") => {
+            Effects::Some
+        }
+        ExprKind::Assign(target, _) | ExprKind::AssignRef(target, _)
+            if is_local_assign_target(target) =>
+        {
+            Effects::LocalAssignOnly
+        }
+        ExprKind::CompoundAssign(_, target, _) if matches!(target.kind, ExprKind::Variable(_)) => {
+            Effects::LocalAssignOnly
+        }
+        ExprKind::Unary(
+            UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
+            target,
+        ) if matches!(target.kind, ExprKind::Variable(_)) => Effects::LocalAssignOnly,
         ExprKind::Call(..)
-            | ExprKind::MethodCall(..)
-            | ExprKind::StaticCall(..)
-            | ExprKind::DynamicMethodCall(..)
-            | ExprKind::New(..)
-            | ExprKind::NewAnonymousClass(..)
-            | ExprKind::Assign(..)
-            | ExprKind::AssignRef(..)
-            | ExprKind::CompoundAssign(..)
-            | ExprKind::Throw(..)
-            | ExprKind::Clone(..)
-            | ExprKind::Yield(..)
-            | ExprKind::YieldFrom(..)
-            | ExprKind::Unary(
-                UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
-                _
-            )
-    );
-    self_free && expr_children(e).into_iter().all(expr_is_side_effect_free)
+        | ExprKind::MethodCall(..)
+        | ExprKind::StaticCall(..)
+        | ExprKind::DynamicMethodCall(..)
+        | ExprKind::New(..)
+        | ExprKind::NewAnonymousClass(..)
+        | ExprKind::Assign(..)
+        | ExprKind::AssignRef(..)
+        | ExprKind::CompoundAssign(..)
+        | ExprKind::Throw(..)
+        | ExprKind::Clone(..)
+        | ExprKind::Yield(..)
+        | ExprKind::YieldFrom(..)
+        | ExprKind::ShellExec(..)
+        | ExprKind::DynamicVariable(..)
+        | ExprKind::Unary(
+            UnaryOp::PreInc | UnaryOp::PreDec | UnaryOp::PostInc | UnaryOp::PostDec,
+            _,
+        ) => Effects::Some,
+        _ => Effects::None,
+    };
+    if own == Effects::Some {
+        return own;
+    }
+    expr_children(e)
+        .into_iter()
+        .map(expr_side_effects)
+        .fold(own, std::cmp::max)
 }
 
 impl<'a> Checker<'a> {
-    /// Called from `StmtKind::Expression`'s own handling - `e` is the
-    /// bare statement's own top-level expression, already fully checked
-    /// by the time this runs (so this only ever *adds* a diagnostic, it
-    /// never needs to walk into `e` itself for anything but the
-    /// `expr_is_side_effect_free` scan above).
-    pub(crate) fn check_noop_statement(&mut self, e: &Expr, label: &str) {
+    /// Effects that depend on the operands' types: `__get`/`get` hooks on
+    /// a property read, `offsetGet` on an object offset read, and
+    /// `__toString` on a stringified object.
+    fn expr_has_hidden_effects(&self, e: &Expr, locals: &Locals) -> bool {
+        let own = match &e.kind {
+            ExprKind::PropertyAccess(object, name, _) => {
+                !self.property_read_is_plain(&self.infer_expr(object, locals), name)
+            }
+            ExprKind::DynamicPropertyAccess(..) => true,
+            ExprKind::Index(base, _) => !self.offset_read_is_plain(&self.infer_expr(base, locals)),
+            ExprKind::Cast(target, operand, _) if target == "string" => {
+                self.may_be_stringable_object(&self.infer_expr(operand, locals))
+            }
+            ExprKind::Binary(BinOp::Concat, l, r) => [l, r]
+                .iter()
+                .any(|side| self.may_be_stringable_object(&self.infer_expr(side, locals))),
+            ExprKind::Interpolated(parts) => parts
+                .iter()
+                .any(|part| self.may_be_stringable_object(&self.infer_expr(part, locals))),
+            _ => false,
+        };
+        own || expr_children(e)
+            .into_iter()
+            .any(|child| self.expr_has_hidden_effects(child, locals))
+    }
+
+    fn property_read_is_plain(&self, receiver: &Type, name: &str) -> bool {
+        match receiver {
+            Type::Object(class, _) => {
+                if self.registry.lookup_method(class, "__get").is_some() {
+                    return false;
+                }
+                match self.registry.lookup_property(class, name) {
+                    Some(prop) => !prop.has_get_hook,
+                    None => self.registry.lookup_class(class).is_some(),
+                }
+            }
+            Type::EnumCase(..) => true,
+            Type::Union(members) => members
+                .iter()
+                .all(|m| matches!(m, Type::Null) || self.property_read_is_plain(m, name)),
+            _ => false,
+        }
+    }
+
+    fn offset_read_is_plain(&self, base: &Type) -> bool {
+        match base {
+            Type::Union(members) => members.iter().all(|m| self.offset_read_is_plain(m)),
+            Type::Array(..)
+            | Type::ArrayShape(..)
+            | Type::String
+            | Type::StringLiteral(_)
+            | Type::ClassString(_)
+            | Type::Accessory(_)
+            | Type::Null
+            | Type::Bool
+            | Type::True
+            | Type::False
+            | Type::Int
+            | Type::IntLiteral(_)
+            | Type::IntRange(..)
+            | Type::Float
+            | Type::FloatLiteral(_) => true,
+            _ => false,
+        }
+    }
+
+    fn may_be_stringable_object(&self, ty: &Type) -> bool {
+        match ty {
+            Type::Union(members) => members.iter().any(|m| self.may_be_stringable_object(m)),
+            Type::Object(..) | Type::Intersection(..) => true,
+            _ => false,
+        }
+    }
+
+    /// Called from `StmtKind::Expression` after `e` itself was checked.
+    pub(crate) fn check_noop_statement(&mut self, e: &Expr, locals: &Locals, label: &str) {
+        let e = match &e.kind {
+            ExprKind::Grouping(inner) => inner.as_ref(),
+            _ => e,
+        };
+        let effects = expr_side_effects(e);
+        if effects == Effects::Some || self.expr_has_hidden_effects(e, locals) {
+            return;
+        }
+        let word_operator = match &e.kind {
+            ExprKind::Binary(BinOp::LogicalXor, ..) => Some(("xor", "logicalXor")),
+            ExprKind::Binary(BinOp::LogicalAnd, ..) => Some(("and", "logicalAnd")),
+            ExprKind::Binary(BinOp::LogicalOr, ..) => Some(("or", "logicalOr")),
+            _ => None,
+        };
+        if let Some((sigil, identifier)) = word_operator {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    format!("Unused result of \"{sigil}\" operator."),
+                    e.span,
+                    4,
+                    format!("{identifier}.resultUnused"),
+                )
+                .tip(PRECEDENCE_TIP),
+            );
+            return;
+        }
+        if effects != Effects::None {
+            return;
+        }
         let (message, identifier) = match &e.kind {
-            ExprKind::Binary(BinOp::LogicalXor, ..) if expr_is_side_effect_free(e) => (
-                "Unused result of \"xor\" operator.".to_string(),
-                "logicalXor.resultUnused",
-            ),
-            ExprKind::Binary(BinOp::And, ..) if expr_is_side_effect_free(e) => (
+            ExprKind::Binary(BinOp::And, ..) => (
                 "Unused result of \"&&\" operator.".to_string(),
                 "booleanAnd.resultUnused",
             ),
-            ExprKind::Binary(BinOp::Or, ..) if expr_is_side_effect_free(e) => (
+            ExprKind::Binary(BinOp::Or, ..) => (
                 "Unused result of \"||\" operator.".to_string(),
                 "booleanOr.resultUnused",
             ),
-            // Real PHPStan additionally reports these even when the
-            // statement contains an assignment elsewhere (see the module
-            // doc comment above) - not replicated here, still gated by
-            // the same strict `expr_is_side_effect_free` the symbol
-            // spelling uses, a disclosed, never-wrong subset of that
-            // wider real behavior rather than the full thing.
-            ExprKind::Binary(BinOp::LogicalAnd, ..) if expr_is_side_effect_free(e) => (
-                "Unused result of \"and\" operator.".to_string(),
-                "logicalAnd.resultUnused",
-            ),
-            ExprKind::Binary(BinOp::LogicalOr, ..) if expr_is_side_effect_free(e) => (
-                "Unused result of \"or\" operator.".to_string(),
-                "logicalOr.resultUnused",
-            ),
-            ExprKind::Ternary(..) if expr_is_side_effect_free(e) => (
+            ExprKind::Ternary(..) => (
                 "Unused result of ternary operator.".to_string(),
                 "ternary.resultUnused",
             ),
-            _ => return,
+            ExprKind::Closure { .. } => return,
+            _ => (
+                format!(
+                    "Expression \"{}\" on a separate line does not do anything.",
+                    crate::printer::print_expr_first_line(e)
+                ),
+                "expr.resultUnused",
+            ),
         };
         self.report(label.to_string(), message, e.span, 4, identifier);
     }

@@ -945,7 +945,7 @@ fn a_reassignable_variable_narrowed_by_its_own_use_as_the_left_operand_is_not_fl
 
 #[test]
 fn a_logical_xor_with_a_literal_operand_on_each_side_is_flagged_independently() {
-    let d = diagnostics_for("<?php function f(bool $x) { $y = true xor $x; }");
+    let d = diagnostics_for("<?php function f(bool $x) { $y = (true xor $x); }");
     assert!(
         d.iter()
             .any(|x| x.identifier == "logicalXor.leftAlwaysTrue"),
@@ -976,7 +976,7 @@ fn a_logical_xor_with_literal_operands_on_both_sides_reports_both() {
 
 #[test]
 fn a_logical_xor_with_a_real_variable_on_both_sides_is_not_flagged() {
-    let d = diagnostics_for("<?php function f(bool $x, bool $y) { $z = $x xor $y; }");
+    let d = diagnostics_for("<?php function f(bool $x, bool $y) { $z = ($x xor $y); }");
     assert!(
         !d.iter().any(|x| x.identifier.starts_with("logicalXor.")),
         "got: {d:?}"

@@ -164,7 +164,7 @@ impl<'a> Checker<'a> {
                 self.check_new_exception_discarded(e, locals, label);
                 // NoopRule's own supported slice - see `checker::noop`'s
                 // module doc comment.
-                self.check_noop_statement(e, label);
+                self.check_noop_statement(e, locals, label);
                 // A bare call to a now-known-pure declaration.
                 self.check_pure_call_without_effect(e, locals, label);
                 // `assert($cond)` is a real, common narrowing idiom real
