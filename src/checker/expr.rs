@@ -746,6 +746,9 @@ impl<'a> Checker<'a> {
                             "array_values" => {
                                 self.check_array_values_no_op(args, locals, label, e.span)
                             }
+                            "ini_get" | "ini_set" | "ini_alter" | "ini_restore" | "get_cfg_var" => {
+                                self.check_ini_directive_call(name, args, locals, label)
+                            }
                             _ => {}
                         }
                         // A spread argument (`f(...$args)`) means the

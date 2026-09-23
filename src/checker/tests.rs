@@ -47,6 +47,7 @@ mod global_vars;
 mod helpers;
 mod impossible_instanceof;
 mod includes;
+mod ini_directives;
 mod inline_var_validation;
 mod instantiation;
 mod int_range_arithmetic;

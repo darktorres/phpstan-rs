@@ -1255,6 +1255,7 @@ mod global_constants;
 mod imports;
 mod impossible_instanceof;
 mod includes;
+mod ini_directives;
 mod instantiation;
 mod strict_idioms;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
