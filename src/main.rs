@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag ordering comparisons between non-comparable or mismatched types.
+        #[arg(long)]
+        check_comparable_types: bool,
         /// Flag non-numeric operands of arithmetic, unary +/- and ++/-- operators.
         #[arg(long)]
         check_arithmetic_operands: bool,
@@ -480,6 +483,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_comparable_types,
             check_arithmetic_operands,
             check_identity_vs_equals,
             check_loose_haystack_comparison,
@@ -544,6 +548,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_comparable_types,
             check_arithmetic_operands,
             check_identity_vs_equals,
             check_loose_haystack_comparison,

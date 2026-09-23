@@ -290,3 +290,45 @@ fn ids_with(
     v.sort();
     v
 }
+
+#[test]
+fn comparable_types() {
+    let src = r#"<?php
+function f(int $i, float $f, string $s, ?int $maybe, bool $b, \DateTimeImmutable $d, \DateTime $e, mixed $m): void {
+    var_dump($i < $f);
+    var_dump($s >= 'a');
+    var_dump($d < $e);
+    var_dump($i < $s);
+    var_dump($maybe > 1);
+    var_dump($b <=> true);
+    var_dump($m < 1);
+    var_dump([$i, $s] < [$f, 'x']);
+    var_dump([$i, $s] < [$s, 'x']);
+    var_dump($d > 5);
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_comparable_types = true;
+    assert_eq!(
+        ids_with(src, enabled, &["nonComparable", "differentTypes"]),
+        vec![
+            "11 comparison.differentTypes",
+            "12 comparison.differentTypes",
+            "6 comparison.differentTypes",
+            "7 comparison.nonComparable",
+            "8 comparison.nonComparable",
+            "9 comparison.nonComparable",
+        ]
+    );
+    let messages: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.span.start.line == 6 || d.span.start.line == 7)
+        .map(|d| d.message)
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "Cannot compare different types in int < string.",
+            "Comparison int|null > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.",
+        ]
+    );
+}

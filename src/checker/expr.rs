@@ -268,6 +268,7 @@ impl<'a> Checker<'a> {
         if self.registry.check_illegal_constructor_calls
             || self.registry.check_dynamic_static_calls
             || self.registry.check_arithmetic_operands
+            || self.registry.check_comparable_types
         {
             self.check_strict_rules_expression(e, locals, label);
         }

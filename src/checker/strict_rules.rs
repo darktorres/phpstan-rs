@@ -22,9 +22,14 @@
 //!   `postInc.nonNumeric`, ...). Arrays and objects are left to the
 //!   core operand checks, except under `++`/`--`; a string may be
 //!   incremented.
+//! - `check_comparable_types` (from `shipmonk/phpstan-rules`) - `<`,
+//!   `>`, `<=`, `>=` or `<=>` with an operand that isn't
+//!   `int|float|string|DateTimeInterface` or a list tuple of those
+//!   (`comparison.nonComparable`), or between two such types that don't
+//!   order against each other (`comparison.differentTypes`).
 
 use crate::ast::*;
-use crate::checker::{Checker, Locals};
+use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::registry::{FunctionSig, Trinary};
 use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
 
@@ -51,6 +56,15 @@ impl<'a> Checker<'a> {
         }
         if self.registry.check_arithmetic_operands {
             self.check_arithmetic_operands(e, locals, label);
+        }
+        if self.registry.check_comparable_types
+            && let ExprKind::Binary(
+                op @ (BinOp::Lt | BinOp::Gt | BinOp::LtEq | BinOp::GtEq | BinOp::Spaceship),
+                l,
+                r,
+            ) = &e.kind
+        {
+            self.check_comparable_types(op, l, r, e.span, locals, label);
         }
         if self.registry.check_illegal_constructor_calls {
             match &e.kind {
@@ -180,6 +194,116 @@ impl<'a> Checker<'a> {
     fn overloads_arithmetic(&self, ty: &Type) -> bool {
         matches!(ty, Type::Object(class, _)
             if ["GMP", "BcMath\\Number"].iter().any(|c| self.registry.is_subclass_of(class, c)))
+    }
+
+    fn check_comparable_types(
+        &mut self,
+        op: &BinOp,
+        l: &Expr,
+        r: &Expr,
+        span: crate::token::Span,
+        locals: &Locals,
+        label: &str,
+    ) {
+        let left = self.infer_expr(l, locals);
+        let right = self.infer_expr(r, locals);
+        let describe = |ty: &Type| {
+            if has_array(ty) {
+                ty.to_string()
+            } else {
+                describe_type_only(ty)
+            }
+        };
+        let sigil = match op {
+            BinOp::Lt => "<",
+            BinOp::Gt => ">",
+            BinOp::LtEq => "<=",
+            BinOp::GtEq => ">=",
+            _ => "<=>",
+        };
+        let (l_text, r_text) = (describe(&left), describe(&right));
+        if !self.is_comparable(&left) || !self.is_comparable(&right) {
+            let mut builder = DiagnosticBuilder::new(
+                label.to_string(),
+                format!(
+                    "Comparison {l_text} {sigil} {r_text} contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed."
+                ),
+                span,
+                0,
+                "comparison.nonComparable",
+            );
+            if self.registry.php_version.is_some_and(|v| v >= (8, 4)) {
+                builder = builder.tip("Also BcMath\\Number is allowed.");
+            }
+            self.report_builder(builder);
+        } else if !self.is_comparable_together(&left, &right) {
+            self.report(
+                label.to_string(),
+                format!("Cannot compare different types in {l_text} {sigil} {r_text}."),
+                span,
+                0,
+                "comparison.differentTypes",
+            );
+        }
+    }
+
+    fn contains_only(&self, ty: &Type, allowed: &[Type]) -> bool {
+        let allowed = if allowed.len() == 1 {
+            allowed[0].clone()
+        } else {
+            Type::Union(allowed.to_vec())
+        };
+        self.registry.is_super_type_of(&allowed, ty) == Trinary::Yes
+    }
+
+    fn is_comparable(&self, ty: &Type) -> bool {
+        if self.contains_only(
+            ty,
+            &[
+                Type::Int,
+                Type::Float,
+                Type::String,
+                Type::Object("DateTimeInterface".to_string(), Vec::new()),
+                Type::Object("BcMath\\Number".to_string(), Vec::new()),
+            ],
+        ) {
+            return true;
+        }
+        let Some(tuples) = list_tuples(ty) else {
+            return false;
+        };
+        tuples
+            .iter()
+            .flatten()
+            .all(|value| self.is_comparable(value))
+    }
+
+    fn is_comparable_together(&self, left: &Type, right: &Type) -> bool {
+        let number = Type::Object("BcMath\\Number".to_string(), Vec::new());
+        let date = Type::Object("DateTimeInterface".to_string(), Vec::new());
+        if self.contains_only(left, &[number.clone(), Type::Int])
+            && self.contains_only(right, &[number, Type::Int])
+        {
+            return true;
+        }
+        for family in [&[Type::Int, Type::Float][..], &[Type::String], &[date]] {
+            if self.contains_only(left, family) {
+                return self.contains_only(right, family);
+            }
+        }
+        let (Some(left_tuples), Some(right_tuples)) =
+            (constant_arrays(left), constant_arrays(right))
+        else {
+            return false;
+        };
+        left_tuples.iter().all(|l| {
+            right_tuples.iter().all(|r| {
+                l.len() == r.len()
+                    && l.iter()
+                        .zip(r.iter())
+                        .all(|(a, b)| self.is_comparable_together(a, b))
+            })
+        })
     }
 
     /// `function.strict`, for one of the functions it covers.
@@ -550,4 +674,44 @@ fn has_array(ty: &Type) -> bool {
         Type::Union(members) | Type::Intersection(members) => members.iter().any(has_array),
         _ => false,
     }
+}
+
+/// Each constant-array member's value types, when every member of `ty` is
+/// a constant array.
+fn constant_arrays(ty: &Type) -> Option<Vec<Vec<Type>>> {
+    match ty {
+        Type::ArrayShape(fields) if fields.iter().all(|(key, ..)| key != "...") => Some(vec![
+            fields.iter().map(|(_, value, _)| value.clone()).collect(),
+        ]),
+        Type::Union(members) => {
+            let mut all = Vec::new();
+            for member in members {
+                all.extend(constant_arrays(member)?);
+            }
+            Some(all)
+        }
+        _ => None,
+    }
+}
+
+/// `constant_arrays`, when every member is also a list: keys `0..n` in
+/// order, none optional.
+fn list_tuples(ty: &Type) -> Option<Vec<Vec<Type>>> {
+    let is_list = |ty: &Type| -> bool {
+        match ty {
+            Type::ArrayShape(fields) => fields
+                .iter()
+                .enumerate()
+                .all(|(i, (key, _, optional))| !optional && *key == i.to_string()),
+            _ => false,
+        }
+    };
+    let all_lists = match ty {
+        Type::Union(members) => members.iter().all(is_list),
+        other => is_list(other),
+    };
+    if !all_lists {
+        return None;
+    }
+    constant_arrays(ty)
 }

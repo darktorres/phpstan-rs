@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_comparable_types`.
+    pub fn set_check_comparable_types(&mut self, enabled: bool) {
+        self.registry.check_comparable_types = enabled;
+    }
+
     /// See `Registry::check_arithmetic_operands`.
     pub fn set_check_arithmetic_operands(&mut self, enabled: bool) {
         self.registry.check_arithmetic_operands = enabled;

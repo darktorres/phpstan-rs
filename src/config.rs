@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_comparable_types = false
 //! check_arithmetic_operands = false
 //! check_identity_vs_equals = false
 //! check_loose_haystack_comparison = false
@@ -298,6 +299,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (shipmonk/phpstan-rules): `<`/`>`/`<=`/`>=`/`<=>` only between int|float, string, DateTimeInterface, or tuples of those (`comparison.nonComparable`/`comparison.differentTypes`).
+    pub check_comparable_types: Option<bool>,
     /// Opt-in (phpstan-strict-rules): arithmetic, unary `+`/`-` and increment/decrement operands that are not numeric (`plus.leftNonNumeric`, `unaryMinus.nonNumeric`, `preInc.nonNumeric`, ...).
     pub check_arithmetic_operands: Option<bool>,
     /// Opt-in: `===`/`!==` between objects whose class defines an `equals()` method accepting the other side (`identical.equalsMethod`).

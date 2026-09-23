@@ -419,6 +419,8 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_comparable_types(resolved.check_comparable_types);
+        self.project
             .set_check_arithmetic_operands(resolved.check_arithmetic_operands);
         self.project
             .set_check_identity_vs_equals(resolved.check_identity_vs_equals);
