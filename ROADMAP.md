@@ -579,7 +579,9 @@ destructured key (`ArrayDestructuringRule`'s per-key half). `OffsetAccessAssignm
 non-int offset, an `ArrayAccess` object given an offset or value its
 `offsetSet()` rejects). `OverridingConstantRule` (`classConstant.final`/
 `.visibility`, and at level 3 `.nativeType`/`.missingNativeType`/`.type`),
-from `ConstSig`'s new `is_final`/`native_ty`/`has_phpdoc_type`.
+from `ConstSig`'s new `is_final`/`native_ty`/`has_phpdoc_type`. `ValueAssignedToClassConstantRule`'s `@var`
+half (`classConstant.phpDocType`, and `classConstant.value` against a
+typed constant's `@var`).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3634,10 +3636,6 @@ against this list, and added the real gaps the audit had missed.
 - `ValueAssignedToDefineRule`/`ValueAssignedToGlobalConstantRule` — a
   `define()`'d/`const`-declared global constant's value checked against
   a configured `dynamicConstantNames` type.
-- `ValueAssignedToClassConstantRule`'s PHPDoc-`@var`-type half — the
-  native-typed-constant half is built; an untyped `const` whose inline
-  `@var` doesn't accept the literal value (`classConstant.phpDocType`)
-  is explicitly skipped.
 
 ### Phase 134 — Variables (`Rules/Variables/` gaps)
 

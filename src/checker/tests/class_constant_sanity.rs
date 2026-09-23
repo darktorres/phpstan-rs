@@ -544,3 +544,42 @@ fn class_constant_overrides_must_stay_compatible() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_constant_var_tag_must_describe_its_value() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Conf {
+                /** @var positive-int */
+                const BAD = -1;
+                /** @var positive-int */
+                const GOOD = 5;
+                /** @var list<string> */
+                const NAMES = ['a', 'b'];
+                /** @var non-empty-string */
+                const string TYPED = '';
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| {
+            x.identifier == "classConstant.phpDocType" || x.identifier == "classConstant.value"
+        })
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                "classConstant.phpDocType",
+                "PHPDoc tag @var for constant Conf::BAD with type int<1, max> is incompatible with value -1."
+            ),
+            (
+                "classConstant.value",
+                "constant Conf::TYPED (non-empty-string) does not accept value ''"
+            ),
+        ],
+        "got: {d:?}"
+    );
+}

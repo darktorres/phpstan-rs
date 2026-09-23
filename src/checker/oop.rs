@@ -801,8 +801,16 @@ impl<'a> Checker<'a> {
     /// enum case gets this checker's full expression inference rather
     /// than only ever seeing `infer_const_type`'s narrower literal-only
     /// view.
+    ///
+    /// The `@var` half: an untyped constant's `@var` type must be a
+    /// supertype of its value (`classConstant.phpDocType`, level 2), and
+    /// a typed constant's `@var` type must accept it
+    /// (`classConstant.value`).
     pub(crate) fn check_typed_class_constant_values(&mut self, fqn: &str, consts: &[ClassConst]) {
-        if !consts.iter().any(|c| c.type_hint.is_some()) {
+        if !consts
+            .iter()
+            .any(|c| c.type_hint.is_some() || c.doc_comment.is_some())
+        {
             return;
         }
         // `self::OTHER_CONST` inside a const's own value needs
@@ -815,6 +823,26 @@ impl<'a> Checker<'a> {
         let previous_class = self.current_class.take();
         self.current_class = Some(fqn.to_string());
         for c in consts {
+            let phpdoc_ty = self
+                .registry
+                .lookup_const_with_owner(fqn, &c.name)
+                .filter(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type)
+                .map(|(_, sig)| sig.ty.clone());
+            if let Some(phpdoc_ty) = &phpdoc_ty {
+                let value_ty = self.infer_expr(&c.value, &Locals::default());
+                if value_ty != Type::Mixed(false) {
+                    self.check_constant_phpdoc_value(
+                        fqn,
+                        c,
+                        phpdoc_ty,
+                        &value_ty,
+                        c.type_hint.is_some(),
+                    );
+                }
+                if c.type_hint.is_some() {
+                    continue;
+                }
+            }
             let Some(raw_hint) = &c.type_hint else {
                 continue;
             };
@@ -844,6 +872,46 @@ impl<'a> Checker<'a> {
             }
         }
         self.current_class = previous_class;
+    }
+
+    fn check_constant_phpdoc_value(
+        &mut self,
+        fqn: &str,
+        c: &ClassConst,
+        phpdoc_ty: &Type,
+        value_ty: &Type,
+        has_native_type: bool,
+    ) {
+        if self.registry.is_assignable(value_ty, phpdoc_ty) {
+            return;
+        }
+        let name = &c.name;
+        if has_native_type {
+            self.report(
+                fqn.to_string(),
+                format!("constant {fqn}::{name} ({phpdoc_ty}) does not accept value {value_ty}"),
+                c.span,
+                2,
+                "classConstant.value",
+            );
+            return;
+        }
+        let definitely = value_type_is_constant(value_ty)
+            || crate::types::types_definitely_disjoint(value_ty, phpdoc_ty);
+        let relation = if definitely {
+            "is incompatible with"
+        } else {
+            "is not subtype of"
+        };
+        self.report(
+            fqn.to_string(),
+            format!(
+                "PHPDoc tag @var for constant {fqn}::{name} with type {phpdoc_ty} {relation} value {value_ty}."
+            ),
+            c.span,
+            2,
+            "classConstant.phpDocType",
+        );
     }
 
     /// The declaration-level checks for a class-like declared inside a
@@ -1746,4 +1814,20 @@ pub(crate) fn signatures_compatible(a: &FunctionSig, b: &FunctionSig) -> bool {
         .iter()
         .zip(&b.params)
         .all(|(pa, pb)| pa.ty == pb.ty)
+}
+
+/// A value type fully known down to its value (a literal, or a shape of
+/// them), whose supertype relation to another type is never "maybe".
+fn value_type_is_constant(ty: &Type) -> bool {
+    match ty {
+        Type::IntLiteral(_)
+        | Type::StringLiteral(_)
+        | Type::FloatLiteral(_)
+        | Type::True
+        | Type::False
+        | Type::Null
+        | Type::EnumCase(..) => true,
+        Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| value_type_is_constant(t)),
+        _ => false,
+    }
 }
