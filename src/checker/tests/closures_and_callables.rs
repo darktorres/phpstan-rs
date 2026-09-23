@@ -884,3 +884,27 @@ fn invoking_a_value_that_names_a_function_or_method_checks_its_signature() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_this_rebound_closure_writes_its_by_ref_captures_back_to_the_caller() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            function beforeEach(?Closure $c = null): void {}
+            function afterEach(?Closure $c = null): void {}
+            $orig = null;
+            beforeEach(function () use (&$orig): void {
+                $orig = getenv('A');
+            });
+            afterEach(function () use (&$orig): void {
+                assertType('null|string|false', $orig);
+                putenv($orig === false || $orig === null ? 'A' : 'A=' . $orig);
+            });
+            class Foo { private int $x = 1; }
+            $n = null;
+            $f = Closure::bind(function () use (&$n): void { $n = $this->x; }, new Foo(), Foo::class);
+            assertType('null|int', $n);
+        "#,
+    );
+    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+}

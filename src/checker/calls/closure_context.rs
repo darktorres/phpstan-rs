@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, DiagnosticBuilder, Locals, LoopZeroIterations, body_contains_yield,
-    collect_goto_targets, is_superglobal,
+    collect_goto_targets, is_superglobal, purge_stale_narrowing_for,
 };
 use crate::types::Type;
 
@@ -11,11 +11,10 @@ impl<'a> Checker<'a> {
     /// own `locals` would otherwise provide - used by `Closure::bind`/
     /// `->bindTo()` and Pest's file-scoped `$this` binding, all of which
     /// rebind `$this` independently of where the closure was lexically
-    /// declared. A clone of `locals`, not a
-    /// mutation of it: the seeded `$this` (and anything the closure's
-    /// own body binds) must not leak back into the caller's real scope,
-    /// matching how `ExprKind::Closure`'s own ordinary handling already
-    /// keeps `closure_locals` separate.
+    /// declared. Checked against a clone of `locals` so the seeded
+    /// `$this` doesn't leak back into the caller's scope; each `use
+    /// (&$x)` capture is copied back afterwards, since the closure body's
+    /// writes to it are real writes to the caller's variable.
     ///
     /// `scope_class` is real PHP's own `$newScope` (`Closure::bind`/
     /// `->bindTo()`'s third argument, or Pest's own bound test-class):
@@ -34,7 +33,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_closure_literal_with_this_and_scope(
         &mut self,
         closure_expr: &Expr,
-        locals: &Locals,
+        locals: &mut Locals,
         label: &str,
         this_ty: Type,
         scope_class: Option<String>,
@@ -47,6 +46,21 @@ impl<'a> Checker<'a> {
             self.current_class = previous_class;
         } else {
             self.check_expr(closure_expr, &mut seeded, label);
+        }
+        let ExprKind::Closure { uses, .. } = &closure_expr.kind else {
+            return;
+        };
+        for u in uses.iter().filter(|u| u.by_ref) {
+            let Some(ty) = seeded.get(&u.name).cloned() else {
+                continue;
+            };
+            purge_stale_narrowing_for(locals, &u.name);
+            if locals.contains_key(&u.name) {
+                locals.insert(u.name.to_string(), ty);
+                locals.clear_native(&u.name);
+            } else {
+                locals.declare(u.name.to_string(), ty, u.span);
+            }
         }
     }
 
