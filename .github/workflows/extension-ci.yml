@@ -55,6 +55,10 @@ jobs:
         with:
           node-version: "22"
 
+      # .cargo/config.toml links x86_64 Linux artifacts with mold.
+      - uses: rui314/setup-mold@v1
+        if: ${{ runner.os == 'Linux' }}
+
       - name: Build the phpstan-rs release binary
         run: cargo build --release
 

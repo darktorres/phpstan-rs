@@ -5,7 +5,7 @@
 # vendored_corpus.rs` already reuses for the same reason - real,
 # representative PHP source is a far better fuzzing seed than an empty
 # corpus). `fuzz/corpus/` is gitignored (cargo-fuzz's own default) - run
-# this once before `cargo +nightly fuzz run lex_parse`, not committed to
+# this once before `cargo fuzz run lex_parse`, not committed to
 # git.
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -13,7 +13,7 @@ how the two structured targets already avoid needing most of them.
 + `vendor/phpstan-src/src`) - run it once per checkout:
 
     ./fuzz/seed_corpus.sh
-    cargo +nightly fuzz run lex_parse
+    cargo fuzz run lex_parse
 
 `cargo fuzz run <target> [CORPUS]...` also accepts extra corpus/seed
 directories as positional args before `--`, if you want to seed from
@@ -32,13 +32,13 @@ punctuation/operator token the lexer itself recognizes in `src/lexer.rs`),
 not guessed. Biases mutation toward inserting whole recognized tokens
 instead of random bytes:
 
-    cargo +nightly fuzz run lex_parse -- -dict=fuzz/php.dict -max_total_time=120
+    cargo fuzz run lex_parse -- -dict=fuzz/php.dict -max_total_time=120
 
 ## 3. `-max_len` / `-only_ascii`
 
 Recommended combined invocation for a longer session:
 
-    cargo +nightly fuzz run lex_parse -- -dict=fuzz/php.dict -max_len=500 -max_total_time=300
+    cargo fuzz run lex_parse -- -dict=fuzz/php.dict -max_len=500 -max_total_time=300
 
 - `-max_len=500` keeps inputs small and iteration fast.
 - `-only_ascii=1` (not in the default recommendation above) stops
@@ -66,8 +66,8 @@ a single `"<?php\n"`-prefixed source string. `token_stream_parse`
 `Token`s fed straight into the parser, bypassing the lexer (and
 `structured_php`'s own source-text rendering) entirely.
 
-    cargo +nightly fuzz run structured_php -- -max_total_time=120
-    cargo +nightly fuzz run parse_type_string -- -max_total_time=120
+    cargo fuzz run structured_php -- -max_total_time=120
+    cargo fuzz run parse_type_string -- -max_total_time=120
 
 Both share `fuzz/src/lib.rs`'s panic-handling/64MiB-worker-stack guard
 (`guarded_parse`/`guarded_parse_type`) - see that file's own doc comment

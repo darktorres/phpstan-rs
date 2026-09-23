@@ -57,8 +57,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # .cargo/config.toml links x86_64 Linux artifacts (including the
+      # cross leg's own host-side build scripts) with mold.
+      - uses: rui314/setup-mold@v1
+        if: ${{ runner.os == 'Linux' }}
+
       # Runner images ship rustup already - this only adds the
-      # non-native target; the native one and the pinned 1.98.0 toolchain
+      # non-native target; the native one and the pinned nightly toolchain
       # itself come from the checked-in rust-toolchain.toml, which every
       # `cargo`/`rustup` invocation below picks up automatically.
       - name: Add the cross-compilation target
