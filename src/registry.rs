@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (phpstan-strict-rules): arithmetic, unary `+`/`-` and increment/decrement operands that are not numeric (`plus.leftNonNumeric`, `unaryMinus.nonNumeric`, `preInc.nonNumeric`, ...).
+    pub check_arithmetic_operands: bool,
     // Opt-in: `===`/`!==` between objects whose class defines an `equals()` method accepting the other side (`identical.equalsMethod`).
     pub check_identity_vs_equals: bool,
     // Opt-in: `in_array()`/`array_search()`/`array_keys()` compared loosely where the needle and haystack value types can be `==` without being `===` (`function.looseComparison`).

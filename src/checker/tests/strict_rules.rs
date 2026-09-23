@@ -232,3 +232,61 @@ function f(array $names, array $ids, array $letters, array $numbers, array $mayb
     assert_eq!(run(Some((8, 3))), vec!["13", "14", "15", "18", "19"]);
     assert_eq!(run(Some((7, 4))), vec!["12", "13", "14", "15", "18", "19"]);
 }
+
+#[test]
+fn arithmetic_operands() {
+    let src = r#"<?php
+/** @param numeric-string $num */
+function f(int $i, float $f, string $s, ?int $maybe, bool $b, array $a, mixed $m, string $num, \GMP $g): void {
+    $x = $i + $f;
+    $x = $i + $s;
+    $x = $maybe * 2;
+    $x = $num / 2;
+    $x = $a + $a;
+    $x = $a + 1;
+    $x = $m - 1;
+    $x = -$b;
+    $s++;
+    $s--;
+    $maybe++;
+    $g++;
+    $i **= $s;
+    $x = '5' % 2;
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_arithmetic_operands = true;
+    assert_eq!(
+        ids_with(src, enabled, &["NonNumeric", "nonNumeric"]),
+        vec![
+            "11 unaryMinus.nonNumeric",
+            "13 postDec.nonNumeric",
+            "14 postInc.nonNumeric",
+            "16 pow.rightNonNumeric",
+            "5 plus.rightNonNumeric",
+            "6 mul.leftNonNumeric",
+        ]
+    );
+    let messages: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.identifier == "plus.rightNonNumeric")
+        .map(|d| d.message)
+        .collect();
+    assert_eq!(
+        messages,
+        vec!["Only numeric types are allowed in +, string given on the right side."]
+    );
+}
+
+fn ids_with(
+    src: &str,
+    set: impl Fn(&mut crate::registry::Registry),
+    suffixes: &[&str],
+) -> Vec<String> {
+    let mut v: Vec<String> = diagnostics_for_with(src, set)
+        .into_iter()
+        .filter(|d| suffixes.iter().any(|s| d.identifier.ends_with(s)))
+        .map(|d| format!("{} {}", d.span.start.line, d.identifier))
+        .collect();
+    v.sort();
+    v
+}

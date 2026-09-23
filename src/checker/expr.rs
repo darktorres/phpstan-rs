@@ -265,7 +265,9 @@ impl<'a> Checker<'a> {
         {
             self.check_strict_expression_idioms(e, locals, label);
         }
-        if self.registry.check_illegal_constructor_calls || self.registry.check_dynamic_static_calls
+        if self.registry.check_illegal_constructor_calls
+            || self.registry.check_dynamic_static_calls
+            || self.registry.check_arithmetic_operands
         {
             self.check_strict_rules_expression(e, locals, label);
         }

@@ -16,11 +16,17 @@
 //!   `array_keys()`/`base64_decode()` without their strict argument
 //!   `true`, and `iterator_to_array()` leaving `$preserve_keys` to its
 //!   default (`function.strict`).
+//! - `check_arithmetic_operands` - an operand of `+ - * / % **` (or their
+//!   compound assignments), unary `+`/`-` or `++`/`--` that isn't a
+//!   number (`plus.leftNonNumeric`, `unaryMinus.nonNumeric`,
+//!   `postInc.nonNumeric`, ...). Arrays and objects are left to the
+//!   core operand checks, except under `++`/`--`; a string may be
+//!   incremented.
 
 use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::registry::{FunctionSig, Trinary};
-use crate::types::Type;
+use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
 
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
@@ -42,6 +48,9 @@ impl<'a> Checker<'a> {
                     "staticMethod.dynamicCall",
                 );
             }
+        }
+        if self.registry.check_arithmetic_operands {
+            self.check_arithmetic_operands(e, locals, label);
         }
         if self.registry.check_illegal_constructor_calls {
             match &e.kind {
@@ -71,6 +80,106 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
+    }
+
+    fn check_arithmetic_operands(&mut self, e: &Expr, locals: &Locals, label: &str) {
+        let (op, left, right) = match &e.kind {
+            ExprKind::Binary(op, l, r) | ExprKind::CompoundAssign(op, l, r) => (op, l, r),
+            ExprKind::Unary(op, operand) => {
+                let (name, id, valid) = match op {
+                    UnaryOp::Neg => ("unary -", "unaryMinus", Operand::Arithmetic),
+                    UnaryOp::Plus => ("unary +", "unaryPlus", Operand::Arithmetic),
+                    UnaryOp::PreInc => ("pre-increment", "preInc", Operand::Increment),
+                    UnaryOp::PostInc => ("post-increment", "postInc", Operand::Increment),
+                    UnaryOp::PreDec => ("pre-decrement", "preDec", Operand::Decrement),
+                    UnaryOp::PostDec => ("post-decrement", "postDec", Operand::Decrement),
+                    _ => return,
+                };
+                let ty = self.infer_expr(operand, locals);
+                if !self.valid_operand(&ty, valid) {
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Only numeric types are allowed in {name}, {} given.",
+                            describe_type_only(&ty)
+                        ),
+                        e.span,
+                        0,
+                        &format!("{id}.nonNumeric"),
+                    );
+                }
+                return;
+            }
+            _ => return,
+        };
+        let (sigil, id) = match op {
+            BinOp::Add => ("+", "plus"),
+            BinOp::Sub => ("-", "minus"),
+            BinOp::Mul => ("*", "mul"),
+            BinOp::Div => ("/", "div"),
+            BinOp::Mod => ("%", "mod"),
+            BinOp::Pow => ("**", "pow"),
+            _ => return,
+        };
+        let left_ty = self.infer_expr(left, locals);
+        let right_ty = self.infer_expr(right, locals);
+        if *op == BinOp::Add && has_array(&left_ty) && has_array(&right_ty) {
+            return;
+        }
+        for (ty, side) in [(&left_ty, "left"), (&right_ty, "right")] {
+            if !self.valid_operand(ty, Operand::Arithmetic) {
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Only numeric types are allowed in {sigil}, {} given on the {side} side.",
+                        describe_type_only(ty)
+                    ),
+                    e.span,
+                    0,
+                    &format!("{id}.{side}NonNumeric"),
+                );
+            }
+        }
+    }
+
+    /// `OperatorRuleHelper::isValidForArithmeticOperation`/
+    /// `isValidForIncrement`/`isValidForDecrement`.
+    fn valid_operand(&self, ty: &Type, operand: Operand) -> bool {
+        if contains_mixed(ty) || is_number(ty) {
+            return true;
+        }
+        if let Type::Intersection(members) = ty
+            && members
+                .iter()
+                .any(|m| matches!(m, Type::Accessory(AccessoryKind::Benevolent)))
+        {
+            let mut inner: Vec<&Type> = Vec::new();
+            for member in members {
+                match member {
+                    Type::Union(ms) => inner.extend(ms.iter()),
+                    Type::Accessory(_) => {}
+                    other => inner.push(other),
+                }
+            }
+            return inner.iter().any(|m| is_number(m));
+        }
+        let members: Vec<&Type> = match ty {
+            Type::Union(members) => members.iter().collect(),
+            other => vec![other],
+        };
+        match operand {
+            // Arrays and objects already fail PHP's own number conversion.
+            Operand::Arithmetic => members.iter().any(|m| not_convertible_to_number(m)),
+            Operand::Increment | Operand::Decrement => {
+                (operand == Operand::Increment && members.iter().all(|m| is_string(m)))
+                    || members.iter().all(|m| self.overloads_arithmetic(m))
+            }
+        }
+    }
+
+    fn overloads_arithmetic(&self, ty: &Type) -> bool {
+        matches!(ty, Type::Object(class, _)
+            if ["GMP", "BcMath\\Number"].iter().any(|c| self.registry.is_subclass_of(class, c)))
     }
 
     /// `function.strict`, for one of the functions it covers.
@@ -370,4 +479,75 @@ fn arg_for_param<'e>(args: &'e [Arg], sig: &FunctionSig, position: usize) -> Opt
             .as_deref()
             .is_some_and(|n| n.eq_ignore_ascii_case(name))
     })
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Operand {
+    Arithmetic,
+    Increment,
+    Decrement,
+}
+
+fn contains_mixed(ty: &Type) -> bool {
+    match ty {
+        Type::Mixed(_) | Type::Never | Type::TemplateParam(_) => true,
+        Type::Union(members) => members.iter().any(contains_mixed),
+        _ => false,
+    }
+}
+
+/// Whether every value of `ty` is an `int`, a `float`, or a
+/// `numeric-string`.
+fn is_number(ty: &Type) -> bool {
+    match ty {
+        Type::Int
+        | Type::IntLiteral(_)
+        | Type::IntRange(..)
+        | Type::Float
+        | Type::FloatLiteral(_) => true,
+        Type::StringLiteral(s) => is_numeric_string_literal(s),
+        Type::Union(members) => members.iter().all(is_number),
+        Type::Intersection(members) => members.iter().any(|m| {
+            is_number(m)
+                || matches!(
+                    m,
+                    Type::Accessory(
+                        AccessoryKind::NumericString | AccessoryKind::DecimalIntegerString
+                    )
+                )
+        }),
+        _ => false,
+    }
+}
+
+fn is_string(ty: &Type) -> bool {
+    match ty {
+        Type::String | Type::StringLiteral(_) | Type::ClassString(_) => true,
+        Type::Intersection(members) => members.iter().any(is_string),
+        _ => false,
+    }
+}
+
+fn not_convertible_to_number(ty: &Type) -> bool {
+    match ty {
+        Type::Array(..)
+        | Type::ArrayShape(_)
+        | Type::Object(..)
+        | Type::ObjectShape(_)
+        | Type::EnumCase(..)
+        | Type::Callable(_)
+        | Type::SelfRef
+        | Type::ParentRef
+        | Type::StaticRef => true,
+        Type::Intersection(members) => members.iter().any(not_convertible_to_number),
+        _ => false,
+    }
+}
+
+fn has_array(ty: &Type) -> bool {
+    match ty {
+        Type::Array(..) | Type::ArrayShape(_) => true,
+        Type::Union(members) | Type::Intersection(members) => members.iter().any(has_array),
+        _ => false,
+    }
 }

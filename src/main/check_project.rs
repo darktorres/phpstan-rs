@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_arithmetic_operands: bool,
     check_identity_vs_equals: bool,
     check_loose_haystack_comparison: bool,
     check_strict_function_calls: bool,
@@ -262,6 +263,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_arithmetic_operands(check_arithmetic_operands);
     project.set_check_identity_vs_equals(check_identity_vs_equals);
     project.set_check_loose_haystack_comparison(check_loose_haystack_comparison);
     project.set_check_strict_function_calls(check_strict_function_calls);
@@ -737,6 +739,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_arithmetic_operands: bool,
     check_identity_vs_equals: bool,
     check_loose_haystack_comparison: bool,
     check_strict_function_calls: bool,
@@ -883,6 +886,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_arithmetic_operands =
+        check_arithmetic_operands || config.check_arithmetic_operands.unwrap_or(false);
     let check_identity_vs_equals =
         check_identity_vs_equals || config.check_identity_vs_equals.unwrap_or(false);
     let check_loose_haystack_comparison =
@@ -1151,6 +1156,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_arithmetic_operands,
         check_identity_vs_equals,
         check_loose_haystack_comparison,
         check_strict_function_calls,

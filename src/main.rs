@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag non-numeric operands of arithmetic, unary +/- and ++/-- operators.
+        #[arg(long)]
+        check_arithmetic_operands: bool,
         /// Flag === and !== between objects whose class defines a matching equals() method.
         #[arg(long)]
         check_identity_vs_equals: bool,
@@ -477,6 +480,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_arithmetic_operands,
             check_identity_vs_equals,
             check_loose_haystack_comparison,
             check_strict_function_calls,
@@ -540,6 +544,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_arithmetic_operands,
             check_identity_vs_equals,
             check_loose_haystack_comparison,
             check_strict_function_calls,
