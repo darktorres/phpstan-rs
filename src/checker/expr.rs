@@ -259,6 +259,9 @@ impl<'a> Checker<'a> {
         // "take, not just read" reasoning as `is_bare_statement` above.
         let is_condition_position = std::mem::take(&mut self.in_condition_position);
         let is_exempt_last_condition = std::mem::take(&mut self.in_exempt_last_condition);
+        if self.registry.check_null_coercion || self.registry.check_enum_exhaustiveness {
+            self.check_strict_expression_idioms(e, locals, label);
+        }
         if !is_bare_statement && let ExprKind::Match { arms, default, .. } = &e.kind {
             self.check_void_match_usage(arms, default.as_deref(), locals, e.span, label);
         }

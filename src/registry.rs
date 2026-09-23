@@ -241,6 +241,10 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in: enum branching that defeats match exhaustiveness (a default arm, switch, or if-chains over enum cases).
+    pub check_enum_exhaustiveness: bool,
+    // Opt-in: isset()/empty() on objects and possibly-null values silently coerced by strings, operators and compound assignments.
+    pub check_null_coercion: bool,
     // `new SomeException(...)` constructed but discarded as a bare
     // statement, never thrown - opt-in, since a plain `new Foo();`
     // statement for a class with a genuine constructor side effect is

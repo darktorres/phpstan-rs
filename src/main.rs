@@ -259,6 +259,12 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Reports a default arm in a match over an enum, and switch or if-chains over enum cases where a match would be exhaustive.
+        #[arg(long)]
+        check_enum_exhaustiveness: bool,
+        /// Reports isset()/empty() on objects and possibly-null values in string interpolation, concatenation, arithmetic and compound assignments.
+        #[arg(long)]
+        check_null_coercion: bool,
         /// Enables discarded-`new`-exception detection (`new
         /// SomeException(...);` sitting on its own line, never thrown).
         /// Off by default - see `registry::Registry::check_new_exception_
@@ -450,6 +456,8 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_enum_exhaustiveness,
+            check_null_coercion,
             check_new_exception_discarded,
             check_risky_tests,
             check_dead_enum_cases,
@@ -504,6 +512,8 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_enum_exhaustiveness,
+            check_null_coercion,
             check_new_exception_discarded,
             check_risky_tests,
             check_dead_enum_cases,

@@ -93,6 +93,7 @@ mod risky_tests;
 mod see_tag;
 mod sql_reflection_dispatch;
 mod sql_reflection_parameter_validation;
+mod strict_idioms;
 mod string_functions;
 mod swapped_arguments;
 mod switch_missing_default;

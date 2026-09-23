@@ -86,6 +86,9 @@ impl<'a> Checker<'a> {
         declared_return: Option<&Type>,
         label: &str,
     ) {
+        if self.registry.check_enum_exhaustiveness {
+            self.check_strict_statement_idioms(stmt, locals, label);
+        }
         self.check_stmt_impl(stmt, locals, declared_return, label);
         if !self.external_rules.is_empty() {
             self.dispatch_stmt_rules(stmt, locals, label);

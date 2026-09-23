@@ -419,6 +419,10 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_enum_exhaustiveness(resolved.check_enum_exhaustiveness);
+        self.project
+            .set_check_null_coercion(resolved.check_null_coercion);
+        self.project
             .set_check_new_exception_discarded(resolved.check_new_exception_discarded);
         self.project
             .set_check_risky_tests(resolved.check_risky_tests);

@@ -32,6 +32,8 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_enum_exhaustiveness = false
+//! check_null_coercion = false
 //! check_new_exception_discarded = false
 //! check_risky_tests = false
 //! check_dead_enum_cases = false
@@ -288,6 +290,10 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in: enum branching that defeats match exhaustiveness (a default arm, switch, or if-chains over enum cases).
+    pub check_enum_exhaustiveness: Option<bool>,
+    /// Opt-in: isset()/empty() on objects and possibly-null values silently coerced by strings, operators and compound assignments.
+    pub check_null_coercion: Option<bool>,
     /// Opt-in discarded-`new`-exception detection - see
     /// `registry::Registry::check_new_exception_discarded`'s own doc
     /// comment for why.

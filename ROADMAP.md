@@ -1355,6 +1355,19 @@ catches are checked on their own) and `catch.baseWithoutRethrow` (a
 catch of `Throwable`/`Exception`/`Error` with no unconditional
 top-level `throw` in its body).
 
+**Null-coercion and enum-exhaustiveness idioms** (`checker/
+strict_idioms.rs`, the `rector/type-perfect`/`shipmonk` families).
+Opt-in `check_null_coercion`: `isset.object`/`empty.object` (on a
+variable or property holding an object - a null check or `instanceof`
+says what's meant; an offset probe is exempt) and possibly-null values
+PHP silently coerces - `interpolation.nullable`, `concat.nullable`,
+`binaryOp.nullable`, `assignOp.nullable`. Opt-in
+`check_enum_exhaustiveness`: `match.enumDefault`, `enum.switch`, and
+`enum.ifChain` (two or more `===` comparisons of one subject against one
+enum's cases). Member access on `mixed` is the level-9/10
+`method`/`property.nonObject` family, and indexing a plain object is
+`offsetAccess.nonOffsetAccessible`.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3402,30 +3415,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 148 — "No mixed member access" + null-coercion-safety + enum-exhaustiveness-enforcement families
-
-Confirmed independently by `rector/type-perfect` and `shipmonk/
-phpstan-rules` (same "no mixed" idea reinvented twice) — entirely
-generic, zero framework dependency:
-
-- **148a (small, 2x confirmed).** Opt-in ban on calling a method or
-  accessing a property on a `mixed`-typed value at all, forcing
-  explicit narrowing before any member access.
-- **148b (small).** Ban `isset()`/`empty()`/array-index syntax
-  targeting a plain object (each behaves oddly/silently on a plain
-  object without `ArrayAccess`/magic methods).
-- **148c (novel family, small each).** Ban a possibly-null value from
-  silently participating in string interpolation (renders as `""`), a
-  binary operator, or a compound assignment (`+=` etc.) — PHP's silent
-  null-to-empty-string/zero coercion is a real, common bug source.
-- **148d (novel, 3x-confirmed-independently-valuable, medium).** A
-  `match` over an enum subject with a `default` arm defeats PHPStan's
-  own exhaustiveness benefit — when a new case is added later, the
-  default arm silently swallows it instead of surfacing a missing-arm
-  error. Pair with requiring `match` (not `switch`/if-chains) when
-  branching over an enum value at all, so exhaustiveness checking
-  actually applies.
 
 ### Phase 149 — Native-typehint-preference + arithmetic/comparison-operand strictness families
 

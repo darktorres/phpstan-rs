@@ -507,6 +507,16 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_enum_exhaustiveness`.
+    pub fn set_check_enum_exhaustiveness(&mut self, enabled: bool) {
+        self.registry.check_enum_exhaustiveness = enabled;
+    }
+
+    /// See `Registry::check_null_coercion`.
+    pub fn set_check_null_coercion(&mut self, enabled: bool) {
+        self.registry.check_null_coercion = enabled;
+    }
+
     /// Opts the whole project's checking into discarded-`new`-exception
     /// detection - see `registry::Registry::check_new_exception_
     /// discarded`'s own doc comment for why this defaults to `false`.

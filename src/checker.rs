@@ -965,6 +965,9 @@ pub struct Checker<'a> {
     pub(crate) include_path_dirs: Vec<String>,
     // `includes::file_constant_initializers` for the file being checked.
     pub(crate) include_constant_initializers: HashMap<String, Expr>,
+    // `if` statements already reported as the tail of an enum `if`/`elseif`
+    // chain (`strict_idioms`).
+    pub(crate) enum_chain_tails: HashSet<Span>,
     // `global_constants::constant_facts` for the file being checked.
     pub(crate) constant_facts: global_constants::ConstantFacts,
     // `$a[]` argument spans bound to a by-reference (or unknown)
@@ -1253,6 +1256,7 @@ mod imports;
 mod impossible_instanceof;
 mod includes;
 mod instantiation;
+mod strict_idioms;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;
 mod internal_usage;
@@ -1375,6 +1379,7 @@ impl<'a> Checker<'a> {
             include_guarded_paths: HashSet::new(),
             include_path_dirs: Vec::new(),
             include_constant_initializers: HashMap::new(),
+            enum_chain_tails: HashSet::new(),
             constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
             property_assign_facts: HashMap::new(),
