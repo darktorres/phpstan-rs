@@ -36,16 +36,9 @@ struct FileState {
     functions: Vec<String>,
     classes: Vec<String>,
     references: HashSet<String>,
-    // `@phpstan-ignore-line`/`-next-line` - computed once here, while the
-    // raw source is still on hand, rather than at `check_file` time (the
-    // AST alone doesn't carry comment text at all, and re-reading the
-    // file from disk there would be new, avoidable I/O coupling
-    // `check_file` doesn't otherwise have).
-    ignore_lines: HashSet<u32>,
-    // The fuller bare `@phpstan-ignore <identifier list>` form - which
-    // diagnostic identifiers are suppressed on a given line, computed
-    // alongside `ignore_lines` above for the identical reason.
-    ignore_identifiers: HashMap<u32, Vec<String>>,
+    // Inline `@phpstan-ignore*` comments, read while the file was lexed
+    // (the AST carries no comment text).
+    ignores: ignore_comments::IgnoreComments,
     // See `ParsedFile::anonymous_class_names`'s own doc comment - carried
     // here too so `Project::check_file_impl` can hand it to a fresh
     // `Checker` on every re-check, not just the initial load.
@@ -97,6 +90,9 @@ pub struct Project {
     // "the project's own root directory" - its files are just whatever
     // absolute paths were handed to `load_file`. Defaults to `false`.
     phpstan_api_check_enabled: bool,
+    // When set, per-file and whole-program checks leave inline
+    // `@phpstan-ignore*` suppression to `apply_inline_ignores`.
+    defer_inline_ignores: bool,
     // Whether `load_file`/`update_file` keep each file's own raw source
     // text around in its `FileState` (see that field's own doc comment) -
     // off by default. Only `lsp.rs`'s `Server::new()` turns this on:
@@ -199,6 +195,7 @@ impl Project {
             registry,
             pest_config: PestConfig::default(),
             phpstan_api_check_enabled: false,
+            defer_inline_ignores: false,
             retain_source: false,
             decl_locations: DeclLocations::default(),
             duplicate_fn_sites: DuplicateFunctionSites::default(),
@@ -551,6 +548,104 @@ impl Project {
         self.registry.check_dead_members = enabled;
     }
 
+    /// Leaves inline ignore comments to one final `apply_inline_ignores`
+    /// pass over every file's complete diagnostics.
+    pub fn set_defer_inline_ignores(&mut self, deferred: bool) {
+        self.defer_inline_ignores = deferred;
+    }
+
+    /// Applies every analyzed file's inline ignore comments to `results`
+    /// and, with `report_unmatched`, reports each ignore that suppressed
+    /// nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`),
+    /// except inside a trait, whose diagnostics depend on its users.
+    pub fn apply_inline_ignores(
+        &self,
+        results: &mut HashMap<PathBuf, Vec<Diagnostic>>,
+        report_unmatched: bool,
+    ) {
+        for (path, file) in &self.files {
+            if !file.analyzed {
+                continue;
+            }
+            let ignores = &file.ignores;
+            let mut matched_lines: HashSet<u32> = HashSet::new();
+            let mut matched_ids: HashSet<(u32, &str)> = HashSet::new();
+            if let Some(diagnostics) = results.get_mut(path) {
+                diagnostics.retain(|d| {
+                    if d.non_ignorable {
+                        return true;
+                    }
+                    let line = d.span.start.line;
+                    if ignores.lines.contains(&line) {
+                        matched_lines.insert(line);
+                        return false;
+                    }
+                    if let Some(ids) = ignores.identifiers.get(&line)
+                        && let Some(id) = ids.iter().find(|id| **id == d.identifier)
+                    {
+                        matched_ids.insert((line, id.as_str()));
+                        return false;
+                    }
+                    true
+                });
+            }
+            if !report_unmatched {
+                continue;
+            }
+            let trait_lines = trait_line_ranges(&file.ast);
+            let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
+            let mut unmatched: Vec<Diagnostic> = Vec::new();
+            let mut unmatched_line = |line: u32, message: String, identifier: &str| {
+                let at = crate::token::Position { line, col: 1 };
+                unmatched.push(
+                    checker::DiagnosticBuilder::new(
+                        "<main>".to_string(),
+                        message,
+                        Span { start: at, end: at },
+                        0,
+                        identifier,
+                    )
+                    .non_ignorable()
+                    .build(),
+                );
+            };
+            for &line in &ignores.lines {
+                if !matched_lines.contains(&line) && !in_trait(line) {
+                    unmatched_line(
+                        line,
+                        format!("No error to ignore is reported on line {line}."),
+                        "ignore.unmatchedLine",
+                    );
+                }
+            }
+            for (&line, ids) in &ignores.identifiers {
+                if ignores.lines.contains(&line) || in_trait(line) {
+                    continue;
+                }
+                for id in ids {
+                    if !matched_ids.contains(&(line, id.as_str())) {
+                        unmatched_line(
+                            line,
+                            format!("No error with identifier {id} is reported on line {line}."),
+                            "ignore.unmatchedIdentifier",
+                        );
+                    }
+                }
+            }
+            if !unmatched.is_empty() {
+                let entry = results.entry(path.clone()).or_default();
+                entry.extend(unmatched);
+                entry.sort_by(|a, b| {
+                    (a.span.start.line, a.span.start.col, &a.message).cmp(&(
+                        b.span.start.line,
+                        b.span.start.col,
+                        &b.message,
+                    ))
+                });
+            }
+        }
+    }
+
     /// Opts the whole project's checking into named-argument-rename-
     /// collision detection - see `registry::Registry::check_renamed_
     /// named_arguments`'s own doc comment for why this defaults to
@@ -678,8 +773,7 @@ impl Project {
             functions,
             classes,
             references,
-            ignore_lines,
-            ignore_identifiers,
+            ignores,
             built_decls,
             anonymous_class_decls,
             anonymous_class_names,
@@ -732,8 +826,7 @@ impl Project {
                 functions,
                 classes,
                 references,
-                ignore_lines,
-                ignore_identifiers,
+                ignores,
                 anonymous_class_names,
                 source: self.retain_source.then_some(source),
                 analyzed,
@@ -955,13 +1048,11 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let ast = parse(new_source)?;
+        let (ast, ignores) = parse_with_ignores(new_source)?;
         let mut changed_symbols: HashSet<String> = HashSet::new();
         self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
         let references = deps::referenced_names(&ast);
-        let ignore_lines = ignore_comments::ignored_lines(new_source);
-        let ignore_identifiers = ignore_comments::ignored_identifiers(new_source);
         // `changed_symbols` seeds transitive_affected_files' BFS, which
         // looks names up in `self.dependents` - keyed by the bare names
         // deps::referenced_names collects (a deliberate simplification,
@@ -1070,8 +1161,7 @@ impl Project {
                 functions,
                 classes,
                 references,
-                ignore_lines,
-                ignore_identifiers,
+                ignores,
                 anonymous_class_names,
                 source: self.retain_source.then(|| new_source.to_string()),
                 analyzed,
@@ -1394,6 +1484,23 @@ impl Project {
                 ),
             );
         }
+        for (line, message) in &file.ignores.parse_errors {
+            let at = crate::token::Position {
+                line: *line,
+                col: 1,
+            };
+            diagnostics.push(
+                checker::DiagnosticBuilder::new(
+                    "<main>".to_string(),
+                    format!("Parse error in @phpstan-ignore: {message}"),
+                    Span { start: at, end: at },
+                    0,
+                    "ignore.parseError",
+                )
+                .non_ignorable()
+                .build(),
+            );
+        }
         diagnostics.sort_by_key(|d| (d.span.start.line, d.span.start.col));
         if self.phpstan_api_check_enabled {
             diagnostics.extend(checker::phpstan_api::check_phpstan_api_usage(
@@ -1415,19 +1522,20 @@ impl Project {
         // exemption (reserved for a handful of its own rules, e.g.
         // flagging a malformed `@phpstan-ignore` comment itself -
         // nonsensical to let another ignore comment suppress).
-        if !file.ignore_lines.is_empty() {
+        if !self.defer_inline_ignores && !file.ignores.lines.is_empty() {
             diagnostics
-                .retain(|d| d.non_ignorable || !file.ignore_lines.contains(&d.span.start.line));
+                .retain(|d| d.non_ignorable || !file.ignores.lines.contains(&d.span.start.line));
         }
         // The fuller bare `@phpstan-ignore <identifier list>` form -
         // unlike the two line markers above, this only suppresses a
         // diagnostic whose own `identifier` exactly matches one named on
         // that line.
-        if !file.ignore_identifiers.is_empty() {
+        if !self.defer_inline_ignores && !file.ignores.identifiers.is_empty() {
             diagnostics.retain(|d| {
                 d.non_ignorable
                     || !file
-                        .ignore_identifiers
+                        .ignores
+                        .identifiers
                         .get(&d.span.start.line)
                         .is_some_and(|ids| ids.iter().any(|id| id == &d.identifier))
             });
@@ -1716,11 +1824,13 @@ impl Project {
         if !file.analyzed {
             return None;
         }
-        if file.ignore_lines.contains(&span.start.line)
-            || file
-                .ignore_identifiers
-                .get(&span.start.line)
-                .is_some_and(|ids| ids.iter().any(|id| id == identifier))
+        if !self.defer_inline_ignores && file.ignores.lines.contains(&span.start.line)
+            || !self.defer_inline_ignores
+                && file
+                    .ignores
+                    .identifiers
+                    .get(&span.start.line)
+                    .is_some_and(|ids| ids.iter().any(|id| id == identifier))
         {
             return None;
         }
@@ -1983,9 +2093,30 @@ impl Default for Project {
     }
 }
 
-fn parse(source: &str) -> Result<Vec<Stmt>, ParseError> {
-    let tokens = Lexer::new(source).tokenize_with_spans();
-    Parser::new(tokens).parse_program()
+/// First and last line of every trait declared in `ast`.
+fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
+    let mut ranges = Vec::new();
+    let mut stack: Vec<&Stmt> = ast.iter().collect();
+    while let Some(stmt) = stack.pop() {
+        match &stmt.kind {
+            StmtKind::ClassDecl(c) if c.kind == crate::ast::ClassKind::Trait => {
+                ranges.push((stmt.span.start.line, stmt.span.end.line));
+            }
+            StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) | StmtKind::EnumDecl(_) => {}
+            _ => stack.extend(crate::ast_walk::stmt_children(stmt)),
+        }
+    }
+    ranges
+}
+
+/// Parses `source`, reading its inline ignore comments from the same
+/// lexing.
+fn parse_with_ignores(
+    source: &str,
+) -> Result<(Vec<Stmt>, ignore_comments::IgnoreComments), ParseError> {
+    let (tokens, comments) = Lexer::new(source).tokenize_with_comments();
+    let ignores = ignore_comments::scan_tokens(&tokens, &comments);
+    Ok((Parser::new(tokens).parse_program()?, ignores))
 }
 
 /// Everything about loading one file that's pure - parsing, plus every
@@ -2000,8 +2131,7 @@ pub struct ParsedFile {
     functions: Vec<String>,
     classes: Vec<String>,
     references: HashSet<String>,
-    ignore_lines: HashSet<u32>,
-    ignore_identifiers: HashMap<u32, Vec<String>>,
+    ignores: ignore_comments::IgnoreComments,
     // This file's own declarations, already built into
     // registry-independent `ClassInfo`/`FunctionSig`/`Type` values (see
     // `registry::build_declarations`'s own doc comment for why that
@@ -2057,11 +2187,9 @@ pub struct ParsedFile {
 /// `path` to each call with no coordination needed between them.
 #[hotpath::measure]
 pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile, ParseError> {
-    let ast = parse(source)?;
+    let (ast, ignores) = parse_with_ignores(source)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
-    let ignore_lines = ignore_comments::ignored_lines(source);
-    let ignore_identifiers = ignore_comments::ignored_identifiers(source);
     let built_decls = crate::registry::build_declarations(&ast);
     let (anonymous_class_decls, anonymous_class_names) =
         crate::registry::collect_anonymous_classes(&ast, &path.display().to_string());
@@ -2079,8 +2207,7 @@ pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile
         anonymous_class_names,
         duplicate_fn_sites,
         duplicate_class_sites,
-        ignore_lines,
-        ignore_identifiers,
+        ignores,
     })
 }
 

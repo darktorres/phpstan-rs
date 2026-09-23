@@ -84,6 +84,9 @@ pub struct Lexer<'a> {
     // it's lexed. `tokenize_with_spans` reads this right after each
     // `next_token()` call, exactly like `last_token_start` above.
     pending_keyword_raw: Option<String>,
+    // Byte ranges of every `//`, `#` and `/* */` comment skipped so far
+    // (doc comments are tokens of their own).
+    comments: Vec<(usize, usize)>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -121,6 +124,9 @@ fn compute_line_starts(src: &[u8]) -> Vec<usize> {
     starts
 }
 
+/// A token, its span, and a keyword's original spelling.
+pub type SpannedToken = (Token, Span, Option<String>);
+
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
         let bytes = src.as_bytes();
@@ -135,6 +141,7 @@ impl<'a> Lexer<'a> {
             pending_param_type_tokens: None,
             pending_param_doc_override: None,
             pending_keyword_raw: None,
+            comments: Vec::new(),
         }
     }
 
@@ -154,6 +161,7 @@ impl<'a> Lexer<'a> {
             pending_param_type_tokens: None,
             pending_param_doc_override: None,
             pending_keyword_raw: None,
+            comments: Vec::new(),
         }
     }
 
@@ -213,6 +221,24 @@ impl<'a> Lexer<'a> {
     /// want to compare bare tokens without spans getting in the way.
     #[hotpath::measure]
     pub fn tokenize_with_spans(mut self) -> Vec<(Token, Span, Option<String>)> {
+        self.run()
+    }
+
+    /// `tokenize_with_spans`, plus every non-doc comment as its start
+    /// position and source text.
+    pub fn tokenize_with_comments(mut self) -> (Vec<SpannedToken>, Vec<(Position, String)>) {
+        let tokens = self.run();
+        let comments = std::mem::take(&mut self.comments)
+            .into_iter()
+            .map(|(start, end)| {
+                let text = String::from_utf8_lossy(&self.src[start..end]).into_owned();
+                (self.line_col_at(start), text)
+            })
+            .collect();
+        (tokens, comments)
+    }
+
+    fn run(&mut self) -> Vec<(Token, Span, Option<String>)> {
         // A real PHP file averages well under one token per 4 source
         // bytes (identifiers/keywords/string contents are usually several
         // bytes each, and whitespace/comments between tokens contribute
@@ -537,21 +563,25 @@ impl<'a> Lexer<'a> {
                         // contains.
                         break;
                     } else {
+                        let start = self.pos;
                         while self.pos < self.src.len()
                             && self.peek() != b'\n'
                             && !self.starts_with("?>")
                         {
                             self.pos += 1;
                         }
+                        self.comments.push((start, self.pos));
                     }
                 }
                 b'/' if self.peek_at(1) == b'/' => {
+                    let start = self.pos;
                     while self.pos < self.src.len()
                         && self.peek() != b'\n'
                         && !self.starts_with("?>")
                     {
                         self.pos += 1;
                     }
+                    self.comments.push((start, self.pos));
                 }
                 // `/**/` (empty) is conventionally just a regular comment,
                 // not a doc comment - PHP's own tokenizer draws the line the
@@ -560,11 +590,13 @@ impl<'a> Lexer<'a> {
                 // close.
                 b'/' if self.starts_with("/**") && self.peek_at(3) != b'/' => break,
                 b'/' if self.peek_at(1) == b'*' => {
+                    let start = self.pos;
                     self.pos += 2;
                     while self.pos < self.src.len() && !self.starts_with("*/") {
                         self.pos += 1;
                     }
                     self.pos = (self.pos + 2).min(self.src.len());
+                    self.comments.push((start, self.pos));
                 }
                 _ => break,
             }

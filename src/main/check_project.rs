@@ -144,6 +144,7 @@ fn run_check_project(
     check_dead_abstract_classes: bool,
     check_dead_members: bool,
     check_renamed_named_arguments: bool,
+    report_unmatched_ignored_errors: bool,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -217,6 +218,7 @@ fn run_check_project(
     project.set_check_circular_dependencies(check_circular_dependencies);
     project.set_check_dead_abstract_classes(check_dead_abstract_classes);
     project.set_check_dead_members(check_dead_members);
+    project.set_defer_inline_ignores(true);
     project.set_check_renamed_named_arguments(check_renamed_named_arguments);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
@@ -475,6 +477,7 @@ fn run_check_project(
     }
 
     let mut results = apply_level_filter(results, level);
+    project.apply_inline_ignores(&mut results, report_unmatched_ignored_errors);
     ignore_errors::filter(&mut results, ignore_error_entries);
     restricted_symbols::filter_by_path(&mut results);
 
@@ -603,6 +606,7 @@ pub(crate) fn run_check_project_command(
     check_dead_abstract_classes: bool,
     check_dead_members: bool,
     check_renamed_named_arguments: bool,
+    report_unmatched_ignored_errors: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -736,6 +740,8 @@ pub(crate) fn run_check_project_command(
     let check_dead_members = check_dead_members || config.check_dead_members.unwrap_or(false);
     let check_renamed_named_arguments =
         check_renamed_named_arguments || config.check_renamed_named_arguments.unwrap_or(false);
+    let report_unmatched_ignored_errors =
+        report_unmatched_ignored_errors || config.report_unmatched_ignored_errors.unwrap_or(false);
     let php_version = match php_version.or(config.php_version) {
         Some(s) => match php_version::parse_php_version(&s) {
             Ok(v) => Some(v),
@@ -889,6 +895,7 @@ pub(crate) fn run_check_project_command(
         check_dead_abstract_classes,
         check_dead_members,
         check_renamed_named_arguments,
+        report_unmatched_ignored_errors,
         configured_level,
         &stub_dirs,
         php_version,

@@ -39,6 +39,7 @@
 //! check_dead_abstract_classes = false
 //! check_dead_members = false
 //! check_renamed_named_arguments = false
+//! report_unmatched_ignored_errors = false
 //! no_composer = false
 //! php_version = "8.1"
 //!
@@ -275,6 +276,11 @@ pub struct Config {
     /// `registry::Registry::check_renamed_named_arguments`'s own doc
     /// comment for why.
     pub check_renamed_named_arguments: Option<bool>,
+    /// Opt-in reporting of inline `@phpstan-ignore*` comments that
+    /// suppress nothing (`ignore.unmatchedLine`/
+    /// `ignore.unmatchedIdentifier`). Off by default: an ignore naming a
+    /// rule this project doesn't implement would always be unmatched.
+    pub report_unmatched_ignored_errors: Option<bool>,
 }
 
 impl Config {

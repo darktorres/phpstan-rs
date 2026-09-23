@@ -1203,7 +1203,12 @@ zero false positives on piwigo16.
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
 (`--generate-baseline`/`--baseline`, on by default reporting an
 unmatched baseline entry) and inline `@phpstan-ignore-line`/`-next-line`/
-`<identifier list>` suppression. `ignoreErrors:` config support.
+`<identifier list>` suppression, read from real comment tokens with
+upstream's placement rules and identifier-list grammar; a malformed list
+is `ignore.parseError` (non-ignorable, upstream's messages), and opt-in
+`report_unmatched_ignored_errors` reports ignores that suppressed
+nothing (`ignore.unmatchedLine`/`ignore.unmatchedIdentifier`, traits
+exempt), applied once after whole-program checks and level filtering. `ignoreErrors:` config support.
 `--level`/`--php-version`-gated portability checks (`PhpFeature::
 NoncapturingCatch`/`ThrowExpression` are declared with the correct
 threshold but not yet wired to a diagnostic - a real, small residual).
@@ -3742,13 +3747,6 @@ against this list, and added the real gaps the audit had missed.
 
 (`VariableCloningRule` — `clone.nonObject` — is now built; see Done,
 receiver-type-checks phase.)
-
-### Phase 139 — DeadCode+EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace (mixed small gaps)
-
-- `Rules/Ignore/IgnoreParseErrorRule` — a non-ignorable diagnostic for
-  malformed `@phpstan-ignore` identifier-list syntax; phpstan-rs's own
-  `ignore_comments.rs` deliberately swallows this with no diagnostic at
-  all today (confirmed by its own test name).
 
 ### Phase 180 — `treatPhpDocTypesAsCertain: false`
 

@@ -302,6 +302,11 @@ enum Command {
         /// own doc comment for the real, disclosed false-positive risks.
         #[arg(long)]
         check_dead_members: bool,
+        /// Reports inline `@phpstan-ignore*` comments that suppress
+        /// nothing. Off by default - an ignore naming a rule this project
+        /// doesn't implement would always be unmatched.
+        #[arg(long)]
+        report_unmatched_ignored_errors: bool,
         /// Enables named-argument-rename-collision detection (a named-
         /// argument call site against a method an override elsewhere
         /// renamed a parameter on). Off by default - see `registry::
@@ -418,6 +423,7 @@ fn main() {
             check_dead_abstract_classes,
             check_dead_members,
             check_renamed_named_arguments,
+            report_unmatched_ignored_errors,
             php_version,
             generate_baseline,
             baseline,
@@ -464,6 +470,7 @@ fn main() {
             check_dead_abstract_classes,
             check_dead_members,
             check_renamed_named_arguments,
+            report_unmatched_ignored_errors,
             php_version,
             generate_baseline,
             baseline,
