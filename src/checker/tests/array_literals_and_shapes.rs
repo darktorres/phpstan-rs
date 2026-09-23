@@ -75,10 +75,18 @@ fn an_array_literal_with_a_mixed_typed_field_from_an_unknown_constant_is_not_fla
             function needsIntOrString($xs): void {}
             needsIntOrString([SOME_UNKNOWN_CONST_A, SOME_UNKNOWN_CONST_B]);
         "#;
-    assert!(diagnostics_for(src).is_empty(), "unexpected diagnostics");
+    assert!(
+        diagnostics_for(src)
+            .iter()
+            .all(|x| x.identifier == "constant.notFound"),
+        "unexpected diagnostics"
+    );
     // strict_mixed_arrays removes this leniency too, the same as the
     // whole-array case above.
-    let d = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true);
+    let d: Vec<_> = diagnostics_for_with(src, |r| r.strict_mixed_arrays = true)
+        .into_iter()
+        .filter(|x| x.identifier != "constant.notFound")
+        .collect();
     assert_eq!(d.len(), 1, "got: {d:?}");
 }
 

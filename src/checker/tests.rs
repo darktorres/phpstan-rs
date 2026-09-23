@@ -37,6 +37,7 @@ mod explicit_and_implicit_mixed;
 mod foreach_iterables;
 mod generator_types;
 mod generics_and_templates;
+mod global_constant_existence;
 mod global_constants;
 mod global_vars;
 mod helpers;

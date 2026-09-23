@@ -581,6 +581,9 @@ fn build_declarations_with_context(
             StmtKind::Namespace(name) => ctx.set_namespace(name),
             StmtKind::Use(imports) => ctx.add_uses(imports),
             StmtKind::ClassDecl(c) => {
+                for m in &c.methods {
+                    collect_nested_defines(&m.function.body, out);
+                }
                 let name = intern(&ctx.declared_name(&c.name));
                 let info = ClassInfo::from_decl(c, ctx);
                 out.push(BuiltDecl::Class {
@@ -590,6 +593,9 @@ fn build_declarations_with_context(
                 });
             }
             StmtKind::EnumDecl(e) => {
+                for m in &e.methods {
+                    collect_nested_defines(&m.function.body, out);
+                }
                 let name = intern(&ctx.declared_name(&e.name));
                 let info = ClassInfo::from_enum_decl(e, ctx);
                 out.push(BuiltDecl::Enum {
@@ -599,6 +605,7 @@ fn build_declarations_with_context(
                 });
             }
             StmtKind::FunctionDecl(f) => {
+                collect_nested_defines(&f.body, out);
                 let name = intern(&ctx.declared_name(&f.name));
                 let sig = FunctionSig::from_decl(
                     f,
@@ -664,7 +671,33 @@ fn build_declarations_with_context(
                     out.push(BuiltDecl::GlobalConst { name, ty });
                 }
             }
-            _ => {}
+            _ => collect_nested_defines(std::slice::from_ref(stmt), out),
+        }
+    }
+}
+
+/// A `define()` statement anywhere in `stmts` - inside a function or
+/// method body, a loop, a `try`, a `switch` - still creates a global
+/// constant at runtime, so it's registered like a top-level one.
+fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
+    for stmt in stmts {
+        match &stmt.kind {
+            StmtKind::Expression(e) => {
+                if let Some((name, ty)) = define_call_constant(e) {
+                    out.push(BuiltDecl::GlobalConst { name, ty });
+                }
+            }
+            StmtKind::FunctionDecl(f) => collect_nested_defines(&f.body, out),
+            StmtKind::ClassDecl(c) => {
+                for m in &c.methods {
+                    collect_nested_defines(&m.function.body, out);
+                }
+            }
+            _ => {
+                for child in crate::ast_walk::stmt_children(stmt) {
+                    collect_nested_defines(std::slice::from_ref(child), out);
+                }
+            }
         }
     }
 }

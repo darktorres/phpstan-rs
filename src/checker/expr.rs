@@ -4311,9 +4311,16 @@ impl<'a> Checker<'a> {
                 Literal::Bool(false) => Type::False,
                 Literal::Null => Type::Null,
             },
-            ExprKind::Name(name) => self
-                .global_constant_type(name)
-                .unwrap_or_else(|| bare_name_literal_type(name)),
+            ExprKind::Name(name) => {
+                self.check_magic_constant_context(name, e.span, label);
+                match self.global_constant_type(name) {
+                    Some(ty) => ty,
+                    None => {
+                        self.check_unknown_global_constant(name, e.span, label);
+                        bare_name_literal_type(name)
+                    }
+                }
+            }
         }
     }
 

@@ -51,7 +51,10 @@ fn a_define_call_with_a_non_literal_name_is_never_registered() {
             needsInt(FOO);
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "constant.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]

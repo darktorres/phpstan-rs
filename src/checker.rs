@@ -897,6 +897,8 @@ pub struct Checker<'a> {
     // which never resolves against the registry. `None` outside an
     // anonymous class's methods, or when its span has no entry.
     pub(crate) current_anonymous_class: Option<String>,
+    // `global_constants::constant_facts` for the file being checked.
+    pub(crate) constant_facts: global_constants::ConstantFacts,
     // `$a[]` argument spans bound to a by-reference (or unknown)
     // parameter, recorded by `predefine_byref_or_unknown_args` before the
     // arguments are checked - the one read-looking position where PHP
@@ -1177,6 +1179,7 @@ mod expr;
 mod function_decl;
 mod function_like_declarations;
 mod generics;
+mod global_constants;
 mod imports;
 mod impossible_instanceof;
 mod instantiation;
@@ -1292,6 +1295,7 @@ impl<'a> Checker<'a> {
             pest_hook_properties: HashSet::new(),
             anonymous_class_names: HashMap::new(),
             current_anonymous_class: None,
+            constant_facts: Default::default(),
             by_ref_empty_dim_args: Default::default(),
             property_assign_facts: HashMap::new(),
             named_argument_call_facts: HashMap::new(),
@@ -1668,6 +1672,7 @@ impl<'a> Checker<'a> {
         // reused for `self.name_ctx` below, which has to be positional
         // instead (see that loop's own comment).
         let whole_file_ctx = NameContext::build(program);
+        self.constant_facts = global_constants::constant_facts(program);
         if !self.facts_only {
             self.check_use_function_imports(program);
             self.check_use_const_imports(program);

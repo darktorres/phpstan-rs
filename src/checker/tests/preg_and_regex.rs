@@ -102,7 +102,8 @@ fn preg_match_reading_a_genuinely_absent_group_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '5'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 5 does not exist")),
         "expected a 'no such key' diagnostic, got: {d:?}"
     );
 }
@@ -457,11 +458,13 @@ fn preg_match_single_optional_group_without_variant_is_bare() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '1'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 1 does not exist")),
         "expected the without-variant to lack key 1, got: {d:?}"
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '2'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 2 does not exist")),
         "expected the without-variant to also lack the nested descendant's own key 2, got: {d:?}"
     );
 }
@@ -521,7 +524,8 @@ fn preg_match_a_top_level_alternation_forces_earlier_siblings_and_removes_later_
         "expected this branch's own group to be 'dog', got: {d:?}"
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '3'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 3 does not exist")),
         "expected the later sibling to be entirely removed, got: {d:?}"
     );
 }
@@ -546,7 +550,8 @@ fn preg_match_a_zero_group_alternation_branch_adds_the_bare_variant() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '1'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 1 does not exist")),
         "expected the bare (zero-group-branch) variant to lack key 1, got: {d:?}"
     );
 }
@@ -568,7 +573,8 @@ fn preg_match_an_alternation_wrapped_in_an_optional_quantifier_still_adds_the_ba
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '1'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 1 does not exist")),
         "expected the bare (whole-alternation-optional) variant to lack key 1, got: {d:?}"
     );
 }
@@ -624,7 +630,10 @@ fn preg_match_with_an_unrecognized_flags_expression_stays_mixed() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "constant.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 // PREG_OFFSET_CAPTURE - every present entry becomes a real [string,
@@ -663,7 +672,8 @@ fn preg_match_offset_capture_still_flags_a_genuinely_absent_group_through_the_un
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '99'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 99 does not exist")),
         "expected a 'no such key' diagnostic even through the Union, got: {d:?}"
     );
 }
@@ -787,7 +797,8 @@ fn preg_match_all_set_order_reading_a_genuinely_absent_group_is_flagged() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.message.contains("no key '5'")),
+        d.iter()
+            .any(|x| x.message.contains("Offset 5 does not exist")),
         "expected a 'no such key' diagnostic, got: {d:?}"
     );
 }

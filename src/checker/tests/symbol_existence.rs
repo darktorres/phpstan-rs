@@ -834,10 +834,10 @@ fn a_grouped_use_const_import_typo_is_flagged() {
     );
 }
 
-// `define()` nested inside a function body is invisible to
-// `Registry::global_constants`, so this stays flagged.
+// A `define()` nested inside a function body still defines a global
+// constant, so importing it is fine.
 #[test]
-fn a_define_nested_inside_a_function_body_is_not_flagged_either_way() {
+fn a_define_nested_inside_a_function_body_registers_the_constant() {
     let d = diagnostics_for(
         r#"<?php
             function definesSomething(): void {
@@ -847,7 +847,7 @@ fn a_define_nested_inside_a_function_body_is_not_flagged_either_way() {
         "#,
     );
     assert!(
-        d.iter().any(|x| x.identifier == "constant.notFound"),
+        !d.iter().any(|x| x.identifier == "constant.notFound"),
         "got: {d:?}"
     );
 }

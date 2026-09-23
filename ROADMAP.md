@@ -581,7 +581,11 @@ non-int offset, an `ArrayAccess` object given an offset or value its
 `.visibility`, and at level 3 `.nativeType`/`.missingNativeType`/`.type`),
 from `ConstSig`'s new `is_final`/`native_ty`/`has_phpdoc_type`. `ValueAssignedToClassConstantRule`'s `@var`
 half (`classConstant.phpDocType`, and `classConstant.value` against a
-typed constant's `@var`).
+typed constant's `@var`). `ConstantRule` (`constant.notFound`, level 1; a
+`defined('NAME')` test anywhere in the file exempts `NAME`) and
+`MagicConstantContextRule` (`magicConstant.outOfClass`/`.outOfTrait`/
+`.outOfFunction`/`.outOfNamespace`). A `define()` anywhere - a function
+or method body, a loop, a `try` - now registers its global constant.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3623,16 +3627,9 @@ against this list, and added the real gaps the audit had missed.
 
 ### Phase 133 — Constants (`Rules/Constants/` gaps)
 
-- `ConstantRule` (level 1) — a bare undefined global-constant reference;
-  phpstan-rs's `global_constant_type` falls back to `Mixed` for anything
-  not in the table.
 - `DynamicClassConstantFetchRule` — PHP 8.3's `Foo::{$expr}` dynamic
   class-constant fetch; `StaticAccess`'s AST has no way to represent a
   dynamic member name at all.
-- `MagicConstantContextRule` — `__CLASS__`/`__TRAIT__`/`__FUNCTION__`/
-  `__METHOD__`/`__NAMESPACE__` used outside their own context; blocked
-  on phpstan-rs having no dedicated magic-constant `Expr` kind at all
-  (already documented in `registry.rs`).
 - `ValueAssignedToDefineRule`/`ValueAssignedToGlobalConstantRule` — a
   `define()`'d/`const`-declared global constant's value checked against
   a configured `dynamicConstantNames` type.

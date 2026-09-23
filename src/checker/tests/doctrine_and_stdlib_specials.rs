@@ -267,7 +267,10 @@ fn curl_getinfo_with_an_unrecognized_constant_keeps_todays_mixed() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "constant.notFound"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]
