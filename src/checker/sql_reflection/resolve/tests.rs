@@ -368,3 +368,16 @@ fn a_derived_table_over_an_unresolvable_inner_query_falls_through() {
         .is_none()
     );
 }
+
+#[test]
+fn a_nullable_static_schema_column_reads_as_nullable() {
+    let schema = crate::sql_reflection_schema::parse_ddl(
+        "CREATE TABLE t (id int NOT NULL, a datetime DEFAULT NULL, b varchar(10) NULL, PRIMARY KEY (id));",
+        crate::sql_reflection_config::SqlDriver::Mysql,
+    );
+    let row = resolve_from_static_schema(&schema, "SELECT id, a, b FROM t").expect("resolves");
+    assert_eq!(
+        row.to_string(),
+        "array{id: int, a: string|null, b: string|null}"
+    );
+}

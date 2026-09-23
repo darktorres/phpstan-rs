@@ -41,6 +41,7 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
+use crate::checker::type_union::union_types;
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
 use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
@@ -427,6 +428,17 @@ fn resolve_ctes_from_static_schema(
     Some(ctes)
 }
 
+/// What fetching `col` returns - its declared type, or `null` too when
+/// the column is nullable. A derived table's/CTE's columns carry their
+/// nullability in `ty` already.
+fn column_value_type(col: &SchemaColumn) -> Type {
+    if col.nullable {
+        union_types(col.ty.clone(), Type::Null)
+    } else {
+        col.ty.clone()
+    }
+}
+
 fn resolve_select_from_static_schema(
     schema: &SchemaCatalog,
     select: &Select,
@@ -475,24 +487,24 @@ fn resolve_select_from_static_schema(
         match item {
             SelectItem::Wildcard(_) => {
                 for col in &columns {
-                    fields.push((col.name.clone(), col.ty.clone(), false));
+                    fields.push((col.name.clone(), column_value_type(col), false));
                 }
             }
             SelectItem::UnnamedExpr(Expr::Identifier(ident)) => {
                 let col = columns.iter().find(|c| c.name == ident.value)?;
-                fields.push((ident.value.clone(), col.ty.clone(), false));
+                fields.push((ident.value.clone(), column_value_type(col), false));
             }
             SelectItem::UnnamedExpr(Expr::CompoundIdentifier(parts)) => {
                 let col_name = &parts.last()?.value;
                 let col = columns.iter().find(|c| &c.name == col_name)?;
-                fields.push((col_name.clone(), col.ty.clone(), false));
+                fields.push((col_name.clone(), column_value_type(col), false));
             }
             SelectItem::ExprWithAlias {
                 expr: Expr::Identifier(ident),
                 alias,
             } => {
                 let col = columns.iter().find(|c| c.name == ident.value)?;
-                fields.push((alias.value.clone(), col.ty.clone(), false));
+                fields.push((alias.value.clone(), column_value_type(col), false));
             }
             SelectItem::ExprWithAlias {
                 expr: Expr::CompoundIdentifier(parts),
@@ -500,7 +512,7 @@ fn resolve_select_from_static_schema(
             } => {
                 let col_name = &parts.last()?.value;
                 let col = columns.iter().find(|c| &c.name == col_name)?;
-                fields.push((alias.value.clone(), col.ty.clone(), false));
+                fields.push((alias.value.clone(), column_value_type(col), false));
             }
             // A computed/aggregate select item, a qualified wildcard, or
             // anything else this simplified path doesn't model - can't
