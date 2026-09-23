@@ -176,3 +176,38 @@ fn dynamic_class_string_targets_are_decided_where_possible() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn instanceof_static_is_decided_against_the_current_class() {
+    let d = diagnostics_for(
+        r#"<?php
+            class Unrelated {}
+            class Node {
+                public function eq(Unrelated $u, Node $n, object $o): void {
+                    if ($u instanceof static) { echo 1; }
+                    if ($n instanceof static) { echo 2; }
+                    if ($o instanceof static) { echo 3; }
+                }
+            }
+            final class Leaf {
+                public function eq(Leaf $l): void {
+                    if ($l instanceof static) { echo 4; }
+                }
+            }
+        "#,
+    );
+    assert_eq!(
+        instanceof_findings(&d),
+        vec![
+            (
+                "instanceof.alwaysFalse",
+                "Instanceof between Unrelated and Node will always evaluate to false."
+            ),
+            (
+                "instanceof.alwaysTrue",
+                "Instanceof between Leaf and Leaf will always evaluate to true."
+            ),
+        ],
+        "got: {d:?}"
+    );
+}

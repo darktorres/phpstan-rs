@@ -2334,8 +2334,22 @@ impl<'a> Checker<'a> {
                 new_ty
             }
             ExprKind::NewAnonymousClass(decl, args) => {
-                for a in args {
-                    if matches!(a.value.kind, ExprKind::Index(_, None)) {
+                let ctor_params = decl
+                    .methods
+                    .iter()
+                    .find(|m| m.function.name.eq_ignore_ascii_case("__construct"))
+                    .map(|m| m.function.params.as_slice())
+                    .unwrap_or_default();
+                for (i, a) in args.iter().enumerate() {
+                    let param = match &a.name {
+                        Some(name) => ctor_params.iter().find(|p| *p.name == **name),
+                        None => ctor_params
+                            .get(i)
+                            .or_else(|| ctor_params.last().filter(|p| p.variadic)),
+                    };
+                    if matches!(a.value.kind, ExprKind::Index(_, None))
+                        && param.is_some_and(|p| p.by_ref)
+                    {
                         self.by_ref_empty_dim_args.borrow_mut().insert(a.value.span);
                     }
                     self.check_expr(&a.value, locals, label);

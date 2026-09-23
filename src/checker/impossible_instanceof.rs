@@ -24,8 +24,9 @@ impl<'a> Checker<'a> {
         is_exempt_last_condition: bool,
     ) {
         let expr_ty = self.infer_expr(inner, locals);
-        // A dynamic `class-string<C>` target names `C` or any subclass of
-        // it, so only "never" carries over, or "always" when `C` is final.
+        // A dynamic `class-string<C>` target, like `static`, names `C` or
+        // any subclass of it, so only "never" carries over, or "always"
+        // when `C` is final.
         let (class, only_subclass_known) = match target {
             InstanceofTarget::Expr(target_expr) => {
                 let target_ty = self.infer_expr(target_expr, locals);
@@ -50,10 +51,14 @@ impl<'a> Checker<'a> {
                     _ => return,
                 }
             }
-            InstanceofTarget::Name(name, _) => {
-                if name.eq_ignore_ascii_case("static") {
+            // `static` names the current class or any subclass of it.
+            InstanceofTarget::Name(name, _) if name.eq_ignore_ascii_case("static") => {
+                let Some(class) = self.current_class.clone() else {
                     return;
-                }
+                };
+                (class, true)
+            }
+            InstanceofTarget::Name(name, _) => {
                 let Type::Object(class, _) = self.resolve_name_expr(name) else {
                     return;
                 };
