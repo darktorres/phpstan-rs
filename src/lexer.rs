@@ -336,6 +336,12 @@ impl<'a> Lexer<'a> {
 
         if self.starts_with("?>") {
             self.pos += 2;
+            // A single newline right after `?>` belongs to the tag.
+            if self.starts_with("\r\n") {
+                self.pos += 2;
+            } else if self.starts_with("\n") {
+                self.pos += 1;
+            }
             // ?> implies a statement terminator in real PHP; the parser
             // treats end-of-inline-html the same as a semicolon boundary.
             self.in_php = false;

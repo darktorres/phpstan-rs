@@ -102,4 +102,5 @@ mod uninitialized;
 mod uninitialized_dataflow;
 mod unused_symbols;
 mod visibility;
+mod whitespace;
 mod xml_validity;

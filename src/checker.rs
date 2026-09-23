@@ -1226,6 +1226,7 @@ mod uninitialized;
 mod uninitialized_dataflow;
 mod unused;
 mod visibility;
+mod whitespace;
 pub(crate) mod whole_program;
 mod xml_name;
 mod xml_wellformedness;
@@ -1698,6 +1699,7 @@ impl<'a> Checker<'a> {
                 self.include_guarded_paths = self.collect_include_guards(program);
             }
             self.check_declare_directives(program);
+            self.check_file_whitespace(program);
             self.check_statement_keywords(program, "<main>");
         }
         if !self.facts_only {

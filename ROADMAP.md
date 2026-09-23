@@ -613,6 +613,11 @@ same file (resolved through their initializers, so `__DIR__` there is
 this file's), checked against the cwd and the file's own directory; a
 directory is not a file, and a path the file tests with
 `file_exists()`/`is_file()`/`is_readable()` is skipped.
+`FileWhitespaceRule`: a leading UTF-8 BOM (`whitespace.bom`), whitespace
+before the first `<?php` (`whitespace.fileStart`), and whitespace after
+the last `?>` of the file, a namespace, or a `declare` block
+(`whitespace.fileEnd`); the lexer keeps the single newline after `?>`
+as part of the tag, as PHP does.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3685,9 +3690,6 @@ receiver-type-checks phase.)
 
 ### Phase 139 — DeadCode+EnumCases+Namespaces+Regexp+Ignore+Missing+Names+Types+Whitespace (mixed small gaps)
 
-- `Rules/Whitespace/FileWhitespaceRule` — a leading UTF-8 BOM
-  (`whitespace.bom`) and a whitespace-only closing-tag remnant as the
-  file's last statement (`whitespace.fileEnd`).
 - `Rules/Types/InvalidTypesInUnionRule` — rejecting `mixed`/`never`/
   `void` inside a union or nullable type on a param/return/property.
 - `Rules/Ignore/IgnoreParseErrorRule` — a non-ignorable diagnostic for
