@@ -244,6 +244,14 @@ pub(crate) fn walk_expr_for_members(
                 usage.consts.insert(Arc::from(member.as_str()));
             }
         }
+        ExprKind::DynamicClassConstFetch(class_ref, name) => match &name.kind {
+            ExprKind::Literal(Literal::String(member)) => {
+                if class_ref_is_self(class_ref, fqn, ctx) {
+                    usage.consts.insert(Arc::from(member.as_ref()));
+                }
+            }
+            _ => usage.escaped = true,
+        },
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
             usage.methods.insert(name.clone());
         }

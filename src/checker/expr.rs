@@ -2694,10 +2694,35 @@ impl<'a> Checker<'a> {
                     _ => Type::Mixed(false),
                 }
             }
-            ExprKind::DynamicClassConstFetch(_, name) => {
+            ExprKind::DynamicClassConstFetch(class_name, name) => {
                 let name_ty = self.check_expr(name, locals, label);
                 self.check_dynamic_class_constant_fetch(&name_ty, e.span, label);
-                Type::Mixed(false)
+                let literal_names: Option<Vec<String>> = match &name_ty {
+                    Type::StringLiteral(s) => Some(vec![s.clone()]),
+                    Type::Union(members) => members
+                        .iter()
+                        .map(|m| match m {
+                            Type::StringLiteral(s) => Some(s.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => None,
+                };
+                let fetch = |member: String| Expr {
+                    kind: ExprKind::StaticAccess(class_name.clone(), member),
+                    span: e.span,
+                };
+                match literal_names {
+                    Some(names) if !names.is_empty() => names
+                        .into_iter()
+                        .map(|n| self.check_expr(&fetch(n), locals, label))
+                        .reduce(crate::checker::type_union::union_types)
+                        .unwrap_or(Type::Mixed(false)),
+                    _ => {
+                        self.check_expr(&fetch("{dynamic}".to_string()), locals, label);
+                        Type::Mixed(false)
+                    }
+                }
             }
             ExprKind::StaticAccess(class_name, member) => {
                 // `Foo::class` (member == "class") always resolves to a
@@ -4677,6 +4702,33 @@ impl<'a> Checker<'a> {
                             self.resolve_static_call_return(&resolved, target, &class)
                         })
                     })
+                    .unwrap_or(Type::Mixed(false))
+            }
+            ExprKind::DynamicClassConstFetch(class_name, name) => {
+                let names: Option<Vec<String>> = match self.infer_expr(name, locals) {
+                    Type::StringLiteral(s) => Some(vec![s]),
+                    Type::Union(members) => members
+                        .into_iter()
+                        .map(|m| match m {
+                            Type::StringLiteral(s) => Some(s),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => None,
+                };
+                names
+                    .into_iter()
+                    .flatten()
+                    .map(|member| {
+                        self.infer_expr(
+                            &Expr {
+                                kind: ExprKind::StaticAccess(class_name.clone(), member),
+                                span: e.span,
+                            },
+                            locals,
+                        )
+                    })
+                    .reduce(crate::checker::type_union::union_types)
                     .unwrap_or(Type::Mixed(false))
             }
             ExprKind::StaticAccess(class_name, member) => {

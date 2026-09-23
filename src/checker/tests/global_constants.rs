@@ -171,3 +171,21 @@ fn a_dynamic_define_site_poisons_a_literal_one_regardless_of_order() {
     );
     assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
 }
+
+#[test]
+fn a_dynamic_fetch_with_a_literal_name_resolves_like_a_static_one() {
+    let d = diagnostics_for_with(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class Config { const LEVEL = 3; }
+            function f(): mixed {
+                $name = 'LEVEL';
+                assertType('3', Config::{$name});
+                return Config::{'MISSING'};
+            }
+        "#,
+        |r| r.php_version = Some((8, 3)),
+    );
+    let ids: Vec<&str> = d.iter().map(|x| x.identifier.as_str()).collect();
+    assert_eq!(ids, vec!["classConstant.notFound"], "{d:?}");
+}
