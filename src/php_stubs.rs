@@ -188,6 +188,12 @@ fn patch_usleep(stubs: &mut [(Arc<str>, FunctionSig)]) {
 /// real PHPStan-bundled dynamic-return-type extension either, so bare
 /// (whatever the native/PHPDoc return type already resolves to) is
 /// already the correct real-PHPStan-matching answer for all of them too.
+///
+/// Where a later `functionMap_php*delta.php` revises one of these, the
+/// newest revision is used - the same newest-PHP reading phpstorm-stubs'
+/// own `LanguageLevelTypeAware` attributes get (`proc_get_status` lost
+/// its `|false` in 8.0, `session_get_cookie_params` gained `partitioned`
+/// in 8.5).
 fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionSig)]) {
     let date_parse_shape = types::parse_type_string(
         "array{year: int|false, month: int|false, day: int|false, hour: int|false, \
@@ -245,7 +251,7 @@ fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionSig)]) {
             &types::parse_type_string(
                 "array{lifetime: 0|positive-int, path: non-falsy-string, domain: string, \
                  secure: bool, httponly: bool, \
-                 samesite: 'None'|'Lax'|'Strict'|'none'|'lax'|'strict'}",
+                 samesite: 'None'|'Lax'|'Strict'|'none'|'lax'|'strict', partitioned: bool}",
             ),
         ),
         ("posix_getpwnam", &posix_pw_shape),
@@ -287,7 +293,7 @@ fn patch_functionmap_array_shapes(stubs: &mut [(Arc<str>, FunctionSig)]) {
             "proc_get_status",
             &types::parse_type_string(
                 "array{command: string, pid: int, running: bool, signaled: bool, stopped: bool, \
-                 exitcode: int, termsig: int, stopsig: int}|false",
+                 exitcode: int, termsig: int, stopsig: int}",
             ),
         ),
         (

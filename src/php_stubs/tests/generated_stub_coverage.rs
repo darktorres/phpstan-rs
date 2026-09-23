@@ -119,3 +119,22 @@ fn array_keys_and_mt_rand_s_optional_trailing_params_are_not_miscounted() {
         );
     }
 }
+
+#[test]
+fn patched_return_shapes_follow_the_newest_function_map_delta() {
+    let stubs = generated_stubs();
+    let return_of = |name: &str| {
+        stubs
+            .iter()
+            .find(|(n, _)| n.as_ref() == name)
+            .map(|(_, sig)| sig.return_type.to_string())
+            .unwrap_or_else(|| panic!("{name} should be generated"))
+    };
+    let proc_status = return_of("proc_get_status");
+    assert!(!proc_status.contains("false"), "got: {proc_status}");
+    let cookie_params = return_of("session_get_cookie_params");
+    assert!(
+        cookie_params.contains("partitioned: bool"),
+        "got: {cookie_params}"
+    );
+}
