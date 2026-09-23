@@ -548,10 +548,12 @@ fn conditional_return_type_syntax_parses_into_a_real_conditional_type() {
         if_true,
         if_false,
         negated,
+        template_subject,
     } = ty
     else {
         panic!("expected a real Conditional type, got {ty:?}");
     };
+    assert!(!template_subject);
     assert_eq!(subject, "action");
     assert_eq!(*target, Type::StringLiteral("send".to_string()));
     assert_eq!(*if_true, parse_type_string("list<string>"));
@@ -577,12 +579,18 @@ fn conditional_return_type_syntax_with_is_not_sets_negated() {
 // "union both branches" leniency rather than guessing at a shape it
 // can't represent.
 #[test]
-fn conditional_return_type_syntax_with_a_non_parameter_subject_falls_back_to_a_union() {
+fn conditional_return_type_syntax_with_a_template_subject_keeps_its_condition() {
     let ty = parse_type_string("(T is 'send' ? list<string> : list<int>)");
-    let Type::Union(members) = ty else {
-        panic!("expected a union of both branches, got {ty:?}");
+    let Type::Conditional {
+        subject,
+        template_subject,
+        ..
+    } = ty
+    else {
+        panic!("expected a template-subject conditional, got {ty:?}");
     };
-    assert_eq!(members.len(), 2);
+    assert_eq!(subject, "T");
+    assert!(template_subject);
 }
 
 // A docblock-parsed `list<int>` builds its key as a literal `Type::Int`

@@ -416,8 +416,16 @@ impl Registry {
             for sig in info.methods.values_mut() {
                 for param in &mut sig.params {
                     resolve(&mut param.ty, &param.ty_native, &self.classes);
-                    if let Some(doc_ty) = &mut param.doc_ty {
-                        resolve(doc_ty, &param.ty_native, &self.classes);
+                    let native = param.ty_native.clone();
+                    for extra in [
+                        &mut param.doc_ty,
+                        &mut param.out_ty,
+                        &mut param.closure_this_type,
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        resolve(extra, &native, &self.classes);
                     }
                 }
                 resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
@@ -501,8 +509,16 @@ impl Registry {
         for sig in self.functions.values_mut() {
             for param in &mut sig.params {
                 resolve(&mut param.ty, &param.ty_native, &self.classes);
-                if let Some(doc_ty) = &mut param.doc_ty {
-                    resolve(doc_ty, &param.ty_native, &self.classes);
+                let native = param.ty_native.clone();
+                for extra in [
+                    &mut param.doc_ty,
+                    &mut param.out_ty,
+                    &mut param.closure_this_type,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    resolve(extra, &native, &self.classes);
                 }
             }
             resolve(&mut sig.return_type, &sig.return_type_native, &self.classes);
@@ -1378,9 +1394,10 @@ fn class_has_deferred_type(info: &ClassInfo) -> bool {
                 .is_some_and(type_contains_deferred_value_of)
             || sig.params.iter().any(|p| {
                 type_contains_deferred_value_of(&p.ty)
-                    || p.doc_ty
-                        .as_ref()
-                        .is_some_and(type_contains_deferred_value_of)
+                    || [&p.doc_ty, &p.out_ty, &p.closure_this_type]
+                        .into_iter()
+                        .flatten()
+                        .any(type_contains_deferred_value_of)
             })
     }) || info
         .extends_args
@@ -1944,6 +1961,16 @@ fn fixed_sig(
             && let Some(ty) = lookup(registry, doc)
         {
             fixed.get_or_insert_with(|| sig.clone()).params[i].doc_ty = Some(ty);
+        }
+        if let Some(out) = &p.out_ty
+            && let Some(ty) = lookup(registry, out)
+        {
+            fixed.get_or_insert_with(|| sig.clone()).params[i].out_ty = Some(ty);
+        }
+        if let Some(this) = &p.closure_this_type
+            && let Some(ty) = lookup(registry, this)
+        {
+            fixed.get_or_insert_with(|| sig.clone()).params[i].closure_this_type = Some(ty);
         }
     }
     if let Some(ty) = lookup(registry, &sig.return_type) {

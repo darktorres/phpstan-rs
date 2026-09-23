@@ -353,6 +353,7 @@ impl<'a> Checker<'a> {
                     std::mem::replace(&mut self.current_class, class_name.map(str::to_string));
                 self.check_default_parameter_types(f, sig, class_name, &label);
                 self.check_phpdoc_types_against_native(f, sig, class_name, &label);
+                self.check_conditional_types(f, sig, class_name, &label);
                 self.current_class = previous_class;
             }
             // Mirrors real PHPStan's `TemplateTypeCheck`'s declaration-

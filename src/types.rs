@@ -7,6 +7,7 @@ mod subtype;
 mod templates;
 
 pub use conditional::resolve_conditional;
+pub(crate) use conditional::{conditional_branch, union_of_branches};
 pub use parse::parse_type_string;
 pub(crate) use parse::{canonical_int_key, strip_call_site_variance};
 pub use subtype::is_subtype;
@@ -156,6 +157,9 @@ pub enum Type {
         if_true: Box<Type>,
         if_false: Box<Type>,
         negated: bool,
+        // `subject` names a `@template` (`(T is int ? A : B)`), resolved
+        // once the template is bound, rather than a parameter.
+        template_subject: bool,
     },
 }
 
@@ -207,6 +211,7 @@ impl PartialEq for Type {
                     if_true: a_if_true,
                     if_false: a_if_false,
                     negated: a_negated,
+                    template_subject: a_template,
                 },
                 Type::Conditional {
                     subject: b_subject,
@@ -214,9 +219,11 @@ impl PartialEq for Type {
                     if_true: b_if_true,
                     if_false: b_if_false,
                     negated: b_negated,
+                    template_subject: b_template,
                 },
             ) => {
-                a_subject == b_subject
+                a_template == b_template
+                    && a_subject == b_subject
                     && a_target == b_target
                     && a_if_true == b_if_true
                     && a_if_false == b_if_false
@@ -351,12 +358,14 @@ impl Type {
                 if_true,
                 if_false,
                 negated,
+                template_subject,
             } => Type::Conditional {
                 subject: subject.clone(),
                 target: Box::new(f(target)),
                 if_true: Box::new(f(if_true)),
                 if_false: Box::new(f(if_false)),
                 negated: *negated,
+                template_subject: *template_subject,
             },
             leaf => leaf.clone(),
         }

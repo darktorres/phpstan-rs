@@ -166,6 +166,12 @@ fn an_undecidable_conditional_subject_keeps_both_branches() {
             }
         "#,
     );
+    // `g`'s own condition can never hold for its `int|string` parameter -
+    // reported as such, which isn't what this test is about.
+    let d: Vec<_> = d
+        .into_iter()
+        .filter(|x| x.identifier != "conditionalType.alwaysFalse")
+        .collect();
     assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
 }
 
@@ -211,6 +217,105 @@ fn an_uninferred_template_in_a_conditional_branch_resolves_to_its_bound() {
             /** @param array<string, mixed> $params */
             function f(array $params): void {
                 assertType('Connection', DriverManager::getConnection($params));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn a_template_subject_conditional_resolves_once_the_template_is_bound() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            /**
+             * @template T
+             * @param T $value
+             * @return (T is int ? 'int' : 'other')
+             */
+            function kind($value): string { return is_int($value) ? 'int' : 'other'; }
+            function f(): void {
+                assertType("'int'", kind(5));
+                assertType("'other'", kind('x'));
+                assertType("'int'|'other'", kind(rand() ? 1 : 'x'));
+            }
+        "#,
+    );
+    assert!(d.is_empty(), "assertType() mismatch(es): {d:?}");
+}
+
+#[test]
+fn conditional_return_declarations_are_validated() {
+    let d = diagnostics_for(
+        r#"<?php
+            /**
+             * @return ($missing is int ? int : string)
+             */
+            function a(int $x): int|string { return 1; }
+            /**
+             * @return (Foo is int ? int : string)
+             */
+            function b(int $x): int|string { return 1; }
+            /**
+             * @return ($x is int ? int : string)
+             */
+            function c(int $x): int|string { return 1; }
+            /**
+             * @return ($x is not string ? int : string)
+             */
+            function d(int $x): int|string { return 1; }
+            /**
+             * @return ($x is int ? int : string)
+             */
+            function e(int|string $x): int|string { return 1; }
+        "#,
+    );
+    let m: Vec<(&str, &str)> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("conditionalType.") || x.identifier == "parameter.notFound"
+        })
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        m,
+        [
+            (
+                "parameter.notFound",
+                "Conditional return type references unknown parameter $missing."
+            ),
+            (
+                "conditionalType.subjectNotFound",
+                "Conditional return type uses subject type Foo which is not part of PHPDoc @template tags."
+            ),
+            (
+                "conditionalType.alwaysTrue",
+                "Condition \"int is int\" in conditional return type is always true."
+            ),
+            (
+                "conditionalType.alwaysTrue",
+                "Condition \"int is not string\" in conditional return type is always true."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn a_class_template_conditional_resolves_through_the_template_default() {
+    let d = diagnostics_for(
+        r#"<?php
+            use function PHPStan\Testing\assertType;
+            class ArrayNode {}
+            class ScalarNode {}
+            /** @template T of 'array'|'scalar' = 'array' */
+            class Builder {
+                /** @return (T is 'array' ? ArrayNode : ScalarNode) */
+                public function root(): object { return new ArrayNode(); }
+            }
+            /** @param Builder<'scalar'> $s */
+            function f(Builder $s): void {
+                assertType('ArrayNode', (new Builder())->root());
+                assertType('ScalarNode', $s->root());
             }
         "#,
     );

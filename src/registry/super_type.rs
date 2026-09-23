@@ -70,6 +70,7 @@ impl Registry {
             (_, Type::Union(members)) => {
                 Trinary::all(members.iter().map(|m| self.is_super_type_of(sup, m)))
             }
+            (_, Type::TemplateParam(tp)) => self.is_super_type_of(sup, &tp.bound),
             (
                 _,
                 Type::Conditional {
@@ -83,7 +84,6 @@ impl Registry {
             (Type::Union(members), _) => {
                 Trinary::any(members.iter().map(|m| self.is_super_type_of(m, sub)))
             }
-            (_, Type::TemplateParam(tp)) => self.is_super_type_of(sup, &tp.bound),
             (_, Type::Mixed(_)) | (Type::TemplateParam(_), _) => Trinary::Maybe,
             (Type::Void, Type::Void) => Trinary::Yes,
             (Type::Void, _) | (_, Type::Void) => Trinary::No,
@@ -104,6 +104,54 @@ impl Registry {
                 Type::Float | Type::FloatLiteral(_),
                 Type::Int | Type::IntLiteral(_) | Type::IntRange(..),
             ) => Trinary::No,
+            // A plain string may or may not name a class.
+            (Type::ClassString(_), Type::String | Type::StringLiteral(_)) => Trinary::Maybe,
+            (Type::ClassString(_), Type::Intersection(ms))
+                if !ms.iter().any(|m| matches!(m, Type::ClassString(_))) =>
+            {
+                Trinary::Maybe
+            }
+            // A class name the registry never saw (or an unresolved
+            // constant reference) proves nothing; `is_assignable` would
+            // accept anything into it.
+            (Type::Object(name, _), _) | (_, Type::Object(name, _))
+                if is_unresolved_reference(name) =>
+            {
+                Trinary::Maybe
+            }
+            (Type::Object(a, a_args), Type::Object(b, b_args))
+                if a == b && a_args.is_empty() && b_args.is_empty() =>
+            {
+                Trinary::Yes
+            }
+            (Type::Object(a, _), Type::Object(b, _))
+                if [a, b]
+                    .iter()
+                    .any(|n| !is_sentinel_class(n) && self.lookup_class(n).is_none()) =>
+            {
+                Trinary::Maybe
+            }
+            (Type::ArrayShape(sup_fields), Type::ArrayShape(sub_fields)) => {
+                self.shape_super_type_of(sup_fields, sub_fields)
+            }
+            // Arrays compare structurally: `is_assignable` reads an
+            // `array<mixed>` value as "unknown" and lets it fit any array,
+            // right for accepting an argument but not for "always". An
+            // empty array fits every array type, so this is never `No`.
+            (Type::Array(sk, sv), Type::Array(k, v)) => {
+                // Every PHP array key is an `int|string`.
+                let key = if self.is_super_type_of(sk, &Type::unknown_array_key()) == Trinary::Yes {
+                    Trinary::Yes
+                } else {
+                    self.is_super_type_of(sk, k)
+                };
+                match Trinary::all([key, self.is_super_type_of(sv, v)].into_iter()) {
+                    Trinary::Yes => Trinary::Yes,
+                    _ => Trinary::Maybe,
+                }
+            }
+            // A general array may or may not carry a shape's keys.
+            (Type::ArrayShape(_), Type::Array(..)) => Trinary::Maybe,
             _ if self.is_assignable(sub, sup) => Trinary::Yes,
             (_, Type::Intersection(members)) => {
                 let refused = members
@@ -116,6 +164,56 @@ impl Registry {
             _ if types::types_definitely_disjoint(sup, sub) => Trinary::No,
             (Type::Accessory(kind), _) if accessory_refuses(kind, sub) => Trinary::No,
             _ => Trinary::Maybe,
+        }
+    }
+
+    /// `ConstantArrayType::isSuperTypeOf` between two shapes: every key
+    /// `sup` requires must be one `sub` always has, with a value `sup`
+    /// accepts; a key `sup` doesn't declare is fine only when `sup` is
+    /// unsealed.
+    fn shape_super_type_of(
+        &self,
+        sup: &[(String, Type, bool)],
+        sub: &[(String, Type, bool)],
+    ) -> Trinary {
+        let sealed = |fields: &[(String, Type, bool)]| !fields.iter().any(|(k, _, _)| k == "...");
+        let mut results = Vec::new();
+        for (key, sup_ty, sup_optional) in sup.iter().filter(|(k, _, _)| k != "...") {
+            match sub.iter().find(|(k, _, _)| k == key) {
+                Some((_, sub_ty, sub_optional)) => {
+                    let value = self.is_super_type_of(sup_ty, sub_ty);
+                    results.push(if *sub_optional && !*sup_optional {
+                        // Present only sometimes: never always.
+                        match value {
+                            Trinary::No => Trinary::No,
+                            _ => Trinary::Maybe,
+                        }
+                    } else {
+                        value
+                    });
+                }
+                None if *sup_optional => {}
+                None if sealed(sub) => results.push(Trinary::No),
+                None => results.push(Trinary::Maybe),
+            }
+        }
+        if sealed(sup) {
+            for (key, _, optional) in sub.iter().filter(|(k, _, _)| k != "...") {
+                if !sup.iter().any(|(k, _, _)| k == key) {
+                    results.push(if *optional {
+                        Trinary::Maybe
+                    } else {
+                        Trinary::No
+                    });
+                }
+            }
+        }
+        if results.contains(&Trinary::No) {
+            Trinary::No
+        } else if results.contains(&Trinary::Maybe) {
+            Trinary::Maybe
+        } else {
+            Trinary::Yes
         }
     }
 
@@ -219,4 +317,16 @@ fn benevolent_inner(members: &[Type]) -> Type {
         1 => rest.into_iter().next().unwrap(),
         _ => Type::Intersection(rest),
     }
+}
+
+/// The `Object` names that stand for a value kind rather than a class.
+/// An unresolved `$$` sentinel isn't one: it proves nothing either way.
+fn is_sentinel_class(name: &str) -> bool {
+    matches!(name, "object" | "resource" | "closed-resource")
+}
+
+/// A constant reference (`Foo::BAR`) or `$$` sentinel left unresolved:
+/// its real type is unknown, so it proves nothing either way.
+fn is_unresolved_reference(name: &str) -> bool {
+    name.contains("::") || name.starts_with("$$")
 }

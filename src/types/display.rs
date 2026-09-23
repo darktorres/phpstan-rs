@@ -165,9 +165,11 @@ impl fmt::Display for Type {
                 if_true,
                 if_false,
                 negated,
+                template_subject,
             } => write!(
                 f,
-                "(${subject} is {}{target} ? {if_true} : {if_false})",
+                "({}{subject} is {}{target} ? {if_true} : {if_false})",
+                if *template_subject { "" } else { "$" },
                 if *negated { "not " } else { "" },
             ),
         }

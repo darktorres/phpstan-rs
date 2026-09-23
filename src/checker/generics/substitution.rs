@@ -75,10 +75,21 @@ impl<'a> Checker<'a> {
             .get(owner)
             .is_some_and(|c| !c.templates.is_empty())
         {
-            scoped_bindings.push((
-                owner.to_string(),
-                self.class_template_bindings(class, type_args, owner),
-            ));
+            let mut bindings = self.class_template_bindings(class, type_args, owner);
+            // An erased receiver's templates with a declared default take
+            // it (`@template T = 'array'`), so a conditional on `T`
+            // resolves; one without a default stays the `Mixed` wildcard.
+            if let Some(info) = self.registry.classes.get(owner) {
+                for name in &info.templates {
+                    if !bindings.contains_key(name.as_ref())
+                        && let Some(default) = info.template_defaults.get(name)
+                    {
+                        let default = substitute_scoped(default, &bindings, owner);
+                        bindings.insert(name.to_string(), default);
+                    }
+                }
+            }
+            scoped_bindings.push((owner.to_string(), bindings));
         } else if signature_references_any_template(sig) {
             // `owner` (the class `lookup_method_with_owner` says
             // lexically declares this signature) can itself declare no
@@ -304,6 +315,33 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                 .map(|a| substitute_scoped(a, bindings, scope))
                 .collect(),
         ),
+        Type::Callable(Some(_)) | Type::HasOffsetValue(..) | Type::ReflectedMember(..) => {
+            ty.map_children(&mut |t| substitute_scoped(t, bindings, scope))
+        }
+        // A conditional on one of this class's templates resolves once
+        // that template is bound, like `types::substitute_template`'s.
+        Type::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+            template_subject: true,
+        } if bindings
+            .get(subject)
+            .is_some_and(|b| !matches!(b, Type::Mixed(_))) =>
+        {
+            let target = substitute_scoped(target, bindings, scope);
+            match crate::types::conditional_branch(&bindings[subject], &target, *negated) {
+                Some(true) => substitute_scoped(if_true, bindings, scope),
+                Some(false) => substitute_scoped(if_false, bindings, scope),
+                None => crate::types::union_of_branches(
+                    substitute_scoped(if_true, bindings, scope),
+                    substitute_scoped(if_false, bindings, scope),
+                ),
+            }
+        }
+        Type::Conditional { .. } => ty.map_children(&mut |t| substitute_scoped(t, bindings, scope)),
         other => other.clone(),
     }
 }
@@ -328,6 +366,26 @@ fn type_references_template(ty: &Type) -> bool {
             fields.iter().any(|(_, t, _)| type_references_template(t))
         }
         Type::Object(_, args) => args.iter().any(type_references_template),
+        Type::Callable(Some(_))
+        | Type::Conditional { .. }
+        | Type::HasOffsetValue(..)
+        | Type::ReflectedMember(..) => {
+            let mut found = false;
+            let _ = ty.map_children(&mut |t| {
+                found |= type_references_template(t);
+                t.clone()
+            });
+            // A template-subject conditional names its template by
+            // `subject` alone.
+            found
+                || matches!(
+                    ty,
+                    Type::Conditional {
+                        template_subject: true,
+                        ..
+                    }
+                )
+        }
         _ => false,
     }
 }

@@ -433,12 +433,14 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
             if_true,
             if_false,
             negated,
+            template_subject,
         } => Type::Conditional {
             subject,
             target: Box::new(resolve_names_in_type(*target, ctx)),
             if_true: Box::new(resolve_names_in_type(*if_true, ctx)),
             if_false: Box::new(resolve_names_in_type(*if_false, ctx)),
             negated,
+            template_subject,
         },
         other => other,
     }

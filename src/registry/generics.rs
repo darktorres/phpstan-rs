@@ -305,6 +305,7 @@ impl Registry {
                 if_true,
                 if_false,
                 negated,
+                template_subject,
             } => {
                 let sub = |t: &Type| {
                     Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
@@ -315,6 +316,7 @@ impl Registry {
                     if_true: Box::new(sub(if_true)),
                     if_false: Box::new(sub(if_false)),
                     negated: *negated,
+                    template_subject: *template_subject,
                 }
             }
             Type::HasOffsetValue(key, inner) => Type::HasOffsetValue(

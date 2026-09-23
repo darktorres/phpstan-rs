@@ -273,18 +273,44 @@ fn substitute(
         // branches (`@return ($x is T ? T : null)`, a real, if narrower,
         // shape) would silently keep reading as the bare, unsubstituted
         // template instead of the caller's actual bound type.
+        // A template-subject conditional (`(T is int ? A : B)`) resolves
+        // once `T` is bound, the way real PHPStan's `ConditionalType`
+        // does; otherwise both branches stay.
         Type::Conditional {
             subject,
             target,
             if_true,
             if_false,
             negated,
+            template_subject: true,
+        } if bindings
+            .get(subject)
+            .is_some_and(|b| !matches!(b, Type::Mixed(_))) =>
+        {
+            let target = substitute(target, bindings, to_bound);
+            match super::conditional::conditional_branch(&bindings[subject], &target, *negated) {
+                Some(true) => substitute(if_true, bindings, to_bound),
+                Some(false) => substitute(if_false, bindings, to_bound),
+                None => super::conditional::union_of_branches(
+                    substitute(if_true, bindings, to_bound),
+                    substitute(if_false, bindings, to_bound),
+                ),
+            }
+        }
+        Type::Conditional {
+            subject,
+            target,
+            if_true,
+            if_false,
+            negated,
+            template_subject,
         } => Type::Conditional {
             subject: subject.clone(),
             target: Box::new(substitute(target, bindings, to_bound)),
             if_true: Box::new(substitute(if_true, bindings, to_bound)),
             if_false: Box::new(substitute(if_false, bindings, to_bound)),
             negated: *negated,
+            template_subject: *template_subject,
         },
         other => other.clone(),
     }

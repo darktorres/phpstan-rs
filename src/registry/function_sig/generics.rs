@@ -94,12 +94,14 @@ pub(crate) fn substitute_type_aliases(ty: Type, aliases: &HashMap<Arc<str>, Type
             if_true,
             if_false,
             negated,
+            template_subject,
         } => Type::Conditional {
             subject,
             target: Box::new(substitute_type_aliases(*target, aliases)),
             if_true: Box::new(substitute_type_aliases(*if_true, aliases)),
             if_false: Box::new(substitute_type_aliases(*if_false, aliases)),
             negated,
+            template_subject,
         },
         other => other,
     }
@@ -263,12 +265,14 @@ pub(crate) fn mark_template_params(ty: Type, params: &HashMap<String, TemplatePa
             if_true,
             if_false,
             negated,
+            template_subject,
         } => Type::Conditional {
             subject,
             target: Box::new(mark_template_params(*target, params)),
             if_true: Box::new(mark_template_params(*if_true, params)),
             if_false: Box::new(mark_template_params(*if_false, params)),
             negated,
+            template_subject,
         },
         other => other,
     }

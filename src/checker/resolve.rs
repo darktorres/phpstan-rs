@@ -409,12 +409,14 @@ impl<'a> Checker<'a> {
                 if_true,
                 if_false,
                 negated,
+                template_subject,
             } => Type::Conditional {
                 subject: subject.clone(),
                 target: Box::new(self.resolve_pseudo(target, defining_class)),
                 if_true: Box::new(self.resolve_pseudo(if_true, defining_class)),
                 if_false: Box::new(self.resolve_pseudo(if_false, defining_class)),
                 negated: *negated,
+                template_subject: *template_subject,
             },
             // `Closure(self): static` - a callable shape's own parameter
             // and return types.

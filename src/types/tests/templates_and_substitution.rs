@@ -70,6 +70,7 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
         if_true: Box::new(t()),
         if_false: Box::new(Type::Null),
         negated: false,
+        template_subject: false,
     };
     assert_eq!(
         substitute_template(&conditional, &bindings),
@@ -79,6 +80,7 @@ fn substitute_template_recurses_into_a_conditional_types_branches() {
             if_true: Box::new(Type::Int),
             if_false: Box::new(Type::Null),
             negated: false,
+            template_subject: false,
         }
     );
 }

@@ -217,15 +217,12 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     };
     let if_true = parse_type_string(true_branch);
     let if_false = parse_type_string(false_branch);
-    // Only a bare `$param` subject is modeled (real PHPStan also allows a
-    // non-parameter type-expression subject, e.g. a template name) -
-    // fall back to the eager union for that unmodeled shape.
-    let Some(subject) = subject_raw.trim().strip_prefix('$') else {
-        return Some(if if_true == if_false {
-            if_true
-        } else {
-            Type::Union(vec![if_true, if_false])
-        });
+    // `$param is ...` resolves per call from the argument; any other
+    // subject (`T is ...`) names a template, resolved when it's bound.
+    let subject_raw = subject_raw.trim();
+    let (subject, template_subject) = match subject_raw.strip_prefix('$') {
+        Some(param) => (param, false),
+        None => (subject_raw, true),
     };
     Some(Type::Conditional {
         subject: subject.to_string(),
@@ -233,6 +230,7 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
         if_true: Box::new(if_true),
         if_false: Box::new(if_false),
         negated,
+        template_subject,
     })
 }
 

@@ -1110,7 +1110,17 @@ PHPStan's descriptions do. A second declaration of a top-level function
 (another file, a polyfill branch, a merged overload) is checked against
 its own signature: the registry records which declaration fills each
 function slot (`function_decl_sites`), and any other declaration is
-rebuilt and finalized on its own (`Registry::finalize_standalone_sig`). **`function.alreadyNarrowedType`** answers
+rebuilt and finalized on its own (`Registry::finalize_standalone_sig`).
+**`conditionalType.subjectNotFound`/`.alwaysTrue`/`.alwaysFalse`** and
+a conditional's unknown-parameter `parameter.notFound` validate each
+conditional type a declaration's own PHPDoc writes. A template-subject
+conditional (`(T is 'array' ? A : B)`) is now modeled, not collapsed to
+its branches: it resolves once `T` is bound, by a call's inference or a
+class's type arguments, falling back to the template's declared default
+on an erased receiver. `Registry::is_super_type_of` compares arrays and
+shapes structurally (optional vs required keys), keeps `string` a
+`Maybe` for `class-string`, and treats an unresolved constant reference
+or unknown class name as proving nothing. **`function.alreadyNarrowedType`** answers
 "always true" through that strict relation, so `is_string()` on a
 benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
@@ -1354,6 +1364,11 @@ Part 11) keep coming back to:
   by default.
 
 ---
+
+Lane ownership for the remaining large phases (two instances working in
+parallel): Lane A owns H (Phase 87), X (Phase 91), P (Phase 94) and Part
+11; Lane B owns Part 10, V (Phase 89) and AA (Phase 97), plus any Part 11
+item that is purely a new rule, named to Lane A before it's taken.
 
 ## Part 1: Precision, whole-program analysis, and closed-world inference
 
@@ -3655,9 +3670,6 @@ against this list, and added the real gaps the audit had missed.
   unimplemented (only in the typo-detection whitelist). (Phase 88's U4
   is the *inference* half of this same tag family, once real tag
   support exists.)
-- `FunctionConditionalReturnTypeRule`/`MethodConditionalReturnTypeRule`
-  — validating a conditional PHPDoc return type's own declaration
-  (`conditionalType.subjectNotFound`/`.alwaysTrue`/`.alwaysFalse`).
 - `InvalidPhpDocVarTagTypeRule`/`WrongVariableNameInVarTagRule`/
   `VarTagChangedExpressionTypeRule` — phpstan-rs's inline-`@var`
   checking is deliberately scoped to the plain-assignment case only;

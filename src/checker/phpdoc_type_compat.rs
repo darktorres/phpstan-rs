@@ -220,6 +220,125 @@ impl<'a> Checker<'a> {
         }
     }
 
+    /// Real PHPStan's `ConditionalReturnTypeRuleHelper`: every
+    /// conditional type in a signature (`($x is int ? A : B)`, or a
+    /// template subject's `(T is int ? A : B)`) must name a real
+    /// parameter or `@template`, and a condition decided by the subject's
+    /// own declared type alone is reported as always true or false.
+    pub(crate) fn check_conditional_types(
+        &mut self,
+        f: &FunctionDecl,
+        sig: &FunctionSig,
+        class_name: Option<&str>,
+        label: &str,
+    ) {
+        // Only this declaration's own PHPDoc: an inherited conditional is
+        // checked once, where it's written, with its own templates.
+        let mut conditionals: Vec<Type> = Vec::new();
+        for p in &sig.params {
+            for own in [&p.doc_ty, &p.out_ty, &p.closure_this_type]
+                .into_iter()
+                .flatten()
+            {
+                collect_conditionals(own, &mut conditionals);
+            }
+        }
+        if let Some(ret) = &sig.return_doc_ty {
+            collect_conditionals(ret, &mut conditionals);
+        }
+        if conditionals.is_empty() {
+            return;
+        }
+        let templates = self.declared_template_names(f, class_name);
+        for c in conditionals {
+            let Type::Conditional {
+                subject,
+                target,
+                negated,
+                template_subject,
+                ..
+            } = &c
+            else {
+                continue;
+            };
+            let subject_ty = if *template_subject {
+                // Its own `@template`s, its class's, or one it inherited
+                // along with the tag (`{@inheritDoc}`).
+                let inherited = find_template_param(sig, subject);
+                if !templates.contains(subject) && inherited.is_none() {
+                    let shown = self.resolve_type_hint(Some(subject));
+                    self.report(
+                        label.to_string(),
+                        format!(
+                            "Conditional return type uses subject type {shown} which is not part of PHPDoc @template tags."
+                        ),
+                        f.name_span,
+                        2,
+                        "conditionalType.subjectNotFound",
+                    );
+                    continue;
+                }
+                match inherited {
+                    Some(tp) => tp,
+                    None => continue,
+                }
+            } else {
+                match sig.params.iter().find(|p| *p.name == **subject) {
+                    Some(p) => p.ty.clone(),
+                    None => {
+                        self.report(
+                            label.to_string(),
+                            format!(
+                                "Conditional return type references unknown parameter ${subject}."
+                            ),
+                            f.name_span,
+                            2,
+                            "parameter.notFound",
+                        );
+                        continue;
+                    }
+                }
+            };
+            let subject_ty = match class_name {
+                Some(c) => self.resolve_pseudo(&subject_ty, c),
+                None => subject_ty,
+            };
+            let holds = match self.registry.is_super_type_of(target, &subject_ty) {
+                Trinary::Maybe => continue,
+                Trinary::Yes => true,
+                Trinary::No => false,
+            };
+            let always = holds != *negated;
+            let word = if *negated { "is not" } else { "is" };
+            self.report(
+                label.to_string(),
+                format!(
+                    "Condition \"{subject_ty} {word} {target}\" in conditional return type is always {always}."
+                ),
+                f.name_span,
+                2,
+                if always {
+                    "conditionalType.alwaysTrue"
+                } else {
+                    "conditionalType.alwaysFalse"
+                },
+            );
+        }
+    }
+
+    /// The `@template` names visible in `f`: its own and its class's.
+    fn declared_template_names(&self, f: &FunctionDecl, class_name: Option<&str>) -> Vec<String> {
+        let mut names: Vec<String> = f
+            .doc_comment
+            .as_deref()
+            .map(|d| docblock::parse(d).templates)
+            .unwrap_or_default();
+        if let Some(info) = class_name.and_then(|c| self.registry.classes.get(c)) {
+            names.extend(info.templates.iter().map(|t| t.to_string()));
+        }
+        names
+    }
+
     /// The shared "incompatible"/"not subtype" report of every
     /// PHPDoc-vs-native rule, `subject` naming the tag and its target.
     pub(crate) fn report_phpdoc_native_mismatch(
@@ -265,4 +384,38 @@ fn type_can_be_array(ty: &Type) -> bool {
         Type::Union(members) | Type::Intersection(members) => members.iter().any(type_can_be_array),
         _ => false,
     }
+}
+
+/// Every `Type::Conditional` inside `ty`, outermost first.
+fn collect_conditionals(ty: &Type, out: &mut Vec<Type>) {
+    if matches!(ty, Type::Conditional { .. }) {
+        out.push(ty.clone());
+    }
+    let _ = ty.map_children(&mut |child| {
+        collect_conditionals(child, out);
+        child.clone()
+    });
+}
+
+/// The `TemplateParam` named `name` somewhere in `sig`, with its bound.
+fn find_template_param(sig: &FunctionSig, name: &str) -> Option<Type> {
+    fn find(ty: &Type, name: &str) -> Option<Type> {
+        if let Type::TemplateParam(tp) = ty
+            && tp.name == name
+        {
+            return Some(ty.clone());
+        }
+        let mut found = None;
+        let _ = ty.map_children(&mut |child| {
+            if found.is_none() {
+                found = find(child, name);
+            }
+            child.clone()
+        });
+        found
+    }
+    sig.params
+        .iter()
+        .find_map(|p| find(&p.ty, name))
+        .or_else(|| find(&sig.return_type, name))
 }
