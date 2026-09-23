@@ -25,30 +25,15 @@ impl<'a> Checker<'a> {
     /// `bare_name_literal_type`'s existing `Mixed` fallback in place.
     pub(crate) fn global_constant_type(&self, name: &str) -> Option<Type> {
         let (primary, fallback) = self.name_ctx.resolve_constant_candidates(name);
-        // `PHP_VERSION_ID`'s own vendored `phpstorm-stubs` declaration
-        // (`Core/Core_d.php`) is a literal `define('PHP_VERSION_ID',
-        // 50306)` - phpstorm-stubs' own generation environment's actual
-        // PHP version at the time it was captured, baked in as if it
-        // were a real, permanent constant value. Trusting that as this
-        // constant's own type would make `PHP_VERSION_ID >= 80300`-style
-        // portability checks (common throughout the real vendor
-        // ecosystem) look provably, unconditionally false everywhere,
-        // the moment anything consumed the exact literal value for a
-        // "provably constant" purpose - this project's own
-        // `--php-version`/`php_version` config key (`php_version.rs`)
-        // exists for exactly this ambiguity, and is the right source of
-        // truth here instead: an `IntRange` spanning every possible
-        // patch digit (0-99, real PHP's own patch component, never
-        // modeled beyond major.minor) when configured, or a fully
-        // unbounded `Type::Int` when it isn't.
-        if primary == "PHP_VERSION_ID" || fallback.as_deref() == Some("PHP_VERSION_ID") {
-            return Some(match self.registry.php_version {
-                Some((major, minor)) => {
-                    let base = major as i64 * 10000 + minor as i64 * 100;
-                    Type::IntRange(Some(base), Some(base + 99))
-                }
-                None => Type::Int,
-            });
+        let predefined = |n: &str| {
+            crate::checker::predefined_constants::predefined_constant_type(
+                n,
+                self.registry.php_version,
+            )
+        };
+        if let Some(ty) = predefined(&primary).or_else(|| fallback.as_deref().and_then(predefined))
+        {
+            return Some(ty);
         }
         let found = self
             .registry

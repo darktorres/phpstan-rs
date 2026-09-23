@@ -1280,6 +1280,7 @@ mod phpdoc_type_compat;
 mod phpdoc_unresolvable;
 pub(crate) mod phpstan_api;
 mod pipe_operator;
+mod predefined_constants;
 mod preg_pattern_validity;
 mod property_assignment;
 mod property_default_types;
