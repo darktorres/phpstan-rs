@@ -330,6 +330,15 @@ enum Command {
         generate_baseline: Option<PathBuf>,
         #[arg(long)]
         baseline: Option<PathBuf>,
+        /// Matches a baseline entry by its identifier when its message
+        /// text no longer matches, so rewording doesn't resurface it.
+        #[arg(long)]
+        baseline_match_identifier: bool,
+        /// Writes `--generate-baseline` as one file per identifier in a
+        /// directory named after the baseline file, which becomes an
+        /// index including them.
+        #[arg(long)]
+        baseline_per_identifier: bool,
         /// Extra directories loaded for type-resolution context only -
         /// never analyzed or reported on. Repeatable.
         #[arg(long = "scan-dir")]
@@ -434,6 +443,8 @@ fn main() {
             php_version,
             generate_baseline,
             baseline,
+            baseline_match_identifier,
+            baseline_per_identifier,
             scan_dirs,
             stub_paths,
             no_composer,
@@ -482,6 +493,8 @@ fn main() {
             php_version,
             generate_baseline,
             baseline,
+            baseline_match_identifier,
+            baseline_per_identifier,
             scan_dirs,
             stub_paths,
             no_composer,

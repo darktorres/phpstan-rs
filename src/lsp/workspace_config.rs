@@ -133,7 +133,13 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
 
     let baseline = config.baseline.map(resolve_against_root).and_then(|path| {
         match crate::baseline::Baseline::load(&path) {
-            Ok(b) => Some(b),
+            Ok(b) => Some(b.with_match_mode(
+                if config.baseline_match_identifier.unwrap_or(false) {
+                    crate::baseline::MatchMode::Identifier
+                } else {
+                    crate::baseline::MatchMode::Message
+                },
+            )),
             Err(e) => {
                 eprintln!(
                     "phpstan-rs lsp: failed to read baseline {}: {e}",

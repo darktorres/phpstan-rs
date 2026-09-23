@@ -79,6 +79,12 @@ pub struct Config {
     pub paths: Option<Vec<PathBuf>>,
     pub level: Option<u8>,
     pub baseline: Option<PathBuf>,
+    /// Match baseline entries by identifier when their message text no
+    /// longer matches (`baseline::MatchMode::Identifier`).
+    pub baseline_match_identifier: Option<bool>,
+    /// Write `--generate-baseline` as one file per identifier plus an
+    /// index (`baseline::generate_per_identifier`).
+    pub baseline_per_identifier: Option<bool>,
     pub strict_mixed_arrays: Option<bool>,
     /// Mirrors real PHPStan's own opt-in `checkUninitializedProperties`
     /// - see `registry::Registry::check_uninitialized_properties`.

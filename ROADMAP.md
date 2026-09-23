@@ -1202,7 +1202,12 @@ zero false positives on piwigo16.
 
 CI-friendly output formats (`json`, `checkstyle`). Baseline suppression
 (`--generate-baseline`/`--baseline`, on by default reporting an
-unmatched baseline entry) and inline `@phpstan-ignore-line`/`-next-line`/
+unmatched baseline entry): entries record their occurrence count and
+absorb at most that many (reporting "expected N, found M" when fewer
+occur), an opt-in identifier-anchored match mode
+(`baseline_match_identifier`) keeps an entry matching after its message
+is reworded, and `baseline_per_identifier` writes one file per
+identifier behind an `includes` index and inline `@phpstan-ignore-line`/`-next-line`/
 `<identifier list>` suppression, read from real comment tokens with
 upstream's placement rules and identifier-list grammar; a malformed list
 is `ignore.parseError` (non-ignorable, upstream's messages), and opt-in
@@ -3119,65 +3124,6 @@ installed userbase whose already-passing analysis a narrower builtin
 stub could suddenly break.
 
 **Effort: small** (a standing policy, same shape as M1-M3).
-
----
-
-### Phase 122 — Baseline robustness (§N)
-
-Real PHPStan's baseline is not actually unbounded, and phpstan-rs's
-currently is - both gaps are concrete and fixable inside `src/baseline.rs`'s
-existing data flow, without touching `Diagnostic` or any rule.
-
-#### N1. Bound baseline matches by recorded occurrence count
-
-Give `baseline::Entry` a `count: usize` field and make `contains`/`filter`
-consume matches up to that count per run, letting any occurrence beyond it
-fall through as a new diagnostic. `generate()` already builds one Entry
-per diagnostic including duplicates (`src/baseline.rs:74-84`) - the count
-information already flows through the pipeline and is only thrown away
-when `load()` collapses the Vec into a `HashSet<Entry>` (lines 100-105).
-Real PHPStan's baseline works at all specifically because it tracks a
-running count per ignore entry and un-suppresses anything past it
-(`IgnoredErrorHelperResult.php:100-117,292-314`) - without this,
-phpstan-rs's baseline can silently absorb unlimited *new* occurrences of
-the same message at the same location forever, masking copy-pasted new
-instances of an already-baselined bug.
-
-**Effort: medium.**
-
-#### N2. Opt-in identifier-anchored baseline match mode, surviving cosmetic message-text changes
-
-An alternate match mode keyed on `(file, location, identifier)` instead of
-`(file, location, message)`, so a baselined finding keeps matching after
-the rendered message text changes (a symbol rename, a wording tweak from
-upgrading phpstan-rs). Real PHPStan's own baseline generator never offers
-this: `BaselineNeonErrorFormatter::formatErrors` always attaches the
-exact-text message as an anchored regex alongside the identifier
-(`ErrorFormatter/BaselineNeonErrorFormatter.php:75-98`), and
-`IgnoredError::shouldIgnore` ANDs both conditions - the coupling is fixed
-generator policy, not a user toggle. phpstan-rs's `Diagnostic` already
-carries a dedicated, stable `identifier` field, documented as deliberately
-stable across occurrences unlike `message` (`src/checker.rs:302-311`) -
-the exact anchor this mode needs already exists on every diagnostic today
-for free; `baseline.rs`'s `Entry` (`baseline.rs:27-32`) just doesn't read
-it yet.
-
-**Effort: medium.**
-
-#### N4. Per-identifier baseline file splitting
-
-From the top-100 Packagist survey: `shipmonk/phpstan-baseline-per-identifier`
-splits one monolithic baseline into a separate file per diagnostic
-identifier (`baseline/argument.type.neon`, `baseline/return.type.neon`,
-etc.). Git diffs of baseline changes get far smaller and easier to
-review, and a team can pay down baseline debt one error category at a
-time. It's purely a file-organization/generation feature on top of
-`baseline.rs`'s existing data, with no new matching logic.
-
-**Effort: small.**
-
-(N3, reporting stale/unmatched baseline entries, has shipped - see
-Done's baseline entry.)
 
 ---
 

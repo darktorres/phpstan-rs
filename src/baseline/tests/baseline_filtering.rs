@@ -180,3 +180,145 @@ fn normalize_path_resolves_dot_and_dotdot_segments() {
     assert_eq!(normalize_path(Path::new(".")), PathBuf::from("."));
     assert_eq!(normalize_path(Path::new("./.")), PathBuf::from("."));
 }
+
+fn results_of(file: &str, diagnostics: Vec<Diagnostic>) -> HashMap<PathBuf, Vec<Diagnostic>> {
+    HashMap::from([(PathBuf::from(file), diagnostics)])
+}
+
+#[test]
+fn a_baseline_entry_absorbs_only_its_recorded_count() {
+    let path = temp_path("counts");
+    let recorded = results_of(
+        "a.php",
+        vec![diag("f", "same problem"), diag("f", "same problem")],
+    );
+    assert_eq!(generate(&path, &recorded).unwrap(), 2);
+    let written = fs::read_to_string(&path).unwrap();
+    assert!(written.contains("\"count\": 2"), "{written}");
+
+    let mut now = results_of(
+        "a.php",
+        vec![
+            diag("f", "same problem"),
+            diag("f", "same problem"),
+            diag("f", "same problem"),
+        ],
+    );
+    let stale = filter(&mut now, &Baseline::load(&path).unwrap());
+    assert!(stale.is_empty(), "{stale:?}");
+    assert_eq!(now[&PathBuf::from("a.php")].len(), 1);
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn fewer_occurrences_than_recorded_are_reported_with_both_counts() {
+    let path = temp_path("fewer");
+    generate(
+        &path,
+        &results_of(
+            "a.php",
+            vec![diag("f", "p"), diag("f", "p"), diag("f", "p")],
+        ),
+    )
+    .unwrap();
+    let mut now = results_of("a.php", vec![diag("f", "p")]);
+    let stale = filter(&mut now, &Baseline::load(&path).unwrap());
+    assert_eq!(
+        stale,
+        vec!["a.php:f: p (expected 3 occurrence(s), found 1)"]
+    );
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn a_legacy_baseline_with_repeated_entries_adds_them_up() {
+    let path = temp_path("legacy");
+    fs::write(
+        &path,
+        r#"[
+            {"file": "a.php", "location": "f", "message": "p"},
+            {"file": "a.php", "location": "f", "message": "p"}
+        ]"#,
+    )
+    .unwrap();
+    let mut now = results_of(
+        "a.php",
+        vec![diag("f", "p"), diag("f", "p"), diag("f", "p")],
+    );
+    filter(&mut now, &Baseline::load(&path).unwrap());
+    assert_eq!(now[&PathBuf::from("a.php")].len(), 1);
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn identifier_mode_survives_a_reworded_message() {
+    let path = temp_path("identifier");
+    generate(
+        &path,
+        &results_of(
+            "a.php",
+            vec![diag_with("f", "Old wording.", "argument.type")],
+        ),
+    )
+    .unwrap();
+    let reworded = || {
+        results_of(
+            "a.php",
+            vec![diag_with("f", "New wording.", "argument.type")],
+        )
+    };
+
+    let mut by_message = reworded();
+    let stale = filter(&mut by_message, &Baseline::load(&path).unwrap());
+    assert_eq!(by_message[&PathBuf::from("a.php")].len(), 1);
+    assert_eq!(stale.len(), 1);
+
+    let mut by_identifier = reworded();
+    let baseline = Baseline::load(&path)
+        .unwrap()
+        .with_match_mode(MatchMode::Identifier);
+    let stale = filter(&mut by_identifier, &baseline);
+    assert!(by_identifier[&PathBuf::from("a.php")].is_empty());
+    assert!(stale.is_empty(), "{stale:?}");
+
+    let mut other_identifier =
+        results_of("a.php", vec![diag_with("f", "New wording.", "return.type")]);
+    filter(&mut other_identifier, &baseline);
+    assert_eq!(other_identifier[&PathBuf::from("a.php")].len(), 1);
+    let _ = fs::remove_file(&path);
+}
+
+#[test]
+fn a_per_identifier_split_round_trips_through_its_index() {
+    let dir = temp_path("split");
+    fs::create_dir_all(&dir).unwrap();
+    let index = dir.join("baseline.json");
+    let recorded = results_of(
+        "a.php",
+        vec![
+            diag_with("f", "one", "argument.type"),
+            diag_with("f", "two", "argument.type"),
+            diag_with("g", "three", "return.type"),
+        ],
+    );
+    fs::create_dir_all(dir.join("baseline")).unwrap();
+    fs::write(dir.join("baseline/stale.identifier.json"), "[]").unwrap();
+    assert_eq!(generate_per_identifier(&index, &recorded).unwrap(), 3);
+    let mut files: Vec<String> = fs::read_dir(dir.join("baseline"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    files.sort();
+    assert_eq!(files, vec!["argument.type.json", "return.type.json"]);
+    let index_text = fs::read_to_string(&index).unwrap();
+    assert!(
+        index_text.contains("baseline/argument.type.json"),
+        "{index_text}"
+    );
+
+    let mut now = recorded.clone();
+    let stale = filter(&mut now, &Baseline::load(&index).unwrap());
+    assert!(now[&PathBuf::from("a.php")].is_empty());
+    assert!(stale.is_empty(), "{stale:?}");
+    let _ = fs::remove_dir_all(&dir);
+}

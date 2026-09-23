@@ -177,6 +177,8 @@ fn run_check_project(
     php_version: Option<php_version::PhpVersion>,
     generate_baseline_path: Option<&Path>,
     baseline_path: Option<&Path>,
+    baseline_mode: baseline::MatchMode,
+    baseline_per_identifier: bool,
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
     dynamic_constant_names: &[(String, Option<String>)],
@@ -517,9 +519,14 @@ fn run_check_project(
     restricted_symbols::filter_by_path(&mut results);
 
     if let Some(generate_baseline_path) = generate_baseline_path {
-        match baseline::generate(generate_baseline_path, &results) {
+        let generated = if baseline_per_identifier {
+            baseline::generate_per_identifier(generate_baseline_path, &results)
+        } else {
+            baseline::generate(generate_baseline_path, &results)
+        };
+        match generated {
             Ok(count) => println!(
-                "baseline written to {}: {count} entry(s)",
+                "baseline written to {}: {count} diagnostic(s)",
                 generate_baseline_path.display()
             ),
             Err(e) => eprintln!(
@@ -533,6 +540,7 @@ fn run_check_project(
     if let Some(baseline_path) = baseline_path {
         match baseline::Baseline::load(baseline_path) {
             Ok(baseline) => {
+                let baseline = baseline.with_match_mode(baseline_mode);
                 for stale in baseline::filter(&mut results, &baseline) {
                     eprintln!("baseline entry no longer matches any diagnostic: {stale}");
                 }
@@ -646,6 +654,8 @@ pub(crate) fn run_check_project_command(
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
+    baseline_match_identifier: bool,
+    baseline_per_identifier: bool,
     scan_dirs: Vec<PathBuf>,
     stub_paths: Vec<PathBuf>,
     no_composer: bool,
@@ -791,6 +801,14 @@ pub(crate) fn run_check_project_command(
         None => None,
     };
     let baseline = baseline.or(config.baseline.map(resolve_against_config));
+    let baseline_mode =
+        if baseline_match_identifier || config.baseline_match_identifier.unwrap_or(false) {
+            baseline::MatchMode::Identifier
+        } else {
+            baseline::MatchMode::Message
+        };
+    let baseline_per_identifier =
+        baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
     let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
     let dynamic_constant_names = config
@@ -972,6 +990,8 @@ pub(crate) fn run_check_project_command(
         php_version,
         generate_baseline.as_deref(),
         baseline.as_deref(),
+        baseline_mode,
+        baseline_per_identifier,
         &ignore_error_entries,
         &restricted_symbol_entries,
         &dynamic_constant_names,

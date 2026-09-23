@@ -23,3 +23,17 @@ pub(super) fn temp_path(label: &str) -> PathBuf {
         std::thread::current().id()
     ))
 }
+
+pub(super) fn diag_with(location: &str, message: &str, identifier: &str) -> Diagnostic {
+    DiagnosticBuilder::new(
+        location.to_string(),
+        message.to_string(),
+        Span {
+            start: Position { line: 1, col: 1 },
+            end: Position { line: 1, col: 1 },
+        },
+        0,
+        identifier,
+    )
+    .build()
+}
