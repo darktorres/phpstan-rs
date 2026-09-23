@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (phpstan-strict-rules): a cast to a type the expression already has (`cast.useless`).
+    pub check_useless_casts: bool,
     // Opt-in (phpstan-strict-rules): `array_filter()` without a callback over values whose truthiness is ambiguous, or with a null callback (`arrayFilter.strict`).
     pub check_strict_array_filter: bool,
     // Opt-in (voku/phpstan-rules): a string operand combined with a non-string one, or an array with a non-array, by a binary operator or compound assignment (`binaryOp.nonStringOperand`/`binaryOp.nonArrayOperand`/`assignOp.*`).

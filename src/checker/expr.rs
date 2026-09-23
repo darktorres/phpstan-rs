@@ -1774,7 +1774,7 @@ impl<'a> Checker<'a> {
                 if ty == "string" {
                     self.check_implicit_tostring_usage(&inner_ty, e.span, label);
                 }
-                match ty.as_str() {
+                let cast_ty = match ty.as_str() {
                     "int" => Type::Int,
                     "float" => Type::Float,
                     "string" => Type::String,
@@ -1786,7 +1786,11 @@ impl<'a> Checker<'a> {
                     "object" => Type::Object("object".to_string(), Vec::new()),
                     "unset" => Type::Null,
                     _ => Type::Mixed(false),
+                };
+                if self.registry.check_useless_casts && ty != "void" {
+                    self.check_useless_cast(&cast_ty, &inner_ty, e.span, label);
                 }
+                cast_ty
             }
             // See `ExprKind::ShellExec`'s own doc comment - a thin
             // wrapper around the identical `Call` a plain `shell_exec()`

@@ -411,3 +411,37 @@ function f(array $ints, array $bools, array $lists, array $objects, array $maybe
     assert_eq!(found(10), vec!["10", "14", "15", "16", "18"]);
     assert_eq!(found(7), vec!["10", "14", "15", "18"]);
 }
+
+#[test]
+fn useless_casts() {
+    let src = r#"<?php
+function f(int $i, ?int $n, string $s, array $a, \stdClass $o, bool $b, mixed $m): void {
+    $x = (int) $i;
+    $x = (int) $n;
+    $x = (string) $s;
+    $x = (string) $i;
+    $x = (array) $a;
+    $x = (object) $o;
+    $x = (bool) $b;
+    $x = (int) $m;
+    $x = (int) 5;
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_useless_casts = true;
+    let found: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.identifier == "cast.useless")
+        .map(|d| format!("{} {}", d.span.start.line, d.message))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "3 Casting to int something that's already int.",
+            "5 Casting to string something that's already string.",
+            "7 Casting to array something that's already array.",
+            "8 Casting to object something that's already stdClass.",
+            "9 Casting to bool something that's already bool.",
+            "11 Casting to int something that's already int.",
+        ]
+    );
+}

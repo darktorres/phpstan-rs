@@ -21,6 +21,8 @@
 //!   always-truthy and always-falsy types, or with a `null` callback
 //!   (`arrayFilter.strict`); a callback that may be `null` is a level 8
 //!   finding.
+//! - `check_useless_casts` - a cast to a type the expression already has
+//!   (`cast.useless`).
 //! - `check_arithmetic_operands` - an operand of `+ - * / % **` (or their
 //!   compound assignments), unary `+`/`-` or `++`/`--` that isn't a
 //!   number (`plus.leftNonNumeric`, `unaryMinus.nonNumeric`,
@@ -505,6 +507,30 @@ impl<'a> Checker<'a> {
                 || members.iter().all(is_array);
         }
         matches!(item, Type::Bool | Type::True | Type::False) || is_array(&item)
+    }
+
+    pub(crate) fn check_useless_cast(
+        &mut self,
+        cast: &Type,
+        expr: &Type,
+        span: crate::token::Span,
+        label: &str,
+    ) {
+        if matches!(expr, Type::Never) || self.registry.is_super_type_of(cast, expr) != Trinary::Yes
+        {
+            return;
+        }
+        self.report(
+            label.to_string(),
+            format!(
+                "Casting to {} something that's already {}.",
+                describe_type_only(cast),
+                describe_type_only(expr)
+            ),
+            span,
+            0,
+            "cast.useless",
+        );
     }
 
     /// `function.strict`, for one of the functions it covers.
