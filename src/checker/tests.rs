@@ -21,6 +21,7 @@ mod conditional_types;
 mod constant_conditions;
 mod contextual_callback_params;
 mod control_flow;
+mod current_time;
 mod date_interval;
 mod date_time_constructor;
 mod date_time_method_return_types;

@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_current_time_dependence`.
+    pub fn set_check_current_time_dependence(&mut self, enabled: bool) {
+        self.registry.check_current_time_dependence = enabled;
+    }
+
     /// See `Registry::check_psr3_exception_context`.
     pub fn set_check_psr3_exception_context(&mut self, enabled: bool) {
         self.registry.check_psr3_exception_context = enabled;

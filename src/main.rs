@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag implicit dependence on the current time instead of an injected clock.
+        #[arg(long)]
+        check_current_time_dependence: bool,
         /// Flag PSR-3 logger calls that leave out an in-scope Throwable as the exception context key.
         #[arg(long)]
         check_psr3_exception_context: bool,
@@ -507,6 +510,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_current_time_dependence,
             check_psr3_exception_context,
             check_psr3_logging,
             check_magic_numbers,
@@ -580,6 +584,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_current_time_dependence,
             check_psr3_exception_context,
             check_psr3_logging,
             check_magic_numbers,

@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_current_time_dependence: bool,
     check_psr3_exception_context: bool,
     check_psr3_logging: bool,
     psr3_context_key_pattern: Option<regex::Regex>,
@@ -274,6 +275,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_current_time_dependence(check_current_time_dependence);
     project.set_check_psr3_exception_context(check_psr3_exception_context);
     project.set_check_psr3_logging(check_psr3_logging);
     project.set_psr3_context_key_pattern(psr3_context_key_pattern);
@@ -761,6 +763,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_current_time_dependence: bool,
     check_psr3_exception_context: bool,
     check_psr3_logging: bool,
     check_magic_numbers: bool,
@@ -917,6 +920,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_current_time_dependence =
+        check_current_time_dependence || config.check_current_time_dependence.unwrap_or(false);
     let check_psr3_exception_context =
         check_psr3_exception_context || config.check_psr3_exception_context.unwrap_or(false);
     let check_psr3_logging = check_psr3_logging || config.check_psr3_logging.unwrap_or(false);
@@ -1221,6 +1226,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_current_time_dependence,
         check_psr3_exception_context,
         check_psr3_logging,
         psr3_context_key_pattern,

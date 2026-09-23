@@ -268,6 +268,9 @@ impl<'a> Checker<'a> {
         if self.registry.check_magic_numbers {
             self.check_magic_numbers_expression(e, label);
         }
+        if self.registry.check_current_time_dependence {
+            self.check_current_time_expression(e, locals, label);
+        }
         if (self.registry.check_psr3_logging || self.registry.check_psr3_exception_context)
             && matches!(e.kind, ExprKind::MethodCall(..) | ExprKind::StaticCall(..))
         {
@@ -758,6 +761,15 @@ impl<'a> Checker<'a> {
                         self.check_internal_function_call(name, sig, e.span, label);
                         self.check_restricted_function_call(name, args, locals, e.span, label);
                         self.check_deprecated_function_call(name, sig, e.span, label);
+                        if self.registry.check_current_time_dependence {
+                            self.check_current_time_call(
+                                &name.to_ascii_lowercase(),
+                                args,
+                                locals,
+                                e.span,
+                                label,
+                            );
+                        }
                         self.record_function_usage_token(name, sig, callee.span);
                         match name.as_ref() {
                             "array_filter" => {

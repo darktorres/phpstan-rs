@@ -419,6 +419,8 @@ impl Server {
         self.project
             .set_check_exception_hygiene(resolved.check_exception_hygiene);
         self.project
+            .set_check_current_time_dependence(resolved.check_current_time_dependence);
+        self.project
             .set_check_psr3_exception_context(resolved.check_psr3_exception_context);
         self.project
             .set_check_psr3_logging(resolved.check_psr3_logging);

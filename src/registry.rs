@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (slam/phpstan-extensions): code reading the wall clock implicitly - `time()`, date functions without their timestamp, relative date strings, argument-less `new DateTime()` (`currentTime.*`).
+    pub check_current_time_dependence: bool,
     // Opt-in: a PSR-3 logger call without an `exception` context key while a Throwable variable is in scope (`psr3.contextMissingException`).
     pub check_psr3_exception_context: bool,
     // Opt-in (staabm/phpstan-psr3, sfp-phpstan-psr-log): PSR-3 logger call hygiene - placeholders, message, level and context (`psr3.*`).

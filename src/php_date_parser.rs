@@ -40,6 +40,43 @@ pub(crate) fn validate_date_time_string(s: &str) -> Option<bool> {
         .or_else(|| validate_keyword(s))
 }
 
+/// Whether a date string of a recognized shape resolves against the
+/// current instant (`"now"`, `"+1 day"`, `"next monday"`, a time of day
+/// alone) rather than naming a fixed point (`"@1700000000"`,
+/// `"2024-05-01"`); `None` for a shape this doesn't recognize.
+pub(crate) fn depends_on_current_time(s: &str) -> Option<bool> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Some(true);
+    }
+    if validate_timestamp(s).is_some() || validate_iso_date_time(s).is_some() {
+        return Some(false);
+    }
+    if is_time_of_day(s) {
+        return Some(true);
+    }
+    let lower = s.to_ascii_lowercase();
+    if let Some(rest) = lower
+        .strip_prefix("first day of")
+        .or_else(|| lower.strip_prefix("last day of"))
+    {
+        return depends_on_current_time(rest);
+    }
+    validate_relative_delta(s)
+        .or_else(|| validate_next_last(s))
+        .or_else(|| validate_keyword(s))
+        .map(|_| true)
+}
+
+/// `HH:MM[:SS]`, which PHP resolves to that time today.
+fn is_time_of_day(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    (2..=3).contains(&parts.len())
+        && parts
+            .iter()
+            .all(|p| (1..=2).contains(&p.len()) && p.bytes().all(|b| b.is_ascii_digit()))
+}
+
 /// `@<seconds>[.<fraction>]` - always accepted once the shape matches;
 /// PHP's own Unix-timestamp form has no range restriction of its own
 /// (negative, zero, and arbitrarily large timestamps are all valid).
@@ -294,6 +331,31 @@ fn validate_keyword(s: &str) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_time_dependence() {
+        for relative in [
+            "",
+            "now",
+            "+1 day",
+            "next monday",
+            "10:30",
+            "first day of next month",
+            "first day of",
+            "tomorrow",
+        ] {
+            assert_eq!(depends_on_current_time(relative), Some(true), "{relative}");
+        }
+        for fixed in [
+            "@1700000000",
+            "2024-05-01",
+            "2024-05-01 10:00:00",
+            "first day of 2024-05",
+        ] {
+            assert_eq!(depends_on_current_time(fixed), Some(false), "{fixed}");
+        }
+        assert_eq!(depends_on_current_time("May 1st 2024"), None);
+    }
 
     #[test]
     fn timestamps_are_always_valid() {

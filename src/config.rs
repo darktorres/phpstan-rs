@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_current_time_dependence = false
 //! check_psr3_exception_context = false
 //! check_psr3_logging = false
 //! psr3_context_key_pattern = "^[a-z][a-z0-9_]*$"
@@ -327,6 +328,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (slam/phpstan-extensions): code reading the wall clock implicitly - `time()`, date functions without their timestamp, relative date strings, argument-less `new DateTime()` (`currentTime.*`).
+    pub check_current_time_dependence: Option<bool>,
     /// Opt-in: a PSR-3 logger call without an `exception` context key while a Throwable variable is in scope (`psr3.contextMissingException`).
     pub check_psr3_exception_context: Option<bool>,
     /// Opt-in (staabm/phpstan-psr3, sfp-phpstan-psr-log): PSR-3 logger call hygiene - placeholders, message, level and context (`psr3.*`).

@@ -1243,6 +1243,7 @@ mod castable_arguments;
 mod coercion;
 mod comparisons;
 mod control_flow;
+mod current_time;
 mod date_interval;
 mod date_time;
 mod deprecated_usage;
