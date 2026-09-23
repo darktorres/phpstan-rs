@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_implicit_array_creation`.
+    pub fn set_check_implicit_array_creation(&mut self, enabled: bool) {
+        self.registry.check_implicit_array_creation = enabled;
+    }
+
     /// See `Registry::check_useless_casts`.
     pub fn set_check_useless_casts(&mut self, enabled: bool) {
         self.registry.check_useless_casts = enabled;

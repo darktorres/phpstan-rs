@@ -993,6 +993,7 @@ impl<'a> Checker<'a> {
             &mut self.current_function_goto_targets,
             collect_goto_targets(&f.body),
         );
+        let previous_assigned_variables = self.enter_assigned_variables(&f.body);
         // See `Checker::current_function_throw_points`'s doc comment.
         let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
         let previous_unannotated_call =
@@ -1281,6 +1282,7 @@ impl<'a> Checker<'a> {
         self.current_function_by_ref_exit_snapshots = previous_by_ref_exit_snapshots;
         self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
         self.current_function_goto_targets = previous_goto_targets;
+        self.current_function_assigned_variables = previous_assigned_variables;
 
         self.current_class = previous_class;
         self.current_method = previous_method;

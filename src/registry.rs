@@ -241,6 +241,8 @@ pub struct Registry {
     // Opt-in exception hygiene in `catch` blocks - see
     // `checker::stmt::try_catch::check_catch_hygiene`.
     pub check_exception_hygiene: bool,
+    // Opt-in (phpstan-strict-rules): `$x[...] = ...` creating the array `$x` implicitly because the variable does not or might not exist (`variable.implicitArray`).
+    pub check_implicit_array_creation: bool,
     // Opt-in (phpstan-strict-rules): a cast to a type the expression already has (`cast.useless`).
     pub check_useless_casts: bool,
     // Opt-in (phpstan-strict-rules): `array_filter()` without a callback over values whose truthiness is ambiguous, or with a null callback (`arrayFilter.strict`).

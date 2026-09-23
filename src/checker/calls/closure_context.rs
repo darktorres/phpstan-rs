@@ -312,6 +312,7 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
                 );
+                let previous_assigned_variables = self.enter_assigned_variables(body);
                 // See `checker/expr.rs`'s `Closure` arm's identical comment.
                 let previous_throw_points = std::mem::take(&mut self.current_function_throw_points);
                 let previous_unannotated_call =
@@ -351,6 +352,7 @@ impl<'a> Checker<'a> {
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
+                self.current_function_assigned_variables = previous_assigned_variables;
                 self.check_unused_closure_uses(uses, body, &closure_label, closure_expr.span);
                 for u in uses {
                     if !u.by_ref {

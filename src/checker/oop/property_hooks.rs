@@ -273,6 +273,10 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_has_unannotated_call);
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
+        let previous_assigned_variables = match body {
+            PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
+            _ => self.enter_assigned_variables(&[]),
+        };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(e) => {
                 self.current_function_is_generator = expr_contains_yield(e);
@@ -365,6 +369,7 @@ impl<'a> Checker<'a> {
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }
+        self.current_function_assigned_variables = previous_assigned_variables;
         self.current_class = previous_class;
     }
 
@@ -576,6 +581,10 @@ impl<'a> Checker<'a> {
             std::mem::take(&mut self.current_function_has_unannotated_call);
         let previous_explicit_throw_points =
             std::mem::take(&mut self.current_function_explicit_throw_points);
+        let previous_assigned_variables = match body {
+            PropertyHookBody::Block(stmts) => self.enter_assigned_variables(stmts),
+            _ => self.enter_assigned_variables(&[]),
+        };
         let previous_goto_targets = match body {
             PropertyHookBody::Arrow(e) => {
                 self.current_function_is_generator = expr_contains_yield(e);
@@ -628,6 +637,7 @@ impl<'a> Checker<'a> {
         if let Some(previous) = previous_goto_targets {
             self.current_function_goto_targets = previous;
         }
+        self.current_function_assigned_variables = previous_assigned_variables;
         self.current_class = previous_class;
     }
 }

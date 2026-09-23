@@ -445,3 +445,38 @@ function f(int $i, ?int $n, string $s, array $a, \stdClass $o, bool $b, mixed $m
         ]
     );
 }
+
+#[test]
+fn implicit_array_creation() {
+    let src = r#"<?php
+function f(bool $b, array $rows): void {
+    $fresh[] = 1;
+    $defined = [];
+    $defined[] = 1;
+    if ($b) { $maybe = []; }
+    $maybe['k'] = 1;
+    foreach ($rows as $row) {
+        $acc[] = $row;
+    }
+    $_SESSION['x'] = 1;
+    $nested['a']['b'] = 1;
+    $fn = function () { $inner[] = 1; };
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_implicit_array_creation = true;
+    let found: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.identifier == "variable.implicitArray")
+        .map(|d| format!("{} {}", d.span.start.line, d.message))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            "3 Implicit array creation is not allowed - variable $fresh does not exist.",
+            "7 Implicit array creation is not allowed - variable $maybe might not exist.",
+            "9 Implicit array creation is not allowed - variable $acc might not exist.",
+            "12 Implicit array creation is not allowed - variable $nested does not exist.",
+            "13 Implicit array creation is not allowed - variable $inner does not exist.",
+        ]
+    );
+}

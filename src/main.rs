@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag offset assignments that implicitly create an array variable.
+        #[arg(long)]
+        check_implicit_array_creation: bool,
         /// Flag casts to a type the expression already has.
         #[arg(long)]
         check_useless_casts: bool,
@@ -492,6 +495,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_implicit_array_creation,
             check_useless_casts,
             check_strict_array_filter,
             check_mixed_type_operands,
@@ -560,6 +564,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_implicit_array_creation,
             check_useless_casts,
             check_strict_array_filter,
             check_mixed_type_operands,

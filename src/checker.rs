@@ -889,6 +889,9 @@ pub struct Checker<'a> {
     // enclosing function's body to answer "could a `goto` reach this
     // labeled statement" itself.
     pub(crate) current_function_goto_targets: std::collections::HashSet<Arc<str>>,
+    // Every variable assignment site in the current function body, for
+    // `variable.implicitArray`; empty unless that check is enabled.
+    pub(crate) current_function_assigned_variables: Vec<strict_rules::AssignedVariable>,
     // Set to `true` immediately before `check_expr` is called for a
     // `StmtKind::Expression`'s top-level expression (a bare `foo();`, its
     // return value going nowhere by construction), cleared the instant
@@ -1370,6 +1373,7 @@ impl<'a> Checker<'a> {
             current_function_by_ref_params_with_tag: std::collections::HashMap::new(),
             current_function_byref_snapshot_names: std::collections::HashSet::new(),
             current_function_goto_targets: std::collections::HashSet::new(),
+            current_function_assigned_variables: Vec::new(),
             in_bare_statement_position: false,
             in_condition_position: false,
             in_exempt_last_condition: false,
@@ -1764,6 +1768,11 @@ impl<'a> Checker<'a> {
         // reused for `self.name_ctx` below, which has to be positional
         // instead (see that loop's own comment).
         let whole_file_ctx = NameContext::build(program);
+        self.current_function_assigned_variables = if self.registry.check_implicit_array_creation {
+            strict_rules::assigned_variables(program)
+        } else {
+            Vec::new()
+        };
         self.constant_facts = global_constants::constant_facts(program);
         if !self.facts_only {
             if self.current_file.is_some() {

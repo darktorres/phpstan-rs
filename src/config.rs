@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_implicit_array_creation = false
 //! check_useless_casts = false
 //! check_strict_array_filter = false
 //! check_mixed_type_operands = false
@@ -302,6 +303,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (phpstan-strict-rules): `$x[...] = ...` creating the array `$x` implicitly because the variable does not or might not exist (`variable.implicitArray`).
+    pub check_implicit_array_creation: Option<bool>,
     /// Opt-in (phpstan-strict-rules): a cast to a type the expression already has (`cast.useless`).
     pub check_useless_casts: Option<bool>,
     /// Opt-in (phpstan-strict-rules): `array_filter()` without a callback over values whose truthiness is ambiguous, or with a null callback (`arrayFilter.strict`).

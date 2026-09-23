@@ -23,6 +23,10 @@
 //!   finding.
 //! - `check_useless_casts` - a cast to a type the expression already has
 //!   (`cast.useless`).
+//! - `check_implicit_array_creation` - `$x[...] = ...` creating `$x`
+//!   because it does not exist, or might not (`variable.implicitArray`).
+//!   It might when the function assigns it earlier, or anywhere within a
+//!   loop enclosing this assignment, this one included.
 //! - `check_arithmetic_operands` - an operand of `+ - * / % **` (or their
 //!   compound assignments), unary `+`/`-` or `++`/`--` that isn't a
 //!   number (`plus.leftNonNumeric`, `unaryMinus.nonNumeric`,
@@ -100,6 +104,35 @@ impl<'a> Checker<'a> {
                     self.check_mixed_type_operands(op, l, r, true, e.span, locals, label);
                 }
                 _ => {}
+            }
+        }
+        if self.registry.check_implicit_array_creation
+            && let ExprKind::Assign(target, _) = &e.kind
+            && matches!(target.kind, ExprKind::Index(..))
+        {
+            let mut root = target.as_ref();
+            while let ExprKind::Index(base, _) = &root.kind {
+                root = base;
+            }
+            if let ExprKind::Variable(name) = &root.kind
+                && name.as_ref() != "this"
+                && !locals.contains_key(name)
+                && !crate::checker::assignment::is_superglobal(name)
+            {
+                let certainty = if self.might_be_assigned_before(name, root.span) {
+                    "might not exist"
+                } else {
+                    "does not exist"
+                };
+                self.report(
+                    label.to_string(),
+                    format!(
+                        "Implicit array creation is not allowed - variable ${name} {certainty}."
+                    ),
+                    e.span,
+                    0,
+                    "variable.implicitArray",
+                );
             }
         }
         if self.registry.check_illegal_constructor_calls {
@@ -531,6 +564,34 @@ impl<'a> Checker<'a> {
             0,
             "cast.useless",
         );
+    }
+
+    /// Replaces the current function's assignment sites with `body`'s,
+    /// returning the previous ones to restore.
+    pub(crate) fn enter_assigned_variables(&mut self, body: &[Stmt]) -> Vec<AssignedVariable> {
+        let entered = if self.registry.check_implicit_array_creation {
+            assigned_variables(body)
+        } else {
+            Vec::new()
+        };
+        std::mem::replace(&mut self.current_function_assigned_variables, entered)
+    }
+
+    /// Whether an assignment to `name` could have run before the one at
+    /// `site`: it comes earlier, or shares an enclosing loop with it (as
+    /// `site` itself does on a later iteration).
+    fn might_be_assigned_before(&self, name: &str, site: crate::token::Span) -> bool {
+        let sites = &self.current_function_assigned_variables;
+        let own_loops = sites
+            .iter()
+            .find(|a| a.span == site)
+            .map(|a| a.loops.as_slice())
+            .unwrap_or_default();
+        sites.iter().any(|a| {
+            a.name.as_ref() == name
+                && ((a.span.start.line, a.span.start.col) < (site.start.line, site.start.col)
+                    || a.loops.iter().any(|l| own_loops.contains(l)))
+        })
     }
 
     /// `function.strict`, for one of the functions it covers.
@@ -996,5 +1057,111 @@ fn collect_array_values(ty: &Type, out: &mut Vec<Type>) -> bool {
             .find(|m| matches!(m, Type::Array(..) | Type::ArrayShape(_)))
             .is_some_and(|base| collect_array_values(base, out)),
         _ => false,
+    }
+}
+
+/// One variable assignment site, with the spans of the loops around it.
+#[derive(Clone)]
+pub(crate) struct AssignedVariable {
+    name: std::sync::Arc<str>,
+    span: crate::token::Span,
+    loops: Vec<crate::token::Span>,
+}
+
+/// Every site in `body` that binds a variable, outside nested functions,
+/// closures and classes.
+pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
+    let mut out = Vec::new();
+    let mut loops = Vec::new();
+    for stmt in body {
+        walk_stmt(stmt, &mut loops, &mut out);
+    }
+    out
+}
+
+fn walk_stmt(stmt: &Stmt, loops: &mut Vec<crate::token::Span>, out: &mut Vec<AssignedVariable>) {
+    match &stmt.kind {
+        StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => return,
+        StmtKind::Foreach { key, value, .. } => {
+            loops.push(stmt.span);
+            for target in key.iter().chain(std::iter::once(value)) {
+                bind_targets(target, loops, out);
+            }
+        }
+        StmtKind::For { .. } | StmtKind::While { .. } | StmtKind::DoWhile { .. } => {
+            loops.push(stmt.span);
+        }
+        StmtKind::Try { catches, .. } => {
+            for catch in catches {
+                if let (Some(var), Some(span)) = (&catch.var, catch.var_span) {
+                    out.push(AssignedVariable {
+                        name: var.clone(),
+                        span,
+                        loops: loops.clone(),
+                    });
+                }
+            }
+        }
+        StmtKind::StaticVar(vars) => {
+            for (name, _) in vars {
+                out.push(AssignedVariable {
+                    name: name.clone(),
+                    span: stmt.span,
+                    loops: loops.clone(),
+                });
+            }
+        }
+        _ => {}
+    }
+    for expr in crate::ast_walk::stmt_own_exprs(stmt) {
+        walk_expr(expr, loops, out);
+    }
+    for child in crate::ast_walk::stmt_children(stmt) {
+        walk_stmt(child, loops, out);
+    }
+    if matches!(
+        stmt.kind,
+        StmtKind::Foreach { .. }
+            | StmtKind::For { .. }
+            | StmtKind::While { .. }
+            | StmtKind::DoWhile { .. }
+    ) {
+        loops.pop();
+    }
+}
+
+fn walk_expr(e: &Expr, loops: &mut Vec<crate::token::Span>, out: &mut Vec<AssignedVariable>) {
+    match &e.kind {
+        ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::NewAnonymousClass(..) => {
+            return;
+        }
+        ExprKind::Assign(target, _)
+        | ExprKind::AssignRef(target, _)
+        | ExprKind::CompoundAssign(_, target, _) => {
+            bind_targets(target, loops, out);
+        }
+        _ => {}
+    }
+    for child in crate::ast_walk::expr_children(e) {
+        walk_expr(child, loops, out);
+    }
+}
+
+/// The variables an assignment target binds: a plain variable, the root
+/// of an offset chain, or each element of a destructuring.
+fn bind_targets(target: &Expr, loops: &[crate::token::Span], out: &mut Vec<AssignedVariable>) {
+    match &target.kind {
+        ExprKind::Variable(name) => out.push(AssignedVariable {
+            name: name.clone(),
+            span: target.span,
+            loops: loops.to_vec(),
+        }),
+        ExprKind::Index(base, _) => bind_targets(base, loops, out),
+        ExprKind::ArrayLiteral(items) => {
+            for item in items {
+                bind_targets(&item.value, loops, out);
+            }
+        }
+        _ => {}
     }
 }

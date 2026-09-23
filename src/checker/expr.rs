@@ -270,6 +270,7 @@ impl<'a> Checker<'a> {
             || self.registry.check_arithmetic_operands
             || self.registry.check_comparable_types
             || self.registry.check_mixed_type_operands
+            || self.registry.check_implicit_array_creation
         {
             self.check_strict_rules_expression(e, locals, label);
         }
@@ -3810,6 +3811,7 @@ impl<'a> Checker<'a> {
                     &mut self.current_function_goto_targets,
                     collect_goto_targets(body),
                 );
+                let previous_assigned_variables = self.enter_assigned_variables(body);
                 // Real PHPStan exempts an anonymous function entirely
                 // from both by-ref-parameter rules (`isInAnonymousFunction()`
                 // bails in `ParameterOutAssignedTypeRule`/
@@ -3942,6 +3944,7 @@ impl<'a> Checker<'a> {
                 self.current_function_has_unannotated_call = previous_unannotated_call;
                 self.current_function_explicit_throw_points = previous_explicit_throw_points;
                 self.current_function_goto_targets = previous_goto_targets;
+                self.current_function_assigned_variables = previous_assigned_variables;
                 self.current_function_by_ref_params = previous_by_ref_params;
                 self.current_function_by_ref_params_with_tag = previous_by_ref_params_with_tag;
                 self.current_function_byref_snapshot_names = previous_byref_snapshot_names;
