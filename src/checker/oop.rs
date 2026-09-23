@@ -957,6 +957,7 @@ impl<'a> Checker<'a> {
             self.check_inheritance_target_kinds(fqn, false, fqn, c.span);
             self.check_magic_serialization_methods(fqn, fqn, fqn, c.name_span);
             self.check_constant_overrides(fqn, &c.consts);
+            self.check_trait_constant_conflicts(fqn, &c.consts);
         }
     }
 
@@ -976,6 +977,7 @@ impl<'a> Checker<'a> {
         if registry_matches {
             self.check_inheritance_target_kinds(fqn, false, fqn, e.span);
             self.check_constant_overrides(fqn, &e.consts);
+            self.check_trait_constant_conflicts(fqn, &e.consts);
         }
     }
 
@@ -1119,6 +1121,148 @@ impl<'a> Checker<'a> {
                     "classConstant.type",
                 );
             }
+        }
+    }
+
+    /// `ConflictingTraitConstantsRule`: a constant also supplied by a used
+    /// trait (at any depth) must keep its visibility
+    /// (`classConstant.visibility`), finality (`classConstant.nonFinal`/
+    /// `.final`), and native type (`classConstant.nativeType`/
+    /// `.missingNativeType`); against an immediately used trait it must
+    /// also keep the same value (`classConstant.value`).
+    pub(crate) fn check_trait_constant_conflicts(&mut self, fqn: &str, consts: &[ClassConst]) {
+        let Some(info) = self.registry.classes.get(fqn) else {
+            return;
+        };
+        let immediate: Vec<std::sync::Arc<str>> = info.uses.clone();
+        if immediate.is_empty() {
+            return;
+        }
+        let mut all_traits: Vec<std::sync::Arc<str>> = Vec::new();
+        let mut stack = immediate.clone();
+        while let Some(t) = stack.pop() {
+            if all_traits.contains(&t) {
+                continue;
+            }
+            if let Some(trait_info) = self.registry.classes.get(&t) {
+                stack.extend(trait_info.uses.iter().cloned());
+            }
+            all_traits.push(t);
+        }
+        let previous_class = self.current_class.replace(fqn.to_string());
+        for cc in consts {
+            let name = cc.name.as_ref();
+            let own_native = cc
+                .type_hint
+                .as_deref()
+                .map(|h| self.resolve_type_hint(Some(h)));
+            for trait_fqn in &all_traits {
+                let Some(trait_const) = self
+                    .registry
+                    .lookup_const_with_owner(trait_fqn, name)
+                    .filter(|(owner, _)| owner == trait_fqn)
+                    .map(|(_, sig)| sig.clone())
+                else {
+                    continue;
+                };
+                self.report_trait_constant_conflict(
+                    fqn,
+                    trait_fqn,
+                    cc,
+                    &trait_const,
+                    own_native.as_ref(),
+                );
+                if immediate.contains(trait_fqn) {
+                    let own_value = self.infer_expr(&cc.value, &Locals::default());
+                    if own_value != Type::Mixed(false) && own_value != trait_const.value_ty {
+                        self.report_builder(
+                            DiagnosticBuilder::new(
+                                fqn.to_string(),
+                                format!(
+                                    "Constant {fqn}::{name} with value {own_value} overriding constant {trait_fqn}::{name} with different value {} should have the same value.",
+                                    trait_const.value_ty
+                                ),
+                                cc.name_span,
+                                0,
+                                "classConstant.value",
+                            )
+                            .non_ignorable(),
+                        );
+                    }
+                }
+            }
+        }
+        self.current_class = previous_class;
+    }
+
+    fn report_trait_constant_conflict(
+        &mut self,
+        fqn: &str,
+        trait_fqn: &str,
+        cc: &ClassConst,
+        trait_const: &crate::registry::ConstSig,
+        own_native: Option<&Type>,
+    ) {
+        let name = cc.name.as_ref();
+        let word = |v: &Visibility| match v {
+            Visibility::Public => "public",
+            Visibility::Protected => "protected",
+            Visibility::Private => "private",
+        };
+        let mut errors: Vec<(String, &'static str)> = Vec::new();
+        if cc.visibility != trait_const.visibility {
+            let own = word(&cc.visibility);
+            let theirs = word(&trait_const.visibility);
+            let mut own_cap = own.to_string();
+            own_cap[..1].make_ascii_uppercase();
+            errors.push((
+                format!(
+                    "{own_cap} constant {fqn}::{name} overriding {theirs} constant {trait_fqn}::{name} should also be {theirs}."
+                ),
+                "classConstant.visibility",
+            ));
+        }
+        if trait_const.is_final && !cc.is_final {
+            errors.push((
+                format!(
+                    "Non-final constant {fqn}::{name} overriding final constant {trait_fqn}::{name} should also be final."
+                ),
+                "classConstant.nonFinal",
+            ));
+        } else if !trait_const.is_final && cc.is_final {
+            errors.push((
+                format!(
+                    "Final constant {fqn}::{name} overriding non-final constant {trait_fqn}::{name} should also be non-final."
+                ),
+                "classConstant.final",
+            ));
+        }
+        match (&trait_const.native_ty, own_native) {
+            (None, Some(own)) => errors.push((
+                format!(
+                    "Constant {fqn}::{name} ({own}) overriding constant {trait_fqn}::{name} should not have a native type."
+                ),
+                "classConstant.nativeType",
+            )),
+            (Some(theirs), None) => errors.push((
+                format!(
+                    "Constant {fqn}::{name} overriding constant {trait_fqn}::{name} ({theirs}) should also have native type {theirs}."
+                ),
+                "classConstant.missingNativeType",
+            )),
+            (Some(theirs), Some(own)) if theirs != own => errors.push((
+                format!(
+                    "Constant {fqn}::{name} ({own}) overriding constant {trait_fqn}::{name} ({theirs}) should have the same native type {theirs}."
+                ),
+                "classConstant.nativeType",
+            )),
+            _ => {}
+        }
+        for (message, identifier) in errors {
+            self.report_builder(
+                DiagnosticBuilder::new(fqn.to_string(), message, cc.name_span, 0, identifier)
+                    .non_ignorable(),
+            );
         }
     }
 

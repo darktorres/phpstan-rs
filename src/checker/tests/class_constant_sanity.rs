@@ -620,3 +620,70 @@ fn dynamic_class_constant_fetches_are_version_gated_and_need_a_string_name() {
         4
     );
 }
+
+#[test]
+fn a_constant_overriding_a_trait_constant_must_match_it() {
+    let d = diagnostics_for(
+        r#"<?php
+            trait Inner { public const DEEP = 1; }
+            trait Outer {
+                use Inner;
+                public const VIS = 1;
+                final public const FIN = 1;
+                public const int TYPED = 1;
+                public const VALUE = 1;
+                public const SAME = 'x';
+            }
+            class Host {
+                use Outer;
+                protected const VIS = 1;
+                public const FIN = 1;
+                public const TYPED = 1;
+                public const VALUE = 2;
+                public const SAME = 'x';
+                final public const DEEP = 5;
+            }
+        "#,
+    );
+    let found: Vec<_> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("classConstant.") && x.identifier != "classConstant.unused"
+        })
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            (
+                "classConstant.visibility",
+                "Protected constant Host::VIS overriding public constant Outer::VIS should also be public."
+            ),
+            (
+                "classConstant.nonFinal",
+                "Non-final constant Host::FIN overriding final constant Outer::FIN should also be final."
+            ),
+            (
+                "classConstant.missingNativeType",
+                "Constant Host::TYPED overriding constant Outer::TYPED (int) should also have native type int."
+            ),
+            (
+                "classConstant.value",
+                "Constant Host::VALUE with value 2 overriding constant Outer::VALUE with different value 1 should have the same value."
+            ),
+            (
+                "classConstant.final",
+                "Final constant Host::DEEP overriding non-final constant Outer::DEEP should also be non-final."
+            ),
+            (
+                "classConstant.value",
+                "Constant Host::DEEP with value 5 overriding constant Outer::DEEP with different value 1 should have the same value."
+            ),
+            (
+                "classConstant.final",
+                "Final constant Host::DEEP overriding non-final constant Inner::DEEP should also be non-final."
+            ),
+        ],
+        "got: {d:?}"
+    );
+}

@@ -1796,6 +1796,7 @@ impl<'a> Checker<'a> {
                         self.check_typed_class_constant_values(&fqn, &c.consts);
                         self.check_class_constant_modifiers(&fqn, c.kind, &c.consts);
                         self.check_constant_overrides(&fqn, &c.consts);
+                        self.check_trait_constant_conflicts(&fqn, &c.consts);
                         // The class's own attributes, plus every property's/
                         // const's - method/param attributes are checked
                         // per-declaration inside `check_function` below
@@ -1915,6 +1916,7 @@ impl<'a> Checker<'a> {
                         self.check_typed_class_constant_values(&fqn, &e.consts);
                         self.check_class_constant_modifiers(&fqn, ClassKind::Enum, &e.consts);
                         self.check_constant_overrides(&fqn, &e.consts);
+                        self.check_trait_constant_conflicts(&fqn, &e.consts);
                         self.check_attributes(&e.attrs, &fqn);
                         self.check_attribute_targets(
                             &e.attrs,

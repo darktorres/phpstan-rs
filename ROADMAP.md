@@ -594,7 +594,9 @@ configured half report a declared value that type rejects
 (`constant.defineValue`/`constant.value`/`classConstant.value`). `DynamicClassConstantFetchRule`
 (`classConstant.dynamicFetch` below PHP 8.3, `classConstant.nameType`),
 from a new `ExprKind::DynamicClassConstFetch` that also checks the name
-expression itself.
+expression itself. `ConflictingTraitConstantsRule` (visibility,
+finality, native type against every used trait at any depth, and value
+against immediately used ones).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3659,12 +3661,6 @@ against this list, and added the real gaps the audit had missed.
 
 (`VariableCloningRule` — `clone.nonObject` — is now built; see Done,
 receiver-type-checks phase.)
-
-### Phase 136 — Traits+InternalTag (`Rules/Traits/` gaps)
-
-- `ConflictingTraitConstantsRule` — a class constant overriding one
-  supplied by a used trait must keep the same visibility/final-ness/
-  native type (and, for immediately-used traits, the same value).
 
 ### Phase 137 — Keywords+Debug (`Rules/Keywords/`, `Rules/Debug/` gaps)
 

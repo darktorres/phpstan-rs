@@ -166,6 +166,8 @@ pub struct ConstSig {
     pub native_ty: Option<Type>,
     // Whether `ty` comes from an `@var` tag rather than the value.
     pub has_phpdoc_type: bool,
+    // The declared value's own type, regardless of any `@var`.
+    pub value_ty: Type,
     // `@internal` on this constant's own doc comment - direct mirror of
     // `PropertySig::is_internal`. Always `false` for an enum case (no
     // doc-comment/`@internal` convention of its own).
@@ -932,6 +934,7 @@ impl ClassInfo {
                         is_final: cc.is_final,
                         native_ty: native_const_type(cc, ctx),
                         has_phpdoc_type,
+                        value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         // `@internal` on this constant's own doc
                         // comment - see `PropertySig::is_internal`'s doc
                         // comment for the convention this mirrors.
@@ -1385,6 +1388,7 @@ impl ClassInfo {
                         is_final: cc.is_final,
                         native_ty: native_const_type(cc, ctx),
                         has_phpdoc_type: false,
+                        value_ty: resolve_names_in_type(infer_class_const_type(&cc.value), ctx),
                         is_internal: doc.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc.as_ref().and_then(|d| d.deprecated.clone()),
                     },
@@ -1407,6 +1411,7 @@ impl ClassInfo {
                     is_final: true,
                     native_ty: None,
                     has_phpdoc_type: false,
+                    value_ty: Type::EnumCase(fqn.clone(), case.name.to_string()),
                     // A case has no doc-comment/`@internal`/`@deprecated`
                     // convention of its own in real PHP either - same
                     // reasoning as its always-`Visibility::Public` above.
