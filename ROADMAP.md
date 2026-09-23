@@ -585,7 +585,13 @@ typed constant's `@var`). `ConstantRule` (`constant.notFound`, level 1; a
 `defined('NAME')` test anywhere in the file exempts `NAME`) and
 `MagicConstantContextRule` (`magicConstant.outOfClass`/`.outOfTrait`/
 `.outOfFunction`/`.outOfNamespace`). A `define()` anywhere - a function
-or method body, a loop, a `try` - now registers its global constant.
+or method body, a loop, a `try` - now registers its global constant. `dynamicConstantNames` (config
+`dynamic_constant_names`, a list or a name-to-type table, global and
+`Class::NAME` constants): a configured constant reads as its configured
+or general type, and `ValueAssignedToDefineRule`/
+`ValueAssignedToGlobalConstantRule`/`ValueAssignedToClassConstantRule`'s
+configured half report a declared value that type rejects
+(`constant.defineValue`/`constant.value`/`classConstant.value`).
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3630,9 +3636,6 @@ against this list, and added the real gaps the audit had missed.
 - `DynamicClassConstantFetchRule` — PHP 8.3's `Foo::{$expr}` dynamic
   class-constant fetch; `StaticAccess`'s AST has no way to represent a
   dynamic member name at all.
-- `ValueAssignedToDefineRule`/`ValueAssignedToGlobalConstantRule` — a
-  `define()`'d/`const`-declared global constant's value checked against
-  a configured `dynamicConstantNames` type.
 
 ### Phase 134 — Variables (`Rules/Variables/` gaps)
 

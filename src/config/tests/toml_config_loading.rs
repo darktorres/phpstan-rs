@@ -207,3 +207,27 @@ fn malformed_toml_is_a_real_error_not_a_panic() {
 
     let _ = std::fs::remove_file(&path);
 }
+
+#[test]
+fn dynamic_constant_names_accept_a_list_or_a_typed_table() {
+    let list: crate::config::Config =
+        toml::from_str(r#"dynamic_constant_names = ["DEBUG", "App\\Settings::LEVEL"]"#).unwrap();
+    assert_eq!(
+        list.dynamic_constant_names.unwrap().entries(),
+        vec![
+            ("DEBUG".to_string(), None),
+            ("App\\Settings::LEVEL".to_string(), None),
+        ]
+    );
+    let typed: crate::config::Config = toml::from_str(
+        r#"
+            [dynamic_constant_names]
+            DEBUG = "bool"
+        "#,
+    )
+    .unwrap();
+    assert_eq!(
+        typed.dynamic_constant_names.unwrap().entries(),
+        vec![("DEBUG".to_string(), Some("bool".to_string()))]
+    );
+}

@@ -151,6 +151,7 @@ fn run_check_project(
     baseline_path: Option<&Path>,
     ignore_error_entries: &[ignore_errors::IgnoreErrorEntry],
     restricted_symbol_entries: &[restricted_symbols::RestrictedSymbolEntry],
+    dynamic_constant_names: &[(String, Option<String>)],
     doctrine_custom_function_entries: &[doctrine_functions::DoctrineCustomFunctionEntry],
     sql_reflection_config: Option<sql_reflection_config::SqlReflectionConfig>,
     sql_reflection_schema: Option<sql_reflection_schema::SchemaCatalog>,
@@ -219,6 +220,7 @@ fn run_check_project(
     project.set_check_renamed_named_arguments(check_renamed_named_arguments);
     project.set_configured_level(configured_level);
     project.set_restricted_symbols(restricted_symbol_entries);
+    project.set_dynamic_constant_names(dynamic_constant_names);
     project.set_doctrine_custom_functions(doctrine_custom_function_entries);
     project.set_sql_reflection_config(sql_reflection_config);
     project.set_sql_reflection_schema(sql_reflection_schema);
@@ -747,6 +749,11 @@ pub(crate) fn run_check_project_command(
     let baseline = baseline.or(config.baseline.map(resolve_against_config));
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
     let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
+    let dynamic_constant_names = config
+        .dynamic_constant_names
+        .as_ref()
+        .map(config::DynamicConstantNames::entries)
+        .unwrap_or_default();
     let doctrine_custom_function_entries = config.doctrine_custom_functions.unwrap_or_default();
     let sql_reflection_config = config.sql_reflection;
     // A configured `schema_file` is a real, reachable-or-not schema
@@ -889,6 +896,7 @@ pub(crate) fn run_check_project_command(
         baseline.as_deref(),
         &ignore_error_entries,
         &restricted_symbol_entries,
+        &dynamic_constant_names,
         &doctrine_custom_function_entries,
         sql_reflection_config,
         sql_reflection_schema,

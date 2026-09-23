@@ -188,4 +188,66 @@ impl<'a> Checker<'a> {
             identifier,
         );
     }
+
+    /// `ValueAssignedToDefineRule`/`ValueAssignedToGlobalConstantRule`
+    /// (`constant.defineValue`/`constant.value`, level 2): a declared
+    /// value the constant's configured `dynamicConstantNames` type
+    /// doesn't accept.
+    pub(crate) fn check_configured_constant_value(
+        &mut self,
+        class: Option<&str>,
+        name: &str,
+        value: &crate::types::Type,
+        identifier: &str,
+        span: Span,
+        label: &str,
+    ) {
+        let Some(configured) = self.registry.configured_constant_type(class, name).cloned() else {
+            return;
+        };
+        if matches!(value, crate::types::Type::Mixed(false))
+            || self.registry.is_assignable(value, &configured)
+        {
+            return;
+        }
+        let display = match class {
+            Some(class) => format!("{class}::{name}"),
+            None => name.trim_start_matches('\\').to_string(),
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "Configuration defined type for constant {display} ({configured}) does not accept value {value}."
+            ),
+            span,
+            2,
+            identifier,
+        );
+    }
+
+    /// `define('NAME', $value)` against a configured type.
+    pub(crate) fn check_define_value(
+        &mut self,
+        args: &[Arg],
+        locals: &crate::checker::Locals,
+        span: Span,
+        label: &str,
+    ) {
+        let [name_arg, value_arg, ..] = args else {
+            return;
+        };
+        let crate::types::Type::StringLiteral(name) = self.infer_expr(&name_arg.value, locals)
+        else {
+            return;
+        };
+        let value = self.infer_expr(&value_arg.value, locals);
+        self.check_configured_constant_value(
+            None,
+            &name,
+            &value,
+            "constant.defineValue",
+            span,
+            label,
+        );
+    }
 }

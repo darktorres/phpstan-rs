@@ -810,6 +810,7 @@ impl<'a> Checker<'a> {
         if !consts
             .iter()
             .any(|c| c.type_hint.is_some() || c.doc_comment.is_some())
+            && self.registry.dynamic_constant_names.is_empty()
         {
             return;
         }
@@ -828,6 +829,18 @@ impl<'a> Checker<'a> {
                 .lookup_const_with_owner(fqn, &c.name)
                 .filter(|(owner, sig)| owner.as_ref() == fqn && sig.has_phpdoc_type)
                 .map(|(_, sig)| sig.ty.clone());
+            if phpdoc_ty.is_none() && c.type_hint.is_none() {
+                let value_ty = self.infer_expr(&c.value, &Locals::default());
+                self.check_configured_constant_value(
+                    Some(fqn),
+                    &c.name,
+                    &value_ty,
+                    "classConstant.value",
+                    c.span,
+                    fqn,
+                );
+                continue;
+            }
             if let Some(phpdoc_ty) = &phpdoc_ty {
                 let value_ty = self.infer_expr(&c.value, &Locals::default());
                 if value_ty != Type::Mixed(false) {

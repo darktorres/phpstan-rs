@@ -758,6 +758,9 @@ impl<'a> Checker<'a> {
                             name, sig, args, &resolved, locals, label,
                         );
                         self.check_impossible_haystack_values(name, args, locals, e.span, label);
+                        if name.eq_ignore_ascii_case("define") {
+                            self.check_define_value(args, locals, e.span, label);
+                        }
                         if !args.iter().any(|a| a.spread)
                             && matches!(
                                 name.as_ref(),
@@ -2817,7 +2820,11 @@ impl<'a> Checker<'a> {
                         .unwrap_or(Type::Mixed(false))
                 } else {
                     let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
-                    let const_ty = const_with_owner.as_ref().map(|(_, cs)| cs.ty.clone());
+                    let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
+                        self.registry
+                            .dynamic_class_constant_type(owner, member, &cs.ty)
+                            .unwrap_or_else(|| cs.ty.clone())
+                    });
                     if const_ty.is_none() {
                         self.report(
                             label.to_string(),
@@ -4695,10 +4702,15 @@ impl<'a> Checker<'a> {
                             .registry
                             .lookup_property(&class, prop_name)
                             .map(|p| self.resolve_pseudo(&p.ty, &class)),
-                        None => self
-                            .registry
-                            .lookup_const(&class, member)
-                            .map(|cs| self.resolve_pseudo(&cs.ty, &class)),
+                        None => self.registry.lookup_const_with_owner(&class, member).map(
+                            |(owner, cs)| {
+                                let ty = self
+                                    .registry
+                                    .dynamic_class_constant_type(&owner, member, &cs.ty)
+                                    .unwrap_or_else(|| cs.ty.clone());
+                                self.resolve_pseudo(&ty, &class)
+                            },
+                        ),
                     })
                     .unwrap_or(Type::Mixed(false))
             }

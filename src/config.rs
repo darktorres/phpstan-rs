@@ -51,6 +51,27 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
+/// `Config::dynamic_constant_names`'s two accepted shapes.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub enum DynamicConstantNames {
+    Names(Vec<String>),
+    Typed(std::collections::BTreeMap<String, String>),
+}
+
+impl DynamicConstantNames {
+    /// Every entry as `(name, explicit type)`.
+    pub fn entries(&self) -> Vec<(String, Option<String>)> {
+        match self {
+            DynamicConstantNames::Names(names) => names.iter().map(|n| (n.clone(), None)).collect(),
+            DynamicConstantNames::Typed(map) => map
+                .iter()
+                .map(|(n, t)| (n.clone(), Some(t.clone())))
+                .collect(),
+        }
+    }
+}
+
 #[derive(Debug, Default, Deserialize, PartialEq)]
 pub struct Config {
     pub paths: Option<Vec<PathBuf>>,
@@ -129,6 +150,20 @@ pub struct Config {
     /// message = "use the Db\\Connection service instead"
     /// ```
     pub restricted_symbols: Option<Vec<crate::restricted_symbols::RestrictedSymbolEntry>>,
+    /// Mirrors real PHPStan's own `dynamicConstantNames`: global
+    /// (`NAME`) or class (`Class::NAME`) constants whose declared value
+    /// differs between environments, so their literal value is never
+    /// trusted. A plain list reads each one as its value's general type;
+    /// a table gives the type explicitly, and a declared value it doesn't
+    /// accept is reported. Config-file-only.
+    ///
+    /// ```toml
+    /// dynamic_constant_names = ["DEBUG", "App\\Settings::LEVEL"]
+    /// # or
+    /// [dynamic_constant_names]
+    /// DEBUG = "bool"
+    /// ```
+    pub dynamic_constant_names: Option<DynamicConstantNames>,
     /// A project's own custom DQL function registrations - see
     /// `doctrine_functions::DoctrineCustomFunctionEntry`. Config-file-only,
     /// no CLI flag, the same reasoning as `restricted_symbols`.

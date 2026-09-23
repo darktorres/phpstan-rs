@@ -261,6 +261,11 @@ impl Project {
     /// into the `Registry`-held index `checker::restricted_symbol_usage`
     /// consults. Empty by default (no entries configured), so this is a
     /// zero-cost no-op call for every ordinary project.
+    /// See `Registry::set_dynamic_constant_names`.
+    pub fn set_dynamic_constant_names(&mut self, entries: &[(String, Option<String>)]) {
+        self.registry.set_dynamic_constant_names(entries);
+    }
+
     pub fn set_restricted_symbols(
         &mut self,
         entries: &[crate::restricted_symbols::RestrictedSymbolEntry],

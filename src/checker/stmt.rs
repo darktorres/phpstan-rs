@@ -699,6 +699,18 @@ impl<'a> Checker<'a> {
             // way `ClassDecl`/`EnumDecl` do, so one arm here is enough.
             StmtKind::GlobalConst(consts) => {
                 self.check_global_const_attributes(consts, stmt.span, label);
+                for c in consts {
+                    let value = self.infer_expr(&c.value, locals);
+                    let name = self.name_ctx.declared_name(&c.name);
+                    self.check_configured_constant_value(
+                        None,
+                        &name,
+                        &value,
+                        "constant.value",
+                        c.span,
+                        label,
+                    );
+                }
             }
             _ => {}
         }

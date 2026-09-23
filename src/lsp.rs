@@ -424,6 +424,8 @@ impl Server {
         self.project
             .set_restricted_symbols(&resolved.restricted_symbol_entries);
         self.project
+            .set_dynamic_constant_names(&resolved.dynamic_constant_names);
+        self.project
             .set_doctrine_custom_functions(&resolved.doctrine_custom_function_entries);
         self.project
             .set_sql_reflection_config(resolved.sql_reflection_config);

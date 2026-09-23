@@ -8,6 +8,7 @@ use crate::types::Type;
 mod anonymous_class;
 mod assignability;
 mod class_info;
+mod dynamic_constants;
 mod function_sig;
 mod generics;
 mod global_vars;
@@ -369,6 +370,10 @@ pub struct Registry {
     // once via `RestrictedSymbols::compile` (`Project::
     // set_restricted_symbols`).
     pub restricted_symbols: crate::restricted_symbols::RestrictedSymbols,
+    // `dynamicConstantNames` - see `registry::dynamic_constants`. Keyed by
+    // a global constant's name, or `lowercased class::NAME` for a class
+    // constant; `None` reads the declared value's general type.
+    pub dynamic_constant_names: FxHashMap<String, Option<Type>>,
     // A project's own `[[doctrine_custom_functions]]` config (ROADMAP
     // Phase 168 168h) - DQL function name (lowercased, matching DQL's own
     // case-insensitive function-name lookup) -> declared category.

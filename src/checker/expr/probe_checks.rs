@@ -51,15 +51,30 @@ impl<'a> Checker<'a> {
                 None => Type::Int,
             });
         }
-        self.registry
+        let found = self
+            .registry
             .global_constants
             .get(primary.as_str())
+            .map(|ty| (primary.as_str(), ty))
             .or_else(|| {
                 fallback
-                    .as_ref()
-                    .and_then(|f| self.registry.global_constants.get(f.as_str()))
-            })
-            .cloned()
+                    .as_deref()
+                    .and_then(|f| self.registry.global_constants.get(f).map(|ty| (f, ty)))
+            });
+        // A `dynamicConstantNames` entry reads as its configured or
+        // general type, and is known even when nothing declares it.
+        let dynamic = match found {
+            Some((name, ty)) => self.registry.dynamic_global_constant_type(name, Some(ty)),
+            None => self
+                .registry
+                .dynamic_global_constant_type(&primary, None)
+                .or_else(|| {
+                    fallback
+                        .as_deref()
+                        .and_then(|f| self.registry.dynamic_global_constant_type(f, None))
+                }),
+        };
+        dynamic.or_else(|| found.map(|(_, ty)| ty.clone()))
     }
 
     /// Checks an `isset()`/`??`-style "quiet" left-hand-side chain: walks

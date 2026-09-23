@@ -47,6 +47,7 @@ pub(crate) struct ResolvedWorkspaceConfig {
     pub(crate) check_risky_tests: bool,
     pub(crate) php_version: Option<crate::php_version::PhpVersion>,
     pub(crate) restricted_symbol_entries: Vec<crate::restricted_symbols::RestrictedSymbolEntry>,
+    pub(crate) dynamic_constant_names: Vec<(String, Option<String>)>,
     pub(crate) doctrine_custom_function_entries:
         Vec<crate::doctrine_functions::DoctrineCustomFunctionEntry>,
     pub(crate) sql_reflection_config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
@@ -223,6 +224,11 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_risky_tests: config.check_risky_tests.unwrap_or(false),
         php_version,
         restricted_symbol_entries: config.restricted_symbols.unwrap_or_default(),
+        dynamic_constant_names: config
+            .dynamic_constant_names
+            .as_ref()
+            .map(crate::config::DynamicConstantNames::entries)
+            .unwrap_or_default(),
         doctrine_custom_function_entries: config.doctrine_custom_functions.unwrap_or_default(),
         sql_reflection_config,
         sql_reflection_schema,
