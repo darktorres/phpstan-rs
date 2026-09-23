@@ -160,6 +160,14 @@ pub struct Config {
     pub restricted_symbols: Option<Vec<crate::restricted_symbols::RestrictedSymbolEntry>>,
     /// `[[architecture]]` rules - see `architecture`'s own doc comment.
     pub architecture: Option<Vec<crate::architecture::ArchitectureRule>>,
+    /// Language constructs to report wherever they're used - see
+    /// `banned::BannedConstruct::ALL` for the names.
+    pub banned_constructs: Option<Vec<String>>,
+    /// Native types (`float`, ...) or class names to report in
+    /// signatures, properties and constants.
+    pub banned_types: Option<Vec<String>>,
+    /// Built-in `restricted_symbols` sets to add (`multibyte-strings`).
+    pub restricted_symbol_presets: Option<Vec<String>>,
     /// Mirrors real PHPStan's own `dynamicConstantNames`: global
     /// (`NAME`) or class (`Class::NAME`) constants whose declared value
     /// differs between environments, so their literal value is never

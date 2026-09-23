@@ -1276,6 +1276,21 @@ class's dependencies are the classes its declaration and body name plus
 every class in its members' PHPDoc-refined types, built-ins excluded;
 each forbidden one is reported where it's used.
 
+**Construct and type bans** (`banned_constructs`/`banned_types`,
+`banned.rs`/`project/banned.rs`, the `ergebnis`/`strict-rules`/
+`roave/no-floaters` families): `eval`, `isset`, `empty`, `compact`,
+`extract`, `exit`/`die`, `@` (recorded from tokens, since the parser
+drops it), `switch`, `goto`, `global`, named arguments, `=&`,
+by-reference parameters and returns, `?:`, `==`/`!=`, `$a[] =`,
+backticks, `@phpstan-ignore` comments (non-ignorable), superglobals,
+variable variables, and dynamic member names - each `banned.<name>`; a
+banned type (`float`, other native types, or a class) in the
+PHPDoc-refined signatures of functions and methods, property types and
+typed constants, plus float literals and `(float)` casts for `float`
+(`banned.type`). `restricted_symbol_presets = ["multibyte-strings"]`
+adds the twelve byte-oriented string functions with `mb_*`
+counterparts to `restricted_symbols`.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3323,52 +3338,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 143 — Generalized "ban this construct/keyword/type" mechanism
-
-A small, self-contained AST-shape-match mechanism — deliberately
-simpler than the `spaze` allow/disallow-in DSL
-(Phase 67), because none of these need call-site-scope-path/attribute-
-context matching, only "does this bare AST-node-kind/type appear at
-all, opt-in per rule." Real, independently popular (`ergebnis/
-phpstan-rules`, republished/forked as `localheinz/phpstan-rules` —
-one of the richest single packages surveyed):
-
-- **143a.** Ban a bare language construct outright, config/opt-in per
-  rule: `eval`, `isset()`, `compact()`, the `@` error-suppression
-  operator, `switch`, PHP 8 named arguments, assignment-by-reference
-  (`=&`) and by-ref function/method/closure parameters/returns, the
-  short ternary `?:`, loose `==`/`!=` comparison, implicit
-  array-append-key creation (`$arr[] = x`), `empty()`, backticks,
-  `@phpstan-ignore`/`@phpstan-ignore-line` comments (forces fixing real
-  issues instead of suppressing — an "eat your own dog food" policy
-  check), and direct `$_GET`/`$_POST`/etc. superglobal access (forces a
-  request-wrapper abstraction). Sources: `ergebnis/phpstan-rules`,
-  `phpstan/phpstan-strict-rules`' `Disallowed*`/`NoSuperglobalsRule`
-  family (`thecodingmachine/phpstan-strict-rules`).
-- **143b.** Ban a bare *type* outright: `roave/no-floaters`' float/
-  double ban (property types, param/return signatures, variable
-  assignments) — avoid floating-point in money/precision-critical
-  domains. A distinct "ban this native type" sub-family from 143a's
-  "ban this construct."
-- **143c.** Ban dynamic member-name-expression access entirely (opt-in
-  strictness, not a resolution problem): `$$foo` variable-variables,
-  `$obj->$memberNameExpr`/`$class::$memberNameExpr` where the member
-  name is a runtime expression rather than a literal — these already
-  collapse to `Mixed` in phpstan-rs's checker; this rule only needs to
-  flag the *syntactic shape*, not resolve anything
-  (`phpstan/phpstan-strict-rules`' `VariableVariablesRule`/`Variable*`
-  family, duplicated independently in `symplify/phpstan-rules`'
-  `NoDynamicNameRule`).
-- **143d (curated preset, not new architecture).** A ready-made config
-  preset banning 12 byte-oriented string functions (`strlen`/`substr`/
-  `strtolower`/`strpos`/`stripos`/`strstr`/etc.) in favor of their
-  `mb_*`-prefixed multibyte-safe counterparts — a real, common
-  UTF-8-correctness bug class (`korbeil/phpstan-generic-rules`). Ships
-  as a documented example config for `restricted_symbols`
-  (Phase 67), not a new mechanism.
-- **Effort: medium** overall — one AST-node-kind/type-kind matcher plus
-  a config table, reused across all four sub-families.
 
 ### Phase 144 — "Closed by default" class shape + generalized parent-hook-call requirement
 

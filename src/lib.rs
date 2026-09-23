@@ -8,6 +8,7 @@
 pub mod architecture;
 pub mod ast;
 pub mod ast_walk;
+pub mod banned;
 pub mod baseline;
 pub mod checker;
 pub mod composer;

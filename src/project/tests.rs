@@ -2,6 +2,7 @@ mod helpers;
 
 mod anonymous_class_naming;
 mod architecture;
+mod banned;
 mod circular_namespace_deps;
 mod composer_hygiene;
 mod dead_abstract_classes;

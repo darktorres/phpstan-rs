@@ -19,6 +19,9 @@ pub(crate) struct IgnoreComments {
     pub(crate) identifiers: HashMap<u32, Vec<String>>,
     /// `(line, message)` for each malformed identifier list.
     pub(crate) parse_errors: Vec<(u32, String)>,
+    /// Where each `@` error-suppression operator is (the parser drops
+    /// the operator itself).
+    pub(crate) error_suppressions: Vec<Span>,
 }
 
 /// Lexes `source` and scans its comments.
@@ -48,9 +51,14 @@ pub(crate) fn scan_tokens(
     comments: &[(Position, String)],
 ) -> IgnoreComments {
     let mut events: Vec<((u32, u32), Event)> = Vec::with_capacity(tokens.len() + comments.len());
+    let mut error_suppressions = Vec::new();
     for (token, span, _) in tokens {
         match token {
             Token::Eof => {}
+            Token::At => {
+                error_suppressions.push(*span);
+                events.push((position_key(span.start), Event::Code(span.start.line)));
+            }
             Token::DocComment(text) => events.push((
                 position_key(span.start),
                 Event::Comment {
@@ -74,7 +82,10 @@ pub(crate) fn scan_tokens(
     }
     events.sort_by_key(|(key, _)| *key);
 
-    let mut out = IgnoreComments::default();
+    let mut out = IgnoreComments {
+        error_suppressions,
+        ..IgnoreComments::default()
+    };
     let mut previous_code_line: Option<u32> = None;
     // (comment text, marker offset, error base line, comment's last line)
     let mut pending: Option<(&str, usize, i64, u32)> = None;

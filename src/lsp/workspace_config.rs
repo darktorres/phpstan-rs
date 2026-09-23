@@ -88,7 +88,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
     let config_path = config_path_override
         .map(Path::to_path_buf)
         .unwrap_or_else(|| root.join("phpstan-rs.toml"));
-    let config = if config_path.is_file() {
+    let mut config = if config_path.is_file() {
         match crate::config::Config::load(&config_path) {
             Ok(c) => c,
             Err(e) => {
@@ -130,6 +130,14 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         }
         None => None,
     };
+
+    let mut restricted_symbol_entries = config.restricted_symbols.take().unwrap_or_default();
+    for preset in config.restricted_symbol_presets.take().unwrap_or_default() {
+        match crate::banned::restricted_symbol_preset(&preset) {
+            Ok(entries) => restricted_symbol_entries.extend(entries),
+            Err(e) => eprintln!("phpstan-rs lsp: {e}"),
+        }
+    }
 
     let baseline = config.baseline.map(resolve_against_root).and_then(|path| {
         match crate::baseline::Baseline::load(&path) {
@@ -229,7 +237,7 @@ pub(crate) fn resolve(root: &Path, config_path_override: Option<&Path>) -> Resol
         check_new_exception_discarded: config.check_new_exception_discarded.unwrap_or(false),
         check_risky_tests: config.check_risky_tests.unwrap_or(false),
         php_version,
-        restricted_symbol_entries: config.restricted_symbols.unwrap_or_default(),
+        restricted_symbol_entries,
         dynamic_constant_names: config
             .dynamic_constant_names
             .as_ref()

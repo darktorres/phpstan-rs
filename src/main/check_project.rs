@@ -173,6 +173,8 @@ fn run_check_project(
     report_unmatched_ignored_errors: bool,
     composer_manifests: Vec<composer::manifest::ComposerManifest>,
     architecture_rules: &[phpstan_rs::architecture::ArchitectureRule],
+    banned_constructs: &[phpstan_rs::banned::BannedConstruct],
+    banned_types: &[String],
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -507,6 +509,11 @@ fn run_check_project(
         entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
     }
 
+    for (path, diags) in project.check_banned(banned_constructs, banned_types) {
+        let entry = results.entry(path).or_default();
+        entry.extend(diags);
+        entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+    }
     for (path, diags) in project.check_architecture(architecture_rules) {
         let entry = results.entry(path).or_default();
         entry.extend(diags);
@@ -859,7 +866,30 @@ pub(crate) fn run_check_project_command(
     let baseline_per_identifier =
         baseline_per_identifier || config.baseline_per_identifier.unwrap_or(false);
     let ignore_error_entries = config.ignore_errors.unwrap_or_default();
-    let restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
+    let mut restricted_symbol_entries = config.restricted_symbols.unwrap_or_default();
+    for preset in config.restricted_symbol_presets.unwrap_or_default() {
+        match phpstan_rs::banned::restricted_symbol_preset(&preset) {
+            Ok(entries) => restricted_symbol_entries.extend(entries),
+            Err(e) => {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+    }
+    let banned_constructs: Vec<phpstan_rs::banned::BannedConstruct> = match config
+        .banned_constructs
+        .unwrap_or_default()
+        .iter()
+        .map(|name| phpstan_rs::banned::BannedConstruct::parse(name))
+        .collect()
+    {
+        Ok(constructs) => constructs,
+        Err(e) => {
+            eprintln!("{e}");
+            std::process::exit(1);
+        }
+    };
+    let banned_types = config.banned_types.unwrap_or_default();
     let architecture_rules = config.architecture.unwrap_or_default();
     for rule in &architecture_rules {
         if let Err(e) = rule.validate() {
@@ -1042,6 +1072,8 @@ pub(crate) fn run_check_project_command(
         report_unmatched_ignored_errors,
         composer_manifests,
         &architecture_rules,
+        &banned_constructs,
+        &banned_types,
         configured_level,
         &stub_dirs,
         php_version,
