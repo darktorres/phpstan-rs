@@ -216,6 +216,8 @@ pub(crate) struct Locals {
     types: LocalsMap,
     provenance: ProvenanceMap,
     pub(crate) guarded_functions: GuardedFunctionSet,
+    // Global constant names a `defined('NAME')` test proved defined.
+    pub(crate) guarded_constants: GuardedFunctionSet,
     pub(crate) guarded_methods: GuardedMemberSet,
     pub(crate) guarded_properties: GuardedMemberSet,
     pub(crate) condition_aliases: ConditionAliasMap,
@@ -389,6 +391,7 @@ impl Locals {
             types: LocalsMap::default(),
             provenance: ProvenanceMap::default(),
             guarded_functions: GuardedFunctionSet::default(),
+            guarded_constants: GuardedFunctionSet::default(),
             guarded_methods: GuardedMemberSet::default(),
             guarded_properties: GuardedMemberSet::default(),
             condition_aliases: ConditionAliasMap::default(),

@@ -666,11 +666,7 @@ fn build_declarations_with_context(
                     out.push(BuiltDecl::GlobalConst { name, ty });
                 }
             }
-            StmtKind::Expression(e) => {
-                if let Some((name, ty)) = define_call_constant(e) {
-                    out.push(BuiltDecl::GlobalConst { name, ty });
-                }
-            }
+            StmtKind::Expression(e) => collect_defines_in_expr(e, out),
             _ => collect_nested_defines(std::slice::from_ref(stmt), out),
         }
     }
@@ -682,7 +678,7 @@ fn build_declarations_with_context(
 fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
     for stmt in stmts {
         match &stmt.kind {
-            StmtKind::Expression(e) => {
+            StmtKind::Expression(e) if define_call_constant(e).is_some() => {
                 if let Some((name, ty)) = define_call_constant(e) {
                     out.push(BuiltDecl::GlobalConst { name, ty });
                 }
@@ -694,12 +690,27 @@ fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
                 }
             }
             _ => {
+                for e in crate::ast_walk::stmt_own_exprs(stmt) {
+                    collect_defines_in_expr(e, out);
+                }
                 for child in crate::ast_walk::stmt_children(stmt) {
                     collect_nested_defines(std::slice::from_ref(child), out);
                 }
             }
         }
     }
+}
+
+/// A `define()` call nested inside an expression (`defined('X') ||
+/// define('X', 1)`), outside any closure body.
+fn collect_defines_in_expr(e: &Expr, out: &mut Vec<BuiltDecl>) {
+    if let Some((name, ty)) = define_call_constant(e) {
+        out.push(BuiltDecl::GlobalConst { name, ty });
+    }
+    crate::ast_walk::any_expr_child(e, &mut |child| {
+        collect_defines_in_expr(child, out);
+        false
+    });
 }
 
 /// Recognizes a top-level `define('NAME', value)` (or `\define(...)`)

@@ -147,3 +147,26 @@ fn a_declared_value_its_configured_type_rejects_is_flagged() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn a_defined_guard_only_covers_the_code_it_actually_guards() {
+    let d = diagnostics_for(
+        r#"<?php
+            defined('VIA_OR') || define('VIA_OR', 1);
+            function inside(): void {
+                if (defined('ONLY_IN_BRANCH')) { echo ONLY_IN_BRANCH; }
+                echo ONLY_IN_BRANCH;
+            }
+            function early(): void {
+                if (!defined('AFTER_RETURN')) { return; }
+                echo AFTER_RETURN;
+            }
+            function viaOr(): void { echo VIA_OR; }
+        "#,
+    );
+    assert_eq!(
+        unknown(&d),
+        vec!["Constant ONLY_IN_BRANCH not found."],
+        "got: {d:?}"
+    );
+}

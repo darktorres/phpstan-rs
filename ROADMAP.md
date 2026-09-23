@@ -582,10 +582,12 @@ non-int offset, an `ArrayAccess` object given an offset or value its
 from `ConstSig`'s new `is_final`/`native_ty`/`has_phpdoc_type`. `ValueAssignedToClassConstantRule`'s `@var`
 half (`classConstant.phpDocType`, and `classConstant.value` against a
 typed constant's `@var`). `ConstantRule` (`constant.notFound`, level 1; a
-`defined('NAME')` test anywhere in the file exempts `NAME`) and
+`defined('NAME')` test exempts `NAME` flow-sensitively, through the new
+`Locals::guarded_constants` narrowing) and
 `MagicConstantContextRule` (`magicConstant.outOfClass`/`.outOfTrait`/
 `.outOfFunction`/`.outOfNamespace`). A `define()` anywhere - a function
-or method body, a loop, a `try` - now registers its global constant. `dynamicConstantNames` (config
+or method body, a loop, a `try`, inside an expression like `defined('X')
+|| define('X', 1)` - now registers its global constant. `dynamicConstantNames` (config
 `dynamic_constant_names`, a list or a name-to-type table, global and
 `Class::NAME` constants): a configured constant reads as its configured
 or general type, and `ValueAssignedToDefineRule`/

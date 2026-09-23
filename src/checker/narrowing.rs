@@ -576,6 +576,23 @@ impl<'a> Checker<'a> {
                 .guarded_functions
                 .insert(guarded_name.trim_start_matches('\\').to_ascii_lowercase());
         }
+        // `defined('NAME')`'s true branch proves the global constant
+        // `NAME` exists, the constant counterpart of `function_exists`.
+        if branch_true
+            && let ExprKind::Call(callee, args) = &unwrap_grouping(cond).kind
+            && let ExprKind::Name(fn_name) = &unwrap_grouping(callee).kind
+            && fn_name
+                .rsplit('\\')
+                .next()
+                .unwrap_or(fn_name)
+                .eq_ignore_ascii_case("defined")
+            && let [guarded_arg] = args.as_slice()
+            && let Some(guarded_name) = literal_string_value(&guarded_arg.value)
+        {
+            locals
+                .guarded_constants
+                .insert(guarded_name.trim_start_matches('\\').to_string());
+        }
         // Real PHPStan's own `MethodExistsTypeSpecifyingExtension`/
         // `PropertyExistsTypeSpecifyingExtension` (`Accessory\
         // HasMethodType`/`HasPropertyType`) - a `method_exists($recv,

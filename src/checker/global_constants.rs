@@ -1,8 +1,8 @@
 //! Bare constant references. At level 1, `ConstantRule`
 //! (`constant.notFound`) flags a global constant no `const`/`define()`
-//! anywhere in the project and no stub declares; one the same file tests
-//! with `defined('NAME')` is left alone, since that guard is how code
-//! reads a constant supplied from outside the analysed files.
+//! anywhere in the project and no stub declares, except where a
+//! `defined('NAME')` test has proven it exists (`Locals::
+//! guarded_constants`).
 //! `MagicConstantContextRule` flags a magic constant used where it's
 //! always empty.
 
@@ -29,8 +29,6 @@ const MAGIC_CONSTANTS: [&str; 10] = [
 /// Per-file facts the bare-constant checks need, gathered once.
 #[derive(Default)]
 pub(crate) struct ConstantFacts {
-    /// Every constant name tested with a literal `defined('NAME')`.
-    pub(crate) defined_guarded: HashSet<String>,
     /// Spans of `__FUNCTION__`/`__METHOD__` inside a closure or arrow
     /// function, where they name `{closure}`.
     pub(crate) magic_in_closure: HashSet<Span>,
@@ -85,16 +83,6 @@ fn collect_in_expr(e: &Expr, in_closure: bool, out: &mut ConstantFacts) {
             out.magic_in_closure.insert(e.span);
         }
         ExprKind::Call(callee, args) => {
-            if let ExprKind::Name(name) = &callee.kind
-                && name
-                    .trim_start_matches('\\')
-                    .eq_ignore_ascii_case("defined")
-                && let Some(arg) = args.first()
-                && let ExprKind::Literal(Literal::String(constant)) = &arg.value.kind
-            {
-                out.defined_guarded
-                    .insert(constant.trim_start_matches('\\').to_string());
-            }
             collect_in_expr(callee, in_closure, out);
             for a in args {
                 collect_in_expr(&a.value, in_closure, out);
@@ -122,7 +110,13 @@ fn collect_in_expr(e: &Expr, in_closure: bool, out: &mut ConstantFacts) {
 impl<'a> Checker<'a> {
     /// Called for a bare constant name that resolved to no known
     /// constant.
-    pub(crate) fn check_unknown_global_constant(&mut self, name: &str, span: Span, label: &str) {
+    pub(crate) fn check_unknown_global_constant(
+        &mut self,
+        name: &str,
+        locals: &crate::checker::Locals,
+        span: Span,
+        label: &str,
+    ) {
         let bare = name.trim_start_matches('\\');
         let unqualified = bare.rsplit('\\').next().unwrap_or(bare);
         if ["true", "false", "null", "exit", "die"]
@@ -135,7 +129,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let (primary, fallback) = self.name_ctx.resolve_function_candidates(name);
-        let guarded = |n: &str| self.constant_facts.defined_guarded.contains(n);
+        let guarded = |n: &str| locals.guarded_constants.contains(n);
         if guarded(bare)
             || guarded(primary.trim_start_matches('\\'))
             || fallback.as_deref().is_some_and(guarded)

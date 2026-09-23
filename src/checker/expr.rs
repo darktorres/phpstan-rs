@@ -4350,7 +4350,7 @@ impl<'a> Checker<'a> {
                 match self.global_constant_type(name) {
                     Some(ty) => ty,
                     None => {
-                        self.check_unknown_global_constant(name, e.span, label);
+                        self.check_unknown_global_constant(name, locals, e.span, label);
                         bare_name_literal_type(name)
                     }
                 }
