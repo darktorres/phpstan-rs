@@ -752,7 +752,12 @@ impl<'a> Checker<'a> {
                         self.record_function_usage_token(name, sig, callee.span);
                         match name.as_ref() {
                             "array_filter" => {
-                                self.check_array_filter_no_op(args, locals, label, e.span)
+                                self.check_array_filter_no_op(args, locals, label, e.span);
+                                if self.registry.check_strict_array_filter {
+                                    self.check_strict_array_filter(
+                                        sig, args, locals, e.span, label,
+                                    );
+                                }
                             }
                             "array_values" => {
                                 self.check_array_values_no_op(args, locals, label, e.span)

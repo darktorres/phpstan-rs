@@ -259,6 +259,9 @@ enum Command {
         /// to rethrow.
         #[arg(long)]
         check_exception_hygiene: bool,
+        /// Flag array_filter() calls relying on loose truthiness.
+        #[arg(long)]
+        check_strict_array_filter: bool,
         /// Flag operators combining a string with a non-string, or an array with a non-array.
         #[arg(long)]
         check_mixed_type_operands: bool,
@@ -486,6 +489,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_strict_array_filter,
             check_mixed_type_operands,
             check_comparable_types,
             check_arithmetic_operands,
@@ -552,6 +556,7 @@ fn main() {
             check_throw_without_message,
             check_throw_base_class,
             check_exception_hygiene,
+            check_strict_array_filter,
             check_mixed_type_operands,
             check_comparable_types,
             check_arithmetic_operands,

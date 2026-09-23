@@ -32,6 +32,7 @@
 //! check_throw_without_message = false
 //! check_throw_base_class = false
 //! check_exception_hygiene = false
+//! check_strict_array_filter = false
 //! check_mixed_type_operands = false
 //! check_comparable_types = false
 //! check_arithmetic_operands = false
@@ -300,6 +301,8 @@ pub struct Config {
     /// Opt-in: a `catch` must chain the caught exception into one it
     /// throws, and a catch of a base exception type must rethrow.
     pub check_exception_hygiene: Option<bool>,
+    /// Opt-in (phpstan-strict-rules): `array_filter()` without a callback over values whose truthiness is ambiguous, or with a null callback (`arrayFilter.strict`).
+    pub check_strict_array_filter: Option<bool>,
     /// Opt-in (voku/phpstan-rules): a string operand combined with a non-string one, or an array with a non-array, by a binary operator or compound assignment (`binaryOp.nonStringOperand`/`binaryOp.nonArrayOperand`/`assignOp.*`).
     pub check_mixed_type_operands: Option<bool>,
     /// Opt-in (shipmonk/phpstan-rules): `<`/`>`/`<=`/`>=`/`<=>` only between int|float, string, DateTimeInterface, or tuples of those (`comparison.nonComparable`/`comparison.differentTypes`).

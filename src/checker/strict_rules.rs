@@ -16,6 +16,11 @@
 //!   `array_keys()`/`base64_decode()` without their strict argument
 //!   `true`, and `iterator_to_array()` leaving `$preserve_keys` to its
 //!   default (`function.strict`).
+//! - `check_strict_array_filter` - `array_filter()` without a callback
+//!   over values that aren't all booleans, all arrays, or a union of
+//!   always-truthy and always-falsy types, or with a `null` callback
+//!   (`arrayFilter.strict`); a callback that may be `null` is a level 8
+//!   finding.
 //! - `check_arithmetic_operands` - an operand of `+ - * / % **` (or their
 //!   compound assignments), unary `+`/`-` or `++`/`--` that isn't a
 //!   number (`plus.leftNonNumeric`, `unaryMinus.nonNumeric`,
@@ -405,6 +410,101 @@ impl<'a> Checker<'a> {
             Type::EnumCase(..) => false,
             _ => true,
         }
+    }
+
+    pub(crate) fn check_strict_array_filter(
+        &mut self,
+        sig: &FunctionSig,
+        args: &[Arg],
+        locals: &Locals,
+        span: crate::token::Span,
+        label: &str,
+    ) {
+        if args.iter().any(|a| a.spread) {
+            return;
+        }
+        let Some(array) = arg_for_param(args, sig, 0) else {
+            return;
+        };
+        let Some(callback) = arg_for_param(args, sig, 1) else {
+            let mode_given = arg_for_param(args, sig, 2).is_some();
+            if !mode_given {
+                let array_ty = self.infer_expr(&array.value, locals);
+                if !self.filters_unambiguously(&array_ty) {
+                    self.report(
+                        label.to_string(),
+                        "Call to function array_filter() requires parameter #2 to be passed to avoid loose comparison semantics.".to_string(),
+                        span,
+                        0,
+                        "arrayFilter.strict",
+                    );
+                }
+                return;
+            }
+            self.report(
+                label.to_string(),
+                "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics (null given).".to_string(),
+                span,
+                0,
+                "arrayFilter.strict",
+            );
+            return;
+        };
+        let callback_ty = self.infer_expr(&callback.value, locals);
+        let level = match &callback_ty {
+            Type::Null => 0,
+            Type::Union(members) if members.iter().any(|m| matches!(m, Type::Null)) => 8,
+            _ => return,
+        };
+        self.report(
+            label.to_string(),
+            format!(
+                "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics ({} given).",
+                describe_type_only(&callback_ty)
+            ),
+            span,
+            level,
+            "arrayFilter.strict",
+        );
+    }
+
+    /// Whether filtering `array`'s values by truthiness is unambiguous:
+    /// they are all booleans, all arrays, or a union of members each
+    /// always truthy or always falsy, with both kinds present.
+    fn filters_unambiguously(&self, array: &Type) -> bool {
+        let mut values = Vec::new();
+        if !collect_array_values(array, &mut values) {
+            return false;
+        }
+        let Some(item) = values
+            .into_iter()
+            .reduce(crate::checker::type_union::union_types)
+        else {
+            return false;
+        };
+        if let Type::Union(members) = &item {
+            let mut truthy = false;
+            let mut falsy = false;
+            for member in members {
+                match truthiness(member) {
+                    Some(true) => truthy = true,
+                    Some(false) => falsy = true,
+                    None => {
+                        truthy = false;
+                        falsy = false;
+                        break;
+                    }
+                }
+            }
+            if truthy && falsy {
+                return true;
+            }
+            return members
+                .iter()
+                .all(|m| matches!(m, Type::Bool | Type::True | Type::False))
+                || members.iter().all(is_array);
+        }
+        matches!(item, Type::Bool | Type::True | Type::False) || is_array(&item)
     }
 
     /// `function.strict`, for one of the functions it covers.
@@ -842,5 +942,33 @@ fn is_string_or_nullable_string(ty: &Type) -> bool {
                 && members.iter().any(is_string)
         }
         other => is_string(other),
+    }
+}
+
+fn truthiness(ty: &Type) -> Option<bool> {
+    match ty {
+        Type::EnumCase(..) | Type::ClassString(_) => Some(true),
+        other => crate::checker::expr::ranges::type_truthiness(other),
+    }
+}
+
+/// The value types of `ty`'s array members; `false` when some member
+/// isn't an array.
+fn collect_array_values(ty: &Type, out: &mut Vec<Type>) -> bool {
+    match ty {
+        Type::Array(_, value) => {
+            out.push((**value).clone());
+            true
+        }
+        Type::ArrayShape(fields) => {
+            out.extend(fields.iter().map(|(_, value, _)| value.clone()));
+            true
+        }
+        Type::Union(members) => members.iter().all(|m| collect_array_values(m, out)),
+        Type::Intersection(members) => members
+            .iter()
+            .find(|m| matches!(m, Type::Array(..) | Type::ArrayShape(_)))
+            .is_some_and(|base| collect_array_values(base, out)),
+        _ => false,
     }
 }

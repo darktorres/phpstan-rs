@@ -376,3 +376,38 @@ function f(string $s, ?string $ns, int $i, array $a, Name $n, \stdClass $o, mixe
         vec!["string (string) in combination with non-string (int) is not allowed."]
     );
 }
+
+#[test]
+fn strict_array_filter() {
+    let src = r#"<?php
+/**
+ * @param list<int> $ints
+ * @param list<bool> $bools
+ * @param list<list<int>> $lists
+ * @param list<\stdClass|null> $objects
+ * @param list<int|null> $maybeInts
+ */
+function f(array $ints, array $bools, array $lists, array $objects, array $maybeInts, ?callable $cb): void {
+    array_filter($ints);
+    array_filter($bools);
+    array_filter($lists);
+    array_filter($objects);
+    array_filter($maybeInts);
+    array_filter($ints, null);
+    array_filter($ints, $cb);
+    array_filter($ints, fn (int $i): bool => $i > 0);
+    array_filter($ints, mode: ARRAY_FILTER_USE_KEY);
+}
+"#;
+    let found = |level: u8| {
+        let mut v: Vec<String> = diagnostics_for_with(src, |r| r.check_strict_array_filter = true)
+            .into_iter()
+            .filter(|d| d.identifier == "arrayFilter.strict" && d.level <= level)
+            .map(|d| d.span.start.line.to_string())
+            .collect();
+        v.sort_by_key(|l| l.parse::<u32>().unwrap());
+        v
+    };
+    assert_eq!(found(10), vec!["10", "14", "15", "16", "18"]);
+    assert_eq!(found(7), vec!["10", "14", "15", "18"]);
+}

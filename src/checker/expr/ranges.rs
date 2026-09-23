@@ -424,7 +424,7 @@ pub(crate) fn numeric_comparison_bounds(ty: &Type) -> Option<(Option<i64>, Optio
 /// `ArrayList` is deliberately excluded from the "always truthy"
 /// accessory set below - unlike `NonEmptyArray`/`NonFalsyString`, a bare
 /// `list<T>` doesn't itself exclude the empty list.
-fn type_truthiness(ty: &Type) -> Option<bool> {
+pub(crate) fn type_truthiness(ty: &Type) -> Option<bool> {
     match ty {
         Type::True => Some(true),
         Type::False | Type::Null => Some(false),

@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_strict_array_filter`.
+    pub fn set_check_strict_array_filter(&mut self, enabled: bool) {
+        self.registry.check_strict_array_filter = enabled;
+    }
+
     /// See `Registry::check_mixed_type_operands`.
     pub fn set_check_mixed_type_operands(&mut self, enabled: bool) {
         self.registry.check_mixed_type_operands = enabled;
