@@ -1189,6 +1189,7 @@ mod instantiation;
 pub(crate) use imports::INTERNAL_CLASS_PREFIXES;
 mod internal_rules;
 mod internal_usage;
+mod keywords;
 mod missing_typehint;
 mod named_argument_renames;
 mod narrowing;
@@ -1676,6 +1677,10 @@ impl<'a> Checker<'a> {
         // instead (see that loop's own comment).
         let whole_file_ctx = NameContext::build(program);
         self.constant_facts = global_constants::constant_facts(program);
+        if !self.facts_only {
+            self.check_declare_directives(program);
+            self.check_statement_keywords(program, "<main>");
+        }
         if !self.facts_only {
             self.check_use_function_imports(program);
             self.check_use_const_imports(program);

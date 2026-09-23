@@ -324,18 +324,55 @@ impl Parser {
             {
                 self.skip();
                 self.expect(&Token::LParen)?;
+                let mut directives = Vec::new();
                 while !self.check(&Token::RParen) {
-                    self.parse_expression()?;
+                    let name_start = self.current_pos();
+                    let name = self.expect_ident()?;
+                    let name_span = Span {
+                        start: name_start,
+                        end: self.previous_end(),
+                    };
+                    self.expect(&Token::Equals)?;
+                    let value = self.parse_expression()?;
+                    directives.push((name, name_span, value));
                     if !self.eat(&Token::Comma) {
                         break;
                     }
                 }
                 self.expect(&Token::RParen)?;
-                if self.check(&Token::LBrace) {
-                    self.parse_block()?
+                let body = if self.check(&Token::LBrace) {
+                    match self.parse_block()?.kind {
+                        StmtKind::Block(stmts) => Some(stmts),
+                        _ => unreachable!(),
+                    }
+                } else if self.eat(&Token::Colon) {
+                    let mut stmts = Vec::new();
+                    while !matches!(self.peek(), Token::Identifier(s) if s.eq_ignore_ascii_case("enddeclare"))
+                        && !self.at_eof()
+                    {
+                        stmts.push(self.parse_statement()?);
+                    }
+                    self.skip();
+                    self.expect_semicolon()?;
+                    Some(stmts)
                 } else {
                     self.expect_semicolon()?;
-                    self.stmt(StmtKind::Block(Vec::new()), start)
+                    None
+                };
+                let declare = self.stmt(
+                    StmtKind::Declare {
+                        directives,
+                        block_mode: body.is_some(),
+                    },
+                    start,
+                );
+                match body {
+                    Some(stmts) => {
+                        let mut all = vec![declare];
+                        all.extend(stmts);
+                        self.stmt(StmtKind::Block(all), start)
+                    }
+                    None => declare,
                 }
             }
             // `__halt_compiler();` - tells the *real* compiler to stop

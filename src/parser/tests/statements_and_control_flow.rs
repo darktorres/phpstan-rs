@@ -36,8 +36,22 @@ fn declare_simple_and_block_forms_parse() {
             }
         "#,
     );
-    assert!(matches!(&program[0].kind, StmtKind::Block(stmts) if stmts.is_empty()));
-    assert!(matches!(&program[1].kind, StmtKind::Block(stmts) if !stmts.is_empty()));
+    assert!(matches!(
+        &program[0].kind,
+        StmtKind::Declare { directives, block_mode: false }
+            if directives.len() == 1 && &*directives[0].0 == "strict_types"
+    ));
+    let StmtKind::Block(stmts) = &program[1].kind else {
+        panic!("expected a block, got {:?}", program[1].kind);
+    };
+    assert!(matches!(
+        &stmts[0].kind,
+        StmtKind::Declare {
+            block_mode: true,
+            ..
+        }
+    ));
+    assert_eq!(stmts.len(), 2);
 }
 
 #[test]

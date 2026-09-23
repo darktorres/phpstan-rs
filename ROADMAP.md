@@ -598,7 +598,14 @@ configured half report a declared value that type rejects
 from a new `ExprKind::DynamicClassConstFetch` that also checks the name
 expression itself. `ConflictingTraitConstantsRule` (visibility,
 finality, native type against every used trait at any depth, and value
-against immediately used ones).
+against immediately used ones). Statement keywords per function-like
+body and the file's top level: `ContinueBreakInLoopRule` (plus a
+non-positive level and `continue.switch`), `GotoUndefinedLabelRule`/
+`UnusedLabelRule` (plus duplicate labels and jumps into a loop, a
+`switch`, or a `finally`, or out of a `finally`), and
+`DeclareStrictTypesRule` (plus block-mode `strict_types`, `ticks`/
+`encoding` value types, and unknown directives) from a new
+`StmtKind::Declare`.
 A class or enum declared inside a block now gets the declaration-level
 checks too, the registry-keyed ones only when the registry entry was
 built from that declaration.
@@ -3666,17 +3673,6 @@ receiver-type-checks phase.)
 
 ### Phase 137 — Keywords+Debug (`Rules/Keywords/`, `Rules/Debug/` gaps)
 
-- `ContinueBreakInLoopRule` — a `break`/`continue`'s numeric level
-  resolving outside enough loop/switch nesting, or crossing a closure
-  boundary first.
-- `DeclareStrictTypesRule` — `declare(strict_types=...)`'s value must
-  be literally `0`/`1`, and the declare must be the file's first
-  statement.
-- `GotoUndefinedLabelRule` — a `goto` targeting a label that doesn't
-  exist in the function; `collect_goto_targets` today only feeds
-  dead-code reachability, never validates target existence.
-- `UnusedLabelRule` — a `label:` statement never targeted by any
-  `goto` — the inverse of the above, same underlying data.
 - `RequireFileExistsRule` — resolving `require`/`include`(`_once`) path
   expressions (including the `__DIR__ . 'x'` idiom) against cwd/
   include_path/the file's own directory.

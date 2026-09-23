@@ -229,6 +229,9 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         self.check_promoted_params(params, site, label);
+        if let Some(ReturnSource::Body(body)) = &returns {
+            self.check_statement_keywords(body, label);
+        }
         let mut seen: Vec<&str> = Vec::new();
         for (i, p) in params.iter().enumerate() {
             self.check_parameter_name(p, label);

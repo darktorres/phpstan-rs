@@ -1577,7 +1577,10 @@ fn the_last_switch_case_ending_in_a_bare_continue_reaches_after_the_switch() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "continue.switch"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]
@@ -1596,7 +1599,10 @@ fn a_non_last_switch_case_ending_in_a_bare_continue_reaches_after_the_switch() {
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "continue.switch"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 // `is_switch_break_equivalent`'s own further real find, verifying the
@@ -1631,7 +1637,10 @@ fn a_switch_case_ending_in_an_if_whose_every_branch_continues_reaches_after_the_
             }
         "#,
     );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
+    assert!(
+        d.iter().all(|x| x.identifier == "continue.switch"),
+        "unexpected diagnostics: {d:?}"
+    );
 }
 
 #[test]

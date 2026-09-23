@@ -1202,7 +1202,8 @@ impl<'a> Walker<'a> {
             | StmtKind::Use(_)
             | StmtKind::Global(_)
             | StmtKind::Goto(_)
-            | StmtKind::Label(_) => {}
+            | StmtKind::Label(_)
+            | StmtKind::Declare { .. } => {}
             StmtKind::Namespace(ns) => self.check_namespace_declaration(ns, stmt.span, label),
             StmtKind::Expression(e) | StmtKind::Throw(e) => {
                 self.check_expr(e, ctx, param_types, label)

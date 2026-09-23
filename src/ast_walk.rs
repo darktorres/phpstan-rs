@@ -159,6 +159,7 @@ pub fn stmt_children(s: &Stmt) -> Vec<&Stmt> {
         | StmtKind::Throw(_)
         | StmtKind::Goto(_)
         | StmtKind::Label(_)
+        | StmtKind::Declare { .. }
         // Dedicated declaration-walkers already exist for these three
         // (`checker::check_function`, `deps::collect_class`/
         // `collect_enum`) - not flattened into an ordinary statement list.
@@ -335,6 +336,7 @@ pub fn any_stmt_child(s: &Stmt, mut f: &mut impl FnMut(&Stmt) -> bool) -> bool {
         | StmtKind::Throw(_)
         | StmtKind::Goto(_)
         | StmtKind::Label(_)
+        | StmtKind::Declare { .. }
         | StmtKind::FunctionDecl(_)
         | StmtKind::ClassDecl(_)
         | StmtKind::EnumDecl(_) => false,

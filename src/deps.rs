@@ -210,7 +210,8 @@ fn collect_stmt(stmt: &Stmt, names: &mut HashSet<String>) {
         | StmtKind::Use(_)
         | StmtKind::Global(_)
         | StmtKind::Goto(_)
-        | StmtKind::Label(_) => {}
+        | StmtKind::Label(_)
+        | StmtKind::Declare { .. } => {}
         StmtKind::Expression(e) | StmtKind::Throw(e) => collect_expr(e, names),
         StmtKind::Return(e) => {
             if let Some(e) = e {
