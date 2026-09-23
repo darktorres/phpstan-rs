@@ -1368,6 +1368,71 @@ enum's cases). Member access on `mixed` is the level-9/10
 `method`/`property.nonObject` family, and indexing a plain object is
 `offsetAccess.nonOffsetAccessible`.
 
+**`phpstan-strict-rules` ports** (`checker/strict_rules.rs`). Each
+family has its own opt-in flag, like upstream's per-rule toggles:
+- `check_illegal_constructor_calls`: `constructor.call`, which also
+  covers Psalm's `DirectConstructorCall`. A static `X::__construct()`
+  passes only from a constructor, or from a trait method some class
+  imports as its constructor, calling a parent class's.
+- `check_dynamic_static_calls`: `staticMethod.dynamicCall`, including
+  first-class callables.
+- `check_loop_variable_overwrite`: `foreach.keyOverwrite`,
+  `foreach.valueOverwrite` and `for.variableOverwrite`, through
+  destructuring.
+- `check_switch_case_types`: `switch.type`.
+- `check_strict_function_calls`: `function.strict`, for
+  `in_array`/`array_search`/`array_keys`/`base64_decode`, plus
+  `iterator_to_array()` leaving `$preserve_keys` to its default.
+- `check_strict_array_filter`: `arrayFilter.strict`; a callback that may
+  be `null` is a level 8 finding.
+- `check_useless_casts`: `cast.useless`.
+- `check_implicit_array_creation`: `variable.implicitArray`. It says
+  "might not exist" when the function assigns the variable earlier, or
+  anywhere within a loop enclosing the assignment.
+- `check_arithmetic_operands`: the `OperatorRuleHelper` family,
+  `plus.leftNonNumeric` through `pow.rightNonNumeric`, `unaryMinus`/
+  `unaryPlus` and `preInc`/`postInc`/`preDec`/`postDec` `.nonNumeric`.
+  GMP and `BcMath\Number` count as numbers under `++`/`--`.
+
+The remaining strict-rules families already exist under other flags:
+booleans in conditions, `banned_constructs` for empty, short ternary,
+loose comparison, backticks and variable variables, and
+`constructor.missingParentCall`, `method.nameCase` and
+`closure.useThis`.
+
+**Operand and comparison policies from other rule packages**, each
+opt-in:
+- `check_comparable_types` (`shipmonk`'s
+  `AllowComparingOnlyComparableTypesRule`): `comparison.nonComparable`/
+  `comparison.differentTypes` for `< > <= >= <=>`.
+- `check_mixed_type_operands` (`voku`'s `ExtendedBinaryOpRule`/
+  `ExtendedAssignOpRule`): `binaryOp`/`assignOp` `.nonStringOperand`/
+  `.nonArrayOperand`.
+- `check_loose_haystack_comparison`: `function.looseComparison`, a
+  loose `in_array`/`array_search`/`array_keys` where some needle/value
+  type pair can be `==` without being `===`. It is a superset of
+  `voku`'s `InArrayLooseComparisonRule`, and the PHP 7 int-vs-non-numeric-
+  string flip only counts when the configured version is below 8.0.
+- `check_identity_vs_equals` (`gosuperscript`): `identical.equalsMethod`,
+  `===`/`!==` between objects whose class defines a public `equals()`
+  accepting the other side; the class's own `equals()` is exempt.
+- `check_native_type_hints`: `missingNativeType.parameter`/`.return`
+  suggest the tightest native type a PHPDoc-only type allows under the
+  configured PHP version. Without a configured version, only PHP 7.1
+  types are suggested. Suggestions that would break the declaration are
+  left out: untyped overridden parameters, overriding methods lacking a
+  compatible return type, incompatible defaults, magic methods. A
+  closure parameter whose type the callee fixes gets the same
+  suggestion.
+
+**Ini directives** (`checker/ini_directives.rs`): `ini.removed`
+(default on once `php_version` is set) and, under
+`check_deprecated_usage`, `ini.deprecated`, for `ini_get`/`ini_set`/
+`ini_alter`/`ini_restore`/`get_cfg_var`. The table follows php-src
+`UPGRADING` 7.2-8.5, and directives deprecated only for changing
+(`assert.*` in 8.3, the 8.4 session settings) are flagged only in
+`ini_set`/`ini_alter`.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -2755,40 +2820,6 @@ a separate collection's construction site.
 
 ---
 
-## Part 4: Ecosystem - `phpstan-strict-rules` ports and `Won't-port` corrections
-
-Grounded directly against the vendored companion package
-`vendor/phpstan-strict-rules/src` (a git submodule, matching the existing
-`vendor/phpstan-src` precedent in `.gitmodules`) - every citation below
-resolves to real, on-disk source, not an assumed API.
-
-### Phase 101 — Ecosystem checks ported from `phpstan-strict-rules` (§E)
-
-#### E2. `array_filter()` without an explicit callback, for an ambiguous element type
-
-`ArrayFilterStrictRule::processNode`
-(`vendor/phpstan-strict-rules/src/Rules/Functions/ArrayFilterStrictRule.php:52-147`)
-flags a 1-argument `array_filter($x)` call (`arrayFilter.strict`) unless the
-array's element type is provably boolean, provably array-valued, or a union
-that splits cleanly into all-truthy/all-falsy members - i.e. unless PHP's
-implicit loose-truthy cast is guaranteed safe. phpstan-rs already ports
-all three of core PHPStan's own `ArrayFilterRule` sub-checks
-(`arrayFilter.empty`/`.same`/`.alwaysEmpty`,
-`check_array_filter_no_op` in `src/checker/expr/array_ops.rs`). The
-two siblings were once declined after corpus false positives, traced to
-gaps in this project's own flow-sensitive variable-type tracking (loop
-branches, `try`/`finally`). Those gaps were fixed and both siblings
-rebuilt (Phase 68.1, commit `c96b1f0`); all three now run
-unconditionally. `ArrayFilterStrictRule`'s truthy/falsy union-splitting
-logic (lines 89-106) is the same shape of judgment, so the old reason
-to hold this back is gone. It's real, buildable, and absent from core
-PHPStan. Ship it opt-in, matching `phpstan-strict-rules`' own opt-in
-status.
-
-**Effort: medium.**
-
----
-
 ## Part 5: LSP / editor-native capabilities
 
 Real PHPStan ships no first-party LSP or interactive query API at all -
@@ -3416,63 +3447,6 @@ nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
 
-### Phase 149 — Native-typehint-preference + arithmetic/comparison-operand strictness families
-
-- **149a (small each, easy).** Require a *native* type hint (not just a
-  PHPDoc-only one) wherever PHP's own grammar could already express it,
-  for return types and closure params — closes real precision gaps
-  PHPDoc-only typing leaves open to drift.
-- **149b (medium, real 3rd-independent-confirmation family, from
-  `phpstan/phpstan-strict-rules` §5 + `shipmonk/phpstan-rules` +
-  `voku/phpstan-rules`).** Ban PHP's automatic numeric-string coercion
-  in arithmetic/binary operators entirely when strict — requires
-  genuinely numeric operands for `+`/`-`/`*`/`/`/`%`/`**` and unary
-  `+`/`-`/`++`/`--` (phpstan-strict-rules' 12-operator
-  `OperatorRuleHelper` family); restrict `<`/`>`/`<=`/`>=` to genuinely
-  comparable type pairs (`shipmonk`'s
-  `AllowComparingOnlyComparableTypesRule`); ban a string operand
-  combined with a non-string/non-mixed operand, and an array operand
-  combined with a non-array/non-mixed operand, across most binary
-  operators (`voku/phpstan-rules`' `ExtendedBinaryOpRule`/
-  `ExtendedAssignOpRule`). One shared mechanism (a type-kind check on
-  both operands of a `BinOp`/`AssignOp`/unary-op node), three
-  independently-converged-on operand-mismatch policies.
-- **149c (small, real, version-relevant).** `in_array()`/
-  `array_search()` called without an explicit strict `true` third
-  argument, where the needle/haystack-element types are a non-numeric-
-  string vs. int/float pair — the exact PHP-7-to-PHP-8 loose-comparison
-  hazard (`0 == "foo"` flipped from true to false in PHP 8). Fits
-  naturally alongside phpstan-rs's existing `PhpFeature`-gated
-  version-behavior-change checks (`voku/phpstan-rules`'
-  `InArrayLooseComparisonRule`).
-- **149d (small).** `ini_get`/`ini_set`/`ini_alter`/`ini_restore`/
-  `get_cfg_var` called with a literal string naming a PHP ini directive
-  deprecated as of a specific PHP version (hardcoded table:
-  `mbstring.func_overload` since 7.2, `assert.active` since 8.3,
-  `session.sid_length` since 8.4, etc.), checked against the project's
-  configured PHP version — a tiny addition to the existing
-  `PhpFeature`/`php_version.rs` framework (`phpstan/phpstan-
-  deprecation-rules`).
-- **149e (small each).** Sharp-edge gotcha checks: `iterator_to_array()`
-  called without `$preserve_keys` explicit (silently loses/collides
-  keys iterating a Generator with non-sequential/string keys);
-  identical-class `===` comparison; calling `__construct()` directly as
-  an ordinary method/static call (`$obj->__construct()` re-runs the
-  constructor on an already-built object; the same check as Phase 176's
-  L3); a `foreach`/`for` loop's own
-  loop-variable shadowing a variable already holding a value from
-  outside the loop (data-loss footgun); calling a statically-declared
-  method via `->` instead of `::`; a `switch` case value whose type
-  differs from the subject's (switch uses loose `==` internally).
-- **149f (small, easy, generic).** `$a === $b` (`Identical`/
-  `NotIdentical`) where `$a`'s static type is a class defining a native
-  `equals($other)` method whose parameter type accepts `$b`'s type —
-  the class author clearly intended value-equality semantics via
-  `->equals()`, so `===` (reference identity) is almost always a bug
-  (two logically-equal but distinct instances won't be `===`-equal).
-  Fully generic, no framework dependency (`gosuperscript/phpstan-
-  rules`).
-
 ### Phase 150 — "No magic numbers" + typed-class-constants families
 
 - **150a (medium, novel, comprehensive, zero existing equivalent).** Ban
@@ -3691,8 +3665,8 @@ inventing a new one.
 
 Every part above is grounded in what real PHPStan does or doesn't do.
 This part instead cross-checks against Psalm (`vimeo/psalm`), the other
-major PHP static analyzer, doing the same kind of comparison Part 4
-already does against `phpstan-strict-rules`, but against a whole
+major PHP static analyzer, doing the same kind of comparison the
+`phpstan-strict-rules` ports did, but against a whole
 separate codebase's own diagnostic catalog: all 325 distinct issue
 classes under `src/Psalm/Issue/`, read exhaustively (every file, not a
 sample chosen by promising-sounding
@@ -3777,27 +3751,6 @@ PHPStan's identifier and opt-in gate, and use Psalm's exemption list as
 a cross-check.
 
 **Effort: small.**
-
-#### L3. `DirectConstructorCall` - flag `$obj->__construct()` called via ordinary method-call syntax
-
-Legal PHP, but virtually always a bug: `$var->__construct(...)` (as
-opposed to the legitimate `parent::__construct()`/`self::__construct()`
-chaining syntax) re-runs the constructor on an already-existing object
-instead of creating a new one via `new`
-(`MethodCallAnalyzer.php:102-106`). Confirmed absent from real PHPStan
-(`grep -rli "direct.*constructor" vendor/phpstan-src/src` - nothing) and
-from phpstan-rs, which only checks the legitimate chaining direction
-(`constructor.missingParentCall`, `checker/oop.rs:989-1034` - a
-constructor that *forgets* to call `parent::__construct()`). The two
-checks are complementary, not overlapping: this item is about the
-*wrong syntax* being used to invoke a constructor at all, not about
-whether a legitimate `parent::`/`self::` call happened.
-
-**Effort: small** - a syntactic check on `ExprKind::MethodCall` where
-the resolved member name is `__construct` and the receiver isn't
-`parent`/`self`/`static`. This is the same check as one of Phase 149e's
-sharp-edge gotchas (calling `__construct()` directly), which the top-100
-survey found independently. Build it once.
 
 #### L4. `ConstructorSignatureMismatch` - a subclass constructor requiring *more* parameters than its parent's
 
