@@ -753,6 +753,14 @@ impl<'a> Checker<'a> {
                             "ini_get" | "ini_set" | "ini_alter" | "ini_restore" | "get_cfg_var" => {
                                 self.check_ini_directive_call(name, args, locals, label)
                             }
+                            "in_array" | "array_search" | "array_keys" | "base64_decode"
+                            | "iterator_to_array"
+                                if self.registry.check_strict_function_calls =>
+                            {
+                                self.check_strict_function_call(
+                                    name, sig, args, locals, e.span, label,
+                                )
+                            }
                             _ => {}
                         }
                         // A spread argument (`f(...$args)`) means the

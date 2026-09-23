@@ -149,3 +149,47 @@ function f(int $n, string $s, mixed $m): void {
     );
     assert_eq!(ids(src, |_| {}), Vec::<String>::new());
 }
+
+#[test]
+fn strict_function_calls() {
+    let src = r#"<?php
+function f(array $a, bool $b, \Generator $g): void {
+    in_array(1, $a);
+    in_array(1, $a, true);
+    in_array(1, $a, $b);
+    array_search(1, $a, strict: true);
+    array_keys($a);
+    array_keys($a, 1);
+    base64_decode('x');
+    base64_decode('x', true);
+    iterator_to_array($g);
+    iterator_to_array($g, false);
+    iterator_to_array($g, preserve_keys: true);
+    in_array(...[1, $a]);
+}
+"#;
+    let enabled = |r: &mut crate::registry::Registry| r.check_strict_function_calls = true;
+    assert_eq!(
+        ids(src, enabled),
+        vec![
+            "11 function.strict",
+            "3 function.strict",
+            "5 function.strict",
+            "8 function.strict",
+            "9 function.strict",
+        ]
+    );
+    let messages: Vec<String> = diagnostics_for_with(src, enabled)
+        .into_iter()
+        .filter(|d| d.identifier == "function.strict")
+        .map(|d| d.message)
+        .collect();
+    assert_eq!(
+        messages[..2],
+        [
+            "Call to function in_array() requires parameter #3 to be set.",
+            "Call to function in_array() requires parameter #3 to be true.",
+        ]
+    );
+    assert_eq!(ids(src, |_| {}), Vec::<String>::new());
+}

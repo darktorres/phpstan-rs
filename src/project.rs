@@ -507,6 +507,11 @@ impl Project {
         self.registry.check_exception_hygiene = enabled;
     }
 
+    /// See `Registry::check_strict_function_calls`.
+    pub fn set_check_strict_function_calls(&mut self, enabled: bool) {
+        self.registry.check_strict_function_calls = enabled;
+    }
+
     /// See `Registry::check_switch_case_types`.
     pub fn set_check_switch_case_types(&mut self, enabled: bool) {
         self.registry.check_switch_case_types = enabled;

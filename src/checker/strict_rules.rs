@@ -12,10 +12,14 @@
 //!   that is already defined.
 //! - `check_switch_case_types` - a `switch` case whose type can never be
 //!   the subject's (`switch.type`).
+//! - `check_strict_function_calls` - `in_array()`/`array_search()`/
+//!   `array_keys()`/`base64_decode()` without their strict argument
+//!   `true`, and `iterator_to_array()` leaving `$preserve_keys` to its
+//!   default (`function.strict`).
 
 use crate::ast::*;
 use crate::checker::{Checker, Locals};
-use crate::registry::Trinary;
+use crate::registry::{FunctionSig, Trinary};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {
@@ -67,6 +71,47 @@ impl<'a> Checker<'a> {
                 _ => {}
             }
         }
+    }
+
+    /// `function.strict`, for one of the functions it covers.
+    pub(crate) fn check_strict_function_call(
+        &mut self,
+        function: &str,
+        sig: &FunctionSig,
+        args: &[Arg],
+        locals: &Locals,
+        span: crate::token::Span,
+        label: &str,
+    ) {
+        if args.iter().any(|a| a.spread) {
+            return;
+        }
+        let (position, must_be_true) = match function {
+            "in_array" | "array_search" | "array_keys" => (2, true),
+            "base64_decode" => (1, true),
+            "iterator_to_array" => (1, false),
+            _ => return,
+        };
+        if function == "array_keys" && arg_for_param(args, sig, 1).is_none() {
+            return;
+        }
+        let message = match arg_for_param(args, sig, position) {
+            None => format!(
+                "Call to function {function}() requires parameter #{} to be set.",
+                position + 1
+            ),
+            Some(arg) if must_be_true => {
+                if self.infer_expr(&arg.value, locals) == Type::True {
+                    return;
+                }
+                format!(
+                    "Call to function {function}() requires parameter #{} to be true.",
+                    position + 1
+                )
+            }
+            Some(_) => return,
+        };
+        self.report(label.to_string(), message, span, 0, "function.strict");
     }
 
     /// The statement-level ports, before `stmt` itself is checked.
@@ -310,4 +355,19 @@ fn describe_type_only(ty: &Type) -> String {
         }
         other => other.to_string(),
     }
+}
+
+/// The argument bound to `sig`'s parameter at `position`, positionally or
+/// by name.
+fn arg_for_param<'e>(args: &'e [Arg], sig: &FunctionSig, position: usize) -> Option<&'e Arg> {
+    let positional = args.iter().take_while(|a| a.name.is_none()).count();
+    if position < positional {
+        return args.get(position);
+    }
+    let name = sig.params.get(position)?.name.as_ref();
+    args.iter().find(|a| {
+        a.name
+            .as_deref()
+            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+    })
 }

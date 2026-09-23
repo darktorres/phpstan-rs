@@ -163,6 +163,7 @@ fn run_check_project(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_strict_function_calls: bool,
     check_switch_case_types: bool,
     check_loop_variable_overwrite: bool,
     check_dynamic_static_calls: bool,
@@ -259,6 +260,7 @@ fn run_check_project(
     project.set_check_throw_without_message(check_throw_without_message);
     project.set_check_throw_base_class(check_throw_base_class);
     project.set_check_exception_hygiene(check_exception_hygiene);
+    project.set_check_strict_function_calls(check_strict_function_calls);
     project.set_check_switch_case_types(check_switch_case_types);
     project.set_check_loop_variable_overwrite(check_loop_variable_overwrite);
     project.set_check_dynamic_static_calls(check_dynamic_static_calls);
@@ -731,6 +733,7 @@ pub(crate) fn run_check_project_command(
     check_throw_without_message: bool,
     check_throw_base_class: bool,
     check_exception_hygiene: bool,
+    check_strict_function_calls: bool,
     check_switch_case_types: bool,
     check_loop_variable_overwrite: bool,
     check_dynamic_static_calls: bool,
@@ -874,6 +877,8 @@ pub(crate) fn run_check_project_command(
         check_throw_base_class || config.check_throw_base_class.unwrap_or(false);
     let check_exception_hygiene =
         check_exception_hygiene || config.check_exception_hygiene.unwrap_or(false);
+    let check_strict_function_calls =
+        check_strict_function_calls || config.check_strict_function_calls.unwrap_or(false);
     let check_switch_case_types =
         check_switch_case_types || config.check_switch_case_types.unwrap_or(false);
     let check_loop_variable_overwrite =
@@ -1136,6 +1141,7 @@ pub(crate) fn run_check_project_command(
         check_throw_without_message,
         check_throw_base_class,
         check_exception_hygiene,
+        check_strict_function_calls,
         check_switch_case_types,
         check_loop_variable_overwrite,
         check_dynamic_static_calls,
