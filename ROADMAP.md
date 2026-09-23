@@ -1336,6 +1336,17 @@ class), optionally intersected; built-in entries cover Mockery's
 container's `get()` is left to configuration, since PSR-11 promises
 nothing about what an id resolves to.
 
+**PHPUnit mock hygiene** (opt-in `check_mock_hygiene`,
+`project/mock_hygiene.rs`, the `rector/mockstan` family):
+`mock.expectsAny`, `mock.atLeastZero`, `mock.withWithoutExpects`
+(argument constraints on a stubbed method are never verified),
+`mock.conflictingReturns`, `mock.methodWithoutExpects` (a variable or
+`$this` property assigned from `createMock`/`createPartialMock`/
+`getMockBuilder()->getMock()`, not `createStub`, configured without
+expectations), `mock.unionPropertyType` (native or `@var` union of a
+mock and a real class), `mock.onlyMockProperties`, and
+`mock.bannedClass` for `mock_banned_classes`.
+
 **LSP hover/go-to-definition** (Phase 17): a real Content-Length-framed
 JSON-RPC server. Every name reference resolves without receiver-type
 inference via a `decl_locations` index; an instance receiver's own type
@@ -3383,33 +3394,6 @@ below. A further ~10 were abandoned/deleted/duplicate/config-only with
 nothing to port. The phases below are what remained: genuinely new,
 portable ideas, plus several real, independent confirmations of ideas
 already scoped above (folded in there instead of repeated here).
-
-### Phase 146 — Pluggable assertion/mock-narrowing tables + PHPUnit native mock-builder hygiene
-
-- **146b (medium, new family, entirely generic, no new mechanism
-  needed).** PHPUnit-native mock-builder-API misuse detection —
-  distinct from 146a (this catches mock-*configuration* mistakes, not
-  assertion-type narrowing), confirmed by `rector/mockstan`'s rich,
-  fully generic rule set (needs only phpstan-rs's existing test-class
-  detection + method-name matching):
-  - `$this->expects($this->any())` is ambiguous — require an explicit
-    count or a stub instead.
-  - `->method('x')->with(...)` without a preceding `->expects(...)`
-    call is a stub, and PHPUnit's own `with()` on a stub is silently a
-    no-op — a real, easy-to-miss test bug (the assertion looks like
-    it's checking arguments but never does).
-  - Combining `willReturnOnConsecutiveCalls()` and
-    `willReturnCallback()` on the same mock is redundant/confusing.
-  - A property typed as a union/intersection mixing `MockObject` with a
-    real class is an ambiguous smell.
-  - A mocked method configured via `->method(...)` needs an explicit
-    `->expects(...)` count.
-  - `$this->atLeast(0)` is meaningless (matches any call count
-    including zero) — require ≥ 1.
-  - A test consisting only of mocked properties with no real property
-    is suspicious — it isn't testing anything real.
-  - Config-driven ban on mocking specific classes — same shape as
-    `restricted_symbols`, applied to mock-target class names.
 
 ### Phase 147 — Exception-hygiene family (consolidates 3 independent confirmations)
 

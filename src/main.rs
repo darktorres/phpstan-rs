@@ -318,6 +318,11 @@ enum Command {
         /// where nothing in the project extends or overrides them.
         #[arg(long)]
         check_closed_classes: bool,
+        /// Reports PHPUnit mock-builder misuse: ambiguous `expects($this->any())`,
+        /// unverified `with()` on stubs, conflicting return configurations,
+        /// mocks configured without expectations, and mock-typed unions.
+        #[arg(long)]
+        check_mock_hygiene: bool,
         /// Enables named-argument-rename-collision detection (a named-
         /// argument call site against a method an override elsewhere
         /// renamed a parameter on). Off by default - see `registry::
@@ -450,6 +455,7 @@ fn main() {
             report_unmatched_ignored_errors,
             check_composer_hygiene,
             check_closed_classes,
+            check_mock_hygiene,
             php_version,
             generate_baseline,
             baseline,
@@ -502,6 +508,7 @@ fn main() {
             report_unmatched_ignored_errors,
             check_composer_hygiene,
             check_closed_classes,
+            check_mock_hygiene,
             php_version,
             generate_baseline,
             baseline,

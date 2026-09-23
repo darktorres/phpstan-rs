@@ -181,6 +181,7 @@ fn run_check_project(
         Vec<phpstan_rs::assertion_tables::AssertionEntry>,
         Vec<phpstan_rs::assertion_tables::ClassArgumentReturn>,
     ),
+    mock_hygiene: Option<Vec<String>>,
     configured_level: Option<u8>,
     stub_dirs: &[PathBuf],
     php_version: Option<php_version::PhpVersion>,
@@ -516,6 +517,13 @@ fn run_check_project(
         entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
     }
 
+    if let Some(banned) = &mock_hygiene {
+        for (path, diags) in project.check_mock_hygiene(banned) {
+            let entry = results.entry(path).or_default();
+            entry.extend(diags);
+            entry.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+        }
+    }
     for (path, diags) in project.check_class_shapes(check_closed_classes, parent_call_rules) {
         let entry = results.entry(path).or_default();
         entry.extend(diags);
@@ -719,6 +727,7 @@ pub(crate) fn run_check_project_command(
     report_unmatched_ignored_errors: bool,
     check_composer_hygiene: bool,
     check_closed_classes: bool,
+    check_mock_hygiene: bool,
     php_version: Option<String>,
     generate_baseline: Option<PathBuf>,
     baseline: Option<PathBuf>,
@@ -904,6 +913,8 @@ pub(crate) fn run_check_project_command(
     };
     let banned_types = config.banned_types.unwrap_or_default();
     let check_closed_classes = check_closed_classes || config.check_closed_classes.unwrap_or(false);
+    let mock_hygiene = (check_mock_hygiene || config.check_mock_hygiene.unwrap_or(false))
+        .then(|| config.mock_banned_classes.clone().unwrap_or_default());
     let assertion_entries = config.assertions.unwrap_or_default();
     let class_argument_returns = config.class_argument_returns.unwrap_or_default();
     if let Some(error) = assertion_entries
@@ -1106,6 +1117,7 @@ pub(crate) fn run_check_project_command(
         check_closed_classes,
         &parent_call_rules,
         (assertion_entries, class_argument_returns),
+        mock_hygiene,
         configured_level,
         &stub_dirs,
         php_version,

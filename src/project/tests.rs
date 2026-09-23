@@ -17,6 +17,7 @@ mod file_discovery_and_misc;
 mod file_removal;
 mod incremental_updates;
 mod inline_ignore_comments;
+mod mock_hygiene;
 mod pest_directory_scoping;
 mod php_version_setter;
 mod phpstan_api_gating;

@@ -42,6 +42,7 @@
 //! report_unmatched_ignored_errors = false
 //! check_composer_hygiene = false
 //! check_closed_classes = false
+//! check_mock_hygiene = false
 //! default_parent_calls = true
 //! no_composer = false
 //! php_version = "8.1"
@@ -182,6 +183,11 @@ pub struct Config {
     pub assertions: Option<Vec<crate::assertion_tables::AssertionEntry>>,
     /// `[[class_argument_returns]]` - see `assertion_tables`.
     pub class_argument_returns: Option<Vec<crate::assertion_tables::ClassArgumentReturn>>,
+    /// Opt-in PHPUnit mock-builder misuse checks - see
+    /// `project::mock_hygiene`.
+    pub check_mock_hygiene: Option<bool>,
+    /// Classes tests must not mock (`mock.bannedClass`).
+    pub mock_banned_classes: Option<Vec<String>>,
     /// Mirrors real PHPStan's own `dynamicConstantNames`: global
     /// (`NAME`) or class (`Class::NAME`) constants whose declared value
     /// differs between environments, so their literal value is never

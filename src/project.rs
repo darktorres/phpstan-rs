@@ -23,6 +23,7 @@ mod composer_hygiene;
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
 pub(crate) mod duplicate_fn_sites;
+mod mock_hygiene;
 pub(crate) mod use_sites;
 
 use decl_locations::DeclLocations;

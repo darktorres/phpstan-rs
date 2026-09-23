@@ -1,0 +1,394 @@
+//! `Project::check_mock_hygiene`: PHPUnit mock-builder misuse
+//! (`rector/mockstan`'s family), opt-in via `check_mock_hygiene`:
+//!
+//! - `mock.expectsAny`: `->expects($this->any())` - neither a stub nor a
+//!   real expectation;
+//! - `mock.atLeastZero`: `$this->atLeast(0)` matches every call count;
+//! - `mock.withWithoutExpects`: `->method(...)->with(...)` with no
+//!   `->expects(...)` in the chain - PHPUnit never verifies arguments on
+//!   a stubbed method;
+//! - `mock.conflictingReturns`: `willReturnOnConsecutiveCalls()` and
+//!   `willReturnCallback()` on one configuration;
+//! - `mock.unionPropertyType`: a property typed as a union of a mock and
+//!   a real class (the intersection `Foo&MockObject` is what's meant);
+//! - `mock.onlyMockProperties`: a test class whose properties are all
+//!   mocks;
+//! - `mock.methodWithoutExpects`: a mock (not a stub) configured with
+//!   `->method(...)` but no `->expects(...)` - make it a stub, or state
+//!   the expected calls;
+//! - `mock.bannedClass`: mocking a class `mock_banned_classes` lists.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use crate::ast::*;
+use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
+use crate::checker::{Diagnostic, DiagnosticBuilder};
+use crate::registry::NameContext;
+use crate::token::Span;
+
+use super::Project;
+
+const MOCK_TYPES: [&str; 3] = [
+    "PHPUnit\\Framework\\MockObject\\MockObject",
+    "PHPUnit\\Framework\\MockObject\\Stub",
+    "Mockery\\MockInterface",
+];
+
+const MOCK_FACTORIES: [&str; 5] = [
+    "createMock",
+    "createStub",
+    "createPartialMock",
+    "createConfiguredMock",
+    "getMockBuilder",
+];
+
+/// Whether `e` is `$this->name(...)`, `self::name(...)` or
+/// `static::name(...)`.
+fn is_test_helper_call<'e>(e: &'e Expr, name: &str) -> Option<&'e [Arg]> {
+    match &e.kind {
+        ExprKind::MethodCall(recv, method, args, _)
+            if method.eq_ignore_ascii_case(name)
+                && matches!(&recv.kind, ExprKind::Variable(v) if v.as_ref() == "this") =>
+        {
+            Some(args)
+        }
+        ExprKind::StaticCall(StaticTarget::Name(target, _), method, args)
+            if method.eq_ignore_ascii_case(name)
+                && ["self", "static", "parent"]
+                    .iter()
+                    .any(|t| target.eq_ignore_ascii_case(t)) =>
+        {
+            Some(args)
+        }
+        _ => None,
+    }
+}
+
+/// The method names of the call chain ending at `e`, innermost first.
+fn chain(e: &Expr) -> Vec<(&str, &[Arg], Span)> {
+    let mut out = Vec::new();
+    let mut current = e;
+    while let ExprKind::MethodCall(recv, method, args, _) = &current.kind {
+        out.push((method.as_ref(), args.as_slice(), current.span));
+        current = recv;
+    }
+    out.reverse();
+    out
+}
+
+struct Walker<'a> {
+    banned: &'a [String],
+    ctx: NameContext,
+    out: Vec<Diagnostic>,
+    // `$name` / `this->prop` -> whether it holds a mock (`true`) or a
+    // stub (`false`), from what it was assigned.
+    origins: HashMap<String, bool>,
+}
+
+/// Whether `e` creates a mock (`Some(true)`) or a stub (`Some(false)`).
+fn mock_origin(e: &Expr) -> Option<bool> {
+    if is_test_helper_call(e, "createStub").is_some() {
+        return Some(false);
+    }
+    for factory in ["createMock", "createPartialMock", "createConfiguredMock"] {
+        if is_test_helper_call(e, factory).is_some() {
+            return Some(true);
+        }
+    }
+    if let ExprKind::MethodCall(_, method, _, _) = &e.kind
+        && method.eq_ignore_ascii_case("getMock")
+    {
+        let mut current = e;
+        while let ExprKind::MethodCall(recv, _, _, _) = &current.kind {
+            if is_test_helper_call(recv, "getMockBuilder").is_some() {
+                return Some(true);
+            }
+            current = recv;
+        }
+    }
+    None
+}
+
+/// The origin key of an assignment target or chain base.
+fn origin_key(e: &Expr) -> Option<String> {
+    match &e.kind {
+        ExprKind::Variable(name) => Some(format!("${name}")),
+        ExprKind::PropertyAccess(object, prop, _) if matches!(&object.kind, ExprKind::Variable(v) if v.as_ref() == "this") => {
+            Some(format!("this->{prop}"))
+        }
+        _ => None,
+    }
+}
+
+fn collect_origins(stmts: &[Stmt], out: &mut HashMap<String, bool>) {
+    fn in_expr(e: &Expr, out: &mut HashMap<String, bool>) {
+        if let ExprKind::Assign(target, value) = &e.kind
+            && let (Some(key), Some(is_mock)) = (origin_key(target), mock_origin(value))
+        {
+            out.insert(key, is_mock);
+        }
+        for child in expr_children(e) {
+            in_expr(child, out);
+        }
+    }
+    for stmt in stmts {
+        for e in stmt_own_exprs(stmt) {
+            in_expr(e, out);
+        }
+        for child in stmt_children(stmt) {
+            collect_origins(std::slice::from_ref(child), out);
+        }
+    }
+}
+
+impl<'a> Walker<'a> {
+    fn report(&mut self, span: Span, message: String, id: &str) {
+        self.out
+            .push(DiagnosticBuilder::new("<main>".to_string(), message, span, 2, id).build());
+    }
+
+    fn stmts(&mut self, stmts: &[Stmt]) {
+        for stmt in stmts {
+            self.stmt(stmt);
+        }
+    }
+
+    fn stmt(&mut self, stmt: &Stmt) {
+        match &stmt.kind {
+            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
+            StmtKind::Use(imports) => self.ctx.add_uses(imports),
+            StmtKind::FunctionDecl(f) => self.stmts(&f.body),
+            StmtKind::ClassDecl(c) => self.class(c),
+            StmtKind::EnumDecl(e) => {
+                for m in &e.methods {
+                    self.stmts(&m.function.body);
+                }
+            }
+            _ => {
+                if let StmtKind::Expression(e) = &stmt.kind {
+                    self.configuration_chain(e);
+                }
+                for e in stmt_own_exprs(stmt) {
+                    self.expr(e);
+                }
+                for child in stmt_children(stmt) {
+                    self.stmt(child);
+                }
+            }
+        }
+    }
+
+    fn class(&mut self, c: &ClassDecl) {
+        let mut mock_properties = 0;
+        for p in &c.properties {
+            let doc_var = p.doc_comment.as_deref().and_then(|doc| {
+                let after = doc.split("@var").nth(1)?;
+                after.split_whitespace().next().map(str::to_string)
+            });
+            let Some(hint) = p.type_hint.clone().or(doc_var) else {
+                continue;
+            };
+            let hint = &hint;
+            let members: Vec<String> = hint
+                .trim_start_matches('?')
+                .split('|')
+                .map(|m| {
+                    self.ctx
+                        .resolve(m.trim())
+                        .trim_start_matches('\\')
+                        .to_string()
+                })
+                .collect();
+            let is_mock = |m: &String| MOCK_TYPES.iter().any(|t| t.eq_ignore_ascii_case(m));
+            if members.iter().any(is_mock) {
+                mock_properties += 1;
+                if hint.contains('|')
+                    && members
+                        .iter()
+                        .any(|m| !is_mock(m) && !m.eq_ignore_ascii_case("null"))
+                {
+                    self.report(
+                        p.span,
+                        format!(
+                            "Property ${} is typed {hint}; a mock of a class is its intersection with the mock type, not a union.",
+                            p.name
+                        ),
+                        "mock.unionPropertyType",
+                    );
+                }
+            } else if hint.contains('&')
+                && hint.split('&').any(|m| {
+                    let resolved = self.ctx.resolve(m.trim());
+                    MOCK_TYPES
+                        .iter()
+                        .any(|t| t.eq_ignore_ascii_case(resolved.trim_start_matches('\\')))
+                })
+            {
+                mock_properties += 1;
+            }
+        }
+        if mock_properties > 0
+            && mock_properties == c.properties.len()
+            && c.extends
+                .first()
+                .is_some_and(|e| e.trim_start_matches('\\').ends_with("TestCase"))
+        {
+            self.report(
+                c.name_span,
+                format!(
+                    "Test class {} has only mock properties; nothing real is under test in its fixtures.",
+                    c.name
+                ),
+                "mock.onlyMockProperties",
+            );
+        }
+        let mut class_origins = HashMap::new();
+        for m in &c.methods {
+            collect_origins(&m.function.body, &mut class_origins);
+        }
+        class_origins.retain(|k, _| k.starts_with("this->"));
+        for m in &c.methods {
+            let mut origins = class_origins.clone();
+            collect_origins(&m.function.body, &mut origins);
+            let previous = std::mem::replace(&mut self.origins, origins);
+            self.stmts(&m.function.body);
+            self.origins = previous;
+        }
+    }
+
+    /// Rules over one statement's mock-configuration chain.
+    fn configuration_chain(&mut self, e: &Expr) {
+        let e = match &e.kind {
+            ExprKind::Assign(_, value) => value.as_ref(),
+            _ => e,
+        };
+        let calls = chain(e);
+        if calls.is_empty() {
+            return;
+        }
+        let has = |name: &str| calls.iter().any(|(m, _, _)| m.eq_ignore_ascii_case(name));
+        if has("method") && has("with") && !has("expects") {
+            let span = calls
+                .iter()
+                .find(|(m, _, _)| m.eq_ignore_ascii_case("with"))
+                .map_or(e.span, |(_, _, s)| *s);
+            self.report(
+                span,
+                "->with() on a method configured without ->expects() is never verified; add an expectation or drop the argument constraint.".to_string(),
+                "mock.withWithoutExpects",
+            );
+        }
+        let mut base = e;
+        while let ExprKind::MethodCall(recv, _, _, _) = &base.kind {
+            base = recv;
+        }
+        if has("method")
+            && !has("expects")
+            && origin_key(base).and_then(|k| self.origins.get(&k).copied()) == Some(true)
+        {
+            self.report(
+                e.span,
+                "A mock configured with ->method() but no ->expects() is a stub in disguise; create it with createStub(), or state the expected calls.".to_string(),
+                "mock.methodWithoutExpects",
+            );
+        }
+        if has("willReturnOnConsecutiveCalls") && has("willReturnCallback") {
+            self.report(
+                e.span,
+                "willReturnOnConsecutiveCalls() and willReturnCallback() configure the same return; keep one.".to_string(),
+                "mock.conflictingReturns",
+            );
+        }
+    }
+
+    fn expr(&mut self, e: &Expr) {
+        if let ExprKind::MethodCall(_, method, args, _) = &e.kind
+            && method.eq_ignore_ascii_case("expects")
+            && let Some(arg) = args.first()
+            && is_test_helper_call(&arg.value, "any").is_some()
+        {
+            self.report(
+                e.span,
+                "->expects($this->any()) asserts nothing; use a stub, or an explicit call count."
+                    .to_string(),
+                "mock.expectsAny",
+            );
+        }
+        if let Some(args) = is_test_helper_call(e, "atLeast")
+            && matches!(
+                args.first().map(|a| &a.value.kind),
+                Some(ExprKind::Literal(Literal::Int(0)))
+            )
+        {
+            self.report(
+                e.span,
+                "atLeast(0) matches any number of calls, including none; use at least 1, or a stub.".to_string(),
+                "mock.atLeastZero",
+            );
+        }
+        if !self.banned.is_empty() {
+            for factory in MOCK_FACTORIES {
+                if let Some(args) = is_test_helper_call(e, factory)
+                    && let Some(ExprKind::StaticAccess(class, member)) =
+                        args.first().map(|a| &a.value.kind)
+                    && member.eq_ignore_ascii_case("class")
+                {
+                    let resolved = self.ctx.resolve(class);
+                    let resolved = resolved.trim_start_matches('\\');
+                    if self
+                        .banned
+                        .iter()
+                        .any(|b| b.trim_start_matches('\\').eq_ignore_ascii_case(resolved))
+                    {
+                        self.report(
+                            e.span,
+                            format!("{resolved} must not be mocked; use a real instance or a purpose-built fake."),
+                            "mock.bannedClass",
+                        );
+                    }
+                }
+            }
+        }
+        match &e.kind {
+            ExprKind::Closure { body, .. } => self.stmts(body),
+            ExprKind::ArrowFn { body, .. } => self.expr(body),
+            ExprKind::NewAnonymousClass(decl, args) => {
+                for a in args {
+                    self.expr(&a.value);
+                }
+                self.class(decl);
+            }
+            _ => {}
+        }
+        for child in expr_children(e) {
+            self.expr(child);
+        }
+    }
+}
+
+impl Project {
+    /// PHPUnit mock-builder misuse in the analysed files; `banned` lists
+    /// classes that must not be mocked.
+    pub fn check_mock_hygiene(&self, banned: &[String]) -> HashMap<PathBuf, Vec<Diagnostic>> {
+        let mut out = HashMap::new();
+        for (path, file) in &self.files {
+            if !file.analyzed {
+                continue;
+            }
+            let mut walker = Walker {
+                banned,
+                ctx: NameContext::default(),
+                out: Vec::new(),
+                origins: HashMap::new(),
+            };
+            walker.stmts(&file.ast);
+            if !walker.out.is_empty() {
+                let mut found = walker.out;
+                found.sort_by_key(|d| (d.span.start.line, d.span.start.col));
+                out.insert(path.clone(), found);
+            }
+        }
+        out
+    }
+}
