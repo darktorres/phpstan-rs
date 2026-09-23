@@ -212,8 +212,8 @@ pub(crate) fn has_explicit_mixed_nested_somewhere(
 /// element type is implicit `mixed` - each finding is that member's own
 /// `Display`ed description (`"array"`, `"iterable"`, `"list"`, ...),
 /// ready to drop straight into a `"... has no value type specified in
-/// {desc}."` message the same way real PHPStan's own
-/// `describe(VerbosityLevel::typeOnly())` output is. Mirrors real
+/// {desc}."` message: `iterable type ` plus the type's display, exactly
+/// as real PHPStan's own descriptions read. Mirrors real
 /// PHPStan's `MissingTypehintCheck::getIterableTypesWithMissingValueTypehint`,
 /// recursing into everything (a class's own generic type arguments, a
 /// union/intersection's own members, an array shape's own field types)
@@ -235,7 +235,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
         Type::Array(_, inner) => {
             if matches!(inner.as_ref(), Type::Mixed(_)) {
                 if !explicit_mixed {
-                    out.push(ty.to_string());
+                    out.push(format!("iterable type {ty}"));
                 }
             } else {
                 collect_iterable_missing_value_types(inner, explicit_mixed, out);
@@ -245,7 +245,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
             if let Some(inner) = iterable_union_value_type(members) {
                 if matches!(inner, Type::Mixed(_)) {
                     if !explicit_mixed {
-                        out.push("iterable".to_string());
+                        out.push("iterable type iterable".to_string());
                     }
                 } else {
                     collect_iterable_missing_value_types(inner, explicit_mixed, out);
@@ -269,7 +269,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
             }) {
                 if matches!(inner, Type::Mixed(_)) {
                     if !explicit_mixed {
-                        out.push(ty.to_string());
+                        out.push(format!("iterable type {ty}"));
                     }
                 } else {
                     collect_iterable_missing_value_types(inner, explicit_mixed, out);
@@ -424,7 +424,7 @@ impl<'a> Checker<'a> {
     /// ... type has no value type ..." / "Method ...() has parameter $x
     /// with no value type ..." / etc. that a single shared message
     /// template can't cover all six).
-    fn report_missing_typehint_findings(
+    pub(crate) fn report_missing_typehint_findings(
         &mut self,
         location: &str,
         span: Span,

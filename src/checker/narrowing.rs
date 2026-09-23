@@ -1475,6 +1475,36 @@ impl<'a> Checker<'a> {
             }
         };
         let subject = format!("PHPDoc tag {tag_name} for {target_desc}");
+        let class = self.current_class.clone();
+        let (node, _, _) = crate::phpdoc_grammar::parse_type_prefix(&info.raw_ty);
+        if node.is_some_and(|n| self.type_node_unresolvable(&n, class.as_deref())) {
+            self.report(
+                label.to_string(),
+                format!("{subject} contains unresolvable type."),
+                span,
+                2,
+                "assert.unresolvableType",
+            );
+            return;
+        }
+        // `AssertRuleHelper`'s missing-typehint checks on the asserted
+        // type itself.
+        let explicit_mixed = crate::checker::missing_typehint::has_explicit_mixed_nested_somewhere(
+            None,
+            Some(&info.raw_ty),
+        );
+        self.report_missing_typehint_findings(
+            label,
+            span,
+            |desc| format!("{subject} has no value type specified in {desc}."),
+            |class_desc, list| {
+                format!(
+                    "{subject} contains generic {class_desc} but does not specify its types: {list}"
+                )
+            },
+            &info.ty,
+            explicit_mixed,
+        );
         self.check_type_class_names_exist(&info.ty, &subject, span, label);
         self.check_type_trait_refs(&info.ty, &subject, span, label, "assert.trait");
         self.check_type_class_name_case(&info.case_refs, label, span);

@@ -143,6 +143,7 @@ impl Parser {
                 end,
             },
             doc_comment: None,
+            doc_line: None,
         });
         for (branch_pos, c, stmts) in branches.into_iter().rev() {
             result = Some(Stmt {
@@ -155,6 +156,7 @@ impl Parser {
                             end,
                         },
                         doc_comment: None,
+                        doc_line: None,
                     }),
                     else_branch: result.map(Box::new),
                 },
@@ -163,6 +165,7 @@ impl Parser {
                     end,
                 },
                 doc_comment: None,
+                doc_line: None,
             });
         }
         Ok(result.unwrap())

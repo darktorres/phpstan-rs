@@ -29,6 +29,8 @@ pub(crate) enum BuiltDecl {
         name: Arc<str>,
         conditional: bool,
         sig: FunctionSig,
+        // The declaration's name position, `(line, col)`.
+        site: (u32, u32),
     },
     GlobalConst {
         name: Arc<str>,
@@ -288,6 +290,7 @@ impl Registry {
                 name,
                 conditional,
                 sig: new_sig,
+                site,
             } => {
                 if conditional {
                     // Gated on arity and not losing any type precision
@@ -328,6 +331,7 @@ impl Registry {
                         }
                         _ => {
                             self.stub_provided_functions.remove(&name);
+                            self.function_decl_sites.insert(name.clone(), Some(site));
                             self.functions.insert(name, new_sig);
                         }
                     }
@@ -353,10 +357,12 @@ impl Registry {
                     let existing = self.functions.remove(&name).expect(
                             "name is in unconditionally_declared_functions, so it must already be indexed",
                         );
+                    self.function_decl_sites.insert(name.clone(), None);
                     self.functions.insert(name, existing.merge(new_sig));
                 } else {
                     self.stub_provided_functions.remove(&name);
                     self.unconditionally_declared_functions.insert(name.clone());
+                    self.function_decl_sites.insert(name.clone(), Some(site));
                     self.functions.insert(name, new_sig);
                 }
             }
@@ -618,6 +624,7 @@ fn build_declarations_with_context(
                     name,
                     conditional,
                     sig,
+                    site: (f.name_span.start.line, f.name_span.start.col),
                 });
             }
             // The common `if (!function_exists('foo')) { function

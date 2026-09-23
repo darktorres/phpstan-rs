@@ -34,6 +34,9 @@ pub struct Stmt {
     // (e.g. a comma-separated `use`/`const` list) - a refcount bump instead
     // of a full text copy each time.
     pub doc_comment: Option<Arc<str>>,
+    // The line `doc_comment` starts on - where real PHPStan reports a
+    // finding about the comment itself (`varTag.unresolvableType`).
+    pub doc_line: Option<u32>,
 }
 
 #[derive(Debug, Clone)]

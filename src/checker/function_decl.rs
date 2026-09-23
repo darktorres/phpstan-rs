@@ -212,7 +212,35 @@ impl<'a> Checker<'a> {
         is_static: bool,
         is_concrete: bool,
     ) {
+        // The registry keeps one signature per top-level function name; a
+        // second declaration of the same name elsewhere is checked against
+        // its own.
+        if class_name.is_none()
+            && let Some(own) = self.own_declaration_sig(f)
+        {
+            self.check_function_impl(f, class_name, is_static, is_concrete, None, Some(&own));
+            return;
+        }
         self.check_function_with_ancestor_hint(f, class_name, is_static, is_concrete, None);
+    }
+
+    /// `f`'s own signature when the registry's slot for its name was built
+    /// from a different declaration (or merged from several); `None` when
+    /// the slot is `f`'s.
+    fn own_declaration_sig(&self, f: &FunctionDecl) -> Option<FunctionSig> {
+        let name = self.name_ctx.declared_name(&f.name);
+        let site = *self.registry.function_decl_sites.get(name.as_str())?;
+        if site == Some((f.name_span.start.line, f.name_span.start.col)) {
+            return None;
+        }
+        let fresh = FunctionSig::from_decl(
+            f,
+            &self.name_ctx,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            crate::ast::Visibility::Public,
+        );
+        Some(self.registry.finalize_standalone_sig(fresh))
     }
 
     /// `check_function`'s real body - `ancestor_sig_hint` is `Some` only

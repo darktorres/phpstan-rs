@@ -57,6 +57,8 @@ pub struct Parser {
     // converting to `String` here and back to `Arc<str>` at the AST
     // fields that ultimately store it would be a pure wash.
     pub(crate) doc_comments: std::collections::HashMap<usize, Arc<str>>,
+    // Each `doc_comments` entry's own start line, same keys.
+    pub(crate) doc_comment_lines: std::collections::HashMap<usize, u32>,
     // Incremented/decremented around the parser's self-recursive
     // expression productions (parse_unary, parse_assignment,
     // parse_coalesce) - see MAX_EXPR_DEPTH.
@@ -83,13 +85,15 @@ impl Parser {
         let mut filtered_spans = Vec::with_capacity(tokens.len());
         let mut filtered_keyword_raw = Vec::with_capacity(tokens.len());
         let mut doc_comments = std::collections::HashMap::new();
-        let mut pending: Option<Arc<str>> = None;
+        let mut doc_comment_lines = std::collections::HashMap::new();
+        let mut pending: Option<(Arc<str>, u32)> = None;
         for (tok, span, keyword_raw) in tokens {
             match tok {
-                Token::DocComment(s) => pending = Some(s),
+                Token::DocComment(s) => pending = Some((s, span.start.line)),
                 other => {
-                    if let Some(doc) = pending.take() {
+                    if let Some((doc, line)) = pending.take() {
                         doc_comments.insert(filtered.len(), doc);
+                        doc_comment_lines.insert(filtered.len(), line);
                     }
                     filtered.push(other);
                     filtered_spans.push(span);
@@ -103,6 +107,7 @@ impl Parser {
             keyword_raw: filtered_keyword_raw,
             pos: 0,
             doc_comments,
+            doc_comment_lines,
             expr_depth: 0,
         }
     }
@@ -144,6 +149,7 @@ impl Parser {
                 end: self.previous_end(),
             },
             doc_comment: None,
+            doc_line: None,
         }
     }
 

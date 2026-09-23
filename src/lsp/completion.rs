@@ -324,11 +324,13 @@ fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
         }),
         span: assign_span,
         doc_comment: None,
+        doc_line: None,
     };
     let read_stmt = Stmt {
         kind: StmtKind::Expression(probe_var(read_span)),
         span: read_span,
         doc_comment: None,
+        doc_line: None,
     };
     (assign_stmt, read_stmt, read_span)
 }

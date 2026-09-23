@@ -346,3 +346,93 @@ fn a_closed_resource_is_not_a_resource_to_is_resource() {
         "got: {d:?}"
     );
 }
+
+#[test]
+fn an_unresolvable_or_underspecified_asserted_type_is_reported() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            /** @phpstan-assert string[optional] $x */
+            function a($x): void {}
+            /** @phpstan-assert-if-true array $x */
+            function b($x): bool { return true; }
+        "#,
+    );
+    let m: Vec<(&str, &str)> = d
+        .iter()
+        .filter(|x| {
+            x.identifier.starts_with("assert.") || x.identifier == "missingType.iterableValue"
+        })
+        .filter(|x| x.message.contains("PHPDoc tag @phpstan-assert"))
+        .map(|x| (x.identifier.as_str(), x.message.as_str()))
+        .collect();
+    assert_eq!(
+        m,
+        [
+            (
+                "assert.unresolvableType",
+                "PHPDoc tag @phpstan-assert for $x contains unresolvable type."
+            ),
+            (
+                "missingType.iterableValue",
+                "PHPDoc tag @phpstan-assert-if-true for $x has no value type specified in iterable type array."
+            ),
+        ]
+    );
+}
+
+#[test]
+fn an_unresolvable_inline_var_tag_is_reported_on_the_comment_line() {
+    let d = diagnostics_for(
+        r#"<?php
+            function f(): void {
+                /**
+                 * @var string[optional] $x
+                 */
+                $x = g();
+                /** @var int<3, 1> */
+                $y = g();
+                /** @var list<int> $z */
+                $z = g();
+            }
+            function g(): mixed { return 1; }
+        "#,
+    );
+    let m: Vec<(u32, &str)> = d
+        .iter()
+        .filter(|x| x.identifier == "varTag.unresolvableType")
+        .map(|x| (x.span.start.line, x.message.as_str()))
+        .collect();
+    assert_eq!(
+        m,
+        [
+            (
+                3,
+                "PHPDoc tag @var for variable $x contains unresolvable type."
+            ),
+            (7, "PHPDoc tag @var contains unresolvable type."),
+        ]
+    );
+}
+
+#[test]
+fn a_second_declaration_of_a_function_is_checked_against_its_own_phpdoc() {
+    let d = all_diagnostics_for(
+        r#"<?php
+            if (PHP_VERSION_ID > 80000) {
+                function twice($a) { return 1; }
+            } else {
+                /** @param array $a */
+                function twice($a) { return 1; }
+            }
+        "#,
+    );
+    let m: Vec<&str> = d
+        .iter()
+        .filter(|x| x.identifier == "missingType.iterableValue")
+        .map(|x| x.message.as_str())
+        .collect();
+    assert_eq!(
+        m,
+        ["Function twice() has parameter $a with no value type specified in iterable type array."]
+    );
+}

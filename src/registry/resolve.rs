@@ -1995,3 +1995,44 @@ fn constant_named_type(name: &str, registry: &Registry) -> Option<Type> {
         .or_else(|| registry.global_constants.get(short))
         .cloned()
 }
+
+impl Registry {
+    /// A top-level function signature built from one particular
+    /// declaration (the registry keeps only one per name), put through
+    /// the same per-signature passes as every indexed function: deferred
+    /// value types, constant-named types, and native-excluded PHPDoc
+    /// members.
+    pub(crate) fn finalize_standalone_sig(&self, mut sig: FunctionSig) -> FunctionSig {
+        let resolve = |ty: &mut Type, native: &Type| {
+            if type_contains_deferred_value_of(ty) {
+                let taken = std::mem::replace(ty, Type::Mixed(false));
+                *ty = resolve_deferred_value_of_with_native_fallback(taken, native, &self.classes);
+            }
+        };
+        for p in &mut sig.params {
+            resolve(&mut p.ty, &p.ty_native);
+            if let Some(doc) = &mut p.doc_ty {
+                resolve(doc, &p.ty_native);
+            }
+        }
+        resolve(&mut sig.return_type, &sig.return_type_native);
+        if let Some(doc) = &mut sig.return_doc_ty {
+            resolve(doc, &sig.return_type_native);
+        }
+        let lookup = |registry: &Registry, ty: &Type| resolve_constant_names(ty, registry);
+        if let Some(fixed) = fixed_sig(self, &sig, &lookup) {
+            sig = fixed;
+        }
+        for i in 0..sig.params.len() {
+            if let Some(ty) =
+                self.excluding_native(&sig.params[i].ty, &sig.params[i].ty_native, None)
+            {
+                sig.params[i].ty = ty;
+            }
+        }
+        if let Some(ty) = self.excluding_native(&sig.return_type, &sig.return_type_native, None) {
+            sig.return_type = ty;
+        }
+        sig
+    }
+}

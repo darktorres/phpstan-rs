@@ -119,6 +119,47 @@ impl<'a> Checker<'a> {
         self.report_invalid_doc_tag_values(label, doc, stmt.span);
     }
 
+    /// `InvalidPhpDocVarTagTypeRule`'s unresolvable half: every `@var` on
+    /// a statement (not a declaration, whose own rules check its tags),
+    /// reported on the comment's own line.
+    fn check_statement_var_tags_resolvable(&mut self, stmt: &Stmt, label: &str) {
+        let Some(doc) = stmt.doc_comment.as_deref() else {
+            return;
+        };
+        if !doc.contains("var")
+            || matches!(
+                stmt.kind,
+                StmtKind::FunctionDecl(_)
+                    | StmtKind::ClassDecl(_)
+                    | StmtKind::EnumDecl(_)
+                    | StmtKind::GlobalConst(_)
+            )
+        {
+            return;
+        }
+        let class = self.current_class.clone();
+        let line = stmt.doc_line.unwrap_or(stmt.span.start.line);
+        let span = crate::token::Span {
+            start: crate::token::Position { line, col: 1 },
+            end: crate::token::Position { line, col: 1 },
+        };
+        for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc) {
+            if self.type_node_unresolvable(&node, class.as_deref()) {
+                let subject = match variable {
+                    Some(v) => format!("PHPDoc tag @var for variable ${v}"),
+                    None => "PHPDoc tag @var".to_string(),
+                };
+                self.report(
+                    label.to_string(),
+                    format!("{subject} contains unresolvable type."),
+                    span,
+                    2,
+                    "varTag.unresolvableType",
+                );
+            }
+        }
+    }
+
     fn dispatch_stmt_rules(&mut self, stmt: &Stmt, locals: &Locals, label: &str) {
         let rules = self.external_rules;
         let mut found = Vec::new();
@@ -140,6 +181,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         self.check_statement_doc_tag_values(stmt, label);
+        self.check_statement_var_tags_resolvable(stmt, label);
         let inline_var = self.inline_var_annotation(stmt);
         if let Some((name, ty)) = &inline_var {
             purge_stale_narrowing_for(locals, name);

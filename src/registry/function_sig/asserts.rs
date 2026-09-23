@@ -56,6 +56,9 @@ pub struct AssertInfo {
     // declared type on this same declaration, which already collects
     // `case_refs`.
     pub case_refs: Vec<(Arc<str>, Arc<str>)>,
+    // The tag's type exactly as written, for checks that need its parsed
+    // form rather than the resolved `ty`.
+    pub raw_ty: Arc<str>,
 }
 
 /// Classifies `tag.target`'s own raw text into a real `AssertTarget` -
@@ -118,6 +121,7 @@ pub(crate) fn resolve_assert_tags(
                 ty,
                 target,
                 case_refs,
+                raw_ty: Arc::from(tag.ty.as_str()),
             }
         })
         .collect()

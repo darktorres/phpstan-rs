@@ -61,6 +61,40 @@ pub(crate) fn tag_type_nodes(doc: &str) -> TagTypeNodes {
     out
 }
 
+/// Every `@var` tag's winning type node, keyed by its variable name
+/// (`None` for a bare `@var Type`), in first-appearance order - the same
+/// prefix precedence as `tag_type_nodes`.
+pub(crate) fn var_tag_nodes(doc: &str) -> Vec<(Option<String>, TypeNode)> {
+    let node = phpdoc_grammar::parse(doc);
+    let mut out: Vec<(Option<String>, TypeNode)> = Vec::new();
+    for prefix in ["", "phan-", "psalm-", "phpstan-"] {
+        for tag in &node.tags {
+            let Some(name) = tag.name.strip_prefix(prefix) else {
+                continue;
+            };
+            if name != "var" || (prefix.is_empty() && has_known_prefix(&tag.name)) {
+                continue;
+            }
+            let PhpDocTagValue::TypedVar {
+                ty: Some(ty),
+                variable,
+                ..
+            } = &tag.value
+            else {
+                continue;
+            };
+            if !prefix.is_empty() && prefix != "phpstan-" && contains_error(ty) {
+                continue;
+            }
+            match out.iter_mut().find(|(v, _)| v == variable) {
+                Some(slot) => slot.1 = ty.clone(),
+                None => out.push((variable.clone(), ty.clone())),
+            }
+        }
+    }
+    out
+}
+
 fn has_known_prefix(name: &str) -> bool {
     ["phan-", "psalm-", "phpstan-"]
         .iter()

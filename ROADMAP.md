@@ -1101,7 +1101,16 @@ Matches real PHPStan 55/55 on the Piwigo corpus. `closed-resource` is
 its own type, disjoint from an open `resource` (`is_resource()` rejects
 it), and class constants and enum cases keep declaration order
 (`IndexMap`), so a `match` remainder and a `Foo::X_*` union list them as
-PHP's own `getConstants()` does. **`function.alreadyNarrowedType`** answers
+PHP's own `getConstants()` does. **`assert.unresolvableType`** and the
+missing-type checks on an asserted type complete `AssertRuleHelper`;
+**`varTag.unresolvableType`** covers every statement-level `@var`,
+reported on the comment's own line (`Stmt::doc_line`).
+`missingType.iterableValue` reads "iterable type array" exactly as real
+PHPStan's descriptions do. A second declaration of a top-level function
+(another file, a polyfill branch, a merged overload) is checked against
+its own signature: the registry records which declaration fills each
+function slot (`function_decl_sites`), and any other declaration is
+rebuilt and finalized on its own (`Registry::finalize_standalone_sig`). **`function.alreadyNarrowedType`** answers
 "always true" through that strict relation, so `is_string()` on a
 benevolent `(int|string)` key is no longer flagged. **`identical.alwaysFalse`/`.alwaysTrue`, `notIdentical.
 alwaysFalse`/`.alwaysTrue`**: a `===`/`!==` comparison whose outcome is
@@ -3646,13 +3655,6 @@ against this list, and added the real gaps the audit had missed.
   unimplemented (only in the typo-detection whitelist). (Phase 88's U4
   is the *inference* half of this same tag family, once real tag
   support exists.)
-- `FunctionAssertRule`/`MethodAssertRule` (`AssertRuleHelper`) remainder
-  — `class.notFound`, `assert.impossibleType`/`.alreadyNarrowedType`/
-  `.trait`/`.unknownExpr`, and `parameter.notFound` are all built
-  (`check_one_assert_tag`, `checker/narrowing.rs`). Left:
-  `assert.unresolvableType`, and the `missingType.iterableValue`/
-  `.generics`/`.callable` checks `AssertRuleHelper` runs on the asserted
-  type itself.
 - `FunctionConditionalReturnTypeRule`/`MethodConditionalReturnTypeRule`
   — validating a conditional PHPDoc return type's own declaration
   (`conditionalType.subjectNotFound`/`.alwaysTrue`/`.alwaysFalse`).
@@ -3661,15 +3663,13 @@ against this list, and added the real gaps the audit had missed.
   checking is deliberately scoped to the plain-assignment case only;
   the much larger name-matching surface (`varTag.differentVariable`/
   `.misplaced`/`.multipleTags`/`.noVariable`/`.variableNotFound`,
-  foreach/static/global/return variants) and `varTag.trait`/
-  `.unresolvableType` are unbuilt. Of `VarTagTypeRuleHelper`'s two
+  foreach/static/global/return variants) and `varTag.trait` are unbuilt
+  (`varTag.unresolvableType` is built). Of `VarTagTypeRuleHelper`'s two
   compatibility checks, only `varTag.type` is built.
   `varTag.nativeType` (the `@var` type against the expression's
   *native* type, not its PHPDoc-refined one) isn't.
 - Identifiers still to build: `selfOut.type`/`.static`/
-  `.unresolvableType` for `IncompatibleSelfOutTypeRule`, and
-  `assert.unresolvableType`/`varTag.unresolvableType`, which can reuse
-  `checker/phpdoc_unresolvable.rs`.
+  `.unresolvableType` for `IncompatibleSelfOutTypeRule`.
 
 ### Phase 131 — Generics (`Rules/Generics/` gaps)
 
