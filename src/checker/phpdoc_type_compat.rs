@@ -325,6 +325,7 @@ impl<'a> Checker<'a> {
             return_type_span: None,
             body: std::sync::Arc::new(Vec::new()),
             has_body: false,
+            body_open: None,
             by_ref: false,
             doc_comment: Some(doc.into()),
             attrs: Vec::new(),
