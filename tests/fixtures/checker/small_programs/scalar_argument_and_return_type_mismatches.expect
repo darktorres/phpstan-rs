@@ -1,0 +1,4 @@
+5:12-5:20 return.type L3 addOne | return type mismatch: expected int, got non-falsy-lowercase-numeric-string
+18:13-18:15 argument.type L5 <main> | strlen() argument #1 ($string) expects string, 42 given
+19:12-19:14 argument.type L5 <main> | greet() argument #1 ($name) expects string, 42 given
+20:6-20:17 arguments.count L0 <main> | needsTwo() expects at least 2 argument(s), 1 given
