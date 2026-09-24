@@ -4,8 +4,8 @@
 //! PHPStan is the release `xtask/oracle/composer.json` pins (the one
 //! `vendor/phpstan-src` checks out), installed under `target/oracle`. Each
 //! fixture runs alone, since fixtures reuse class names, under a neon
-//! translated from its `phpstan-rs.toml`: `level` as given (else `max`,
-//! the level an unconfigured fixture's always-strict acceptance matches),
+//! translated from its `phpstan-rs.toml`: `level` as given (else `max`
+//! with `mixed` accepted, as an unconfigured fixture's acceptance is),
 //! every setting that mirrors a PHPStan parameter or a strict-rules /
 //! deprecation-rules switch, and scan and stub paths. Settings with no
 //! PHPStan counterpart are left out; the identifiers they enable are
@@ -416,7 +416,10 @@ fn translate(config: &toml::Table, base: &Path, subject: &Path) -> Result<Transl
     neon.push_str("parameters:\n");
     match level {
         Some(level) => writeln!(neon, "\tlevel: {level}").unwrap(),
-        None => neon.push_str("\tlevel: max\n"),
+        // Unconfigured, phpstan-rs checks every level's rules but, like
+        // level 8, accepts `mixed` wherever a type is expected.
+        None => neon
+            .push_str("\tlevel: max\n\tcheckExplicitMixed: false\n\tcheckImplicitMixed: false\n"),
     }
     writeln!(neon, "\treportUnmatchedIgnoredErrors: {report_unmatched}").unwrap();
     if let Some(version) = php_version {
