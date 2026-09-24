@@ -15,8 +15,9 @@
 //! messages differ are a disagreement of their own (side `message`). A
 //! phpstan-rs entry whose identifier PHPStan never emits (per its sources
 //! and this run) belongs to a phpstan-rs-only rule, and one PHPStan
-//! reports only with bleedingEdge on is confirmed by it; both are counted,
-//! not listed.
+//! reports only with bleedingEdge on is confirmed by it, and one in a
+//! file PHPStan cannot parse is unverifiable; all three are counted, not
+//! listed.
 //!
 //! Every other entry only phpstan-rs reports (side `rs`) needs a verdict
 //! in `gates/oracle/verdicts.tsv`, one per line:
@@ -25,7 +26,9 @@
 //! Entries only PHPStan reports (side `phpstan`) and `message` pairs are
 //! the parity backlog, tracked in `gates/oracle/parity.tsv`: each run
 //! reports what is new and what is resolved against it, and `--bless`
-//! rewrites it. Details go to `target/oracle/report.txt`.
+//! rewrites it. Details go to `target/oracle/report.txt`, and every
+//! disagreement (key, verdict, phpstan-rs message, PHPStan message) to
+//! `target/oracle/disagreements.tsv`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -798,7 +801,14 @@ impl Catalog {
                 }
             }
         }
-        for t in seen_templates {
+        // A template with no literal part (`'%s.%s'`) says nothing about
+        // which identifiers exist.
+        for t in seen_templates.into_iter().filter(|t| {
+            t.replace("%s", "")
+                .replace("%d", "")
+                .chars()
+                .any(char::is_alphabetic)
+        }) {
             let pattern = regex::escape(&t)
                 .replace("%s", "[A-Za-z0-9]+")
                 .replace("%d", "[0-9]+");
@@ -892,6 +902,9 @@ struct Tallies {
     rs_rules: BTreeMap<String, usize>,
     /// phpstan-rs entries only PHPStan's bleedingEdge reports.
     bleeding_edge: BTreeMap<String, usize>,
+    /// phpstan-rs entries in files PHPStan could not parse, so did not
+    /// analyse.
+    unparsed: BTreeMap<String, usize>,
 }
 
 /// Pairs one fixture's entries: exact matches first, then same file,
@@ -926,8 +939,19 @@ fn pair(outcome: &Outcome, catalog: &Catalog, tallies: &mut Tallies) -> Vec<Disa
             *p = None;
         }
     }
+    let unparsed: BTreeSet<&str> = outcome
+        .phpstan
+        .iter()
+        .filter(|p| p.identifier == "phpstan.parse")
+        .map(|p| p.file.as_str())
+        .collect();
     for entry in rs.into_iter().flatten() {
-        if !catalog.knows(&entry.identifier) {
+        if unparsed.contains(entry.file.as_str()) {
+            *tallies
+                .unparsed
+                .entry(entry.identifier.clone())
+                .or_default() += 1;
+        } else if !catalog.knows(&entry.identifier) {
             *tallies
                 .rs_rules
                 .entry(entry.identifier.clone())
@@ -1013,6 +1037,7 @@ fn report(
     let mut unclassified_count = 0usize;
     let mut parity: BTreeMap<String, usize> = BTreeMap::new();
     let mut parity_details: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    let mut tsv = String::new();
     for outcome in outcomes {
         for setting in &outcome.unmapped {
             *unmapped.entry(setting).or_default() += 1;
@@ -1020,6 +1045,19 @@ fn report(
         let mut section = String::new();
         for d in pair(outcome, catalog, &mut tallies) {
             let key = d.key();
+            let message = |e: &Option<Entry>| {
+                e.as_ref()
+                    .map(|e| format!("{}:{} {}", e.file, e.line, e.message.replace('\n', "\\n")))
+                    .unwrap_or_default()
+            };
+            writeln!(
+                tsv,
+                "{key}\t{}\t{}\t{}",
+                verdicts.get(&key).map_or("", String::as_str),
+                message(&d.rs),
+                message(&d.phpstan)
+            )
+            .unwrap();
             *by_identifier
                 .entry((d.side, d.entry().identifier.clone()))
                 .or_default() += 1;
@@ -1085,6 +1123,7 @@ fn report(
     for (title, tally) in [
         ("phpstan-rs-only rules", &tallies.rs_rules),
         ("confirmed by bleedingEdge only", &tallies.bleeding_edge),
+        ("in files PHPStan cannot parse", &tallies.unparsed),
     ] {
         writeln!(
             summary,
@@ -1118,6 +1157,7 @@ fn report(
         parity.values().sum::<usize>()
     )
     .unwrap();
+    write(&oracle_dir().join("disagreements.tsv"), tsv.as_bytes())?;
     write(
         &oracle_dir().join("report.txt"),
         format!(
