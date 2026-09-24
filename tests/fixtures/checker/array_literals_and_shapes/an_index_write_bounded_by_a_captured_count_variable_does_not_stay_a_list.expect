@@ -1,1 +1,1 @@
-8:27-8:31 argument.type L5 f | needsList() argument #1 ($x) expects list<int>, array<int, int> given
+8:27-8:31 argument.type L5 f | Parameter #1 $x of function needsList expects list<int>, array<int, int> given.

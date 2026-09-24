@@ -6,7 +6,7 @@
 //! method the calling scope can't see.
 
 use crate::ast::{Arg, Visibility};
-use crate::checker::calls::{CheckArgsCall, resolve_call_args};
+use crate::checker::calls::CheckArgsCall;
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
 use crate::token::Span;
@@ -123,15 +123,15 @@ impl<'a> Checker<'a> {
                 "callable.inaccessibleMethod",
             );
         }
-        let resolved = resolve_call_args(args, &named.sig.params);
         self.check_args(CheckArgsCall {
             callee_label: &named.description,
+            callee: crate::checker::calls::parameters::Callee::Callable(&named.description),
             sig: named.sig,
             args,
-            resolved: &resolved,
             locals,
             label,
             defining_class: named.defining_class.as_deref(),
+            is_builtin: false,
             span,
         });
     }

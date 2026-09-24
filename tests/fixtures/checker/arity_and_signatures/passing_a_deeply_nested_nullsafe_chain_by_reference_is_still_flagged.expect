@@ -1,2 +1,2 @@
-5:58-5:75 argument.byRef L0 test | setValue34() argument #1 ($x) is passed by reference, but its access chain contains a nullsafe operator (?->), which may short-circuit and never write back
-5:58-5:75 argument.type L5 test | setValue34() argument #1 ($x) expects int, int|null given
+5:58-5:75 argument.byRef L5 test | Parameter #1 $x of function setValue34 is passed by reference, so it expects variables only.
+5:58-5:75 argument.type L5 test | Parameter #1 $x of function setValue34 expects int, int|null given.

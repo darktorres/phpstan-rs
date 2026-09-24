@@ -1,3 +1,3 @@
 2:24-2:39 missingType.iterableValue L6 f | Function f() has parameter $items with no value type specified in iterable type iterable.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-3:39-3:53 argument.type L5 test | f() argument #1 ($items) expects array|Traversable, 'not iterable' given
+3:39-3:53 argument.type L5 test | Parameter #1 $items of function f expects array|Traversable, 'not iterable' given.

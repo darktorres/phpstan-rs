@@ -1,2 +1,2 @@
-4:19-4:26 argument.type L5 g | f() argument #1 ($width) expects int, string given
-4:28-4:34 argument.type L5 g | f() argument #2 ($height) expects string, int given
+4:19-4:26 argument.type L5 g | Parameter #1 $width of function f expects int, string given.
+4:28-4:34 argument.type L5 g | Parameter #2 $height of function f expects string, int given.

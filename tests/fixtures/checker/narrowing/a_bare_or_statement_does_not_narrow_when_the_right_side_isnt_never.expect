@@ -1,1 +1,1 @@
-9:41-9:45 argument.type L5 C::f | substr() argument #2 ($offset) expects int, int|false given
+9:41-9:45 argument.type L5 C::f | Parameter #2 $offset of function substr expects int, int|false given.

@@ -1,1 +1,1 @@
-4:47-4:63 argument.type L5 test | needsPair() argument #1 ($pair) expects array{0: int, 1: string}, array{0: 'backwards', 1: 5} given
+4:47-4:63 argument.type L5 test | Parameter #1 $pair of function needsPair expects array{0: int, 1: string}, array{0: 'backwards', 1: 5} given.

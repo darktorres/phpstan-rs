@@ -1,1 +1,1 @@
-5:30-5:38 argument.type L5 f (closure) | needsInt() argument #1 ($i) expects int, array<string> given
+5:30-5:38 argument.type L5 f (closure) | Parameter #1 $i of function needsInt expects int, array<string> given.

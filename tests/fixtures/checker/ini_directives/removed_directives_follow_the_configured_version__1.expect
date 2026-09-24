@@ -1,0 +1,2 @@
+6:5-6:44 argument.namedNotSupported L0 f | Named arguments are supported only on PHP 8.0 and later.
+    non-ignorable

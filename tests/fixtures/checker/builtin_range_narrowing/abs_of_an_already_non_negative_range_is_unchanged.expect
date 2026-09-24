@@ -1,1 +1,1 @@
-6:31-6:38 argument.type L5 test | needsNarrower() argument #1 ($x) expects int<0, 9>, int<0, 10> given
+6:31-6:38 argument.type L5 test | Parameter #1 $x of function needsNarrower expects int<0, 9>, int<0, 10> given.

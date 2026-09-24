@@ -1,1 +1,1 @@
-6:27-6:60 argument.type L5 f | wantsList() argument #1 ($x) expects list<string>, array<string> given
+6:27-6:60 argument.type L5 f | Parameter #1 $x of function wantsList expects list<string>, array<string> given.

@@ -1,3 +1,3 @@
 4:27-4:41 missingType.iterableValue L6 test | Function test() has parameter $untyped with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-4:61-4:69 argument.type L5 test | needsInts() argument #1 ($xs) expects array<(int|string), int>, array given
+4:61-4:69 argument.type L5 test | Parameter #1 $xs of function needsInts expects array<(int|string), int>, array given.

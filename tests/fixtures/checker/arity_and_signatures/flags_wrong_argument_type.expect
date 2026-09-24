@@ -1,1 +1,1 @@
-1:14-1:16 argument.type L5 <main> | strlen() argument #1 ($string) expects string, 42 given
+1:14-1:16 argument.type L5 <main> | Parameter #1 $string of function strlen expects string, 42 given.

@@ -1,1 +1,1 @@
-8:22-8:24 argument.type L5 f | sink() argument #1 ($p) expects object{x: int}, Point given
+8:22-8:24 argument.type L5 f | Parameter #1 $p of function sink expects object{x: int}, Point given.

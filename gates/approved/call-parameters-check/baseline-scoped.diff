@@ -1,0 +1,5 @@
+--- old
++++ new
+@@ -1 +1,2 @@
+ # files_checked 2792
++src/Piwigo/Section/SectionPopulator.php	679	21	5	argument.type	Piwigo\\Section\\SectionPopulator::populate	Parameter #7 $chronologyDate of method Piwigo\\Calendar\\CalendarRenderer::render() expects list<int|string>, array given.	

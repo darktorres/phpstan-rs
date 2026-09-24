@@ -1,1 +1,1 @@
-5:26-5:28 argument.type L5 f | needsInt() argument #1 ($x) expects int, array{'foo bar': string} given
+5:26-5:28 argument.type L5 f | Parameter #1 $x of function needsInt expects int, array{'foo bar': string} given.

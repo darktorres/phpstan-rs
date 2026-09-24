@@ -30,11 +30,11 @@ fn preg_match_understands_a_free_spacing_pattern_with_comments() {
     );
     assert_eq!(d.len(), 2, "got: {d:?}");
     assert!(
-        d[0].message.contains("needsInt") && d[0].message.ends_with("numeric-string given"),
+        d[0].message.contains("needsInt") && d[0].message.ends_with("numeric-string given."),
         "expected group 1 as numeric-string, got: {d:?}"
     );
     assert!(
-        d[1].message.contains("needsInt") && d[1].message.ends_with("non-empty-string given"),
+        d[1].message.contains("needsInt") && d[1].message.ends_with("non-empty-string given."),
         "expected group 2 as non-empty-string, got: {d:?}"
     );
 }

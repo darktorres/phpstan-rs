@@ -1,1 +1,1 @@
-5:22-5:32 argument.type L5 f | sink() argument #1 ($x) expects non-falsy-string, string given
+5:22-5:32 argument.type L5 f | Parameter #1 $x of function sink expects non-falsy-string, string given.

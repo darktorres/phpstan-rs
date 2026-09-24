@@ -1,1 +1,1 @@
-5:22-5:25 argument.type L5 <main> | App\\needsInt() argument #1 ($x) expects int, 'hello' given
+5:22-5:25 argument.type L5 <main> | Parameter #1 $x of function App\\needsInt expects int, 'hello' given.

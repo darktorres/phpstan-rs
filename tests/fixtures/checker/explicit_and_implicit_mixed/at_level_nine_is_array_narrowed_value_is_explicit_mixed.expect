@@ -1,2 +1,2 @@
 2:24-2:26 missingType.parameter L6 f | Function f() has parameter $m with no type specified.
-4:23-4:28 argument.type L5 f | g() argument #1 ($s) expects string, mixed given
+4:23-4:28 argument.type L5 f | Parameter #1 $s of function g expects string, mixed given.

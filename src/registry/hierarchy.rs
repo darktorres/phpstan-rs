@@ -356,6 +356,24 @@ impl Registry {
     /// A single two-level `HashMap` lookup against `self.method_owner_by_
     /// class` (see `precompute_member_owners`'s own doc comment for what
     /// this replaced and why).
+    /// `method` as `owner` declares it (method names resolve
+    /// case-insensitively; messages spell them as declared).
+    pub(crate) fn declared_method_name(&self, owner: &str, method: &str) -> String {
+        self.classes
+            .get(owner)
+            .and_then(|info| {
+                info.methods
+                    .get_key_value(method)
+                    .or_else(|| {
+                        info.methods
+                            .iter()
+                            .find(|(k, _)| k.eq_ignore_ascii_case(method))
+                    })
+                    .map(|(k, _)| k.to_string())
+            })
+            .unwrap_or_else(|| method.to_string())
+    }
+
     pub fn lookup_method(&self, class: &str, method: &str) -> Option<&FunctionSig> {
         let owners = self.method_owner_by_class.get(class)?;
         if let Some(owner) = owners.get(method) {
@@ -951,6 +969,21 @@ impl Registry {
     /// second, not first: the overwhelming majority of real calls
     /// already match a declaration's own case exactly, so the common
     /// path stays a plain, allocation-free `HashMap` lookup.
+    /// Whether `name` is a function a stub declares (a PHP builtin or
+    /// extension function) and no analysed code redeclares.
+    pub(crate) fn is_builtin_function(&self, name: &str) -> bool {
+        self.stub_provided_functions.contains(name)
+            || self
+                .lookup_function_with_name(name)
+                .is_some_and(|(canonical, _)| self.stub_provided_functions.contains(canonical))
+    }
+
+    /// Whether `class` is a class a stub declares (a PHP builtin or
+    /// extension class).
+    pub(crate) fn is_builtin_class(&self, class: &str) -> bool {
+        self.built_in_stub_classes.contains(class)
+    }
+
     pub fn lookup_function(&self, name: &str) -> Option<&FunctionSig> {
         self.functions.get(name).or_else(|| {
             self.functions

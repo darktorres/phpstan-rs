@@ -1,1 +1,1 @@
-5:33-5:35 argument.type L5 f | needs_lowercase() argument #1 ($s) expects lowercase-string, string given
+5:33-5:35 argument.type L5 f | Parameter #1 $s of function needs_lowercase expects lowercase-string, string given.

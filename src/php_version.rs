@@ -140,6 +140,13 @@ pub enum PhpFeature {
     /// decimal-point float formatting). `PhpVersion::
     /// supportsHhPrintfSpecifier` (`PrintfHelper::parsePlaceholders`).
     PrintfHhSpecifier,
+    /// Named arguments. `PhpVersion::supportsNamedArguments`
+    /// (`FunctionCallParametersCheck`).
+    NamedArguments,
+    /// A named argument after an unpacked one (`f(...$a, b: 1)`).
+    /// `PhpVersion::supportsNamedArgumentAfterUnpackedArgument`
+    /// (`FunctionCallParametersCheck`).
+    NamedArgumentAfterUnpackedArgument,
     /// PHP's native `#[\Deprecated]` attribute actually being respected
     /// on a *trait* declaration - below this version it's a real, if
     /// silent, no-op there (unlike a function/method/class constant/enum
@@ -238,6 +245,7 @@ impl PhpFeature {
             | UnsetCastRemoved
             | CaseInsensitiveConstantsRemoved
             | PrintfHhSpecifier
+            | NamedArguments
             | NativeUnionTypes
             | RequiredParameterAfterOptionalDeprecated
             | AbstractTraitMethods => (8, 0),
@@ -248,6 +256,7 @@ impl PhpFeature {
             | SerializableRequiresMagicMethods
             | FirstClassCallables
             | TentativeReturnTypes
+            | NamedArgumentAfterUnpackedArgument
             | ReadOnlyProperties => (8, 1),
             ReadOnlyClasses
             | ConstantsInTraits

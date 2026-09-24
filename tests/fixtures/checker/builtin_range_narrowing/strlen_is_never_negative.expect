@@ -1,1 +1,1 @@
-5:29-5:39 argument.type L5 test | needsNarrow() argument #1 ($x) expects int<0, 5>, int<0, max> given
+5:29-5:39 argument.type L5 test | Parameter #1 $x of function needsNarrow expects int<0, 5>, int<0, max> given.

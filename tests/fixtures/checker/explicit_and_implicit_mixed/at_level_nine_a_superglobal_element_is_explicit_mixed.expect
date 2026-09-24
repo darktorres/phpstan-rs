@@ -1,1 +1,1 @@
-3:19-3:30 argument.type L5 f | g() argument #1 ($s) expects string, mixed given
+3:19-3:30 argument.type L5 f | Parameter #1 $s of function g expects string, mixed given.

@@ -1,8 +1,7 @@
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::checker::expr::is_canonical_int_key;
 use crate::checker::{
     Checker, Locals, literal_string_value, purge_stale_narrowing_for, union_types, unwrap_grouping,
 };
@@ -13,26 +12,21 @@ use crate::types::{self, Type};
 mod closure_context;
 mod format_string;
 mod misc_rules;
+pub(crate) mod parameters;
 
-/// `check_args`'s own call bundle. `callee_label`/`label` are two
-/// adjacent, identically-typed `&str` parameters (the callee's display
-/// name vs. the enclosing function/method being checked) - a real
-/// mis-ordering risk a positional call site can't catch, which named
-/// struct fields fix. `args` is the raw, as-written argument list
-/// (needed for the count-based checks, which are about how many
-/// arguments were actually written); `resolved` is `resolve_call_args`'s
-/// per-parameter resolution of that same list, used for the
-/// missing-required-parameter test (correct for a named call that fills
-/// required parameters out of order, where a raw count alone can't
-/// tell) and for the per-argument type-checking loop.
+/// `check_args`'s call bundle. `callee` names the callee in PHPStan's
+/// messages; `callee_label` in this project's own (boolean-trap and
+/// swapped-argument) ones. `label` is the enclosing function or method.
 pub(crate) struct CheckArgsCall<'a> {
     pub(crate) callee_label: &'a str,
+    pub(crate) callee: parameters::Callee<'a>,
     pub(crate) sig: &'a FunctionSig,
     pub(crate) args: &'a [Arg],
-    pub(crate) resolved: &'a [Option<&'a Expr>],
     pub(crate) locals: &'a Locals,
     pub(crate) label: &'a str,
     pub(crate) defining_class: Option<&'a str>,
+    /// A PHP builtin (whose variadic takes no unknown named argument).
+    pub(crate) is_builtin: bool,
     pub(crate) span: Span,
 }
 
@@ -345,180 +339,31 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_args(&mut self, call: CheckArgsCall) {
         let CheckArgsCall {
             callee_label,
+            callee,
             sig,
             args,
-            resolved,
             locals,
             label,
             defining_class,
+            is_builtin,
             span,
         } = call;
-        // Naming/ordering legality first - independent of, and prior to,
-        // every count/type check below.
-        self.check_argument_legality(callee_label, sig, args, label);
-
         if self.registry.check_boolean_trap {
             self.check_boolean_trap_arguments(callee_label, sig, args, defining_class, label);
         }
         if self.registry.check_swapped_arguments {
             self.check_swapped_argument_names(callee_label, sig, args, defining_class, label);
         }
-
-        // A spread/unpack argument's own real contents can't be resolved
-        // statically (see `resolve_call_args`'s own doc comment) - every
-        // declared parameter at or past the positional index the spread
-        // occupies might still be filled by it at runtime, so neither
-        // the "missing required parameter" nor the "too many arguments"
-        // check below can trust a `None` slot (or a raw `args.len()`) at
-        // or past that point. `None` here still lets both checks run
-        // precisely for everything before the spread.
-        let spread_from = first_spread_positional_index(args);
-        let required = sig
-            .params
-            .iter()
-            .filter(|p| !p.variadic && !p.has_default)
-            .count();
-        let required_scan_len = spread_from.map_or(required, |sp| sp.min(required));
-        let missing_required = resolved
-            .iter()
-            .take(required_scan_len)
-            .filter(|s| s.is_none())
-            .count();
-        if missing_required > 0 {
-            self.report(
-                label.to_string(),
-                format!(
-                    "{callee_label}() expects at least {required} argument(s), {} given",
-                    args.len()
-                ),
-                span,
-                0,
-                "arguments.count",
-            );
-        }
-
-        // Calling a non-variadic function/method with more positional
-        // arguments than it can accept is a real PHP fatal error ("Too
-        // many arguments... expected exactly N"); the per-argument loop
-        // below wouldn't catch it, since it simply stops once
-        // `sig.params.get(i)` runs out and the last param isn't
-        // variadic. Uses the raw `args.len()` deliberately, not
-        // `resolved`'s length - a non-variadic signature's resolved
-        // slice is always exactly `params.len()` long by
-        // `resolve_call_args`'s design, which would make this check
-        // always read `false` if it read from that shape instead.
-        let last_is_variadic = sig.params.last().is_some_and(|p| p.variadic);
-        if spread_from.is_none() && !last_is_variadic && args.len() > sig.params.len() {
-            let quantifier = if required == sig.params.len() {
-                "exactly"
-            } else {
-                "at most"
-            };
-            self.report(
-                label.to_string(),
-                format!(
-                    "{callee_label}() expects {quantifier} {} argument(s), {} given",
-                    sig.params.len(),
-                    args.len()
-                ),
-                span,
-                0,
-                "arguments.count",
-            );
-        }
-
-        for (i, slot) in resolved.iter().enumerate() {
-            let Some(arg) = slot else {
-                continue;
-            };
-            let param = match sig.params.get(i) {
-                Some(p) => p,
-                None => match sig.params.last() {
-                    Some(p) if p.variadic => p,
-                    _ => continue,
-                },
-            };
-            // By-ref target legality: independent of - and checked
-            // before - the type check below, since it's about whether
-            // `arg` is even a real storage location at all, not what
-            // its value's type is. A nullsafe-chain root is checked
-            // first and reported with its own, more specific reason
-            // (short-circuiting, not "not an lvalue") even though a
-            // nullsafe chain is *also* not one of `is_valid_byref_
-            // argument_expr`'s legal shapes.
-            if param.by_ref {
-                if contains_nullsafe_access(arg) {
-                    self.report(
-                        label.to_string(),
-                        format!(
-                            "{callee_label}() argument #{} (${}) is passed by reference, but its access chain contains a nullsafe operator (?->), which may short-circuit and never write back",
-                            i + 1,
-                            param.name
-                        ),
-                        arg.span,
-                        0,
-                        "argument.byRef",
-                    );
-                } else if !is_valid_byref_argument_expr(arg) {
-                    self.report(
-                        label.to_string(),
-                        format!(
-                            "{callee_label}() argument #{} (${}) is passed by reference, so it expects a variable, not an expression",
-                            i + 1,
-                            param.name
-                        ),
-                        arg.span,
-                        0,
-                        "argument.byRef",
-                    );
-                }
-            }
-            // A closure/arrow-fn literal at a shaped-callable parameter is
-            // typed in that context (its unhinted parameters from the
-            // shape, its return inferred from them), as real PHPStan does
-            // - otherwise an unhinted `fn ($x) => ...` is compared as
-            // `Closure(mixed): ...`.
-            let arg_ty = self
-                .infer_closure_literal_in_context(arg, &param.ty, locals)
-                .unwrap_or_else(|| self.infer_expr(arg, locals));
-            // `accepts_at_configured_level` already accepts a `Mixed`
-            // argument unconditionally below real PHPStan's own level
-            // 9/10 `checkExplicitMixed`/`checkImplicitMixed` threshold -
-            // no separate early bail-out needed, and one here would
-            // wrongly skip this check entirely once either is enabled.
-            let param_ty = match defining_class {
-                Some(c) => self.resolve_pseudo(&param.ty, c),
-                None => param.ty.clone(),
-            };
-            if !self
-                .registry
-                .accepts_at_configured_level(&arg_ty, &param_ty)
-            {
-                self.report(
-                    label.to_string(),
-                    format!(
-                        "{callee_label}() argument #{} (${}) expects {}, {} given",
-                        i + 1,
-                        param.name,
-                        param_ty,
-                        arg_ty
-                    ),
-                    arg.span,
-                    5,
-                    "argument.type",
-                );
-            }
-        }
-
-        self.check_constant_array_spread_arguments(
-            callee_label,
+        self.check_parameters(parameters::ParametersCheck {
+            callee,
             sig,
             args,
-            resolved,
             locals,
             label,
             defining_class,
-        );
+            is_builtin,
+            span,
+        });
     }
 
     /// Argument-checking for a call through a value statically known to
@@ -605,93 +450,6 @@ impl<'a> Checker<'a> {
                         arg_ty
                     ),
                     a.value.span,
-                    5,
-                    "argument.type",
-                );
-            }
-        }
-    }
-
-    /// `f(...['a', 'b', 'named' => $c])`-style spread arguments whose
-    /// inferred type is a literal `Type::ArrayShape` have every eventual
-    /// argument slot known statically - real PHP resolves each int-keyed
-    /// shape field positionally (in shape order, not by its literal key
-    /// value) and each string-keyed field by name, like an ordinary
-    /// named argument. Every other check in `check_args` gives up the
-    /// moment it sees a spread (see `resolve_call_args`'s doc comment)
-    /// because an arbitrary spread's contents can't be resolved
-    /// statically - this recovers type-checking for the one common,
-    /// fully static shape.
-    #[allow(clippy::too_many_arguments)]
-    fn check_constant_array_spread_arguments(
-        &mut self,
-        callee_label: &str,
-        sig: &FunctionSig,
-        args: &[Arg],
-        resolved: &[Option<&Expr>],
-        locals: &Locals,
-        label: &str,
-        defining_class: Option<&str>,
-    ) {
-        if args.iter().filter(|a| a.spread).count() != 1 {
-            return;
-        }
-        let spread_index = args.iter().position(|a| a.spread).unwrap();
-        if !args[spread_index + 1..].iter().all(|a| a.name.is_some()) {
-            return;
-        }
-        let spread_arg = &args[spread_index];
-        let spread_ty = self.infer_expr(&spread_arg.value, locals);
-        let Some(fields) = array_shape_fields(&spread_ty) else {
-            return;
-        };
-        if fields.iter().any(|(k, _, _)| k == "...") {
-            return;
-        }
-        let Some(mut positional_counter) = first_spread_positional_index(args) else {
-            return;
-        };
-        for (key, field_ty, optional) in fields {
-            if *optional {
-                continue;
-            }
-            let param = if is_canonical_int_key(key) {
-                let p = sig
-                    .params
-                    .get(positional_counter)
-                    .or_else(|| sig.params.last().filter(|p| p.variadic));
-                positional_counter += 1;
-                p
-            } else {
-                sig.params.iter().find(|p| p.name.as_ref() == key.as_str())
-            };
-            let Some(param) = param else {
-                continue;
-            };
-            let already_filled = sig
-                .params
-                .iter()
-                .position(|p| std::ptr::eq(p, param))
-                .and_then(|pos| resolved.get(pos))
-                .is_some_and(|s| s.is_some());
-            if already_filled {
-                continue;
-            }
-            let param_ty = match defining_class {
-                Some(c) => self.resolve_pseudo(&param.ty, c),
-                None => param.ty.clone(),
-            };
-            if !self
-                .registry
-                .accepts_at_configured_level(field_ty, &param_ty)
-            {
-                self.report(
-                    label.to_string(),
-                    format!(
-                        "{callee_label}() argument (${}) expects {}, {} given",
-                        param.name, param_ty, field_ty
-                    ),
-                    spread_arg.value.span,
                     5,
                     "argument.type",
                 );
@@ -823,140 +581,6 @@ impl<'a> Checker<'a> {
                 5,
                 "arguments.possiblySwapped",
             );
-        }
-    }
-
-    /// Validates a call's argument list for the naming/ordering legality
-    /// real PHP itself enforces, independent of which parameter each
-    /// argument actually resolves to (`resolve_call_args`'s job).
-    /// Mirrors real PHPStan's `FunctionCallParametersCheck::
-    /// processArguments` plus its raw-args ordering pre-pass, reusing
-    /// its identifiers verbatim (`argument.unknown`, `argument.duplicate`,
-    /// `argument.positionalAfterNamed`, `argument.unpackAfterNamed`,
-    /// `argument.nonUnpackAfterUnpacked`).
-    ///
-    /// The three ordering checks are deliberately `else if` against each
-    /// other (real PHPStan instead runs an ordering pre-pass over the raw
-    /// argument list and a separate, later pass over an *expanded*
-    /// argument list - one that turns a spread over a known constant
-    /// array into one synthetic argument per element - to get
-    /// `positionalAfterNamed` from a genuinely different pass than
-    /// `unpackAfterNamed`/`nonUnpackAfterUnpacked`; this project doesn't
-    /// attempt that constant-array expansion, so the three collapse onto
-    /// the same raw-args loop here) - a single malformed argument only
-    /// ever gets one ordering complaint, not a pile of overlapping ones
-    /// for what's really the same mistake.
-    fn check_argument_legality(
-        &mut self,
-        callee_label: &str,
-        sig: &FunctionSig,
-        args: &[Arg],
-        label: &str,
-    ) {
-        let variadic = sig.params.last().is_some_and(|p| p.variadic);
-        let mut named_seen = false;
-        let mut spread_seen = false;
-        let mut used_param_names: FxHashSet<&str> = FxHashSet::default();
-        let mut positional_index = 0usize;
-
-        for arg in args {
-            if named_seen && arg.name.is_none() && !arg.spread {
-                self.report(
-                    label.to_string(),
-                    format!(
-                        "named argument cannot be followed by a positional argument in call to {callee_label}()"
-                    ),
-                    arg.value.span,
-                    0,
-                    "argument.positionalAfterNamed",
-                );
-            } else if named_seen && arg.spread {
-                self.report(
-                    label.to_string(),
-                    format!(
-                        "named argument cannot be followed by an unpacked (...) argument in call to {callee_label}()"
-                    ),
-                    arg.value.span,
-                    0,
-                    "argument.unpackAfterNamed",
-                );
-            } else if spread_seen && arg.name.is_none() && !arg.spread {
-                self.report(
-                    label.to_string(),
-                    format!(
-                        "unpacked (...) argument cannot be followed by a non-unpacked argument in call to {callee_label}()"
-                    ),
-                    arg.value.span,
-                    0,
-                    "argument.nonUnpackAfterUnpacked",
-                );
-            }
-
-            if arg.spread {
-                spread_seen = true;
-                continue;
-            }
-
-            if let Some(name) = &arg.name {
-                named_seen = true;
-                match sig.params.iter().find(|p| p.name.as_ref() == name.as_str()) {
-                    // A named argument targeting the real, declared
-                    // variadic parameter's own name (rather than an
-                    // unmatched name collected *into* it, the `None`
-                    // arm below) is just an ordinary named argument.
-                    Some(_) => {
-                        if !used_param_names.insert(name.as_str()) {
-                            self.report(
-                                label.to_string(),
-                                format!(
-                                    "argument for parameter ${name} has already been passed to {callee_label}()"
-                                ),
-                                arg.value.span,
-                                0,
-                                "argument.duplicate",
-                            );
-                        }
-                    }
-                    // No declared parameter has this name - legal only
-                    // when there's a trailing variadic parameter to
-                    // collect it into (real PHP's own named-argument-
-                    // into-variadic support), and then only once per
-                    // name.
-                    None if variadic => {
-                        if !used_param_names.insert(name.as_str()) {
-                            self.report(
-                                label.to_string(),
-                                format!(
-                                    "named parameter ${name} overwrites a previous argument to {callee_label}()"
-                                ),
-                                arg.value.span,
-                                0,
-                                "argument.duplicate",
-                            );
-                        }
-                    }
-                    None => {
-                        self.report(
-                            label.to_string(),
-                            format!("unknown named parameter ${name} in call to {callee_label}()"),
-                            arg.value.span,
-                            0,
-                            "argument.unknown",
-                        );
-                    }
-                }
-                continue;
-            }
-
-            // A plain positional argument, still legally placeable
-            // (nothing above flagged it): record which declared
-            // parameter it claims, the same way a named argument does
-            // above, so a *later* named argument re-targeting that same
-            // parameter is caught as a duplicate too.
-            if !spread_seen && let Some(p) = sig.params.get(positional_index) {
-                used_param_names.insert(p.name.as_ref());
-            }
-            positional_index += 1;
         }
     }
 
@@ -1119,16 +743,16 @@ impl<'a> Checker<'a> {
             };
             let sig = sig.clone();
             let callee_args = &args[1..];
-            let resolved = resolve_call_args(callee_args, &sig.params);
             self.maybe_record_param_name_hints(Some(&sig), callee_args);
             self.check_args(CheckArgsCall {
                 callee_label: "callable passed to call_user_func()",
+                callee: parameters::Callee::Callable("callable passed to call_user_func()"),
                 sig: &sig,
                 args: callee_args,
-                resolved: &resolved,
                 locals,
                 label,
                 defining_class: None,
+                is_builtin: false,
                 span,
             });
         } else if name.eq_ignore_ascii_case("call_user_func_array") {
@@ -1153,16 +777,16 @@ impl<'a> Checker<'a> {
                     value: item.value.clone(),
                 })
                 .collect();
-            let resolved = resolve_call_args(&synthesized, &sig.params);
             self.maybe_record_param_name_hints(Some(&sig), &synthesized);
             self.check_args(CheckArgsCall {
                 callee_label: "callable passed to call_user_func_array()",
+                callee: parameters::Callee::Callable("callable passed to call_user_func_array()"),
                 sig: &sig,
                 args: &synthesized,
-                resolved: &resolved,
                 locals,
                 label,
                 defining_class: None,
+                is_builtin: false,
                 span,
             });
         }
@@ -1307,37 +931,6 @@ pub(crate) fn call_arg_param_name_hints(
     hints
 }
 
-/// The positional index `resolve_call_args` would have reached at the
-/// moment it hits this call's first spread/unpack argument - `None` when
-/// there isn't one. Every declared parameter at or past that index might
-/// still be filled by the spread's own runtime contents, which can't be
-/// resolved statically, so `check_args`'s "too few"/"too many" argument-
-/// count checks must stop trusting a `None` slot (or a raw `args.len()`)
-/// at or past that point to mean what it normally would.
-/// The `Type::ArrayShape` fields underlying `ty`, unwrapping an
-/// `Intersection` of exactly one shape plus any number of accessory
-/// markers (`non-empty-array`, `list`, ...) the same way real PHPStan's
-/// own accessory-typed array shapes are represented here - `None` for
-/// anything else (a plain `Type::Array`, a union, two shapes intersected
-/// together, ...), since none of those have statically-known fields.
-fn array_shape_fields(ty: &Type) -> Option<&[(String, Type, bool)]> {
-    match ty {
-        Type::ArrayShape(fields) => Some(fields),
-        Type::Intersection(members) => {
-            let mut shape = None;
-            for member in members {
-                match member {
-                    Type::ArrayShape(fields) if shape.is_none() => shape = Some(fields.as_slice()),
-                    Type::Accessory(_) => {}
-                    _ => return None,
-                }
-            }
-            shape
-        }
-        _ => None,
-    }
-}
-
 /// Descends a concat chain's own `.left` operand (unwrapping `Grouping`
 /// at each step) until it reaches a non-`Concat` leaf, then reads that
 /// leaf's own literal string value's first character - the pattern's
@@ -1376,19 +969,6 @@ fn find_preg_quote_calls<'a>(e: &'a Expr, out: &mut Vec<&'a [Arg]>) {
         }
         _ => {}
     }
-}
-
-fn first_spread_positional_index(args: &[Arg]) -> Option<usize> {
-    let mut positional_index = 0usize;
-    for arg in args {
-        if arg.spread {
-            return Some(positional_index);
-        }
-        if arg.name.is_none() {
-            positional_index += 1;
-        }
-    }
-    None
 }
 
 /// Whether `expr`'s access chain passes through a nullsafe operator

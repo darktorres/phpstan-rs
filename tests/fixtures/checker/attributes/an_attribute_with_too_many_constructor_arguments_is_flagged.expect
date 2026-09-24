@@ -1,1 +1,1 @@
-7:15-7:27 arguments.count L0 Foo | MyAttr::__construct() expects exactly 1 argument(s), 2 given
+7:15-7:27 arguments.count L1 Foo | Attribute class MyAttr constructor invoked with 2 parameters, 1 required.

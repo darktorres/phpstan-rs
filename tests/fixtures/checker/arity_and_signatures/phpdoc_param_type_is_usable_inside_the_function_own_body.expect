@@ -1,2 +1,2 @@
 4:13-6:14 missingType.return L6 f | Function f() has no return type specified.
-5:33-5:35 argument.type L5 f | needsInt() argument #1 ($x) expects int, string given
+5:33-5:35 argument.type L5 f | Parameter #1 $x of function needsInt expects int, string given.

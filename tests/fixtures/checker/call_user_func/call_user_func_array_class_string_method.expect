@@ -1,1 +1,1 @@
-6:63-6:75 argument.type L5 test | callable passed to call_user_func_array()() argument #1 ($a) expects int, 'not an int' given
+6:63-6:75 argument.type L5 test | Parameter #1 $a of callable passed to call_user_func_array() expects int, 'not an int' given.

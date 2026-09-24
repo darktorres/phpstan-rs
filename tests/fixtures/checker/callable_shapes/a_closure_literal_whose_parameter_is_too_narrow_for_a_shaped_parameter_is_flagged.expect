@@ -1,1 +1,1 @@
-7:34-7:60 argument.type L5 test | takesFooCallback() argument #1 ($fn) expects Closure(Foo): void, Closure(Bar): void given
+7:34-7:60 argument.type L5 test | Parameter #1 $fn of function takesFooCallback expects Closure(Foo): void, Closure(Bar): void given.

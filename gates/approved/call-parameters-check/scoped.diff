@@ -1,0 +1,11 @@
+--- old
++++ new
+@@ -119,7 +119,7 @@
+ src/Piwigo/Search/SearchRepository.php	249	16	0	arrayValues.list	Piwigo\\Search\\SearchRepository::findImageIdsMatching	call to array_values() on list<int>, which is already a list, has no effect	
+ src/Piwigo/Search/SearchRepository.php	327	16	0	arrayValues.list	Piwigo\\Search\\SearchRepository::findDistinctImageColumnValues	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Search/SearchRepository.php	356	19	4	function.alreadyNarrowedType	Piwigo\\Search\\SearchRepository::findCategoryIdsAndUppercats	Call to function is_array() with array{id: Piwigo\\Common\\ValueObject\\CategoryId|null, uppercats: string} will always evaluate to true.	
+-src/Piwigo/Section/SectionPopulator.php	679	21	5	argument.type	Piwigo\\Section\\SectionPopulator::populate	Piwigo\\Calendar\\CalendarRenderer::render() argument #7 ($chronologyDate) expects list<int|string>, array given	
++src/Piwigo/Section/SectionPopulator.php	679	21	5	argument.type	Piwigo\\Section\\SectionPopulator::populate	Parameter #7 $chronologyDate of method Piwigo\\Calendar\\CalendarRenderer::render() expects list<int|string>, array given.	
+ src/Piwigo/Section/SectionRepository.php	100	16	0	arrayValues.list	Piwigo\\Section\\SectionRepository::findVisibleSubcategoryIds	call to array_values() on list<string>, which is already a list, has no effect	
+ src/Piwigo/Section/SectionRepository.php	186	16	0	arrayValues.list	Piwigo\\Section\\SectionRepository::findSectionImageIdsViaDql	call to array_values() on list<string|null>, which is already a list, has no effect	
+ src/Piwigo/Section/SectionRepository.php	255	16	0	arrayValues.list	Piwigo\\Section\\SectionRepository::findImagesViaDql	call to array_values() on list<string|null>, which is already a list, has no effect	

@@ -1,1 +1,1 @@
-6:32-6:35 argument.type L5 test | needsIntReturn() argument #1 ($fn) expects Closure(int): int, Closure(int): string given
+6:32-6:35 argument.type L5 test | Parameter #1 $fn of function needsIntReturn expects Closure(int): int, Closure(int): string given.

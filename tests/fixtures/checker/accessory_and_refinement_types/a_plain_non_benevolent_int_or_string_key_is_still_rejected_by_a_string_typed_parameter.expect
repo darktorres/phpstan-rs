@@ -1,1 +1,1 @@
-6:31-6:34 argument.type L5 apply | hideBlock() argument #1 ($block_id) expects string, int|string given
+6:31-6:34 argument.type L5 apply | Parameter #1 $block_id of function hideBlock expects string, int|string given.

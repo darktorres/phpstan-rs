@@ -1,1 +1,1 @@
-6:33-6:36 argument.type L5 test | needsWiderParam() argument #1 ($fn) expects Closure(int|string): void, Closure(int): void given
+6:33-6:36 argument.type L5 test | Parameter #1 $fn of function needsWiderParam expects Closure(int|string): void, Closure(int): void given.

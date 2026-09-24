@@ -1,1 +1,1 @@
-4:22-4:28 argument.type L5 test | f() argument ($b) expects string, 2 given
+4:22-4:28 argument.type L5 test | Parameter #2 $b of function f expects string, 2 given.

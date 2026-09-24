@@ -1,1 +1,1 @@
-4:17-4:46 arguments.count L0 test | callable passed to call_user_func()() expects at least 2 argument(s), 1 given
+4:17-4:46 arguments.count L0 test | Callable passed to call_user_func() invoked with 1 parameter, 2 required.

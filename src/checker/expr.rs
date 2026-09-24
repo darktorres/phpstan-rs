@@ -1,4 +1,5 @@
 use crate::ast::*;
+use crate::checker::calls::parameters::Callee;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
@@ -823,14 +824,19 @@ impl<'a> Checker<'a> {
                         // stops trusting a count/"missing" check at or
                         // past a spread's position), so it's always worth
                         // calling.
+                        let declared = self
+                            .registry
+                            .lookup_function_with_name(name)
+                            .map_or_else(|| name.to_string(), |(n, _)| n.to_string());
                         self.check_args(CheckArgsCall {
                             callee_label: name,
+                            callee: Callee::Function(&declared),
                             sig,
                             args,
-                            resolved: &resolved,
                             locals,
                             label,
                             defining_class: None,
+                            is_builtin: self.registry.is_builtin_function(name),
                             span: e.span,
                         });
                         self.check_castable_array_arguments(
@@ -1460,14 +1466,19 @@ impl<'a> Checker<'a> {
                         // Call arm above - `check_args` is spread-aware,
                         // so it's always worth calling.
                         let qualified = format!("{class}::{method}");
+                        let declared = self.registry.declared_method_name(owner, method);
                         self.check_args(CheckArgsCall {
                             callee_label: &qualified,
+                            callee: Callee::Method {
+                                class: owner,
+                                name: &declared,
+                            },
                             sig,
                             args,
-                            resolved: &resolved,
                             locals,
                             label,
                             defining_class: Some(class),
+                            is_builtin: self.registry.is_builtin_class(owner),
                             span: e.span,
                         });
                     }
@@ -2415,12 +2426,13 @@ impl<'a> Checker<'a> {
                             // spread-aware, so it's always worth calling.
                             self.check_args(CheckArgsCall {
                                 callee_label: &format!("{class}::__construct"),
+                                callee: Callee::Constructor(class),
                                 sig,
                                 args,
-                                resolved: &resolved,
                                 locals,
                                 label,
                                 defining_class: Some(class),
+                                is_builtin: self.registry.is_builtin_class(class),
                                 span: e.span,
                             });
                         }
@@ -2749,14 +2761,28 @@ impl<'a> Checker<'a> {
                         // function Call arm above - `check_args` is
                         // spread-aware, so it's always worth calling.
                         let qualified = format!("{class}::{method}");
+                        let owner = sig_with_owner
+                            .as_ref()
+                            .map_or_else(|| class.to_string(), |(o, _)| o.to_string());
+                        let declared = self.registry.declared_method_name(&owner, method);
+                        let is_static = self
+                            .registry
+                            .classes
+                            .get(owner.as_str())
+                            .is_some_and(|info| info.static_methods.contains(declared.as_str()));
                         self.check_args(CheckArgsCall {
                             callee_label: &qualified,
+                            callee: Callee::StaticMethod {
+                                class: &owner,
+                                name: &declared,
+                                is_static,
+                            },
                             sig,
                             args,
-                            resolved: &resolved,
                             locals,
                             label,
                             defining_class: Some(class),
+                            is_builtin: self.registry.is_builtin_class(&owner),
                             span: e.span,
                         });
                     } else if self.registry.classes.contains_key(class.as_str())

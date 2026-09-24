@@ -1,1 +1,1 @@
-10:52-10:75 argument.type L5 f | array_uintersect_assoc() argument #3 ($rest) expects array, Closure(mixed, mixed): int given
+10:52-10:75 argument.type L5 f | Parameter #3 ...$rest of function array_uintersect_assoc expects array, Closure(mixed, mixed): int given.

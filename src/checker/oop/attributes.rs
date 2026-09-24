@@ -1,9 +1,7 @@
 use rustc_hash::FxHashSet;
 
 use crate::ast::*;
-use crate::checker::{
-    CheckArgsCall, Checker, DiagnosticBuilder, Locals, class_type_word, resolve_call_args,
-};
+use crate::checker::{CheckArgsCall, Checker, DiagnosticBuilder, Locals, class_type_word};
 use crate::php_version::PhpFeature;
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
 use crate::token::Span;
@@ -117,15 +115,15 @@ impl<'a> Checker<'a> {
             for a in &attr.args {
                 self.check_expr(&a.value, &mut locals, label);
             }
-            let resolved = resolve_call_args(&attr.args, &ctor_sig.params);
             self.check_args(CheckArgsCall {
                 callee_label: &format!("{canonical}::__construct"),
+                callee: crate::checker::calls::parameters::Callee::AttributeConstructor(&canonical),
                 sig: ctor_sig,
                 args: &attr.args,
-                resolved: &resolved,
                 locals: &mut locals,
                 label,
                 defining_class: Some(&canonical),
+                is_builtin: self.registry.is_builtin_class(&canonical),
                 span: attr.span,
             });
         }

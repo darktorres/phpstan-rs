@@ -1,4 +1,4 @@
 9:13-9:50 missingType.return L6 needsAnimalComparator | Function needsAnimalComparator() has no return type specified.
 11:13-13:14 missingType.return L6 f | Function f() has no return type specified.
 12:17-12:42 function.resultUnused L4 f | Call to function needsAnimalComparator() on a separate line has no effect.
-12:39-12:41 argument.type L5 f | needsAnimalComparator() argument #1 ($c) expects Comparator<Animal>, Comparator<Cat> given
+12:39-12:41 argument.type L5 f | Parameter #1 $c of function needsAnimalComparator expects Comparator<Animal>, Comparator<Cat> given.

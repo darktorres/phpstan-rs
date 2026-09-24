@@ -1,1 +1,1 @@
-8:70-8:93 argument.type L5 f | array_udiff() argument #3 ($rest) expects array, Closure(mixed, mixed): int given
+8:70-8:93 argument.type L5 f | Parameter #3 ...$rest of function array_udiff expects array, Closure(mixed, mixed): int given.

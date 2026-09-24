@@ -1,2 +1,2 @@
 5:13-5:35 function.resultUnused L4 <main> | Call to function needsInt() on a separate line has no effect.
-5:22-5:34 argument.type L5 <main> | needsInt() argument #1 ($x) expects int, 'not an int' given
+5:22-5:34 argument.type L5 <main> | Parameter #1 $x of function needsInt expects int, 'not an int' given.
