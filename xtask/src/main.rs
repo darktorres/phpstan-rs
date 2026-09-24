@@ -17,6 +17,7 @@ use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
 mod oracle;
+mod parity;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -35,6 +36,7 @@ fn main() -> ExitCode {
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
         Some("oracle") => oracle::oracle(&args[1..]),
+        Some("parity") => parity::parity(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -62,7 +64,9 @@ const USAGE: &str = "usage: cargo xtask <command>
                          that only added gates/ files
   oracle [--bless] [<filter>]
                          compare the fixtures' diagnostics against real
-                         PHPStan's; --bless rewrites gates/oracle/parity.tsv";
+                         PHPStan's; --bless rewrites gates/oracle/parity.tsv
+  parity [--bless]       run phpstan-rs over PHPStan's own test data; --bless
+                         rewrites gates/parity/upstream.tsv";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
