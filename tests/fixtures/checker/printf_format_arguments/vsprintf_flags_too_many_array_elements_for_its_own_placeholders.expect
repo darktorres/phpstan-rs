@@ -1,1 +1,1 @@
-1:16-1:20 arguments.count L0 <main> | vsprintf() format string expects 1 argument(s), 2 given
+1:7-1:33 argument.vsprintf L0 <main> | Call to vsprintf contains 1 placeholder, 2 values given.

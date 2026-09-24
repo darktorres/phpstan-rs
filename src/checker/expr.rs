@@ -822,12 +822,7 @@ impl<'a> Checker<'a> {
                         // statically - `check_args` is spread-aware (it
                         // stops trusting a count/"missing" check at or
                         // past a spread's position), so it's always worth
-                        // calling. `check_format_string_call` is NOT
-                        // spread-aware (it walks `args[1..]` strictly
-                        // positionally against the format string's
-                        // specifier count) and stays gated on no spread
-                        // being present, to avoid treating the spread
-                        // argument itself as filling one specifier slot.
+                        // calling.
                         self.check_args(CheckArgsCall {
                             callee_label: name,
                             sig,
@@ -845,14 +840,13 @@ impl<'a> Checker<'a> {
                         if name.eq_ignore_ascii_case("define") {
                             self.check_define_value(args, locals, e.span, label);
                         }
-                        if !args.iter().any(|a| a.spread)
-                            && matches!(
-                                name.as_ref(),
-                                "sprintf" | "printf" | "fprintf" | "vsprintf" | "vprintf"
-                            )
-                        {
-                            self.check_format_string_call(name, args, locals, label);
-                        }
+                        self.check_format_string_call(
+                            &name.to_ascii_lowercase(),
+                            args,
+                            locals,
+                            label,
+                            e.span,
+                        );
                         // Real PHP resolves `define` case-insensitively
                         // like any other function call - matched against
                         // just the last namespace segment, the same as

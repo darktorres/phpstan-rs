@@ -1,0 +1,114 @@
+--- old
++++ new
+@@ -532,7 +532,6 @@
+ src/Piwigo/Admin/Maintenance/FilesystemIntegrityChecker.php	88	57	0	magicNumber.argument	Piwigo\\Admin\\Maintenance\\FilesystemIntegrityChecker::fsQuickCheck	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Maintenance/FilesystemIntegrityChecker.php	92	46	0	magicNumber.argument	Piwigo\\Admin\\Maintenance\\FilesystemIntegrityChecker::fsQuickCheck	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Admin/Maintenance/FilesystemIntegrityChecker.php	95	63	0	magicNumber.argument	Piwigo\\Admin\\Maintenance\\FilesystemIntegrityChecker::fsQuickCheck	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-src/Piwigo/Admin/Maintenance/MaintenanceActionDispatcher.php	195	114	5	argument.type	Piwigo\\Admin\\Maintenance\\MaintenanceActionDispatcher::dispatch	sprintf() format specifier %d does not accept int<0, max>	
+ src/Piwigo/Admin/Maintenance/MaintenanceActionDispatcher.php	212	47	0	argument.booleanTrap	Piwigo\\Admin\\Maintenance\\MaintenanceActionDispatcher::dispatch	Piwigo\\Cache\\PersistentCache::purge() argument #1 ($all) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/Maintenance/Request/DerivativesTypeRequest.php	48	16	0	argument.booleanTrap	Piwigo\\Admin\\Maintenance\\Request\\DerivativesTypeRequest::fromArray	Piwigo\\Validation\\InputValidator::validate() argument #3 ($isArray) is a bare `false` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Admin/MaintenanceEnvPageRenderer.php	114	63	0	argument.booleanTrap	Piwigo\\Admin\\MaintenanceEnvPageRenderer::render	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -1381,11 +1380,6 @@
+ src/Piwigo/Command/PhpStanLatteCompileCommand.php	71	25	0	misplaced.autoloadDevSymbol	<main>	Class Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateCompiler is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.	
+ src/Piwigo/Command/PhpStanLatteCompileCommand.php	77	18	0	misplaced.autoloadDevSymbol	<main>	Class Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateFiles is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.	
+ src/Piwigo/Command/PhpStanLatteCompileCommand.php	80	20	4	catch.baseWithoutRethrow	Piwigo\\Command\\PhpStanLatteCompileCommand::execute	Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.	
+-src/Piwigo/Command/PhpStanLatteCompileCommand.php	100	17	5	argument.type	Piwigo\\Command\\PhpStanLatteCompileCommand::execute	sprintf() format specifier %d does not accept int<0, max>	
+-src/Piwigo/Command/PhpStanLatteCompileCommand.php	109	66	5	argument.type	Piwigo\\Command\\PhpStanLatteCompileCommand::execute	sprintf() format specifier %d does not accept int<0, max>	
+-src/Piwigo/Command/PhpStanLatteCompileCommand.php	109	82	5	argument.type	Piwigo\\Command\\PhpStanLatteCompileCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+-src/Piwigo/Command/PhpStanLatteCompileCommand.php	116	13	5	argument.type	Piwigo\\Command\\PhpStanLatteCompileCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+-src/Piwigo/Command/PhpStanLatteCompileCommand.php	118	13	5	argument.type	Piwigo\\Command\\PhpStanLatteCompileCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+ src/Piwigo/Command/PhpStanLatteShimsCommand.php	54	5	2	throws.notCovariant	Piwigo\\Command\\PhpStanLatteShimsCommand	PHPDoc tag @throws type Throwable of method Piwigo\\Command\\PhpStanLatteShimsCommand::execute() should be covariant with PHPDoc @throws type Symfony\\Component\\Console\\Exception\\LogicException of method Symfony\\Component\\Console\\Command\\Command::execute().	
+ src/Piwigo/Command/PhpStanLatteShimsCommand.php	57	28	0	misplaced.autoloadDevSymbol	<main>	Class Piwigo\\Tools\\PhpStan\\Latte\\ShimClassGenerator is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.	
+ src/Piwigo/Command/PhpStanLatteShimsCommand.php	81	45	0	magicNumber.argument	Piwigo\\Command\\PhpStanLatteShimsCommand::execute	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -1394,14 +1388,8 @@
+ src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	51	28	0	misplaced.autoloadDevSymbol	<main>	Class Piwigo\\Tools\\PhpStan\\Latte\\VariableMapContext is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.	
+ src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	61	23	0	misplaced.autoloadDevSymbol	<main>	Class Piwigo\\Tools\\PhpStan\\Latte\\VarTypeSyncer is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.	
+ src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	67	18	0	misplaced.autoloadDevSymbol	<main>	Class Piwigo\\Tools\\PhpStan\\Latte\\LatteTemplateFiles is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.	
+-src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	100	96	5	argument.type	Piwigo\\Command\\PhpStanLatteSyncVarTypeCommand::execute	sprintf() format specifier %d does not accept int<0, max>	
+-src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	100	113	5	argument.type	Piwigo\\Command\\PhpStanLatteSyncVarTypeCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+-src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	107	13	5	argument.type	Piwigo\\Command\\PhpStanLatteSyncVarTypeCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+-src/Piwigo/Command/PhpStanLatteSyncVarTypeCommand.php	108	13	5	argument.type	Piwigo\\Command\\PhpStanLatteSyncVarTypeCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+ src/Piwigo/Command/PrecompileTemplatesCommand.php	48	5	2	throws.notCovariant	Piwigo\\Command\\PrecompileTemplatesCommand	PHPDoc tag @throws type Throwable of method Piwigo\\Command\\PrecompileTemplatesCommand::execute() should be covariant with PHPDoc @throws type Symfony\\Component\\Console\\Exception\\LogicException of method Symfony\\Component\\Console\\Command\\Command::execute().	
+ src/Piwigo/Command/PrecompileTemplatesCommand.php	67	24	4	catch.baseWithoutRethrow	Piwigo\\Command\\PrecompileTemplatesCommand::execute	Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.	
+-src/Piwigo/Command/PrecompileTemplatesCommand.php	77	67	5	argument.type	Piwigo\\Command\\PrecompileTemplatesCommand::execute	sprintf() format specifier %d does not accept int<0, max>	
+-src/Piwigo/Command/PrecompileTemplatesCommand.php	77	83	5	argument.type	Piwigo\\Command\\PrecompileTemplatesCommand::execute	sprintf() format specifier %d does not accept 0|1|2|3|4|5|6	
+ src/Piwigo/Command/SchemaDumpCommand.php	24	5	2	throws.notCovariant	Piwigo\\Command\\SchemaDumpCommand	PHPDoc tag @throws type Throwable of method Piwigo\\Command\\SchemaDumpCommand::execute() should be covariant with PHPDoc @throws type Symfony\\Component\\Console\\Exception\\LogicException of method Symfony\\Component\\Console\\Command\\Command::execute().	
+ src/Piwigo/Command/SchemaDumpCommand.php	29	16	4	catch.baseWithoutRethrow	Piwigo\\Command\\SchemaDumpCommand::execute	Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.	
+ src/Piwigo/Command/UserListCommand.php	25	5	2	throws.notCovariant	Piwigo\\Command\\UserListCommand	PHPDoc tag @throws type Throwable of method Piwigo\\Command\\UserListCommand::execute() should be covariant with PHPDoc @throws type Symfony\\Component\\Console\\Exception\\LogicException of method Symfony\\Component\\Console\\Command\\Command::execute().	
+@@ -4725,8 +4713,6 @@
+ tests/Browser/IntroSubControllerTest.php	522	23	0	currentTime.time	<main> (closure)	Calling time() reads the current time; rely on an injected clock (PSR-20 ClockInterface) instead.	
+ tests/Browser/IntroSubControllerTest.php	589	22	0	magicNumber.arithmetic	<main> (closure)	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ tests/Browser/IntroSubControllerTest.php	613	18	0	magicNumber.comparison	<main> (closure)	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+-tests/Browser/IntroSubControllerTest.php	614	149	5	argument.type	<main> (closure)	sprintf() format specifier %d does not accept 0|1|2|3|4|5	
+-tests/Browser/IntroSubControllerTest.php	614	162	5	argument.type	<main> (closure)	sprintf() format specifier %d does not accept 0|1|2|3|4|5	
+ tests/Browser/IntroSubControllerTest.php	621	31	0	magicNumber.arithmetic	<main> (closure)	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ tests/Browser/IntroSubControllerTest.php	623	27	0	magicNumber.argument	<main> (closure)	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tests/Browser/IntroSubControllerTest.php	866	130	0	argument.booleanTrap	<main> (closure)	var_export() argument #2 ($return) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+@@ -5117,24 +5103,7 @@
+ tests/Browser/RegenerateFixtureTest.php	207	82	0	magicNumber.argument	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tests/Browser/RegenerateFixtureTest.php	211	26	0	magicNumber.comparison	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ tests/Browser/RegenerateFixtureTest.php	215	28	0	magicNumber.comparison	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+-tests/Browser/RegenerateFixtureTest.php	238	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	240	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	242	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	244	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	246	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+ tests/Browser/RegenerateFixtureTest.php	298	56	0	foreach.valueOverwrite	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Foreach overwrites $name with its value variable.	
+-tests/Browser/RegenerateFixtureTest.php	332	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	335	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	338	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	340	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	343	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	348	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	352	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	356	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	360	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	366	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	367	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+-tests/Browser/RegenerateFixtureTest.php	368	13	5	argument.type	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	sprintf() format specifier %d does not accept mixed	
+ tests/Browser/RegenerateFixtureTest.php	424	23	2	throws.missing	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Method Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture() throws RuntimeException but it's not covered by any @throws tag.	
+ tests/Browser/RegenerateFixtureTest.php	535	31	0	magicNumber.arithmetic	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Do not use magic number in arithmetic operations. Move to constant with a suitable name.	
+ tests/Browser/RegenerateFixtureTest.php	536	33	0	magicNumber.argument	Piwigo\\Tests\\Browser\\RegenerateFixtureTest::testRegenerateFixture	Do not use magic number as a function argument. Move to constant with a suitable name.	
+@@ -5245,8 +5214,6 @@
+ tests/Browser/SearchFilterRendererDataFiltersTest.php	1097	108	0	argument.booleanTrap	<main> (closure)	var_export() argument #2 ($return) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tests/Browser/SearchFilterRendererDataFiltersTest.php	1117	114	0	argument.booleanTrap	<main> (closure)	var_export() argument #2 ($return) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tests/Browser/SearchFilterRendererDataFiltersTest.php	1212	108	0	argument.booleanTrap	<main> (closure)	var_export() argument #2 ($return) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-tests/Browser/SearchFilterRendererDataFiltersTest.php	1223	93	5	argument.type	<main> (closure)	sprintf() format specifier %d does not accept 600|650|700	
+-tests/Browser/SearchFilterRendererDataFiltersTest.php	1223	97	5	argument.type	<main> (closure)	sprintf() format specifier %d does not accept 300|500|700	
+ tests/Browser/SearchFilterRendererDataFiltersTest.php	1238	114	0	argument.booleanTrap	<main> (closure)	var_export() argument #2 ($return) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	48	24	0	magicNumber.comparison	extraFiltersSettledContent	Do not use magic number in comparison operations. Move to constant with a suitable name.	
+ tests/Browser/SearchFilterRendererExtraFiltersTest.php	51	18	0	undeclared.composerDependency	<main>	Class PHPUnit\\Framework\\ExpectationFailedException is declared in package phpunit/phpunit, which composer.json doesn't require; it's only installed as another package's dependency.	
+@@ -15695,11 +15662,10 @@
+ tools/p58/assign.php	154	54	0	argument.booleanTrap	<main>	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tools/p58/assign.php	156	46	0	argument.booleanTrap	<main>	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tools/p58/assign.php	156	90	0	argument.booleanTrap	<main>	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-tools/p58/assign.php	175	34	5	argument.type	<main>	printf() format specifier %d does not accept int|float	
++tools/p58/assign.php	175	1	5	argument.type	<main>	Parameter #3 of function printf is expected to be int by placeholder #2 ("%4d"), int|float given.	
+ tools/p58/assign.php	179	29	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/assign.php	181	20	0	restrictedSymbol.function	<main>	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ tools/p58/assign.php	181	33	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+-tools/p58/assign.php	185	41	5	argument.type	<main>	printf() format specifier %d does not accept int<0, max>	
+ tools/p58/census.php	6	24	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/census.php	38	26	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/census.php	47	20	0	restrictedSymbol.function	<main>	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+@@ -15711,9 +15677,7 @@
+ tools/p58/census.php	80	29	0	restrictedSymbol.function	<main>	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ tools/p58/census.php	80	54	0	restrictedSymbol.function	<main>	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+ tools/p58/census.php	139	55	0	argument.booleanTrap	<main>	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-tools/p58/census.php	147	53	5	argument.type	<main>	printf() format specifier %d does not accept int|float	
+-tools/p58/census.php	150	31	5	argument.type	<main>	printf() format specifier %d does not accept mixed	
+-tools/p58/census.php	154	23	5	argument.type	<main>	printf() format specifier %d does not accept mixed	
++tools/p58/census.php	147	5	5	argument.type	<main>	Parameter #3 of function printf is expected to be int by placeholder #2 ("%d"), int|float given.	
+ tools/p58/trace.php	6	24	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/trace.php	32	26	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/trace.php	66	48	0	restrictedSymbol.function	templatesByCompiledName	Call to restricted function substr(): use mb_substr() instead; substr() counts bytes, not characters	
+@@ -15724,9 +15688,6 @@
+ tools/p58/unflatten.php	6	24	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/unflatten.php	35	26	0	magicNumber.argument	<main>	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ tools/p58/unflatten.php	42	37	0	argument.booleanTrap	<main>	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+-tools/p58/unflatten.php	118	5	5	argument.type	<main>	printf() format specifier %d does not accept int<0, max>	
+-tools/p58/unflatten.php	119	5	5	argument.type	<main>	printf() format specifier %d does not accept int<0, max>	
+-tools/p58/unflatten.php	120	5	5	argument.type	<main>	printf() format specifier %d does not accept int<0, max>	
+ tools/phpstan/GessoHookMethodUsageProvider.php	30	13	5	class.unused	Piwigo\\Tools\\PhpStan\\GessoHookMethodUsageProvider	Class Piwigo\\Tools\\PhpStan\\GessoHookMethodUsageProvider is never referenced.	
+ tools/phpstan/GessoHookMethodUsageProvider.php	46	69	0	argument.booleanTrap	Piwigo\\Tools\\PhpStan\\GessoHookMethodUsageProvider::shouldMarkMethodAsUsed	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ tools/phpstan/GessoHookMethodUsageProvider.php	50	97	0	argument.booleanTrap	Piwigo\\Tools\\PhpStan\\GessoHookMethodUsageProvider::shouldMarkMethodAsUsed	in_array() argument #3 ($strict) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	

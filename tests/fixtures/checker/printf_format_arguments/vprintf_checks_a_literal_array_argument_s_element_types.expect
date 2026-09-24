@@ -1,4 +1,4 @@
 2:13-4:14 missingType.return L6 f | Function f() has no return type specified.
 2:24-2:34 missingType.iterableValue L6 f | Function f() has parameter $arr with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-3:31-3:37 argument.type L5 f | vprintf() format specifier %d does not accept array
+3:31-3:37 argument.type L5 f | Parameter #2 $values of function vprintf expects array<bool|float|int|string|null>, array{0: array} given.

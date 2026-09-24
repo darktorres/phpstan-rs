@@ -1,1 +1,1 @@
-1:22-1:28 argument.type L5 <main> | sprintf() format specifier's width ("*") expects int, 'five' given
+1:7-1:33 argument.type L5 <main> | Parameter #2 of function sprintf is expected to be int by placeholder #1 ("%*d" (width)), string given.

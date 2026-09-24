@@ -1,0 +1,1 @@
+5:10-5:27 argument.type L5 f | Parameter #2 of function sprintf is expected to be castable to int by placeholder #1 ("%d"), Label given.

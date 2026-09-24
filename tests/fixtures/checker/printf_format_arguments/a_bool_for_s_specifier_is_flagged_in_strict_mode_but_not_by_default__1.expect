@@ -1,2 +1,2 @@
 2:13-4:14 missingType.return L6 f | Function f() has no return type specified.
-3:31-3:33 argument.type L5 f | sprintf() format specifier %s does not accept bool
+3:17-3:34 argument.type L5 f | Parameter #2 of function sprintf is expected to be string by placeholder #1 ("%s"), bool given.

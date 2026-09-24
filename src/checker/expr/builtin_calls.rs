@@ -50,9 +50,7 @@ impl<'a> Checker<'a> {
             // Narrows to `non-falsy-string` whenever the format string is
             // a literal whose non-specifier literal text (with every real
             // `%[argnum$][flags][width][.precision]specifier` sequence
-            // removed, via `parse_format_specifiers`/`parse_positional_
-            // format_specifiers` in `calls.rs`) is itself provably
-            // non-falsy - the same reasoning `BinOp::Concat`/`ExprKind::
+            // removed) is itself provably non-falsy - the same reasoning `BinOp::Concat`/`ExprKind::
             // Interpolated` use: a guaranteed-present, non-empty, non-`'0'`
             // literal chunk means the result can never be exactly `""`/`"0"`,
             // regardless of what any specifier expands to.

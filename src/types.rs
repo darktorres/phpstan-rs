@@ -368,6 +368,34 @@ impl Type {
         }
     }
 
+    /// `VerbosityLevel::typeOnly()`: literal values and array shapes
+    /// collapse to their plain type.
+    pub(crate) fn describe_type_only(&self) -> String {
+        match self {
+            Type::IntLiteral(_) | Type::IntRange(..) => "int".to_string(),
+            Type::FloatLiteral(_) => "float".to_string(),
+            Type::StringLiteral(_) => "string".to_string(),
+            Type::True | Type::False => "bool".to_string(),
+            Type::Array(..) | Type::ArrayShape(_) => "array".to_string(),
+            Type::Object(class, _) | Type::EnumCase(class, _) => class.clone(),
+            Type::Intersection(members) => members
+                .iter()
+                .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
+                .map_or_else(|| self.to_string(), Type::describe_type_only),
+            Type::Union(members) => {
+                let mut parts: Vec<String> = Vec::new();
+                for member in members {
+                    let part = member.describe_type_only();
+                    if !parts.contains(&part) {
+                        parts.push(part);
+                    }
+                }
+                parts.join("|")
+            }
+            other => other.to_string(),
+        }
+    }
+
     /// This type with `f` applied to each directly nested type (generic
     /// arguments, array key/value, shape fields, union/intersection
     /// members, callable parameters and return, conditional branches);

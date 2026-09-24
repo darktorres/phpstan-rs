@@ -1,1 +1,1 @@
-1:15-1:26 arguments.count L0 <main> | sprintf() format string expects 2 argument(s), 1 given
+1:7-1:39 argument.sprintf L0 <main> | Call to sprintf contains 2 placeholders, 1 value given.

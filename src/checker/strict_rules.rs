@@ -184,7 +184,7 @@ impl<'a> Checker<'a> {
                         label.to_string(),
                         format!(
                             "Only numeric types are allowed in {name}, {} given.",
-                            describe_type_only(&ty)
+                            ty.describe_type_only()
                         ),
                         e.span,
                         0,
@@ -215,7 +215,7 @@ impl<'a> Checker<'a> {
                     label.to_string(),
                     format!(
                         "Only numeric types are allowed in {sigil}, {} given on the {side} side.",
-                        describe_type_only(ty)
+                        ty.describe_type_only()
                     ),
                     e.span,
                     0,
@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
             if has_array(ty) {
                 ty.to_string()
             } else {
-                describe_type_only(ty)
+                ty.describe_type_only()
             }
         };
         let sigil = match op {
@@ -495,7 +495,7 @@ impl<'a> Checker<'a> {
             label.to_string(),
             format!(
                 "Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics ({} given).",
-                describe_type_only(&callback_ty)
+                callback_ty.describe_type_only()
             ),
             span,
             level,
@@ -557,8 +557,8 @@ impl<'a> Checker<'a> {
             label.to_string(),
             format!(
                 "Casting to {} something that's already {}.",
-                describe_type_only(cast),
-                describe_type_only(expr)
+                cast.describe_type_only(),
+                expr.describe_type_only()
             ),
             span,
             0,
@@ -697,7 +697,7 @@ impl<'a> Checker<'a> {
                     format!(
                         "Switch condition type ({subject_ty}) does not match case condition {} ({}).",
                         crate::printer::print_expr(test),
-                        describe_type_only(&case_ty)
+                        case_ty.describe_type_only()
                     ),
                     case.span,
                     0,
@@ -847,34 +847,6 @@ fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, crate::token:
             .flat_map(|item| defined_targets(&item.value, locals))
             .collect(),
         _ => Vec::new(),
-    }
-}
-
-/// `VerbosityLevel::typeOnly()`: literal values and array shapes collapse
-/// to their plain type.
-fn describe_type_only(ty: &Type) -> String {
-    match ty {
-        Type::IntLiteral(_) | Type::IntRange(..) => "int".to_string(),
-        Type::FloatLiteral(_) => "float".to_string(),
-        Type::StringLiteral(_) => "string".to_string(),
-        Type::True | Type::False => "bool".to_string(),
-        Type::Array(..) | Type::ArrayShape(_) => "array".to_string(),
-        Type::Object(class, _) | Type::EnumCase(class, _) => class.clone(),
-        Type::Intersection(members) => members
-            .iter()
-            .find(|m| !matches!(m, Type::Accessory(_) | Type::HasOffsetValue(..)))
-            .map_or_else(|| ty.to_string(), describe_type_only),
-        Type::Union(members) => {
-            let mut parts: Vec<String> = Vec::new();
-            for member in members {
-                let part = describe_type_only(member);
-                if !parts.contains(&part) {
-                    parts.push(part);
-                }
-            }
-            parts.join("|")
-        }
-        other => other.to_string(),
     }
 }
 

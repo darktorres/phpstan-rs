@@ -1,0 +1,1 @@
+1:7-1:44 argument.type L5 <main> | Parameter #2 of function sprintf is expected to be int by placeholder #1 ("%1$*d" (width)), string given.

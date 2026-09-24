@@ -1,0 +1,6 @@
+--- old
++++ new
+@@ -1 +1,3 @@
+ # files_checked 2792
++tools/p58/assign.php	175	1	5	argument.type	<main>	Parameter #3 of function printf is expected to be int by placeholder #2 ("%4d"), int|float given.	
++tools/p58/census.php	147	5	5	argument.type	<main>	Parameter #3 of function printf is expected to be int by placeholder #2 ("%d"), int|float given.	
