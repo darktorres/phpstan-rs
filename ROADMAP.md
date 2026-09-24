@@ -1604,6 +1604,42 @@ allowed rule; a handful of genuinely narrow, real-PHPStan-internal
 reflection nuances (a native/internal generic class's own concrete
 subclass, one level removed).
 
+**Diagnostic usability gaps (found 2026-09-24, crate-split fixture
+review).** Findings that are correct but reported on the wrong line, twice,
+or under a shared identifier, plus one false-positive source; the named
+fixture shows each one. The pure correctness bugs from the same review are
+listed in `CRATE_SPLIT_PLAN.md` (A2, "Known bugs found during A2").
+- Wrong line: a property hook's own problems (`propertySetHook.*`,
+  `propertyGetHook.*`, its `@param`/`@return`/`@throws` checks,
+  `parameter.trait`) are reported on the property, not the hook
+  (`property_hooks/*`); a PHPDoc tag error (`phpDoc.parseError`,
+  `phpDoc.phpstanTag`) on the declaration, not the tag's line, since doc
+  comments carry no span (`phpdoc_parse_errors/*`); `return.missing` on the
+  function, not where it falls off the end; `generator.returnType` on the
+  function, not the `yield`; an invalid `@use` tag and a missing trait on
+  the class, not the `use` statement; a trait-supplied method's override
+  problems on the using class, not the trait method; a declaration's span
+  starts after its attributes, not at them.
+- Reported twice: an asserted unknown class is also "already narrowed"
+  (`phpstan_assert_tags/*`); reading any key of `array{}` is not reported
+  as a missing offset, but its `null` result then is, as an argument
+  (`reading_a_dynamic_key_from_a_freshly_empty_array_infers_null`); a
+  strict-arithmetic operand report on top of an already-invalid operation
+  (`strict_rules/arithmetic_operands__*`); `return.unusedType` beside a
+  return value the return type rejects (`value_of_on_a_backed_enum_...`);
+  `property.protected` beside `property.assignByRef` for a reference to a
+  protected property; `assign.invalidExpr` beside `nullsafe.assign`.
+- Noise: `PHP_VERSION_ID` comparisons are reported always true/false under
+  a configured `php_version`, though they are deliberate version guards
+  (`php_version_id_reflects_the_configured_php_version_...`).
+- Shared identifiers: checks that reuse another check's identifier cannot
+  be ignored separately - override-with-different-casing as
+  `method.nameCase` (also the call-site case check), XML validity as
+  `argument.type`.
+- False positive: `PhpParser\Node` and the rest of nikic/php-parser are
+  unknown classes to a PHPStan rule author, since php-parser is not a stub
+  source (`phpstan_api_method_calls/*`).
+
 ---
 
 # Planned (phases 85+)
