@@ -353,11 +353,11 @@ impl<'a> Checker<'a> {
             // the argument order (expected class first, actual value
             // second), the reverse of `instanceof`'s own left-to-right
             // reading - `$expected` is conventionally `Foo::class`, a
-            // `StaticAccess(class_name, "class")` expression.
+            // `ClassNameFetch` expression.
             "assertInstanceOf" => {
                 if let Some(class_arg) = args.first()
-                    && let ExprKind::StaticAccess(class_name, member) = &class_arg.value.kind
-                    && member == "class"
+                    && let ExprKind::ClassNameFetch(target) = &class_arg.value.kind
+                    && let Some(class_name) = target.as_name()
                     && let Some(actual_arg) = args.get(1)
                     && let Some(key) = narrowing_key(&actual_arg.value)
                 {

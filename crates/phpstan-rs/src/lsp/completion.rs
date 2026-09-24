@@ -29,7 +29,7 @@
 //! flow-sensitive inferred type via the *already-shipped*
 //! `ExprKind::Variable` probe hook (`checker/expr.rs`'s `self.probe_hit_
 //! at(e.span, &ty)` inside that arm) - no new Checker API, and uniform
-//! for `->`/`::` alike (`ExprKind::StaticAccess`/`StaticCall`'s class
+//! for `->`/`::` alike (`ExprKind::ClassConstFetch`/`StaticCall`'s class
 //! side is a bare `String`, not an `Expr`, so there is no AST-node shape
 //! a `::` receiver could otherwise be spliced into).
 //!

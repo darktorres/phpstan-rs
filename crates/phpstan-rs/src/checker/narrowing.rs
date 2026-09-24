@@ -1120,16 +1120,10 @@ impl<'a> Checker<'a> {
                     // literal string or `::class` constant) resolves via
                     // `literal_string_value`'s own "give up, don't guess"
                     // `None` the same way a dynamic `instanceof` target
-                    // does. `Foo::class` resolves via the identical
-                    // `StaticAccess(class_name, "class")` shape
-                    // `phpstan_api.rs`/`visibility.rs` already extract a
-                    // raw class name from elsewhere, not `literal_string_
-                    // value` (which only ever handles a real string
-                    // literal/concatenation).
+                    // does. `Foo::class` is a `ClassNameFetch`, not a
+                    // string `literal_string_value` handles.
                     let class_name = match &class_arg.value.kind {
-                        ExprKind::StaticAccess(name, member) if member == "class" => {
-                            Some(name.clone())
-                        }
+                        ExprKind::ClassNameFetch(target) => target.as_name().map(str::to_string),
                         _ => literal_string_value(&class_arg.value).map(|s| s.into_owned()),
                     };
                     if let Some(class_name) = class_name {

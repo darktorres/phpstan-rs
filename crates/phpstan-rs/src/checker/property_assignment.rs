@@ -291,11 +291,13 @@ impl<'a> Checker<'a> {
                 };
                 (owner, prop.to_string(), sig, false)
             }
-            ExprKind::StaticAccess(class, member) if member.starts_with('$') => {
-                let Some(class) = self.resolve_static_class_name(class) else {
+            ExprKind::StaticPropertyFetch(target, prop) => {
+                let Some(class) = target
+                    .as_name()
+                    .and_then(|n| self.resolve_static_class_name(n))
+                else {
                     return;
                 };
-                let prop = member.trim_start_matches('$');
                 let Some((owner, sig)) = self.registry.lookup_property_with_owner(&class, prop)
                 else {
                     return;

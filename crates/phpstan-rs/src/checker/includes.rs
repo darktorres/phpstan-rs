@@ -149,14 +149,15 @@ impl<'a> Checker<'a> {
             ExprKind::Name(n) if !(n.starts_with("__") && n.ends_with("__")) => {
                 short_name(n).to_string()
             }
-            ExprKind::StaticAccess(class, constant) => {
+            ExprKind::ClassConstFetch(target, constant) => {
+                let class = target.as_name()?;
                 let class = if ["self", "static"]
                     .iter()
                     .any(|k| class.eq_ignore_ascii_case(k))
                 {
                     self.current_class.as_deref()?
                 } else {
-                    class.as_str()
+                    class
                 };
                 class_constant_key(class, constant)
             }

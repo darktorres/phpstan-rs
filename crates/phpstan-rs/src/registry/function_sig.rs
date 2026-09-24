@@ -1,7 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::{ExprKind, FunctionDecl, Stmt, Visibility};
+use crate::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{
@@ -251,7 +251,7 @@ fn infer_const_type_with(
         // into.
         ExprKind::Binary(crate::ast::BinOp::Concat, ..) => Type::String,
         ExprKind::Grouping(inner) => infer_const_type_with(inner, class_const_ref),
-        ExprKind::StaticAccess(class, name) if !name.starts_with('$') => {
+        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             class_const_ref(class, name).unwrap_or(Type::Mixed(false))
         }
         // A constant array literal is a real, exact array shape in

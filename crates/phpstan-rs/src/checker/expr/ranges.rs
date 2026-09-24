@@ -374,7 +374,10 @@ pub(crate) fn expr_reads_a_property(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
-        | ExprKind::StaticAccess(..) => true,
+        | ExprKind::ClassConstFetch(..)
+        | ExprKind::ClassNameFetch(_)
+        | ExprKind::StaticPropertyFetch(..)
+        | ExprKind::DynamicStaticPropertyFetch(..) => true,
         ExprKind::Call(callee, args) => {
             expr_reads_a_property(callee) || args.iter().any(|a| expr_reads_a_property(&a.value))
         }

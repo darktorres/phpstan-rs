@@ -338,12 +338,9 @@ impl<'a> Walker<'a> {
                 e.span,
                 "A variable variable".to_string(),
             ),
-            ExprKind::DynamicPropertyAccess(..) | ExprKind::DynamicClassConstFetch(..) => self.ban(
-                BannedConstruct::DynamicMemberAccess,
-                e.span,
-                "A dynamic member name".to_string(),
-            ),
-            ExprKind::StaticAccess(_, member) if member == "{dynamic}" => self.ban(
+            ExprKind::DynamicPropertyAccess(..)
+            | ExprKind::DynamicClassConstFetch(..)
+            | ExprKind::DynamicStaticPropertyFetch(..) => self.ban(
                 BannedConstruct::DynamicMemberAccess,
                 e.span,
                 "A dynamic member name".to_string(),

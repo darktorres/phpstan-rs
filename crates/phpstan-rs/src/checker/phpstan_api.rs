@@ -1352,12 +1352,18 @@ impl<'a> Walker<'a> {
             // class-constant check - see this module's own doc comment
             // for why - but is still a real bare name reference, so
             // `OldPhpParser4ClassRule` still applies to it.
-            ExprKind::StaticAccess(class_name, member) if member == "class" => {
+            ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
                 self.check_old_php_parser4_class(class_name, e.span, label);
             }
-            ExprKind::StaticAccess(class_name, member) if member != "class" => {
+            ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member)
+            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), member) => {
+                let sigil = if matches!(e.kind, ExprKind::StaticPropertyFetch(..)) {
+                    "$"
+                } else {
+                    ""
+                };
                 if let Some(fqn) = self.resolve_if_phpstan(class_name, ctx) {
-                    let action = format!("accessing {fqn}::{member}");
+                    let action = format!("accessing {fqn}::{sigil}{member}");
                     self.report_not_covered(
                         &fqn,
                         &action,

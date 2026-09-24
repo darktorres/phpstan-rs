@@ -144,7 +144,7 @@ impl<'a> Checker<'a> {
     /// throws a real "Cannot access private constant Child::SECRET".
     /// Exempts a `final` class: it can never have a subclass, so
     /// `static::` there can never actually differ from the literal
-    /// declaring class. The caller (`ExprKind::StaticAccess`'s const-fetch
+    /// declaring class. The caller (`ExprKind::ClassConstFetch`
     /// arm in `checker/expr.rs`) already confirmed the class-part is the
     /// literal `static` keyword and that the constant is `private` before
     /// calling this.
@@ -260,9 +260,9 @@ impl<'a> Checker<'a> {
     /// declaration site).
     pub(crate) fn literal_class_name_from_expr(&self, e: &Expr) -> Option<String> {
         match &e.kind {
-            ExprKind::StaticAccess(class_name, member) if member == "class" => {
-                self.resolve_static_class_name(class_name)
-            }
+            ExprKind::ClassNameFetch(target) => target
+                .as_name()
+                .and_then(|n| self.resolve_static_class_name(n)),
             ExprKind::Literal(Literal::String(s)) => {
                 let s = s.trim_start_matches('\\');
                 self.registry.classes.contains_key(s).then(|| s.to_string())

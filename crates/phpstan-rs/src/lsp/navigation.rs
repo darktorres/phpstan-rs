@@ -608,14 +608,11 @@ impl<'a> Walker<'a> {
                     self.record(out, expr.span, resolved);
                 }
             }
-            ExprKind::StaticAccess(class, member) => {
+            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), member) => {
                 if self.anchor.matches(expr.span)
                     && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
-                    && let Some(spans) = split_identifier_spans(
-                        self.source,
-                        expr.span,
-                        &[class.as_str(), member.as_str()],
-                    )
+                    && let Some(spans) =
+                        split_identifier_spans(self.source, expr.span, &[class.as_str(), member])
                 {
                     // Two independent `if`s, not `if`/`else if`: under
                     // `Anchor::All` a single expression can contain both
@@ -627,13 +624,22 @@ impl<'a> Walker<'a> {
                     if self.anchor.matches(spans[0]) {
                         out.push((spans[0], Resolved::Class(fqn.clone())));
                     }
-                    if self.anchor.matches(spans[1]) && member != "class" && member != "{dynamic}" {
-                        let member = member.strip_prefix('$').unwrap_or(member);
+                    if self.anchor.matches(spans[1]) {
                         out.push((spans[1], Resolved::Member(fqn, member.to_string())));
                     }
                 }
             }
-            // `Foo::method()` mirrors `StaticAccess` above exactly (a
+            ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
+                if self.anchor.matches(expr.span)
+                    && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
+                    && let Some(spans) =
+                        split_identifier_spans(self.source, expr.span, &[class.as_str(), "class"])
+                    && self.anchor.matches(spans[0])
+                {
+                    out.push((spans[0], Resolved::Class(fqn)));
+                }
+            }
+            // `Foo::method()` mirrors `ClassConstFetch`/`StaticPropertyFetch` above exactly (a
             // literal class name, resolved by plain name lookup). A
             // genuinely dynamic receiver (`$obj::method()`) has no
             // class-name text to resolve here at all - it needs the

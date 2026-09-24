@@ -1065,7 +1065,7 @@ impl Project {
     /// all. Called for EVERY
     /// file `update_file`'s own affected-file loop re-checks, not just
     /// the one that was directly edited: a dependent file's own bare-
-    /// `Name`/`StaticAccess` resolution can change (e.g. registry-wide
+    /// `Name`/`ClassConstFetch`/`StaticPropertyFetch` resolution can change (e.g. registry-wide
     /// class-name-case canonicalization) even though its own source text
     /// didn't, so re-deriving Tier 1 only for the edited file itself
     /// would let a dependent's index silently go stale.

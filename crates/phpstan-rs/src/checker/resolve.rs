@@ -273,7 +273,7 @@ impl<'a> Checker<'a> {
         }
     }
 
-    /// Resolves a `StaticAccess`/`StaticCall` target (`self`/`parent`/
+    /// Resolves a `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall` target (`self`/`parent`/
     /// `static`, or a plain/namespaced class name) to a concrete FQN.
     /// `"?"` is the parser's own placeholder for a genuinely dynamic
     /// class target (`$obj::method()`, `(new Foo())::CONST`) - there's no

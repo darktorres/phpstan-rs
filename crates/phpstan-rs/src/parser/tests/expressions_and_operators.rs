@@ -695,7 +695,7 @@ fn dollar_brace_variable_variable_forms_parse() {
     ));
     assert!(matches!(
         &program[2].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::StaticAccess(c, m) if c == "C" && m == "{dynamic}")
+        StmtKind::Expression(Expr { kind: ExprKind::Assign(lhs, _), .. }) if matches!(&lhs.kind, ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c, _), _) if c == "C")
     ));
 }
 
@@ -1022,7 +1022,7 @@ fn double_dollar_variable_variable_in_member_position_parses() {
     ));
     assert!(matches!(
         &program[1].kind,
-        StmtKind::Expression(Expr { kind: ExprKind::StaticAccess(c, m), .. }) if c == "Foo" && m == "{dynamic}"
+        StmtKind::Expression(Expr { kind: ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(c, _), _), .. }) if c == "Foo"
     ));
     assert!(matches!(
         &program[2].kind,

@@ -10,7 +10,7 @@
 //! `record_member_ref` already fires from every ordinary access arm
 //! (instance/static property, instance/static method call, class
 //! constant - `checker/expr.rs`'s own `PropertyAccess`/`MethodCall`/
-//! `StaticAccess`/`StaticCall` arms), so a ordinary reference needs no
+//! `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall` arms), so a ordinary reference needs no
 //! new instrumentation at all. Two real gaps did:
 //!
 //! - A genuinely dynamic member access (`$obj->{$expr}`/`$obj->$name`)

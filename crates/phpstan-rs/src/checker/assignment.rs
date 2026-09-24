@@ -40,7 +40,10 @@ pub(crate) fn is_non_assignable_target(expr: &Expr) -> bool {
         | ExprKind::PropertyAccess(..)
         | ExprKind::DynamicPropertyAccess(..)
         | ExprKind::Index(..)
-        | ExprKind::StaticAccess(..) => false,
+        | ExprKind::ClassConstFetch(..)
+        | ExprKind::ClassNameFetch(_)
+        | ExprKind::StaticPropertyFetch(..)
+        | ExprKind::DynamicStaticPropertyFetch(..) => false,
         // A skipped destructuring slot (`[, $x]`/`[$a, , $c]`) has no
         // item of its own in real PHPStan's AST at all (`$item ===
         // null`, skipped outright) - this project's own parser instead

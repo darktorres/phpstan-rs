@@ -53,7 +53,7 @@ fn collect_type_hint(hint: &str, names: &mut FxHashSet<String>) {
 
 /// `#[Name(args), ...]` - a class used only as an attribute target
 /// (`#[MyAttribute]` on some other declaration) has no `Name`/`New`/
-/// `StaticAccess` node anywhere pointing at it, so without this it would
+/// `ClassConstFetch`/`StaticPropertyFetch` node anywhere pointing at it, so without this it would
 /// look identically unreferenced to a genuinely dead class.
 fn collect_attrs(attrs: &[Attribute], names: &mut FxHashSet<String>) {
     for a in attrs {
@@ -255,7 +255,7 @@ fn collect_stmt(stmt: &Stmt, names: &mut FxHashSet<String>) {
 
 // Delegates the "walk into child expressions" recursion to
 // `ast_walk::expr_children` - this match only needs to handle each
-// variant's own name-bearing fields (a `StaticAccess`/`StaticCall`
+// variant's own name-bearing fields (a `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall`
 // class name, a bare `Name`, an `instanceof` target's class name) and
 // the three variants `expr_children` deliberately returns no children
 // for (`Closure`/`ArrowFn`/`NewAnonymousClass`, each needing its own
@@ -263,7 +263,10 @@ fn collect_stmt(stmt: &Stmt, names: &mut FxHashSet<String>) {
 // comment for why).
 fn collect_expr(expr: &Expr, names: &mut FxHashSet<String>) {
     match &expr.kind {
-        ExprKind::StaticAccess(class, _) => {
+        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), _)
+        | ExprKind::ClassNameFetch(StaticTarget::Name(class, _))
+        | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, _), _)
+        | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, _), _) => {
             names.insert(class.clone());
         }
         // A dynamic receiver's own name references (if any) are picked

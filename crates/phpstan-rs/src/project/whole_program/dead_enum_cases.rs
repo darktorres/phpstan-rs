@@ -4,7 +4,7 @@
 //! argument, project-wide. All three signals are already free once
 //! Tier 2 (`Project::ensure_member_index_built`) runs: `record_member_ref`
 //! already fires for a resolved class-constant access from both
-//! `check_expr`'s and `infer_expr`'s `StaticAccess` arms (which is what a
+//! `check_expr`'s and `infer_expr`'s `ClassConstFetch`/`StaticPropertyFetch` arms (which is what a
 //! plain reference, a `match`/`switch` arm value, and a property/const
 //! default value all resolve through - `checker::expr::collect_default_
 //! and_const_value_member_refs` reaches the last of those, since
@@ -16,7 +16,7 @@
 //! Any `::cases()` call or a dynamic (`{dynamic}`) member access on a
 //! real enum escapes the *whole* enum (conservative, all-or-nothing) -
 //! see `Checker::escaped_enums`'s own doc comment for where that's
-//! tracked, and `checker/expr.rs`'s own `StaticCall`/`StaticAccess` arms
+//! tracked, and `checker/expr.rs`'s own `StaticCall`/`ClassConstFetch`/`StaticPropertyFetch` arms
 //! for the exact hooks.
 //!
 //! Real, disclosed false-positive risks (ship opt-in, per this project's

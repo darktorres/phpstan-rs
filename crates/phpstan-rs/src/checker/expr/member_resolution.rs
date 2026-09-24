@@ -990,7 +990,7 @@ fn resolve_hydration_mode_arg(args: &[Arg], index: usize) -> HydrationMode {
     };
     match &arg.value.kind {
         ExprKind::Literal(Literal::Null) => HydrationMode::Object,
-        ExprKind::StaticAccess(_, member) => by_name(member),
+        ExprKind::ClassConstFetch(_, member) => by_name(member),
         ExprKind::Literal(Literal::Int(n)) => match n {
             1 => HydrationMode::Object,
             2 => HydrationMode::Array,

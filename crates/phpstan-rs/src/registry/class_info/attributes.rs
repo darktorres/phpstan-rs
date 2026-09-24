@@ -28,7 +28,7 @@ fn attribute_target_constant_value(name: &str) -> Option<u32> {
 /// expression can never manufacture a false `attribute.target` finding.
 fn eval_attribute_flags_expr(e: &Expr) -> u32 {
     match &e.kind {
-        ExprKind::StaticAccess(_, member) => {
+        ExprKind::ClassConstFetch(_, member) => {
             attribute_target_constant_value(member).unwrap_or(ATTRIBUTE_TARGET_ALL)
         }
         ExprKind::Literal(Literal::Int(n)) => u32::try_from(*n).unwrap_or(ATTRIBUTE_TARGET_ALL),

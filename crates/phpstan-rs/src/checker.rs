@@ -251,7 +251,7 @@ pub(crate) struct Locals {
     // never reset back to `false` except by starting a fresh scope. Lets
     // `check_expr`/`infer_expr`'s own "is this exact property/index/
     // static-property chain narrowed?" probes (`PropertyAccess`/`Index`/
-    // `StaticAccess`) skip building the synthetic lookup key entirely -
+    // `ClassConstFetch`/`StaticPropertyFetch`) skip building the synthetic lookup key entirely -
     // two `String` allocations (`narrowing_key` itself, then the call
     // site's own `format!`) - in the overwhelmingly common case where
     // `locals` holds no such entry at all, without needing every one of
@@ -1471,7 +1471,7 @@ impl<'a> Checker<'a> {
 
     /// No-op unless `collect_member_refs` is set. `&self`, not `&mut
     /// self` - see `member_ref_sites`'s own doc comment for why. `member`
-    /// is normalized the same way `lsp::navigation`'s own StaticAccess
+    /// is normalized the same way `lsp::navigation`'s own ClassConstFetch
     /// arm is: a leading `$` (a static property's own syntax,
     /// `self::$prop`) stripped, and `"class"`/`"{dynamic}"` (not a real
     /// member at all) excluded by every caller before this is reached.

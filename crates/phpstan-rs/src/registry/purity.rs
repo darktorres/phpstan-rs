@@ -373,7 +373,10 @@ fn expr_disqualifies(
         // Any static property access at all - real PHPStan's own
         // `staticPropertyAccess` fires even for a bare read of shared
         // static state, not just a write.
-        ExprKind::StaticAccess(_, _) => true,
+        ExprKind::ClassConstFetch(..)
+        | ExprKind::ClassNameFetch(_)
+        | ExprKind::StaticPropertyFetch(..)
+        | ExprKind::DynamicStaticPropertyFetch(..) => true,
         ExprKind::Variable(name) if is_superglobal(name) => true,
         ExprKind::Yield(..) | ExprKind::YieldFrom(_) => true,
         ExprKind::Assign(lhs, rhs) | ExprKind::AssignRef(lhs, rhs) => {
@@ -800,30 +803,18 @@ fn collect_expr_impure_points(
     out: &mut Vec<ImpurePointOccurrence>,
 ) {
     match &e.kind {
-        // `StaticAccess`'s second field is the parser's own single encoding
-        // for three different real things (`Foo::$prop`/`Foo::CONST`/
-        // `Foo::EnumCase`) - only a leading `$` (`checker/expr.rs`'s own
-        // `ExprKind::StaticAccess` arm uses this identical test to tell a
-        // property from a constant) means an actual, mutable static
-        // property read. A bare constant/enum-case name is immutable -
-        // real PHPStan's own `NodeScopeResolver` never emits an
-        // `ImpurePoint` for a `ClassConstFetch` at all, so flagging one
-        // here would be an actively-mislabeled false positive ("static
-        // property access" on something that isn't one), not just an
-        // imprecision. `stmt_disqualifies`/`expr_disqualifies`'s own identical `Static
-        // Access(_, _) => true` arm has this same conflation - deliberately
-        // left as-is there (this function's own doc comment already
-        // explains why that file isn't touched), so it's a real, disclosed,
-        // narrower divergence between the boolean classifier and this
-        // diagnostic-only walk, in the "fewer false positives" direction.
-        ExprKind::StaticAccess(_, member) if member.starts_with('$') => {
-            out.push(ImpurePointOccurrence {
-                span: e.span,
-                identifier: "staticPropertyAccess",
-                description: "static property access",
-                certain: true,
-            })
-        }
+        // Only a static property read is mutable shared state; a class
+        // constant or enum case is immutable (real PHPStan's own
+        // `NodeScopeResolver` never emits an `ImpurePoint` for a
+        // `ClassConstFetch`). `expr_disqualifies`'s boolean classifier
+        // still treats every static fetch as impure - a disclosed,
+        // narrower divergence in the "fewer false positives" direction.
+        ExprKind::StaticPropertyFetch(..) => out.push(ImpurePointOccurrence {
+            span: e.span,
+            identifier: "staticPropertyAccess",
+            description: "static property access",
+            certain: true,
+        }),
         ExprKind::Variable(name) if is_superglobal(name) => out.push(ImpurePointOccurrence {
             span: e.span,
             identifier: "superglobal",

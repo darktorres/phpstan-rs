@@ -54,6 +54,12 @@ fn class_ref_is_self(class_ref: &str, fqn: &str, ctx: &NameContext) -> bool {
     class_ref == "self" || class_ref == "static" || ctx.resolve(class_ref) == fqn
 }
 
+fn target_is_self(target: &StaticTarget, fqn: &str, ctx: &NameContext) -> bool {
+    target
+        .as_name()
+        .is_some_and(|class_ref| class_ref_is_self(class_ref, fqn, ctx))
+}
+
 fn is_this(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Variable(name) if **name == *"this")
 }
@@ -100,17 +106,12 @@ fn mark_write_target(
             }
             true
         }
-        ExprKind::StaticAccess(class_ref, member) if class_ref_is_self(class_ref, fqn, ctx) => {
-            match member.strip_prefix('$') {
-                Some(prop) => {
-                    usage.writes.insert(Arc::from(prop));
-                    if also_read {
-                        usage.reads.insert(Arc::from(prop));
-                    }
-                    true
-                }
-                None => false,
+        ExprKind::StaticPropertyFetch(target, prop) if target_is_self(target, fqn, ctx) => {
+            usage.writes.insert(prop.clone());
+            if also_read {
+                usage.reads.insert(prop.clone());
             }
+            true
         }
         _ => false,
     }
@@ -185,7 +186,7 @@ pub(crate) fn walk_expr_for_members(
         // `expr_children` recursion at the bottom of this function)
         // specifically so a pure write target - `$this->x = ...` - is
         // recorded as a write only, not *also* as a read the way falling
-        // through to the generic `PropertyAccess`/`StaticAccess` arms
+        // through to the generic `PropertyAccess`/`ClassConstFetch`/`StaticPropertyFetch` arms
         // further down would.
         ExprKind::Assign(l, r) | ExprKind::AssignRef(l, r) => {
             walk_expr_for_members(r, fqn, ctx, usage);
@@ -228,25 +229,23 @@ pub(crate) fn walk_expr_for_members(
                 usage.aliases.insert(name.clone());
             }
         }
-        ExprKind::StaticAccess(class_ref, member) => {
-            // `Foo::{$expr}` / `Foo::$$name` - the parser's own sentinel
-            // for a fully dynamic static member name (`parser/postfix.rs`).
-            // Can't know which const/property this reaches, so the whole
-            // class's private-member checks are skipped (see `MemberUsage`'s
-            // own doc comment).
-            if member == "{dynamic}" {
-                usage.escaped = true;
-            } else if let Some(prop) = member.strip_prefix('$') {
-                if class_ref_is_self(class_ref, fqn, ctx) {
-                    usage.reads.insert(Arc::from(prop));
-                }
-            } else if class_ref_is_self(class_ref, fqn, ctx) {
-                usage.consts.insert(Arc::from(member.as_str()));
+        // `Foo::${$expr}` / `Foo::$$name`: can't know which property
+        // this reaches, so the whole class's private-member checks are
+        // skipped (see `MemberUsage`'s own doc comment).
+        ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
+        ExprKind::StaticPropertyFetch(target, prop) => {
+            if target_is_self(target, fqn, ctx) {
+                usage.reads.insert(prop.clone());
             }
         }
-        ExprKind::DynamicClassConstFetch(class_ref, name) => match &name.kind {
+        ExprKind::ClassConstFetch(target, member) => {
+            if target_is_self(target, fqn, ctx) {
+                usage.consts.insert(member.clone());
+            }
+        }
+        ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
             ExprKind::Literal(Literal::String(member)) => {
-                if class_ref_is_self(class_ref, fqn, ctx) {
+                if target_is_self(target, fqn, ctx) {
                     usage.consts.insert(Arc::from(member.as_ref()));
                 }
             }
@@ -255,9 +254,7 @@ pub(crate) fn walk_expr_for_members(
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
             usage.methods.insert(name.clone());
         }
-        ExprKind::StaticCall(target, name, _)
-            if class_ref_is_self(target.as_name().unwrap_or("?"), fqn, ctx) =>
-        {
+        ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
             usage.methods.insert(Arc::from(name.as_str()));
         }
         // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member

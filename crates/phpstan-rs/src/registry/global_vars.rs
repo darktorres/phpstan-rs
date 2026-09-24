@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::ast::{BinOp, Expr, ExprKind, Literal, Stmt, StmtKind};
+use crate::ast::{BinOp, Expr, ExprKind, Literal, StaticTarget, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::checker::union_types;
 use crate::registry::{NameContext, infer_const_type};
@@ -691,7 +691,7 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                 .map(|sig| sig.return_type.clone())
                 .unwrap_or(Type::Mixed(false))
         }
-        ExprKind::StaticAccess(class, name) => {
+        ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             let fqn = ctx.resolve(class);
             registry
                 .lookup_const(&fqn, name)

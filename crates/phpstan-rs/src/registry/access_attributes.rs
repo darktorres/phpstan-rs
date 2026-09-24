@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use crate::ast::{Attribute, Expr, ExprKind, Literal};
+use crate::ast::{Attribute, Expr, ExprKind, Literal, StaticTarget};
 use crate::intern::intern;
 use crate::registry::NameContext;
 
@@ -54,7 +54,7 @@ fn library_attribute(resolved: &str) -> Option<&str> {
 fn class_names(args: &[Expr], ctx: &NameContext, out: &mut Vec<Arc<str>>) {
     for arg in args {
         match &arg.kind {
-            ExprKind::StaticAccess(class, member) if member.eq_ignore_ascii_case("class") => {
+            ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
                 out.push(intern(ctx.resolve(class).trim_start_matches('\\')));
             }
             ExprKind::Literal(Literal::String(s)) => {

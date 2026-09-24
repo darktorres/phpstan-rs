@@ -28,7 +28,7 @@
 //! correctness, since this text is never executed, only prepared.
 
 use crate::ast::literal_string_value;
-use crate::ast::{Arg, Expr, ExprKind};
+use crate::ast::{Arg, Expr, ExprKind, StaticTarget};
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
 
@@ -738,7 +738,7 @@ fn fold_sprintf_int_arg(checker: &Checker, arg: &Arg, locals: &Locals) -> Option
 /// list").
 pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
     match &expr.kind {
-        ExprKind::StaticAccess(class_name, _member) => checker
+        ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), _member) => checker
             .name_ctx
             .resolve(class_name)
             .ends_with("ArrayParameterType"),
@@ -759,12 +759,12 @@ pub(crate) fn is_array_parameter_type(checker: &Checker, expr: &Expr) -> bool {
 /// doesn't treat as integer.
 pub(crate) fn is_integer_parameter_type(checker: &Checker, expr: &Expr) -> bool {
     match &expr.kind {
-        ExprKind::StaticAccess(class_name, member) => {
+        ExprKind::ClassConstFetch(StaticTarget::Name(class_name, _), member) => {
             let resolved = checker.name_ctx.resolve(class_name);
             let short_name = resolved.rsplit('\\').next().unwrap_or(&resolved);
             match short_name {
-                "ParameterType" => member == "INTEGER",
-                "Types" => matches!(member.as_str(), "INTEGER" | "SMALLINT" | "BIGINT"),
+                "ParameterType" => &**member == "INTEGER",
+                "Types" => matches!(&**member, "INTEGER" | "SMALLINT" | "BIGINT"),
                 _ => false,
             }
         }

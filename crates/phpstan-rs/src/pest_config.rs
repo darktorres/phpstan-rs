@@ -33,7 +33,7 @@
 use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Arg, Expr, ExprKind, Stmt, StmtKind};
+use crate::ast::{Arg, Expr, ExprKind, StaticTarget, Stmt, StmtKind};
 use crate::ast::{literal_string_value, unwrap_grouping};
 use crate::registry::{NameContext, Registry};
 use crate::types::Type;
@@ -50,13 +50,13 @@ pub(crate) fn is_this_binding_call(name: &str) -> bool {
 /// (resolved through `ctx`, since a `Pest.php` file imports classes via
 /// an ordinary `use` statement the same as any other PHP file) or a plain
 /// string literal, used as-is: a string's contents are never subject to
-/// `use`-import short-name resolution the way a bare `Name`/`StaticAccess`
+/// `use`-import short-name resolution the way a bare `Name`/`ClassConstFetch`/`StaticPropertyFetch`
 /// token is. Trait arguments aren't distinguished from classes - see the
 /// module doc comment.
 pub(crate) fn class_names_from_uses_call(args: &[Arg], ctx: &NameContext) -> Vec<String> {
     args.iter()
         .filter_map(|a| match &a.value.kind {
-            ExprKind::StaticAccess(class_name, member) if member == "class" => {
+            ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => {
                 Some(ctx.resolve(class_name))
             }
             _ => literal_string_value(&a.value).map(|s| s.trim_start_matches('\\').to_string()),

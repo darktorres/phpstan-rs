@@ -167,11 +167,24 @@ fn bias_span(span: Span, frag_base: Position) -> Span {
 /// matching `Stmt`-level walker to bias fully) - a narrow, honest gap,
 /// not silently wrong: the closure expression's own span is still
 /// correctly biased, just not its inner statements'.
+fn bias_static_target(target: &mut StaticTarget, frag_base: Position) {
+    match target {
+        StaticTarget::Name(_, span) => *span = bias_span(*span, frag_base),
+        StaticTarget::Expr(e) => bias_expr_spans(e, frag_base),
+    }
+}
+
 fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
     expr.span = bias_span(expr.span, frag_base);
     match &mut expr.kind {
         ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => {}
-        ExprKind::StaticAccess(_, _) => {}
+        ExprKind::ClassNameFetch(target)
+        | ExprKind::ClassConstFetch(target, _)
+        | ExprKind::StaticPropertyFetch(target, _) => bias_static_target(target, frag_base),
+        ExprKind::DynamicStaticPropertyFetch(target, name) => {
+            bias_static_target(target, frag_base);
+            bias_expr_spans(name, frag_base);
+        }
         ExprKind::Closure { .. } => {}
         ExprKind::DynamicVariable(e)
         | ExprKind::Unary(_, e)
@@ -181,8 +194,11 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
         | ExprKind::YieldFrom(e)
         | ExprKind::FirstClassCallable(e)
         | ExprKind::ShellExec(e)
-        | ExprKind::DynamicClassConstFetch(_, e)
         | ExprKind::PropertyAccess(e, _, _) => bias_expr_spans(e, frag_base),
+        ExprKind::DynamicClassConstFetch(target, name) => {
+            bias_static_target(target, frag_base);
+            bias_expr_spans(name, frag_base);
+        }
         ExprKind::ArrowFn { body, .. } => bias_expr_spans(body, frag_base),
         ExprKind::ArrayLiteral(items) => {
             for item in items {

@@ -1009,6 +1009,9 @@ pub(crate) fn is_valid_byref_argument_expr(expr: &Expr) -> bool {
             | ExprKind::Index(_, _)
             | ExprKind::PropertyAccess(_, _, _)
             | ExprKind::DynamicPropertyAccess(_, _)
-            | ExprKind::StaticAccess(_, _)
+            | ExprKind::ClassConstFetch(..)
+            | ExprKind::ClassNameFetch(_)
+            | ExprKind::StaticPropertyFetch(..)
+            | ExprKind::DynamicStaticPropertyFetch(..)
     )
 }

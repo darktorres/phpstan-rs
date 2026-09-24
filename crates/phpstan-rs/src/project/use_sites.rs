@@ -125,7 +125,7 @@ fn resolve_class_ref(
 }
 
 /// Every `(Span, RefTarget::Class|Function)` pair in `stmts` - Tier 1's
-/// own entry point. `parent`/member halves of a `StaticAccess`/
+/// own entry point. `parent`/member halves of a `ClassConstFetch`/`StaticPropertyFetch`/
 /// `StaticCall` are deliberately NOT resolved here (parent needs the
 /// registry's own ancestor lookup only `resolve_class_ref` in
 /// `navigation.rs` does via `registry.classes`, harmless to add later but
@@ -210,7 +210,7 @@ impl<'a> ClassFnRefWalker<'a> {
     /// `lsp::navigation::Walker::param` at all (that walker only ever
     /// needs a parameter's type-hint/name-declaration site for
     /// cursor-driven hover/definition), but a legitimate home for a bare
-    /// `Name`/`StaticAccess(::class)` reference this item's own index
+    /// `Name`/`ClassNameFetch` reference this item's own index
     /// must not silently miss.
     fn param(
         &self,
@@ -355,20 +355,17 @@ impl<'a> ClassFnRefWalker<'a> {
                     out.push((expr.span, RefTarget::Function(fqn)));
                 }
             }
-            ExprKind::StaticAccess(class, member) => {
+            ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), _)
+            | ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span))
+            | ExprKind::StaticPropertyFetch(StaticTarget::Name(class, class_span), _)
+            | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Name(class, class_span), _) => {
                 if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
-                    match self.source {
-                        Some(source) => {
-                            if let Some(spans) = split_identifier_spans(
-                                source,
-                                expr.span,
-                                &[class.as_str(), member.as_str()],
-                            ) {
-                                out.push((spans[0], RefTarget::Class(fqn)));
-                            }
-                        }
-                        None => out.push((expr.span, RefTarget::Class(fqn))),
-                    }
+                    let span = if self.source.is_some() {
+                        *class_span
+                    } else {
+                        expr.span
+                    };
+                    out.push((span, RefTarget::Class(fqn)));
                 }
             }
             // A genuinely dynamic receiver has no class-name text to

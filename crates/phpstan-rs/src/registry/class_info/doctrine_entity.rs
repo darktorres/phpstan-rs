@@ -22,7 +22,7 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal};
+use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, StaticTarget};
 use crate::intern::intern;
 use crate::registry::name_context::NameContext;
 use crate::types::Type;
@@ -143,9 +143,7 @@ fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
 
 fn class_name_of_class_const(e: &Expr) -> Option<&str> {
     match &e.kind {
-        ExprKind::StaticAccess(class_name, member) if member.eq_ignore_ascii_case("class") => {
-            Some(class_name.as_str())
-        }
+        ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _)) => Some(class_name.as_str()),
         _ => None,
     }
 }

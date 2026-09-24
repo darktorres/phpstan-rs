@@ -589,7 +589,10 @@ impl<'a> Checker<'a> {
                 | ExprKind::Index(..)
                 | ExprKind::PropertyAccess(..)
                 | ExprKind::DynamicPropertyAccess(..)
-                | ExprKind::StaticAccess(..)
+                | ExprKind::ClassConstFetch(..)
+                | ExprKind::ClassNameFetch(_)
+                | ExprKind::StaticPropertyFetch(..)
+                | ExprKind::DynamicStaticPropertyFetch(..)
         ) {
             self.report(
                 label.to_string(),

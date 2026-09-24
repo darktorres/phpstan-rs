@@ -2828,7 +2828,7 @@ impl<'a> Checker<'a> {
                     _ => Type::Mixed(false),
                 }
             }
-            ExprKind::DynamicClassConstFetch(class_name, name) => {
+            ExprKind::DynamicClassConstFetch(target, name) => {
                 let name_ty = self.check_expr(name, locals, label);
                 self.check_dynamic_class_constant_fetch(&name_ty, e.span, label);
                 let literal_names: Option<Vec<String>> = match &name_ty {
@@ -2842,215 +2842,40 @@ impl<'a> Checker<'a> {
                         .collect(),
                     _ => None,
                 };
-                let fetch = |member: String| Expr {
-                    id: NodeId::SYNTHETIC,
-                    kind: ExprKind::StaticAccess(class_name.clone(), member),
-                    span: e.span,
-                };
                 match literal_names {
                     Some(names) if !names.is_empty() => names
                         .into_iter()
-                        .map(|n| self.check_expr(&fetch(n), locals, label))
+                        .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
                         .reduce(crate::checker::type_union::union_types)
                         .unwrap_or(Type::Mixed(false)),
                     _ => {
-                        self.check_expr(&fetch("{dynamic}".to_string()), locals, label);
+                        self.record_dynamic_static_member_escape(target);
                         Type::Mixed(false)
                     }
                 }
             }
-            ExprKind::StaticAccess(class_name, member) => {
-                // `Foo::class` (member == "class") always resolves to a
-                // real string constant, not an actual member of the
-                // class - and a fully dynamic member name (`Foo::{$e}`/
-                // `Foo::$$e`) has no statically known name to check in
-                // the first place. Both are the parser's own documented
-                // encoding for these two cases, not something to check.
-                if member == "class" {
-                    return match self.resolve_static_class_name(class_name) {
-                        Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
-                        // A genuinely dynamic target (`$obj::class`) -
-                        // unresolvable, unchanged from before.
-                        None => Type::String,
-                    };
-                }
-                if member == "{dynamic}" {
-                    // Phase 92's own dynamic-member escape hatch - see
-                    // `Checker::escaped_enums`'s own doc comment. No
-                    // `lookup_method_with_owner`-style call to piggyback
-                    // an already-canonical name off here (the member
-                    // name genuinely isn't known), so this calls
-                    // `lookup_class` itself for the canonical form -
-                    // `resolve_static_class_name` alone doesn't
-                    // guarantee it.
-                    if let Some(raw) = self.resolve_static_class_name(class_name)
-                        && let Some((canonical, info)) = self.registry.lookup_class(&raw)
-                        && info.kind == ClassKind::Enum
-                    {
-                        self.record_enum_escape(canonical);
-                    }
-                    return Type::Mixed(false);
-                }
-                // A static property (`self::$prop`) can be narrowed the
-                // same way an instance property already is - check for a
-                // locally-narrowed override before the undefined-property
-                // check/registry lookup below.
-                if member.starts_with('$')
-                    && locals.may_have_member_narrowing()
-                    && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
+            ExprKind::ClassNameFetch(target) => {
+                // `Foo::class` is a string naming the class, not a member.
+                match target
+                    .as_name()
+                    .and_then(|n| self.resolve_static_class_name(n))
                 {
-                    return narrowed.clone();
+                    Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
+                    // A genuinely dynamic target (`$obj::class`).
+                    None => Type::String,
                 }
-                let Some(class) = self.resolve_static_class_name(class_name) else {
-                    return Type::Mixed(false);
-                };
-                // Rebind to the registry's canonical-case spelling up
-                // front, same as `ExprKind::New`'s identical fix - without
-                // it, a differently-cased real reference (`base::CONST`
-                // for a real `class Base`) always fell into the "class
-                // doesn't exist" branch below before `check_class_name_case`
-                // ever got a chance to run.
-                let class = self
-                    .registry
-                    .lookup_class(&class)
-                    .map(|(canonical, _)| canonical.to_string())
-                    .unwrap_or(class);
-                if !self.registry.classes.contains_key(class.as_str()) {
-                    // Mirrors real PHPStan's `AccessStaticPropertiesCheck`/
-                    // `ClassConstantRule`'s "class doesn't exist at all"
-                    // half, for both a static-property and a
-                    // class-constant reference on a genuinely undefined
-                    // class.
-                    let subject = if member.starts_with('$') {
-                        "static property access"
-                    } else {
-                        "class constant access"
-                    };
-                    self.report(
-                        label.to_string(),
-                        format!("{subject} target class {class} not found"),
-                        e.span,
-                        0,
-                        "class.notFound",
-                    );
-                    return Type::Mixed(false);
-                }
-                // `class.nameCase` - `class_name` is the raw, as-written
-                // text (`resolve_static_class_name` above already
-                // resolved `self`/`parent`/`static`/a variable target to
-                // `class`, but never touches `class_name` itself).
-                self.check_class_name_case(label, class_name, e.span);
-                if let Some(prop_name) = member.strip_prefix('$') {
-                    // Unlike an instance property, PHP has no legal way
-                    // to dynamically create a static property at all - no
-                    // "could be legitimate" case to stay lenient for
-                    // here, the way check_property_assignment's write
-                    // side has to for instance properties. A property
-                    // declared as an ordinary instance property is
-                    // equally invalid through `::` in real PHP ("Access
-                    // to undeclared static property"), so both share one
-                    // message.
-                    let prop_with_owner =
-                        self.registry.lookup_property_with_owner(&class, prop_name);
-                    let is_valid_static = prop_with_owner
-                        .as_ref()
-                        .is_some_and(|(_, sig)| sig.is_static);
-                    if !is_valid_static {
-                        self.report(
-                            label.to_string(),
-                            format!("access to undefined static property {class}::${prop_name}"),
-                            e.span,
-                            0,
-                            "staticProperty.notFound",
-                        );
-                    } else if let Some((owner, sig)) = &prop_with_owner {
-                        self.check_internal_property_access(owner, prop_name, sig, e.span, label);
-                        self.check_restricted_property_access(
-                            owner, prop_name, true, e.span, label,
-                        );
-                        self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
-                        self.record_member_usage_token(
-                            UsageTokenKind::Property,
-                            owner,
-                            sig.deprecated.is_some(),
-                            sig.is_internal,
-                            e.span,
-                        );
-                        self.record_member_ref(e.span, owner, prop_name);
-                        // A static property shares the exact same
-                        // visibility rules as an instance one ("Cannot
-                        // access private property" is a real fatal error
-                        // either way).
-                        self.check_member_visibility(MemberVisibilityCheck {
-                            kind: "staticProperty",
-                            owner,
-                            member_name: prop_name,
-                            visibility: &sig.visibility,
-                            describe: &format!("static property {owner}::${prop_name}"),
-                            span: e.span,
-                            label,
-                        });
-                        // Mirrors real PHPStan's
-                        // `AccessPrivatePropertyThroughStaticRule` - same
-                        // late-static-binding unsafety as the identical
-                        // class-constant rule above.
-                        if class_name == "static" && sig.visibility == Visibility::Private {
-                            self.check_static_private_property_access(
-                                owner, prop_name, e.span, label,
-                            );
-                        }
-                    }
-                    prop_with_owner
-                        .map(|(_, p)| self.resolve_pseudo(&p.ty, &class))
-                        .unwrap_or(Type::Mixed(false))
-                } else {
-                    let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
-                    let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
-                        self.registry
-                            .dynamic_class_constant_type(owner, member, &cs.ty)
-                            .unwrap_or_else(|| cs.ty.clone())
-                    });
-                    if const_ty.is_none() {
-                        self.report(
-                            label.to_string(),
-                            format!("access to undefined constant {class}::{member}"),
-                            e.span,
-                            0,
-                            "classConstant.notFound",
-                        );
-                    } else if let Some((owner, cs)) = &const_with_owner {
-                        self.check_internal_class_constant_access(owner, member, cs, e.span, label);
-                        self.check_restricted_class_constant_access(owner, member, e.span, label);
-                        self.check_deprecated_class_constant_access(
-                            owner, member, cs, e.span, label,
-                        );
-                        self.record_member_usage_token(
-                            UsageTokenKind::ClassConstant,
-                            owner,
-                            cs.deprecated.is_some(),
-                            cs.is_internal,
-                            e.span,
-                        );
-                        self.record_member_ref(e.span, owner, member);
-                        self.check_member_visibility(MemberVisibilityCheck {
-                            kind: "classConstant",
-                            owner,
-                            member_name: member,
-                            visibility: &cs.visibility,
-                            describe: &format!("constant {owner}::{member}"),
-                            span: e.span,
-                            label,
-                        });
-                        // Mirrors real PHPStan's
-                        // `AccessPrivateConstantThroughStaticRule`.
-                        if class_name == "static" && cs.visibility == Visibility::Private {
-                            self.check_static_private_constant_access(owner, member, e.span, label);
-                        }
-                    }
-                    const_ty
-                        .map(|ty| self.resolve_pseudo(&ty, &class))
-                        .unwrap_or(Type::Mixed(false))
-                }
+            }
+            ExprKind::DynamicStaticPropertyFetch(target, _) => {
+                // A computed static property name (`Foo::${$e}`/
+                // `Foo::$$e`) has no statically known name to check.
+                self.record_dynamic_static_member_escape(target);
+                Type::Mixed(false)
+            }
+            ExprKind::ClassConstFetch(target, name) => {
+                self.check_static_member_fetch(e, target, name, false, locals, label)
+            }
+            ExprKind::StaticPropertyFetch(target, name) => {
+                self.check_static_member_fetch(e, target, name, true, locals, label)
             }
             ExprKind::DynamicVariable(name_expr) => {
                 self.check_expr(name_expr, locals, label);
@@ -4831,7 +4656,7 @@ impl<'a> Checker<'a> {
                             // Phase 92's own `::from()`/`::tryFrom()`
                             // literal-argument signal - see `check_expr`'s
                             // identical fix just above `ExprKind::
-                            // StaticAccess` for why this reads the
+                            // ClassConstFetch` for why this reads the
                             // already-computed type rather than
                             // threading a new span parameter through
                             // `narrow_enum_from_call`.
@@ -4848,7 +4673,7 @@ impl<'a> Checker<'a> {
                     })
                     .unwrap_or(Type::Mixed(false))
             }
-            ExprKind::DynamicClassConstFetch(class_name, name) => {
+            ExprKind::DynamicClassConstFetch(target, name) => {
                 let names: Option<Vec<String>> = match self.infer_expr(name, locals) {
                     Type::StringLiteral(s) => Some(vec![s]),
                     Type::Union(members) => members
@@ -4863,84 +4688,75 @@ impl<'a> Checker<'a> {
                 names
                     .into_iter()
                     .flatten()
-                    .map(|member| {
-                        self.infer_expr(
-                            &Expr {
-                                id: NodeId::SYNTHETIC,
-                                kind: ExprKind::StaticAccess(class_name.clone(), member),
-                                span: e.span,
-                            },
-                            locals,
-                        )
-                    })
+                    .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
                     .reduce(crate::checker::type_union::union_types)
                     .unwrap_or(Type::Mixed(false))
             }
-            ExprKind::StaticAccess(class_name, member) => {
-                if member == "class" {
-                    return match self.resolve_static_class_name(class_name) {
-                        Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
-                        None => Type::String,
-                    };
+            ExprKind::ClassNameFetch(target) => {
+                match target
+                    .as_name()
+                    .and_then(|n| self.resolve_static_class_name(n))
+                {
+                    Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
+                    None => Type::String,
                 }
+            }
+            ExprKind::DynamicStaticPropertyFetch(target, _) => {
+                if self.collect_member_refs {
+                    self.record_dynamic_static_member_escape(target);
+                }
+                Type::Mixed(false)
+            }
+            ExprKind::StaticPropertyFetch(target, prop_name) => {
                 // A static property (`self::$prop`) can be narrowed the
                 // same way an instance property already is above - check
                 // for a locally-narrowed override before falling back to
                 // its own declared type.
-                if member.starts_with('$')
-                    && locals.may_have_member_narrowing()
-                    && let Some(narrowed) = locals.get(&format!("{class_name}::{member}"))
+                if locals.may_have_member_narrowing()
+                    && let Some(narrowed) = locals.get(&format!(
+                        "{}::${prop_name}",
+                        target.as_name().unwrap_or("?")
+                    ))
                 {
                     return narrowed.clone();
                 }
+                let Some(class) = target
+                    .as_name()
+                    .and_then(|n| self.resolve_static_class_name(n))
+                else {
+                    return Type::Mixed(false);
+                };
                 if self.collect_member_refs
-                    && let Some(class) = self.resolve_static_class_name(class_name)
+                    && let Some((owner, _)) =
+                        self.registry.lookup_property_with_owner(&class, prop_name)
                 {
-                    if member == "{dynamic}" {
-                        // Phase 92's own dynamic-member escape hatch -
-                        // see `check_expr`'s identical fix on this same
-                        // `"{dynamic}"` sentinel for why this needs
-                        // `lookup_class` for the canonical name rather
-                        // than trusting `class` as-is.
-                        if let Some((canonical, info)) = self.registry.lookup_class(&class)
-                            && info.kind == ClassKind::Enum
-                        {
-                            self.record_enum_escape(canonical);
-                        }
-                    } else {
-                        match member.strip_prefix('$') {
-                            Some(prop_name) => {
-                                if let Some((owner, _)) =
-                                    self.registry.lookup_property_with_owner(&class, prop_name)
-                                {
-                                    self.record_member_ref(e.span, &owner, prop_name);
-                                }
-                            }
-                            None => {
-                                if let Some((owner, _)) =
-                                    self.registry.lookup_const_with_owner(&class, member)
-                                {
-                                    self.record_member_ref(e.span, &owner, member);
-                                }
-                            }
-                        }
-                    }
+                    self.record_member_ref(e.span, &owner, prop_name);
                 }
-                self.resolve_static_class_name(class_name)
-                    .and_then(|class| match member.strip_prefix('$') {
-                        Some(prop_name) => self
+                self.registry
+                    .lookup_property(&class, prop_name)
+                    .map(|p| self.resolve_pseudo(&p.ty, &class))
+                    .unwrap_or(Type::Mixed(false))
+            }
+            ExprKind::ClassConstFetch(target, member) => {
+                let Some(class) = target
+                    .as_name()
+                    .and_then(|n| self.resolve_static_class_name(n))
+                else {
+                    return Type::Mixed(false);
+                };
+                if self.collect_member_refs
+                    && let Some((owner, _)) = self.registry.lookup_const_with_owner(&class, member)
+                {
+                    self.record_member_ref(e.span, &owner, member);
+                }
+                self.registry
+                    .lookup_const_with_owner(&class, member)
+                    .map(|(owner, cs)| {
+                        let ty = self
                             .registry
-                            .lookup_property(&class, prop_name)
-                            .map(|p| self.resolve_pseudo(&p.ty, &class)),
-                        None => self.registry.lookup_const_with_owner(&class, member).map(
-                            |(owner, cs)| {
-                                let ty = self
-                                    .registry
-                                    .dynamic_class_constant_type(&owner, member, &cs.ty)
-                                    .unwrap_or_else(|| cs.ty.clone());
-                                self.resolve_pseudo(&ty, &class)
-                            },
-                        ),
+                            .dynamic_class_constant_type(&owner, member, &cs.ty)
+                            .unwrap_or_else(|| cs.ty.clone());
+                        self.resolve_pseudo(&ty, &class)
                     })
                     .unwrap_or(Type::Mixed(false))
             }
@@ -5249,7 +5065,7 @@ impl<'a> Checker<'a> {
     /// consumers in this crate are unrelated unused-variable/`@api`-usage
     /// walkers, none of which resolve a true declaring owner) - each
     /// found expression is fed through `infer_expr` purely to trigger its
-    /// own now-hooked `StaticAccess`/`StaticCall` arms; the returned
+    /// own now-hooked `ClassConstFetch`/`StaticPropertyFetch`/`StaticCall` arms; the returned
     /// `Type` is discarded, only the `record_member_ref` side effect
     /// matters. `check_typed_class_constant_values` already runs
     /// `infer_expr` on a *typed* constant's own value independently -
@@ -6370,6 +6186,21 @@ fn is_true_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
 }
 
+/// A synthetic `target::NAME` fetch, for a computed constant name whose
+/// possible values are known.
+fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
+    let kind = if name == "class" {
+        ExprKind::ClassNameFetch(target.clone())
+    } else {
+        ExprKind::ClassConstFetch(target.clone(), name.into())
+    };
+    Expr {
+        id: NodeId::SYNTHETIC,
+        kind,
+        span,
+    }
+}
+
 /// The type a cast of this kind produces.
 fn cast_result_type(kind: CastKind) -> Type {
     match kind {
@@ -6401,6 +6232,192 @@ pub(crate) fn doctrine_query_result_list_type() -> Type {
 }
 
 impl<'a> Checker<'a> {
+    /// `Foo::BAR` (`is_property` false) or `Foo::$bar` (true): the
+    /// member's type, reporting an unknown class or member, visibility,
+    /// deprecation and internal-use problems.
+    fn check_static_member_fetch(
+        &mut self,
+        e: &Expr,
+        target: &StaticTarget,
+        member: &str,
+        is_property: bool,
+        locals: &Locals,
+        label: &str,
+    ) -> Type {
+        let key_class = target.as_name().unwrap_or("?");
+        // A static property (`self::$prop`) can be narrowed the
+        // same way an instance property already is - check for a
+        // locally-narrowed override before the undefined-property
+        // check/registry lookup below.
+        if is_property
+            && locals.may_have_member_narrowing()
+            && let Some(narrowed) = locals.get(&format!("{key_class}::${member}"))
+        {
+            return narrowed.clone();
+        }
+        let Some(class_name) = target.as_name() else {
+            return Type::Mixed(false);
+        };
+        let Some(class) = self.resolve_static_class_name(class_name) else {
+            return Type::Mixed(false);
+        };
+        // Rebind to the registry's canonical-case spelling up
+        // front, same as `ExprKind::New`'s identical fix - without
+        // it, a differently-cased real reference (`base::CONST`
+        // for a real `class Base`) always fell into the "class
+        // doesn't exist" branch below before `check_class_name_case`
+        // ever got a chance to run.
+        let class = self
+            .registry
+            .lookup_class(&class)
+            .map(|(canonical, _)| canonical.to_string())
+            .unwrap_or(class);
+        if !self.registry.classes.contains_key(class.as_str()) {
+            // Mirrors real PHPStan's `AccessStaticPropertiesCheck`/
+            // `ClassConstantRule`'s "class doesn't exist at all"
+            // half, for both a static-property and a
+            // class-constant reference on a genuinely undefined
+            // class.
+            let subject = if is_property {
+                "static property access"
+            } else {
+                "class constant access"
+            };
+            self.report(
+                label.to_string(),
+                format!("{subject} target class {class} not found"),
+                e.span,
+                0,
+                "class.notFound",
+            );
+            return Type::Mixed(false);
+        }
+        // `class.nameCase` - `class_name` is the raw, as-written
+        // text (`resolve_static_class_name` above already
+        // resolved `self`/`parent`/`static`/a variable target to
+        // `class`, but never touches `class_name` itself).
+        self.check_class_name_case(label, class_name, e.span);
+        if is_property {
+            let prop_name = member;
+            // Unlike an instance property, PHP has no legal way
+            // to dynamically create a static property at all - no
+            // "could be legitimate" case to stay lenient for
+            // here, the way check_property_assignment's write
+            // side has to for instance properties. A property
+            // declared as an ordinary instance property is
+            // equally invalid through `::` in real PHP ("Access
+            // to undeclared static property"), so both share one
+            // message.
+            let prop_with_owner = self.registry.lookup_property_with_owner(&class, prop_name);
+            let is_valid_static = prop_with_owner
+                .as_ref()
+                .is_some_and(|(_, sig)| sig.is_static);
+            if !is_valid_static {
+                self.report(
+                    label.to_string(),
+                    format!("access to undefined static property {class}::${prop_name}"),
+                    e.span,
+                    0,
+                    "staticProperty.notFound",
+                );
+            } else if let Some((owner, sig)) = &prop_with_owner {
+                self.check_internal_property_access(owner, prop_name, sig, e.span, label);
+                self.check_restricted_property_access(owner, prop_name, true, e.span, label);
+                self.check_deprecated_property_access(owner, prop_name, sig, e.span, label);
+                self.record_member_usage_token(
+                    UsageTokenKind::Property,
+                    owner,
+                    sig.deprecated.is_some(),
+                    sig.is_internal,
+                    e.span,
+                );
+                self.record_member_ref(e.span, owner, prop_name);
+                // A static property shares the exact same
+                // visibility rules as an instance one ("Cannot
+                // access private property" is a real fatal error
+                // either way).
+                self.check_member_visibility(MemberVisibilityCheck {
+                    kind: "staticProperty",
+                    owner,
+                    member_name: prop_name,
+                    visibility: &sig.visibility,
+                    describe: &format!("static property {owner}::${prop_name}"),
+                    span: e.span,
+                    label,
+                });
+                // Mirrors real PHPStan's
+                // `AccessPrivatePropertyThroughStaticRule` - same
+                // late-static-binding unsafety as the identical
+                // class-constant rule above.
+                if class_name == "static" && sig.visibility == Visibility::Private {
+                    self.check_static_private_property_access(owner, prop_name, e.span, label);
+                }
+            }
+            prop_with_owner
+                .map(|(_, p)| self.resolve_pseudo(&p.ty, &class))
+                .unwrap_or(Type::Mixed(false))
+        } else {
+            let const_with_owner = self.registry.lookup_const_with_owner(&class, member);
+            let const_ty = const_with_owner.as_ref().map(|(owner, cs)| {
+                self.registry
+                    .dynamic_class_constant_type(owner, member, &cs.ty)
+                    .unwrap_or_else(|| cs.ty.clone())
+            });
+            if const_ty.is_none() {
+                self.report(
+                    label.to_string(),
+                    format!("access to undefined constant {class}::{member}"),
+                    e.span,
+                    0,
+                    "classConstant.notFound",
+                );
+            } else if let Some((owner, cs)) = &const_with_owner {
+                self.check_internal_class_constant_access(owner, member, cs, e.span, label);
+                self.check_restricted_class_constant_access(owner, member, e.span, label);
+                self.check_deprecated_class_constant_access(owner, member, cs, e.span, label);
+                self.record_member_usage_token(
+                    UsageTokenKind::ClassConstant,
+                    owner,
+                    cs.deprecated.is_some(),
+                    cs.is_internal,
+                    e.span,
+                );
+                self.record_member_ref(e.span, owner, member);
+                self.check_member_visibility(MemberVisibilityCheck {
+                    kind: "classConstant",
+                    owner,
+                    member_name: member,
+                    visibility: &cs.visibility,
+                    describe: &format!("constant {owner}::{member}"),
+                    span: e.span,
+                    label,
+                });
+                // Mirrors real PHPStan's
+                // `AccessPrivateConstantThroughStaticRule`.
+                if class_name == "static" && cs.visibility == Visibility::Private {
+                    self.check_static_private_constant_access(owner, member, e.span, label);
+                }
+            }
+            const_ty
+                .map(|ty| self.resolve_pseudo(&ty, &class))
+                .unwrap_or(Type::Mixed(false))
+        }
+    }
+
+    /// A static member reached through a computed name: when the class
+    /// is an enum, any of its cases may be the one used - see
+    /// `Checker::escaped_enums`.
+    fn record_dynamic_static_member_escape(&self, target: &StaticTarget) {
+        if let Some(raw) = target
+            .as_name()
+            .and_then(|n| self.resolve_static_class_name(n))
+            && let Some((canonical, info)) = self.registry.lookup_class(&raw)
+            && info.kind == ClassKind::Enum
+        {
+            self.record_enum_escape(canonical);
+        }
+    }
+
     /// A `match(true) { $a, $b => X, ... }` arm listing more than one
     /// condition for the same result (real PHP semantics: the arm runs
     /// iff `$a || $b`) needs narrowing applied to its body just as much

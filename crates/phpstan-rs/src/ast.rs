@@ -897,10 +897,16 @@ pub enum ExprKind {
     // member's own type never can be.
     DynamicPropertyAccess(Box<Expr>, Box<Expr>),
     DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>),
-    StaticAccess(String, String),
-    // `Foo::{$expr}` - PHP 8.3's dynamic class-constant fetch; the class
-    // is as in `StaticAccess`, the second field the name expression.
-    DynamicClassConstFetch(String, Box<Expr>),
+    /// `Foo::BAR`.
+    ClassConstFetch(StaticTarget, Arc<str>),
+    /// `Foo::class` (any case).
+    ClassNameFetch(StaticTarget),
+    /// `Foo::$bar`; the name is without its `$`.
+    StaticPropertyFetch(StaticTarget, Arc<str>),
+    /// `Foo::${expr}` / `Foo::$$name`: the property name is computed.
+    DynamicStaticPropertyFetch(StaticTarget, Box<Expr>),
+    /// `Foo::{$expr}` (PHP 8.3): the constant name is computed.
+    DynamicClassConstFetch(StaticTarget, Box<Expr>),
     // `Name` mirrors `InstanceofTarget::Name`'s own (name, name-span)
     // shape exactly - a `Foo::method()` receiver, unchanged from before
     // this variant existed. `Expr` is a real, non-`Name` receiver

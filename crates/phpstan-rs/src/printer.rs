@@ -170,6 +170,13 @@ fn write_interpolated_parts(out: &mut String, parts: &[Expr]) {
     }
 }
 
+fn write_static_target(out: &mut String, target: &StaticTarget) {
+    match target {
+        StaticTarget::Name(n, _) => out.push_str(n),
+        StaticTarget::Expr(inner) => write_expr(out, inner),
+    }
+}
+
 fn write_expr(out: &mut String, e: &Expr) {
     match &e.kind {
         ExprKind::Literal(lit) => match lit {
@@ -309,22 +316,34 @@ fn write_expr(out: &mut String, e: &Expr) {
             write_member_name(out, name);
             write_args(out, args);
         }
-        ExprKind::StaticAccess(class, member) => {
-            out.push_str(class);
+        ExprKind::ClassConstFetch(target, name) => {
+            write_static_target(out, target);
             out.push_str("::");
-            out.push_str(member);
+            out.push_str(name);
         }
-        ExprKind::DynamicClassConstFetch(class, name) => {
-            out.push_str(class);
+        ExprKind::ClassNameFetch(target) => {
+            write_static_target(out, target);
+            out.push_str("::class");
+        }
+        ExprKind::StaticPropertyFetch(target, name) => {
+            write_static_target(out, target);
+            out.push_str("::$");
+            out.push_str(name);
+        }
+        ExprKind::DynamicStaticPropertyFetch(target, name) => {
+            write_static_target(out, target);
+            out.push_str("::${");
+            write_expr(out, name);
+            out.push('}');
+        }
+        ExprKind::DynamicClassConstFetch(target, name) => {
+            write_static_target(out, target);
             out.push_str("::{");
             write_expr(out, name);
             out.push('}');
         }
         ExprKind::StaticCall(target, member, args) => {
-            match target {
-                StaticTarget::Name(n, _) => out.push_str(n),
-                StaticTarget::Expr(inner) => write_expr(out, inner),
-            }
+            write_static_target(out, target);
             out.push_str("::");
             out.push_str(member);
             write_args(out, args);

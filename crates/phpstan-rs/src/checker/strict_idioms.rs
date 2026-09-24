@@ -316,8 +316,8 @@ impl<'a> Checker<'a> {
                         break;
                     };
                     let (subject, case) = match (&l.kind, &r.kind) {
-                        (_, ExprKind::StaticAccess(..)) => (l, r),
-                        (ExprKind::StaticAccess(..), _) => (r, l),
+                        (_, ExprKind::ClassConstFetch(..)) => (l, r),
+                        (ExprKind::ClassConstFetch(..), _) => (r, l),
                         _ => break,
                     };
                     let Some(enum_name) = self.enum_of(&self.infer_expr(case, locals)) else {

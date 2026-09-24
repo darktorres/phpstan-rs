@@ -19,7 +19,7 @@ use crate::token::{Position, Span, Token};
 /// coordinates. Deliberately does **not** filter out scalar/pseudo-type
 /// keywords here (`int`, `self`, `static`, ...) the way `deps.rs`'s own
 /// `is_primitive_type_name` would - unlike that function's "does this
-/// file mention a real class name" purpose, a caller here (`StaticAccess`/
+/// file mention a real class name" purpose, a caller here (`ClassConstFetch`/`StaticPropertyFetch`/
 /// `MethodCall`'s own class+member split) often *wants* exactly one of
 /// those names back (`self::CONST`'s own `"self"` half is a real,
 /// resolvable navigation target, just resolved differently than an
@@ -30,7 +30,7 @@ use crate::token::{Position, Span, Token};
 /// own class names) apply it themselves - see `type_hint_identifiers_qualified`.
 ///
 /// `expected` is the name count the caller already has from the AST
-/// (e.g. `[class_name, member]` for a `StaticAccess`) - this function
+/// (e.g. `[class_name, member]` for a `ClassConstFetch`/`StaticPropertyFetch`) - this function
 /// only ever *locates* text the parser already agreed exists, so a count
 /// mismatch means the re-lex found a different shape than expected (a
 /// lexer edge case, an off-by-one in the span itself) and the caller
@@ -244,7 +244,7 @@ mod tests {
         // is_primitive_type_name (deps.rs's own "not an independent
         // dependency edge" list) also lists self/static/parent -
         // filtering those out here would break the count check for every
-        // self::X/static::X/parent::X StaticAccess, since a caller there
+        // self::X/static::X/parent::X ClassConstFetch, since a caller there
         // always expects both halves back.
         let src = "<?php self::LIMIT;";
         let span = Span {
@@ -267,18 +267,18 @@ mod tests {
 
     #[test]
     fn splits_a_static_access_expression_into_its_class_and_member_halves() {
-        use crate::ast::{Expr, ExprKind};
+        use crate::ast::{Expr, ExprKind, StaticTarget};
         let src = "<?php Foo::CONST;";
         let program = Parser::new(Lexer::new(src).tokenize_with_spans())
             .parse_program()
             .unwrap();
         let StmtKind::Expression(Expr {
-            kind: ExprKind::StaticAccess(class, member),
+            kind: ExprKind::ClassConstFetch(StaticTarget::Name(class, _), member),
             span,
             ..
         }) = &program[0].kind
         else {
-            panic!("expected a StaticAccess expression statement");
+            panic!("expected a ClassConstFetch expression statement");
         };
         let spans = split_identifier_spans(src, *span, &[class, member]).expect("split");
         assert_eq!(spans.len(), 2);

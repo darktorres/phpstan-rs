@@ -299,13 +299,15 @@ impl<'a> Checker<'a> {
                     ty
                 }
             }
-            ExprKind::StaticAccess(class_name, member) => match member.strip_prefix('$') {
-                Some(prop) => match self.resolve_static_class_name(class_name) {
+            ExprKind::StaticPropertyFetch(target, prop) => {
+                match target
+                    .as_name()
+                    .and_then(|n| self.resolve_static_class_name(n))
+                {
                     Some(class) => self.native_property_type(&class, prop, true),
                     None => Type::Mixed(false),
-                },
-                None => Type::Mixed(false),
-            },
+                }
+            }
             _ => Type::Mixed(false),
         }
     }

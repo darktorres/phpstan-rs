@@ -182,7 +182,7 @@ fn record_rebind_scope(
     escape_all: &mut bool,
 ) {
     match scope_arg.map(|a| &a.value.kind) {
-        Some(ExprKind::StaticAccess(class_name, member)) if member == "class" => {
+        Some(ExprKind::ClassNameFetch(StaticTarget::Name(class_name, _))) => {
             targets.insert(Arc::from(ctx.resolve(class_name)));
         }
         // An omitted scope argument, or one that isn't a literal

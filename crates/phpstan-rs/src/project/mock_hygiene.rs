@@ -330,9 +330,8 @@ impl<'a> Walker<'a> {
         if !self.banned.is_empty() {
             for factory in MOCK_FACTORIES {
                 if let Some(args) = is_test_helper_call(e, factory)
-                    && let Some(ExprKind::StaticAccess(class, member)) =
+                    && let Some(ExprKind::ClassNameFetch(StaticTarget::Name(class, _))) =
                         args.first().map(|a| &a.value.kind)
-                    && member.eq_ignore_ascii_case("class")
                 {
                     let resolved = self.ctx.resolve(class);
                     let resolved = resolved.trim_start_matches('\\');

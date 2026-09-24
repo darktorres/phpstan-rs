@@ -68,7 +68,7 @@ impl<'a> Checker<'a> {
     /// variable's own "undefined variable" check and `PropertyAccess`'s
     /// own "access to undefined property" check at every level along the
     /// way - exactly what `isset()`/`??` themselves suppress in real PHP,
-    /// and nothing more. `StaticAccess` is never part of this walk (an
+    /// and nothing more. `ClassConstFetch`/`StaticPropertyFetch` is never part of this walk (an
     /// undeclared *static* property is a real, non-suppressible PHP
     /// fatal error), and anything past a function/method call is checked
     /// normally, since `isset()`/`??` don't evaluate quietly past one.
@@ -687,7 +687,7 @@ impl<'a> Checker<'a> {
 /// loose_comparison`/`check_constant_numeric_comparison` against, but a
 /// class *constant*/enum-case reference (`Foo::BAR`, `Status::A`) is
 /// exactly as immutable as a bare literal - conflating the two (as
-/// `expr_reads_a_property`'s own single `StaticAccess(..) => true` arm
+/// `expr_reads_a_property`'s own static-fetch `=> true` arm
 /// does, correctly for those two siblings' own narrower needs) would
 /// silently exempt the single most valuable real-world shape this check
 /// exists for (`$status === Status::A`) from ever firing at all -
@@ -696,7 +696,7 @@ impl<'a> Checker<'a> {
 fn expr_reads_a_mutable_property(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::PropertyAccess(..) | ExprKind::DynamicPropertyAccess(..) => true,
-        ExprKind::StaticAccess(_, member) => member.starts_with('$'),
+        ExprKind::StaticPropertyFetch(..) => true,
         ExprKind::Call(callee, args) => {
             expr_reads_a_mutable_property(callee)
                 || args.iter().any(|a| expr_reads_a_mutable_property(&a.value))

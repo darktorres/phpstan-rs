@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
 use crate::token::Token;
@@ -107,53 +109,49 @@ impl Parser {
                 Token::DoubleColon => {
                     self.skip();
                     let receiver_expr = expr;
+                    let target = match receiver_expr.kind {
+                        ExprKind::Name(n) => StaticTarget::Name(n, receiver_expr.span),
+                        _ => StaticTarget::Expr(Box::new(receiver_expr)),
+                    };
                     // `class` (`Foo::class`) already worked as a special
                     // case; any other keyword is just as valid here
                     // (`Foo::new()`, `Foo::default()`, `Foo::list()`).
                     let member = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => {
-                            self.take_name_segment().unwrap().to_string()
+                            StaticMember::Name(self.take_name_segment().unwrap())
                         }
                         Token::Variable(_) => {
                             let Token::Variable(s) = self.take_token() else {
                                 unreachable!()
                             };
-                            format!("${s}")
+                            StaticMember::Variable(s)
                         }
-                        // `Foo::{$name}` / `Foo::${$name}` / `Foo::$$name`
-                        // - a fully dynamic static member name.
-                        // StaticAccess/StaticCall aren't given any deeper
-                        // type-checking today regardless of whether the
-                        // name is static or dynamic, so this is just
-                        // parsed (consuming the name expression correctly)
-                        // rather than threading a real Expr through here.
+                        // `Foo::{$name}` - a computed constant name, or
+                        // with `(...)` a computed method name.
                         Token::LBrace if !matches!(self.peek_at(1), Token::RBrace) => {
                             self.skip();
                             let name = self.parse_expression()?;
                             self.expect(&Token::RBrace)?;
                             if !self.check(&Token::LParen) {
-                                let class_name = match &receiver_expr.kind {
-                                    ExprKind::Name(n) => n.clone(),
-                                    _ => "?".to_string(),
-                                };
                                 expr = self.expr(
-                                    ExprKind::DynamicClassConstFetch(class_name, Box::new(name)),
+                                    ExprKind::DynamicClassConstFetch(target, Box::new(name)),
                                     start,
                                 );
                                 continue;
                             }
-                            "{dynamic}".to_string()
+                            StaticMember::Dynamic(name)
                         }
+                        // `Foo::${expr}` / `Foo::$$name` - a computed
+                        // static property name.
                         Token::LBrace | Token::DollarBrace => {
                             self.skip();
-                            self.parse_expression()?;
+                            let name = self.parse_expression()?;
                             self.expect(&Token::RBrace)?;
-                            "{dynamic}".to_string()
+                            StaticMember::Dynamic(name)
                         }
                         Token::Dollar => {
                             self.skip();
-                            self.parse_primary()?;
-                            "{dynamic}".to_string()
+                            StaticMember::Dynamic(self.parse_primary()?)
                         }
                         other => {
                             return Err(ParseError {
@@ -167,22 +165,29 @@ impl Parser {
                     };
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
-                        let target = match &receiver_expr.kind {
-                            ExprKind::Name(n) => StaticTarget::Name(n.clone(), receiver_expr.span),
-                            _ => StaticTarget::Expr(Box::new(receiver_expr)),
+                        let method = match member {
+                            StaticMember::Name(n) => n.to_string(),
+                            StaticMember::Variable(v) => format!("${v}"),
+                            StaticMember::Dynamic(_) => "{dynamic}".to_string(),
                         };
-                        let call = self.expr(ExprKind::StaticCall(target, member, args), start);
+                        let call = self.expr(ExprKind::StaticCall(target, method, args), start);
                         expr = if is_fcc {
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
                             call
                         };
                     } else {
-                        let class_name = match &receiver_expr.kind {
-                            ExprKind::Name(n) => n.clone(),
-                            _ => "?".to_string(),
+                        let kind = match member {
+                            StaticMember::Name(n) if n.eq_ignore_ascii_case("class") => {
+                                ExprKind::ClassNameFetch(target)
+                            }
+                            StaticMember::Name(n) => ExprKind::ClassConstFetch(target, n),
+                            StaticMember::Variable(v) => ExprKind::StaticPropertyFetch(target, v),
+                            StaticMember::Dynamic(name) => {
+                                ExprKind::DynamicStaticPropertyFetch(target, Box::new(name))
+                            }
                         };
-                        expr = self.expr(ExprKind::StaticAccess(class_name, member), start);
+                        expr = self.expr(kind, start);
                     }
                 }
                 Token::LBracket => {
@@ -263,4 +268,11 @@ impl Parser {
         self.expect(&Token::RParen)?;
         Ok((args, false))
     }
+}
+
+/// What follows `::` in a static member access or call.
+enum StaticMember {
+    Name(Arc<str>),
+    Variable(Arc<str>),
+    Dynamic(Expr),
 }

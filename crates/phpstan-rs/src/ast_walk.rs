@@ -40,7 +40,10 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
     match &e.kind {
         ExprKind::Literal(_)
         | ExprKind::Variable(_)
-        | ExprKind::StaticAccess(_, _)
+        | ExprKind::ClassConstFetch(..)
+        | ExprKind::ClassNameFetch(_)
+        | ExprKind::StaticPropertyFetch(..)
+        | ExprKind::DynamicStaticPropertyFetch(..)
         | ExprKind::Name(_) => {
             vec![]
         }
@@ -258,7 +261,10 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
     match &e.kind {
         ExprKind::Literal(_)
         | ExprKind::Variable(_)
-        | ExprKind::StaticAccess(_, _)
+        | ExprKind::ClassConstFetch(..)
+        | ExprKind::ClassNameFetch(_)
+        | ExprKind::StaticPropertyFetch(..)
+        | ExprKind::DynamicStaticPropertyFetch(..)
         | ExprKind::Name(_) => false,
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
