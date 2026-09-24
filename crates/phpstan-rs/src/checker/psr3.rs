@@ -28,6 +28,7 @@
 
 use crate::ast::*;
 use crate::checker::{Checker, Locals};
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 use crate::types::Type;
 
@@ -244,7 +245,7 @@ impl<'a> Checker<'a> {
         let Some(texts) = string_literals(&message_ty) else {
             if may_be_non_literal_string(&message_ty) {
                 self.report_builder(
-                    crate::checker::DiagnosticBuilder::new(
+                    DiagnosticBuilder::new(
                         label.to_string(),
                         format!(
                             "Parameter $message of logger method {method}() is not a static string."

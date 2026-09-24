@@ -11,6 +11,7 @@ use rustc_hash::FxHashSet;
 use crate::ast::*;
 use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 
 const MAGIC_CONSTANTS: [&str; 10] = [
@@ -260,7 +261,7 @@ impl<'a> Checker<'a> {
             !crate::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
         }) {
             self.report_builder(
-                crate::checker::DiagnosticBuilder::new(
+                DiagnosticBuilder::new(
                     label.to_string(),
                     "Fetching class constants with a dynamic name is supported only on PHP 8.3 and later."
                         .to_string(),

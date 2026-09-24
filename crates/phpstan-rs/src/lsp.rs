@@ -9,7 +9,7 @@
 //! rolling the LSP/JSON-RPC layer specifically stopped being the more
 //! consistent choice once those were already dependencies.
 //!
-//! `checker::Diagnostic` carries a real `Span`, converted here to LSP's
+//! `diagnostic::Diagnostic` carries a real `Span`, converted here to LSP's
 //! 0-indexed line/character convention. The `location` symbolic
 //! label (e.g. `"ClassName::methodName"`) is still folded into the
 //! message text rather than dropped - LSP has no field for it. Known
@@ -46,7 +46,8 @@ use lsp_types::{
 };
 
 use crate::ast::ClassKind;
-use crate::checker::{self, Checker};
+use crate::checker::Checker;
+use crate::diagnostic;
 use crate::project::Project;
 use crate::project::use_sites;
 use crate::registry::{FunctionSig, format_signature, param_label};
@@ -177,7 +178,7 @@ struct Server {
     // `codeAction` request can only ever see whatever the most recently
     // processed `didChange`/scan already committed, never a torn or
     // stale-relative-to-an-earlier-unprocessed-edit state.
-    last_diagnostics: FxHashMap<PathBuf, Vec<checker::Diagnostic>>,
+    last_diagnostics: FxHashMap<PathBuf, Vec<diagnostic::Diagnostic>>,
     // The exact current text `didOpen`/`didChange` last sent for a path,
     // regardless of whether it parses - `Project::source`/`Project::ast`
     // only ever reflect the last *successfully parsed* version, but
@@ -515,8 +516,8 @@ impl Server {
     /// default, not a provable-correct one, for either.
     fn apply_post_filters(
         &self,
-        mut results: FxHashMap<PathBuf, Vec<checker::Diagnostic>>,
-    ) -> FxHashMap<PathBuf, Vec<checker::Diagnostic>> {
+        mut results: FxHashMap<PathBuf, Vec<diagnostic::Diagnostic>>,
+    ) -> FxHashMap<PathBuf, Vec<diagnostic::Diagnostic>> {
         if let Some(cutoff) = self.level_cutoff {
             for diagnostics in results.values_mut() {
                 diagnostics.retain(|d| d.level <= cutoff);
@@ -533,7 +534,7 @@ impl Server {
                 .map(Path::to_path_buf)
                 .unwrap_or(path)
         };
-        let mut relative: FxHashMap<PathBuf, Vec<checker::Diagnostic>> = results
+        let mut relative: FxHashMap<PathBuf, Vec<diagnostic::Diagnostic>> = results
             .into_iter()
             .map(|(path, diags)| (to_relative(path), diags))
             .collect();
@@ -753,7 +754,7 @@ impl Server {
     /// (which then drops empty results) and `republish_known_files`
     /// (which must not, so a file previously flagged and now clean gets
     /// an explicit clearing notification).
-    fn check_all_analyzed_paths(&mut self) -> FxHashMap<PathBuf, Vec<checker::Diagnostic>> {
+    fn check_all_analyzed_paths(&mut self) -> FxHashMap<PathBuf, Vec<diagnostic::Diagnostic>> {
         let mut paths = self.project.analyzed_paths();
         if paths.is_empty() {
             return FxHashMap::default();
@@ -989,7 +990,7 @@ impl Server {
     /// `remove_workspace_folders`'s own recheck step.
     fn publish_diagnostics_for(
         &mut self,
-        results: FxHashMap<PathBuf, Vec<checker::Diagnostic>>,
+        results: FxHashMap<PathBuf, Vec<diagnostic::Diagnostic>>,
     ) -> Vec<Message> {
         results
             .into_iter()

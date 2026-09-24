@@ -1,7 +1,7 @@
 //! `reflection_rule::ReflectionRule` + `Project::run_reflection_rules`.
 
 use super::super::*;
-use crate::checker::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::reflection_rule::ReflectionRule;
 use crate::registry::{ClassInfo, FunctionSig};
 

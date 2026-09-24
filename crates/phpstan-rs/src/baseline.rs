@@ -20,9 +20,8 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use crate::diagnostic::Diagnostic;
 use serde::{Deserialize, Serialize};
-
-use crate::checker::Diagnostic;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 struct Entry {

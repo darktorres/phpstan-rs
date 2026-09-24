@@ -1,9 +1,9 @@
 use crate::ast::*;
 use crate::ast_walk::body_contains_yield;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, LoopZeroIterations, collect_goto_targets,
-    purge_stale_narrowing_for,
+    Checker, Locals, LoopZeroIterations, collect_goto_targets, purge_stale_narrowing_for,
 };
+use crate::diagnostic::DiagnosticBuilder;
 use crate::types::Type;
 
 impl<'a> Checker<'a> {

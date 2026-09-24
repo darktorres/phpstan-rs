@@ -1,8 +1,8 @@
 use crate::ast::*;
 use crate::checker::{
-    Checker, DiagnosticBuilder, Locals, is_unsealed_shape, narrowing_key,
-    purge_stale_narrowing_for, union_types,
+    Checker, Locals, is_unsealed_shape, narrowing_key, purge_stale_narrowing_for, union_types,
 };
+use crate::diagnostic::DiagnosticBuilder;
 use crate::types::{AccessoryKind, Type, is_subtype};
 
 /// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an

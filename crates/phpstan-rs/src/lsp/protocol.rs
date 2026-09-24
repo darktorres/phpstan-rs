@@ -11,7 +11,7 @@ use lsp_types::{
     Range as LspRange, TextEdit, Uri, WorkDoneProgress, WorkspaceEdit,
 };
 
-use crate::checker::Diagnostic;
+use crate::diagnostic::{Diagnostic, diagnostic_order};
 use crate::token::{Position, Span};
 
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
@@ -361,7 +361,7 @@ pub(crate) fn publish_diagnostics_notification(
     diagnostics: &[Diagnostic],
 ) -> Message {
     let mut ordered: Vec<&Diagnostic> = diagnostics.iter().collect();
-    ordered.sort_by(|a, b| crate::checker::diagnostic_order(a, b));
+    ordered.sort_by(|a, b| diagnostic_order(a, b));
     Message::Notification(LspNotification::new(
         "textDocument/publishDiagnostics".to_string(),
         PublishDiagnosticsParams {

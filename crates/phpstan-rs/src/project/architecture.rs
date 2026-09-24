@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
-use crate::checker::{Diagnostic, DiagnosticBuilder};
 use crate::php_stubs;
 use crate::registry::NameContext;
 use crate::token::Span;
@@ -19,6 +18,7 @@ use crate::types::Type;
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
+use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 
 /// A class-like declaration's own facts the registry doesn't keep.
 struct Declared<'a> {

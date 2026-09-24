@@ -12,7 +12,8 @@
 //! parameter, ... all routinely go unused without being a bug).
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 
 mod member_usage;

@@ -1,6 +1,7 @@
 //! Suggested fixes, checked by applying them to the source.
 
 use super::helpers::*;
+use crate::diagnostic::DiagnosticFix;
 
 fn fixed(
     src: &str,
@@ -8,7 +9,7 @@ fn fixed(
     configure: impl FnOnce(&mut crate::registry::Registry),
 ) -> String {
     let d = all_diagnostics_for_with(src, configure);
-    let fixes: Vec<&crate::checker::DiagnosticFix> = d
+    let fixes: Vec<&DiagnosticFix> = d
         .iter()
         .filter(|x| x.identifier == identifier)
         .filter_map(|x| x.fix.as_ref())
@@ -45,7 +46,7 @@ fn a_used_function_import_is_fixed_in_place() {
 fn unused_private_members_are_deleted_with_their_doc_comments() {
     let src = "<?php\nfinal class A {\n    /** Never used. */\n    private const UNUSED = 1;\n    private const A = 1, B = 2;\n\n    #[\\Deprecated]\n    private ?int $gone;\n\n    /**\n     * Helper.\n     */\n    private function helper(): void {}\n\n    public function used(): int { return self::A; }\n}\n";
     let d = all_diagnostics_for(src);
-    let fixes: Vec<&crate::checker::DiagnosticFix> = d
+    let fixes: Vec<&DiagnosticFix> = d
         .iter()
         .filter(|x| x.identifier.ends_with(".unused"))
         .filter_map(|x| x.fix.as_ref())

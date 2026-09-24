@@ -23,11 +23,11 @@ use std::path::PathBuf;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
-use crate::checker::{Diagnostic, DiagnosticBuilder};
 use crate::registry::NameContext;
 use crate::token::Span;
 
 use super::Project;
+use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 
 const MOCK_TYPES: [&str; 3] = [
     "PHPUnit\\Framework\\MockObject\\MockObject",

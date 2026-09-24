@@ -1,7 +1,8 @@
 use rustc_hash::FxHashMap;
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{self};
 use crate::types::Type;

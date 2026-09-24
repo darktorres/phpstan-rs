@@ -5,7 +5,8 @@
 //! and a dynamic class-name expression that can't be a class name.
 
 use crate::ast::{ClassKind, Visibility};
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 use crate::types::Type;
 

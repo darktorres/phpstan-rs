@@ -54,7 +54,8 @@
 //!   it).
 
 use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
-use crate::checker::{Checker, Diagnostic, Locals};
+use crate::checker::{Checker, Locals};
+use crate::diagnostic::Diagnostic;
 use crate::types::Type;
 
 /// One flow-sensitive, per-node-kind rule - see this module's own doc

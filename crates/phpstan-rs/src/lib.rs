@@ -15,6 +15,7 @@ pub mod checker;
 pub mod composer;
 pub mod config;
 pub mod deps;
+pub mod diagnostic;
 pub mod docblock;
 pub mod doctrine_functions;
 pub mod fix;
@@ -48,6 +49,7 @@ pub(crate) mod text_split;
 pub mod token;
 pub mod types;
 
-pub use checker::{Checker, Diagnostic, DiagnosticBuilder, DiagnosticFix};
+pub use checker::Checker;
+pub use diagnostic::{Diagnostic, DiagnosticBuilder, DiagnosticFix};
 pub use project::Project;
 pub use registry::Registry;

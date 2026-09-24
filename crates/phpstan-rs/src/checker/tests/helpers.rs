@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::diagnostic::Diagnostic;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::registry::Registry;

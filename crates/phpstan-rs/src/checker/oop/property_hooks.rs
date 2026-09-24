@@ -2,9 +2,10 @@ use crate::ast::*;
 use crate::ast_walk::{body_contains_yield, expr_contains_yield};
 use crate::checker::type_union::union_types;
 use crate::checker::{
-    ATTRIBUTE_TARGET_METHOD, Checker, DiagnosticBuilder, Locals, body_contains_explicit_throw,
-    collect_goto_targets, expr_contains_explicit_throw,
+    ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
+    expr_contains_explicit_throw,
 };
+use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{self, PropertySig, resolve_names_in_type};
 use crate::token::Span;

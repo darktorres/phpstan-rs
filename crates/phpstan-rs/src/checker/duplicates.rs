@@ -15,7 +15,8 @@
 //! of what real PHP does with it."
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 
 impl<'a> Checker<'a> {
     /// `DuplicateDeclarationHelper::checkClassLike`'s equivalent for a

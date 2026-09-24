@@ -22,7 +22,7 @@
 //! `checker::internal_rules`'s own doc comment) would need a real
 //! `Scope` facade to expose safely, which doesn't exist yet.
 
-use crate::checker::Diagnostic;
+use crate::diagnostic::Diagnostic;
 use crate::registry::{ClassInfo, FunctionSig};
 
 /// One reflection-level check. Default no-op bodies (unlike this

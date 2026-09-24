@@ -21,7 +21,8 @@
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
 use crate::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::FunctionSig;
 use crate::token::Span;

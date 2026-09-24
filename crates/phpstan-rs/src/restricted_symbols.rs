@@ -35,10 +35,10 @@
 //! keyword-specific siblings, each a materially different detection shape
 //! needing its own separate investigation.
 
-use crate::checker::Diagnostic;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
+use crate::diagnostic::Diagnostic;
 use serde::Deserialize;
 
 /// PHP's own case-(in)sensitivity rules govern the lookup-key casing
@@ -639,10 +639,7 @@ mod tests {
         assert!(RestrictedSymbols::default().is_empty());
     }
 
-    fn restricted_diagnostic(
-        allow_in: &[&str],
-        allow_except_in: &[&str],
-    ) -> crate::checker::Diagnostic {
+    fn restricted_diagnostic(allow_in: &[&str], allow_except_in: &[&str]) -> Diagnostic {
         let mut metadata = rustc_hash::FxHashMap::default();
         if !allow_in.is_empty() {
             metadata.insert(
@@ -656,7 +653,7 @@ mod tests {
                 serde_json::json!(allow_except_in),
             );
         }
-        crate::checker::Diagnostic {
+        Diagnostic {
             location: "f".to_string(),
             message: "restricted".to_string(),
             span: crate::token::Span::default(),
@@ -701,7 +698,7 @@ mod tests {
 
     #[test]
     fn filter_by_path_drops_only_the_allowed_entries() {
-        let mut results: FxHashMap<PathBuf, Vec<crate::checker::Diagnostic>> = FxHashMap::default();
+        let mut results: FxHashMap<PathBuf, Vec<Diagnostic>> = FxHashMap::default();
         results.insert(
             PathBuf::from("tests/Foo.php"),
             vec![restricted_diagnostic(&["tests/*.php"], &[])],
@@ -715,7 +712,7 @@ mod tests {
         assert_eq!(results[&PathBuf::from("src/Foo.php")].len(), 1);
     }
 
-    fn with_gate(mut d: crate::checker::Diagnostic, gate: bool) -> crate::checker::Diagnostic {
+    fn with_gate(mut d: Diagnostic, gate: bool) -> Diagnostic {
         d.metadata.insert(
             PARAMS_IN_ALLOWED_GATE_METADATA_KEY.to_string(),
             serde_json::json!(gate),

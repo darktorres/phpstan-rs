@@ -69,8 +69,9 @@ use std::path::Path;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::checker::{Checker, Diagnostic, class_type_word};
+use crate::checker::{Checker, class_type_word};
 use crate::composer;
+use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 use crate::registry::{FunctionSig, NameContext, Registry, is_phpstan_namespace};
 use crate::token::Span;
 
@@ -548,7 +549,7 @@ impl<'a> Checker<'a> {
             return;
         }
         self.report_builder(
-            crate::checker::DiagnosticBuilder::new(
+            DiagnosticBuilder::new(
                 label.to_string(),
                 format!("Node attribute '{name}' is no longer available."),
                 span,

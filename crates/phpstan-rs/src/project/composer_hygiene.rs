@@ -27,7 +27,6 @@ use std::path::{Path, PathBuf};
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
-use crate::checker::{Diagnostic, DiagnosticBuilder};
 use crate::composer::constraint;
 use crate::composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use crate::php_stubs;
@@ -35,6 +34,7 @@ use crate::token::{Position, Span};
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
+use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 
 /// PSR virtual packages and the interfaces a provider must implement.
 const PSR_VIRTUAL_PACKAGES: &[(&str, &[&str])] = &[

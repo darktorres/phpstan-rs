@@ -13,7 +13,8 @@
 //! `bool` arm can never actually fire and isn't worth a coercion method
 //! of its own.
 
-use crate::checker::{Checker, DiagnosticBuilder, union_types};
+use crate::checker::{Checker, union_types};
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 use crate::types::{AccessoryKind, Type};
 

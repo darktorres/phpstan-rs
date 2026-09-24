@@ -17,9 +17,8 @@
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
+use crate::diagnostic::Diagnostic;
 use serde::Deserialize;
-
-use crate::checker::Diagnostic;
 
 /// One `ignoreErrors:` entry. Every field is optional and AND-combined
 /// when more than one is set (mirrors real PHPStan's own

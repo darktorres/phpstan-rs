@@ -10,12 +10,12 @@ use std::path::PathBuf;
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::banned::BannedConstruct;
-use crate::checker::{Diagnostic, DiagnosticBuilder};
 use crate::registry::{NameContext, Registry};
 use crate::token::{Position, Span};
 use crate::types::Type;
 
 use super::Project;
+use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 
 const SUPERGLOBALS: [&str; 9] = [
     "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV",

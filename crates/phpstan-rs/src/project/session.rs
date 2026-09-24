@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::checker::{self, Diagnostic};
 use crate::config::{self, Config};
 use crate::token::Span;
 use crate::{
@@ -21,6 +20,7 @@ use crate::{
 };
 
 use super::{ParsedFile, Project};
+use crate::diagnostic::{self, Diagnostic};
 
 /// The level reported when neither the command line nor the config sets
 /// one: every level this project's diagnostics are tagged with.
@@ -42,7 +42,7 @@ pub struct Overrides {
     pub php_version: Option<String>,
     pub no_composer: bool,
     /// Leaves each file's diagnostics in the order the checks emitted them
-    /// instead of `checker::diagnostic_order`: the determinism gate runs
+    /// instead of `diagnostic::diagnostic_order`: the determinism gate runs
     /// twice with this and requires identical output.
     pub emission_order: bool,
 }
@@ -89,7 +89,7 @@ pub struct Loaded {
 
 /// What one run produced, after the full post-processing chain.
 pub struct Analysis {
-    /// Per-file diagnostics in `checker::diagnostic_order`.
+    /// Per-file diagnostics in `diagnostic::diagnostic_order`.
     pub results: FxHashMap<PathBuf, Vec<Diagnostic>>,
     /// Analysed files that parsed and checked without an internal error.
     pub checked: usize,
@@ -753,7 +753,7 @@ impl Session {
         restricted_symbols::filter_by_path(&mut results);
         if !self.emission_order {
             for diagnostics in results.values_mut() {
-                checker::sort_diagnostics(diagnostics);
+                diagnostic::sort_diagnostics(diagnostics);
             }
         }
 

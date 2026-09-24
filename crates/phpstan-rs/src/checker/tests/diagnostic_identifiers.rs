@@ -5,7 +5,7 @@
 //! that attach one, `tip`) correctly, and that `DiagnosticBuilder`
 //! itself behaves as a plain, independently-testable unit.
 
-use crate::checker::DiagnosticBuilder;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::{Position, Span};
 
 fn dummy_span() -> Span {

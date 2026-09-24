@@ -19,7 +19,7 @@ pub(crate) struct CheckProjectArgs {
     // not statically by clap.
     pub(crate) dirs: Vec<PathBuf>,
     /// Report up to and including this level (see
-    /// checker::Diagnostic's own doc comment) - unset means
+    /// diagnostic::Diagnostic's own doc comment) - unset means
     /// "report everything".
     #[arg(long)]
     pub(crate) level: Option<u8>,

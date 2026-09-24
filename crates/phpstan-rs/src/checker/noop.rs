@@ -16,7 +16,8 @@
 
 use crate::ast::{BinOp, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
-use crate::checker::{Checker, DiagnosticBuilder, Locals};
+use crate::checker::{Checker, Locals};
+use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{FunctionSig, collect_impure_points};
 use crate::types::Type;

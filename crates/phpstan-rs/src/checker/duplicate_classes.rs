@@ -30,7 +30,8 @@
 
 use std::path::Path;
 
-use crate::checker::{Diagnostic, class_kind_identifier, class_kind_word};
+use crate::checker::{class_kind_identifier, class_kind_word};
+use crate::diagnostic::Diagnostic;
 use crate::project::duplicate_class_sites::{ClassDeclSite, DuplicateClassSites};
 
 pub(crate) fn check_duplicate_class_declarations(

@@ -12,7 +12,8 @@ use std::sync::Arc;
 
 use crate::ast::*;
 use crate::ast_walk::stmt_children;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 
 #[derive(Clone, Copy, PartialEq, Eq)]

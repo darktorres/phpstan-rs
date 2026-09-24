@@ -7,7 +7,8 @@
 //! the position doesn't allow them, and, below PHP 8.2, standalone
 //! `null`/`false`, the `true` type, and DNF types.
 
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::php_version::PhpFeature;
 use crate::token::Span;
 

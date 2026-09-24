@@ -1,5 +1,6 @@
 use crate::ast::StaticTarget;
-use crate::checker::{Checker, DiagnosticBuilder, Locals, class_type_word};
+use crate::checker::{Checker, Locals, class_type_word};
+use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{self, FunctionSig};
 use crate::token::Span;
 use crate::types::{self, Type};
@@ -875,7 +876,7 @@ impl<'a> Checker<'a> {
         prefixed.retain(|(n, _)| seen.insert(*n));
         for (name, project) in prefixed {
             self.report_builder(
-                crate::checker::DiagnosticBuilder::new(
+                DiagnosticBuilder::new(
                     label.to_string(),
                     format!("Referencing prefixed {project} class: {name}."),
                     span,

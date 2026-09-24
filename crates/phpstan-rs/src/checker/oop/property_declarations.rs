@@ -5,7 +5,8 @@
 //! `ExistingClassesInPropertiesRule`'s unresolvable-native-type half.
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::checker::Checker;
+use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::php_version::PhpFeature;
 use crate::token::Span;

@@ -5,8 +5,9 @@ use std::sync::Arc;
 
 use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use crate::checker::whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
-use crate::checker::{self, Checker, Diagnostic, PropertyAssignFacts};
+use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
+use crate::diagnostic::{self, Diagnostic};
 use crate::ignore_comments;
 use crate::lexer::Lexer;
 use crate::parser::{ParseError, Parser};
@@ -743,7 +744,7 @@ impl Project {
             let mut unmatched_line = |line: u32, message: String, identifier: &str| {
                 let at = crate::token::Position { line, col: 1 };
                 unmatched.push(
-                    checker::DiagnosticBuilder::new(
+                    diagnostic::DiagnosticBuilder::new(
                         "<main>".to_string(),
                         message,
                         Span { start: at, end: at },
@@ -1658,7 +1659,7 @@ impl Project {
                 col: 1,
             };
             diagnostics.push(
-                checker::DiagnosticBuilder::new(
+                diagnostic::DiagnosticBuilder::new(
                     "<main>".to_string(),
                     format!("Parse error in @phpstan-ignore: {message}"),
                     Span { start: at, end: at },

@@ -1,8 +1,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::DiagnosticBuilder;
 use crate::ast::*;
 use crate::checker::{Checker, class_kind_identifier};
+use crate::diagnostic::DiagnosticBuilder;
 
 /// Real PHPStan's own `INTERNAL_CLASS_PREFIXES`
 /// (`ClassForbiddenNameCheck`), transcribed - a Rector/PHP-Scoper/PHPUnit-

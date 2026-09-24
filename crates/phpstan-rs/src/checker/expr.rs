@@ -4,13 +4,14 @@ use crate::checker::calls::parameters::Callee;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
-    CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
-    TemplateBindings, UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
+    CheckArgsCall, Checker, Locals, LoopZeroIterations, MemberVisibilityCheck, TemplateBindings,
+    UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
     is_known_single_value, is_language_construct, is_real_variable_key, literal_string_key,
     merge_scopes, narrow_type_excluding, narrowing_key, propagate_container_field_facts,
     purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
     superglobal_default_type, to_bitwise_not,
 };
+use crate::diagnostic::DiagnosticBuilder;
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::{FunctionSig, Registry};

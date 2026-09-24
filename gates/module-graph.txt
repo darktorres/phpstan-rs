@@ -69,6 +69,7 @@ module sql_reflection_schema sql
 module sql_reflection_reflector sql
 module sql_reflection_schema_drift sql
 module output app
+module diagnostic diagnostics
 module fix diagnostics
 module baseline project
 module ignore_errors project
@@ -208,9 +209,9 @@ module checker::whole_program rules
 module checker::access_attributes ext-language-extensions
 
 # allow <from> <to> <phase that removes the edge>
-allow fix checker B2
 
 allow checker::coercion checker B4
+allow checker::coercion diagnostic B4
 allow checker::coercion registry B4
 
 allow registry sql_reflection_config B6

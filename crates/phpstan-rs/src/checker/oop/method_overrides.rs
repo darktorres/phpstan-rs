@@ -1,6 +1,7 @@
 use crate::ast::*;
+use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
-use crate::checker::{Checker, DiagnosticBuilder};
+use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
 use crate::types::Type;
 
