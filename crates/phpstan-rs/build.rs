@@ -45,10 +45,7 @@ fn main() {
     let vendor = Path::new(&manifest_dir).join("../../vendor");
 
     let mut phpstorm_files = Vec::new();
-    collect_php_files(
-        &vendor.join("phpstorm-stubs"),
-        &mut phpstorm_files,
-    );
+    collect_php_files(&vendor.join("phpstorm-stubs"), &mut phpstorm_files);
 
     // Deliberately scoped to `src/` only, not the whole `vendor/
     // phpstan-src` root - mirrors phpstorm-stubs' own curation (real
@@ -59,10 +56,7 @@ fn main() {
     // `turbo-ext/` - none of which declare the PHPStan\Type\*/
     // PHPStan\Rules\Rule-style classes actually referenced in the wild.
     let mut phpstan_src_files = Vec::new();
-    collect_php_files(
-        &vendor.join("phpstan-src/src"),
-        &mut phpstan_src_files,
-    );
+    collect_php_files(&vendor.join("phpstan-src/src"), &mut phpstan_src_files);
 
     // `vendor/phpstan-src` is a git submodule (see `.gitmodules`) - unlike
     // a plain vendored directory, `git clone`/`git worktree add` don't
@@ -91,16 +85,15 @@ fn main() {
     // top-level `stubs/*.stub` files; `stubs/runtime/` is PHPStan's own
     // polyfills) - `php_stubs.rs` reads their class-level `@template`
     // declarations.
-    let mut phpstan_stub_files: Vec<PathBuf> =
-        fs::read_dir(vendor.join("phpstan-src/stubs"))
-            .map(|entries| {
-                entries
-                    .flatten()
-                    .map(|e| e.path())
-                    .filter(|p| p.extension().is_some_and(|e| e == "stub"))
-                    .collect()
-            })
-            .unwrap_or_default();
+    let mut phpstan_stub_files: Vec<PathBuf> = fs::read_dir(vendor.join("phpstan-src/stubs"))
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.extension().is_some_and(|e| e == "stub"))
+                .collect()
+        })
+        .unwrap_or_default();
     phpstan_stub_files.sort();
 
     let mut generated = String::new();
