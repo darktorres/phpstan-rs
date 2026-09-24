@@ -36,7 +36,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
         use Doctrine\DBAL\ArrayParameterType;
@@ -48,5 +48,5 @@
                 ->where('id IN (:ids)')
                 ->setParameter('ids', $ids, ArrayParameterType::INTEGER)
                 ->fetchAssociative();
-        }
+        } }
         

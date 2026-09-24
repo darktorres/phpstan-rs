@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -122,5 +122,5 @@
                 $indexed = $this->createQueryBuilder('t', 't.id')->getQuery()->getResult();
                 assertType('array<int, App\TagEntity>', $indexed);
             }
-        }
+        } }
         

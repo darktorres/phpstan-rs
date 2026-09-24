@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -91,5 +91,5 @@
                 $rows = $qb->getQuery()->getResult();
                 assertType('list<App\TagEntity>', $rows);
             }
-        }
+        } }
         

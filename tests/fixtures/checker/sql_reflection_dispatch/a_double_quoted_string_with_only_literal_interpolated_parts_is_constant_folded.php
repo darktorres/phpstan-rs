@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -64,5 +64,5 @@
             $table = 'categories';
             $row = $c->fetchAssociative("SELECT id, name FROM $table");
             assertType('array{id: int, name: string}|false', $row);
-        }
+        } }
         

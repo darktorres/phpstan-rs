@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -64,5 +64,5 @@
             $result = $c->executeQuery('SELECT id, name FROM categories');
             assertType('int|string', $result->rowCount());
             assertType('int', $result->columnCount());
-        }
+        } }
         

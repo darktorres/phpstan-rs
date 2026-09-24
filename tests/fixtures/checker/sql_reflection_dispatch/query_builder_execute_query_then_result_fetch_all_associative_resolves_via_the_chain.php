@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -67,5 +67,5 @@
                 ->executeQuery()
                 ->fetchAllAssociative();
             assertType('list<array{id: int, name: string}>', $rows);
-        }
+        } }
         

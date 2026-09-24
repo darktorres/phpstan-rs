@@ -71,7 +71,7 @@
     }
 
 
-            namespace App;
+            namespace App {
 
             use Doctrine\ORM\Mapping as ORM;
             use function PHPStan\Testing\assertType;
@@ -88,5 +88,5 @@
             function f(Connection $c): void {
                 $row = $c->fetchAssociative('SELECT name FROM categories');
                 assertType('array{name: string}|false', $row);
-            }
+            } }
             

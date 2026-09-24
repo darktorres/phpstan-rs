@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -63,5 +63,5 @@
         function f(Connection $c): void {
             $row = $c->fetchAssociative('SELECT 1, COUNT(*)');
             assertType("array{1: int, 'COUNT(*)': int<0, max>}|false", $row);
-        }
+        } }
         

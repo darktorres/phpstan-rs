@@ -36,11 +36,11 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
 
         function f(Connection $c): void {
             $c->fetchAssociative('SELECT * FROM categories WHERE id = ? AND status = ?', [1]);
-        }
+        } }
         

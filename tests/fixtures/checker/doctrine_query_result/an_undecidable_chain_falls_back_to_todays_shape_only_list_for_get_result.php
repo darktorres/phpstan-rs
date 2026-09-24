@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\EntityManagerInterface;
@@ -79,5 +79,5 @@
                 $rows = $em->createQueryBuilder()->select($dql)->getQuery()->getResult();
                 assertType('list', $rows);
             }
-        }
+        } }
         

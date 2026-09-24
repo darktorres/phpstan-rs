@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -94,5 +94,5 @@
                 $rows = $this->createQueryBuilder('t')->getQuery()->getResult();
                 assertType('list', $rows);
             }
-        }
+        } }
         

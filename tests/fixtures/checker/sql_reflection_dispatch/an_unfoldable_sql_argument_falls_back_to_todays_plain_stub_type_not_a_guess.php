@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -63,5 +63,5 @@
         function f(Connection $c, string $dynamicSql): void {
             $row = $c->fetchAssociative($dynamicSql);
             assertType('array|false', $row);
-        }
+        } }
         

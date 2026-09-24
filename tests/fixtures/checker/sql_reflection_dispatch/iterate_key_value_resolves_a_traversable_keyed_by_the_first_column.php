@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -63,5 +63,5 @@
         function f(Connection $c): void {
             $rows = $c->iterateKeyValue('SELECT id, name FROM categories');
             assertType('Traversable<int, string>', $rows);
-        }
+        } }
         

@@ -36,7 +36,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
         use Doctrine\DBAL\Types\Types;
@@ -47,5 +47,5 @@
                 ['not-a-number'],
                 [Types::INTEGER]
             );
-        }
+        } }
         

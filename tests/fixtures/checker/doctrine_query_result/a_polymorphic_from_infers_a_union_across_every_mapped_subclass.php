@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -105,5 +105,5 @@
                     ->getResult();
                 assertType('list<App\CatEntity|App\DogEntity>', $rows);
             }
-        }
+        } }
         

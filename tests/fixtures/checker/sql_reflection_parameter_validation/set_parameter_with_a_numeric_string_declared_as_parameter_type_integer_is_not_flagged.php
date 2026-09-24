@@ -36,7 +36,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
         use Doctrine\DBAL\ParameterType;
@@ -48,5 +48,5 @@
                 ->where('id = :id')
                 ->setParameter('id', '42', ParameterType::INTEGER)
                 ->fetchAssociative();
-        }
+        } }
         

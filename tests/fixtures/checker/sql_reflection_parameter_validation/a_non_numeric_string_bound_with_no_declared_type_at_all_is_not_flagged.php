@@ -36,7 +36,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
 
@@ -45,5 +45,5 @@
                 'SELECT * FROM categories WHERE name = ?',
                 ['not-a-number']
             );
-        }
+        } }
         

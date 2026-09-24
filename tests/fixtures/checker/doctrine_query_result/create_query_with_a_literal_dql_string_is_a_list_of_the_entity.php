@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -87,5 +87,5 @@
                 $rows = $em->createQuery('SELECT t FROM App\TagEntity t')->getResult();
                 assertType('list<App\TagEntity>', $rows);
             }
-        }
+        } }
         

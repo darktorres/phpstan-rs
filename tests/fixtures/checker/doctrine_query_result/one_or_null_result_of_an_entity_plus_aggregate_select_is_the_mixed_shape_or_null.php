@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -90,5 +90,5 @@
                     ->getOneOrNullResult();
                 assertType('array{0: App\TagEntity, cnt: int<0, max>}|null', $row);
             }
-        }
+        } }
         

@@ -36,11 +36,11 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
 
         function f(Connection $c, string $dynamicSql): void {
             $c->fetchAssociative($dynamicSql, []);
-        }
+        } }
         

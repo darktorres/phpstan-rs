@@ -55,7 +55,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\DBAL\Connection;
@@ -63,5 +63,5 @@
         function f(Connection $c): void {
             $row = $c->fetchAssociative(sprintf('SELECT id, name FROM categories LIMIT %d', 1));
             assertType('array{id: int, name: string}|false', $row);
-        }
+        } }
         

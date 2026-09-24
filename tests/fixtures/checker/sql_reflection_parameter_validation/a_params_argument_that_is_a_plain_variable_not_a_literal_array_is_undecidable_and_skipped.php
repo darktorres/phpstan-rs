@@ -36,11 +36,11 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
 
         function f(Connection $c, array $ids): void {
             $c->executeStatement('DELETE FROM images WHERE id IN (?, ?)', $ids);
-        }
+        } }
         

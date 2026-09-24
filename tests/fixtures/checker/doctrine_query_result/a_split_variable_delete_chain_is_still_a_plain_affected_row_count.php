@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\ORM\Mapping as ORM;
         use Doctrine\ORM\EntityRepository;
@@ -89,5 +89,5 @@
                 }
                 return $qb->getQuery()->execute();
             }
-        }
+        } }
         

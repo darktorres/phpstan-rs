@@ -67,7 +67,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use function PHPStan\Testing\assertType;
         use Doctrine\ORM\Mapping as ORM;
@@ -95,5 +95,5 @@
                 )->getResult();
                 assertType('list<array{0: App\TagEntity, firstImageId: int}>', $rows);
             }
-        }
+        } }
         

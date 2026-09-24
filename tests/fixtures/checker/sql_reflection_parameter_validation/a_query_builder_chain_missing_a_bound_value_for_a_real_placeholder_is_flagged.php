@@ -36,7 +36,7 @@
     }
 
 
-        namespace App;
+        namespace App {
 
         use Doctrine\DBAL\Connection;
 
@@ -46,5 +46,5 @@
                 ->from('categories')
                 ->where('status = :status')
                 ->fetchAssociative();
-        }
+        } }
         
