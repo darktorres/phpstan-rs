@@ -4,7 +4,7 @@
 //! since verifying no *other file* reaches a broader-visibility member
 //! needs its cross-process collector machinery - this project's own
 //! closed-world `Registry`/Tier-2 `use_sites` index already has that
-//! fact for free, the same infrastructure `checker::whole_program::
+//! fact for free, the same infrastructure `project::whole_program::
 //! dead_code` (Phase 86's B2) already reads.
 //!
 //! `record_member_ref` already fires from every ordinary access arm

@@ -10,7 +10,7 @@
 //! neither on, Tier 1 stays empty - measured too expensive on a real
 //! corpus to populate unconditionally the way `decl_locations` is (see
 //! `Project::insert_parsed_file`'s own doc comment). This is what
-//! `checker::whole_program::dead_code` (`project::tests::dead_code`)
+//! `project::whole_program::dead_code` (`project::tests::dead_code`)
 //! relies on. The LSP wiring itself (`textDocument/references`/
 //! `textDocument/rename`) is exercised separately in `lsp::tests::
 //! references_and_rename`.

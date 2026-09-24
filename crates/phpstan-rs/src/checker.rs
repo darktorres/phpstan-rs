@@ -1068,7 +1068,7 @@ pub struct Checker<'a> {
     // check pass saw a `::cases()` call or a dynamic (`{dynamic}`)
     // member access against - either one means "some case of this enum
     // is used in a way this project can't attribute to a specific case
-    // name," so `checker::whole_program::dead_enum_cases` treats the
+    // name," so `project::whole_program::dead_enum_cases` treats the
     // whole enum as conservatively used rather than risk a false
     // "unused" report. Populated only when `collect_member_refs` is on
     // (the same Tier-2 pass `member_ref_sites` rides along with) -
@@ -1082,7 +1082,7 @@ pub struct Checker<'a> {
     // *genuinely* dynamic member access (`$obj->{$expr}`/`$obj->$name`,
     // the name itself not a literal string - see `check_expr`'s own
     // `DynamicPropertyAccess`/`DynamicMethodCall` arms) whose receiver
-    // resolved to a known type. `checker::whole_program::dead_members`
+    // resolved to a known type. `project::whole_program::dead_members`
     // treats every member of an escaped class as conservatively used,
     // the same "can't attribute to one specific member, don't flag any
     // of them" discipline `escaped_enums` above already uses for enum
@@ -1139,8 +1139,6 @@ mod date_interval;
 mod date_time;
 mod deprecated_usage;
 pub(crate) mod doctrine;
-pub(crate) mod duplicate_classes;
-pub(crate) mod duplicate_functions;
 mod duplicates;
 mod expr;
 mod function_decl;
@@ -1195,7 +1193,6 @@ mod unused;
 mod var_tag_types;
 mod visibility;
 mod whitespace;
-pub(crate) mod whole_program;
 mod xml_name;
 mod xml_wellformedness;
 
@@ -1540,7 +1537,7 @@ impl<'a> Checker<'a> {
     /// through a subclass instance too); `ty` resolving to an interface
     /// or non-final abstract class additionally includes every real
     /// class anywhere in the registry that has it in *their* own
-    /// ancestor set (the same inversion `checker::whole_program::dead_
+    /// ancestor set (the same inversion `project::whole_program::dead_
     /// abstract_classes` already uses, applied here per dynamic-access
     /// site instead of once project-wide - dynamic accesses are rare
     /// enough in practice that this doesn't need its own persistent

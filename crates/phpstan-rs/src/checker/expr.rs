@@ -2826,7 +2826,7 @@ impl<'a> Checker<'a> {
                         let resolved_ty =
                             self.narrow_enum_from_call(class, method, args, resolved_ty, locals);
                         // Phase 92's own `::from()`/`::tryFrom()` literal-
-                        // argument signal - see `checker::whole_program::
+                        // argument signal - see `project::whole_program::
                         // dead_enum_cases`'s own doc comment. Reads the
                         // type `narrow_enum_from_call` just computed
                         // rather than threading a new span parameter

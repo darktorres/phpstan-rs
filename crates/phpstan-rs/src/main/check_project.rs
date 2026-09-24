@@ -143,7 +143,7 @@ pub(crate) struct CheckProjectArgs {
     /// Enables opt-in whole-project duplicate class/interface/trait/
     /// enum-declaration detection (`class.duplicate`/etc.) - going
     /// beyond real PHPStan, which has no whole-project equivalent of
-    /// this check at all (see `checker::duplicate_classes`'s own
+    /// this check at all (see `project::duplicate_classes`'s own
     /// module doc comment). Off by default: its one known corpus
     /// false-positive shape (a vendored built-in stub override
     /// colliding with the real extension's own class) needs

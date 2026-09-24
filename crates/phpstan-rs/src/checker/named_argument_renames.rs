@@ -12,7 +12,7 @@
 //!
 //! This module only ever *records facts* (into `Checker::named_
 //! argument_call_facts`/`renamed_parameter_override_facts`) - the real
-//! cross-referencing (`checker::whole_program::renamed_named_arguments`)
+//! cross-referencing (`project::whole_program::renamed_named_arguments`)
 //! only makes sense once every file's own facts have been merged
 //! project-wide (`Project::collect_named_argument_facts`), the same
 //! two-pass shape `property_assign_facts`'s own architecture already

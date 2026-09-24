@@ -129,8 +129,8 @@ module checker::xml_name builtins
 module checker::xml_wellformedness builtins
 module checker::deprecated_usage ext-deprecation-rules
 module checker::doctrine ext-doctrine
-module checker::duplicate_classes rules
-module checker::duplicate_functions rules
+module project::duplicate_classes rules
+module project::duplicate_functions rules
 module checker::duplicates rules
 module checker::expr analyser
 module checker::expr::array_ops builtins
@@ -205,7 +205,7 @@ module checker::uninitialized rules
 module checker::uninitialized_dataflow rules
 module checker::unused rules
 module checker::var_tag_types analyser
-module checker::whole_program rules
+module project::whole_program rules
 module checker::access_attributes ext-language-extensions
 
 # allow <from> <to> <phase that removes the edge>
@@ -240,15 +240,15 @@ allow checker::internal_rules checker::oop::method_overrides D6
 
 allow checker checker::named_argument_renames E1
 allow checker checker::property_type_too_wide E1
-allow checker::duplicate_classes project E1
-allow checker::duplicate_functions project E1
+allow project::duplicate_classes project E1
+allow project::duplicate_functions project E1
 allow checker::expr checker::named_argument_renames E1
 allow checker::function_decl checker::property_type_too_wide E1
-allow checker::whole_program project E1
-allow project checker::duplicate_classes E1
-allow project checker::duplicate_functions E1
+allow project::whole_program project E1
+allow project project::duplicate_classes E1
+allow project project::duplicate_functions E1
 allow project checker::named_argument_renames E1
-allow project checker::whole_program E1
+allow project project::whole_program E1
 allow project project::architecture E1
 allow project project::banned E1
 allow project project::class_shape E1

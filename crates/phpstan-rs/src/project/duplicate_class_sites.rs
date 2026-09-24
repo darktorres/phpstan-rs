@@ -11,7 +11,7 @@ use crate::token::Span;
 /// `DeclLocations` are - mirrors `project::duplicate_fn_sites::FnDeclSite`
 /// exactly, with one new field this side needs and the function side
 /// doesn't: `is_stub`, whether this site's own file falls under a
-/// configured `stub_paths` entry (see `checker::duplicate_classes`'s own
+/// configured `stub_paths` entry (see `project::duplicate_classes`'s own
 /// doc comment for why that distinction exists at all - a designated
 /// override for a real corpus-vendored stub file, e.g. `Imagick.stub.
 /// php`, must never itself be flagged, and must never count toward

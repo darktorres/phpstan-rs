@@ -9,7 +9,7 @@
 //! the one match at a cursor". Real caret-precision spans need the
 //! file's retained source text (`index_class_fn_refs`, LSP-only, gated
 //! behind `retain_source` exactly like `DeclLocations` used to be); a
-//! batch `check-project` run has no retained source but, when `checker::
+//! batch `check-project` run has no retained source but, when `project::
 //! whole_program::dead_code` is enabled, still needs to know *whether* a
 //! class/function is referenced at all -
 //! `index_class_fn_refs_without_source` runs instead there, trading
@@ -151,7 +151,7 @@ pub(crate) fn index_class_fn_refs(stmts: &[Stmt], source: &str) -> Vec<(Span, Re
 /// own span, when its owning node doesn't carve out a narrower one"), just
 /// not narrowed to the exact identifier's own characters. Existence-only
 /// callers (a whole-program "was this ever referenced" check, e.g.
-/// `checker::whole_program::dead_code`) never read a use-site's span at
+/// `project::whole_program::dead_code`) never read a use-site's span at
 /// all, so the imprecision is invisible to them; a real caret-precision
 /// consumer (`textDocument/references`/`rename`) only ever runs with
 /// `retain_source` on, so it always gets `index_class_fn_refs`'s own exact

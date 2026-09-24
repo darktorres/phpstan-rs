@@ -204,7 +204,7 @@ fn method_signatures_differ(a: &MethodDecl, b: &MethodDecl) -> bool {
     function_decl_signatures_differ(&a.function, &b.function)
 }
 
-/// `pub(crate)`: also reused by `checker::duplicate_functions` for the
+/// `pub(crate)`: also reused by `project::duplicate_functions` for the
 /// identical top-level-function shape of this same "is this a real bug or
 /// a version-gated split" question.
 pub(crate) fn function_decl_signatures_differ(af: &FunctionDecl, bf: &FunctionDecl) -> bool {

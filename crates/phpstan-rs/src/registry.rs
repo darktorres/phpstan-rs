@@ -174,7 +174,7 @@ pub struct Registry {
     // comparison is worth verifying against a real corpus before
     // defaulting on.
     pub check_method_throw_type_covariance: bool,
-    // `checker::duplicate_functions::check_duplicate_function_declarations`.
+    // `project::duplicate_functions::check_duplicate_function_declarations`.
     // Real PHPStan's own `DuplicateFunctionDeclarationRule` is
     // `#[ValidatesStubFiles]` and never runs against ordinary scanned
     // files - two unconditionally-declared same-named top-level
@@ -182,11 +182,11 @@ pub struct Registry {
     // the same PHP process are a real, structural false-positive this
     // checker can't rule out in general.
     pub check_duplicate_function_declarations: bool,
-    // `checker::duplicate_classes::check_duplicate_class_declarations` -
+    // `project::duplicate_classes::check_duplicate_class_declarations` -
     // its one known false-positive shape (a vendored built-in stub
     // override, e.g. `Imagick.stub.php`, colliding with the real PHP
     // extension's class) can only be defused by a project's `stub_paths`
-    // config being correctly populated. See `checker::duplicate_classes`
+    // config being correctly populated. See `project::duplicate_classes`
     // for why this goes beyond real PHPStan, which has no whole-project
     // equivalent to mirror.
     pub check_duplicate_class_declarations: bool,
@@ -338,7 +338,7 @@ pub struct Registry {
     // new architectural-smell category, not because of any disclosed
     // false-positive risk the way most of this project's other opt-in
     // checks are. Deliberately narrower than a full "any reference"
-    // dependency graph - see `checker::whole_program::circular_
+    // dependency graph - see `project::whole_program::circular_
     // namespace_deps`'s own module doc comment for why.
     pub check_circular_dependencies: bool,
     // An `abstract class` with zero concrete descendants anywhere in the
@@ -359,7 +359,7 @@ pub struct Registry {
     // attribute discovery); a member reachable only through a
     // genuinely dynamic access (`$obj->{$expr}`/`$obj->$name`) whose
     // receiver's own type this project can't resolve at all (a real,
-    // narrower risk than the framework-magic one - see `checker::
+    // narrower risk than the framework-magic one - see `project::
     // whole_program::dead_members`'s own module doc comment for the
     // escape-hatch mechanism that closes the *resolvable*-receiver case).
     pub check_dead_members: bool,
@@ -367,7 +367,7 @@ pub struct Registry {
     // (`argument.parameterRenamedInSubtype`) - a named-argument call
     // site against `Base::m(int $old)` that would throw at runtime the
     // moment the actual receiver is a `Sub extends Base` renaming `$old`
-    // to `$new` on override. Opt-in, matching every other `checker::
+    // to `$new` on override. Opt-in, matching every other `project::
     // whole_program` check's own cost/architecture tradeoff (see
     // `check_dead_code`'s own doc comment): unlike those, this one needs
     // a real, type-inferring `Checker` pass over every loaded file (not

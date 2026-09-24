@@ -1,4 +1,4 @@
-//! A same-shape sibling of `checker::duplicate_functions`, but going
+//! A same-shape sibling of `project::duplicate_functions`, but going
 //! beyond real PHPStan rather than porting one of its existing rules.
 //! Real PHPStan's own `DuplicateClassDeclarationRule` is tagged only
 //! `#[ValidatesStubFiles]`, wired exclusively into `StubValidator`'s own

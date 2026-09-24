@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
-use crate::checker::whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::diagnostic::{self, Diagnostic};
@@ -15,6 +14,7 @@ use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::{NameContext, Registry};
 use crate::token::Span;
+use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 
 mod architecture;
 mod banned;
@@ -22,10 +22,13 @@ mod class_shape;
 mod composer_hygiene;
 mod decl_locations;
 pub(crate) mod duplicate_class_sites;
+mod duplicate_classes;
 pub(crate) mod duplicate_fn_sites;
+mod duplicate_functions;
 mod mock_hygiene;
 pub mod session;
 pub(crate) mod use_sites;
+mod whole_program;
 
 use decl_locations::DeclLocations;
 use duplicate_class_sites::DuplicateClassSites;
@@ -164,12 +167,12 @@ pub struct Project {
     // some file - populated/queried alongside `use_sites`/`member_
     // index_built` above, by the identical two paths (`ensure_member_
     // index_built`'s own loop, or `seed_member_refs` fed from `check-
-    // project`'s primary pass). Consulted by `checker::whole_program::
+    // project`'s primary pass). Consulted by `whole_program::
     // dead_enum_cases::find_dead_cases`.
     escaped_enum_cases: FxHashSet<String>,
     // `Checker::escaped_member_classes`'s own project-wide merge -
     // exactly the same shape/population paths as `escaped_enum_cases`
-    // above, just for Phase 86's B1 (`checker::whole_program::
+    // above, just for Phase 86's B1 (`whole_program::
     // dead_members::find_dead_members`) instead of Phase 92.
     escaped_member_classes: FxHashSet<String>,
 }
@@ -422,7 +425,7 @@ impl Project {
         self.registry.check_duplicate_function_declarations = enabled;
     }
 
-    /// Opts the whole project's checking into `checker::
+    /// Opts the whole project's checking into `project::
     /// duplicate_classes::check_duplicate_class_declarations` - see
     /// `registry::Registry::check_duplicate_class_declarations`'s own doc
     /// comment for why this defaults to `false`.
@@ -935,7 +938,7 @@ impl Project {
         // spans (`use_sites::index_class_fn_refs`'s own doc comment) - a
         // batch run with no retained source can still get real, just less
         // precisely-scoped, entries via `index_class_fn_refs_without_
-        // source`, which `checker::whole_program::dead_code` (existence-
+        // source`, which `whole_program::dead_code` (existence-
         // only, never reads a use-site's span) can't tell apart from the
         // precise version at all. But unlike `decl_locations` above, this
         // walk is NOT cheap enough to run unconditionally in batch mode -
@@ -1638,20 +1641,16 @@ impl Project {
         let escaped_member_classes = checker.take_escaped_member_classes();
         let mut diagnostics = checker.into_diagnostics();
         if self.registry.check_duplicate_function_declarations {
-            diagnostics.extend(
-                checker::duplicate_functions::check_duplicate_function_declarations(
-                    path,
-                    &self.duplicate_fn_sites,
-                ),
-            );
+            diagnostics.extend(duplicate_functions::check_duplicate_function_declarations(
+                path,
+                &self.duplicate_fn_sites,
+            ));
         }
         if self.registry.check_duplicate_class_declarations {
-            diagnostics.extend(
-                checker::duplicate_classes::check_duplicate_class_declarations(
-                    path,
-                    &self.duplicate_class_sites,
-                ),
-            );
+            diagnostics.extend(duplicate_classes::check_duplicate_class_declarations(
+                path,
+                &self.duplicate_class_sites,
+            ));
         }
         for (line, message) in &file.ignores.parse_errors {
             let at = crate::token::Position {
@@ -1843,7 +1842,7 @@ impl Project {
     /// fact kinds from the same throwaway per-file pass, and (unlike
     /// `PropertyAssignFacts`, which only aggregates types) tagging each
     /// named-argument call site's own span with the file it came from -
-    /// `checker::whole_program::renamed_named_arguments`'s own cross-
+    /// `whole_program::renamed_named_arguments`'s own cross-
     /// referencing pass reports directly at that site, not through
     /// `decl_locations`. Runs over every loaded file unconditionally
     /// (like `collect_property_assign_facts`) - a rename could be
@@ -2019,7 +2018,7 @@ impl Project {
     /// Runs every opt-in whole-program diagnostic check (currently
     /// `check_dead_enum_cases`, `check_dead_code`, `check_circular_
     /// dependencies`, `check_dead_abstract_classes`, and `check_dead_
-    /// members`) - see `checker::whole_program`'s own module doc comment
+    /// members`) - see `project::whole_program`'s own module doc comment
     /// for why these can't run through the ordinary per-file `Checker`
     /// path `check_file`/`check_all` above use. `check-project` calls
     /// this once, after its own primary per-file pass has populated
@@ -2051,7 +2050,7 @@ impl Project {
 
         if self.registry.check_dead_enum_cases {
             self.ensure_member_index_built();
-            let dead = checker::whole_program::dead_enum_cases::find_dead_cases(
+            let dead = whole_program::dead_enum_cases::find_dead_cases(
                 &self.registry,
                 &self.use_sites,
                 &self.escaped_enum_cases,
@@ -2078,10 +2077,8 @@ impl Project {
         }
 
         if self.registry.check_dead_code {
-            let dead_functions = checker::whole_program::dead_code::find_dead_functions(
-                &self.registry,
-                &self.use_sites,
-            );
+            let dead_functions =
+                whole_program::dead_code::find_dead_functions(&self.registry, &self.use_sites);
             for name in dead_functions {
                 let Some((path, span)) = self.decl_locations.functions.get(&name) else {
                     continue;
@@ -2097,10 +2094,8 @@ impl Project {
                     results.entry(path).or_default().push(d);
                 }
             }
-            let dead_classes = checker::whole_program::dead_code::find_dead_classes(
-                &self.registry,
-                &self.use_sites,
-            );
+            let dead_classes =
+                whole_program::dead_code::find_dead_classes(&self.registry, &self.use_sites);
             for name in dead_classes {
                 let Some((path, span)) = self.decl_locations.classes.get(&name) else {
                     continue;
@@ -2119,9 +2114,8 @@ impl Project {
         }
 
         if self.registry.check_circular_dependencies {
-            let cycles = checker::whole_program::circular_namespace_deps::find_namespace_cycles(
-                &self.registry,
-            );
+            let cycles =
+                whole_program::circular_namespace_deps::find_namespace_cycles(&self.registry);
             for cycle in cycles {
                 let Some((path, span)) =
                     self.decl_locations.classes.get(&cycle.representative_class)
@@ -2144,9 +2138,7 @@ impl Project {
 
         if self.registry.check_dead_abstract_classes {
             let dead_abstract_classes =
-                checker::whole_program::dead_abstract_classes::find_dead_abstract_classes(
-                    &self.registry,
-                );
+                whole_program::dead_abstract_classes::find_dead_abstract_classes(&self.registry);
             for name in dead_abstract_classes {
                 let Some((path, span)) = self.decl_locations.classes.get(&name) else {
                     continue;
@@ -2168,7 +2160,7 @@ impl Project {
 
         if self.registry.check_dead_members {
             self.ensure_member_index_built();
-            let dead_members = checker::whole_program::dead_members::find_dead_members(
+            let dead_members = whole_program::dead_members::find_dead_members(
                 &self.registry,
                 &self.use_sites,
                 &self.escaped_member_classes,
@@ -2183,13 +2175,11 @@ impl Project {
                 };
                 let path = path.clone();
                 let (noun, identifier) = match kind {
-                    checker::whole_program::dead_members::MemberKind::Method => {
-                        ("Method", "method.unused")
-                    }
-                    checker::whole_program::dead_members::MemberKind::Property => {
+                    whole_program::dead_members::MemberKind::Method => ("Method", "method.unused"),
+                    whole_program::dead_members::MemberKind::Property => {
                         ("Property", "property.unused")
                     }
-                    checker::whole_program::dead_members::MemberKind::Const => {
+                    whole_program::dead_members::MemberKind::Const => {
                         ("Constant", "classConstant.unused")
                     }
                 };
@@ -2208,7 +2198,7 @@ impl Project {
         if self.registry.check_renamed_named_arguments {
             let (calls, overrides) = self.collect_named_argument_facts();
             let collisions =
-                checker::whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
+                whole_program::renamed_named_arguments::find_renamed_named_argument_collisions(
                     &calls, &overrides,
                 );
             for (path, span, location, message) in collisions {

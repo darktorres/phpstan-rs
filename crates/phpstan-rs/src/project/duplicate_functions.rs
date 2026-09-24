@@ -6,7 +6,7 @@
 //!
 //! Real PHPStan's own `DuplicateFunctionDeclarationRule` is
 //! `#[ValidatesStubFiles]` - exactly like `DuplicateClassDeclarationRule`
-//! (`checker::duplicate_classes`'s own doc comment) - and never runs
+//! (`project::duplicate_classes`'s own doc comment) - and never runs
 //! against ordinary scanned project files at all, only a project's own
 //! configured `stubFiles:` list in an isolated pass. This project's
 //! version instead gates behind `Registry::check_duplicate_function_
