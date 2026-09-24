@@ -1,0 +1,3 @@
+domain.php:5:33-5:47 property.onlyWritten L4 App\Domain\User | private property App\\Domain\\User::$db is never read, only written
+domain.php:6:29-6:46 architecture.dependency L0 App\Domain\User | Class App\\Domain\\User depends on App\\Infra\\Mailer, but architecture rule "#1" doesn't allow it.
+domain.php:6:60-6:77 architecture.construction L0 App\Domain\User | Class App\\Domain\\User constructs App\\Infra\\Mailer, which architecture rule "#1" forbids.

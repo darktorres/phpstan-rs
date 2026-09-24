@@ -1,0 +1,1 @@
+<?php class Sub extends Base {}

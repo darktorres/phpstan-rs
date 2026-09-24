@@ -1,0 +1,19 @@
+a.php:2:12-2:24 banned.byReferenceParameters L0 <main> | By-reference parameter $list is banned by this project's configuration.
+a.php:2:12-2:24 missingType.iterableValue L6 f | Function f() has parameter $list with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+a.php:3:5-3:15 banned.eval L0 <main> | eval() is banned by this project's configuration.
+a.php:4:5-4:20 banned.isset L0 <main> | isset() is banned by this project's configuration.
+a.php:5:5-5:17 banned.empty L0 <main> | empty() is banned by this project's configuration.
+a.php:6:5-6:20 banned.compact L0 <main> | compact() is banned by this project's configuration.
+a.php:7:10-7:11 banned.errorSuppression L0 <main> | The @ error-suppression operator is banned by this project's configuration.
+a.php:8:5-8:36 banned.switch L0 <main> | switch is banned by this project's configuration.
+a.php:9:10-9:17 banned.shortTernary L0 <main> | The short ternary ?: is banned by this project's configuration.
+a.php:10:10-10:17 banned.looseComparison L0 <main> | Loose comparison == is banned by this project's configuration.
+a.php:11:5-11:12 banned.arrayAppend L0 <main> | Appending with [] is banned by this project's configuration.
+a.php:12:10-12:14 banned.backticks L0 <main> | A backtick shell command is banned by this project's configuration.
+a.php:13:10-13:15 banned.superglobals L0 <main> | $_GET is banned by this project's configuration.
+a.php:14:10-14:13 banned.variableVariables L0 <main> | A variable variable is banned by this project's configuration.
+a.php:15:10-15:16 banned.dynamicMemberAccess L0 <main> | A dynamic member name is banned by this project's configuration.
+a.php:16:5-16:13 banned.assignByReference L0 <main> | Assignment by reference is banned by this project's configuration.
+a.php:17:5-17:19 banned.namedArguments L0 <main> | A named argument is banned by this project's configuration.
+a.php:18:5-18:9 banned.exit L0 <main> | exit is banned by this project's configuration.

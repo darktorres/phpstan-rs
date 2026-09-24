@@ -1,0 +1,1 @@
+<?php function make() { return new class {}; }

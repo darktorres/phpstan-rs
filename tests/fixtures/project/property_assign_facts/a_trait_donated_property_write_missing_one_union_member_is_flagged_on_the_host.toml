@@ -1,0 +1,2 @@
+paths = ["host.php"]
+scan_paths = ["trait.php"]

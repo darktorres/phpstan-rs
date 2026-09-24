@@ -255,6 +255,17 @@ fn psr4_expected_path(dir: &Path, prefix: &str, fqn: &str) -> PathBuf {
     path
 }
 
+/// `path` resolved against `base` (the project's working directory) when
+/// it's relative, so it compares with the manifest's paths no matter what
+/// directory the process runs in.
+fn resolved(base: Option<&Path>, path: &Path) -> PathBuf {
+    let joined = match base {
+        Some(base) if path.is_relative() => base.join(path),
+        _ => path.to_path_buf(),
+    };
+    std::path::absolute(&joined).unwrap_or(joined)
+}
+
 fn normalized(path: &Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
@@ -279,15 +290,17 @@ fn normalized(path: &Path) -> String {
 /// `ComposerManifest::owning_package`, memoized per file.
 struct OwnerCache<'m> {
     manifest: &'m ComposerManifest,
+    base: Option<&'m Path>,
     cache: FxHashMap<PathBuf, Option<usize>>,
 }
 
 impl<'m> OwnerCache<'m> {
     fn owner(&mut self, path: &Path) -> Option<&'m InstalledPackage> {
         let manifest = self.manifest;
-        let index = *self.cache.entry(path.to_path_buf()).or_insert_with(|| {
+        let path = resolved(self.base, path);
+        let index = *self.cache.entry(path.clone()).or_insert_with(|| {
             manifest
-                .owning_package(path)
+                .owning_package(&path)
                 .and_then(|p| manifest.installed.iter().position(|q| std::ptr::eq(p, q)))
         });
         index.map(|i| &manifest.installed[i])
@@ -320,8 +333,10 @@ impl Project {
             .iter()
             .map(|(name, (path, _))| (name.to_ascii_lowercase(), (name.as_str(), path.as_path())))
             .collect();
+        let base = self.working_dir.as_deref();
         let mut owners = OwnerCache {
             manifest,
+            base,
             cache: FxHashMap::default(),
         };
 
@@ -332,12 +347,13 @@ impl Project {
         analyzed.sort_by(|a, b| a.0.cmp(b.0));
 
         let belongs_to_root = |path: &Path| {
-            path_starts_with(path, &manifest.root) && manifest.owning_package(path).is_none()
+            let path = resolved(base, path);
+            path_starts_with(&path, &manifest.root) && manifest.owning_package(&path).is_none()
         };
         analyzed.retain(|(path, _)| belongs_to_root(path));
         for (path, file) in &analyzed {
-            let production = manifest.autoload.covers(path);
-            let dev_only = !production && manifest.autoload_dev.covers(path);
+            let production = manifest.autoload.covers(&resolved(base, path));
+            let dev_only = !production && manifest.autoload_dev.covers(&resolved(base, path));
             let used_before: FxHashSet<String> = used_packages.clone();
             let mut facts = FileFacts::default();
             collect_facts_in_stmts(&file.ast, &mut facts);
@@ -438,8 +454,8 @@ impl Project {
                 if self.files.get(declared_in).is_some_and(|f| f.analyzed) {
                     if production
                         && kind == "Class"
-                        && manifest.autoload_dev.covers(declared_in)
-                        && !manifest.autoload.covers(declared_in)
+                        && manifest.autoload_dev.covers(&resolved(base, declared_in))
+                        && !manifest.autoload.covers(&resolved(base, declared_in))
                         && reported_dev_symbols.insert(display.clone())
                     {
                         diagnostics.push(diagnostic(
@@ -582,6 +598,11 @@ impl Project {
         if declared.is_empty() {
             return;
         }
+        // Compared against the manifest's paths resolved; reported as the
+        // file's own spelling.
+        let shown = path;
+        let path = resolved(self.working_dir.as_deref(), path);
+        let path = path.as_path();
         let sections = [&manifest.autoload, &manifest.autoload_dev];
         if sections.iter().any(|s| s.excludes(path)) {
             return;
@@ -637,7 +658,7 @@ impl Project {
                     &fqn,
                     format!(
                         "Class {fqn} is declared in {}, whose letter case differs from {} that PSR-4 prefix {prefix} maps it to; a case-sensitive filesystem won't find it.",
-                        path.display(),
+                        shown.display(),
                         case_variant.display()
                     ),
                     span,
@@ -649,7 +670,7 @@ impl Project {
                 &fqn,
                 format!(
                     "Class {fqn} is declared in {}, but PSR-4 prefix {prefix} maps it to {}.",
-                    path.display(),
+                    shown.display(),
                     first.display()
                 ),
                 span,

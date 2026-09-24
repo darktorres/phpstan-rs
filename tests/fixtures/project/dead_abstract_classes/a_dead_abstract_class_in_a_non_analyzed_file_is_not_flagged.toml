@@ -1,0 +1,3 @@
+check_dead_abstract_classes = true
+paths = ["analysed.php"]
+scan_paths = ["vendor/lib/a.php"]

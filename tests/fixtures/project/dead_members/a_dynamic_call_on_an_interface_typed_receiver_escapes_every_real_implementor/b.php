@@ -1,0 +1,1 @@
+<?php function f(Greeter $obj, string $name) { $obj->{$name}(); }

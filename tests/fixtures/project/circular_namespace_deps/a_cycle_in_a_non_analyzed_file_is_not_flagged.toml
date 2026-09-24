@@ -1,0 +1,3 @@
+check_circular_dependencies = true
+paths = ["analysed.php"]
+scan_paths = ["vendor/lib/a.php", "vendor/lib/b.php"]

@@ -1,0 +1,1 @@
+src/MyRule.php:1:22-1:85 phpstanApi.class L0 App\MyRule | extending PHPStan\\Rules\\ZzzPhase40TestOnlyMarker is not covered by PHPStan's backward compatibility promise (missing @api on PHPStan\\Rules\\ZzzPhase40TestOnlyMarker)

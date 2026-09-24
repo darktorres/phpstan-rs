@@ -1,0 +1,3 @@
+check_duplicate_class_declarations = true
+paths = ["real.php"]
+stub_paths = ["Imagick.stub.php"]

@@ -1,0 +1,3 @@
+paths = ["src/Doctrine/MyRule.php"]
+scan_paths = ["vendor/phpstan/phpstan/src/ZzzPhase40TrinaryLogicMarker.php"]
+no_composer = false

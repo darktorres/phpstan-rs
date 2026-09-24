@@ -1,0 +1,1 @@
+src/Ext.php:4:9-4:18 ext.notRequired L0 <main> | Function mb_strlen() belongs to the mbstring extension, but composer.json doesn't require ext-mbstring.

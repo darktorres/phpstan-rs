@@ -1,0 +1,2 @@
+a.php:1:17-1:20 interface.duplicate L0 Foo | Interface Foo declared multiple times:\n- a.php:1\n- b.php:1
+    non-ignorable

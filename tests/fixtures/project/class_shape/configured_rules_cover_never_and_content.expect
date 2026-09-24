@@ -1,0 +1,2 @@
+a.php:4:21-4:25 parentCall.noContent L2 C::boot | Method C::boot() only calls parent::boot(); the override does nothing else.
+a.php:5:21-5:25 parentCall.forbidden L2 C::init | Method C::init() calls parent::init(), which it must not.

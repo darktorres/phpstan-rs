@@ -1,0 +1,1 @@
+<?php namespace PHPStan; class ZzzPhase40TrinaryLogicMarker { public static function check() {} }

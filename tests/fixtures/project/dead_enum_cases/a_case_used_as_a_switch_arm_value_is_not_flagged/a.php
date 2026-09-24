@@ -1,0 +1,1 @@
+<?php enum Suit { case Hearts; case Spades; } function f($x) { switch ($x) { case Suit::Hearts: break; } }

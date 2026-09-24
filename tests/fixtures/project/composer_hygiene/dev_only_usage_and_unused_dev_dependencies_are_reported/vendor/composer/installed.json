@@ -1,0 +1,6 @@
+{"packages": [
+            {"name": "acme/assert", "type": "library", "install-path": "../acme/assert"},
+            {"name": "acme/faker", "type": "library", "install-path": "../acme/faker"},
+            {"name": "acme/tool", "type": "library", "install-path": "../acme/tool"},
+            {"name": "acme/cli", "type": "library", "install-path": "../acme/cli", "bin": ["bin/cli"]}
+        ]}

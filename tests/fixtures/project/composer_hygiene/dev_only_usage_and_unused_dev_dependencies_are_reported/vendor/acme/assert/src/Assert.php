@@ -1,0 +1,1 @@
+<?php namespace Acme\Assert; final class Assert {}

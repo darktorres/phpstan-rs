@@ -1,0 +1,1 @@
+<?php namespace PHPStan\Doctrine; class Bar { public static function check() {} }

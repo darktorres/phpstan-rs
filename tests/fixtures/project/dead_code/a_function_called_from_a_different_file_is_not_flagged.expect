@@ -1,0 +1,2 @@
+a.php:1:7-1:25 missingType.return L6 used | Function used() has no return type specified.
+b.php:1:7-1:13 function.resultUnused L4 <main> | Call to function used() on a separate line has no effect.

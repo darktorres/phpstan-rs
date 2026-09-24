@@ -1,0 +1,2 @@
+b.php:1:13-1:16 class.duplicate L0 Foo | Class Foo declared multiple times:\n- a.php:1\n- b.php:1
+    non-ignorable

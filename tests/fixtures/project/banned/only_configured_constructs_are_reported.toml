@@ -1,0 +1,3 @@
+banned_constructs = ["eval"]
+banned_types = []
+paths = ["a.php"]

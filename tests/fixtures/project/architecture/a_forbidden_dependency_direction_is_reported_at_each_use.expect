@@ -1,0 +1,4 @@
+domain.php:4:13-4:17 architecture.dependency L0 App\Domain\User | Class App\\Domain\\User depends on App\\Infra\\Cache, which architecture rule "domain is infrastructure-free" forbids.
+domain.php:5:33-5:47 property.onlyWritten L4 App\Domain\User | private property App\\Domain\\User::$db is never read, only written
+domain.php:5:41-5:43 architecture.dependency L0 App\Domain\User | Class App\\Domain\\User depends on App\\Infra\\Db, which architecture rule "domain is infrastructure-free" forbids.
+domain.php:6:29-6:46 architecture.dependency L0 App\Domain\User | Class App\\Domain\\User depends on App\\Infra\\Mailer, which architecture rule "domain is infrastructure-free" forbids.

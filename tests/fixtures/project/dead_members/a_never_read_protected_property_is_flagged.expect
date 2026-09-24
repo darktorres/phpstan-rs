@@ -1,0 +1,2 @@
+a.php:1:29-1:31 missingType.property L6 Foo | Property Foo::$x has no type specified.
+a.php:1:29-1:31 property.unused L5 Foo | Property Foo::x is never used.

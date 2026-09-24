@@ -77,6 +77,16 @@ pub struct Session {
     pub warnings: Vec<String>,
 }
 
+/// A configured `Project` with every file loaded, before any check ran.
+pub struct Loaded {
+    pub project: Project,
+    pool: rayon::ThreadPool,
+    analyze_files_by_size: Vec<PathBuf>,
+    skipped_analyze: usize,
+    skipped_context: usize,
+    context_loaded: usize,
+}
+
 /// What one run produced, after the full post-processing chain.
 pub struct Analysis {
     /// Per-file diagnostics in `checker::diagnostic_order`.
@@ -284,10 +294,12 @@ impl Session {
                 }
             }
             if !promoted.is_empty() {
+                // Relative scan paths are relative to the root.
                 let is_promoted = |p: &Path| {
+                    let p = root.join(p);
                     promoted
                         .iter()
-                        .any(|dir| composer::manifest::path_starts_with(p, dir))
+                        .any(|dir| composer::manifest::path_starts_with(&p, dir))
                 };
                 scan_dirs.retain(|d| !is_promoted(d));
                 scan_files.retain(|f| !is_promoted(f));
@@ -504,6 +516,13 @@ impl Session {
     /// writes `--dump-types` output there. Fails when the analysed
     /// paths hold no `.php` file.
     pub fn run(&self, dump_types: Option<&Path>) -> Result<Analysis, String> {
+        let loaded = self.load()?;
+        Ok(self.analyse(loaded, dump_types))
+    }
+
+    /// Parses every context and analysed file into a configured,
+    /// finished `Project`, ready for `analyse`.
+    pub fn load(&self) -> Result<Loaded, String> {
         let mut analyze_files = Vec::new();
         for dir in &self.dirs {
             self.collect_php_files(dir, &mut analyze_files);
@@ -577,6 +596,27 @@ impl Session {
         let mut analyze_files_by_size = analyze_files.clone();
         analyze_files_by_size
             .sort_by_key(|path| std::cmp::Reverse(analyze_sizes.get(path).copied().unwrap_or(0)));
+        Ok(Loaded {
+            project,
+            pool,
+            analyze_files_by_size,
+            skipped_analyze,
+            skipped_context,
+            context_loaded: context_files.len() - skipped_context,
+        })
+    }
+
+    /// Checks every analysed file of `loaded`, runs the project-wide
+    /// passes, and post-processes the result.
+    pub fn analyse(&self, loaded: Loaded, dump_types: Option<&Path>) -> Analysis {
+        let Loaded {
+            mut project,
+            pool,
+            analyze_files_by_size,
+            skipped_analyze,
+            skipped_context,
+            context_loaded,
+        } = loaded;
 
         // `Project` has no interior mutability a panic could leave
         // half-updated beyond `OnceLock`s that stay unset, so continuing
@@ -717,13 +757,13 @@ impl Session {
             }
         }
 
-        Ok(Analysis {
+        Analysis {
             results,
-            checked: analyze_files.len() - skipped_analyze - check_panics.len(),
+            checked: analyze_files_by_size.len() - skipped_analyze - check_panics.len(),
             skipped_analyze,
             skipped_context,
-            context_loaded: context_files.len() - skipped_context,
+            context_loaded,
             check_panics,
-        })
+        }
     }
 }

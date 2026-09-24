@@ -1,0 +1,2 @@
+paths = ["tests/Unit/FooTest.php"]
+scan_paths = ["tests/Pest.php"]

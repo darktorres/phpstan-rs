@@ -1,0 +1,2 @@
+f.php:2:1-4:2 missingType.return L6 f | Function f() has no return type specified.
+f.php:3:5-3:31 function.notFound L0 f | call to undefined function totallyUndefinedFunction()

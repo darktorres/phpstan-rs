@@ -1,0 +1,1 @@
+<?php namespace PHPStan; class ZzzPhase40BareNsMarker {}

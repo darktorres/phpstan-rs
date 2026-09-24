@@ -1,0 +1,1 @@
+<?php function it($description, $callback) {} it('works', function (): void { $this->totallyUndefinedMethod(); });

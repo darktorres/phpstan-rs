@@ -1,0 +1,1 @@
+a.php:1:47-1:85 missingType.return L6 f | Function f() has no return type specified.

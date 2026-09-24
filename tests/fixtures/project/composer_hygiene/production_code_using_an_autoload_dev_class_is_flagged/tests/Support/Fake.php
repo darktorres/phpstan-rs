@@ -1,0 +1,1 @@
+<?php namespace App\Tests\Support; final class Fake {}

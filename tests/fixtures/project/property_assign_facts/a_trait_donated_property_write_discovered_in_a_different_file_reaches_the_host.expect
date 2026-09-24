@@ -1,0 +1,2 @@
+host.php:5:29-5:31 property.unused L4 Foo | private property Foo::$x is unused
+    fix: Remove property $x => ""

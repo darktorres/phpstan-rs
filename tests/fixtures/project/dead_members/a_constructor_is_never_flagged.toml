@@ -1,0 +1,2 @@
+check_dead_members = true
+paths = ["a.php"]

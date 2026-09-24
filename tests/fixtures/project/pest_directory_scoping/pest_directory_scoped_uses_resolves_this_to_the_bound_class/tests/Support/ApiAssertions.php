@@ -1,0 +1,1 @@
+<?php class ApiAssertions { public function assertContract(): void {} }

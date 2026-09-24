@@ -1,0 +1,1 @@
+<?php function strtr(string $s, array $r) {} function strtr(string $s, string $f, string $t) {}

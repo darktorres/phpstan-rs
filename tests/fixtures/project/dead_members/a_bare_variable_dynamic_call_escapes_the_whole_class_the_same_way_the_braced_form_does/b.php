@@ -1,0 +1,1 @@
+<?php function f(Foo $obj, string $name) { $obj->$name(); }

@@ -1,0 +1,3 @@
+check_mock_hygiene = true
+mock_banned_classes = ["App\\Tests\\Database"]
+paths = ["t.php"]

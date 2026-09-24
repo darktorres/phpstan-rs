@@ -1,0 +1,1 @@
+<?php enum Suit { case Hearts; case Spades; } function f($x) { return match ($x) { Suit::Hearts => 1, default => 0 }; }

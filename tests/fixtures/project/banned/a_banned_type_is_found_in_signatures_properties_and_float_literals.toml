@@ -1,0 +1,3 @@
+banned_constructs = []
+banned_types = ["float"]
+paths = ["a.php"]

@@ -1,0 +1,3 @@
+banned_constructs = ["eval", "isset", "empty", "compact", "extract", "exit", "error-suppression", "switch", "goto", "global", "named-arguments", "assign-by-reference", "by-reference-parameters", "by-reference-returns", "short-ternary", "loose-comparison", "array-append", "backticks", "ignore-comments", "superglobals", "variable-variables", "dynamic-member-access"]
+banned_types = []
+paths = ["a.php"]

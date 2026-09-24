@@ -1,0 +1,5 @@
+a.php:4:12-4:23 banned.type L0 <main> | Property Money::$amount uses banned type float.
+a.php:5:33-5:57 banned.type L0 <main> | Parameter $rate of Money::__construct() uses banned type float.
+a.php:5:54-5:57 banned.type L0 <main> | Float literal 1.5 uses banned type float.
+a.php:7:30-7:35 banned.type L0 <main> | The return type of Money::parts() uses banned type float.
+a.php:7:46-7:57 banned.type L0 <main> | A (float) cast uses banned type float.

@@ -1,0 +1,1 @@
+<?php uses(ApiAssertions::class)->in('Browser/Api');

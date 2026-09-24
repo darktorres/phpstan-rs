@@ -1,0 +1,2 @@
+a.php:1:47-1:90 missingType.return L6 f | Function f() has no return type specified.
+a.php:1:58-1:63 missingType.parameter L6 f | Function f() has parameter $name with no type specified.

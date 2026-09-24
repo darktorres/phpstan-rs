@@ -1,0 +1,2 @@
+check_duplicate_class_declarations = true
+paths = ["a.php", "b.php"]

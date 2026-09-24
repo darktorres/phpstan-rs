@@ -1,0 +1,2 @@
+a.php:1:37-1:43 enumCase.unused L5 Suit | Enum case Suit::Spades is never used.
+b.php:1:7-1:44 missingType.return L6 f | Function f() has no return type specified.

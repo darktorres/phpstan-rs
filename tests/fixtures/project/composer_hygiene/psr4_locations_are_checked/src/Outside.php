@@ -1,0 +1,1 @@
+<?php namespace Unrelated; final class Outside {}

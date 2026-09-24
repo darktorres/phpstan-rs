@@ -1,0 +1,2 @@
+report_unmatched_ignored_errors = true
+paths = ["f.php"]

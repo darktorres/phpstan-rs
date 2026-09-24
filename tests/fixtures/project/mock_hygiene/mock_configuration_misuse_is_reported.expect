@@ -1,0 +1,22 @@
+t.php:5:1-22:2 class.notFound L0 App\Tests\MailerTest | App\\Tests\\MailerTest extends unknown class PHPUnit\\Framework\\TestCase
+t.php:6:31-6:38 class.notFound L0 App\Tests\MailerTest | property App\\Tests\\MailerTest::$mailer has invalid type App\\Tests\\Mailer
+t.php:6:31-6:38 class.notFound L0 App\Tests\MailerTest | property App\\Tests\\MailerTest::$mailer has invalid type PHPUnit\\Framework\\MockObject\\MockObject
+t.php:6:31-6:38 mock.unionPropertyType L2 <main> | Property $mailer is typed MockObject|Mailer; a mock of a class is its intersection with the mock type, not a union.
+t.php:8:13-8:19 class.notFound L0 App\Tests\MailerTest | property App\\Tests\\MailerTest::$clock has invalid type App\\Tests\\Clock
+t.php:8:13-8:19 class.notFound L0 App\Tests\MailerTest | property App\\Tests\\MailerTest::$clock has invalid type PHPUnit\\Framework\\MockObject\\MockObject
+t.php:8:13-8:19 mock.unionPropertyType L2 <main> | Property $clock is typed Clock|MockObject; a mock of a class is its intersection with the mock type, not a union.
+t.php:9:18-9:23 class.notFound L0 App\Tests\MailerTest | property App\\Tests\\MailerTest::$real has invalid type App\\Tests\\Real
+t.php:9:18-9:23 property.unused L4 App\Tests\MailerTest | private property App\\Tests\\MailerTest::$real is unused
+    fix: Remove property $real => ""
+t.php:11:25-11:57 method.notFound L0 App\Tests\MailerTest::setUp | call to undefined method App\\Tests\\MailerTest::createMock()
+t.php:12:24-12:55 method.notFound L0 App\Tests\MailerTest::setUp | call to undefined method App\\Tests\\MailerTest::createStub()
+t.php:15:9-15:45 mock.expectsAny L2 <main> | ->expects($this->any()) asserts nothing; use a stub, or an explicit call count.
+t.php:15:32-15:44 method.notFound L0 App\Tests\MailerTest::testSend | call to undefined method App\\Tests\\MailerTest::any()
+t.php:16:9-16:56 mock.methodWithoutExpects L2 <main> | A mock configured with ->method() but no ->expects() is a stub in disguise; create it with createStub(), or state the expected calls.
+t.php:17:9-17:45 mock.withWithoutExpects L2 <main> | ->with() on a method configured without ->expects() is never verified; add an expectation or drop the argument constraint.
+t.php:18:9-18:131 mock.conflictingReturns L2 <main> | willReturnOnConsecutiveCalls() and willReturnCallback() configure the same return; keep one.
+t.php:18:32-18:49 method.notFound L0 App\Tests\MailerTest::testSend | call to undefined method App\\Tests\\MailerTest::atLeast()
+t.php:18:32-18:49 mock.atLeastZero L2 <main> | atLeast(0) matches any number of calls, including none; use at least 1, or a stub.
+t.php:19:32-19:45 method.notFound L0 App\Tests\MailerTest::testSend | call to undefined method App\\Tests\\MailerTest::once()
+t.php:20:15-20:49 method.notFound L0 App\Tests\MailerTest::testSend | call to undefined method App\\Tests\\MailerTest::createMock()
+t.php:20:15-20:49 mock.bannedClass L2 <main> | App\\Tests\\Database must not be mocked; use a real instance or a purpose-built fake.

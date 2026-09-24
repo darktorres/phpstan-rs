@@ -1,0 +1,5 @@
+a.php:13:24-13:29 parentCall.missing L2 App\Tests\MissingTest::setUp | Method App\\Tests\\MissingTest::setUp() doesn't call parent::setUp(), which App\\Tests\\BaseTest::setUp() implements.
+    fix: Call parent::setUp() => "parent::setUp();\n        "
+a.php:16:24-16:32 parentCall.missing L2 App\Tests\MissingTest::tearDown | Method App\\Tests\\MissingTest::tearDown() doesn't call parent::tearDown(), which App\\Tests\\BaseTest::tearDown() implements.
+    fix: Call parent::tearDown() => "\n        parent::tearDown();"
+a.php:21:24-21:29 parentCall.notFirst L2 App\Tests\LateTest::setUp | Method App\\Tests\\LateTest::setUp() should call parent::setUp() first.

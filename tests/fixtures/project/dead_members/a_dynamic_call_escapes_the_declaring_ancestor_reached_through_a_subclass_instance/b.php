@@ -1,0 +1,1 @@
+<?php function f(Sub $obj, string $name) { $obj->{$name}(); }

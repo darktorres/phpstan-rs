@@ -1,0 +1,1 @@
+a.php:1:25-1:28 classConstant.unused L5 Foo | Constant Foo::BAR is never used.

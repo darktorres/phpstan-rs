@@ -1,0 +1,1 @@
+<?php namespace App; class Caller { public function run() { MyNonPhpStanSubclass::inheritedMethod(); } }

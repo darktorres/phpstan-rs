@@ -1,0 +1,2 @@
+check_dead_abstract_classes = true
+paths = ["a.php", "b.php"]

@@ -1,0 +1,1 @@
+<?php enum Suit: string { case Hearts = 'H'; case Spades = 'S'; } function f() { return Suit::from('H'); }

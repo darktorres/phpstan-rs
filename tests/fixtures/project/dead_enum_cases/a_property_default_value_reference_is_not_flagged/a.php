@@ -1,0 +1,1 @@
+<?php enum Suit { case Hearts; case Spades; } class Card { public Suit $suit = Suit::Hearts; }

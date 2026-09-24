@@ -1,0 +1,2 @@
+a.php:1:24-1:30 enumCase.unused L5 Suit | Enum case Suit::Hearts is never used.
+a.php:1:37-1:43 enumCase.unused L5 Suit | Enum case Suit::Spades is never used.

@@ -1,0 +1,1 @@
+<?php namespace Acme\Unused; class Unused {}

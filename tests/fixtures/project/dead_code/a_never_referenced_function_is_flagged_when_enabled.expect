@@ -1,0 +1,2 @@
+a.php:1:7-1:27 missingType.return L6 unused | Function unused() has no return type specified.
+a.php:1:16-1:22 function.unused L5 unused | Function unused is never referenced.

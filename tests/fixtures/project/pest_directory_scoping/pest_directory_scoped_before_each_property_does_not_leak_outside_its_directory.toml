@@ -1,0 +1,2 @@
+paths = ["tests/Browser/FooTest.php"]
+scan_paths = ["tests/Pest.php", "tests/Support/RealTestBase.php"]

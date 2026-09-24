@@ -1,0 +1,1 @@
+a.php:1:35-1:38 method.unused L5 Foo | Method Foo::bar is never used.

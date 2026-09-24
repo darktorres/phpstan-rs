@@ -1,0 +1,1 @@
+<?php namespace PHPStan\Doctrine; class MyRule { public function run() { \PHPStan\ZzzPhase40TrinaryLogicMarker::check(); } }

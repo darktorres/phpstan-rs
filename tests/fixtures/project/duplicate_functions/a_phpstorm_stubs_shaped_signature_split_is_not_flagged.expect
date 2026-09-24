@@ -1,0 +1,4 @@
+a.php:1:7-1:45 missingType.return L6 strtr | Function strtr() has no return type specified.
+a.php:1:33-1:41 missingType.iterableValue L6 strtr | Function strtr() has parameter $r with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+a.php:1:46-1:96 missingType.return L6 strtr | Function strtr() has no return type specified.

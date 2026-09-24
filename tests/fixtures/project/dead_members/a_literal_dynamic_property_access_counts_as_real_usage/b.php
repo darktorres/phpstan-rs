@@ -1,0 +1,1 @@
+<?php function f(Foo $obj) { return $obj->{'x'}; }

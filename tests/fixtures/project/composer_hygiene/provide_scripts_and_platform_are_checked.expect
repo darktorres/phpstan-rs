@@ -1,0 +1,7 @@
+composer.json:5:1-5:1 provide.unimplemented L0 composer.json | composer.json provides psr/log-implementation, but no class implements Psr\\Log\\LoggerInterface.
+composer.json:10:1-10:1 composerScript.notFound L0 composer.json | Composer script check calls App\\Installer::missing, but method App\\Installer::missing() doesn't exist.
+composer.json:10:1-10:1 composerScript.notFound L0 composer.json | Composer script check calls App\\Missing::run, but class App\\Missing doesn't exist.
+composer.json:10:1-10:1 composerScript.notPublicStatic L0 composer.json | Composer script check calls App\\Installer::check, but App\\Installer::check() is not static; Composer calls it statically from outside the class.
+composer.json:12:1-12:1 composer.platformPhpInconsistentWithRequire L0 composer.json | config.platform.php 8.1.0 doesn't satisfy require.php ^8.3; Composer resolves dependencies for a PHP version the package doesn't support.
+src/Logger.php:1:42-1:60 psr4.pathMismatch L0 Psr\Container\ContainerInterface | Class Psr\\Container\\ContainerInterface is declared under the PSR-4 root of prefix App\\, but its namespace doesn't start with that prefix; the autoloader can't find it.
+src/Logger.php:2:28-2:37 psr4.pathMismatch L0 App\Container | Class App\\Container is declared in src/Logger.php, but PSR-4 prefix App\\ maps it to <fixture>/src/Container.php.

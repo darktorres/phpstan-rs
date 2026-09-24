@@ -1,0 +1,14 @@
+check_closed_classes = false
+default_parent_calls = false
+paths = ["a.php"]
+
+[[parent_calls]]
+method = "boot"
+invocation = "any"
+has_content = "yes"
+
+[[parent_calls]]
+class = "P"
+method = "init"
+invocation = "never"
+has_content = "maybe"

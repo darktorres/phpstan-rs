@@ -1,0 +1,2 @@
+paths = ["b.php"]
+scan_paths = ["a.php"]

@@ -1,0 +1,3 @@
+check_duplicate_function_declarations = true
+paths = ["a.php"]
+scan_paths = ["b.php"]

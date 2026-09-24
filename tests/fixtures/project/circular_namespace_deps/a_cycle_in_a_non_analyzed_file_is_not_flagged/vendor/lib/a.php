@@ -1,0 +1,1 @@
+<?php namespace NsA; class A extends \NsB\B {}

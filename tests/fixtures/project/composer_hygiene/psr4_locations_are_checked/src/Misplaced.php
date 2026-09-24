@@ -1,0 +1,1 @@
+<?php namespace App\Other; final class Elsewhere {}

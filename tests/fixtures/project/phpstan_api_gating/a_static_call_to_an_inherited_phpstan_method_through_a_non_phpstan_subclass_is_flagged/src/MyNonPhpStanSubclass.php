@@ -1,0 +1,1 @@
+<?php namespace App; class MyNonPhpStanSubclass extends \PHPStan\Rules\ZzzPhase40BaseMarker {}

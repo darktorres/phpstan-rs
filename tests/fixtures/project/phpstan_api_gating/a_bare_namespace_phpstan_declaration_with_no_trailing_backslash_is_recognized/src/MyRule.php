@@ -1,0 +1,1 @@
+<?php namespace App; class MyRule extends \PHPStan\ZzzPhase40BareNsMarker {}

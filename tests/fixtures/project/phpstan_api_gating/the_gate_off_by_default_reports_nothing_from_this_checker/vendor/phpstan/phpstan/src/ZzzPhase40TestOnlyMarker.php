@@ -1,0 +1,1 @@
+<?php namespace PHPStan\Rules; class ZzzPhase40TestOnlyMarker {}

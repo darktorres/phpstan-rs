@@ -1,0 +1,2 @@
+a.php:4:29-4:31 property.onlyWritten L4 Foo | private property Foo::$x is never read, only written
+a.php:4:29-4:31 property.unusedType L4 Foo::$x | Foo::$x is never assigned string so it can be removed from the property type.

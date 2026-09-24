@@ -1,0 +1,1 @@
+<?php class Bar extends Foo { function f() { return $this->x; } }

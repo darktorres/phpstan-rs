@@ -1,0 +1,3 @@
+check_composer_hygiene = true
+no_composer = false
+paths = ["src/Installer.php", "src/Logger.php"]

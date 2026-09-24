@@ -1,0 +1,3 @@
+b.php:1:7-1:24 missingType.return L6 foo | Function foo() has no return type specified.
+b.php:1:16-1:19 function.duplicate L0 foo | Function foo declared multiple times:\n- a.php:1\n- b.php:1
+    non-ignorable

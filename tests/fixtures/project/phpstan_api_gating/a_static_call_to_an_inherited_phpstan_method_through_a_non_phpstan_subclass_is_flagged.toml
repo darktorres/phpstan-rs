@@ -1,0 +1,3 @@
+paths = ["src/Caller.php"]
+scan_paths = ["vendor/phpstan/phpstan/src/ZzzPhase40BaseMarker.php", "src/MyNonPhpStanSubclass.php"]
+no_composer = false

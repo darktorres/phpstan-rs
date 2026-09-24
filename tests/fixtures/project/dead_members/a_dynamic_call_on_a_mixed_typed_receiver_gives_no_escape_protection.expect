@@ -1,0 +1,3 @@
+a.php:1:35-1:38 method.unused L5 Foo | Method Foo::bar is never used.
+b.php:1:7-1:58 missingType.return L6 f | Function f() has no return type specified.
+b.php:1:18-1:22 missingType.parameter L6 f | Function f() has parameter $obj with no type specified.

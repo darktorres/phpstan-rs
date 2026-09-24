@@ -1,0 +1,4 @@
+composer.json:5:1-5:1 unused.composerDependency L0 composer.json | Package acme/used is in require, but the analysed code uses none of its symbols.
+composer.json:6:1-6:1 unused.composerDependency L0 composer.json | Package acme/unused is in require, but the analysed code uses none of its symbols.
+composer.json:10:1-10:1 unused.composerDependency L0 composer.json | Package acme/dev-tool is in require-dev, but the analysed code uses none of its symbols.
+src/Uses.php:3:46-3:69 misplaced.autoloadDevSymbol L0 <main> | Class App\\Tests\\Support\\Fake is only autoloaded through autoload-dev, but this file is autoloaded in production; `composer install --no-dev` can't load it.

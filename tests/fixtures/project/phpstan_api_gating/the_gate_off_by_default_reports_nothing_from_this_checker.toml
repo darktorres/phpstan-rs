@@ -1,0 +1,2 @@
+paths = ["src/MyRule.php"]
+scan_paths = ["vendor/phpstan/phpstan/src/ZzzPhase40TestOnlyMarker.php"]

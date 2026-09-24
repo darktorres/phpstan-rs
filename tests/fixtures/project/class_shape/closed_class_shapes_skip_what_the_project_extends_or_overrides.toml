@@ -1,0 +1,3 @@
+check_closed_classes = true
+default_parent_calls = false
+paths = ["a.php"]

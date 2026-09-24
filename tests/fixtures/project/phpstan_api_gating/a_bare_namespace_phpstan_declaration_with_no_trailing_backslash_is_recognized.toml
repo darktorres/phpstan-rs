@@ -1,0 +1,3 @@
+paths = ["src/MyRule.php"]
+scan_paths = ["vendor/phpstan/phpstan/src/ZzzPhase40BareNsMarker.php"]
+no_composer = false
