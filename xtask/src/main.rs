@@ -16,8 +16,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
-mod oracle;
-mod parity;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -35,8 +33,6 @@ fn main() -> ExitCode {
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
-        Some("oracle") => oracle::oracle(&args[1..]),
-        Some("parity") => parity::parity(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -61,12 +57,7 @@ const USAGE: &str = "usage: cargo xtask <command>
                          write HEAD's snapshot diffs against its parent to
                          gates/approved/<slug>/ (then amend them in)
   rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
-                         that only added gates/ files
-  oracle [--bless] [<filter>]
-                         compare the fixtures' diagnostics against real
-                         PHPStan's; --bless rewrites gates/oracle/parity.tsv
-  parity [--bless]       run phpstan-rs over PHPStan's own test data; --bless
-                         rewrites gates/parity/upstream.tsv";
+                         that only added gates/ files";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

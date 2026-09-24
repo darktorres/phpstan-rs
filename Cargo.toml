@@ -80,12 +80,6 @@ name = "fixtures"
 harness = false
 test = false
 
-# The upstream parity run (tests/parity.rs), driven by `cargo xtask parity`.
-[[test]]
-name = "parity"
-harness = false
-test = false
-
 [[bench]]
 name = "vendored_corpus"
 harness = false
