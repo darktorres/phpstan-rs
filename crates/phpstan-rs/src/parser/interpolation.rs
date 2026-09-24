@@ -33,7 +33,9 @@ impl Parser {
                 StringPart::ComplexExpr(src, frag_base) => {
                     let tokens = Lexer::new_in_php(&src).tokenize_with_spans();
                     let mut sub = Parser::new(tokens);
+                    sub.next_node_id.set(self.next_node_id.get());
                     let mut parsed = sub.parse_expression()?;
+                    self.next_node_id.set(sub.next_node_id.get());
                     bias_expr_spans(&mut parsed, frag_base);
                     exprs.push(parsed);
                 }
@@ -50,6 +52,7 @@ impl Parser {
                     end,
                 } => {
                     let var_expr = Expr {
+                        id: self.node_id(),
                         kind: ExprKind::Variable(var),
                         span: Span {
                             start: var_start,
@@ -57,6 +60,7 @@ impl Parser {
                         },
                     };
                     exprs.push(Expr {
+                        id: self.node_id(),
                         // Real PHP's simple interpolation syntax has no
                         // `?->` form - always non-nullsafe.
                         kind: ExprKind::PropertyAccess(Box::new(var_expr), prop, false),
@@ -74,6 +78,7 @@ impl Parser {
                     end,
                 } => {
                     let var_expr = Expr {
+                        id: self.node_id(),
                         kind: ExprKind::Variable(var),
                         span: Span {
                             start: var_start,
@@ -86,6 +91,7 @@ impl Parser {
                         SimpleIndexKey::Str(s) => ExprKind::Literal(Literal::String(s)),
                     };
                     let key_expr = Expr {
+                        id: self.node_id(),
                         kind: key_kind,
                         span: Span {
                             start: var_end,
@@ -93,6 +99,7 @@ impl Parser {
                         },
                     };
                     exprs.push(Expr {
+                        id: self.node_id(),
                         kind: ExprKind::Index(Box::new(var_expr), Some(Box::new(key_expr))),
                         span: Span {
                             start: var_start,

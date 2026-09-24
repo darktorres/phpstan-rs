@@ -275,6 +275,7 @@ mod tests {
         let StmtKind::Expression(Expr {
             kind: ExprKind::StaticAccess(class, member),
             span,
+            ..
         }) = &program[0].kind
         else {
             panic!("expected a StaticAccess expression statement");

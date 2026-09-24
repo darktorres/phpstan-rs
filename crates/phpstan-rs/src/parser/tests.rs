@@ -2,6 +2,7 @@ mod declarations;
 mod doc_comments_and_robustness;
 mod expressions_and_operators;
 mod helpers;
+mod node_ids;
 mod namespaces_and_names;
 mod spans;
 mod statements_and_control_flow;

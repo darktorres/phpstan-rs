@@ -2,6 +2,27 @@ use std::sync::Arc;
 
 use crate::token::Span;
 
+/// A syntax node's identity within one parsed file: the parser numbers
+/// every `Stmt` and `Expr` densely from 0 in the order it builds them, so a
+/// side table can be a plain vector indexed by `NodeId::index`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct NodeId(u32);
+
+impl NodeId {
+    /// The id of a node built outside the parser (a probe or a rewritten
+    /// expression), which no side table has an entry for.
+    pub const SYNTHETIC: NodeId = NodeId(u32::MAX);
+
+    pub(crate) fn new(index: u32) -> NodeId {
+        debug_assert!(index != u32::MAX, "node ids exhausted");
+        NodeId(index)
+    }
+
+    pub fn index(self) -> usize {
+        self.0 as usize
+    }
+}
+
 /// One `Name(args)` entry inside an attribute group
 /// (`#[Name(args), ...]`). `name` is the raw class name as written,
 /// resolved by the checker (not here). `args` reuses `Arg`'s call-argument
@@ -22,6 +43,7 @@ pub struct Attribute {
 /// concerns - "what kind of statement" and "where it is" - stay separate).
 #[derive(Debug, Clone)]
 pub struct Stmt {
+    pub id: NodeId,
     pub kind: StmtKind,
     pub span: Span,
     // The raw text of a `/** ... */` doc comment immediately preceding this
@@ -719,6 +741,7 @@ impl StaticTarget {
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
 pub struct Expr {
+    pub id: NodeId,
     pub kind: ExprKind,
     pub span: Span,
 }

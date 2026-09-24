@@ -137,6 +137,7 @@ impl Parser {
         let end = self.previous_end();
 
         let mut result = else_stmts.map(|stmts| Stmt {
+            id: self.node_id(),
             kind: StmtKind::Block(stmts),
             span: Span {
                 start: else_start,
@@ -147,9 +148,11 @@ impl Parser {
         });
         for (branch_pos, c, stmts) in branches.into_iter().rev() {
             result = Some(Stmt {
+                id: self.node_id(),
                 kind: StmtKind::If {
                     cond: c,
                     then_branch: Box::new(Stmt {
+                        id: self.node_id(),
                         kind: StmtKind::Block(stmts),
                         span: Span {
                             start: branch_pos,

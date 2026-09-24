@@ -562,6 +562,7 @@ impl<'a> Checker<'a> {
                 continue;
             }
             let variable = Expr {
+                id: NodeId::SYNTHETIC,
                 kind: ExprKind::Variable(name.as_str().into()),
                 span: stmt.span,
             };

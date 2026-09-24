@@ -70,6 +70,8 @@ pub struct Parser {
     // expression productions (parse_unary, parse_assignment,
     // parse_coalesce) - see MAX_EXPR_DEPTH.
     pub(crate) expr_depth: usize,
+    // The id the next node built gets - see `NodeId`.
+    pub(crate) next_node_id: std::cell::Cell<u32>,
 }
 
 mod classes;
@@ -143,6 +145,7 @@ impl Parser {
             doc_comments_all,
             doc_comment_starts,
             expr_depth: 0,
+            next_node_id: std::cell::Cell::new(0),
         }
     }
 
@@ -228,11 +231,19 @@ impl Parser {
             .unwrap_or_default()
     }
 
+    /// A fresh id for the node being built.
+    pub(crate) fn node_id(&self) -> NodeId {
+        let id = self.next_node_id.get();
+        self.next_node_id.set(id + 1);
+        NodeId::new(id)
+    }
+
     /// Builds a `Stmt` spanning from `start` (the position captured before
     /// this statement's first token was consumed) to whatever token was
     /// last consumed.
     pub(crate) fn stmt(&self, kind: StmtKind, start: Position) -> Stmt {
         Stmt {
+            id: self.node_id(),
             kind,
             span: Span {
                 start,
@@ -246,6 +257,7 @@ impl Parser {
     /// Same as `stmt`, for expressions.
     pub(crate) fn expr(&self, kind: ExprKind, start: Position) -> Expr {
         Expr {
+            id: self.node_id(),
             kind,
             span: Span {
                 start,

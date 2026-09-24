@@ -2857,6 +2857,7 @@ impl<'a> Checker<'a> {
                     _ => None,
                 };
                 let fetch = |member: String| Expr {
+                    id: NodeId::SYNTHETIC,
                     kind: ExprKind::StaticAccess(class_name.clone(), member),
                     span: e.span,
                 };
@@ -4891,6 +4892,7 @@ impl<'a> Checker<'a> {
                     .map(|member| {
                         self.infer_expr(
                             &Expr {
+                                id: NodeId::SYNTHETIC,
                                 kind: ExprKind::StaticAccess(class_name.clone(), member),
                                 span: e.span,
                             },

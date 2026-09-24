@@ -45,7 +45,7 @@ use std::path::Path;
 
 use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 
-use crate::ast::{ClassKind, Expr, ExprKind, FunctionDecl, Stmt, StmtKind, Visibility};
+use crate::ast::{ClassKind, Expr, ExprKind, FunctionDecl, NodeId, Stmt, StmtKind, Visibility};
 use crate::project::{self, Project};
 use crate::registry::{NameContext, Registry};
 use crate::token::{Keyword, Position, Span, Token};
@@ -314,11 +314,14 @@ fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
     let assign_span = sentinel_span(u32::MAX - 1);
     let read_span = sentinel_span(u32::MAX);
     let probe_var = |span: Span| Expr {
+        id: NodeId::SYNTHETIC,
         kind: ExprKind::Variable(PROBE_VAR.into()),
         span,
     };
     let assign_stmt = Stmt {
+        id: NodeId::SYNTHETIC,
         kind: StmtKind::Expression(Expr {
+            id: NodeId::SYNTHETIC,
             kind: ExprKind::Assign(Box::new(probe_var(assign_span)), Box::new(receiver)),
             span: assign_span,
         }),
@@ -327,6 +330,7 @@ fn probe_statements(receiver: Expr) -> (Stmt, Stmt, Span) {
         doc_line: None,
     };
     let read_stmt = Stmt {
+        id: NodeId::SYNTHETIC,
         kind: StmtKind::Expression(probe_var(read_span)),
         span: read_span,
         doc_comment: None,
