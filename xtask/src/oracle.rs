@@ -712,7 +712,9 @@ fn parse_phpstan(json: &str, base: &Path, single: bool) -> Result<Vec<Entry>, St
     let mut out = Vec::new();
     if let Some(files) = value["files"].as_object() {
         for (path, file) in files {
-            let path = Path::new(path);
+            // A trait's body is analysed, and reported, once per class
+            // using it: `<path> (in context of class X)`.
+            let path = Path::new(path.split(" (in context of ").next().unwrap_or(path));
             let file_name = if single {
                 path.file_name()
                     .map(|n| n.to_string_lossy().to_string())
