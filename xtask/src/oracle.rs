@@ -78,9 +78,10 @@ const PARAMETERS: &[(&str, &str)] = &[
     ),
 ];
 
-/// phpstan-rs settings that switch on one phpstan-strict-rules rule.
+/// phpstan-rs settings that switch on phpstan-strict-rules rules.
 const STRICT_RULES: &[(&str, &str)] = &[
     ("check_boolean_conditions", "booleansInConditions"),
+    ("check_boolean_conditions", "booleansInLoopConditions"),
     (
         "check_parent_constructor_call",
         "requireParentConstructorCall",
@@ -379,9 +380,14 @@ fn translate(config: &toml::Table, base: &Path, subject: &Path) -> Result<Transl
                 if let Some((_, parameter)) = PARAMETERS.iter().find(|(k, _)| k == key) {
                     let on = flag.ok_or_else(|| format!("{key} is not a boolean"))?;
                     params.insert(parameter, on.to_string());
-                } else if let Some((_, rule)) = STRICT_RULES.iter().find(|(k, _)| k == key) {
+                } else if STRICT_RULES.iter().any(|(k, _)| k == key) {
                     if flag == Some(true) {
-                        strict.push(*rule);
+                        strict.extend(
+                            STRICT_RULES
+                                .iter()
+                                .filter(|(k, _)| k == key)
+                                .map(|(_, r)| *r),
+                        );
                     }
                 } else if flag != Some(false) {
                     unmapped.push(key.clone());
@@ -400,7 +406,10 @@ fn translate(config: &toml::Table, base: &Path, subject: &Path) -> Result<Transl
         for (parameter, value) in STRICT_RULES_GLOBALS {
             params.entry(parameter).or_insert_with(|| value.to_string());
         }
-        let mut rules = String::from("\n\t\tallRules: false\n\t\tbooleansInLoopConditions: false");
+        let mut rules = String::from("\n\t\tallRules: false");
+        if !strict.contains(&"booleansInLoopConditions") {
+            rules.push_str("\n\t\tbooleansInLoopConditions: false");
+        }
         for rule in &strict {
             write!(rules, "\n\t\t{rule}: true").unwrap();
         }
