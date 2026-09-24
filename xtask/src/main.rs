@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
+mod modgraph;
 
 const LEVELS: [&str; 12] = [
     "unset", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
@@ -30,6 +31,7 @@ fn main() -> ExitCode {
         Some("perf") => perf(),
         Some("buildtime") => buildtime(),
         Some("tests") => test_manifest(),
+        Some("modgraph") => modgraph::modgraph(&root(), &args[1..]),
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
@@ -52,6 +54,9 @@ const USAGE: &str = "usage: cargo xtask <command>
   perf                   record wall time and peak memory of the scoped run
   buildtime              record incremental rebuild times
   tests                  record and check the test-name manifest
+  modgraph [--inventory] check the module graph against
+                         gates/module-graph.txt (--inventory lists every
+                         crossing edge)
   baseline               generate the reference baselines (Stage A only)
   approve <slug> [--full]
                          write HEAD's snapshot diffs against its parent to
@@ -916,6 +921,7 @@ fn gates(args: &[String]) -> Result<(), String> {
     run(cargo().args(["test", "--workspace", "--all-targets", "--quiet"]))?;
     run(cargo().args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"]))?;
     test_manifest()?;
+    modgraph::modgraph(&root(), &[])?;
     run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))?;
     run(cargo().args(["bench", "--no-run", "--quiet"]))?;
     run(cargo().args([
