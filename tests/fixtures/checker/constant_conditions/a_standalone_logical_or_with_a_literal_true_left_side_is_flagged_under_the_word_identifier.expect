@@ -1,0 +1,4 @@
+1:7-1:42 missingType.return L6 f | Function f() has no return type specified.
+1:29-1:33 logicalOr.leftAlwaysTrue L4 f | Left side of or is always true.
+1:29-1:39 logicalOr.resultUnused L4 f | Unused result of "or" operator.
+    tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().

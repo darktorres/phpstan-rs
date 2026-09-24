@@ -1,0 +1,1 @@
+4:58-4:60 argument.type L5 test | display() argument #1 ($x) expects string|Stringable, NoToString given

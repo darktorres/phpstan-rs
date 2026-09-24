@@ -195,45 +195,6 @@ function f(array $a, bool $b, \Generator $g): void {
 }
 
 #[test]
-fn loose_haystack_comparisons() {
-    let src = r#"<?php
-/**
- * @param list<string> $names
- * @param list<int> $ids
- * @param list<'a'|'b'> $letters
- * @param list<numeric-string> $numbers
- * @param list<?int> $maybe
- */
-function f(array $names, array $ids, array $letters, array $numbers, array $maybe, int $n, string $s, mixed $m): void {
-    in_array($s, $names);
-    in_array($n, $ids);
-    in_array($n, $letters);
-    in_array($n, $names);
-    in_array($s, $numbers);
-    in_array($n, $maybe);
-    in_array($n, $names, true);
-    in_array($m, $names);
-    array_search(1.5, $ids);
-    array_keys($ids, '1');
-}
-"#;
-    let run = |version: Option<(u8, u8)>| {
-        let mut v: Vec<String> = diagnostics_for_with(src, |r| {
-            r.check_loose_haystack_comparison = true;
-            r.php_version = version;
-        })
-        .into_iter()
-        .filter(|d| d.identifier == "function.looseComparison")
-        .map(|d| d.span.start.line.to_string())
-        .collect();
-        v.sort_by_key(|l| l.parse::<u32>().unwrap());
-        v
-    };
-    assert_eq!(run(Some((8, 3))), vec!["13", "14", "15", "18", "19"]);
-    assert_eq!(run(Some((7, 4))), vec!["12", "13", "14", "15", "18", "19"]);
-}
-
-#[test]
 fn arithmetic_operands() {
     let src = r#"<?php
 /** @param numeric-string $num */
@@ -375,41 +336,6 @@ function f(string $s, ?string $ns, int $i, array $a, Name $n, \stdClass $o, mixe
         messages,
         vec!["string (string) in combination with non-string (int) is not allowed."]
     );
-}
-
-#[test]
-fn strict_array_filter() {
-    let src = r#"<?php
-/**
- * @param list<int> $ints
- * @param list<bool> $bools
- * @param list<list<int>> $lists
- * @param list<\stdClass|null> $objects
- * @param list<int|null> $maybeInts
- */
-function f(array $ints, array $bools, array $lists, array $objects, array $maybeInts, ?callable $cb): void {
-    array_filter($ints);
-    array_filter($bools);
-    array_filter($lists);
-    array_filter($objects);
-    array_filter($maybeInts);
-    array_filter($ints, null);
-    array_filter($ints, $cb);
-    array_filter($ints, fn (int $i): bool => $i > 0);
-    array_filter($ints, mode: ARRAY_FILTER_USE_KEY);
-}
-"#;
-    let found = |level: u8| {
-        let mut v: Vec<String> = diagnostics_for_with(src, |r| r.check_strict_array_filter = true)
-            .into_iter()
-            .filter(|d| d.identifier == "arrayFilter.strict" && d.level <= level)
-            .map(|d| d.span.start.line.to_string())
-            .collect();
-        v.sort_by_key(|l| l.parse::<u32>().unwrap());
-        v
-    };
-    assert_eq!(found(10), vec!["10", "14", "15", "16", "18"]);
-    assert_eq!(found(7), vec!["10", "14", "15", "18"]);
 }
 
 #[test]

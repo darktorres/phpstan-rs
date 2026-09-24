@@ -1,0 +1,1 @@
+1:7-1:42 argument.type L0 <main> | simplexml_load_string() argument is not well-formed XML (expected 'b' tag, not 'a' at 1:7) and will return false at runtime

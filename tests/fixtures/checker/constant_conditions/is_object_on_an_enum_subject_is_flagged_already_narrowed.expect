@@ -1,0 +1,2 @@
+3:13-5:14 missingType.return L6 f | Function f() has no return type specified.
+4:21-4:34 function.alreadyNarrowedType L4 f | Call to function is_object() with Status will always evaluate to true.

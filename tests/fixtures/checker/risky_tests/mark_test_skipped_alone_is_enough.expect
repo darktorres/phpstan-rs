@@ -1,0 +1,2 @@
+8:24-10:18 missingType.return L6 MyTest::testSomething | Method MyTest::testSomething() has no return type specified.
+9:21-9:54 method.notFound L0 MyTest::testSomething | call to undefined method MyTest::markTestSkipped()

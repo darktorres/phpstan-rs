@@ -1,0 +1,1 @@
+4:22-4:55 method.notFound L0 test | call to undefined method Foo::totallyUndefinedMethod()

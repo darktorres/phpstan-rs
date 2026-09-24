@@ -1,0 +1,2 @@
+2:24-2:32 missingType.parameter L6 f | Function f() has parameter $pattern with no type specified.
+2:34-2:42 missingType.parameter L6 f | Function f() has parameter $subject with no type specified.

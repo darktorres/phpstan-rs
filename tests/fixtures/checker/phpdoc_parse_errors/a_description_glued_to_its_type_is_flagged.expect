@@ -1,0 +1,4 @@
+3:13-3:40 missingType.return L6 f | Function f() has no return type specified.
+3:22-3:23 phpDoc.parseError L2 f | PHPDoc tag @return has invalid value (array(width, height)): Unexpected token "(", expected TOKEN_HORIZONTAL_WS
+5:13-5:40 missingType.return L6 g | Function g() has no return type specified.
+5:22-5:23 phpDoc.parseError L2 g | PHPDoc tag @return has invalid value (array<array><string>): Unexpected token "<", expected TOKEN_HORIZONTAL_WS

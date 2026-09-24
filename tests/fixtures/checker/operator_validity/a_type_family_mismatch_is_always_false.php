@@ -1,0 +1,1 @@
+<?php function f(int $x) { if ($x === "hello") { echo 1; } }

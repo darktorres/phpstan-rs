@@ -1,0 +1,2 @@
+3:17-3:19 binaryOp.invalid L2 test | Binary operation "<<" between string and string results in an error.
+3:17-3:25 expr.resultUnused L4 test | Expression "$a << $b" on a separate line does not do anything.

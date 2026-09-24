@@ -1,0 +1,1 @@
+7:17-7:30 property.deprecated L0 f | Call to deprecated property Foo::$oldProp.

@@ -1,0 +1,2 @@
+3:13-3:24 arguments.count L0 <main> | needsTwo() expects at least 2 argument(s), 1 given
+3:13-3:24 function.resultUnused L4 <main> | Call to function needsTwo() on a separate line has no effect.

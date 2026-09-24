@@ -1,0 +1,1 @@
+<?php function f(float $a, int $b): int { return $a << $b; }

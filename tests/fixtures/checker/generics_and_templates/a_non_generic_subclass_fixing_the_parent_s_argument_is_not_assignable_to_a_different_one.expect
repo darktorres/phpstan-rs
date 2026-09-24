@@ -1,0 +1,4 @@
+9:13-9:50 missingType.return L6 needsStringCollection | Function needsStringCollection() has no return type specified.
+10:13-12:14 missingType.return L6 f | Function f() has no return type specified.
+11:17-11:42 function.resultUnused L4 f | Call to function needsStringCollection() on a separate line has no effect.
+11:39-11:41 argument.type L5 f | needsStringCollection() argument #1 ($c) expects Collection<string>, IntCollection given

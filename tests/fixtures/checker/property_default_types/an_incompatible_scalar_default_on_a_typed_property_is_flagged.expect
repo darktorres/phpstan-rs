@@ -1,0 +1,1 @@
+3:33-3:40 property.defaultValue L3 Foo | Property Foo::$x (int) does not accept default value of type 'hello'.

@@ -1,0 +1,2 @@
+6:21-6:37 function.resultUnused L4 test | Call to function needsInt() on a separate line has no effect.
+6:30-6:36 argument.type L5 test | needsInt() argument #1 ($n) expects int, 'a'|'b' given

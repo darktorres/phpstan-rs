@@ -1,0 +1,4 @@
+<?php
+            #[\AllowDynamicProperties]
+            class Foo {}
+        

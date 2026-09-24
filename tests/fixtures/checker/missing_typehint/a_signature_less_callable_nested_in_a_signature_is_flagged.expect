@@ -1,0 +1,1 @@
+4:38-4:50 missingType.callable L6 C::test | Method C::test() has parameter $cb with no signature specified for callable.

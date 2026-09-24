@@ -1,0 +1,2 @@
+6:24-6:35 method.notFound L0 test | call to undefined method Point::getx_()
+    tip: Did you mean getX()?

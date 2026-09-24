@@ -1,0 +1,1 @@
+7:38-7:45 property.defaultValue L3 Foo | Property Foo::$bad (string) does not accept default value of type 3.

@@ -1,0 +1,2 @@
+1:7-1:42 missingType.return L6 f | Function f() has no return type specified.
+1:29-1:39 ternary.resultUnused L4 f | Unused result of ternary operator.

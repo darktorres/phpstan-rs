@@ -1,0 +1,2 @@
+4:24-4:59 missingType.return L6 Iter::current | Method Iter::current() has no return type specified.
+9:24-9:29 return.type L3 f | return type mismatch: expected string, got FakeFileInfo9921

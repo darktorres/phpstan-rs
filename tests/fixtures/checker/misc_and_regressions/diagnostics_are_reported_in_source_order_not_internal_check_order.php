@@ -1,0 +1,1 @@
+<?php function f() { $obj->prop = $rhs; }

@@ -1,0 +1,2 @@
+3:17-3:40 enum.caseType L0 Status | Enum case Status::Active value 'active' does not match the "int" type.
+    non-ignorable

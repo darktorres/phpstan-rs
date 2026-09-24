@@ -1,0 +1,2 @@
+2:13-2:33 function.nameCase L0 <main> | Function strlen used with incorrect case: STRLEN.
+    fix: Use strlen => "strlen"

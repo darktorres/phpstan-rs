@@ -1,0 +1,7 @@
+12:13-15:14 generics.existingClass L6 Box | PHPDoc tag @method template for method Box::bad() cannot have existing class Foo as its name.
+12:13-15:14 generics.requiredTypeAfterOptional L6 Box | PHPDoc tag @template B for method Box::opt() does not have a default type but follows an optional @template A.
+12:13-15:14 methodTag.shadowTemplate L2 Box | PHPDoc tag @method template T for method Box::shadow() shadows @template T for class Box.
+13:51-13:59 missingType.iterableValue L6 Box::__call | Method Box::__call() has parameter $a with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+14:64-14:72 missingType.iterableValue L6 Box::__callStatic | Method Box::__callStatic() has parameter $a with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

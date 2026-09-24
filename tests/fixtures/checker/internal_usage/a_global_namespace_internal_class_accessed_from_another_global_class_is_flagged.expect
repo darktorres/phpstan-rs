@@ -1,0 +1,4 @@
+7:24-9:18 missingType.return L6 Other::f | Method Other::f() has no return type specified.
+7:35-7:40 parameter.internalClass L0 Other::f | Parameter $t of method Other::f() has typehint with internal class Thing.
+7:35-7:43 type.internalClass L0 Other::f | Referencing internal class Thing.
+8:21-8:34 method.internalClass L0 Other::f | Call to method doStuff() of internal class Thing.

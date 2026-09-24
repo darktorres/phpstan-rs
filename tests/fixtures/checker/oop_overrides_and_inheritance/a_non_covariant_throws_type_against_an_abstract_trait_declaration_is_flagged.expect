@@ -1,0 +1,1 @@
+9:17-9:47 throws.notCovariant L2 Widget | PHPDoc tag @throws type RuntimeException of method Widget::foo() should be covariant with PHPDoc @throws type LogicException of method FooTrait::foo().

@@ -1,0 +1,2 @@
+3:24-3:27 missingType.parameter L6 f | Function f() has parameter $ch with no type specified.
+4:47-4:80 constant.notFound L1 f | Constant CURLINFO_NOT_IN_THE_CURATED_TABLE not found.

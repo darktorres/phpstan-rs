@@ -1,0 +1,2 @@
+3:13-3:27 ini.removed L0 f | Call to ini_get() with ini directive track_errors, removed in PHP 8.0; it always returns false.
+6:25-6:43 ini.removed L0 f | Call to ini_restore() with ini directive mysqli.reconnect, removed in PHP 8.2; it does nothing.

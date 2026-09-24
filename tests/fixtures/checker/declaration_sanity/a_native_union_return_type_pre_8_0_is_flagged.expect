@@ -1,0 +1,2 @@
+2:13-2:51 return.unionTypeNotSupported L0 f | Function f() uses native union types but they're supported only on PHP 8.0 and later.
+2:13-2:51 return.unusedType L4 f | Function f() never returns string so it can be removed from the return type.

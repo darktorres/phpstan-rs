@@ -1,0 +1,1 @@
+4:1-5:1 whitespace.fileEnd L0 <main> | File ends with a trailing whitespace. This may cause problems when running the code in the web browser. Remove the closing ?> mark or remove the whitespace.

@@ -1,0 +1,2 @@
+2:17-7:18 missingType.generics L6 Container | Class Container implements generic interface ArrayAccess but does not specify its types: TKey, TValue
+8:17-10:18 missingType.return L6 f | Function f() has no return type specified.

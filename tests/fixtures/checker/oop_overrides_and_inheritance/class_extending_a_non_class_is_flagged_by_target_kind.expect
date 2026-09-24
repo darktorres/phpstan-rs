@@ -1,0 +1,3 @@
+5:13-5:40 class.extendsInterface L0 ExtI | class ExtI cannot extend interface KindI
+6:13-6:40 class.extendsTrait L0 ExtT | class ExtT cannot extend trait KindT
+7:13-7:40 class.extendsEnum L0 ExtE | class ExtE cannot extend enum KindE

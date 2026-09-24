@@ -1,0 +1,6 @@
+11:30-11:37 argument.type L5 f | Parameter #2 $array of function implode expects array<string>, list<array<(int|string), int>> given.
+14:27-14:34 argument.type L5 f | Parameter #1 $array of function array_sum expects an array of values castable to number, list<array<(int|string), int>> given.
+16:35-16:42 argument.type L5 f | Parameter #2 $arrays of function array_diff expects an array of values castable to string, list<Plain> given.
+17:31-17:38 argument.type L5 f | Parameter #1 $keys of function array_combine expects an array of values castable to string, list<Plain> given.
+18:30-18:37 argument.type L5 f | Parameter #1 $array of function array_unique expects an array of values castable to string, list<Plain> given.
+20:22-20:29 argument.type L5 f | Parameter #1 $array of function sort expects an array of values castable to float, list<Plain> given.

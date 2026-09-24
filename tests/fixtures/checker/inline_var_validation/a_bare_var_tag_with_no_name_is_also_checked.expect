@@ -1,0 +1,1 @@
+4:17-4:30 varTag.nativeType L2 f | PHPDoc tag @var with type int is not subtype of native type 'hello'.

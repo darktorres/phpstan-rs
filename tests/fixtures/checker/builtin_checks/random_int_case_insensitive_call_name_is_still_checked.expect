@@ -1,0 +1,1 @@
+1:18-1:20 argument.type L0 <main> | random_int(): parameter #1 ($min = 10) must be less than or equal to parameter #2 ($max = 1)

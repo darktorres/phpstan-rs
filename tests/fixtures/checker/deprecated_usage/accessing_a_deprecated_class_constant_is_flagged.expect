@@ -1,0 +1,1 @@
+7:24-7:38 classConstant.deprecated L0 f | Call to deprecated constant Foo::OLD_CONST (use NEW_CONST instead).

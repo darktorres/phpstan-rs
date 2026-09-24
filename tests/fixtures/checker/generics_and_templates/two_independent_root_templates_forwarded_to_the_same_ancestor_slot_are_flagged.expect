@@ -1,0 +1,1 @@
+20:13-20:51 generics.interfaceConflict L6 Box | Class Box specifies template type Y of interface BaseIface as U but it's already specified as T.

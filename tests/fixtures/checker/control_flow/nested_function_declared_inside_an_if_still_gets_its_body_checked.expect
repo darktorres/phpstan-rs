@@ -1,0 +1,2 @@
+3:17-5:18 missingType.return L6 foo | Function foo() has no return type specified.
+4:28-4:41 variable.undefined L0 foo | undefined variable $undefinedVar

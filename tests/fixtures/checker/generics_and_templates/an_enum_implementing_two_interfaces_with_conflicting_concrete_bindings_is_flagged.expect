@@ -1,0 +1,1 @@
+18:13-18:51 generics.interfaceConflict L6 Suit | Class Suit specifies template type Y of interface BaseIface as string but it's already specified as int.

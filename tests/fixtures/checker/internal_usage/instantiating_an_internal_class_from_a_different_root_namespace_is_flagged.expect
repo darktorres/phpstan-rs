@@ -1,0 +1,2 @@
+8:13-10:14 missingType.return L6 f | Function f() has no return type specified.
+9:17-9:45 new.internalClass L0 f | Instantiation of internal class Vendor\\Internal\\Thing.

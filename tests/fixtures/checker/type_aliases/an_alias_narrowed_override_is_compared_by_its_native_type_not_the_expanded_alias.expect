@@ -1,0 +1,1 @@
+13:33-13:40 parameter.phpDocType L2 MyRule::process | PHPDoc tag @param for parameter $node with type array{kind: string} is incompatible with native type Node.

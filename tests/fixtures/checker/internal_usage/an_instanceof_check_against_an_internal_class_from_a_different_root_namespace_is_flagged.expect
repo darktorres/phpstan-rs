@@ -1,0 +1,3 @@
+8:13-10:14 missingType.return L6 f | Function f() has no return type specified.
+9:17-9:53 expr.resultUnused L4 f | Expression "$o instanceof \\Vendor\\Internal\\Thing" on a separate line does not do anything.
+9:17-9:53 instanceof.internalClass L0 f | Instanceof references internal class Vendor\\Internal\\Thing.

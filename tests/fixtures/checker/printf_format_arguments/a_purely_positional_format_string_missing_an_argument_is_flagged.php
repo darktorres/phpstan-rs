@@ -1,0 +1,1 @@
+<?php sprintf('%1$s %2$s', "only one");

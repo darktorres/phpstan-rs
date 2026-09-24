@@ -1,0 +1,4 @@
+4:22-4:24 offsetAccess.notFound L3 f | Offset 1 does not exist on array{0: int, name: string, nested: array{a: int}}.
+5:32-5:37 offsetAccess.notFound L3 f | Offset 'age' does not exist on array{0: int, name: string, nested: array{a: int}}.
+6:42-6:45 offsetAccess.notFound L3 f | Offset 'b' does not exist on array{a: int}.
+7:22-7:28 offsetAccess.notFound L3 f | Offset 2 does not exist on array{0: int, name: string, nested: array{a: int}}.

@@ -1,0 +1,7 @@
+4:24-4:56 missingType.return L6 Status::__call | Method Status::__call() has no return type specified.
+4:40-4:45 missingType.parameter L6 Status::__call | Method Status::__call() has parameter $name with no type specified.
+4:47-4:52 missingType.parameter L6 Status::__call | Method Status::__call() has parameter $args with no type specified.
+5:31-5:69 missingType.return L6 Status::__callStatic | Method Status::__callStatic() has no return type specified.
+5:53-5:58 missingType.parameter L6 Status::__callStatic | Method Status::__callStatic() has parameter $name with no type specified.
+5:60-5:65 missingType.parameter L6 Status::__callStatic | Method Status::__callStatic() has parameter $args with no type specified.
+6:24-6:46 missingType.return L6 Status::__invoke | Method Status::__invoke() has no return type specified.

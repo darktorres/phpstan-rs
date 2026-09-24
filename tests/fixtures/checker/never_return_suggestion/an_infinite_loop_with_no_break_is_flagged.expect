@@ -1,0 +1,2 @@
+2:27-2:31 return.neverCandidate L5 f | could be declared to return never - it never returns normally
+3:24-3:28 while.alwaysTrue L4 f | While loop condition is always true.

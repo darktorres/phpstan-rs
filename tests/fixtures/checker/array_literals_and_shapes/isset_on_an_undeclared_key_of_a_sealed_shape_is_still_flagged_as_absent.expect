@@ -1,0 +1,1 @@
+4:27-4:34 isset.offset L0 f | Offset 'b' on array{a: int} in isset() does not exist.

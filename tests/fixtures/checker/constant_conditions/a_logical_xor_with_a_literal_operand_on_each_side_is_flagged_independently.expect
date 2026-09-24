@@ -1,0 +1,2 @@
+1:7-1:50 missingType.return L6 f | Function f() has no return type specified.
+1:35-1:39 logicalXor.leftAlwaysTrue L4 f | Left side of xor is always true.

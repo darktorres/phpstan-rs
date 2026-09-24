@@ -1,0 +1,3 @@
+5:13-5:30 missingType.return L6 f | Function f() has no return type specified.
+5:22-5:23 phpDoc.parseError L2 f | PHPDoc tag @param has invalid value (c13y object): Unexpected token "object", expected variable
+5:24-5:26 missingType.parameter L6 f | Function f() has parameter $a with no type specified.

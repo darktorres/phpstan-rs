@@ -1,0 +1,1 @@
+4:45-4:59 property.onlyWritten L4 Point | private property Point::$x is never read, only written

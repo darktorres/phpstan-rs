@@ -1,0 +1,2 @@
+4:23-4:31 classConstant.phpDocType L2 Conf | PHPDoc tag @var for constant Conf::BAD with type int<1, max> is incompatible with value -1.
+10:30-10:40 classConstant.value L2 Conf | constant Conf::TYPED (non-empty-string) does not accept value ''

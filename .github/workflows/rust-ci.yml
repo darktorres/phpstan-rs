@@ -39,6 +39,8 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --workspace --all-targets
+      - name: Fixture suite
+        run: cargo test --profile gate --test fixtures
       - name: Tests without default features
         run: cargo test --workspace --no-default-features
       - name: Docs

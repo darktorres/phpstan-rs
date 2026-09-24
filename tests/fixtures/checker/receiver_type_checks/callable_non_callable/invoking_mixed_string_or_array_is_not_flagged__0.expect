@@ -1,0 +1,2 @@
+2:21-4:22 missingType.return L6 f | Function f() has no return type specified.
+2:32-2:34 missingType.parameter L6 f | Function f() has parameter $x with no type specified.

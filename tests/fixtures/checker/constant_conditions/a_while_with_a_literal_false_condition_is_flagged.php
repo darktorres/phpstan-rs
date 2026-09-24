@@ -1,0 +1,1 @@
+<?php function f() { while (false) { echo 1; } }

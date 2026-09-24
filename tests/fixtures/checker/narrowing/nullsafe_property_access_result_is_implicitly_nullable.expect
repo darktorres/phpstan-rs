@@ -1,0 +1,1 @@
+5:57-5:67 argument.type L5 test | needsFoo() argument #1 ($x) expects Foo, Foo|null given

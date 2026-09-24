@@ -1,0 +1,7 @@
+3:17-3:26 logicalAnd.leftAlwaysTrue L4 test | Left side of and is always true.
+3:17-3:33 logicalAnd.resultUnused L4 test | Unused result of "and" operator.
+    tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().
+4:17-4:27 logicalOr.leftAlwaysFalse L4 test | Left side of or is always false.
+4:17-4:33 logicalOr.resultUnused L4 test | Unused result of "or" operator.
+    tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().
+5:28-5:32 booleanAnd.rightAlwaysTrue L4 test | Right side of && is always true.

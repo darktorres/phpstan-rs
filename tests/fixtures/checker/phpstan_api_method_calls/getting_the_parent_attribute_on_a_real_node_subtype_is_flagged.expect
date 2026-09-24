@@ -1,0 +1,7 @@
+test.php:9:13-13:14 class.abstractMethodNotImplemented L0 App\MyRule | class App\\MyRule does not implement abstract method(s): getNodeType, processNode
+    tip: either implement every method listed above, or declare this class itself abstract
+test.php:9:13-13:14 missingType.generics L6 App\MyRule | Class App\\MyRule implements generic interface PHPStan\\Rules\\Rule but does not specify its types: TNodeType
+test.php:10:24-12:18 missingType.return L6 App\MyRule::check | Method App\\MyRule::check() has no return type specified.
+test.php:11:21-11:52 method.notFound L0 App\MyRule::check | call to undefined method PhpParser\\Node\\Stmt\\ClassMethod::getAttribute()
+test.php:11:21-11:52 phpParser.nodeConnectingAttribute L0 App\MyRule::check | Node attribute 'previous' is no longer available.
+    tip: See: https://phpstan.org/blog/preprocessing-ast-for-custom-rules

@@ -1,0 +1,2 @@
+3:17-3:26 logicalXor.resultUnused L4 test | Unused result of "xor" operator.
+    tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().

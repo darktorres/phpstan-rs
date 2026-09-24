@@ -1,0 +1,3 @@
+3:17-3:54 method.finalPrivate L1 Foo | private method Foo::bar() cannot be final as it is never overridden by other classes
+3:31-3:54 method.unused L4 Foo | private method Foo::bar() is unused
+    fix: Remove method bar() => ""

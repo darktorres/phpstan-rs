@@ -1,0 +1,2 @@
+5:44-5:50 property.staticAsymmetricVisibility L0 Gated | Asymmetric visibility for static properties is supported only on PHP 8.5 and later.
+    non-ignorable

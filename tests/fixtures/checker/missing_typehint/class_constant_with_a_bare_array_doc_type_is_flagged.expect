@@ -1,0 +1,2 @@
+4:30-4:43 missingType.iterableValue L6 C | Constant C::X type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

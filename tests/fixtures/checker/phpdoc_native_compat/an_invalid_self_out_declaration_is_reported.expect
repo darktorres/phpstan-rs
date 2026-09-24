@@ -1,0 +1,3 @@
+5:33-5:34 selfOut.type L2 Thing::a | Self-out type Other of method Thing::a is not subtype of Thing.
+7:40-7:41 selfOut.static L2 Thing::b | PHPDoc tag @phpstan-self-out is not supported above static method Thing::b().
+9:33-9:34 selfOut.unresolvableType L2 Thing::c | PHPDoc tag @phpstan-self-out for method Thing::c() contains unresolvable type.

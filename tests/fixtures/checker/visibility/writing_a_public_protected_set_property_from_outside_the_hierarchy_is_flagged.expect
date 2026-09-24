@@ -1,0 +1,1 @@
+6:17-6:22 property.protected L0 test | access to protected property Foo::$x

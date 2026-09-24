@@ -1,0 +1,5 @@
+3:24-3:43 missingType.return L6 X::foo | Method X::foo() has no return type specified.
+3:37-3:39 missingType.parameter L6 X::foo | Method X::foo() has parameter $a with no type specified.
+4:24-4:47 missingType.return L6 X::foo | Method X::foo() has no return type specified.
+4:37-4:39 missingType.parameter L6 X::foo | Method X::foo() has parameter $a with no type specified.
+4:41-4:43 missingType.parameter L6 X::foo | Method X::foo() has parameter $b with no type specified.

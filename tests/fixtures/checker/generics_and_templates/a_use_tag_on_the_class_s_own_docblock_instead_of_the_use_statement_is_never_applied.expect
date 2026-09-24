@@ -1,0 +1,1 @@
+5:13-7:14 missingType.generics L6 UserRepo | Class UserRepo uses generic trait Repo but does not specify its types: T

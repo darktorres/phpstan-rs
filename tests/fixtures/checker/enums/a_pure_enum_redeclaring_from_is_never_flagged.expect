@@ -1,0 +1,1 @@
+4:45-4:51 missingType.parameter L6 Status::from | Method Status::from() has parameter $value with no type specified.

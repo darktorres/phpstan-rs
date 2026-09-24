@@ -1,0 +1,2 @@
+1:7-1:51 missingType.return L6 f | Function f() has no return type specified.
+1:29-1:48 class.notFound L0 f | instantiated class TotallyMadeUp not found

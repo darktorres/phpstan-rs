@@ -1,0 +1,8 @@
+4:19-4:29 classConstant.unused L4 A | private constant A::UNUSED is unused
+    fix: Remove constant UNUSED => ""
+5:26-5:31 classConstant.unused L4 A | private constant A::B is unused
+7:7-7:18 attribute.target L0 A | Attribute class Deprecated does not have the property target.
+8:18-8:23 property.unused L4 A | private property A::$gone is unused
+    fix: Remove property $gone => ""
+13:13-13:39 method.unused L4 A | private method A::helper() is unused
+    fix: Remove method helper() => ""

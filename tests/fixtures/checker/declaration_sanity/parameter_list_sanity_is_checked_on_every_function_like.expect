@@ -1,0 +1,28 @@
+2:13-2:58 missingType.return L6 f | Function f() has no return type specified.
+2:24-2:29 missingType.parameter L6 f | Function f() has parameter $_GET with no type specified.
+2:24-2:29 parameter.superglobal L0 f | Superglobal variable $_GET cannot be used as a parameter.
+    non-ignorable
+2:31-2:36 missingType.parameter L6 f | Function f() has parameter $this with no type specified.
+2:31-2:36 parameter.this L0 f | Cannot use $this as parameter.
+    non-ignorable
+2:38-2:40 missingType.parameter L6 f | Function f() has parameter $a with no type specified.
+2:42-2:44 missingType.parameter L6 f | Function f() has parameter $rest with no type specified.
+2:42-2:44 parameter.duplicate L0 f | Redefinition of parameter $a.
+    non-ignorable
+3:13-3:46 missingType.return L6 g | Function g() has no return type specified.
+3:24-3:33 missingType.parameter L6 g | Function g() has parameter $first with no type specified.
+3:24-3:33 parameter.variadicNotLast L0 g | Only the last parameter can be variadic.
+    non-ignorable
+3:35-3:42 missingType.parameter L6 g | Function g() has parameter $second with no type specified.
+5:24-5:47 missingType.return L6 K::m | Method K::m() has no return type specified.
+5:35-5:43 missingType.parameter L6 K::m | Method K::m() has parameter $GLOBALS with no type specified.
+5:35-5:43 parameter.superglobal L0 K::m | Superglobal variable $GLOBALS cannot be used as a parameter.
+    non-ignorable
+6:28-6:49 propertySetHook.nativeParameterType L0 K | Parameter $this of set hook does not have a native type but the property K::$p does.
+    non-ignorable
+6:37-6:43 parameter.this L0 K::$p | Cannot use $this as parameter.
+    non-ignorable
+8:32-8:34 parameter.duplicate L0 <main> | Redefinition of parameter $x.
+    non-ignorable
+9:22-9:27 parameter.variadicNotLast L0 <main> | Only the last parameter can be variadic.
+    non-ignorable

@@ -1,0 +1,3 @@
+4:45-4:57 missingType.iterableValue L6 Foo::__construct | Method Foo::__construct() has parameter $items with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+8:26-8:34 property.uninitialized L2 Foo | Access to an uninitialized property Foo::$x.

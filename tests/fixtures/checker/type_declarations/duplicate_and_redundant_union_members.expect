@@ -1,0 +1,23 @@
+5:24-5:31 unionType.duplicate L0 a | Duplicate type INT is redundant.
+    non-ignorable
+5:36-5:48 unionType.duplicate L0 a | Duplicate type \\App\\Foo is redundant.
+    non-ignorable
+5:53-5:74 class.notFound L0 a | parameter $z of a() has invalid type Other\\Thing
+5:53-5:71 unionType.duplicate L0 a | Duplicate type \\Other\\Thing is redundant.
+    non-ignorable
+6:24-6:34 unionType.duplicate L0 b | Duplicate type false is redundant.
+    non-ignorable
+6:39-6:49 unionType.trueAndFalse L0 b | Type contains both true and false, bool must be used instead.
+    non-ignorable
+6:54-6:64 unionType.objectAndClass L0 b | Type object|Foo contains both object and a class type, which is redundant.
+    non-ignorable
+6:69-6:86 missingType.iterableValue L6 b | Function b() has parameter $w with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:69-6:86 missingType.iterableValue L6 b | Function b() has parameter $w with no value type specified in iterable type iterable.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:69-6:83 unionType.iterableAndArray L0 b | Type iterable|array contains both iterable and array, which is redundant.
+    non-ignorable
+7:27-7:40 unionType.objectAndClass L0 c | Type object|static contains both object and a class type, which is redundant.
+    non-ignorable
+8:27-8:38 unionType.objectAndClass L0 d | Type object|self contains both object and a class type, which is redundant.
+    non-ignorable

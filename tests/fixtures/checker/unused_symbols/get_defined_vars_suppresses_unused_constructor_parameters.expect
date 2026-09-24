@@ -1,0 +1,2 @@
+6:40-6:48 missingType.iterableValue L6 Bag::store | Method Bag::store() has parameter $a with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

@@ -1,0 +1,2 @@
+6:17-6:51 method.nameCase L4 Child | Method Child::DoStuff() overrides Base::doStuff() with different letter casing
+    fix: Use doStuff => "doStuff"

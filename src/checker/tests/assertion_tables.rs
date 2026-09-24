@@ -19,28 +19,6 @@ fn types_of(src: &str, configure: impl FnOnce(&mut crate::registry::Registry)) -
 }
 
 #[test]
-fn nette_tester_assertions_narrow_their_argument() {
-    let found = types_of(
-        r#"<?php
-namespace Tester { class Assert {
-    public static function notNull(mixed $actual, ?string $description = null): void {}
-    public static function true(mixed $actual, ?string $description = null): void {}
-} }
-namespace App {
-use function PHPStan\Testing\assertType;
-function f(?string $s, bool $b): void {
-    \Tester\Assert::notNull($s);
-    assertType('?', $s);
-    \Tester\Assert::true($b);
-    assertType('?', $b);
-}
-}"#,
-        |_| {},
-    );
-    assert_eq!(found, vec!["Dumped type: string", "Dumped type: true"]);
-}
-
-#[test]
 fn configured_assertions_apply_to_functions_and_conditional_returns() {
     let found = types_of(
         r#"<?php

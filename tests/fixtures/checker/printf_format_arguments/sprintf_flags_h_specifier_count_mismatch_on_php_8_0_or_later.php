@@ -1,0 +1,1 @@
+<?php sprintf("%h and %h", 3.5);

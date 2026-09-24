@@ -1,0 +1,3 @@
+5:17-5:63 function.impossibleHaystackValue L4 f | Value Color::Red in the haystack passed to in_array() can never be identical to the needle type Suit.
+7:17-7:52 function.impossibleHaystackValue L4 f | Value 1 in the haystack passed to array_search() can never be identical to the needle type string.
+9:17-9:52 function.impossibleHaystackValue L4 f | Value 1 in the haystack passed to array_keys() can never be identical to the needle type 'one'.

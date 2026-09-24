@@ -1,0 +1,1 @@
+<?php sprintf("%h and %s", 3.5, "only one");

@@ -1,0 +1,6 @@
+2:36-2:53 missingType.return L6 Foo::doFoo | Method Foo::doFoo() has no return type specified.
+4:24-4:43 missingType.return L6 Bar::doBar | Method Bar::doBar() has no return type specified.
+5:33-5:50 missingType.return L6 Bar::doBaz | Method Bar::doBaz() has no return type specified.
+7:13-9:14 class.abstractMethodNotImplemented L0 Baz | class Baz does not implement abstract method(s): doBaz, doFoo
+    tip: either implement every method listed above, or declare this class itself abstract
+8:24-8:43 missingType.return L6 Baz::doBar | Method Baz::doBar() has no return type specified.

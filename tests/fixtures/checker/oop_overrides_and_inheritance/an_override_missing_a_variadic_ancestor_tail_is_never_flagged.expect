@@ -1,0 +1,1 @@
+2:54-2:62 missingType.parameter L6 Base::foo | Method Base::foo() has parameter $rest with no type specified.

@@ -1,0 +1,1 @@
+3:46-3:60 property.onlyWritten L4 Value | private property Value::$x is never read, only written

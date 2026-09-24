@@ -1,0 +1,7 @@
+8:5-8:14 expr.resultUnused L4 f | Expression "isset($a)" on a separate line does not do anything.
+9:5-9:14 expr.resultUnused L4 f | Expression "empty($b)" on a separate line does not do anything.
+9:11-9:13 empty.variable L0 f | Variable $b in empty() always exists and is not falsy.
+11:5-11:18 expr.resultUnused L4 f | Expression "isset($plain)" on a separate line does not do anything.
+11:11-11:17 isset.variable L0 f | Variable $plain in isset() always exists and is not nullable.
+13:5-13:20 expr.resultUnused L4 f | Expression "isset($list[0])" on a separate line does not do anything.
+13:11-13:19 isset.offset L0 f | Offset '0' on array{0: A} in isset() always exists and is not nullable.

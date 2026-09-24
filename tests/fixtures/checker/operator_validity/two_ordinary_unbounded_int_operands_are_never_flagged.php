@@ -1,0 +1,1 @@
+<?php function f(int $a, int $b) { if ($a === $b) { echo 1; } }

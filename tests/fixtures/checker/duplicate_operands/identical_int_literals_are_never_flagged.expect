@@ -1,0 +1,1 @@
+3:24-3:31 identical.alwaysTrue L4 f | Strict comparison using === between 1 and 1 will always evaluate to true.

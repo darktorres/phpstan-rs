@@ -1,0 +1,1 @@
+3:40-3:84 parameter.notOptional L0 Child | Parameter #2 ($b) of Child::foo() is required but parameter #2 ($b) of Base::foo() is optional

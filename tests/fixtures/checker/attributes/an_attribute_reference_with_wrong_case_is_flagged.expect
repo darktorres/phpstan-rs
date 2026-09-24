@@ -1,0 +1,2 @@
+4:15-4:22 class.nameCase L0 Bar | Class referenced with incorrect case: fooattr.
+    fix: Use FooAttr => "FooAttr"

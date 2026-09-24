@@ -1,0 +1,4 @@
+<?php
+            #[\Deprecated]
+            interface Foo {}
+        

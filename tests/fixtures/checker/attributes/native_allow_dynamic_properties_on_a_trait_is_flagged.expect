@@ -1,0 +1,2 @@
+2:15-2:38 trait.allowDynamicProperties L0 Foo | Attribute class AllowDynamicProperties cannot be used with trait.
+    non-ignorable

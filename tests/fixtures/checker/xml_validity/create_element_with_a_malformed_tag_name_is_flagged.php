@@ -1,0 +1,1 @@
+<?php (new DOMDocument())->createElement('1bad');

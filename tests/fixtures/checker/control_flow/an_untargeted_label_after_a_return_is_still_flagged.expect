@@ -1,0 +1,2 @@
+4:17-4:31 deadCode.unreachable L4 f | Unreachable statement - code above always terminates.
+4:17-4:31 label.unused L4 f | Label 'never_reached' is unused.

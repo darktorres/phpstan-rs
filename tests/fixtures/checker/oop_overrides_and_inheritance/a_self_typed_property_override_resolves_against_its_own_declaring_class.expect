@@ -1,0 +1,2 @@
+6:29-6:34 property.nativeType L0 Child | Type Child of property Child::$next is not the same as type Base of overridden property Base::$next.
+    non-ignorable

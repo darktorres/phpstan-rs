@@ -1,0 +1,2 @@
+3:17-3:25 staticMethod.nonObject L0 f | cannot call static method go() on int
+5:17-5:25 staticMethod.nonObject L7 f | cannot call static method go() on int|string

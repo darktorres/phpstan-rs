@@ -1,0 +1,6 @@
+2:17-2:38 missingType.return L6 g | Function g() has no return type specified.
+2:28-2:30 missingType.parameter L6 g | Function g() has parameter $a with no type specified.
+2:32-2:34 missingType.parameter L6 g | Function g() has parameter $b with no type specified.
+3:17-5:18 missingType.return L6 f | Function f() has no return type specified.
+4:21-4:29 function.resultUnused L4 f | Call to function g() on a separate line has no effect.
+4:26-4:28 argument.unpackNonIterable L3 f | Only iterables can be unpacked, int given.

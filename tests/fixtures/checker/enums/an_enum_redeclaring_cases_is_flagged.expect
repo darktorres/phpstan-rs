@@ -1,0 +1,2 @@
+4:17-4:69 enum.methodRedeclaration L0 Status | Enum Status cannot redeclare native method cases().
+    non-ignorable

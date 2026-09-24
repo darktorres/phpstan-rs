@@ -1,0 +1,2 @@
+3:13-3:31 interface.nameInUse L0 <main> | Cannot declare interface Iface because the name is already in use.
+    non-ignorable

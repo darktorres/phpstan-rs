@@ -1,0 +1,8 @@
+7:28-7:38 property.readOnlyByPhpDocDefaultValue L0 Refs | @readonly property cannot have a default value.
+9:35-9:49 property.readOnlyByPhpDocDefaultValue L0 Refs | @readonly property cannot have a default value.
+13:27-13:36 property.readOnlyAssignByRef L3 Refs::inside | Readonly property Refs::$ro is assigned by reference.
+14:27-14:39 property.readOnlyByPhpDocAssignByRef L3 Refs::inside | @readonly property Refs::$docRo is assigned by reference.
+15:27-15:43 property.readOnlyByPhpDocAssignByRef L3 Refs::inside | @readonly property Refs::$docStatic is assigned by reference.
+20:23-20:31 property.assignByRef L0 f | Property Refs::$asym with private(set) visibility is assigned by reference.
+21:23-21:31 property.assignByRef L0 f | Property Refs::$prot with protected visibility is assigned by reference.
+21:23-21:31 property.protected L0 f | access to protected property Refs::$prot

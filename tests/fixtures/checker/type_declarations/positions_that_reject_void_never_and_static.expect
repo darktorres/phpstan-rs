@@ -1,0 +1,15 @@
+3:23-3:27 classConstant.voidType L0 Foo | Class constant Foo::A cannot have type void.
+    non-ignorable
+3:28-3:33 classConstant.value L0 Foo | constant Foo::A (void) does not accept value 1
+4:23-4:31 classConstant.callableType L0 Foo | Class constant Foo::B cannot have type callable.
+    non-ignorable
+5:24-5:28 property.voidType L0 Foo | Property Foo::$a cannot have type void.
+    non-ignorable
+6:24-6:29 property.neverType L0 Foo | Property Foo::$b cannot have type never.
+    non-ignorable
+7:35-7:39 parameter.void L0 Foo::m | void cannot be used as a parameter type.
+    non-ignorable
+7:44-7:49 parameter.never L0 Foo::m | never cannot be used as a parameter type.
+    non-ignorable
+7:54-7:60 parameter.static L0 Foo::m | static cannot be used as a parameter type.
+    non-ignorable

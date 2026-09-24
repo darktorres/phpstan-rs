@@ -1,0 +1,2 @@
+8:17-8:25 varTag.nativeType L2 f | PHPDoc tag @var with type string is not subtype of native type int.
+10:17-10:25 varTag.type L2 f | PHPDoc tag @var with type string is incompatible with type int.

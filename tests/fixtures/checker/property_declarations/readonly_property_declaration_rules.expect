@@ -1,0 +1,11 @@
+3:33-3:41 missingType.property L6 Ro | Property Ro::$untyped has no type specified.
+3:33-3:41 property.readOnlyNoNativeType L0 Ro | Readonly property must have a native type.
+    non-ignorable
+4:37-4:51 property.readOnlyDefaultValue L0 Ro | Readonly property cannot have a default value.
+    non-ignorable
+5:44-5:47 property.readOnlyStatic L0 Ro | Readonly property cannot be static.
+    non-ignorable
+6:45-6:77 missingType.parameter L6 Ro::__construct | Method Ro::__construct() has parameter $promotedUntyped with no type specified.
+6:45-6:77 property.readOnlyNoNativeType L0 Ro | Readonly property must have a native type.
+    non-ignorable
+10:28-10:44 property.readOnlyByPhpDocDefaultValue L0 ByDoc | @readonly property cannot have a default value.

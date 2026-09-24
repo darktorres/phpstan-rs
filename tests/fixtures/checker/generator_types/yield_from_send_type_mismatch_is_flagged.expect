@@ -1,0 +1,3 @@
+3:13-5:14 generics.lessTypes L6 inner | Generic type Generator<int, mixed, int> in PHPDoc tag @return does not specify all template types of class Generator: TKey, TYield, TSend, TReturn
+7:13-9:14 generics.lessTypes L6 f | Generic type Generator<int, mixed, string> in PHPDoc tag @return does not specify all template types of class Generator: TKey, TYield, TSend, TReturn
+8:17-8:35 generator.sendType L0 f | Send type string of enclosing generator is not assignable to send type int of yielded generator.

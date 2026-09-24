@@ -1,0 +1,3 @@
+4:28-6:18 parameter.trait L0 C::$x (set hook) | Parameter $value of set hook for property C::$x has invalid type T
+4:28-6:18 propertySetHook.nativeParameterType L0 C | Native type T of set hook parameter $value is not contravariant with native type int of property C::$x.
+    non-ignorable

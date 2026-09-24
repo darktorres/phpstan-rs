@@ -1,0 +1,1 @@
+7:13-7:24 staticMethod.resultUnused L4 <main> | Call to Foo::noop() on a separate line has no effect.

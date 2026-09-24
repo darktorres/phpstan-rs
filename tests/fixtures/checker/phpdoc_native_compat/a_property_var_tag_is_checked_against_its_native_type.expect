@@ -1,0 +1,3 @@
+6:28-6:38 property.phpDocType L2 Holder | PHPDoc tag @var for property Holder::$count with type string is incompatible with native type int.
+8:31-8:38 property.phpDocType L2 Holder | PHPDoc tag @var for property Holder::$circle with type Shape is not subtype of native type Circle.
+15:21-15:41 property.phpDocType L2 Holder | PHPDoc type for property Holder::$label with type int is incompatible with native type string.

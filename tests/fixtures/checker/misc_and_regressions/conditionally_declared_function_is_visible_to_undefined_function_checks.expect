@@ -1,0 +1,2 @@
+3:17-3:41 missingType.return L6 polyfilled | Function polyfilled() has no return type specified.
+5:13-5:50 missingType.return L6 f | Function f() has no return type specified.

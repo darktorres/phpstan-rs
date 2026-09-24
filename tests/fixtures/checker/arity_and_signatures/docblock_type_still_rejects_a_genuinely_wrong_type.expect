@@ -1,0 +1,1 @@
+6:51-6:63 argument.type L5 test | Foo::bar() argument #1 ($x) expects int|null, 'not an int' given

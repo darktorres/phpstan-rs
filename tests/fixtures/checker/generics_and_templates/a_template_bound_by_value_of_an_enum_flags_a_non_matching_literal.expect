@@ -1,0 +1,2 @@
+11:13-11:30 missingType.return L6 f | Function f() has no return type specified.
+11:24-11:26 generics.notSubtype L6 f | Type 'nope' in generic type Collection<'nope'> in PHPDoc tag @param for parameter $c is not subtype of template type T of class Collection.

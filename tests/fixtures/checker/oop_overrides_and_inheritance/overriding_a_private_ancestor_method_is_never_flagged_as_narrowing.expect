@@ -1,0 +1,4 @@
+2:34-2:63 method.unused L4 Base | private method Base::foo() is unused
+    fix: Remove method foo() => ""
+3:48-3:71 method.unused L4 Child | private method Child::foo() is unused
+    fix: Remove method foo() => ""

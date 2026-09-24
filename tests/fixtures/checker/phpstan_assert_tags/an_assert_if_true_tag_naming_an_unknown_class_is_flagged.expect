@@ -1,0 +1,3 @@
+4:24-4:65 assert.alreadyNarrowedType L0 Foo::check | Asserted type NoSuchClass for $x with type mixed does not narrow down the type.
+4:24-4:65 class.notFound L0 Foo::check | PHPDoc tag @phpstan-assert-if-true for $x has invalid type NoSuchClass
+4:39-4:41 missingType.parameter L6 Foo::check | Method Foo::check() has parameter $x with no type specified.

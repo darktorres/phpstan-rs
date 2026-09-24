@@ -1,0 +1,4 @@
+4:17-4:48 enum.magicMethod L0 Status | Enum Status contains magic method __get().
+    non-ignorable
+4:24-4:48 missingType.return L6 Status::__get | Method Status::__get() has no return type specified.
+4:39-4:44 missingType.parameter L6 Status::__get | Method Status::__get() has parameter $name with no type specified.

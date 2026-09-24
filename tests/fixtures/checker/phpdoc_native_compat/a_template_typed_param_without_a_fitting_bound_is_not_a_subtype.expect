@@ -1,0 +1,1 @@
+6:22-6:23 parameter.phpDocType L2 f | PHPDoc tag @param for parameter $x with type T is not subtype of native type int.

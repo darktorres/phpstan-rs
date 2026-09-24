@@ -1,0 +1,2 @@
+1:7-1:38 missingType.return L6 f | Function f() has no return type specified.
+1:27-1:34 parameter.defaultValue L2 f | Default value of the parameter #1 $x ('hello') of function f() is incompatible with type int.

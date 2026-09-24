@@ -1,0 +1,1 @@
+<?php DEFINE("FOO", 1, true);

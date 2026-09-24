@@ -1,0 +1,2 @@
+4:20-4:41 missingType.return L6 PHPStan\FakeNs\Widget::getType | Method PHPStan\\FakeNs\\Widget::getType() has no return type specified.
+8:20-10:14 missingType.return L6 App\Rules\SomeRule::processNode | Method App\\Rules\\SomeRule::processNode() has no return type specified.

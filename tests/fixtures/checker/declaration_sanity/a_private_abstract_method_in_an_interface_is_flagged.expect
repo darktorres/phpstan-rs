@@ -1,0 +1,4 @@
+3:17-3:46 method.abstractPrivate L0 Foo | private method Foo::bar() cannot be abstract
+    non-ignorable
+3:17-3:46 method.visibility L0 Foo | method Foo::bar() cannot use non-public visibility in interface
+    non-ignorable

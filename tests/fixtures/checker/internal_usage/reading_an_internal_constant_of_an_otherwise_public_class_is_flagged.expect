@@ -1,0 +1,2 @@
+9:13-11:14 missingType.return L6 f | Function f() has no return type specified.
+10:22-10:47 classConstant.internal L0 f | Access to internal constant Vendor\\Internal\\Thing::X from outside its root namespace Vendor.

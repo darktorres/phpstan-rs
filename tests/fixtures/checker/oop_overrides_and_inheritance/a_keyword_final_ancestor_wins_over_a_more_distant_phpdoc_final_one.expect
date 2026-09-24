@@ -1,0 +1,3 @@
+7:17-7:66 method.parentMethodFinalByPhpDoc L0 Base | Method Base::locked() overrides @final method Grandparent::locked().
+10:17-10:60 method.parentMethodFinal L0 Sub | Method Sub::locked() overrides final method Base::locked().
+    non-ignorable

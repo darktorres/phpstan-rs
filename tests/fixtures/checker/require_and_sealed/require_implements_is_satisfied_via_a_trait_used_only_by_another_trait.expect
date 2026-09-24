@@ -1,0 +1,1 @@
+7:13-7:37 class.missingImplements L0 Bad | Trait Inner requires using class to implement Contract, but Bad does not.

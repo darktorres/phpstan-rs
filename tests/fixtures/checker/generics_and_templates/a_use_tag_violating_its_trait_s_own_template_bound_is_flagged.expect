@@ -1,0 +1,1 @@
+7:13-10:14 generics.notSubtype L6 UserRepo | Type NotAShape in generic type Repo<NotAShape> in PHPDoc tag @use is not subtype of template type T of trait Repo.

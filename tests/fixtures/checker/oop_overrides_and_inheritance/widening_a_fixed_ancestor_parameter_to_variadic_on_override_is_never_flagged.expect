@@ -1,0 +1,2 @@
+2:46-2:48 missingType.parameter L6 Base::foo | Method Base::foo() has parameter $x with no type specified.
+3:60-3:65 missingType.parameter L6 Child::foo | Method Child::foo() has parameter $x with no type specified.

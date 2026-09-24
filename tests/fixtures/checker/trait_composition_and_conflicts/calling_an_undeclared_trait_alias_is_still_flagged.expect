@@ -1,0 +1,1 @@
+8:46-8:65 method.notFound L0 test | call to undefined method Y::totallyMadeUp()

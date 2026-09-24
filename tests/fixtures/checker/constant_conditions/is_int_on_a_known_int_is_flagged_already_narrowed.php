@@ -1,0 +1,1 @@
+<?php function f(int $x) { if (is_int($x)) { echo 1; } }

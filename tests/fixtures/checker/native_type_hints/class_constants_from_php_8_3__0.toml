@@ -1,0 +1,2 @@
+check_native_type_hints = true
+php_version = "8.3"

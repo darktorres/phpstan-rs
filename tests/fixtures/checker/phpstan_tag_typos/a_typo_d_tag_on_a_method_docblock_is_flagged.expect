@@ -1,0 +1,2 @@
+4:24-4:52 missingType.return L6 Foo::bar | Method Foo::bar() has no return type specified.
+4:33-4:36 phpDoc.phpstanTag L2 Foo | Unknown PHPDoc tag: @phpstan-retrn

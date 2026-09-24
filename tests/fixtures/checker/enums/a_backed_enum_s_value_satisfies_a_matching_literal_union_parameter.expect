@@ -1,0 +1,2 @@
+8:45-8:59 constructor.unusedParameter L1 OrderByClause::__construct | Constructor of class OrderByClause has an unused parameter $column.
+8:61-8:72 constructor.unusedParameter L1 OrderByClause::__construct | Constructor of class OrderByClause has an unused parameter $dir.

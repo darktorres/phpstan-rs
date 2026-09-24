@@ -1,0 +1,2 @@
+9:13-11:14 missingType.return L6 f | Function f() has no return type specified.
+10:22-10:48 staticProperty.internalClass L0 f | Access to static property $x of internal class Vendor\\Internal\\Thing from outside its root namespace Vendor.

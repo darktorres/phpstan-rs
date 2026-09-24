@@ -1,0 +1,1 @@
+4:27-4:29 isset.variable L0 test | Variable $x in isset() always exists and is always null.

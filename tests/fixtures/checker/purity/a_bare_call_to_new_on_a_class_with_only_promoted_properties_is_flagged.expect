@@ -1,0 +1,2 @@
+3:45-3:59 property.onlyWritten L4 Foo | private property Foo::$x is never read, only written
+6:13-6:23 new.resultUnused L4 <main> | Call to new Foo() on a separate line has no effect.

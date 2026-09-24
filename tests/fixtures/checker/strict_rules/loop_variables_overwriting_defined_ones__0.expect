@@ -1,0 +1,6 @@
+2:12-2:23 missingType.iterableValue L6 f | Function f() has parameter $rows with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+4:31-4:35 foreach.valueOverwrite L0 f | Foreach overwrites $row with its value variable.
+5:30-5:32 foreach.valueOverwrite L0 f | Foreach overwrites $i with its value variable.
+6:10-6:12 for.variableOverwrite L0 f | For loop initial assignment overwrites variable $i.
+9:23-9:25 foreach.keyOverwrite L0 f | Foreach overwrites $b with its key variable.

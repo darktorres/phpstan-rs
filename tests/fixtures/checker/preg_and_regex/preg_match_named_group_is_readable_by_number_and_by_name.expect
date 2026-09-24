@@ -1,0 +1,1 @@
+3:24-3:32 missingType.parameter L6 f | Function f() has parameter $subject with no type specified.

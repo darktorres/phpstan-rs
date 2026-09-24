@@ -1,0 +1,2 @@
+3:26-3:28 new.nonObject L0 f | cannot instantiate class using int
+4:26-4:28 new.nonObject L7 f | cannot instantiate class using int|string

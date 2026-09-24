@@ -1,0 +1,1 @@
+3:23-3:40 throw.baseClass L5 f | Throwing the base Error class is not recommended, use a specific subclass instead.

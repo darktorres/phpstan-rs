@@ -1,0 +1,2 @@
+3:36-3:42 property.onlyWritten L4 Foo | private static property Foo::$x is never read, only written
+6:17-6:24 staticProperty.private L0 test | access to private static property Foo::$x

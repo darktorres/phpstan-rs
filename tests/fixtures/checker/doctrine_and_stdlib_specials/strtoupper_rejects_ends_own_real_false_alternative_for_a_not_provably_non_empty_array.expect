@@ -1,0 +1,1 @@
+4:35-4:46 argument.type L5 f | strtoupper() argument #1 ($string) expects string, string|false given

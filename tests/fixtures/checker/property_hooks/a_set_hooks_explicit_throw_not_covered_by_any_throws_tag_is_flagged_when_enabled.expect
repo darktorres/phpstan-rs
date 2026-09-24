@@ -1,0 +1,1 @@
+5:31-5:68 throws.missing L2 Widget::$x (set hook) | Set hook for property Widget::$x throws RuntimeException but it's not covered by any @throws tag.

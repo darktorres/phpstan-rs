@@ -1,0 +1,1 @@
+3:13-7:14 throws.unusedType L2 f | Function f() has RuntimeException in PHPDoc @throws tag but it's not thrown.

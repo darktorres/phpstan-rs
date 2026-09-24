@@ -1,0 +1,1 @@
+<?php new SimpleXMLElement('<a><b></b></a>');

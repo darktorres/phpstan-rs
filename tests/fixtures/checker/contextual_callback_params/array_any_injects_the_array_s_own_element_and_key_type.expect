@@ -1,0 +1,1 @@
+6:33-6:35 argument.type L5 f (closure) | needsString() argument #1 ($s) expects string, int given

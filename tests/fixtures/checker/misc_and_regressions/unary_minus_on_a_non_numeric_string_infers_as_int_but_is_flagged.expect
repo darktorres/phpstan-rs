@@ -1,0 +1,1 @@
+2:55-2:57 unaryOp.invalid L2 negate | Unary operation "-" on string results in an error.

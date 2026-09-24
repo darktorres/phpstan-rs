@@ -1,0 +1,1 @@
+<?php strlen(var_export([1, 2]));

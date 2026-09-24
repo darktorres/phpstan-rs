@@ -1,0 +1,1 @@
+<?php $x = var_export([1, 2], false);

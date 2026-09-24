@@ -18,15 +18,6 @@ fn fixed(
 }
 
 #[test]
-fn class_name_case_is_fixed_keeping_the_written_qualification() {
-    let src = "<?php\nnamespace App\\Models;\nclass UserModel {}\nnamespace App;\nfunction f(): void {\n    new models\\usermodel();\n    new \\APP\\Models\\UserModel();\n}\n";
-    assert_eq!(
-        fixed(src, "class.nameCase", |_| {}),
-        "<?php\nnamespace App\\Models;\nclass UserModel {}\nnamespace App;\nfunction f(): void {\n    new Models\\UserModel();\n    new \\App\\Models\\UserModel();\n}\n"
-    );
-}
-
-#[test]
 fn function_and_method_name_case_are_fixed() {
     let src = "<?php\nfunction doThing(): void {}\nclass A { public function run(): void {} }\nfunction g(A $a): void {\n    DOTHING();\n    $a->RUN();\n}\n";
     let enable = |r: &mut crate::registry::Registry| r.check_function_name_case = true;
@@ -47,25 +38,6 @@ fn a_used_function_import_is_fixed_in_place() {
     assert_eq!(
         fixed(src, "function.nameCase", enable),
         src.replace("lib\\HELPER", "Lib\\helper")
-    );
-}
-
-#[test]
-fn an_override_with_different_casing_is_renamed_to_the_parent_s_spelling() {
-    let src = "<?php\nclass P { public function doWork(): void {} }\nclass C extends P {\n    public function DoWork(): void {}\n}\n";
-    assert_eq!(
-        fixed(src, "method.nameCase", |_| {}),
-        src.replace("function DoWork", "function doWork")
-    );
-}
-
-#[test]
-fn an_override_attribute_that_overrides_nothing_is_removed() {
-    let src = "<?php\nclass A {\n    #[\\Override]\n    public function nothing(): void {}\n    #[\\Override, Deprecated]\n    public function other(): void {}\n}\n";
-    let out = fixed(src, "method.override", |r| r.php_version = Some((8, 3)));
-    assert_eq!(
-        out,
-        "<?php\nclass A {\n    public function nothing(): void {}\n    #[Deprecated]\n    public function other(): void {}\n}\n"
     );
 }
 

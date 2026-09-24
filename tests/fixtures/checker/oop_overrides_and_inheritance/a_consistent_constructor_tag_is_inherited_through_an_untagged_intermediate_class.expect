@@ -1,0 +1,2 @@
+3:56-3:65 constructor.unusedParameter L1 Base14::__construct | Constructor of class Base14 has an unused parameter $a.
+5:44-5:76 parameter.missing L0 Sub14 | Sub14::__construct() overrides Base14::__construct() but misses parameter #1 ($a)

@@ -1,0 +1,2 @@
+1:66-1:74 intersectionType.static L0 C::m | Type static cannot be part of an intersection type.
+    non-ignorable

@@ -1,0 +1,8 @@
+3:24-3:29 nullableType.null L0 a | Type null cannot be marked as nullable.
+    non-ignorable
+3:34-3:39 intersectionType.int L0 a | Type int cannot be part of an intersection type.
+    non-ignorable
+3:44-3:49 intersectionType.duplicate L0 a | Duplicate type A is redundant.
+    non-ignorable
+3:55-3:71 intersectionType.string L0 a | Type string cannot be part of an intersection type.
+    non-ignorable

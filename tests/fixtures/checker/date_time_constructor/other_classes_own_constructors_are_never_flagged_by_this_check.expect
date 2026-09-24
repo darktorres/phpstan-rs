@@ -1,0 +1,2 @@
+3:45-3:54 constructor.unusedParameter L1 DateTimeLookalike::__construct | Constructor of class DateTimeLookalike has an unused parameter $x.
+5:13-5:48 new.resultUnused L4 <main> | Call to new DateTimeLookalike() on a separate line has no effect.

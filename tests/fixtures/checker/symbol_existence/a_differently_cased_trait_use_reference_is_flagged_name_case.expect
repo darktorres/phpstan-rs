@@ -1,0 +1,2 @@
+3:27-3:28 trait.nameCase L0 C | Trait referenced with incorrect case: t.
+    fix: Use T => "T"

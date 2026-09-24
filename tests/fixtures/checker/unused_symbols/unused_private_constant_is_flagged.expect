@@ -1,0 +1,2 @@
+3:31-3:41 classConstant.unused L4 Config | private constant Config::UNUSED is unused
+    fix: Remove constant UNUSED => ""

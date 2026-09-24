@@ -1,0 +1,2 @@
+3:17-3:26 logicalAnd.resultUnused L4 test | Unused result of "and" operator.
+    tip: This operator has unexpected precedence, try disambiguating the logic with parentheses ().

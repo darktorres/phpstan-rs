@@ -1,0 +1,1 @@
+7:28-7:33 property.protected L0 Unrelated::test | access to protected property Foo::$x

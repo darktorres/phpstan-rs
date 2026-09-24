@@ -1,0 +1,1 @@
+1:7-1:29 argument.unused L0 <main> | Argument #3 ($case_insensitive) is ignored since declaration of case-insensitive constants is no longer supported.

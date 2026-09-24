@@ -1,0 +1,1 @@
+8:17-8:28 method.deprecatedClass L0 f | Call to method bar() of deprecated class OldFoo.

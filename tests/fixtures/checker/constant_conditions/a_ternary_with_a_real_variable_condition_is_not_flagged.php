@@ -1,0 +1,1 @@
+<?php function f(bool $x) { $x ? 1 : 2; }

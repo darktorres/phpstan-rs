@@ -1,0 +1,1 @@
+6:35-6:37 argument.type L5 test | needsNarrower() argument #1 ($x) expects int<0, max>|string, int|string given

@@ -1,0 +1,4 @@
+3:28-7:18 property.hooksNotSupported L0 Foo | Property hooks are supported only on PHP 8.4 and later.
+    non-ignorable
+3:28-7:18 propertySetHook.nativeParameterType L0 Foo | Parameter $value of set hook does not have a native type but the property Foo::$bar does.
+    non-ignorable

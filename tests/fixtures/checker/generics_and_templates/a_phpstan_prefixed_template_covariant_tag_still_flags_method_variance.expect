@@ -1,0 +1,1 @@
+6:13-6:36 function.variance L6 f | Variance annotation is only allowed for type parameters of classes and interfaces, but occurs in template type T in function f().

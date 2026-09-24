@@ -1,0 +1,1 @@
+7:37-7:43 missingType.generics L6 C::foo | Method C::foo() has parameter $b with generic class Box but does not specify its types: T

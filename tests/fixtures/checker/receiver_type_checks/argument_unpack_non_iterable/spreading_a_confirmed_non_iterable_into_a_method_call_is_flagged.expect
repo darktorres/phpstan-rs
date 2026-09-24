@@ -1,0 +1,5 @@
+3:21-3:42 missingType.return L6 Foo::g | Method Foo::g() has no return type specified.
+3:32-3:34 missingType.parameter L6 Foo::g | Method Foo::g() has parameter $a with no type specified.
+3:36-3:38 missingType.parameter L6 Foo::g | Method Foo::g() has parameter $b with no type specified.
+5:17-7:18 missingType.return L6 f | Function f() has no return type specified.
+6:32-6:34 argument.unpackNonIterable L3 f | Only iterables can be unpacked, int given.

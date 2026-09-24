@@ -1,0 +1,2 @@
+7:13-9:14 type.internalClass L0 f | Referencing internal class Vendor\\Internal\\Foo.
+7:27-7:47 return.internalClass L0 f | Return type of function f() has typehint with internal class Vendor\\Internal\\Foo.

@@ -1,0 +1,1 @@
+5:28-5:38 property.phpDocType L2 Holder | PHPDoc tag @var for property Holder::$count with type int|string is not subtype of native type int.

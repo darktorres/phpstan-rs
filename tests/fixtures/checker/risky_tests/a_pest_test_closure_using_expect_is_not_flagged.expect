@@ -1,0 +1,5 @@
+2:13-2:54 missingType.return L6 test | Function test() has no return type specified.
+2:27-2:39 missingType.parameter L6 test | Function test() has parameter $description with no type specified.
+2:41-2:50 missingType.parameter L6 test | Function test() has parameter $callback with no type specified.
+3:13-5:15 function.resultUnused L4 <main> | Call to function test() on a separate line has no effect.
+4:17-4:30 function.notFound L0 <main> (closure) | call to undefined function expect()

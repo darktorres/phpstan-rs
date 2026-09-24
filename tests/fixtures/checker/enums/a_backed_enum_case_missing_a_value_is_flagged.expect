@@ -1,0 +1,2 @@
+3:17-3:29 enum.missingCase L0 Status | Enum case Status::Active does not have a value but the enum is backed with the "int" type.
+    non-ignorable

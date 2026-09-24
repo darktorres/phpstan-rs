@@ -1,0 +1,1 @@
+3:57-3:64 missingType.parameter L6 TestCase::assertIsResource | Method TestCase::assertIsResource() has parameter $actual with no type specified.

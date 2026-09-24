@@ -1,0 +1,3 @@
+3:9-3:18 method.nonObject L9 f | Cannot call method run() on mixed.
+4:14-4:22 property.nonObject L9 f | Cannot access property $name on mixed.
+5:17-5:22 offsetAccess.nonOffsetAccessible L9 f | Cannot access offset on mixed.

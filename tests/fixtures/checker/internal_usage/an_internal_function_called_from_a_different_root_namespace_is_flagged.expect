@@ -1,0 +1,2 @@
+7:13-9:14 missingType.return L6 f | Function f() has no return type specified.
+8:17-8:40 function.internal L0 f | Call to internal function Vendor\\Internal\\make() from outside its root namespace Vendor.

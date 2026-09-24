@@ -1,0 +1,2 @@
+3:24-5:18 return.noParent L0 Standalone::f | return type of Standalone::f() has invalid type parent
+4:28-4:33 return.type L3 Standalone::f | return type mismatch: expected parent, got Standalone

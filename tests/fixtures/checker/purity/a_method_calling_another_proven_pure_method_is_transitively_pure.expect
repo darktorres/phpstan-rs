@@ -1,0 +1,1 @@
+11:13-11:24 method.resultUnused L4 <main> | Call to method Foo::outer() on a separate line has no effect.

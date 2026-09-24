@@ -1,0 +1,2 @@
+5:13-11:14 missingType.return L6 f | Function f() has no return type specified.
+9:26-9:43 property.notFound L2 f | access to undefined property Base::$name

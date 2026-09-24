@@ -1,0 +1,2 @@
+4:33-4:39 phpDoc.phpstanTag L2 Base | Unknown PHPDoc tag: @phpstan-final
+7:17-7:60 method.parentMethodFinalByPhpDoc L0 Sub | Method Sub::locked() overrides @final method Base::locked().

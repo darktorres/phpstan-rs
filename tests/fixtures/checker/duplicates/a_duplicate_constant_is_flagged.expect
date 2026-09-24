@@ -1,0 +1,2 @@
+4:30-4:35 class.duplicateConstant L0 X | Cannot redeclare constant X::C.
+    non-ignorable

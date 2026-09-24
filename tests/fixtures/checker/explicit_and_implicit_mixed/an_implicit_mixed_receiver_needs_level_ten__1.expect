@@ -1,0 +1,2 @@
+2:20-2:22 missingType.parameter L6 f | Function f() has parameter $m with no type specified.
+3:13-3:22 method.nonObject L10 f | Cannot call method run() on mixed.

@@ -1,0 +1,1 @@
+7:22-7:42 method.deprecated L0 test | Call to deprecated method Foo::oldMethod().

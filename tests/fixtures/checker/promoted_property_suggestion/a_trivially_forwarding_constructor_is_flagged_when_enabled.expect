@@ -1,0 +1,2 @@
+5:24-8:18 constructor.promotionCandidate L5 Point | Point::__construct() only forwards its parameters into matching properties - consider constructor property promotion instead
+    tip: merge each property's own declaration into its constructor parameter

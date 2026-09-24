@@ -1,0 +1,1 @@
+8:17-8:47 throws.notCovariant L2 Child | PHPDoc tag @throws type RuntimeException of method Child::foo() should be covariant with PHPDoc @throws type LogicException of method Base::foo().

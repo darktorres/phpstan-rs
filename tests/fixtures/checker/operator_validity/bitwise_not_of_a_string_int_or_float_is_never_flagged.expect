@@ -1,0 +1,3 @@
+3:17-3:20 expr.resultUnused L4 test | Expression "~$s" on a separate line does not do anything.
+4:17-4:20 expr.resultUnused L4 test | Expression "~$i" on a separate line does not do anything.
+5:17-5:20 expr.resultUnused L4 test | Expression "~$f" on a separate line does not do anything.

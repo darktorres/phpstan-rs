@@ -1,0 +1,1 @@
+<?php sprintf('%1$*d', "not an int at all");

@@ -1,0 +1,1 @@
+8:13-10:14 method.childParameterType L0 Impl | Impl::foo() parameter #1 ($x) narrows the inherited parameter type: expects string, ancestor expects int

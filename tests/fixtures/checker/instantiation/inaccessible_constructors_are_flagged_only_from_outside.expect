@@ -1,0 +1,3 @@
+13:22-13:34 new.privateConstructor L0 f | cannot instantiate class Single via private constructor Single::__construct()
+14:22-14:35 new.protectedConstructor L0 f | cannot instantiate class Guarded via protected constructor Guarded::__construct()
+15:22-15:40 new.protectedConstructor L0 f | cannot instantiate class GuardedChild via protected constructor Guarded::__construct()

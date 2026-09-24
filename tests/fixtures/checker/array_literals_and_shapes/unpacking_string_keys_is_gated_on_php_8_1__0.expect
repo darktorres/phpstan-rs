@@ -1,0 +1,4 @@
+7:9-9:10 missingType.iterableValue L6 f | Function f() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+8:24-8:30 arrayUnpacking.stringOffset L3 f | Array unpacking cannot be used on an array with string keys: array<string, int>
+8:45-8:51 arrayUnpacking.stringOffset L7 f | Array unpacking cannot be used on an array with potential string keys: array<int>

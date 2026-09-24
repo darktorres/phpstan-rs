@@ -1,0 +1,2 @@
+5:31-5:43 classConstant.unused L4 Suit | private constant Suit::UNUSED is unused
+    fix: Remove constant UNUSED => ""

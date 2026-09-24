@@ -1,0 +1,6 @@
+5:30-9:18 property.hooksNotSupported L0 Baz | Property hooks are supported only on PHP 8.4 and later.
+    non-ignorable
+5:30-9:18 propertySetHook.nativeParameterType L0 Baz | Native type Foo&Bar of set hook parameter $value is not contravariant with native type mixed of property Baz::$bar.
+    non-ignorable
+6:33-6:39 parameter.unresolvableNativeType L0 Baz::$bar (set hook) | Parameter $value of set hook for property Baz::$bar has unresolvable native type.
+    non-ignorable

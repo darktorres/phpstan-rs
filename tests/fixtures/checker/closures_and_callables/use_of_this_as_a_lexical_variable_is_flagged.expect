@@ -1,0 +1,3 @@
+3:24-5:18 closure.unusedUse L1 make (closure) | closure has an unused use ($this)
+3:41-3:46 closure.useThis L0 make | Cannot use $this as lexical variable.
+    non-ignorable

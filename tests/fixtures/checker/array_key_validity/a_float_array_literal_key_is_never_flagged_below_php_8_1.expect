@@ -1,0 +1,2 @@
+2:13-4:14 missingType.iterableValue L6 test | Function test() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

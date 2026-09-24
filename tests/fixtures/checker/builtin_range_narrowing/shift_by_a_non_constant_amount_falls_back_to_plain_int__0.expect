@@ -1,0 +1,1 @@
+6:31-6:43 argument.type L5 test | needsNarrower() argument #1 ($x) expects int<1, 10>, int given

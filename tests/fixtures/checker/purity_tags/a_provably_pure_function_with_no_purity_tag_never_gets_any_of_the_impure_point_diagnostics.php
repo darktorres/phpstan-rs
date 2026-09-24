@@ -1,0 +1,5 @@
+<?php
+            function addOne(int $x): int {
+                return $x + 1;
+            }
+        

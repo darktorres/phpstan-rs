@@ -1,0 +1,1 @@
+<?php new DateTimeImmutable('last day of this month');

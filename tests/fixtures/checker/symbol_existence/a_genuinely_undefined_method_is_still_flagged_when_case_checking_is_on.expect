@@ -1,0 +1,1 @@
+6:17-6:39 method.notFound L0 f | call to undefined method Foo::totallyUnrelated()

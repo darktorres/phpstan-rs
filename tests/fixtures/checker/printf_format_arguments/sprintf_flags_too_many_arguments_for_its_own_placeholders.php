@@ -1,0 +1,1 @@
+<?php sprintf("%s", "a", "b", "c");

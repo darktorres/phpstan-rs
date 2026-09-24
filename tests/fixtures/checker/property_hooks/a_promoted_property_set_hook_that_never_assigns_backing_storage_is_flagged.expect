@@ -1,0 +1,1 @@
+4:21-7:22 propertySetHook.noAssign L3 BadSetPromoted | Set hook for non-virtual property BadSetPromoted::$z does not assign value to it.

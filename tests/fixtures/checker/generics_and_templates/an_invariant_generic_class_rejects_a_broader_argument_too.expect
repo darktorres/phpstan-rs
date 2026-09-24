@@ -1,0 +1,4 @@
+9:13-9:47 missingType.return L6 needsCatCollection | Function needsCatCollection() has no return type specified.
+11:13-13:14 missingType.return L6 f | Function f() has no return type specified.
+12:17-12:39 function.resultUnused L4 f | Call to function needsCatCollection() on a separate line has no effect.
+12:36-12:38 argument.type L5 f | needsCatCollection() argument #1 ($c) expects Collection<Cat>, Collection<Animal> given

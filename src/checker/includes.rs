@@ -127,7 +127,11 @@ impl<'a> Checker<'a> {
     /// otherwise walk off its top to `""`).
     fn current_file_absolute(&self) -> Option<PathBuf> {
         let file = self.current_file.as_ref()?;
-        Some(std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf()))
+        let file = match &self.working_dir {
+            Some(dir) => dir.join(file),
+            None => file.to_path_buf(),
+        };
+        Some(std::path::absolute(&file).unwrap_or(file))
     }
 
     fn current_dir_of_file(&self) -> Option<PathBuf> {

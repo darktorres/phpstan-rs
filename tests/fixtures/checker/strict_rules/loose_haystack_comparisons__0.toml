@@ -1,0 +1,2 @@
+check_loose_haystack_comparison = true
+php_version = "8.3"

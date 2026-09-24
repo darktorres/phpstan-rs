@@ -1,0 +1,1 @@
+9:26-9:39 property.private L0 f | access to private property Foo::$secret

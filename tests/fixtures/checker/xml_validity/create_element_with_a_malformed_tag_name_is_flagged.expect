@@ -1,0 +1,1 @@
+1:7-1:49 argument.type L0 <main> | DOMDocument::createElement() name '1bad' is not a valid XML element name and will throw at runtime

@@ -1,0 +1,1 @@
+<?php function f(int|string $x) { if (is_string($x)) { echo 1; } }

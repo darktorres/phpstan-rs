@@ -1,0 +1,1 @@
+4:28-4:31 return.type L3 WrongReturnType::$r (get hook) | return type mismatch: expected string, got 123

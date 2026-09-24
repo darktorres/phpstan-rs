@@ -1,0 +1,2 @@
+3:54-3:61 property.nativeType L0 Child | Type string of property Child::$x is not the same as type int of overridden property Base::$x.
+    non-ignorable

@@ -1,0 +1,5 @@
+test.php:3:9-7:10 class.abstractMethodNotImplemented L0 App\MyRule | class App\\MyRule does not implement abstract method(s): getNodeType, processNode
+    tip: either implement every method listed above, or declare this class itself abstract
+test.php:3:9-7:10 missingType.generics L6 App\MyRule | Class App\\MyRule implements generic interface PHPStan\\Rules\\Rule but does not specify its types: TNodeType
+test.php:4:20-6:14 missingType.return L6 App\MyRule::check | Method App\\MyRule::check() has no return type specified.
+test.php:4:35-4:56 class.notFound L0 App\MyRule::check | parameter $node of App\\MyRule::check() has invalid type PhpParser\\Node

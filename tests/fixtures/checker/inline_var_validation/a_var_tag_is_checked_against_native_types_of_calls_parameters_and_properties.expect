@@ -1,0 +1,6 @@
+9:21-9:29 varTag.nativeType L2 C::f | PHPDoc tag @var with type string is not subtype of native type int.
+11:21-11:40 varTag.nativeType L2 C::f | PHPDoc tag @var with type Bar is not subtype of native type Foo.
+13:21-13:37 varTag.nativeType L2 C::f | PHPDoc tag @var with type Bar is not subtype of native type Foo.
+17:21-17:30 varTag.nativeType L2 C::f | PHPDoc tag @var with type string is not subtype of native type array.
+20:13-20:47 missingType.iterableValue L6 g | Function g() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

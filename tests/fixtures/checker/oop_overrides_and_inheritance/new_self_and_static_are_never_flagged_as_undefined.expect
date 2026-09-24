@@ -1,0 +1,2 @@
+4:70-4:82 new.static L0 Foo::makeStatic | unsafe usage of new static()
+    tip: See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static

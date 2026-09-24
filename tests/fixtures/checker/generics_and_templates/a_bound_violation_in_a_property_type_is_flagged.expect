@@ -1,0 +1,1 @@
+10:24-10:30 generics.notSubtype L6 Holder | Type NotAShape in generic type Collection<NotAShape> in PHPDoc tag @var for property Holder::$items is not subtype of template type T of class Collection.

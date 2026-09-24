@@ -1,0 +1,4 @@
+8:68-8:82 missingType.iterableValue L6 Dave\Liddament\PhpLanguageExtensions\Attributes\Sealed::__construct | Method Dave\\Liddament\\PhpLanguageExtensions\\Attributes\\Sealed::__construct() has parameter $classes with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+21:102-21:111 attribute.namespaceVisibility L2 App\Domain\Sub\Inner::f | App\\Domain\\Narrow::run() is only visible from namespace App\\Domain.
+24:68-24:77 attribute.namespaceVisibility L2 App\Ui\Outer::f | App\\Domain\\Wide::run() is only visible from namespace App\\Domain and below.

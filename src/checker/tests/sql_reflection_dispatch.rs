@@ -81,10 +81,6 @@ fn diagnostics_with_dbal_schema(src: &str) -> Vec<crate::checker::Diagnostic> {
     })
 }
 
-fn diagnostics_with_dbal_no_schema(src: &str) -> Vec<crate::checker::Diagnostic> {
-    diagnostics_for(&format!("<?php\n{STUBS}\n{src}"))
-}
-
 #[test]
 fn connection_fetch_associative_with_a_literal_sql_string_resolves_the_real_row_shape() {
     let d = diagnostics_with_dbal_schema(
@@ -230,42 +226,6 @@ fn an_unfoldable_sql_argument_falls_back_to_todays_plain_stub_type_not_a_guess()
         function f(Connection $c, string $dynamicSql): void {
             $row = $c->fetchAssociative($dynamicSql);
             assertType('array|false', $row);
-        }
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
-}
-
-#[test]
-fn no_schema_configured_at_all_falls_back_to_todays_plain_stub_type() {
-    let d = diagnostics_with_dbal_no_schema(
-        r#"
-        namespace App;
-
-        use function PHPStan\Testing\assertType;
-        use Doctrine\DBAL\Connection;
-
-        function f(Connection $c): void {
-            $row = $c->fetchAssociative('SELECT id, name FROM categories');
-            assertType('array|false', $row);
-        }
-        "#,
-    );
-    assert!(d.is_empty(), "unexpected diagnostics: {d:?}");
-}
-
-#[test]
-fn a_pure_literal_query_resolves_with_no_schema_or_live_connection_configured_at_all() {
-    let d = diagnostics_with_dbal_no_schema(
-        r#"
-        namespace App;
-
-        use function PHPStan\Testing\assertType;
-        use Doctrine\DBAL\Connection;
-
-        function f(Connection $c): void {
-            $row = $c->fetchAssociative('SELECT 1, COUNT(*)');
-            assertType("array{1: int, 'COUNT(*)': int<0, max>}|false", $row);
         }
         "#,
     );

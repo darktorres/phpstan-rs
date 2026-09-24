@@ -1,0 +1,3 @@
+3:40-3:71 method.visibility L0 Child | Child::foo() overriding protected method Base::foo() must not reduce visibility
+3:48-3:71 method.unused L4 Child | private method Child::foo() is unused
+    fix: Remove method foo() => ""

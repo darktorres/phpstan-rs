@@ -1,0 +1,1 @@
+5:42-5:61 property.notFound L2 Point::equals | access to undefined property Point::$missingProp

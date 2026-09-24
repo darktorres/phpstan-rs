@@ -1,0 +1,5 @@
+10:5-10:24 arrayFilter.strict L0 f | Call to function array_filter() requires parameter #2 to be passed to avoid loose comparison semantics.
+14:5-14:29 arrayFilter.strict L0 f | Call to function array_filter() requires parameter #2 to be passed to avoid loose comparison semantics.
+15:5-15:30 arrayFilter.strict L0 f | Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics (null given).
+16:5-16:29 arrayFilter.strict L8 f | Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics (callable|null given).
+18:5-18:52 arrayFilter.strict L0 f | Parameter #2 of array_filter() cannot be null to avoid loose comparison semantics (null given).

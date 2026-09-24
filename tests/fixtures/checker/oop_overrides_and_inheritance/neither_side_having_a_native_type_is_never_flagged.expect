@@ -1,0 +1,2 @@
+2:33-2:39 missingType.property L6 Base | Property Base::$x has no type specified.
+3:47-3:53 missingType.property L6 Child | Property Child::$x has no type specified.

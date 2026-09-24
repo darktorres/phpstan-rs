@@ -1,0 +1,3 @@
+3:13-5:14 missingType.return L6 test | Function test() has no return type specified.
+4:17-4:25 nullsafe.assign L0 test | Nullsafe operator cannot be on left side of assignment.
+    non-ignorable

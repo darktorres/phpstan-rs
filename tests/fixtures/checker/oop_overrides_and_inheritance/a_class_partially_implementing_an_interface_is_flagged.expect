@@ -1,0 +1,2 @@
+3:13-3:75 class.abstractMethodNotImplemented L0 Impl7 | class Impl7 does not implement abstract method(s): b
+    tip: either implement every method listed above, or declare this class itself abstract

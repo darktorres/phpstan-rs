@@ -1,0 +1,2 @@
+2:28-2:63 method.finalPrivate L1 Base13 | private method Base13::__clone() cannot be final as it is never overridden by other classes
+3:42-3:77 method.finalPrivate L1 Sub13 | private method Sub13::__clone() cannot be final as it is never overridden by other classes

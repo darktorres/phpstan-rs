@@ -1,0 +1,1 @@
+3:13-3:16 function.resultUnused L4 <main> | Call to function f() on a separate line has no effect.

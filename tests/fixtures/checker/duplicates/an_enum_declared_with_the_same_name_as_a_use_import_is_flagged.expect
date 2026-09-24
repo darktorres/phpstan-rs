@@ -1,0 +1,2 @@
+3:13-3:24 enum.nameInUse L0 <main> | Cannot declare enum Bar because the name is already in use.
+    non-ignorable

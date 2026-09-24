@@ -1,0 +1,2 @@
+3:27-3:32 classConstant.nativeTypeNotSupported L0 Foo | Class constants with native types are supported only on PHP 8.3 and later.
+    non-ignorable

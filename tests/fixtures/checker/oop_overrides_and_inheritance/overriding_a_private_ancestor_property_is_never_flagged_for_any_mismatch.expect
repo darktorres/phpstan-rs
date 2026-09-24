@@ -1,0 +1,1 @@
+2:45-2:51 property.onlyWritten L4 Base | private static property Base::$x is never read, only written

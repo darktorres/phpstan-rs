@@ -1,0 +1,2 @@
+3:24-3:39 missingType.iterableValue L6 f | Function f() has parameter $items with no value type specified in iterable type iterable.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

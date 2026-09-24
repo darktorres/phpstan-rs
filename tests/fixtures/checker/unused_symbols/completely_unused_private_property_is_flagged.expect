@@ -1,0 +1,2 @@
+3:29-3:40 property.unused L4 Widget | private property Widget::$deadWeight is unused
+    fix: Remove property $deadWeight => ""

@@ -1,0 +1,13 @@
+3:44-3:52 missingType.iterableValue L6 f | Function f() has parameter $a with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:10-6:12 binaryOp.invalid L2 f | Binary operation "." between string and stdClass results in an error.
+6:10-6:17 binaryOp.nonStringOperand L0 f | string (string) in combination with non-string (stdClass) is not allowed.
+7:10-7:12 binaryOp.invalid L2 f | Binary operation "+" between string and int results in an error.
+7:10-7:17 binaryOp.nonStringOperand L0 f | string (string) in combination with non-string (int) is not allowed.
+9:10-9:17 binaryOp.nonStringOperand L0 f | string (string) in combination with non-string (int) is not allowed.
+10:10-10:19 identical.alwaysFalse L4 f | Strict comparison using === between string and int will always evaluate to false.
+12:10-12:12 binaryOp.invalid L2 f | Binary operation "+" between array and int results in an error.
+12:10-12:17 binaryOp.nonArrayOperand L0 f | array (array) in combination with non-array (int) is not allowed.
+16:5-16:7 assignOp.invalid L2 f | Binary operation "+=" between non-empty-string and int results in an error.
+16:5-16:13 assignOp.nonStringOperand L0 f | string (non-empty-string) in combination with non-string (int) is not allowed.
+17:10-17:17 binaryOp.nonStringOperand L0 f | string ('') in combination with non-string (int) is not allowed.

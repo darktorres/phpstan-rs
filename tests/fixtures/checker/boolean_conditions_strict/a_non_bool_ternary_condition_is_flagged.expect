@@ -1,0 +1,1 @@
+3:24-3:26 ternary.condNotBoolean L5 f | Only booleans are allowed in a ternary operator condition, int given.

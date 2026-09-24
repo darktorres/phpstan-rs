@@ -1,0 +1,28 @@
+4:29-4:35 missingType.parameter L6 Psr\Log\LoggerInterface::log | Method Psr\\Log\\LoggerInterface::log() has parameter $level with no type specified.
+4:66-4:85 missingType.iterableValue L6 Psr\Log\LoggerInterface::log | Method Psr\\Log\\LoggerInterface::log() has parameter $context with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+5:60-5:79 missingType.iterableValue L6 Psr\Log\LoggerInterface::error | Method Psr\\Log\\LoggerInterface::error() has parameter $context with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+6:59-6:78 missingType.iterableValue L6 Psr\Log\LoggerInterface::info | Method Psr\\Log\\LoggerInterface::info() has parameter $context with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+12:72-12:83 missingType.iterableValue L6 f | Function f() has parameter $data with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+14:19-14:42 psr3.placeholderMissingContext L0 f | Parameter $context of logger method info() is required when the message has placeholders - {name}.
+15:44-15:62 psr3.placeholderMissingKey L0 f | Parameter $message of logger method info() has placeholders with no context key - {name}.
+16:19-16:41 psr3.interpolated L0 f | Using interpolated strings in log messages is potentially a security risk. Use PSR-3 placeholders instead.
+16:19-16:41 psr3.messageNotStatic L0 f | Parameter $message of logger method info() is not a static string.
+    tip: See https://www.php-fig.org/psr/psr-3/meta/#static-log-messages
+17:19-17:47 psr3.messageNotStatic L0 f | Parameter $message of logger method info() is not a static string.
+    tip: See https://www.php-fig.org/psr/psr-3/meta/#static-log-messages
+18:19-18:40 psr3.messageNotStatic L0 f | Parameter $message of logger method info() is not a static string.
+    tip: See https://www.php-fig.org/psr/psr-3/meta/#static-log-messages
+19:19-19:24 psr3.messageNotStatic L0 f | Parameter $message of logger method info() is not a static string.
+    tip: See https://www.php-fig.org/psr/psr-3/meta/#static-log-messages
+20:19-20:35 psr3.placeholderDoubleBraces L0 f | Parameter $message of logger method info() should not include double braces.
+21:19-21:32 psr3.placeholderInvalidChar L0 f | Parameter $message of logger method info() has braces with invalid placeholder characters - {na me}.
+23:18-23:25 psr3.invalidLevel L0 f | Parameter #1 $level of method Psr\\Log\\LoggerInterface::log() expects a PSR-3 log level, 'fatal' given.
+24:18-24:24 psr3.invalidLevel L0 f | Parameter #1 $level of method Psr\\Log\\LoggerInterface::log() expects a PSR-3 log level, string given.
+25:26-25:43 psr3.contextKeyNotString L0 f | Context key "" of a logger call should be a non-empty string.
+25:26-25:43 psr3.contextKeyNotString L0 f | Context key "5" of a logger call should be a non-empty string.
+26:30-26:53 psr3.contextType L0 f | Context key 'exception' of a logger call expects Throwable, 'text' given.
+27:34-27:51 psr3.placeholderNotStringable L0 f | Context value for placeholder {data} of logger method info() is array, which has no string form.

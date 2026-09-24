@@ -1,0 +1,2 @@
+2:24-2:37 class.notFound L0 f | parameter $x of f() has invalid type Foo
+2:28-2:30 parameter.implicitlyNullable L0 f | Deprecated in PHP 8.4: Parameter #1 $x (Foo) is implicitly nullable via default value null.

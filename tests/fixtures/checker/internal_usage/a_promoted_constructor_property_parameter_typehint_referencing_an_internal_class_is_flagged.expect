@@ -1,0 +1,3 @@
+8:45-8:78 property.onlyWritten L4 Other\App\C | private property Other\\App\\C::$foo is never read, only written
+8:45-8:78 type.internalClass L0 Other\App\C::__construct | Referencing internal class Vendor\\Internal\\Foo.
+8:53-8:73 parameter.internalClass L0 Other\App\C::__construct | Parameter $foo of method Other\\App\\C::__construct() has typehint with internal class Vendor\\Internal\\Foo.

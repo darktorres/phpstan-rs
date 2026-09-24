@@ -1,0 +1,2 @@
+check_psr3_logging = true
+psr3_context_key_pattern = "^[a-z][a-z0-9_]*$"

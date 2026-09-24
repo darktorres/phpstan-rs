@@ -1,0 +1,1 @@
+1:7-1:33 argument.type L0 <main> | DateInterval::__construct() spec 'PT1S2M' is malformed and will throw at runtime

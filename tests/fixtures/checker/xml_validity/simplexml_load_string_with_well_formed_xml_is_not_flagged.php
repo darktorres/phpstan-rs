@@ -1,0 +1,1 @@
+<?php simplexml_load_string('<a><b></b></a>');

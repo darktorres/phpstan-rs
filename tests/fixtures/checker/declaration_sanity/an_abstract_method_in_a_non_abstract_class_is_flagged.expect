@@ -1,0 +1,4 @@
+2:13-4:14 class.abstractMethodNotImplemented L0 Foo | class Foo does not implement abstract method(s): bar
+    tip: either implement every method listed above, or declare this class itself abstract
+3:17-3:54 method.abstract L0 Foo | Non-abstract class Foo contains abstract method bar()
+    non-ignorable

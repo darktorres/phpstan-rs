@@ -1,0 +1,2 @@
+5:29-5:39 new.static L0 Node::create | unsafe usage of new static()
+    tip: See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static

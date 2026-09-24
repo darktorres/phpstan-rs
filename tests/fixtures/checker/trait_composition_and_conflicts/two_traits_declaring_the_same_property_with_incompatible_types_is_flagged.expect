@@ -1,0 +1,1 @@
+4:13-4:39 trait.propertyConflict L0 C1 | T1a and T1b define the same property ($x) with incompatible types in the composition of C1

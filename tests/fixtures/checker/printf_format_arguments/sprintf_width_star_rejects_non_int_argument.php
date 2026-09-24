@@ -1,0 +1,1 @@
+<?php sprintf("%*d", "five", 42);

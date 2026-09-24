@@ -1,0 +1,1 @@
+<?php function f(): never { while (true) { echo 1; } }

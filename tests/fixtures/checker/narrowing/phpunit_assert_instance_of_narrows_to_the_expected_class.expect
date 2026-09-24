@@ -1,0 +1,6 @@
+3:56-3:66 missingType.iterableValue L6 FuncCall | Property FuncCall::$args type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+5:57-5:66 missingType.parameter L6 TestCase::assertInstanceOf | Method TestCase::assertInstanceOf() has parameter $expected with no type specified.
+5:68-5:75 missingType.parameter L6 TestCase::assertInstanceOf | Method TestCase::assertInstanceOf() has parameter $actual with no type specified.
+8:24-11:18 missingType.iterableValue L6 MyTest::testX | Method MyTest::testX() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

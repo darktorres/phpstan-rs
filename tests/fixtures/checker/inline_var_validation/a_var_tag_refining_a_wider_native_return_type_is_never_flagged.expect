@@ -1,0 +1,2 @@
+6:13-6:66 missingType.iterableValue L6 returnsArray | Function returnsArray() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

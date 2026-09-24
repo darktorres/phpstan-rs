@@ -1,0 +1,4 @@
+3:28-3:38 missingType.iterableValue L6 spawn | Function spawn() has parameter $cmd with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+3:40-3:58 missingType.iterableValue L6 spawn | Function spawn() has parameter $descriptors with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

@@ -1,0 +1,2 @@
+4:21-4:29 greater.alwaysFalse L4 f | Comparison operation ">" between 5 and 100 is always false.
+6:27-6:41 identical.alwaysFalse L4 f | Strict comparison using === between 5 and 'never' will always evaluate to false.

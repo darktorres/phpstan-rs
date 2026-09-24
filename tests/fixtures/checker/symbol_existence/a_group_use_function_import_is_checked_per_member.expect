@@ -1,0 +1,2 @@
+2:13-2:74 function.notFound L0 <main> | used function Foo\\strlen not found
+2:13-2:74 function.notFound L0 <main> | used function Foo\\totallyMadeUpGroupedFunction not found

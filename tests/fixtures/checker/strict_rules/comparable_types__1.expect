@@ -1,0 +1,7 @@
+6:14-6:21 comparison.differentTypes L0 f | Cannot compare different types in int < string.
+7:14-7:24 comparison.nonComparable L0 f | Comparison int|null > int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.
+8:14-8:25 comparison.nonComparable L0 f | Comparison bool <=> bool contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.
+9:14-9:20 comparison.nonComparable L0 f | Comparison mixed < int contains non-comparable type, only int|float|string|DateTimeInterface or comparable tuple is allowed.
+11:14-11:34 comparison.differentTypes L0 f | Cannot compare different types in array{0: int, 1: string} < array{0: string, 1: 'x'}.
+12:14-12:20 comparison.differentTypes L0 f | Cannot compare different types in DateTimeImmutable > int.
+12:14-12:16 greater.invalid L2 f | Comparison operation ">" between DateTimeImmutable and 5 results in an error.

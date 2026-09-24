@@ -1,0 +1,4 @@
+3:13-3:39 class.abstractMethodNotImplemented L0 Child | class Child does not implement abstract method(s): f
+    tip: either implement every method listed above, or declare this class itself abstract
+3:33-3:36 class.nameCase L0 Child | Class referenced with incorrect case: Bar.
+    fix: Use bar => "bar"

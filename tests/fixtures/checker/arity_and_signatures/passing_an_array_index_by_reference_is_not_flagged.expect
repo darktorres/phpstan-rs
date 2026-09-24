@@ -1,0 +1,2 @@
+3:27-3:37 missingType.iterableValue L6 test | Function test() has parameter $arr with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

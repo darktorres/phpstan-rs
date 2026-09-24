@@ -1,0 +1,5 @@
+13:5-13:25 function.looseComparison L0 f | Loose comparison in in_array() between needle int and haystack value string can match values that are not identical; pass true as the strict argument.
+14:5-14:27 function.looseComparison L0 f | Loose comparison in in_array() between needle string and haystack value numeric-string can match values that are not identical; pass true as the strict argument.
+15:5-15:25 function.looseComparison L0 f | Loose comparison in in_array() between needle int and haystack value int|null can match values that are not identical; pass true as the strict argument.
+18:5-18:28 function.looseComparison L0 f | Loose comparison in array_search() between needle float and haystack value int can match values that are not identical; pass true as the strict argument.
+19:5-19:26 function.looseComparison L0 f | Loose comparison in array_keys() between needle '1' and haystack value int can match values that are not identical; pass true as the strict argument.

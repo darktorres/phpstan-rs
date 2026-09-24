@@ -1,0 +1,1 @@
+3:22-3:28 impureFunction.pure L0 addOne | Function addOne() is marked as impure but does not have any side effects.

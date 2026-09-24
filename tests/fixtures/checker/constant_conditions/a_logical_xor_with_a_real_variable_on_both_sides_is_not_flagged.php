@@ -1,0 +1,1 @@
+<?php function f(bool $x, bool $y) { $z = ($x xor $y); }

@@ -1,0 +1,1 @@
+5:24-5:31 equal.alwaysTrue L4 f | Loose comparison using == between 4 and 4 will always evaluate to true.

@@ -1,0 +1,1 @@
+1:12-1:37 function.uselessReturnValue L0 <main> | Return value of function var_export() is always null and the result is printed instead of being returned. Pass in true as parameter #2 $return to return the output instead.

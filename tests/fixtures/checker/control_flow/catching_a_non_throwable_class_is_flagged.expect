@@ -1,0 +1,1 @@
+5:42-5:82 catch.notThrowable L0 test | cannot catch NotAnException1: it does not implement Throwable

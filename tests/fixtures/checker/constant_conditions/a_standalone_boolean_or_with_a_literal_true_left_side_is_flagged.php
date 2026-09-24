@@ -1,0 +1,1 @@
+<?php function f(bool $x) { $y = true || $x; }

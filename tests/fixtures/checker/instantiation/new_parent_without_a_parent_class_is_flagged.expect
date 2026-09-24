@@ -1,0 +1,1 @@
+3:61-3:67 class.noParent L0 Orphan::make | Orphan::make() calls new parent but Orphan does not extend any class

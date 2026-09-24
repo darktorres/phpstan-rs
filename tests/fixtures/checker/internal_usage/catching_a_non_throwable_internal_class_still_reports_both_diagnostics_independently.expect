@@ -1,0 +1,4 @@
+8:13-13:14 missingType.return L6 f | Function f() has no return type specified.
+10:21-10:30 function.notFound L0 f | call to undefined function Other\\App\\doStuff()
+11:24-12:18 catch.internalClass L0 f | Catching internal class Vendor\\Internal\\NotAnException.
+11:24-12:18 catch.notThrowable L0 f | cannot catch Vendor\\Internal\\NotAnException: it does not implement Throwable

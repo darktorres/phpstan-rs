@@ -1,0 +1,2 @@
+6:13-9:14 missingType.return L6 f | Function f() has no return type specified.
+8:22-8:40 classConstant.notFound L0 f | access to undefined constant Status::MadeUpCase

@@ -1,0 +1,1 @@
+<?php sscanf("1 x", "%d %s");

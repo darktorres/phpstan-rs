@@ -66,7 +66,19 @@ fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
 criterion = "0.8.2"
+libtest-mimic = "0.8.2"
 proptest = "1.11.0"
+
+# The fixture suite (tests/fixtures.rs). Each fixture still builds a whole
+# Project, stubs included, so a debug run takes ~26 minutes; it runs in the
+# `gate` profile instead (`cargo test --profile gate --test fixtures`, part
+# of `cargo xtask gates` and Rust CI), and `cargo test --test fixtures --
+# <filter>` runs a subset. Plain `cargo test` leaves it out until
+# per-fixture setup is cheap.
+[[test]]
+name = "fixtures"
+harness = false
+test = false
 
 [[bench]]
 name = "vendored_corpus"

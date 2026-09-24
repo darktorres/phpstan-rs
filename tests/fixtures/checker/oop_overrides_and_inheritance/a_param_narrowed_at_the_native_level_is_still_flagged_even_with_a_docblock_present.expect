@@ -1,0 +1,1 @@
+7:17-7:88 method.childParameterType L0 MyRector5 | MyRector5::refactor() parameter #1 ($node) narrows the inherited parameter type: expects SpecificNode5, ancestor expects Node5

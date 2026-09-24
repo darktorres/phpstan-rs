@@ -1,0 +1,5 @@
+2:13-2:52 missingType.return L6 takesByRef | Function takesByRef() has no return type specified.
+2:33-2:36 missingType.parameter L6 takesByRef | Function takesByRef() has parameter $y with no type specified.
+3:13-5:14 missingType.return L6 test | Function test() has no return type specified.
+4:17-4:35 expr.resultUnused L4 test | Expression "$x |> 'takesByRef'" on a separate line does not do anything.
+4:23-4:35 pipe.byRef L0 test | Parameter #1 of callable on the right side of pipe operator is passed by reference.

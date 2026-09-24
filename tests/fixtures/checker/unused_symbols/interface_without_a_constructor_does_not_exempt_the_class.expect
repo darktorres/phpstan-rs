@@ -1,0 +1,1 @@
+6:45-6:54 constructor.unusedParameter L1 Square::__construct | Constructor of class Square has an unused parameter $side.

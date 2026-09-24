@@ -1,0 +1,3 @@
+3:31-3:36 classConstant.unused L4 Base | private constant Base::X is unused
+    fix: Remove constant X => ""
+7:28-7:35 classConstant.private L0 Child::getX | access to private constant Base::X

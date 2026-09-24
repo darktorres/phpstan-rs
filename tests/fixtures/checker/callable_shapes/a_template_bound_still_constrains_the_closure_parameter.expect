@@ -1,0 +1,1 @@
+12:24-12:52 argument.type L5 f | Dispatcher::on() argument #1 ($handler) expects callable(T): void, Closure(Other): void given

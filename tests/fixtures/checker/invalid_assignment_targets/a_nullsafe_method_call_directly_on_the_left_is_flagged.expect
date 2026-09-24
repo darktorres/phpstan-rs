@@ -1,0 +1,6 @@
+3:13-5:14 missingType.return L6 test | Function test() has no return type specified.
+4:17-4:27 assign.invalidExpr L0 test | Expression on left side of assignment is not assignable.
+    non-ignorable
+4:17-4:27 method.notFound L0 test | call to undefined method Foo|null::bar()
+4:17-4:27 nullsafe.assign L0 test | Nullsafe operator cannot be on left side of assignment.
+    non-ignorable

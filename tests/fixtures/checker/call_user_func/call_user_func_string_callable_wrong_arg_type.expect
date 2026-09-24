@@ -1,0 +1,1 @@
+4:44-4:56 argument.type L5 test | callable passed to call_user_func()() argument #1 ($a) expects int, 'not an int' given

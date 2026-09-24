@@ -1,0 +1,2 @@
+2:13-2:31 ini.removed L0 <main> | Call to ini_restore() with ini directive mysqli.reconnect, removed in PHP 8.2; it does nothing.
+3:9-3:29 ini.deprecated L0 <main> | Call to ini_set(): Changing ini directive session.sid_length is deprecated since PHP 8.4.

@@ -1,0 +1,1 @@
+5:15-5:27 attribute.noConstructor L0 Foo | Attribute class MyAttr does not have a constructor and must be instantiated without any parameters.

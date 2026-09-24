@@ -1,0 +1,2 @@
+2:13-5:14 missingType.return L6 f | Function f() has no return type specified.
+4:24-4:49 variable.undefined L0 f | undefined variable $undefinedInStaticVarBody

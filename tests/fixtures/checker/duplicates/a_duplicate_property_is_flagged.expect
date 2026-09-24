@@ -1,0 +1,4 @@
+3:24-3:26 missingType.property L6 X | Property X::$a has no type specified.
+4:24-4:26 class.duplicateProperty L0 X | Cannot redeclare property X::$a.
+    non-ignorable
+4:24-4:26 missingType.property L6 X | Property X::$a has no type specified.

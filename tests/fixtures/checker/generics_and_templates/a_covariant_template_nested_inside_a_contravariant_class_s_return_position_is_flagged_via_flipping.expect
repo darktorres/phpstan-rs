@@ -1,0 +1,2 @@
+11:24-11:60 generics.variance L6 Bad::makeSink | Bad's @template-covariant T cannot be used in an input (parameter) position
+11:53-11:57 return.type L3 Bad::makeSink | return type mismatch: expected Sink<T>, got null

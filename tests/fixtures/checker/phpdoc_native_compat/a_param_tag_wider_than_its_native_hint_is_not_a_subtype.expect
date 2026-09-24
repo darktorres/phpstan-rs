@@ -1,0 +1,1 @@
+5:22-5:23 parameter.phpDocType L2 f | PHPDoc tag @param for parameter $s with type Shape|null is not subtype of native type Circle.

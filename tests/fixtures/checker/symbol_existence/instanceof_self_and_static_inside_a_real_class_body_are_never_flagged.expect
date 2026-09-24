@@ -1,0 +1,1 @@
+3:44-3:50 missingType.parameter L6 Node::isSameKind | Method Node::isSameKind() has parameter $other with no type specified.

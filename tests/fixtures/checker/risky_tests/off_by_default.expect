@@ -1,0 +1,1 @@
+8:24-10:18 missingType.return L6 MyTest::testSomething | Method MyTest::testSomething() has no return type specified.

@@ -1,0 +1,1 @@
+7:22-7:34 argument.type L5 Foo | MyAttr::__construct() argument #1 ($a) expects int, 'not an int' given

@@ -1,0 +1,4 @@
+5:22-5:23 parameter.notFound L2 a | Conditional return type references unknown parameter $missing.
+9:22-9:23 conditionalType.subjectNotFound L2 b | Conditional return type uses subject type Foo which is not part of PHPDoc @template tags.
+13:22-13:23 conditionalType.alwaysTrue L2 c | Condition "int is int" in conditional return type is always true.
+17:22-17:23 conditionalType.alwaysTrue L2 d | Condition "int is not string" in conditional return type is always true.

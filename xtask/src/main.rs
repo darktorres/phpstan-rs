@@ -32,6 +32,7 @@ fn main() -> ExitCode {
         Some("baseline") => baseline_generate(),
         Some("approve") => approve(&args[1..]),
         Some("rekey") => rekey(&args[1..]),
+        Some("fixtures-convert") => fixtures_convert(&args[1..]),
         _ => Err(USAGE.to_string()),
     };
     match result {
@@ -56,7 +57,9 @@ const USAGE: &str = "usage: cargo xtask <command>
                          write HEAD's snapshot diffs against its parent to
                          gates/approved/<slug>/ (then amend them in)
   rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
-                         that only added gates/ files";
+                         that only added gates/ files
+  fixtures-convert <capture-dir>
+                         turn captured test analyses into fixtures";
 
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -817,8 +820,21 @@ fn list_tests() -> Result<BTreeSet<String>, String> {
         "--format",
         "terse",
     ]))?;
+    // The fixture target is `test = false`, so `--all-targets` leaves it
+    // out; list it on its own.
+    let fixtures = capture(cargo().args([
+        "test",
+        "--profile",
+        "gate",
+        "--test",
+        "fixtures",
+        "--quiet",
+        "--",
+        "--list",
+    ]))?;
     Ok(out
         .lines()
+        .chain(fixtures.lines())
         .filter_map(|l| {
             l.strip_suffix(": test")
                 .or_else(|| l.strip_suffix(": benchmark"))
@@ -894,6 +910,7 @@ fn gates(args: &[String]) -> Result<(), String> {
         "warnings",
     ]))?;
     run(cargo().args(["test", "--workspace", "--all-targets", "--quiet"]))?;
+    run(cargo().args(["test", "--profile", "gate", "--test", "fixtures", "--quiet"]))?;
     test_manifest()?;
     run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))?;
     run(cargo().args(["bench", "--no-run", "--quiet"]))?;
@@ -937,5 +954,119 @@ fn gates(args: &[String]) -> Result<(), String> {
         buildtime()?;
     }
     eprintln!("all gates passed");
+    Ok(())
+}
+
+// --- fixture conversion ----------------------------------------------------
+
+/// Builds `tests/fixtures/<area>/<module>/<test>[__<n>].php` (+ `.toml`,
+/// and an empty `.expect` for blessing) from the records the test
+/// helpers write under `PHPSTAN_RS_CAPTURE`, plus
+/// `tests/fixtures/MAPPING.tsv` (test, call index, fixture, filtered) for
+/// the replay run. Records the fixture format can't express yet are
+/// listed in `tests/fixtures/MANUAL.tsv` instead.
+fn fixtures_convert(args: &[String]) -> Result<(), String> {
+    let dir = args
+        .first()
+        .ok_or("fixtures-convert needs the capture directory")?;
+    let mut records: Vec<serde_json::Value> = Vec::new();
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())?.flatten() {
+        let text = std::fs::read_to_string(entry.path()).map_err(|e| e.to_string())?;
+        records.push(serde_json::from_str(&text).map_err(|e| e.to_string())?);
+    }
+    records.sort_by(|a, b| {
+        (a["test"].as_str(), a["index"].as_u64()).cmp(&(b["test"].as_str(), b["index"].as_u64()))
+    });
+    let mut calls_per_test: std::collections::BTreeMap<String, u64> = Default::default();
+    for r in &records {
+        *calls_per_test
+            .entry(r["test"].as_str().unwrap_or("").to_string())
+            .or_default() += 1;
+    }
+    let fixtures = root().join("tests/fixtures");
+    let mut mapping = String::from("test\tindex\tfixture\tfiltered\n");
+    let mut manual = String::from("test\tindex\treason\n");
+    let mut written = 0usize;
+    for r in &records {
+        let test = r["test"].as_str().unwrap_or("");
+        let index = r["index"].as_u64().unwrap_or(0);
+        let unsupported: Vec<&str> = r["unsupported"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str())
+            .collect();
+        // The phpstan-API gate is derived from the project's composer
+        // dependencies, so it's expressed as a directory fixture with a
+        // composer.json requiring phpstan and composer discovery on.
+        let phpstan_api = unsupported == ["phpstan_api_check_enabled"];
+        let unsupported: Vec<&str> = if phpstan_api { Vec::new() } else { unsupported };
+        let mut reasons = unsupported.join(",");
+        if !r["file"].is_null() {
+            if !reasons.is_empty() {
+                reasons.push(',');
+            }
+            reasons.push_str("file-path");
+        }
+        if !reasons.is_empty() {
+            writeln!(manual, "{test}\t{index}\t{reasons}").unwrap();
+            continue;
+        }
+        // `phpstan_rs::checker::tests::narrowing::foo` ->
+        // `checker/narrowing/foo`.
+        let segments: Vec<&str> = test.split("::").collect();
+        let Some(tests_at) = segments.iter().position(|s| *s == "tests") else {
+            writeln!(manual, "{test}\t{index}\tunrecognized test path").unwrap();
+            continue;
+        };
+        let area: Vec<&str> = segments[..tests_at].to_vec();
+        let rest: Vec<&str> = segments[tests_at + 1..].to_vec();
+        let mut rel = PathBuf::new();
+        for part in area.iter().chain(rest.iter()) {
+            rel.push(part);
+        }
+        if calls_per_test[test] > 1 {
+            let name = rel.file_name().unwrap().to_string_lossy().to_string();
+            rel.set_file_name(format!("{name}__{index}"));
+        }
+        let base = fixtures.join(&rel);
+        std::fs::create_dir_all(base.parent().unwrap()).map_err(|e| e.to_string())?;
+        let source = r["source"].as_str().unwrap_or("");
+        let mut toml = r["toml"].as_str().unwrap_or("").to_string();
+        if phpstan_api {
+            std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+            std::fs::write(base.join("test.php"), source).map_err(|e| e.to_string())?;
+            std::fs::write(
+                base.join("composer.json"),
+                "{\"require-dev\": {\"phpstan/phpstan\": \"^2.0\"}}\n",
+            )
+            .map_err(|e| e.to_string())?;
+            toml.push_str("no_composer = false\n");
+        } else {
+            std::fs::write(base.with_extension("php"), source).map_err(|e| e.to_string())?;
+        }
+        let toml = toml.as_str();
+        if !toml.is_empty() {
+            std::fs::write(base.with_extension("toml"), toml).map_err(|e| e.to_string())?;
+        }
+        let expect = base.with_extension("expect");
+        if !expect.exists() {
+            std::fs::write(&expect, "").map_err(|e| e.to_string())?;
+        }
+        writeln!(
+            mapping,
+            "{test}\t{index}\t{}\t{}",
+            rel.display(),
+            r["filtered"].as_bool().unwrap_or(false)
+        )
+        .unwrap();
+        written += 1;
+    }
+    std::fs::write(fixtures.join("MAPPING.tsv"), mapping).map_err(|e| e.to_string())?;
+    std::fs::write(fixtures.join("MANUAL.tsv"), manual).map_err(|e| e.to_string())?;
+    eprintln!(
+        "{written} fixture(s) written from {} record(s)",
+        records.len()
+    );
     Ok(())
 }

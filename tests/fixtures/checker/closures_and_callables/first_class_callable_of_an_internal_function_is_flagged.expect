@@ -1,0 +1,1 @@
+8:22-8:48 function.internal L0 test | Call to internal function Vendor\\Internal\\make() from outside its root namespace Vendor.

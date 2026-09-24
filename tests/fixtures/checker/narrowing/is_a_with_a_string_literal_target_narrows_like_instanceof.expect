@@ -1,0 +1,2 @@
+4:13-9:14 missingType.return L6 handle | Function handle() has no return type specified.
+4:29-4:36 missingType.parameter L6 handle | Function handle() has parameter $animal with no type specified.

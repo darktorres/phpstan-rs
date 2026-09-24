@@ -1,0 +1,2 @@
+2:36-2:47 missingType.iterableValue L6 needsIterable | Function needsIterable() has parameter $x with no value type specified in iterable type iterable.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

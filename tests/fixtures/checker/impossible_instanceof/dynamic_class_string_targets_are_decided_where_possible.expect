@@ -1,0 +1,3 @@
+12:21-12:39 instanceof.alwaysTrue L4 f | Instanceof between Other and Other will always evaluate to true.
+13:21-13:40 instanceof.alwaysFalse L4 f | Instanceof between Other and Base will always evaluate to false.
+15:21-15:42 instanceof.alwaysTrue L4 f | Instanceof between Sealed and Sealed will always evaluate to true.

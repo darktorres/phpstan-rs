@@ -1,0 +1,12 @@
+3:17-3:39 method.nonAbstract L0 NoBody | Non-abstract method NoBody::run() must contain a body
+    non-ignorable
+3:24-3:39 missingType.return L6 NoBody::run | Method NoBody::run() has no return type specified.
+4:24-4:42 missingType.return L6 NoBody::fine | Method NoBody::fine() has no return type specified.
+7:33-7:47 missingType.return L6 AbsNoBody::ok | Method AbsNoBody::ok() has no return type specified.
+8:17-8:43 method.nonAbstract L0 AbsNoBody | Non-abstract method AbsNoBody::missing() must contain a body
+    non-ignorable
+8:24-8:43 missingType.return L6 AbsNoBody::missing | Method AbsNoBody::missing() has no return type specified.
+11:24-11:39 missingType.return L6 Contract::run | Method Contract::run() has no return type specified.
+14:17-14:39 method.nonAbstract L0 NoBodyTrait | Non-abstract method NoBodyTrait::run() must contain a body
+    non-ignorable
+14:24-14:39 missingType.return L6 NoBodyTrait::run | Method NoBodyTrait::run() has no return type specified.

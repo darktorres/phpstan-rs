@@ -1,0 +1,1 @@
+8:24-10:18 missingType.return L6 MyTest::helperMethod | Method MyTest::helperMethod() has no return type specified.

@@ -1,0 +1,1 @@
+3:29-3:35 property.onlyRead L4 Widget | private property Widget::$count is never written, only read

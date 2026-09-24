@@ -1,0 +1,1 @@
+6:22-6:24 argument.type L5 f | sink() argument #1 ($p) expects object{x: int, y: int}, object{x: int} given

@@ -1,0 +1,1 @@
+4:17-4:30 phpDoc.parseError L2 f | PHPDoc tag @var has invalid value ($node \\DOMNode): Unexpected token "$node", expected type

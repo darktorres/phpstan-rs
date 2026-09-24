@@ -1,0 +1,2 @@
+1:1-1:8 whitespace.bom L0 <main> | File begins with UTF-8 BOM character. This may cause problems when running the code in the web browser.
+1:1-1:8 whitespace.fileStart L0 <main> | File begins with whitespace before the opening <?php tag. This may cause problems when running the code in the web browser.

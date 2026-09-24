@@ -1,0 +1,1 @@
+6:13-9:14 generics.lessTypes L6 UserRepo | Generic type Repo<int> in PHPDoc tag @use does not specify all template types of trait Repo: K, V

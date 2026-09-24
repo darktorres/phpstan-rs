@@ -1,0 +1,1 @@
+4:24-4:65 assert.unknownExpr L0 Foo::isValid | Assert references unknown $this->parseError().

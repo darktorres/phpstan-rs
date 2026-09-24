@@ -1,0 +1,1 @@
+2:13-2:47 parameter.unionTypeNotSupported L0 f | Function f() uses native union types but they're supported only on PHP 8.0 and later.

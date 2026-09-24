@@ -1,0 +1,3 @@
+6:13-6:19 staticMethod.resultDiscarded L0 <main> | Call to C::m() on a separate line discards its return value.
+    non-ignorable
+6:13-6:19 staticMethod.resultUnused L4 <main> | Call to C::m() on a separate line has no effect.

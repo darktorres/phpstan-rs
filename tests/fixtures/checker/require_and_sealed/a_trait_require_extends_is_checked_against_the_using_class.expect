@@ -1,0 +1,1 @@
+5:13-5:38 class.missingExtends L0 Bad | Trait Helper requires using class to extend Base, but Bad does not.

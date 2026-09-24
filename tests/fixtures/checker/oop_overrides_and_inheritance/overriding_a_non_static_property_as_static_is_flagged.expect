@@ -1,0 +1,1 @@
+3:58-3:64 property.static L0 Child | Static property Child::$x overrides non-static property Base::$x

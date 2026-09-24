@@ -1,0 +1,3 @@
+check_magic_numbers = true
+magic_numbers_ignore_numeric_strings = true
+magic_number_exemptions = [-1.0, 42.0, 60.0]

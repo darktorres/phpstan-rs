@@ -1,0 +1,2 @@
+2:15-2:38 interface.allowDynamicProperties L0 Foo | Attribute class AllowDynamicProperties cannot be used with interface.
+    non-ignorable

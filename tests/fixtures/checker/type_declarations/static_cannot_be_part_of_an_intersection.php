@@ -1,0 +1,1 @@
+<?php interface A {} class C implements A { public function m(): A&static { return $this; } public function n(): A&self { return $this; } }

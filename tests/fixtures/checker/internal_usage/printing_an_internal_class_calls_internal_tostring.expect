@@ -1,0 +1,4 @@
+9:13-11:14 missingType.return L6 f | Function f() has no return type specified.
+9:24-9:46 parameter.internalClass L0 f | Parameter $t of function f() has typehint with internal class Vendor\\Internal\\Thing.
+9:24-9:49 type.internalClass L0 f | Referencing internal class Vendor\\Internal\\Thing.
+10:23-10:25 method.internalClass L0 f | Call to method __toString() of internal class Vendor\\Internal\\Thing from outside its root namespace Vendor.

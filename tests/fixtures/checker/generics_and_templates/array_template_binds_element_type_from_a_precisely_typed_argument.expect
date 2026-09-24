@@ -1,0 +1,2 @@
+10:13-12:14 missingType.return L6 process | Function process() has no return type specified.
+11:33-11:48 argument.type L5 process | needsInt() argument #1 ($x) expects int, string given

@@ -1,0 +1,2 @@
+4:40-4:73 method.parentMethodFinal L0 Leaf6 | Method Leaf6::locked() overrides final method Base6::locked().
+    non-ignorable

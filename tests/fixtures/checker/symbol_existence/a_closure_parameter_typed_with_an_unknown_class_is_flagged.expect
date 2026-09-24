@@ -1,0 +1,2 @@
+2:13-4:14 missingType.return L6 f | Function f() has no return type specified.
+3:33-3:61 class.notFound L0 f (closure) | parameter $x of anonymous function has invalid type TotallyMadeUpClosureParam

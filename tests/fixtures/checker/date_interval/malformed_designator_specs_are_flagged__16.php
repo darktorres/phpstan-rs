@@ -1,0 +1,1 @@
+<?php new DateInterval('PT1S2M');

@@ -1,0 +1,2 @@
+3:13-3:34 missingType.return L6 f | Function f() has no return type specified.
+3:22-3:23 phpDoc.phpstanTag L2 f | Unknown PHPDoc tag: @phpstan-parm

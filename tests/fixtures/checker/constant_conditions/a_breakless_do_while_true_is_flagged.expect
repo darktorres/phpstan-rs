@@ -1,0 +1,2 @@
+1:7-1:52 missingType.return L6 f | Function f() has no return type specified.
+1:44-1:48 doWhile.alwaysTrue L4 f | Do-while loop condition is always true.

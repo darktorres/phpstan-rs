@@ -1,0 +1,2 @@
+3:13-5:14 throws.unusedType L2 f | Function f() has LogicException in PHPDoc @throws tag but it's not thrown.
+4:23-4:68 throws.missing L2 f | Function f() throws RuntimeException but it's not covered by any @throws tag.

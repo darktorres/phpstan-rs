@@ -1,0 +1,2 @@
+1:7-1:46 missingType.return L6 f | Function f() has no return type specified.
+1:26-1:31 if.alwaysFalse L4 f | If condition is always false.

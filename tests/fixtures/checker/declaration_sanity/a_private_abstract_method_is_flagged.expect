@@ -1,0 +1,4 @@
+3:17-3:55 method.abstractPrivate L0 Foo | private method Foo::bar() cannot be abstract
+    non-ignorable
+3:34-3:55 method.unused L4 Foo | private method Foo::bar() is unused
+    fix: Remove method bar() => ""

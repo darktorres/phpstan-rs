@@ -672,7 +672,13 @@ pub(crate) fn run_check_project_command(args: CheckProjectArgs) {
     for warning in &session.warnings {
         eprintln!("{warning}");
     }
-    let analysis = match session.run(args.dump_types.as_deref()) {
+    // A file whose parse or check panics is reported per file; don't also
+    // print each caught panic's default message.
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(|_| {}));
+    let analysis = session.run(args.dump_types.as_deref());
+    std::panic::set_hook(default_hook);
+    let analysis = match analysis {
         Ok(analysis) => analysis,
         Err(e) => {
             eprintln!("{e}");

@@ -1,0 +1,1 @@
+<?php sprintf('%1$s %1$s', "a");

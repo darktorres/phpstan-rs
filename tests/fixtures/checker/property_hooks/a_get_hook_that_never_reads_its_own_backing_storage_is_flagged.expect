@@ -1,0 +1,1 @@
+3:31-8:18 propertyGetHook.noRead L3 BadGet | Get hook for non-virtual property BadGet::$y does not read its value.

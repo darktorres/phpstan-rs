@@ -1,0 +1,1 @@
+4:17-4:19 binaryOp.invalid L2 test | Binary operation "." between string and Foo results in an error.

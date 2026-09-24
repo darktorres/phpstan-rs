@@ -1,0 +1,2 @@
+3:31-3:36 classConstant.unused L4 Foo | private constant Foo::X is unused
+    fix: Remove constant X => ""

@@ -1,0 +1,2 @@
+2:12-2:20 missingType.iterableValue L6 f | Function f() has parameter $a with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

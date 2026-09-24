@@ -1,0 +1,5 @@
+7:9-7:28 constructor.call L0 Child::__construct | Static call to __construct() is only allowed on a parent class in the constructor.
+10:9-10:30 constructor.call L0 Child::reset | Static call to __construct() is only allowed on a parent class in the constructor.
+11:9-11:29 constructor.call L0 Child::reset | Call to __construct() on an existing object is not allowed.
+17:37-17:58 constructor.call L0 User::other | Static call to __construct() is only allowed on a parent class in the constructor.
+20:30-20:47 constructor.call L0 f | Call to __construct() on an existing object is not allowed.

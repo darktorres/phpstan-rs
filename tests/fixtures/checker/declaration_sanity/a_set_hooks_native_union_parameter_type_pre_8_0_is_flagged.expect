@@ -1,0 +1,3 @@
+3:28-7:18 property.hooksNotSupported L0 Foo | Property hooks are supported only on PHP 8.4 and later.
+    non-ignorable
+4:36-4:42 parameter.unionTypeNotSupported L0 Foo::$bar (set hook) | Set hook for property Foo::$bar uses native union types but they're supported only on PHP 8.0 and later.

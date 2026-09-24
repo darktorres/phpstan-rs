@@ -1,0 +1,3 @@
+6:13-6:56 interfaceExtends.class L0 Ix | interface Ix cannot extend class IxC
+6:13-6:56 interfaceExtends.enum L0 Ix | interface Ix cannot extend enum IxE
+6:13-6:56 interfaceExtends.trait L0 Ix | interface Ix cannot extend trait IxT

@@ -1,0 +1,2 @@
+4:17-4:35 missingType.return L6 IBarPanel::getTab | Method IBarPanel::getTab() has no return type specified.
+7:17-7:52 missingType.return L6 ConcretePanel::getTab | Method ConcretePanel::getTab() has no return type specified.

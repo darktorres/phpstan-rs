@@ -1,0 +1,1 @@
+6:29-6:32 argument.type L5 test | needsOneArg() argument #1 ($fn) expects Closure(int): void, Closure(int, int): void given

@@ -1,0 +1,4 @@
+2:13-4:14 missingType.return L6 test | Function test() has no return type specified.
+3:17-3:29 cast.voidNotSupported L0 test | The (void) cast is supported only on PHP 8.5 and later.
+    non-ignorable
+3:24-3:29 function.notFound L0 test | call to undefined function foo()

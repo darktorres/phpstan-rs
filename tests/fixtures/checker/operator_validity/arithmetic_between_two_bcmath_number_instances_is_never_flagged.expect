@@ -1,0 +1,2 @@
+3:17-3:24 expr.resultUnused L4 test | Expression "$a + $b" on a separate line does not do anything.
+4:17-4:24 expr.resultUnused L4 test | Expression "$a - $b" on a separate line does not do anything.

@@ -1,0 +1,2 @@
+6:34-6:64 catch.previousNotPassed L4 f | DomainError is thrown from the catch of $e without $e as its previous exception; the original cause and trace are lost.
+12:45-12:77 catch.previousNotPassed L4 f | DomainError is thrown from the catch of $e without $e as its previous exception; the original cause and trace are lost.

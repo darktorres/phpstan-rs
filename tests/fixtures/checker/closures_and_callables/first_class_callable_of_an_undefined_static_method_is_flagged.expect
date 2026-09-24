@@ -1,0 +1,1 @@
+4:22-4:54 staticMethod.notFound L0 test | call to undefined static method Foo::totallyUndefinedStatic()

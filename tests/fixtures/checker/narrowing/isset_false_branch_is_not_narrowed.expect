@@ -1,0 +1,1 @@
+6:31-6:33 argument.type L5 f | strlen() argument #1 ($string) expects string, string|null given

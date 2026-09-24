@@ -1,0 +1,1 @@
+4:36-4:57 throw.notThrowable L0 test | cannot throw NotAnException3: it does not implement Throwable

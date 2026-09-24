@@ -323,6 +323,47 @@ impl Session {
         })
     }
 
+    /// A fixture's session: `stem.php` (or the directory `stem/`) analysed
+    /// under `stem.toml` if present (its paths relative to the fixture's
+    /// directory), with composer discovery off unless the config turns it
+    /// on, reporting every level. Returns the session and that directory.
+    pub fn for_fixture(stem: &Path) -> Result<(Session, PathBuf), String> {
+        let file_subject = stem.with_extension("php");
+        let (subject, base) = if file_subject.is_file() {
+            let base = file_subject.parent().unwrap_or(Path::new("")).to_path_buf();
+            let name = PathBuf::from(file_subject.file_name().unwrap_or_default());
+            (name, base)
+        } else if stem.is_dir() {
+            (PathBuf::new(), stem.to_path_buf())
+        } else {
+            return Err(format!(
+                "{}: no `.php` file or directory subject",
+                stem.display()
+            ));
+        };
+        let config_file = stem.with_extension("toml");
+        let mut config = if config_file.is_file() {
+            Config::load(&config_file)?
+        } else {
+            Config::default()
+        };
+        if config.paths.is_none() {
+            config.paths = Some(vec![subject]);
+        }
+        if config.no_composer.is_none() {
+            config.no_composer = Some(true);
+        }
+        let overrides = Overrides {
+            report_level: Some(u8::MAX),
+            ..Overrides::default()
+        };
+        // Paths stay relative to the fixture's own directory, so where the
+        // fixture suite lives (under `tests/`) never shows in the analysed
+        // paths - path-sensitive checks see only the fixture's own layout.
+        let session = Session::resolve(config, None, base.clone(), overrides)?;
+        Ok((session, base))
+    }
+
     /// The directories analysed (after composer path-repository
     /// promotion), relative to the root as given.
     pub fn dirs(&self) -> &[PathBuf] {
@@ -432,8 +473,26 @@ impl Session {
         project.set_phpstan_api_check_enabled(self.phpstan_api_check_enabled);
     }
 
-    fn read_and_parse_file(path: &Path, is_stub: bool) -> Option<(String, ParsedFile)> {
-        let bytes = std::fs::read(path).ok()?;
+    /// Every `.php` file under `dir` (or `dir` itself), spelled as `dir`
+    /// joined with its path below it - the same spelling the command line
+    /// gave - while the walk itself happens under the root.
+    fn collect_php_files(&self, dir: &Path, out: &mut Vec<PathBuf>) {
+        let walked = self.root.join(dir);
+        let mut found = Vec::new();
+        super::collect_php_files(&walked, &mut found);
+        out.extend(
+            found
+                .into_iter()
+                .map(|path| match path.strip_prefix(&walked) {
+                    Ok(rest) if rest.as_os_str().is_empty() => dir.to_path_buf(),
+                    Ok(rest) => dir.join(rest),
+                    Err(_) => path,
+                }),
+        );
+    }
+
+    fn read_and_parse_file(&self, path: &Path, is_stub: bool) -> Option<(String, ParsedFile)> {
+        let bytes = std::fs::read(self.root.join(path)).ok()?;
         let source = String::from_utf8_lossy(&bytes).into_owned();
         let parsed = std::panic::catch_unwind(|| super::parse_file(path, &source, is_stub))
             .ok()?
@@ -447,12 +506,12 @@ impl Session {
     pub fn run(&self, dump_types: Option<&Path>) -> Result<Analysis, String> {
         let mut analyze_files = Vec::new();
         for dir in &self.dirs {
-            super::collect_php_files(dir, &mut analyze_files);
+            self.collect_php_files(dir, &mut analyze_files);
         }
         analyze_files.sort();
         let mut context_files: Vec<PathBuf> = self.scan_files.clone();
         for dir in &self.scan_dirs {
-            super::collect_php_files(dir, &mut context_files);
+            self.collect_php_files(dir, &mut context_files);
         }
         context_files.sort();
         context_files.dedup();
@@ -474,25 +533,20 @@ impl Session {
 
         let mut stub_files_vec = Vec::new();
         for dir in &self.stub_dirs {
-            super::collect_php_files(dir, &mut stub_files_vec);
+            self.collect_php_files(dir, &mut stub_files_vec);
         }
         let stub_files: FxHashSet<PathBuf> = stub_files_vec.into_iter().collect();
 
-        // Caught parse/check panics are reported per file; don't also print
-        // each one's default panic message.
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
         let combined_files: Vec<&PathBuf> =
             context_files.iter().chain(analyze_files.iter()).collect();
         let mut combined_parsed: Vec<Option<(String, ParsedFile)>> = pool.install(|| {
             combined_files
                 .par_iter()
-                .map(|p| Self::read_and_parse_file(p, stub_files.contains(p.as_path())))
+                .map(|p| self.read_and_parse_file(p, stub_files.contains(p.as_path())))
                 .collect()
         });
         let analyze_parsed = combined_parsed.split_off(context_files.len());
         let context_parsed = combined_parsed;
-        std::panic::set_hook(default_hook);
 
         // Context files first, so an analysed file's declaration wins a
         // name collision.
@@ -533,8 +587,6 @@ impl Session {
             }))
             .unwrap_or_default(),
         );
-        let default_hook = std::panic::take_hook();
-        std::panic::set_hook(Box::new(|_| {}));
         type MemberRefData = (
             Vec<(Span, String, String)>,
             FxHashSet<String>,
@@ -580,7 +632,6 @@ impl Session {
                 })
                 .collect()
         });
-        std::panic::set_hook(default_hook);
 
         if let Some(out) = dump_types {
             let mut dumps: Vec<(&PathBuf, Vec<String>)> = pool.install(|| {

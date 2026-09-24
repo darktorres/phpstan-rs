@@ -1,0 +1,4 @@
+3:24-3:63 missingType.return L6 Foo::takesByRef | Method Foo::takesByRef() has no return type specified.
+3:44-3:47 missingType.parameter L6 Foo::takesByRef | Method Foo::takesByRef() has parameter $y with no type specified.
+5:13-7:14 missingType.return L6 test | Function test() has no return type specified.
+6:23-6:42 pipe.byRef L0 test | Parameter #1 of callable on the right side of pipe operator is passed by reference.

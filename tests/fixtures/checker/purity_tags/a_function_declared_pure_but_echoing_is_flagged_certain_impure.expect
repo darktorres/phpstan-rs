@@ -1,0 +1,2 @@
+3:22-3:27 pureFunction.void L0 logIt | Function logIt() is pure but has no return value.
+4:17-4:27 impure.echo L0 logIt | Impure echo in pure function logIt().

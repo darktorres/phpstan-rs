@@ -1,0 +1,1 @@
+2:13-7:14 return.unusedType L4 f | Function f() never returns string so it can be removed from the return type.

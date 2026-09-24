@@ -1,0 +1,2 @@
+3:18-3:33 return.trait L0 <main> | return type of arrow function has invalid type T
+3:29-3:33 return.type L3 <main> | return type mismatch: expected T, got null

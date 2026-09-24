@@ -1,0 +1,5 @@
+3:13-5:14 missingType.return L6 test | Function test() has no return type specified.
+3:27-3:35 missingType.iterableValue L6 test | Function test() has parameter $x with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+4:17-4:24 assign.invalidExpr L0 test | Expression on left side of assignment is not assignable.
+    non-ignorable

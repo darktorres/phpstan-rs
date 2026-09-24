@@ -1,0 +1,2 @@
+4:13-6:14 missingType.return L6 test | Function test() has no return type specified.
+5:29-5:33 offsetAccess.invalidOffset L3 test | Invalid array key type Foo.

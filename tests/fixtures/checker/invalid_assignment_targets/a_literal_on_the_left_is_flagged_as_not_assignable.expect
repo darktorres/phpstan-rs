@@ -1,0 +1,3 @@
+2:13-4:14 missingType.return L6 test | Function test() has no return type specified.
+3:17-3:18 assign.invalidExpr L0 test | Expression on left side of assignment is not assignable.
+    non-ignorable

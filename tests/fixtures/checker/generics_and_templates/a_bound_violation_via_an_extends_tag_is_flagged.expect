@@ -1,0 +1,1 @@
+9:13-9:44 generics.notSubtype L6 Bad | Type NotAShape in generic type Collection<NotAShape> in PHPDoc tag @extends is not subtype of template type T of class Collection.

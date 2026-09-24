@@ -1,0 +1,1 @@
+4:27-4:64 throws.missing L2 Repo::find | Method Repo::find() throws RuntimeException but it's not covered by any @throws tag.

@@ -1,0 +1,1 @@
+3:27-3:45 classConstant.value L0 Foo | constant Foo::BAD (int) does not accept value 'not an int'

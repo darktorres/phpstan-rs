@@ -1,0 +1,2 @@
+5:13-10:14 missingType.return L6 f | Function f() has no return type specified.
+8:26-8:52 property.notFound L2 f | access to undefined property Base&Variable::$totallyMadeUp

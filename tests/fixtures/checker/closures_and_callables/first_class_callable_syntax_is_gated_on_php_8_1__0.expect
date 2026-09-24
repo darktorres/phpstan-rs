@@ -1,0 +1,6 @@
+7:18-7:29 callable.notSupported L0 f | First-class callables are supported only on PHP 8.1 and later.
+    non-ignorable
+8:18-8:28 callable.notSupported L0 f | First-class callables are supported only on PHP 8.1 and later.
+    non-ignorable
+9:18-9:29 callable.notSupported L0 f | First-class callables are supported only on PHP 8.1 and later.
+    non-ignorable

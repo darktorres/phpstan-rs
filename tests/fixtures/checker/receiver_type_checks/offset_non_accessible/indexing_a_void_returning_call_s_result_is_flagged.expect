@@ -1,0 +1,2 @@
+3:17-6:18 missingType.return L6 f | Function f() has no return type specified.
+5:29-5:32 offsetAccess.nonOffsetAccessible L3 f | Cannot access offset on void.

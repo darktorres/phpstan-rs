@@ -1,0 +1,10 @@
+3:20-3:24 nullType.standaloneNotSupported L0 a | Type null uses null as a standalone type, which is supported only on PHP 8.2 and later.
+    non-ignorable
+3:29-3:35 falseType.standaloneNotSupported L0 a | Type ?false uses false as a standalone type, which is supported only on PHP 8.2 and later.
+    non-ignorable
+3:40-3:50 falseType.standaloneNotSupported L0 a | Type null|false uses false as a standalone type, which is supported only on PHP 8.2 and later.
+    non-ignorable
+3:70-3:74 trueType.notSupported L0 a | Type true is supported only on PHP 8.2 and later.
+    non-ignorable
+4:20-4:30 unionType.dnfNotSupported L0 b | Disjunctive normal form types are supported only on PHP 8.2 and later.
+    non-ignorable

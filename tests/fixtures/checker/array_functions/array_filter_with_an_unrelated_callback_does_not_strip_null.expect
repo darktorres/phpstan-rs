@@ -1,0 +1,1 @@
+6:24-6:79 return.type L3 f | return type mismatch: expected array<(int|string), int>, got array<(int|string), int|null>

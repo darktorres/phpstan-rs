@@ -1,0 +1,1 @@
+4:21-4:37 method.nonObject L0 f | call to method someMethod() on a non-object type stdClass

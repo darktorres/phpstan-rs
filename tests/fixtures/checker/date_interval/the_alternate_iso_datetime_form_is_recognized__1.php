@@ -1,0 +1,1 @@
+<?php new DateInterval('P0000-00-01T00:00:00');

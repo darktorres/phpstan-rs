@@ -1,0 +1,2 @@
+3:36-3:47 missingType.iterableValue L6 test | Function test() has parameter $args with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

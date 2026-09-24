@@ -1,0 +1,1 @@
+4:21-4:36 method.resultUnused L4 Foo::run | Call to method Foo::helper() on a separate line has no effect.

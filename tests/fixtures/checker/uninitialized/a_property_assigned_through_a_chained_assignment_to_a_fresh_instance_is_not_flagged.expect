@@ -1,0 +1,4 @@
+2:32-2:37 missingType.property L6 Tag | Property Tag::$node has no type specified.
+5:31-9:18 missingType.return L6 Node::create | Method Node::create() has no return type specified.
+6:42-6:52 new.static L0 Node::create | unsafe usage of new static()
+    tip: See: https://phpstan.org/blog/solving-phpstan-error-unsafe-usage-of-new-static

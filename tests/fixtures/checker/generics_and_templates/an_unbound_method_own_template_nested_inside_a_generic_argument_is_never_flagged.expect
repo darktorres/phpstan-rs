@@ -1,0 +1,2 @@
+14:13-16:14 missingType.return L6 f | Function f() has no return type specified.
+14:24-14:43 missingType.generics L6 f | Function f() has parameter $r with generic class EntityRepository but does not specify its types: T

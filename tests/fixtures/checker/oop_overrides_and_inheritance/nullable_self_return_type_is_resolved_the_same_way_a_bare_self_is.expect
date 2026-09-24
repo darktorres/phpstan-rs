@@ -1,0 +1,2 @@
+3:53-3:64 missingType.iterableValue L6 Widget::tryFromArray | Method Widget::tryFromArray() has parameter $data with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

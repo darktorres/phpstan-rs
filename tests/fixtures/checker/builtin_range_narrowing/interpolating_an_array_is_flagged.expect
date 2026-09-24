@@ -1,0 +1,1 @@
+4:33-4:35 encapsedStringPart.nonString L2 test | Part of encapsed string (array<(int|string), int>) cannot be cast to string.

@@ -1,0 +1,4 @@
+8:31-8:38 missingType.iterableValue L6 Holder | Property Holder::$p type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+9:38-9:50 missingType.iterableValue L6 Holder::fill | Method Holder::fill() has parameter $items with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

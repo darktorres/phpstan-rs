@@ -1,0 +1,4 @@
+2:24-2:36 missingType.iterableValue L6 f | Function f() has parameter $items with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+5:25-5:34 finally.exitPoint L4 f | This continue is overwritten by a different one in the finally block below.
+7:25-7:31 finally.exitPoint L4 f | The overwriting break is on this line.

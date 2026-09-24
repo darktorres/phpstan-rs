@@ -1,0 +1,1 @@
+11:24-11:53 generics.variance L6 Bad::consume | Bad's @template-covariant T cannot be used in an input (parameter) position

@@ -1,0 +1,4 @@
+8:68-8:82 missingType.iterableValue L6 Dave\Liddament\PhpLanguageExtensions\Attributes\Sealed::__construct | Method Dave\\Liddament\\PhpLanguageExtensions\\Attributes\\Sealed::__construct() has parameter $classes with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+22:60-22:72 attribute.friend L2 App\Stranger::make | App\\Person::__construct() can only be called by its friends (App\\PersonBuilder), not by App\\Stranger.
+22:74-22:86 attribute.friend L2 App\Stranger::make | App\\Person::rename() can only be called by its friends (App\\PersonBuilder), not by App\\Stranger.

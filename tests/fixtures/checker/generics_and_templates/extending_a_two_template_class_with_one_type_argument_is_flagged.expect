@@ -1,0 +1,1 @@
+9:13-9:43 generics.lessTypes L6 StringMap | Generic type Map<string> in PHPDoc tag @extends does not specify all template types of class Map: K, V

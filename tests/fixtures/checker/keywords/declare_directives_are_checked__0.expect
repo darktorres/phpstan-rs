@@ -1,0 +1,12 @@
+2:34-2:35 declareStrictTypes.value L0 <main> | Declare strict_types must have 0 or 1 as its value, 2 given.
+    non-ignorable
+3:13-3:37 declareStrictTypes.notFirst L0 <main> | Declare strict_types must be the very first statement.
+    non-ignorable
+4:27-4:30 declare.ticksValue L0 <main> | Declare ticks must have an integer value, 'x' given.
+    non-ignorable
+5:30-5:31 declare.encodingValue L0 <main> | Declare encoding must have a string value, 1 given.
+    non-ignorable
+6:21-6:29 declare.unsupported L0 <main> | Unsupported declare 'nonsense'.
+    non-ignorable
+7:13-7:48 declareStrictTypes.blockMode L0 <main> | Declare strict_types must not use block mode.
+    non-ignorable

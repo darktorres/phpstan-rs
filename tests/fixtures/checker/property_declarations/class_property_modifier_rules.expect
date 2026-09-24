@@ -1,0 +1,30 @@
+3:37-3:45 property.abstractNonHooked L0 Base | Only hooked properties can be declared abstract.
+    non-ignorable
+4:37-4:61 property.abstractWithoutAbstractHook L0 Base | Abstract properties must specify at least one abstract hook.
+    non-ignorable
+5:28-5:46 property.hookWithoutBody L0 Base | Non-abstract properties cannot include hooks without bodies.
+    non-ignorable
+6:38-6:55 property.abstractPrivate L0 Base | Property cannot be both abstract and private.
+    non-ignorable
+6:38-6:55 property.unused L4 Base | private property Base::$absPriv is unused
+    fix: Remove property $absPriv => ""
+7:35-7:47 property.finalPrivate L0 Base | Property cannot be both final and private.
+    non-ignorable
+7:35-7:47 property.onlyWritten L4 Base | private property Base::$finPriv is never read, only written
+8:29-8:57 property.finalPrivateHook L0 Base | Private property cannot have a final hook.
+    non-ignorable
+8:29-8:57 property.unused L4 Base | private property Base::$finHook is unused
+    fix: Remove property $finHook => ""
+9:37-9:65 property.abstractFinal L0 Base | Property cannot be both abstract and final.
+    non-ignorable
+10:37-10:60 property.hookReadOnly L0 Base | Hooked properties cannot be readonly.
+    non-ignorable
+11:35-11:62 property.hookedStatic L0 Base | Hooked properties cannot be static.
+    non-ignorable
+12:28-12:54 property.virtualDefault L0 Base | Virtual hooked properties cannot have a default value.
+    non-ignorable
+13:29-13:73 propertySetHook.nativeParameterType L0 Base | Parameter $value of set hook does not have a native type but the property Base::$fine does.
+    non-ignorable
+13:29-13:73 propertySetHook.noAssign L3 Base | Set hook for non-virtual property Base::$fine does not assign value to it.
+16:37-16:50 property.abstract L0 Concrete | Non-abstract classes cannot include abstract properties.
+    non-ignorable

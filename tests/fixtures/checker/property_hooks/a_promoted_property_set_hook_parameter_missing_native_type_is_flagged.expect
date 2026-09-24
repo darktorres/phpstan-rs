@@ -1,0 +1,2 @@
+4:21-6:22 propertySetHook.nativeParameterType L0 PromotedNativeMismatch | Parameter $value of set hook does not have a native type but the property PromotedNativeMismatch::$w does.
+    non-ignorable

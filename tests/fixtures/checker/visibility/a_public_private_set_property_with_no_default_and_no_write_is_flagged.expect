@@ -1,0 +1,1 @@
+3:41-3:43 property.neverWritten L4 Foo | property Foo::$x has private(set) visibility but is never written from within the declaring class

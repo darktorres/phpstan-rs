@@ -1,0 +1,1 @@
+3:13-5:14 throws.unusedType L2 f | Function f() has DivisionByZeroError in PHPDoc @throws tag but it's not thrown.

@@ -1,0 +1,4 @@
+<?php
+            #[TotallyUndefinedAttribute]
+            class Foo {}
+        

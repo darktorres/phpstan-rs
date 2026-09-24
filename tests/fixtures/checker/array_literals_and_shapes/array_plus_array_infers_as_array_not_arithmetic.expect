@@ -1,0 +1,4 @@
+2:28-2:41 missingType.iterableValue L6 merge | Function merge() has parameter $config with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+2:43-2:58 missingType.iterableValue L6 merge | Function merge() has parameter $defaults with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

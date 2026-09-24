@@ -1,0 +1,2 @@
+3:13-5:14 missingType.return L6 test | Function test() has no return type specified.
+3:27-3:31 missingType.parameter L6 test | Function test() has parameter $arr with no type specified.

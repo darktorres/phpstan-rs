@@ -1,0 +1,11 @@
+12:13-12:37 generics.wrongParent L2 A | The @extends tag of class A describes Base but the class extends Plain.
+14:13-14:23 generics.noParent L2 B | Class B has @extends tag, but does not extend any class.
+15:13-15:36 missingType.generics L6 C | Class C extends generic class Base but does not specify its types: T
+21:13-21:52 class.notFound L0 D | PHPDoc tag @implements has invalid type Missing.
+21:13-21:52 generics.variance L2 D | Template type U is declared as covariant, but occurs in invariant position in extended type Base<U> of class D.
+23:13-23:38 generics.callSiteVarianceNotAllowed L2 E | Call-site variance annotation of covariant int in generic type Out<covariant int> in PHPDoc tag @implements is not allowed.
+25:13-25:40 generics.noParent L2 F | Interface F has @implements tag, but can not implement any interface, must extend from it.
+25:13-25:40 missingType.generics L6 F | Interface F extends generic interface Coll but does not specify its types: T
+27:13-27:47 generics.noParent L2 G | Enum G has @extends tag, but cannot extend anything.
+27:13-27:47 missingType.generics L6 G | Enum G implements generic interface Coll but does not specify its types: T
+32:13-32:32 missingType.generics L6 I | Class I uses generic trait Tr but does not specify its types: T

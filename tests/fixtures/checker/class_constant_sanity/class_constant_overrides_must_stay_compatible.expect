@@ -1,0 +1,17 @@
+9:31-9:43 classConstant.unused L4 Base | private constant Base::HIDDEN is unused
+    fix: Remove constant HIDDEN => ""
+16:23-16:28 classConstant.final L0 Child | Constant Child::FIXED overrides final constant HasLimit::FIXED.
+    non-ignorable
+17:33-17:37 classConstant.visibility L0 Child | Protected constant Child::OPEN overriding public constant Base::OPEN should also be public.
+    non-ignorable
+18:31-18:44 classConstant.unused L4 Child | private constant Child::GUARDED is unused
+    fix: Remove constant GUARDED => ""
+18:31-18:38 classConstant.visibility L0 Child | Private constant Child::GUARDED overriding protected constant Base::GUARDED should be protected or public.
+    non-ignorable
+19:31-19:43 classConstant.unused L4 Child | private constant Child::HIDDEN is unused
+    fix: Remove constant HIDDEN => ""
+20:23-20:28 classConstant.missingNativeType L3 Child | Constant Child::TYPED overriding constant Base::TYPED (int) should also have native type int.
+    non-ignorable
+22:23-22:26 classConstant.type L3 Child | Type int of constant Child::DOC is not covariant with type int<1, max> of constant Base::DOC.
+25:30-25:35 classConstant.nativeType L3 TypedChild | Native type string of constant TypedChild::TYPED is not covariant with native type int of constant Base::TYPED.
+    non-ignorable

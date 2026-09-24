@@ -1,0 +1,2 @@
+3:13-3:27 ini.deprecated L0 f | Call to ini_get(): Ini directive track_errors is deprecated since PHP 7.2.
+7:13-7:54 ini.deprecated L0 f | Call to ini_set(): Ini directive allow_url_include is deprecated since PHP 7.4.

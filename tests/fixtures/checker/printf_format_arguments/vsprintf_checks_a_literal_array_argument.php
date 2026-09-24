@@ -1,0 +1,1 @@
+<?php vsprintf('%s and %s', ["only one"]);

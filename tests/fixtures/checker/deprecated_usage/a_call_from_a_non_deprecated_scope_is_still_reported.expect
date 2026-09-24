@@ -1,0 +1,1 @@
+6:21-6:30 function.deprecated L0 Foo::bar | Call to deprecated function oldFunc().

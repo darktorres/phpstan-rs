@@ -1,0 +1,1 @@
+5:13-7:14 enum.generic L2 Status | Enum Status has PHPDoc @template tag but enums cannot be generic.

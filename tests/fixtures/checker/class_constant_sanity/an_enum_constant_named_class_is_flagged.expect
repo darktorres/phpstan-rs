@@ -1,0 +1,2 @@
+4:23-4:32 classConstant.class L0 Status | a class constant must not be called 'class'; it is reserved for class name fetching
+    non-ignorable

@@ -1,0 +1,4 @@
+7:13-7:28 missingType.return L6 f | Function f() has no return type specified.
+7:22-7:23 phpDoc.parseError L2 f | PHPDoc tag @internal has invalid value ((do not use this)): Unexpected token "not", expected ')'
+7:22-7:23 phpDoc.parseError L2 f | PHPDoc tag @see has invalid value ((see below)): Unexpected token "below", expected ')'
+7:22-7:23 phpDoc.parseError L2 f | PHPDoc tag @url has invalid value ((image.jpg) images will be loaded and merged): Unexpected token ".", expected ')'

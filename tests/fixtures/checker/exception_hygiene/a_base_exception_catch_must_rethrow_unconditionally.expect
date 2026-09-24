@@ -1,0 +1,2 @@
+3:23-3:55 catch.baseWithoutRethrow L4 f | Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.
+5:23-5:66 catch.baseWithoutRethrow L4 f | Catching Exception swallows every such exception unless the catch rethrows; add an unconditional throw.

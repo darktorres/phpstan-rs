@@ -1,0 +1,2 @@
+5:17-5:28 enum.duplicateValue L0 EnumDuplicateValue | duplicate value in enum EnumDuplicateValue for case C (already used by case B)
+7:17-7:28 enum.duplicateValue L0 EnumDuplicateValue | duplicate value in enum EnumDuplicateValue for case E (already used by case A)

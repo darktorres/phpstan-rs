@@ -1,0 +1,1 @@
+4:17-4:20 assignOp.invalid L2 test | Binary operation "+=" between array<(int|string), int> and 'foo' results in an error.

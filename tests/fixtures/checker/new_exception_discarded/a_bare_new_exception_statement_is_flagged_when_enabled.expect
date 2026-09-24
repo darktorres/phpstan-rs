@@ -1,0 +1,1 @@
+3:17-3:38 new.exceptionNotThrown L5 f | Construction of Exception is discarded - did you forget the throw keyword?

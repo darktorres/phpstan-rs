@@ -1,0 +1,1 @@
+<?php function f() { true ? 1 : 2; }

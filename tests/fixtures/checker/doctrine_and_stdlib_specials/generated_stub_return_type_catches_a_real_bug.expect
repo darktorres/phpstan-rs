@@ -1,0 +1,2 @@
+3:13-3:49 function.resultUnused L4 <main> | Call to function needsString() on a separate line has no effect.
+3:25-3:48 argument.type L5 <main> | needsString() argument #1 ($s) expects string, string|false given

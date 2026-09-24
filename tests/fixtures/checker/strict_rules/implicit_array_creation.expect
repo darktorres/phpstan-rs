@@ -1,0 +1,7 @@
+2:21-2:32 missingType.iterableValue L6 f | Function f() has parameter $rows with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+3:5-3:17 variable.implicitArray L0 f | Implicit array creation is not allowed - variable $fresh does not exist.
+7:5-7:20 variable.implicitArray L0 f | Implicit array creation is not allowed - variable $maybe might not exist.
+9:9-9:22 variable.implicitArray L0 f | Implicit array creation is not allowed - variable $acc might not exist.
+12:5-12:26 variable.implicitArray L0 f | Implicit array creation is not allowed - variable $nested does not exist.
+13:25-13:37 variable.implicitArray L0 f (closure) | Implicit array creation is not allowed - variable $inner does not exist.

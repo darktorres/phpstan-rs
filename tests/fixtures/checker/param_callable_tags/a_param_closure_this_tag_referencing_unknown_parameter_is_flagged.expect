@@ -1,0 +1,1 @@
+3:22-3:23 parameter.notFound L2 f | PHPDoc tag @param-closure-this references unknown parameter: $bogus

@@ -1,0 +1,1 @@
+<?php RANDOM_INT(10, 1);

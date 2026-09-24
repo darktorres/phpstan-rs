@@ -1,0 +1,1 @@
+3:31-10:18 propertySetHook.noAssign L3 NestedClosureWrite | Set hook for non-virtual property NestedClosureWrite::$k does not assign value to it.

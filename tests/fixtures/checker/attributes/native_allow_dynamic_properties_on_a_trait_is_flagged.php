@@ -1,0 +1,4 @@
+<?php
+            #[\AllowDynamicProperties]
+            trait Foo {}
+        

@@ -1,0 +1,2 @@
+3:17-3:48 method.visibility L0 Foo | method Foo::bar() cannot use non-public visibility in interface
+    non-ignorable

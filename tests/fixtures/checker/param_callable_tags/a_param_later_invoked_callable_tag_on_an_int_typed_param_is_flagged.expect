@@ -1,0 +1,1 @@
+3:22-3:23 paramLaterInvokedCallable.nonCallable L2 f | PHPDoc tag @param-later-invoked-callable is for parameter $cb with non-callable type int.

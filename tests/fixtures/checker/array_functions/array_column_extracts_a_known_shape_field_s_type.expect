@@ -1,0 +1,2 @@
+5:13-8:14 missingType.return L6 f | Function f() has no return type specified.
+7:30-7:34 argument.type L5 f | needsStrings() argument #1 ($xs) expects array<(int|string), string>, list<int> given

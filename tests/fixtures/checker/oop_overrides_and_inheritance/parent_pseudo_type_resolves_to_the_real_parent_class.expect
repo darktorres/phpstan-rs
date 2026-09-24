@@ -1,0 +1,1 @@
+7:28-7:43 return.type L3 Dog::asAnimal | return type mismatch: expected Animal, got Unrelated

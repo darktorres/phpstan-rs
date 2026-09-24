@@ -1,0 +1,5 @@
+9:21-9:41 instanceof.alwaysFalse L4 f | Instanceof between int and Circle will always evaluate to false.
+10:21-10:41 instanceof.alwaysFalse L4 f | Instanceof between Circle and Square will always evaluate to false.
+11:21-11:40 instanceof.alwaysFalse L4 f | Instanceof between Locked and Shape will always evaluate to false.
+12:21-12:40 instanceof.alwaysFalse L4 f | Instanceof between Suit and Shape will always evaluate to false.
+13:21-13:40 instanceof.alwaysFalse L4 f | Instanceof between Circle&Square|Circle and Mixin will always evaluate to false.

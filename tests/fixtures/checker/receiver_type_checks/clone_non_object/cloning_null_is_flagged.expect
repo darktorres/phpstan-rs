@@ -1,0 +1,2 @@
+2:17-5:18 missingType.return L6 f | Function f() has no return type specified.
+4:32-4:34 clone.nonObject L3 f | Cannot clone non-object variable of type null.

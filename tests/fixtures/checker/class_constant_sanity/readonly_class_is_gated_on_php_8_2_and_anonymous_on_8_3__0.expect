@@ -1,0 +1,4 @@
+2:24-2:30 classConstant.nativeTypeNotSupported L0 Frozen | Readonly classes are supported only on PHP 8.2 and later.
+    non-ignorable
+4:20-4:41 classConstant.nativeTypeNotSupported L0 make | Anonymous readonly classes are supported only on PHP 8.3 and later.
+    non-ignorable

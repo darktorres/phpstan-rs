@@ -1,0 +1,3 @@
+3:22-3:28 pureFunction.void L0 callIt | Function callIt() is pure but has no return value.
+4:17-4:45 function.notFound L0 callIt | call to undefined function someTotallyUnknownFunction()
+4:17-4:45 possiblyImpure.functionCall L0 callIt | Possibly impure call to unknown function in pure function callIt().

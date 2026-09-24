@@ -1,0 +1,2 @@
+3:30-3:36 missingType.iterableValue L6 C | Property C::$items type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

@@ -69,16 +69,6 @@ fn entry_with(
 }
 
 #[test]
-fn absent_from_config_never_fires() {
-    let d = diagnostics_for(r#"<?php var_dump(1);"#);
-    assert!(
-        !d.iter()
-            .any(|x| x.identifier.starts_with("restrictedSymbol")),
-        "unexpected diagnostics: {d:?}"
-    );
-}
-
-#[test]
 fn a_restricted_function_call_is_flagged() {
     let d = with_entries(
         r#"<?php var_dump(1);"#,

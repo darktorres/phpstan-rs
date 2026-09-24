@@ -1,0 +1,1 @@
+5:24-5:47 throws.notThrowable L2 Foo::bar | PHPDoc tag @throws with type NotAThrowable is not subtype of Throwable

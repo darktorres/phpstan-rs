@@ -1,0 +1,1 @@
+6:28-6:31 argument.type L5 test | mayOmitArg() argument #1 ($fn) expects Closure(int=): void, Closure(int): void given

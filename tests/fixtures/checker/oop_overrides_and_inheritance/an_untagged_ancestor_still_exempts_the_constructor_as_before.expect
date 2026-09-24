@@ -1,0 +1,3 @@
+2:56-2:65 constructor.unusedParameter L1 Base15::__construct | Constructor of class Base15 has an unused parameter $a.
+3:70-3:76 constructor.unusedParameter L1 Sub15::__construct | Constructor of class Sub15 has an unused parameter $a.
+3:78-3:84 constructor.unusedParameter L1 Sub15::__construct | Constructor of class Sub15 has an unused parameter $b.

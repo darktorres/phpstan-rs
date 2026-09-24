@@ -1,0 +1,4 @@
+<?php
+            #[\Attribute]
+            interface Foo {}
+        

@@ -1,0 +1,4 @@
+5:25-5:34 finally.exitPoint L4 f | This return is overwritten by a different one in the finally block below.
+7:25-7:34 finally.exitPoint L4 f | This return is overwritten by a different one in the finally block below.
+11:25-11:34 finally.exitPoint L4 f | The overwriting return is on this line.
+13:25-13:34 finally.exitPoint L4 f | The overwriting return is on this line.

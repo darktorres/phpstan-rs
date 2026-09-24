@@ -1,0 +1,2 @@
+2:13-4:14 missingType.return L6 test | Function test() has no return type specified.
+3:22-3:31 backtick.deprecated L0 test | Backtick operator is deprecated in PHP 8.5. Use shell_exec() function call instead.

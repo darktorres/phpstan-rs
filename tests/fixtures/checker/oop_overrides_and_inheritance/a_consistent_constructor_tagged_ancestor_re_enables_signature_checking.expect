@@ -1,0 +1,4 @@
+3:56-3:65 constructor.unusedParameter L1 Base12::__construct | Constructor of class Base12 has an unused parameter $a.
+4:42-4:88 method.childParameterType L0 Sub12 | Sub12::__construct() parameter #1 ($a) narrows the inherited parameter type: expects int, ancestor expects string
+4:70-4:76 constructor.unusedParameter L1 Sub12::__construct | Constructor of class Sub12 has an unused parameter $a.
+4:78-4:84 constructor.unusedParameter L1 Sub12::__construct | Constructor of class Sub12 has an unused parameter $b.

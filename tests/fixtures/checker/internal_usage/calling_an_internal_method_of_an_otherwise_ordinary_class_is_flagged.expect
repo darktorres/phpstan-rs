@@ -1,0 +1,2 @@
+9:13-11:14 missingType.return L6 f | Function f() has no return type specified.
+10:17-10:30 method.internal L0 f | Call to internal method Vendor\\Internal\\Thing::doStuff() from outside its root namespace Vendor.
