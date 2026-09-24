@@ -31,6 +31,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use regex::Regex;
 use sha2::{Digest, Sha256};
@@ -150,13 +151,41 @@ pub fn oracle(args: &[String]) -> Result<(), String> {
         .iter()
         .filter(|stem| filter.is_none_or(|f| name(&fixtures_root, stem).contains(f)))
         .collect();
-    for (i, stem) in selected.iter().enumerate() {
-        if i % 250 == 0 {
-            eprintln!("oracle: {i}/{} fixtures", selected.len());
-        }
-        let fixture = name(&fixtures_root, stem);
-        let outcome =
-            compare_fixture(stem, &fixture, &lock).map_err(|e| format!("{fixture}: {e}"))?;
+    let next = AtomicUsize::new(0);
+    let workers = std::thread::available_parallelism().map_or(1, |n| n.get());
+    let results: Vec<Vec<(usize, Result<Outcome, String>)>> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..workers)
+            .map(|worker| {
+                let (next, selected, fixtures_root, lock) =
+                    (&next, &selected, &fixtures_root, &lock);
+                scope.spawn(move || {
+                    let tmp = oracle_dir().join("tmp").join(worker.to_string());
+                    let mut done = Vec::new();
+                    loop {
+                        let i = next.fetch_add(1, Ordering::Relaxed);
+                        let Some(stem) = selected.get(i) else { break };
+                        if i % 250 == 0 {
+                            eprintln!("oracle: {i}/{} fixtures", selected.len());
+                        }
+                        let fixture = name(fixtures_root, stem);
+                        let outcome = compare_fixture(stem, &fixture, lock, &tmp)
+                            .map_err(|e| format!("{fixture}: {e}"));
+                        done.push((i, outcome));
+                    }
+                    done
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("an oracle worker panicked"))
+            .collect()
+    });
+    let mut indexed: Vec<(usize, Result<Outcome, String>)> =
+        results.into_iter().flatten().collect();
+    indexed.sort_by_key(|(i, _)| *i);
+    for (_, outcome) in indexed {
+        let outcome = outcome?;
         for d in outcome.phpstan.iter().chain(&outcome.bleeding_edge) {
             catalog.observed.insert(d.identifier.clone());
         }
@@ -234,7 +263,7 @@ struct Translation {
     unmapped: Vec<String>,
 }
 
-fn compare_fixture(stem: &Path, fixture: &str, lock: &[u8]) -> Result<Outcome, String> {
+fn compare_fixture(stem: &Path, fixture: &str, lock: &[u8], tmp: &Path) -> Result<Outcome, String> {
     let single = stem.with_extension("php");
     let (base, subject) = if single.is_file() {
         (
@@ -259,9 +288,14 @@ fn compare_fixture(stem: &Path, fixture: &str, lock: &[u8]) -> Result<Outcome, S
             entry.identifier = (*theirs).to_string();
         }
     }
-    let json = run_phpstan(&translation, &translation.neon, lock)?;
+    let json = run_phpstan(&translation, &translation.neon, lock, tmp)?;
     let phpstan = parse_phpstan(&json, &base, single.is_file())?;
-    let json = run_phpstan(&translation, &with_bleeding_edge(&translation.neon), lock)?;
+    let json = run_phpstan(
+        &translation,
+        &with_bleeding_edge(&translation.neon),
+        lock,
+        tmp,
+    )?;
     let bleeding_edge = parse_phpstan(&json, &base, single.is_file())?;
     Ok(Outcome {
         fixture: fixture.to_string(),
@@ -380,12 +414,6 @@ fn translate(config: &toml::Table, base: &Path, subject: &Path) -> Result<Transl
         Some(level) => writeln!(neon, "\tlevel: {level}").unwrap(),
         None => neon.push_str("\tlevel: max\n"),
     }
-    writeln!(
-        neon,
-        "\ttmpDir: {}",
-        quote(&oracle_dir().join("tmp").display().to_string())
-    )
-    .unwrap();
     writeln!(neon, "\treportUnmatchedIgnoredErrors: {report_unmatched}").unwrap();
     if let Some(version) = php_version {
         writeln!(neon, "\tphpVersion: {version}").unwrap();
@@ -536,7 +564,14 @@ fn quote(text: &str) -> String {
 
 /// Runs PHPStan on the translation unless a result for the same neon,
 /// inputs and PHPStan install is cached.
-fn run_phpstan(translation: &Translation, neon: &str, lock: &[u8]) -> Result<String, String> {
+/// `tmp` is the worker's own PHPStan temporary directory (PHPStan keeps
+/// its compiled container there), passed as `TMPDIR`.
+fn run_phpstan(
+    translation: &Translation,
+    neon: &str,
+    lock: &[u8],
+    tmp: &Path,
+) -> Result<String, String> {
     let mut hasher = Sha256::new();
     hasher.update(lock);
     hasher.update(neon.as_bytes());
@@ -558,12 +593,14 @@ fn run_phpstan(translation: &Translation, neon: &str, lock: &[u8]) -> Result<Str
         .join("configs")
         .join(format!("{:x}.neon", config_hasher.finalize()));
     write(&neon_file, neon.as_bytes())?;
+    std::fs::create_dir_all(tmp).map_err(|e| format!("{}: {e}", tmp.display()))?;
     let out = Command::new("php")
         .args(["-d", "memory_limit=2G"])
         .arg(vendor_dir().join("phpstan/phpstan/phpstan"))
         .args(["analyse", "--no-progress", "--error-format=json", "-c"])
         .arg(&neon_file)
         .args(&translation.paths)
+        .env("TMPDIR", tmp)
         .stdin(Stdio::null())
         .stderr(Stdio::piped())
         .output()
@@ -602,7 +639,11 @@ fn write(path: &Path, contents: &[u8]) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("{}: {e}", parent.display()))?;
     }
-    std::fs::write(path, contents).map_err(|e| format!("{}: {e}", path.display()))
+    // Written aside and renamed into place: concurrent workers may write
+    // the same file, and none may read it half-written.
+    let aside = path.with_extension(format!("{:?}.part", std::thread::current().id()));
+    std::fs::write(&aside, contents).map_err(|e| format!("{}: {e}", aside.display()))?;
+    std::fs::rename(&aside, path).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// The entries of a fixture's `.expect` up to `level`, if set: the
