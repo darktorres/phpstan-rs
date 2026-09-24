@@ -27,8 +27,9 @@
 //! the parity backlog, tracked in `gates/oracle/parity.tsv`: each run
 //! reports what is new and what is resolved against it, and `--bless`
 //! rewrites it. Details go to `target/oracle/report.txt`, and every
-//! disagreement (key, verdict, phpstan-rs message, PHPStan message) to
-//! `target/oracle/disagreements.tsv`.
+//! disagreement (key, verdict, phpstan-rs message, PHPStan message, and
+//! what PHPStan reports on the line of an entry only phpstan-rs reports)
+//! to `target/oracle/disagreements.tsv`.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
@@ -848,6 +849,9 @@ struct Disagreement {
     side: Side,
     rs: Option<Entry>,
     phpstan: Option<Entry>,
+    /// For an entry only phpstan-rs reports: what PHPStan (plain or
+    /// bleedingEdge) reports on the same line under other identifiers.
+    nearby: Vec<Entry>,
 }
 
 impl Disagreement {
@@ -893,6 +897,15 @@ impl Disagreement {
                 .unwrap();
             }
         }
+        for e in &self.nearby {
+            writeln!(
+                out,
+                "    nearby   {} {}",
+                e.identifier,
+                e.message.replace('\n', "\\n")
+            )
+            .unwrap();
+        }
     }
 }
 
@@ -934,6 +947,7 @@ fn pair(outcome: &Outcome, catalog: &Catalog, tallies: &mut Tallies) -> Vec<Disa
                 side: Side::Message,
                 rs: Some(entry.clone()),
                 phpstan: p.cloned(),
+                nearby: Vec::new(),
             });
             *r = None;
             *p = None;
@@ -962,11 +976,21 @@ fn pair(outcome: &Outcome, catalog: &Catalog, tallies: &mut Tallies) -> Vec<Disa
                 .entry(entry.identifier.clone())
                 .or_default() += 1;
         } else {
+            let mut nearby: Vec<Entry> = outcome
+                .phpstan
+                .iter()
+                .chain(&outcome.bleeding_edge)
+                .filter(|p| p.file == entry.file && p.line == entry.line)
+                .cloned()
+                .collect();
+            nearby.sort();
+            nearby.dedup();
             out.push(Disagreement {
                 fixture: outcome.fixture.clone(),
                 side: Side::Rs,
                 rs: Some(entry.clone()),
                 phpstan: None,
+                nearby,
             });
         }
     }
@@ -976,6 +1000,7 @@ fn pair(outcome: &Outcome, catalog: &Catalog, tallies: &mut Tallies) -> Vec<Disa
             side: Side::Phpstan,
             rs: None,
             phpstan: Some(entry.clone()),
+            nearby: Vec::new(),
         });
     }
     out
@@ -1052,10 +1077,15 @@ fn report(
             };
             writeln!(
                 tsv,
-                "{key}\t{}\t{}\t{}",
+                "{key}\t{}\t{}\t{}\t{}",
                 verdicts.get(&key).map_or("", String::as_str),
                 message(&d.rs),
-                message(&d.phpstan)
+                message(&d.phpstan),
+                d.nearby
+                    .iter()
+                    .map(|e| format!("{} {}", e.identifier, e.message.replace('\n', "\\n")))
+                    .collect::<Vec<_>>()
+                    .join(" || ")
             )
             .unwrap();
             *by_identifier
