@@ -41,10 +41,12 @@ fn write_source_array(out: &mut String, name: &str, files: &[PathBuf]) {
 
 fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    // The vendored stub sources sit at the workspace root, two levels up.
+    let vendor = Path::new(&manifest_dir).join("../../vendor");
 
     let mut phpstorm_files = Vec::new();
     collect_php_files(
-        &Path::new(&manifest_dir).join("vendor/phpstorm-stubs"),
+        &vendor.join("phpstorm-stubs"),
         &mut phpstorm_files,
     );
 
@@ -58,7 +60,7 @@ fn main() {
     // PHPStan\Rules\Rule-style classes actually referenced in the wild.
     let mut phpstan_src_files = Vec::new();
     collect_php_files(
-        &Path::new(&manifest_dir).join("vendor/phpstan-src/src"),
+        &vendor.join("phpstan-src/src"),
         &mut phpstan_src_files,
     );
 
@@ -90,7 +92,7 @@ fn main() {
     // polyfills) - `php_stubs.rs` reads their class-level `@template`
     // declarations.
     let mut phpstan_stub_files: Vec<PathBuf> =
-        fs::read_dir(Path::new(&manifest_dir).join("vendor/phpstan-src/stubs"))
+        fs::read_dir(vendor.join("phpstan-src/stubs"))
             .map(|entries| {
                 entries
                     .flatten()
@@ -105,7 +107,7 @@ fn main() {
     write_source_array(&mut generated, "PHPSTORM_STUBS_SOURCES", &phpstorm_files);
     // Each stub file's top-level directory under `vendor/phpstorm-stubs`
     // - the extension it documents - parallel to `PHPSTORM_STUBS_SOURCES`.
-    let stubs_root = Path::new(&manifest_dir).join("vendor/phpstorm-stubs");
+    let stubs_root = vendor.join("phpstorm-stubs");
     generated.push_str("pub static PHPSTORM_STUBS_EXTENSIONS: &[&str] = &[\n");
     for path in &phpstorm_files {
         let extension = path
@@ -127,8 +129,8 @@ fn main() {
     )
     .unwrap();
 
-    println!("cargo:rerun-if-changed=vendor/phpstorm-stubs");
-    println!("cargo:rerun-if-changed=vendor/phpstan-src/src");
-    println!("cargo:rerun-if-changed=vendor/phpstan-src/stubs");
+    println!("cargo:rerun-if-changed=../../vendor/phpstorm-stubs");
+    println!("cargo:rerun-if-changed=../../vendor/phpstan-src/src");
+    println!("cargo:rerun-if-changed=../../vendor/phpstan-src/stubs");
     println!("cargo:rerun-if-changed=build.rs");
 }

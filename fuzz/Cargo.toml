@@ -17,7 +17,7 @@ arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
 
 [dependencies.phpstan-rs]
-path = ".."
+path = "../crates/phpstan-rs"
 features = ["fuzzing"]
 
 [lib]

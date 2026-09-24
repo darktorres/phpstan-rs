@@ -64,7 +64,7 @@ Development Host.
   no GitHub remote yet). Run manually:
 
   ```sh
-  cargo build --release --manifest-path ../../Cargo.toml
+  cargo build --release -p phpstan-rs --manifest-path ../../Cargo.toml
   PHPSTAN_RS_TEST_BIN="$(pwd)/../../target/release/phpstan-rs" npm run test:smoke
   ```
 

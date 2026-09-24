@@ -774,9 +774,9 @@ fn hyperfine_stats(path: &Path) -> Result<(f64, f64), String> {
 
 /// Files whose edit represents each rebuild scenario.
 const BUILD_SCENARIOS: &[(&str, &str)] = &[
-    ("engine", "src/checker/expr.rs"),
-    ("rule", "src/checker/magic_numbers.rs"),
-    ("lexer", "src/lexer.rs"),
+    ("engine", "crates/phpstan-rs/src/checker/expr.rs"),
+    ("rule", "crates/phpstan-rs/src/checker/magic_numbers.rs"),
+    ("lexer", "crates/phpstan-rs/src/lexer.rs"),
     ("stub", "vendor/phpstorm-stubs/standard/standard_0.php"),
 ];
 

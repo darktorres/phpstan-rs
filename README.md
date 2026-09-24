@@ -51,7 +51,7 @@ via System Settings.
 ## Building from source
 
 ```sh
-cargo build --release
+cargo build --release -p phpstan-rs
 ```
 
 The default build includes the `pcre-validate` feature (a PCRE2-backed

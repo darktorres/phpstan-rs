@@ -1,0 +1,81 @@
+[package]
+name = "phpstan-rs"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+dhat = { version = "0.3", optional = true }
+hotpath = "0.24"
+imbl = "7.0.1"
+indexmap = "2"
+lsp-server = "0.10.0"
+md5 = "0.7"
+lsp-types = "0.97.0"
+pcre2-sys = { version = "0.2.10", optional = true }
+rayon = "1"
+regex = "1"
+roxmltree = "0.20"
+rustc-hash = "2.1.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+sqlparser = "0.63.0"
+mysql = { version = "28.0.2", default-features = false, features = ["rustls-tls", "minimal-rust"] }
+postgres = "0.19.14"
+rusqlite = { version = "0.40.2", features = ["bundled", "column_decltype", "column_metadata"] }
+r2d2 = "0.8.10"
+r2d2_postgres = "0.18.2"
+r2d2_sqlite = { version = "0.35.0", features = ["bundled"] }
+
+[features]
+default = ["pcre-validate"]
+hotpath = ["hotpath/hotpath"]
+hotpath-alloc = ["hotpath/hotpath-alloc"]
+# One-shot heap profiler (https://docs.rs/dhat): swaps in `dhat::Alloc` as
+# the global allocator and dumps a `dhat-heap.json` on clean exit, showing
+# which call sites hold live bytes at peak (not just alloc/dealloc churn,
+# which `hotpath-alloc` already covers) - use `--profile dhat` (see that
+# profile below) to keep symbols for a readable dh_view.html call stack.
+dhat-heap = ["dep:dhat"]
+# Phase 46: `regexp.pattern` validation calls real PCRE2 (via the
+# low-level `pcre2-sys` FFI, not the higher-level `pcre2` crate - see
+# `src/pcre_validate.rs`'s own doc comment for why) - this project's one
+# *optional* C dependency. `cargo build --no-default-features` keeps the
+# rest of the crate 100% pure Rust, at the cost of only this one
+# diagnostic. `rusqlite`'s own `bundled` feature (live SQL query
+# reflection, sub-phase C of `delegated-tumbling-dongarra.md`) is a
+# second, always-on C dependency (vendors and compiles SQLite's real C
+# source at build time) - deliberately not gated behind a feature flag,
+# per the user's own explicit choice recorded in that plan.
+pcre-validate = ["dep:pcre2-sys"]
+# Phase 19 Part A: `Token`/`Keyword`/`StringPart`/`Position` gain a real
+# `arbitrary::Arbitrary` derive under this feature only - the fuzz
+# workspace's own `token_stream_parse` target needs it (bypasses the
+# lexer, feeding an `arbitrary`-derived token stream straight into
+# `Parser::new`), and this keeps the main crate's ordinary build (and
+# every other consumer) from ever pulling `arbitrary` in.
+fuzzing = ["dep:arbitrary"]
+
+[dev-dependencies]
+criterion = "0.8.2"
+libtest-mimic = "0.8.2"
+proptest = "1.11.0"
+
+# The fixture suite (tests/fixtures.rs). Each fixture still builds a whole
+# Project, stubs included, so a debug run takes ~26 minutes; it runs in the
+# `gate` profile instead (`cargo test --profile gate --test fixtures`, part
+# of `cargo xtask gates` and Rust CI), and `cargo test --test fixtures --
+# <filter>` runs a subset. Plain `cargo test` leaves it out until
+# per-fixture setup is cheap.
+[[test]]
+name = "fixtures"
+harness = false
+test = false
+
+[[bench]]
+name = "vendored_corpus"
+harness = false

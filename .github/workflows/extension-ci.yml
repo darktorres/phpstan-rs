@@ -9,9 +9,8 @@ on:
   push:
     paths:
       - "editors/vscode/**"
-      - "src/**"
-      - "build.rs"
-      - "Cargo.toml"
+      - "crates/**"
+      - "**/Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"
@@ -19,9 +18,8 @@ on:
   pull_request:
     paths:
       - "editors/vscode/**"
-      - "src/**"
-      - "build.rs"
-      - "Cargo.toml"
+      - "crates/**"
+      - "**/Cargo.toml"
       - "Cargo.lock"
       - "rust-toolchain.toml"
       - ".cargo/**"

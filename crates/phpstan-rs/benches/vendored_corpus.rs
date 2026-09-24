@@ -30,8 +30,11 @@ use phpstan_rs::project::{self, Project};
 
 fn load_sources(dirs: &[&str]) -> Vec<(PathBuf, String)> {
     let mut files = Vec::new();
+    // `dirs` are relative to the workspace root, two levels above this
+    // package.
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     for dir in dirs {
-        project::collect_php_files(Path::new(dir), &mut files);
+        project::collect_php_files(&root.join(dir), &mut files);
     }
     files.sort();
     files
@@ -53,8 +56,8 @@ fn bench_vendored_corpus(c: &mut Criterion) {
     assert!(
         !sources.is_empty(),
         "no .php files found under vendor/phpstorm-stubs or vendor/phpstan-src/src - \
-         run from the crate root, and check vendor/phpstan-src's git submodule is \
-         initialized (git submodule update --init)"
+         check vendor/phpstan-src's git submodule is initialized \
+         (git submodule update --init)"
     );
 
     c.bench_function("load_and_check_vendored_corpus", |b| {
