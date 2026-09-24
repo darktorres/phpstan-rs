@@ -297,7 +297,8 @@ impl<'a> Checker<'a> {
                 }) {
                     return Type::Mixed(false);
                 }
-                if let ExprKind::Name(filter_name) = &args[2].value.kind
+                if let Some(filter) = args.get(2)
+                    && let ExprKind::Name(filter_name) = &filter.value.kind
                     && let Some((element_ty, fallback, throw_on_failure)) = filter_validate_result(
                         filter_name.trim_start_matches('\\'),
                         flags_arg,
