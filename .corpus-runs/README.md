@@ -28,7 +28,8 @@ Artifacts:
   variable's type and native type after each statement), zstd-compressed.
 - `baseline-scoped`, `baseline-all-on`: the run with the reference
   baselines from `cargo xtask baseline` (generated once, by the Stage A
-  binary). It must stay empty with no stale entries.
+  binary). Stage A's run is empty with no stale entries; a later commit
+  may change it only by an approved delta, like any other artifact.
 - `perf/`, `buildtime/`, `tests/`: hyperfine + peak RSS of the scoped
   run, incremental rebuild times, and the test-name manifest.
 
