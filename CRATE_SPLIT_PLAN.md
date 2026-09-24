@@ -679,10 +679,6 @@ Each index entry records:
   `PHPStan\Testing\*`, via a `FileAssertRule` port plus
   `dumpType`/`dumpNativeType`/`dumpPhpDocType`/`debugScope` rules, with
   PHPStan identifiers and precise type display.
-- **Upstream parity mode.** The vendored phpstan-src nsrt data files
-  (1,662) and the rule data files, with expectations extracted from
-  upstream `*RuleTest.php` `analyse()` calls, run as a tracked parity
-  baseline, not a gate.
 
 ## 4. Gates (permanent, per commit)
 
@@ -785,9 +781,8 @@ Piwigo checkout and a stable machine, so they run locally.
 
 **Approved deltas.** A commit that intentionally changes output records its
 expected diffs (corpus, fixtures, type snapshot, baseline) in the commit.
-Every line is classified against real PHPStan run on the same input
-(bleedingEdge, same level): *matches PHPStan* or *phpstan-rs-only*, and
-only the latter are reviewed. The gate is: actual diff == approved diff.
+Every changed line is reviewed for runtime correctness. The gate is:
+actual diff == approved diff.
 Behaviour-changing commits are always separate from structural ones.
 
 ## 5. Stages and phases
@@ -831,79 +826,32 @@ commit); the unsorted corpus comparison starts here.
 - **Dual run.** For one commit, the old Rust helpers read from the fixture
   harness, and every old assertion must pass. Only then are the converted
   Rust tests deleted.
-- **Triage.** Diagnostics the weak assertions tolerated are classified
-  against real PHPStan. Each real bug gets a fix commit with an approved
-  delta.
 - `examples/stress*.php` become fixtures or are deleted.
-- The upstream parity mode is added.
 - The harness backend at this point is today's Project API, in the bin
   package's integration tests.
 
-**A2 triage state.** `cargo xtask oracle` compares every fixture with a
-pinned real PHPStan (plain and bleedingEdge). The diagnostics only
-phpstan-rs reports are classified in `gates/oracle/verdicts.tsv`; the
-rest of the disagreements are the parity backlog in
-`gates/oracle/parity.tsv`. The oracle fails while an entry lacks a
-verdict. Entries that are phpstan-rs bugs are fixed here, one commit each,
-until none remains unclassified:
-- anchoring: a declaration's span starts at its first attribute;
-  `return.missing` at the last statement; `generator.returnType` at the
-  yield; `enum.duplicateValue` at the enum; `@use` generics at the `use`;
-  trait-supplied method checks at the trait's method; `trait.notFound` and
-  `traitUse.internalTrait` at the `use`; PHPDoc tag errors at the tag's
-  line (doc comments get a span; `phpDoc.parseError` gains phpdoc-parser's
-  offset suffix); property hook checks at the hook;
-- property hooks: a set hook without a parameter list, or a short
-  `set => expr`, has the property's type and assigns it; a child
-  overriding a hooked property inherits the hooks it does not redefine;
-  private abstract or hooked properties are `property.neverRead`;
-  `__set()` needs no return type;
-- identifiers and messages: `new.deprecatedClass`; `property.staticAccess`;
-  `method.visibility` for a private interface method; `classConstant.notFound`
-  for a private constant from a subclass; `offsetAccess.notFound` on a void
-  call's result; `booleanAnd.leftAlwaysFalse` and the other side-specific
-  identifiers; `nullsafe.assign` alone; `staticMethod.nameCase`;
-  `interface.notFound`; `method.private` through a mixin; the random_int
-  and `method.nonAbstract` messages; phpstan-rs-only checks reusing a
-  PHPStan identifier for a different check (override name casing, XML
-  validity) get their own;
-- inference: benevolent `(float|int)` division; the sort family's by-ref
-  list and `array_splice`'s splicing; class names in types and static-call
-  targets resolve case-insensitively; `array_is_list()` failing proves a
-  non-empty array; a flag variable set alongside a side effect still
-  narrows; a native typed property keeps its type after an invalid write;
-  an invalid inline `@var` type is not applied; `function_exists()`
-  narrowing holds in a closure defined under it; `@phpstan-final` is not
-  `@final`; `DateInterval::format()`'s return type; reading any key of
-  `array{}` is `offsetAccess.notFound`;
-- false positives: `(string)` of a resource; a differently cased `catch`;
-  an intersection's method visibility; `@param-out` wider than the native
-  by-ref type; `list<int>&non-empty-array` has a value type; a tentative
-  return type is inherited; duplicate method declarations each keep their
-  own signature; `PHP_VERSION_ID` comparisons; `return.unusedType` beside a
-  rejected return value; a reference to a protected property is
-  `property.assignByRef` only; strict arithmetic after `binaryOp.invalid`;
-  `postInc.type`/`postDec.type`; the `NoopRule` expression list (a pipe is
-  a call); an asserted unknown class is not also "already narrowed";
-- control flow: a try block that cannot throw makes its catch dead;
-  a non-exhaustive match without a default throws `UnhandledMatchError`;
-  `match(true)` arms report their own comparison, and the arm that becomes
-  always true is the one reported;
-- stubs: nikic/php-parser declarations as a stub source.
-
-Found by the triage and scheduled with their phases:
-- C6: `functionMap.php` variants (`array_udiff` trailing callbacks) and
-  parameter names/types (`ini_restore`, `DatePeriod`, `proc_open`);
-- E(h): `Type::describe(VerbosityLevel)` and
-  `getRecommendedLevelByType`, which every type in a message follows;
-- E: the rest of `FunctionCallParametersCheck` (`@no-named-arguments`,
-  allowed constants, void results used, unresolvable template and
-  parameter types, static closures, by-ref-returning calls and
-  `createsNewVariable` by-ref parameters), `additionalConstructors`,
-  `property.uninitializedReadonly`, readonly `ArrayAccess` offset writes,
-  PHPStan's filter function return types (`FilterFunctionReturnTypeHelper`),
-  PHPStan's visibility messages, and timelib's wording for malformed
-  DateTime strings.
+**Known bugs found during A2**, each fixed later in its own commit with an
+approved delta (none blocks the split):
+- false positives: `array_udiff()`-family trailing callbacks rejected;
+  `(string)` of a resource; a differently cased `catch` class; a method
+  called on an intersection checked against a private declaration an
+  instance cannot have; `@param-out` wider than the native by-ref type;
+  `list<int>&non-empty-array` reported as missing a value type; a method
+  overriding a builtin's tentative return type reported as untyped;
+  duplicate method declarations checked against each other's signature;
+  a class name resolved case-sensitively as a static-call target or in a
+  return type; `function_exists()` narrowing lost inside a closure; a
+  child hooked property losing the hooks it inherits; a set hook without
+  a parameter list or a short `set => expr` treated as untyped and
+  non-assigning; `__set()` required to declare a return type; a pipe
+  expression and an interpolated string reported as no-op statements;
+- imprecise inference: a native typed property narrowed to an invalid
+  written value; an invalid inline `@var` type applied; the sort family's
+  by-ref argument not becoming a list; `array_splice()`'s by-ref argument
+  not spliced; a failing `array_is_list()` not proving non-emptiness; a
+  flag variable set beside a side effect not narrowing; a try block that
+  cannot throw leaving its catch live; a non-exhaustive match not
+  throwing `UnhandledMatchError`.
 
 ### Stage B: workspace and leaf layers
 
@@ -1245,9 +1193,9 @@ The `structured_php` fuzz target moves to `project`.
   gates relative to the previous commit.
 - **Cross-crate inlining.** Thin LTO plus `codegen-units = 1`, decided and
   baselined in A0. The timing gate applies from B1 on.
-- **Fixture conversion.** Weak assertions surface extra diagnostics. These
-  are triaged against real PHPStan, and the dual-run gate ensures no old
-  assertion is lost.
+- **Fixture conversion.** Weak assertions surface extra diagnostics, which
+  the fixtures now record; the dual-run gate ensures no old assertion is
+  lost.
 - **User-visible changes.** Config schema (with a shim), CLI flags,
   baseline format (with a converter), JSON schema (versioned), exit code,
   output order. Each is its own changelog-noted commit.
