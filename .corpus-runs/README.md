@@ -7,7 +7,7 @@ rebuilding an old commit just to re-diff against it.
 ## Regression gates (`cargo xtask`)
 
 The gates of `CRATE_SPLIT_PLAN.md` §4 record their snapshots under
-`.corpus-runs/gate/<artifact>/<commit>.<ext>`, keyed by the short hash of
+`.corpus-runs/gate/<artifact>/<commit>.<ext>`, keyed by the full hash of
 a committed tree (`xtask` refuses a dirty tree):
 
     cargo xtask gates            # quick tier: build/test gates, scoped +

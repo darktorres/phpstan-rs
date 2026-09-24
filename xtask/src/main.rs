@@ -1,7 +1,7 @@
 //! Regression gates for phpstan-rs (`cargo xtask <command>`).
 //!
 //! Snapshots live under `.corpus-runs/gate/<artifact>/<commit>.<ext>`
-//! (gitignored), keyed by the short hash of the commit the binary was
+//! (gitignored), keyed by the full hash of the commit the binary was
 //! built from. `compare` checks HEAD's snapshots against its parent's:
 //! every artifact must be byte-identical unless HEAD's own commit adds
 //! `gates/approved/<slug>/<artifact>.diff` holding exactly the expected
@@ -135,7 +135,7 @@ fn git(args: &[&str]) -> Result<String, String> {
 }
 
 fn head_hash() -> Result<String, String> {
-    git(&["rev-parse", "--short", "HEAD"])
+    git(&["rev-parse", "HEAD"])
 }
 
 fn require_clean_tree() -> Result<(), String> {
@@ -510,7 +510,7 @@ fn baseline_check(hash: &str) -> Result<(), String> {
 // --- comparison ------------------------------------------------------------
 
 fn parent_hash() -> Result<String, String> {
-    git(&["rev-parse", "--short", "HEAD~1"])
+    git(&["rev-parse", "HEAD~1"])
 }
 
 /// `gates/approved/*/<artifact>.diff` files HEAD's own commit adds or
@@ -573,7 +573,10 @@ fn compared_artifacts(full: bool) -> Vec<(String, &'static str)> {
 fn compare(args: &[String]) -> Result<(), String> {
     let full = args.iter().any(|a| a == "--full");
     let against = match args.iter().position(|a| a == "--against") {
-        Some(i) => args.get(i + 1).cloned().ok_or("--against needs a hash")?,
+        Some(i) => git(&[
+            "rev-parse",
+            args.get(i + 1).ok_or("--against needs a hash")?,
+        ])?,
         None => parent_hash()?,
     };
     let hash = head_hash()?;
@@ -648,6 +651,7 @@ fn approve(args: &[String]) -> Result<(), String> {
 /// snapshots are still keyed by the pre-amend hash: move them.
 fn rekey(args: &[String]) -> Result<(), String> {
     let old = args.first().ok_or("rekey needs the pre-amend hash")?;
+    let old = &git(&["rev-parse", old])?;
     let hash = head_hash()?;
     let changed = git(&["diff", "--name-only", old, "HEAD"])?;
     if let Some(path) = changed.lines().find(|p| !p.starts_with("gates/")) {
@@ -749,7 +753,7 @@ fn perf() -> Result<(), String> {
 
 /// The nearest proper ancestor of HEAD with `<hash>.<ext>` in `dir`.
 fn nearest_ancestor_with(dir: &Path, ext: &str) -> Result<Option<String>, String> {
-    let ancestors = git(&["rev-list", "--abbrev-commit", "--max-count=200", "HEAD~1"])?;
+    let ancestors = git(&["rev-list", "--max-count=200", "HEAD~1"])?;
     Ok(ancestors
         .lines()
         .map(str::to_string)
