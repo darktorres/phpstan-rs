@@ -445,6 +445,11 @@ pub(crate) fn merge_scopes(then_locals: &Locals, else_locals: &Locals) -> Locals
         .guarded_properties
         .clone()
         .intersection(else_locals.guarded_properties.clone());
+    // Reinitialized on either path is possibly reinitialized.
+    merged.clone_reinitialized = then_locals
+        .clone_reinitialized
+        .clone()
+        .union(else_locals.clone_reinitialized.clone());
     // A condition alias only survives a merge point when both incoming
     // branches still
     // agree on the exact same stored condition - `Rc::ptr_eq` (not a

@@ -1,2 +1,1 @@
-13:54-13:62 property.readOnlyAssignNotInConstructor L0 Point3D::setZ | Point3D::$z is readonly and cannot be modified here
-    tip: readonly properties can only be written once, from inside the declaring class's own constructor
+13:54-13:62 property.readOnlyByPhpDocAssignNotInConstructor L0 Point3D::setZ | @readonly property Point3D::$z is assigned outside of the constructor.

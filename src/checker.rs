@@ -57,6 +57,12 @@ type GuardedMemberSet = imbl::GenericHashSet<
     imbl::shared_ptr::DefaultSharedPtr,
 >;
 
+// Properties a `__clone()` body may already have reinitialized on this
+// control-flow path (PHPStan's `CloneReinitializationExpr`): a second
+// write to one is reported, so branches merge by union.
+type ReinitializedPropertySet =
+    imbl::GenericHashSet<String, rustc_hash::FxBuildHasher, imbl::shared_ptr::DefaultSharedPtr>;
+
 // `name -> (target_key, Rc<Expr>)` for a variable whose last assignment's
 // RHS was itself a recognized narrowable condition shape (see
 // `condition_alias_shape`/`condition_alias_targets` in `checker/
@@ -231,6 +237,7 @@ pub(crate) struct Locals {
     pub(crate) guarded_constants: GuardedFunctionSet,
     pub(crate) guarded_methods: GuardedMemberSet,
     pub(crate) guarded_properties: GuardedMemberSet,
+    pub(crate) clone_reinitialized: ReinitializedPropertySet,
     pub(crate) condition_aliases: ConditionAliasMap,
     pub(crate) branch_implied_facts: BranchImpliedFactsMap,
     pub(crate) query_builder_aliases: QueryBuilderAliasMap,
@@ -475,6 +482,7 @@ impl Locals {
             guarded_constants: GuardedFunctionSet::default(),
             guarded_methods: GuardedMemberSet::default(),
             guarded_properties: GuardedMemberSet::default(),
+            clone_reinitialized: ReinitializedPropertySet::default(),
             condition_aliases: ConditionAliasMap::default(),
             branch_implied_facts: BranchImpliedFactsMap::default(),
             query_builder_aliases: QueryBuilderAliasMap::default(),

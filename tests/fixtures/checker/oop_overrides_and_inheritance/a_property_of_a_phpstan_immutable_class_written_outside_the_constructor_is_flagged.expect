@@ -1,2 +1,1 @@
-6:54-6:62 property.readOnlyAssignNotInConstructor L0 Point::setX | Point::$x is readonly and cannot be modified here
-    tip: readonly properties can only be written once, from inside the declaring class's own constructor
+6:54-6:62 property.readOnlyByPhpDocAssignNotInConstructor L0 Point::setX | @readonly property Point::$x is assigned outside of the constructor.

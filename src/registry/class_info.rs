@@ -68,6 +68,10 @@ pub struct PropertySig {
     // promoted constructor property, a magic `@property` tag, an enum's
     // built-in `name`/`value`).
     pub write_visibility: Visibility,
+    // A native `readonly` property declared `public` with no set
+    // visibility of its own, which PHP 8.4 makes `protected(set)`
+    // (`Checker::write_visibility`).
+    pub implicit_protected_set: bool,
     // PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook
     // can accept a wider type than the property's own backing/read type
     // (`public array $x { set(array $value) { $this->x =
@@ -703,6 +707,9 @@ impl ClassInfo {
                             .write_visibility
                             .clone()
                             .unwrap_or(p.visibility.clone()),
+                        implicit_protected_set: p.is_readonly
+                            && p.write_visibility.is_none()
+                            && p.visibility == Visibility::Public,
                         is_internal: doc_ty.as_ref().is_some_and(|d| d.internal),
                         deprecated: doc_ty.as_ref().and_then(|d| d.deprecated.clone()),
                         has_default: p.default.is_some(),
@@ -815,6 +822,10 @@ impl ClassInfo {
                             .promoted_visibility
                             .clone()
                             .unwrap_or(Visibility::Public),
+                        implicit_protected_set: p.promoted_readonly
+                            && p.promoted_visibility
+                                .as_ref()
+                                .is_none_or(|v| *v == Visibility::Public),
                         is_internal: false,
                         deprecated: None,
                         has_default: p.default.is_some(),
@@ -866,6 +877,7 @@ impl ClassInfo {
                         is_virtual: false,
                         visibility: Visibility::Public,
                         write_visibility: Visibility::Public,
+                        implicit_protected_set: false,
                         is_internal: false,
                         deprecated: None,
                         // A magic `@property` tag describes a virtual
@@ -1512,6 +1524,7 @@ impl ClassInfo {
                 is_virtual: false,
                 visibility: Visibility::Public,
                 write_visibility: Visibility::Public,
+                implicit_protected_set: false,
                 is_internal: false,
                 deprecated: None,
                 // Unlike a magic `@property` tag, this one's presence is
@@ -1575,6 +1588,7 @@ impl ClassInfo {
                     is_virtual: false,
                     visibility: Visibility::Public,
                     write_visibility: Visibility::Public,
+                    implicit_protected_set: false,
                     is_internal: false,
                     deprecated: None,
                     // Same reasoning as `->name` above - a backed enum

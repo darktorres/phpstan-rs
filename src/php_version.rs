@@ -204,6 +204,10 @@ pub enum PhpFeature {
     /// `final` properties. `PhpVersion::supportsFinalProperties`
     /// (`PropertyInClassRule`).
     FinalProperties,
+    /// Asymmetric visibility (`public private(set)`), which also makes a
+    /// `readonly` property `protected(set)`.
+    /// `PhpVersion::supportsAsymmetricVisibility` (`ReadOnlyPropertyAssignRule`).
+    AsymmetricVisibility,
     /// Asymmetric visibility on a `static` property.
     /// `PhpVersion::supportsAsymmetricVisibilityForStaticProperties`
     /// (`PropertyInClassRule`).
@@ -253,7 +257,10 @@ impl PhpFeature {
             | DynamicClassConstantFetch
             | ReadOnlyAnonymousClasses
             | ReadonlyPropertyReinitializationOnClone => (8, 3),
-            ImplicitlyNullableParameterDeprecated | PropertyHooks | FinalProperties => (8, 4),
+            ImplicitlyNullableParameterDeprecated
+            | PropertyHooks
+            | FinalProperties
+            | AsymmetricVisibility => (8, 4),
             FinalPromotedProperties
             | VoidCast
             | DeprecatedNonStandardCasts

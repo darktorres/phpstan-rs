@@ -1,1 +1,1 @@
-6:17-6:22 property.private L0 test | access to private property Foo::$x
+6:17-6:22 assign.propertyPrivateSet L0 test | Assign to private(set) property Foo::$x.

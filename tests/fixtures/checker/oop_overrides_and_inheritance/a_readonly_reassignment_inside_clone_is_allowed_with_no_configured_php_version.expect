@@ -1,4 +1,2 @@
 3:45-3:73 missingType.iterableValue L6 Foo::__construct | Method Foo::__construct() has parameter $items with no value type specified in iterable type array.
     tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
-5:21-5:33 property.readOnlyAssignNotInConstructor L0 Foo::__clone | Foo::$items is readonly and cannot be modified here
-    tip: readonly properties can only be written once, from inside the declaring class's own constructor
