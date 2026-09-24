@@ -1,1 +1,1 @@
-4:17-4:44 argument.type L0 f | DateInterval::__construct() spec 'garbage' is malformed and will throw at runtime
+4:17-4:44 new.dateInterval L5 f | Instantiating DateInterval with garbage produces an error: Unknown or bad format (garbage)

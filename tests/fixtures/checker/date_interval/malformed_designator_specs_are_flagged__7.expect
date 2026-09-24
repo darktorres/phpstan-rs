@@ -1,1 +1,1 @@
-1:7-1:31 argument.type L0 <main> | DateInterval::__construct() spec 'P1YY' is malformed and will throw at runtime
+1:7-1:31 new.dateInterval L5 <main> | Instantiating DateInterval with P1YY produces an error: Unknown or bad format (P1YY)

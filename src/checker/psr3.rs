@@ -109,17 +109,8 @@ fn may_be_non_literal_string(ty: &Type) -> bool {
 }
 
 fn string_literals(ty: &Type) -> Option<Vec<&str>> {
-    match ty {
-        Type::StringLiteral(s) => Some(vec![s.as_str()]),
-        Type::Union(members) => {
-            let mut all = Vec::new();
-            for member in members {
-                all.extend(string_literals(member)?);
-            }
-            Some(all)
-        }
-        _ => None,
-    }
+    let strings = ty.constant_strings();
+    (!strings.is_empty()).then_some(strings)
 }
 
 impl<'a> Checker<'a> {

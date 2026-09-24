@@ -343,6 +343,31 @@ impl CallableSig {
 }
 
 impl Type {
+    /// Every string value this type can only be: a string literal, each
+    /// member's of an intersection, and a union's only when every member
+    /// has some (PHPStan's `Type::getConstantStrings()`). Empty for
+    /// anything else.
+    pub(crate) fn constant_strings(&self) -> Vec<&str> {
+        match self {
+            Type::StringLiteral(s) => vec![s.as_str()],
+            Type::Intersection(members) => {
+                members.iter().flat_map(Type::constant_strings).collect()
+            }
+            Type::Union(members) => {
+                let mut all = Vec::new();
+                for member in members {
+                    let strings = member.constant_strings();
+                    if strings.is_empty() {
+                        return Vec::new();
+                    }
+                    all.extend(strings);
+                }
+                all
+            }
+            _ => Vec::new(),
+        }
+    }
+
     /// This type with `f` applied to each directly nested type (generic
     /// arguments, array key/value, shape fields, union/intersection
     /// members, callable parameters and return, conditional branches);

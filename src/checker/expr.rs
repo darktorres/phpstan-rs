@@ -2392,10 +2392,10 @@ impl<'a> Checker<'a> {
                     // validation - independent of whether the class is
                     // otherwise instantiable, so this runs unconditionally
                     // before that dispatch.
-                    self.check_date_interval_constructor(class, args, e.span, label);
+                    self.check_date_interval_constructor(class, args, e.span, label, locals);
                     // `DateTime`/`DateTimeImmutable`'s own constructor-
                     // string validation - same shape.
-                    self.check_date_time_constructor(class, args, e.span, label);
+                    self.check_date_time_constructor(class, args, e.span, label, locals);
                     // `SimpleXMLElement`'s construction well-formedness
                     // validation - same shape.
                     self.check_simplexml_element_constructor(class, args, e.span, label);

@@ -1,60 +1,48 @@
-//! `DateInterval`'s own ISO-8601 duration-string constructor
-//! validation. Real PHPStan validates this
-//! (`DateIntervalConstructorThrowTypeExtension`) by constructing an
-//! actual `DateInterval` at analysis time and observing whether it
-//! throws - this project has no embedded PHP runtime to do that, so
-//! this hand-rolled grammar mirrors PHP's own two accepted spec formats
-//! instead. Deliberately scoped to a literal string argument only -
-//! "don't guess" for a computed one, the same restriction this project
-//! applies to every other runtime-error-detecting builtin check
-//! (`random_int`'s min/max, `define()`'s third argument).
-//!
-//! `DOMDocument`/`SimpleXMLElement`'s own XML-content validation
-//! remains unimplemented - a full XML well-formedness grammar is a
-//! substantially bigger undertaking than `DateInterval`'s own small,
-//! precisely-specified duration syntax, with no comparable "just verify
-//! against real php, case by case" shortcut.
+//! `DateInterval`'s ISO-8601 duration-string constructor validation
+//! (PHPStan's `DateIntervalInstantiationRule`, which constructs the
+//! object at analysis time). With no PHP runtime to do that, this grammar
+//! mirrors PHP's two accepted spec formats instead; every malformed spec
+//! gets PHP's one exception message, `Unknown or bad format (<spec>)`.
 
-use crate::ast::{Arg, ExprKind, Literal};
-use crate::checker::Checker;
-use crate::checker::expr::unwrap_grouping;
+use crate::ast::Arg;
+use crate::checker::{Checker, Locals};
 use crate::token::Span;
 
 impl<'a> Checker<'a> {
     /// `new DateInterval($spec)` - real PHP throws
     /// `DateMalformedIntervalStringException` (an `Exception` subclass on
     /// PHP < 8.3) when `$spec` matches neither of its two accepted
-    /// formats. Only fires for a literal string argument this checker
-    /// can conclusively prove malformed - a computed spec is left alone.
+    /// formats. Every constant string the first argument's type holds is
+    /// checked, each malformed one reported with PHP's own exception
+    /// message (PHPStan's `DateIntervalInstantiationRule`); any other
+    /// argument is left alone.
     pub(crate) fn check_date_interval_constructor(
         &mut self,
         class: &str,
         args: &[Arg],
         span: Span,
         label: &str,
+        locals: &Locals,
     ) {
         if class != "DateInterval" {
             return;
         }
-        let [arg] = args else { return };
-        if arg.name.is_some() || arg.spread {
-            return;
+        let Some(arg) = args.first() else { return };
+        let ty = self.infer_expr(&arg.value, locals);
+        for spec in ty.constant_strings() {
+            if is_valid_date_interval_spec(spec) {
+                continue;
+            }
+            self.report(
+                label.to_string(),
+                format!(
+                    "Instantiating DateInterval with {spec} produces an error: Unknown or bad format ({spec})"
+                ),
+                span,
+                5,
+                "new.dateInterval",
+            );
         }
-        let ExprKind::Literal(Literal::String(spec)) = &unwrap_grouping(&arg.value).kind else {
-            return;
-        };
-        if is_valid_date_interval_spec(spec) {
-            return;
-        }
-        self.report(
-            label.to_string(),
-            format!(
-                "DateInterval::__construct() spec '{spec}' is malformed and will throw at runtime"
-            ),
-            span,
-            0,
-            "argument.type",
-        );
     }
 }
 

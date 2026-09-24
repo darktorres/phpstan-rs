@@ -1,1 +1,1 @@
-1:7-1:29 argument.type L0 <main> | DateInterval::__construct() spec 'PY' is malformed and will throw at runtime
+1:7-1:29 new.dateInterval L5 <main> | Instantiating DateInterval with PY produces an error: Unknown or bad format (PY)
