@@ -2447,6 +2447,7 @@ impl<'a> Checker<'a> {
                 new_ty
             }
             ExprKind::NewAnonymousClass(decl, args) => {
+                self.check_enum_cases_outside_enum(&decl.enum_cases, label);
                 let ctor_params = decl
                     .methods
                     .iter()

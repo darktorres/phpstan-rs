@@ -492,6 +492,9 @@ pub struct ClassDecl {
     // author already explicitly addressed, even though this project
     // doesn't model *which* trait `insteadof` actually picked.
     pub resolved_trait_conflicts: Vec<Arc<str>>,
+    // `case` members, which PHP parses in any class-like body but only
+    // allows in an enum (`enum.caseOutsideOfEnum`).
+    pub enum_cases: Vec<EnumCase>,
     // The class's own `/** ... */` doc comment, if any - needed for its
     // own `@template T` declarations (class-level generics).
     pub doc_comment: Option<Arc<str>>,

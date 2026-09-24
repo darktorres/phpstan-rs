@@ -1997,6 +1997,7 @@ impl<'a> Checker<'a> {
                         self.check_class_completeness(&fqn, c.span);
                         self.check_inheritance_target_kinds(&fqn, false, &fqn, c.span);
                         self.check_readonly_class_version(c.is_readonly, false, &fqn, c.name_span);
+                        self.check_enum_cases_outside_enum(&c.enum_cases, &fqn);
                         self.check_magic_serialization_methods(&fqn, &fqn, &fqn, c.name_span);
                         self.check_class_references_exist(&fqn, c.span);
                         self.check_internal_inheritance(&fqn, c.kind, c.span);

@@ -34,6 +34,23 @@ pub(crate) fn is_magic_method_name(lower: &str) -> bool {
 }
 
 impl<'a> Checker<'a> {
+    /// `EnumCaseOutsideEnumRule`: a `case` in a class, interface, trait
+    /// or anonymous class body - PHP parses it, then refuses to compile it.
+    pub(crate) fn check_enum_cases_outside_enum(&mut self, cases: &[EnumCase], label: &str) {
+        for case in cases {
+            self.report_builder(
+                DiagnosticBuilder::new(
+                    label.to_string(),
+                    "Enum case can only be used in enums.".to_string(),
+                    case.span,
+                    0,
+                    "enum.caseOutsideOfEnum",
+                )
+                .non_ignorable(),
+            );
+        }
+    }
+
     /// Every case of a backed enum must have a unique backing
     /// value - a real, unconditional PHP fatal error at declaration time
     /// otherwise ("Duplicate value in enum ... for case ..."), not merely

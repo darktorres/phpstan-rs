@@ -3,6 +3,36 @@ use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
 
 impl Parser {
+    /// An enum case after its `case` keyword: `Name [= value];`.
+    pub(crate) fn parse_enum_case_rest(
+        &mut self,
+        attrs: Vec<Attribute>,
+        member_start: crate::token::Position,
+    ) -> Result<EnumCase, ParseError> {
+        let name_start = self.current_pos();
+        let name = self.expect_ident()?;
+        let name_span = Span {
+            start: name_start,
+            end: self.previous_end(),
+        };
+        let value = if self.eat(&Token::Equals) {
+            Some(self.parse_expression()?)
+        } else {
+            None
+        };
+        self.expect_semicolon()?;
+        Ok(EnumCase {
+            name,
+            name_span,
+            value,
+            attrs,
+            span: Span {
+                start: member_start,
+                end: self.previous_end(),
+            },
+        })
+    }
+
     // `enum Name [: BackingType] [implements Iface, ...] { ...members... }`.
     // Structurally close to parse_class_decl's member loop (modifiers,
     // `use`, `const`, methods are identical), except enums have `case
@@ -69,28 +99,7 @@ impl Parser {
             let doc = self.take_doc_comment();
 
             if self.eat(&Token::Keyword(Keyword::Case)) {
-                let case_name_start = self.current_pos();
-                let case_name = self.expect_ident()?;
-                let case_name_span = Span {
-                    start: case_name_start,
-                    end: self.previous_end(),
-                };
-                let value = if self.eat(&Token::Equals) {
-                    Some(self.parse_expression()?)
-                } else {
-                    None
-                };
-                self.expect_semicolon()?;
-                cases.push(EnumCase {
-                    name: case_name,
-                    name_span: case_name_span,
-                    value,
-                    attrs,
-                    span: Span {
-                        start: member_start,
-                        end: self.previous_end(),
-                    },
-                });
+                cases.push(self.parse_enum_case_rest(attrs, member_start)?);
                 continue;
             }
 

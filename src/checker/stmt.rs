@@ -876,6 +876,7 @@ impl<'a> Checker<'a> {
                     &fqn,
                 );
                 self.check_class_like_marker_attributes(&c.attrs, c.kind, c.is_readonly, &fqn);
+                self.check_enum_cases_outside_enum(&c.enum_cases, &fqn);
                 for p in &c.properties {
                     self.check_attributes(&p.attrs, &fqn);
                     self.check_attribute_targets(

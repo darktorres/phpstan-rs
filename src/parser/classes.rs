@@ -5,6 +5,19 @@ use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
+/// A class-like body's members, as `Parser::parse_class_body` reads them.
+pub(crate) struct ClassBody {
+    pub properties: Vec<PropertyDecl>,
+    pub methods: Vec<MethodDecl>,
+    pub consts: Vec<ClassConst>,
+    pub uses: Vec<String>,
+    pub uses_spans: Vec<Span>,
+    pub uses_doc_comments: Vec<Option<Arc<str>>>,
+    pub trait_aliases: Vec<TraitAlias>,
+    pub resolved_trait_conflicts: Vec<Arc<str>>,
+    pub enum_cases: Vec<EnumCase>,
+}
+
 impl Parser {
     // ---- classes ----
 
@@ -90,7 +103,7 @@ impl Parser {
             }
         }
 
-        let (
+        let ClassBody {
             properties,
             methods,
             consts,
@@ -99,7 +112,8 @@ impl Parser {
             uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
-        ) = self.parse_class_body(class_is_readonly)?;
+            enum_cases,
+        } = self.parse_class_body(class_is_readonly)?;
 
         let decl_span = Span {
             start: decl_start,
@@ -131,6 +145,7 @@ impl Parser {
             uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
+            enum_cases,
             doc_comment: None,
             attrs,
             span: decl_span,
@@ -142,23 +157,10 @@ impl Parser {
     /// The `{ ... }` body shared by class/interface/trait declarations and
     /// anonymous classes (`new class { ... }`) - extracted so the two
     /// don't duplicate this (fairly large) member-parsing loop.
-    #[allow(clippy::type_complexity)]
     pub(crate) fn parse_class_body(
         &mut self,
         class_is_readonly: bool,
-    ) -> Result<
-        (
-            Vec<PropertyDecl>,
-            Vec<MethodDecl>,
-            Vec<ClassConst>,
-            Vec<String>,
-            Vec<Span>,
-            Vec<Option<Arc<str>>>,
-            Vec<TraitAlias>,
-            Vec<Arc<str>>,
-        ),
-        ParseError,
-    > {
+    ) -> Result<ClassBody, ParseError> {
         self.expect(&Token::LBrace)?;
         let mut properties = Vec::new();
         let mut methods = Vec::new();
@@ -168,6 +170,7 @@ impl Parser {
         let mut uses_doc_comments = Vec::new();
         let mut trait_aliases = Vec::new();
         let mut resolved_trait_conflicts = Vec::new();
+        let mut enum_cases = Vec::new();
 
         let mut pending_member: Option<crate::parser::MemberStart> = None;
         while !self.check(&Token::RBrace) && !self.at_eof() {
@@ -188,6 +191,13 @@ impl Parser {
             // still found there unchanged.
             let attrs = self.parse_leading_attributes()?;
             let doc = self.take_doc_comment();
+
+            // PHP's grammar allows an enum case in any class-like body;
+            // outside an enum it is a compile error the checker reports.
+            if self.eat(&Token::Keyword(Keyword::Case)) {
+                enum_cases.push(self.parse_enum_case_rest(attrs, member_start)?);
+                continue;
+            }
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 let (name, span) = self.parse_qualified_name_spanned();
@@ -454,7 +464,7 @@ impl Parser {
         }
         self.expect(&Token::RBrace)?;
 
-        Ok((
+        Ok(ClassBody {
             properties,
             methods,
             consts,
@@ -463,7 +473,8 @@ impl Parser {
             uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
-        ))
+            enum_cases,
+        })
     }
 
     /// The `{ ... }` conflict-resolution block after a `use A, B;` clause
@@ -617,7 +628,7 @@ impl Parser {
             }
         }
 
-        let (
+        let ClassBody {
             properties,
             methods,
             consts,
@@ -626,7 +637,8 @@ impl Parser {
             uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
-        ) = self.parse_class_body(class_is_readonly)?;
+            enum_cases,
+        } = self.parse_class_body(class_is_readonly)?;
 
         Ok(ClassDecl {
             name,
@@ -647,6 +659,7 @@ impl Parser {
             uses_doc_comments,
             trait_aliases,
             resolved_trait_conflicts,
+            enum_cases,
             doc_comment,
             // Overwritten by `parse_statement`, the only caller that
             // actually saw any leading `#[Attr]` groups (both of this
