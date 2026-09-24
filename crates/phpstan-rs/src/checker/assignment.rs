@@ -1,7 +1,7 @@
 use crate::ast::*;
 use crate::checker::{
     Checker, DiagnosticBuilder, Locals, is_unsealed_shape, narrowing_key,
-    purge_stale_narrowing_for, union_types, unwrap_grouping,
+    purge_stale_narrowing_for, union_types,
 };
 use crate::types::{AccessoryKind, Type, is_subtype};
 
@@ -956,23 +956,6 @@ impl<'a> Checker<'a> {
     }
 }
 
-pub(crate) fn is_superglobal(name: &str) -> bool {
-    matches!(
-        name,
-        "GLOBALS"
-            | "_GET"
-            | "_POST"
-            | "_REQUEST"
-            | "_SERVER"
-            | "_SESSION"
-            | "_COOKIE"
-            | "_FILES"
-            | "_ENV"
-            | "argv"
-            | "argc"
-    )
-}
-
 /// A superglobal's own type, read *before* any real assignment to it
 /// appears in this function's own `locals` - real phpstorm-stubs' own
 /// `superglobals/_superglobals.php` bootstrap file declares every one of
@@ -1368,28 +1351,6 @@ fn write_literal_key_aware(
         // of them can be trusted to still hold once an arbitrary key may
         // have overwritten them.
         _ => base,
-    }
-}
-
-/// A literal string's text, or a statically-foldable `.`-concatenation of
-/// nothing but literal strings (and parenthesized groupings of the same),
-/// folded into one owned value. `None` for anything not fully foldable
-/// this way (a variable anywhere in the chain, a non-string literal) -
-/// unlike `literal_string_key`, this doesn't also accept an int literal,
-/// since a format string is never legitimately written as a bare number.
-/// Purely syntactic: a concatenation with a variable operand is never
-/// resolved here even if a caller's type tracking knows it's a literal
-/// value, since this function only sees the raw `Expr`.
-pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
-    match &e.kind {
-        ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_ref())),
-        ExprKind::Grouping(inner) => literal_string_value(inner),
-        ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
-            let l = literal_string_value(lhs)?;
-            let r = literal_string_value(rhs)?;
-            Some(std::borrow::Cow::Owned(format!("{l}{r}")))
-        }
-        _ => None,
     }
 }
 

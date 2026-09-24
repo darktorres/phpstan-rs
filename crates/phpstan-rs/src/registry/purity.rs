@@ -40,7 +40,6 @@ use std::sync::Arc;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::checker::is_superglobal;
 use crate::intern::intern;
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;

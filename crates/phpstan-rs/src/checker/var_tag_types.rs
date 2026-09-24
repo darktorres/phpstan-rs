@@ -4,6 +4,7 @@
 //! tag's type against the value it describes.
 
 use super::*;
+use crate::ast::literal_string_value;
 use crate::registry::{self, Trinary};
 
 /// How the described value was written, for the literal leniency of
@@ -111,7 +112,7 @@ impl<'a> Checker<'a> {
     /// `e`'s value when it is a known string: literal syntax, or a
     /// constant (`self::PATTERN`) whose inferred type is one string.
     pub(crate) fn constant_string_value(&self, e: &Expr, locals: &Locals) -> Option<String> {
-        if let Some(s) = super::assignment::literal_string_value(e) {
+        if let Some(s) = literal_string_value(e) {
             return Some(s.into_owned());
         }
         match self.infer_expr(e, locals) {

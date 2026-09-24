@@ -2,10 +2,10 @@ use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 use crate::ast::*;
+use crate::ast_walk::body_contains_yield;
 use crate::checker::{
-    Checker, Locals, LoopZeroIterations, body_contains_yield, count_call_operand,
-    is_truthy_literal, merge_scopes, propagate_container_field_facts, stmt_contains_break,
-    stmt_contains_escaping_exit, union_types, unwrap_grouping,
+    Checker, Locals, LoopZeroIterations, count_call_operand, is_truthy_literal, merge_scopes,
+    propagate_container_field_facts, stmt_contains_break, stmt_contains_escaping_exit, union_types,
 };
 use crate::types::Type;
 

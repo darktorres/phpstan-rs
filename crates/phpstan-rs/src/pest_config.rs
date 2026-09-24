@@ -34,7 +34,7 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Arg, Expr, ExprKind, Stmt, StmtKind};
-use crate::checker::{literal_string_value, unwrap_grouping};
+use crate::ast::{literal_string_value, unwrap_grouping};
 use crate::registry::{NameContext, Registry};
 use crate::types::Type;
 

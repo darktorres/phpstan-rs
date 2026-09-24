@@ -26,6 +26,7 @@ use crate::docblock;
 use crate::registry::FunctionSig;
 use crate::token::Span;
 use crate::types::Type;
+use crate::types::has_explicit_mixed_nested_somewhere;
 
 /// Real PHPStan's own tip text (`MissingTypehintCheck::
 /// MISSING_ITERABLE_VALUE_TYPE_TIP`), attached to every
@@ -155,56 +156,6 @@ fn iterable_union_value_type(members: &[Type]) -> Option<&Type> {
         .iter()
         .any(|m| matches!(m, Type::Object(name, args) if name == "Traversable" && args.is_empty()));
     has_bare_traversable.then_some(array_inner)
-}
-
-/// True when `text` mentions the word `mixed` (case-insensitively, as a
-/// whole word rather than a substring of some longer identifier like
-/// `MixedTypeHelper`) anywhere at all - used to recover real PHPStan's
-/// `MixedType::isExplicitMixed()` bit for a value type nested inside an
-/// `array`/`iterable`/`list`/... generic, which (like the top-level case
-/// `is_explicit_mixed_text` already handles) this project's `Type` model
-/// has no room to carry through parsing (see that function's own doc
-/// comment). Scoped to exactly one declaration's own single type
-/// snippet (never a whole docblock), so any occurrence of the word is,
-/// in practice, always the author's own explicit `mixed` written
-/// somewhere in that same type - worst case a rare false *negative*
-/// (silently accepting a still-implicit `mixed` elsewhere in the same
-/// union/intersection), never a new false positive.
-fn text_mentions_mixed(text: &str) -> bool {
-    let lower = text.to_ascii_lowercase();
-    let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
-    let mut search_from = 0;
-    while let Some(offset) = lower[search_from..].find("mixed") {
-        let start = search_from + offset;
-        let end = start + "mixed".len();
-        let before_ok = start == 0 || !is_ident_byte(lower.as_bytes()[start - 1]);
-        let after_ok = end == lower.len() || !is_ident_byte(lower.as_bytes()[end]);
-        if before_ok && after_ok {
-            return true;
-        }
-        search_from = end;
-    }
-    false
-}
-
-/// Mirrors `is_explicit_mixed_text`'s own two-source convention (a
-/// native hint and a separate PHPDoc type can each independently spell
-/// out `mixed`) but for the nested-value-type case `text_mentions_mixed`
-/// covers - see its own doc comment for why a substring/whole-word check
-/// is the right (and only practical) level of precision here.
-///
-/// `pub(crate)` - `registry::function_sig::FunctionSig::
-/// from_decl` calls this too, to compute `ParamSig::explicit_mixed_hint`/
-/// `FunctionSig::return_explicit_mixed_hint` once, from this
-/// declaration's own text, at the same time it resolves `ty`/
-/// `return_type` - see those fields' own doc comments for why a fresh
-/// per-check re-derivation isn't enough once a type can be inherited
-/// from a different declaration's own docblock.
-pub(crate) fn has_explicit_mixed_nested_somewhere(
-    native_hint: Option<&str>,
-    doc_type: Option<&str>,
-) -> bool {
-    native_hint.is_some_and(text_mentions_mixed) || doc_type.is_some_and(text_mentions_mixed)
 }
 
 /// Walks `ty` for every iterable-shaped member (`array`, the `iterable`

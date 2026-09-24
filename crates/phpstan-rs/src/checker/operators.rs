@@ -32,8 +32,9 @@
 //! elevated false-positive rate against this project's own unions -
 //! not a good trade for a rule whose whole point is confidence.
 
+use crate::ast::unwrap_grouping;
 use crate::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
-use crate::checker::{Checker, unwrap_grouping};
+use crate::checker::Checker;
 use crate::token::Span;
 use crate::types::{AccessoryKind, Type, is_subtype};
 

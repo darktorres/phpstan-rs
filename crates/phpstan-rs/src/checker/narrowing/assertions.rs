@@ -4,7 +4,7 @@ use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_ke
 use crate::checker::narrowing::type_ops::{
     is_known_single_value, narrow_type_excluding, narrow_type_to,
 };
-use crate::checker::{Checker, Locals, unwrap_grouping};
+use crate::checker::{Checker, Locals};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {

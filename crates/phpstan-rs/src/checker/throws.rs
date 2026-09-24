@@ -31,7 +31,7 @@ mod too_wide;
 
 /// Whether `stmts` contains a real, direct `throw` anywhere in its own
 /// body - `Some(span)` of the first one found. Mirrors
-/// `checker::control_flow`'s `body_contains_yield` trio, including their
+/// `ast_walk`'s `body_contains_yield` trio, including their
 /// "stops at a nested `Closure`/`ArrowFn`/`NewAnonymousClass`/
 /// `FunctionDecl`/`ClassDecl`/`EnumDecl` boundary" semantics - a `throw`
 /// inside a nested closure belongs to that closure, not the outer one.

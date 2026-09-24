@@ -869,3 +869,88 @@ pub enum ExprKind {
         default: Option<Box<Expr>>,
     },
 }
+
+/// Peels through any `(...)`-grouping wrapper(s) to the real expression
+/// underneath - `ExprKind::Grouping` is a genuine, distinct AST node,
+/// not something parens collapse away during parsing, so a closure-
+/// literal-shaped check like the `Closure::bind`/`->bindTo()` special-
+/// casing needs to see through `(function () {...})` the same as a bare
+/// `function () {...}`.
+pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
+    match &e.kind {
+        ExprKind::Grouping(inner) => unwrap_grouping(inner),
+        _ => e,
+    }
+}
+
+/// A literal string's text, or a statically-foldable `.`-concatenation of
+/// nothing but literal strings (and parenthesized groupings of the same),
+/// folded into one owned value. `None` for anything not fully foldable
+/// this way (a variable anywhere in the chain, a non-string literal) -
+/// unlike `literal_string_key`, this doesn't also accept an int literal,
+/// since a format string is never legitimately written as a bare number.
+/// Purely syntactic: a concatenation with a variable operand is never
+/// resolved here even if a caller's type tracking knows it's a literal
+/// value, since this function only sees the raw `Expr`.
+pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
+    match &e.kind {
+        ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_ref())),
+        ExprKind::Grouping(inner) => literal_string_value(inner),
+        ExprKind::Binary(BinOp::Concat, lhs, rhs) => {
+            let l = literal_string_value(lhs)?;
+            let r = literal_string_value(rhs)?;
+            Some(std::borrow::Cow::Owned(format!("{l}{r}")))
+        }
+        _ => None,
+    }
+}
+
+/// Whether `name` (without its `$`) is one of PHP's superglobals.
+pub(crate) fn is_superglobal(name: &str) -> bool {
+    matches!(
+        name,
+        "GLOBALS"
+            | "_GET"
+            | "_POST"
+            | "_REQUEST"
+            | "_SERVER"
+            | "_SESSION"
+            | "_COOKIE"
+            | "_FILES"
+            | "_ENV"
+            | "argv"
+            | "argc"
+    )
+}
+
+/// Whether `name` is a PHP or PHPDoc keyword type rather than a class name.
+pub(crate) fn is_primitive_type_name(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "int"
+            | "integer"
+            | "float"
+            | "double"
+            | "real"
+            | "string"
+            | "bool"
+            | "boolean"
+            | "array"
+            | "object"
+            | "mixed"
+            | "void"
+            | "never"
+            | "noreturn"
+            | "never-return"
+            | "never-returns"
+            | "no-return"
+            | "null"
+            | "true"
+            | "false"
+            | "self"
+            | "static"
+            | "parent"
+            | "callable"
+            | "iterable"
+    )
+}

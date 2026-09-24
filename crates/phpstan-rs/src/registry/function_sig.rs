@@ -2,11 +2,12 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::{ExprKind, FunctionDecl, Stmt, Visibility};
-use crate::checker::{has_explicit_mixed_nested_somewhere, union_types};
+use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{
     NameContext, collect_class_name_case_refs, resolve_names_in_type,
 };
+use crate::types::has_explicit_mixed_nested_somewhere;
 use crate::types::{self, TemplateParam, Type};
 
 mod asserts;

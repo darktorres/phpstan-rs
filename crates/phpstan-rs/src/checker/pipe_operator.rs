@@ -28,7 +28,7 @@
 //! resolution can't produce a confident `isCallable()` type either.
 
 use crate::ast::*;
-use crate::checker::{Checker, DiagnosticBuilder, Locals, unwrap_grouping};
+use crate::checker::{Checker, DiagnosticBuilder, Locals};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {

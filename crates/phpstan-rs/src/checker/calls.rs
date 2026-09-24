@@ -2,9 +2,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::ast::*;
-use crate::checker::{
-    Checker, Locals, literal_string_value, purge_stale_narrowing_for, union_types, unwrap_grouping,
-};
+use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types};
 use crate::registry::{FunctionSig, ParamSig};
 use crate::token::Span;
 use crate::types::{self, Type};

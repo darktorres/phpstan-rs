@@ -363,5 +363,77 @@ pub fn any_stmt_child(s: &Stmt, mut f: &mut impl FnMut(&Stmt) -> bool) -> bool {
     }
 }
 
+/// Does this function/method/closure body contain a `yield`/`yield from`
+/// anywhere, making it a real PHP generator? A generator always returns a
+/// real `Generator` object when called, regardless of whether it has an
+/// explicit `return` - `return;`/`return $x;` *inside* it sets
+/// `Generator::getReturn()`'s own value, not the enclosing function's
+/// return value, so real PHPStan never checks either against the
+/// function's own declared `Generator`/`Iterator`/`Traversable` return
+/// type (only against a `@return Generator<...,...,...,TReturn>`
+/// docblock's 4th argument, if present - not modeled here).
+pub(crate) fn body_contains_yield(stmts: &[Stmt]) -> bool {
+    stmts.iter().any(stmt_contains_yield)
+}
+
+/// An arrow function's own body is a single expression, not a
+/// `Vec<Stmt>` `body_contains_yield` can walk - this is that same
+/// walk's expression-only counterpart (`any_expr_child` already stops at
+/// a nested `Closure`/`ArrowFn` boundary, the correct semantics here
+/// too: a `yield` inside a nested one doesn't make *this* arrow function
+/// a generator). Uses `any_expr_child` (non-allocating) rather than
+/// `expr_children`/`.into_iter().any()` - this runs on every function/
+/// method/closure body checked, a real, measured cost at that call
+/// volume.
+pub(crate) fn expr_contains_yield(e: &Expr) -> bool {
+    matches!(e.kind, ExprKind::Yield(..) | ExprKind::YieldFrom(_))
+        || any_expr_child(e, &mut expr_contains_yield)
+}
+
+/// Mirrors `deps::collect_stmt`'s own exhaustive per-variant shape: each
+/// `StmtKind` variant's own `Expr`-bearing field(s), checked via
+/// `expr_contains_yield`, plus recursing into `any_stmt_child` for nested
+/// statements. `any_stmt_child` (and `any_expr_child`, transitively)
+/// already stop at `Closure`/`ArrowFn`/`NewAnonymousClass`/`FunctionDecl`/
+/// `ClassDecl`/`EnumDecl` boundaries by design - exactly the correct
+/// semantics here too, since a `yield` inside any of those nested scopes
+/// does NOT make the *outer* function a generator.
+fn stmt_contains_yield(stmt: &Stmt) -> bool {
+    let own = match &stmt.kind {
+        StmtKind::Expression(e) | StmtKind::Throw(e) => expr_contains_yield(e),
+        StmtKind::Return(Some(e)) => expr_contains_yield(e),
+        StmtKind::Return(None) => false,
+        StmtKind::Echo(exprs) => exprs.iter().any(expr_contains_yield),
+        StmtKind::If { cond, .. }
+        | StmtKind::While { cond, .. }
+        | StmtKind::DoWhile { cond, .. } => expr_contains_yield(cond),
+        StmtKind::For {
+            init, cond, step, ..
+        } => init.iter().chain(cond).chain(step).any(expr_contains_yield),
+        StmtKind::Foreach {
+            subject,
+            key,
+            value,
+            ..
+        } => {
+            expr_contains_yield(subject)
+                || key.as_ref().is_some_and(expr_contains_yield)
+                || expr_contains_yield(value)
+        }
+        StmtKind::GlobalConst(consts) => consts.iter().any(|c| expr_contains_yield(&c.value)),
+        StmtKind::StaticVar(vars) => vars
+            .iter()
+            .any(|(_, d)| d.as_ref().is_some_and(expr_contains_yield)),
+        StmtKind::Switch { subject, cases } => {
+            expr_contains_yield(subject)
+                || cases
+                    .iter()
+                    .any(|c| c.test.as_ref().is_some_and(expr_contains_yield))
+        }
+        _ => false,
+    };
+    own || any_stmt_child(stmt, &mut stmt_contains_yield)
+}
+
 #[cfg(test)]
 mod tests;

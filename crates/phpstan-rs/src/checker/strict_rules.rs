@@ -117,7 +117,7 @@ impl<'a> Checker<'a> {
             if let ExprKind::Variable(name) = &root.kind
                 && name.as_ref() != "this"
                 && !locals.contains_key(name)
-                && !crate::checker::assignment::is_superglobal(name)
+                && !is_superglobal(name)
             {
                 let certainty = if self.might_be_assigned_before(name, root.span) {
                     "might not exist"

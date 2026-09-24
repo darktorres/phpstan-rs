@@ -1,9 +1,9 @@
 use crate::ast::*;
 use crate::checker::type_union::{has_offset_value_parts, union_types};
 use crate::checker::{
-    Checker, Locals, is_real_variable_key, literal_string_key, literal_string_value,
-    narrow_type_excluding, narrow_type_excluding_falsy, narrow_type_to,
-    narrowing_type_for_predicate, resolve_call_args, string_type_has_accessory, to_absolute_number,
+    Checker, Locals, is_real_variable_key, literal_string_key, narrow_type_excluding,
+    narrow_type_excluding_falsy, narrow_type_to, narrowing_type_for_predicate, resolve_call_args,
+    string_type_has_accessory, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::token::Span;

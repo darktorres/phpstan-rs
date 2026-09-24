@@ -21,9 +21,10 @@
 //! own established pattern, `is_valid_date_interval_spec` below), not as
 //! a throw-type extension.
 
+use crate::ast::unwrap_grouping;
 use crate::ast::{Arg, ExprKind, Literal, UnaryOp};
 use crate::checker::date_interval::is_valid_date_interval_spec;
-use crate::checker::expr::{contains_flag_name, unwrap_grouping};
+use crate::checker::expr::contains_flag_name;
 use crate::checker::xml_name::is_valid_xml_name;
 use crate::checker::xml_wellformedness::is_well_formed_xml;
 use crate::checker::{Checker, Locals};

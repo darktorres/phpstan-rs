@@ -13,8 +13,8 @@
 //! filter/order rows, never add or remove a result column, so this
 //! module never even attempts to resolve their own arguments.
 
+use crate::ast::literal_string_value;
 use crate::ast::{Arg, Expr, ExprKind};
-use crate::checker::assignment::literal_string_value;
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
 

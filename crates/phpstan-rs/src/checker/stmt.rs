@@ -2,7 +2,7 @@ use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
-    purge_stale_narrowing_for, union_types, unwrap_grouping,
+    purge_stale_narrowing_for, union_types,
 };
 use crate::types::Type;
 

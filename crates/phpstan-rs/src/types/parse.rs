@@ -1285,3 +1285,43 @@ pub(crate) fn strip_call_site_variance(ty: &Type) -> Option<&Type> {
         other => Some(other),
     }
 }
+
+/// True when `text` mentions the word `mixed` (case-insensitively, as a
+/// whole word rather than a substring of some longer identifier like
+/// `MixedTypeHelper`) anywhere at all - used to recover real PHPStan's
+/// `MixedType::isExplicitMixed()` bit for a value type nested inside an
+/// `array`/`iterable`/`list`/... generic, which (like a top-level
+/// explicit `mixed`) this project's `Type` model has no room to carry
+/// through parsing. Scoped to exactly one declaration's own single type
+/// snippet (never a whole docblock), so any occurrence of the word is,
+/// in practice, always the author's own explicit `mixed` written
+/// somewhere in that same type - worst case a rare false *negative*
+/// (silently accepting a still-implicit `mixed` elsewhere in the same
+/// union/intersection), never a new false positive.
+fn text_mentions_mixed(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    let is_ident_byte = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut search_from = 0;
+    while let Some(offset) = lower[search_from..].find("mixed") {
+        let start = search_from + offset;
+        let end = start + "mixed".len();
+        let before_ok = start == 0 || !is_ident_byte(lower.as_bytes()[start - 1]);
+        let after_ok = end == lower.len() || !is_ident_byte(lower.as_bytes()[end]);
+        if before_ok && after_ok {
+            return true;
+        }
+        search_from = end;
+    }
+    false
+}
+
+/// Whether a declaration's native hint or its PHPDoc type spells out
+/// `mixed` anywhere (see `text_mentions_mixed` for the precision), so a
+/// `mixed` value type nested in an `array`/`iterable`/`list` generic
+/// counts as explicit.
+pub(crate) fn has_explicit_mixed_nested_somewhere(
+    native_hint: Option<&str>,
+    doc_type: Option<&str>,
+) -> bool {
+    native_hint.is_some_and(text_mentions_mixed) || doc_type.is_some_and(text_mentions_mixed)
+}

@@ -11,7 +11,7 @@ fn preg_match_understands_a_free_spacing_pattern_with_comments() {
     // through an intermediate variable - `literal_string_value` only
     // ever looks at the raw `Expr` passed to it, with no access to
     // inferred types/`Locals` (same reasoning as its own `Concat`
-    // folding, see `checker::assignment::literal_string_value`'s own
+    // folding, see `ast::literal_string_value`'s own
     // doc comment).
     let d = diagnostics_for(
         r#"<?php

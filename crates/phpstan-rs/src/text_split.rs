@@ -9,7 +9,7 @@
 //! rely on, rather than a hand-rolled parallel implementation that could
 //! silently diverge from it.
 
-use crate::deps::is_primitive_type_name;
+use crate::ast::is_primitive_type_name;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::token::{Position, Span, Token};

@@ -31,37 +31,6 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
     names
 }
 
-pub(crate) fn is_primitive_type_name(name: &str) -> bool {
-    matches!(
-        name.to_ascii_lowercase().as_str(),
-        "int"
-            | "integer"
-            | "float"
-            | "double"
-            | "real"
-            | "string"
-            | "bool"
-            | "boolean"
-            | "array"
-            | "object"
-            | "mixed"
-            | "void"
-            | "never"
-            | "noreturn"
-            | "never-return"
-            | "never-returns"
-            | "no-return"
-            | "null"
-            | "true"
-            | "false"
-            | "self"
-            | "static"
-            | "parent"
-            | "callable"
-            | "iterable"
-    )
-}
-
 /// Pulls candidate class names out of a type-hint string (`"?Foo"`,
 /// `"Foo|Bar"`, `"array<Baz>"`, `"(A&B)|C"`, ...) by splitting on anything
 /// that isn't part of a bare/qualified identifier and discarding the

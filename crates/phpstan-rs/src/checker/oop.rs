@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 use crate::ast::*;
 use crate::ast_walk::any_stmt_child;
-use crate::checker::{Checker, DiagnosticBuilder, Locals, class_kind_identifier, unwrap_grouping};
+use crate::checker::{Checker, DiagnosticBuilder, Locals, class_kind_identifier};
 use crate::docblock;
 use crate::registry::{
     FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,

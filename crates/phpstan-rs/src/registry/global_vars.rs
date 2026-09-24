@@ -27,11 +27,12 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::ast::{BinOp, Expr, ExprKind, Literal, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
-use crate::checker::{union_types, unwrap_grouping};
+use crate::checker::union_types;
 use crate::registry::{NameContext, infer_const_type};
 use crate::types::Type;
 
 use super::Registry;
+use crate::ast::unwrap_grouping;
 
 /// Mirrors `checker::type_union::MAX_UNION_MEMBERS`'s own naming style -
 /// a different, unrelated constant, not that one reused. Past this many

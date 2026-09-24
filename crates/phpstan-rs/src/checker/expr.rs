@@ -1,14 +1,15 @@
 use crate::ast::*;
+use crate::ast_walk::{body_contains_yield, expr_contains_yield};
 use crate::checker::calls::parameters::Callee;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
     CheckArgsCall, Checker, DiagnosticBuilder, Locals, LoopZeroIterations, MemberVisibilityCheck,
-    TemplateBindings, UsageTokenKind, binop_sigil, body_contains_yield, collect_goto_targets,
-    expr_contains_yield, generator_template_param, is_known_single_value, is_language_construct,
-    is_real_variable_key, is_superglobal, literal_string_key, merge_scopes, narrow_type_excluding,
-    narrowing_key, propagate_container_field_facts, purge_stale_narrowing_for, resolve_call_args,
-    resolve_concat_type, string_type_has_accessory, superglobal_default_type, to_bitwise_not,
+    TemplateBindings, UsageTokenKind, binop_sigil, collect_goto_targets, generator_template_param,
+    is_known_single_value, is_language_construct, is_real_variable_key, literal_string_key,
+    merge_scopes, narrow_type_excluding, narrowing_key, propagate_container_field_facts,
+    purge_stale_narrowing_for, resolve_call_args, resolve_concat_type, string_type_has_accessory,
+    superglobal_default_type, to_bitwise_not,
 };
 use crate::pest_config;
 use crate::regex_groups;
@@ -6397,32 +6398,12 @@ fn is_true_literal(e: &Expr) -> bool {
 /// `toIterable()` when their own hydration-mode argument is omitted or
 /// explicit) always produces a real, sequentially-keyed list - true
 /// regardless of whether ROADMAP Phase 168's own DQL-aware row-
-/// type inference (168b-168d) managed to resolve a real element type,
-/// in which case `element_ty` is that resolved `Type`; `Type::Mixed(false)`
-/// when it didn't (matches this project's pre-Phase-168 fallback
-/// exactly, so an undecidable chain regresses nothing).
-pub(crate) fn doctrine_query_result_list_type_of(element_ty: Type) -> Type {
-    Type::Intersection(vec![
-        Type::Array(Box::new(Type::unknown_array_key()), Box::new(element_ty)),
-        Type::Accessory(AccessoryKind::ArrayList),
-    ])
-}
-
+/// type inference (168b-168d) managed to resolve a real element type;
+/// this is the list of `mixed` used when it didn't (matches this
+/// project's pre-Phase-168 fallback exactly, so an undecidable chain
+/// regresses nothing).
 pub(crate) fn doctrine_query_result_list_type() -> Type {
-    doctrine_query_result_list_type_of(Type::Mixed(false))
-}
-
-/// Peels through any `(...)`-grouping wrapper(s) to the real expression
-/// underneath - `ExprKind::Grouping` is a genuine, distinct AST node,
-/// not something parens collapse away during parsing, so a closure-
-/// literal-shaped check like the `Closure::bind`/`->bindTo()` special-
-/// casing needs to see through `(function () {...})` the same as a bare
-/// `function () {...}`.
-pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
-    match &e.kind {
-        ExprKind::Grouping(inner) => unwrap_grouping(inner),
-        _ => e,
-    }
+    Type::list_of(Type::Mixed(false))
 }
 
 impl<'a> Checker<'a> {

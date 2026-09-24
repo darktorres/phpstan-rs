@@ -9,9 +9,9 @@
 //! succeeds) - the base, colon-permissive `Name` grammar, not the
 //! namespace-restricted `NCName` one.
 
+use crate::ast::unwrap_grouping;
 use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
-use crate::checker::expr::unwrap_grouping;
 use crate::token::Span;
 
 impl<'a> Checker<'a> {

@@ -1,5 +1,5 @@
 use crate::ast::*;
-use crate::checker::{Checker, Locals, unwrap_grouping};
+use crate::checker::{Checker, Locals};
 use crate::types::Type;
 
 impl<'a> Checker<'a> {

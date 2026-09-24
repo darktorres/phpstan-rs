@@ -209,8 +209,6 @@ module checker::access_attributes ext-language-extensions
 
 # allow <from> <to> <phase that removes the edge>
 allow fix checker B2
-allow registry checker::missing_typehint B2
-allow text_split deps B2
 
 allow checker::coercion checker B4
 allow checker::coercion registry B4
@@ -365,7 +363,6 @@ allow checker::var_tag_types checker::phpdoc_unresolvable E3e
 
 allow checker checker::control_flow::boolean_conditions E3f
 allow checker checker::control_flow::generators E3f
-allow checker::calls::closure_context checker::control_flow::generators E3f
 allow checker::control_flow checker::control_flow::boolean_conditions E3f
 allow checker::control_flow checker::control_flow::generators E3f
 allow checker::expr checker::control_flow::boolean_conditions E3f

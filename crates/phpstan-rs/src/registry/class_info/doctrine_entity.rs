@@ -127,11 +127,8 @@ fn class_const_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
 
 /// A named argument's own value, when it's a plain string literal
 /// (`#[ORM\Table(name: 'categories')]`/`#[ORM\Column(name: '...')]`'s
-/// only real corpus shape) - deliberately separate from `checker::
-/// assignment::literal_string_value` rather than reusing it: `registry`
-/// has zero existing references to `checker::` types (`checker`
-/// depends on `registry`, never the reverse), so a shared helper here
-/// would invert that direction.
+/// only real corpus shape); unlike `ast::literal_string_value`, a
+/// concatenation of literals is not folded.
 fn string_arg<'a>(attr: &'a Attribute, name: &str) -> Option<&'a str> {
     attr.args.iter().find_map(|arg| {
         if arg.name.as_deref() != Some(name) {

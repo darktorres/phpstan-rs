@@ -9,7 +9,9 @@ mod templates;
 pub use conditional::resolve_conditional;
 pub(crate) use conditional::{conditional_branch, union_of_branches};
 pub use parse::parse_type_string;
-pub(crate) use parse::{canonical_int_key, strip_call_site_variance};
+pub(crate) use parse::{
+    canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance,
+};
 pub use subtype::is_subtype;
 pub(crate) use subtype::types_definitely_disjoint;
 pub(crate) use subtype::{
@@ -482,6 +484,14 @@ impl Type {
             }),
             _ => None,
         }
+    }
+
+    /// `list<element>`: an array whose keys are `0..n` in order.
+    pub(crate) fn list_of(element: Type) -> Type {
+        Type::Intersection(vec![
+            Type::Array(Box::new(Type::unknown_array_key()), Box::new(element)),
+            Type::Accessory(AccessoryKind::ArrayList),
+        ])
     }
 
     /// PHP's full legal-array-key domain (`int|string`) - the default for

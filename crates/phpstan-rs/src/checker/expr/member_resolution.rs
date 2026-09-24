@@ -4,9 +4,8 @@ use crate::checker::expr::builtin_calls::{
     date_format_return_type, date_interval_format_return_type,
 };
 use crate::checker::expr::doctrine_query_result_list_type;
-use crate::checker::expr::doctrine_query_result_list_type_of;
 use crate::checker::type_union::union_types;
-use crate::checker::{Checker, Locals, literal_string_value, resolve_call_args, unwrap_grouping};
+use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionSig, PropertySig};
 use crate::types::{self, Type};
 
@@ -925,17 +924,15 @@ fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<T
         |key: Type, value: Type| Type::Object("Traversable".to_string(), vec![key, value]);
     match method {
         "fetchAssociative" => Some(Type::Union(vec![Type::ArrayShape(fields), Type::False])),
-        "fetchAllAssociative" => Some(doctrine_query_result_list_type_of(Type::ArrayShape(fields))),
+        "fetchAllAssociative" => Some(Type::list_of(Type::ArrayShape(fields))),
         "iterateAssociative" => Some(traversable_of(Type::Int, Type::ArrayShape(fields))),
         "fetchNumeric" => Some(Type::Union(vec![numeric_shape(), Type::False])),
-        "fetchAllNumeric" => Some(doctrine_query_result_list_type_of(numeric_shape())),
+        "fetchAllNumeric" => Some(Type::list_of(numeric_shape())),
         "iterateNumeric" => Some(traversable_of(Type::Int, numeric_shape())),
         "fetchOne" if !fields.is_empty() => {
             Some(Type::Union(vec![fields[0].1.clone(), Type::False]))
         }
-        "fetchFirstColumn" if !fields.is_empty() => {
-            Some(doctrine_query_result_list_type_of(fields[0].1.clone()))
-        }
+        "fetchFirstColumn" if !fields.is_empty() => Some(Type::list_of(fields[0].1.clone())),
         "iterateColumn" if !fields.is_empty() => {
             Some(traversable_of(Type::Int, fields[0].1.clone()))
         }
@@ -1173,7 +1170,7 @@ impl<'a> Checker<'a> {
                 (Some(el), Some(key)) if keyed && *key != Type::Null => {
                     Type::Array(Box::new(key.clone()), Box::new(el.clone()))
                 }
-                (Some(el), _) => doctrine_query_result_list_type_of(el.clone()),
+                (Some(el), _) => Type::list_of(el.clone()),
                 (None, _) => doctrine_query_result_list_type(),
             }
         };

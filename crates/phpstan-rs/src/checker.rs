@@ -1399,26 +1399,19 @@ pub(crate) mod whole_program;
 mod xml_name;
 mod xml_wellformedness;
 
-pub(crate) use assignment::{
-    is_superglobal, literal_string_key, literal_string_value, superglobal_default_type,
-};
+pub(crate) use assignment::{literal_string_key, superglobal_default_type};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
 pub(crate) use control_flow::{
-    LoopZeroIterations, body_contains_yield, collect_exit_point_statements, collect_goto_targets,
-    exit_point_description, expr_contains_yield, generator_missing_return_type,
-    generator_template_param, is_constant_condition_family_identifier, is_switch_break_equivalent,
-    is_truthy_literal, merge_scopes, stmt_contains_break, stmt_contains_escaping_exit,
-    type_allows_generator_return,
+    LoopZeroIterations, collect_exit_point_statements, collect_goto_targets,
+    exit_point_description, generator_missing_return_type, generator_template_param,
+    is_constant_condition_family_identifier, is_switch_break_equivalent, is_truthy_literal,
+    merge_scopes, stmt_contains_break, stmt_contains_escaping_exit, type_allows_generator_return,
 };
 pub(crate) use duplicates::class_kind_identifier;
-pub(crate) use expr::{
-    build_matched_shape, int_range_bounds, normalize_int_range, unwrap_grouping,
-};
+pub(crate) use expr::{build_matched_shape, int_range_bounds, normalize_int_range};
 pub(crate) use internal_usage::class_type_word;
-pub(crate) use missing_typehint::{
-    ITERABLE_GENERIC_CLASS_NAMES, class_kind_word, has_explicit_mixed_nested_somewhere,
-};
+pub(crate) use missing_typehint::{ITERABLE_GENERIC_CLASS_NAMES, class_kind_word};
 pub(crate) use named_argument_renames::{
     NamedArgumentCallFacts, RenamedParameterOverride, RenamedParameterOverrideFacts,
 };

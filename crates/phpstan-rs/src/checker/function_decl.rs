@@ -1,9 +1,10 @@
 use crate::ast::*;
+use crate::ast_walk::body_contains_yield;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, DiagnosticBuilder, Locals, body_contains_explicit_throw,
-    body_contains_yield, collect_goto_targets, generator_missing_return_type,
-    is_constant_condition_family_identifier, type_allows_generator_return,
+    collect_goto_targets, generator_missing_return_type, is_constant_condition_family_identifier,
+    type_allows_generator_return,
 };
 use crate::docblock;
 use crate::php_version::PhpFeature;

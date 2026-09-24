@@ -4,7 +4,7 @@ use crate::checker::expr::ranges::{
     numeric_comparison_bounds,
 };
 use crate::checker::{
-    Checker, Locals, array_value_type_for_key, is_superglobal, literal_string_key,
+    Checker, Locals, array_value_type_for_key, literal_string_key,
     narrow_array_shape_by_key_presence, narrowing_type_for_predicate, types_definitely_disjoint,
 };
 use crate::token::Span;

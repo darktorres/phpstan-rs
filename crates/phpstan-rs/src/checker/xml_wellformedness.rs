@@ -8,9 +8,9 @@
 //! requirement, strictly cheaper to add than the C dependency this
 //! project already accepts for its PCRE work.
 
+use crate::ast::unwrap_grouping;
 use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
-use crate::checker::expr::unwrap_grouping;
 use crate::token::Span;
 
 impl<'a> Checker<'a> {

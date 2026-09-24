@@ -27,8 +27,8 @@
 //! keyword) - only syntactic validity matters here, never logical
 //! correctness, since this text is never executed, only prepared.
 
+use crate::ast::literal_string_value;
 use crate::ast::{Arg, Expr, ExprKind};
-use crate::checker::assignment::literal_string_value;
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
 

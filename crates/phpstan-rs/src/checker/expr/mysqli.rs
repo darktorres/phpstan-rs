@@ -4,7 +4,6 @@
 //! `Doctrine\DBAL\Result`'s) types every `fetch_*` method's row.
 
 use crate::ast::*;
-use crate::checker::expr::doctrine_query_result_list_type_of;
 use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals};
 use crate::types::{Type, parse_type_string};
@@ -148,7 +147,7 @@ impl<'a> Checker<'a> {
             "fetch_assoc" => union_types(assoc(), end),
             "fetch_row" => union_types(numeric(), end),
             "fetch_array" => union_types(by_mode(&mode("MYSQLI_BOTH")?)?, end),
-            "fetch_all" => doctrine_query_result_list_type_of(by_mode(&mode("MYSQLI_NUM")?)?),
+            "fetch_all" => Type::list_of(by_mode(&mode("MYSQLI_NUM")?)?),
             "fetch_column" => {
                 let index = match arg.map(|e| &e.kind) {
                     None => 0,

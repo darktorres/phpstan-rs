@@ -69,7 +69,7 @@ use std::path::Path;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::checker::{Checker, Diagnostic, class_type_word, literal_string_value};
+use crate::checker::{Checker, Diagnostic, class_type_word};
 use crate::composer;
 use crate::registry::{FunctionSig, NameContext, Registry, is_phpstan_namespace};
 use crate::token::Span;
