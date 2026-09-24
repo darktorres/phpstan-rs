@@ -1,0 +1,2 @@
+2:13-2:57 missingType.return L6 var_dump_wrapper | Function var_dump_wrapper() has no return type specified.
+3:13-3:24 restrictedSymbol.function L0 <main> | Call to restricted function var_dump(): no debug dumps

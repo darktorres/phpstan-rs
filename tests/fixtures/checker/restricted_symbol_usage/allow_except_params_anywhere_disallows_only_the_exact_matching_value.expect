@@ -1,0 +1,4 @@
+2:13-2:50 missingType.return L6 foo | Function foo() has no return type specified.
+3:13-3:30 function.resultUnused L4 <main> | Call to function foo() on a separate line has no effect.
+3:13-3:30 restrictedSymbol.function L0 <main> | Call to restricted function foo(): not with baz
+4:13-4:30 function.resultUnused L4 <main> | Call to function foo() on a separate line has no effect.

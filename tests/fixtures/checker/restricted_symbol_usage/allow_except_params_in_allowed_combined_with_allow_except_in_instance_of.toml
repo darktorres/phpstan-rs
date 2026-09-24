@@ -1,0 +1,9 @@
+[[restricted_symbols]]
+allow_except_in_instance_of = ["HandlerInterface"]
+kind = "function"
+message = "use the module-specific handler instead"
+name = "dispatch"
+
+[[restricted_symbols.allow_except_params_in_allowed]]
+position = 1
+type_string = "DangerousEvent"

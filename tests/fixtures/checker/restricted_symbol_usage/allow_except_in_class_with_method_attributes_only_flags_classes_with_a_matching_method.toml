@@ -1,0 +1,6 @@
+[[restricted_symbols]]
+allow_except_in_class_with_method_attributes = ["Special"]
+class = "Db"
+kind = "method"
+message = "use the connection service"
+name = "query"

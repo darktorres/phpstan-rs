@@ -1,0 +1,10 @@
+[[assertions]]
+function = "ensure_int"
+parameter = "$value"
+type = "int"
+
+[[assertions]]
+function = "is_user"
+parameter = "value"
+type = "User"
+when = "true"

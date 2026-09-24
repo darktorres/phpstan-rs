@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+allow_in_use = true
+kind = "class"
+message = "do not use Banned"
+name = 'Vendor\Banned'

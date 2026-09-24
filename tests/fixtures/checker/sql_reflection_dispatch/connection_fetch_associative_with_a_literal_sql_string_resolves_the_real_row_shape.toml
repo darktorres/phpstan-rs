@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "connection_fetch_associative_with_a_literal_sql_string_resolves_the_real_row_shape.sql"

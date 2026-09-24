@@ -1,0 +1,3 @@
+2:13-2:24 restrictedSymbol.function L0 <main> | Call to restricted function print_r(): use logging instead
+2:21-2:23 variable.undefined L0 <main> | undefined variable $x
+3:21-3:23 variable.undefined L0 <main> | undefined variable $x

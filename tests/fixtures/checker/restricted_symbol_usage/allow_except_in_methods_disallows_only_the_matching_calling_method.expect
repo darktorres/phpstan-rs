@@ -1,0 +1,1 @@
+4:57-4:74 restrictedSymbol.method L0 Controller::handleRequest | Call to restricted method Controller::redirect(): redirect in startup() instead

@@ -1,0 +1,5 @@
+2:31-2:61 missingType.return L6 Db::query | Method Db::query() has no return type specified.
+4:51-4:73 restrictedSymbol.method L0 Repo::f | Call to restricted method Db::query(): use the connection service
+5:19-5:26 attribute.notFound L0 Repo::checkThis | attribute class Special does not exist
+6:25-6:54 method.unused L4 Repo | private method Repo::checkThis() is unused
+    fix: Remove method checkThis() => ""

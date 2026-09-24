@@ -1,0 +1,2 @@
+4:34-4:46 class.notFound L0 f | instantiated class Vendor\\Banned not found
+4:34-4:46 restrictedSymbol.class L0 f | Instantiation of restricted class Vendor\\Banned: do not use Banned

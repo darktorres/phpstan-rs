@@ -1,0 +1,1 @@
+7:58-7:72 restrictedSymbol.method L0 MyHandler::f | Call to restricted method Dispatcher::dispatch(): module handles its own dispatch

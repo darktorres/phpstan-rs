@@ -1,0 +1,6 @@
+[[restricted_symbols]]
+allow_except_in_return_type = true
+allow_in_use = true
+kind = "class"
+message = "do not expose RawData as a return type"
+name = 'Vendor\RawData'

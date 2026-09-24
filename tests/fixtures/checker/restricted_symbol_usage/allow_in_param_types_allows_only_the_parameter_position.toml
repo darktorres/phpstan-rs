@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+allow_in_param_types = true
+kind = "class"
+message = "use NewService instead"
+name = "OldService"

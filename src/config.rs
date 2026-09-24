@@ -80,12 +80,25 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-/// `Config::dynamic_constant_names`'s two accepted shapes.
+/// `Config::dynamic_constant_names`'s accepted shapes: a list of names, a
+/// name-to-type table, or a list of entries mixing both (PHPStan's neon
+/// allows mixing typed and untyped names in one list).
 #[derive(Debug, Deserialize, PartialEq)]
 #[serde(untagged)]
 pub enum DynamicConstantNames {
     Names(Vec<String>),
     Typed(std::collections::BTreeMap<String, String>),
+    Entries(Vec<DynamicConstantEntry>),
+}
+
+/// One `dynamic_constant_names` entry: a constant (`NAME` or
+/// `Class::NAME`), optionally with the type its value has.
+#[derive(Debug, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DynamicConstantEntry {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub ty: Option<String>,
 }
 
 impl DynamicConstantNames {
@@ -96,6 +109,10 @@ impl DynamicConstantNames {
             DynamicConstantNames::Typed(map) => map
                 .iter()
                 .map(|(n, t)| (n.clone(), Some(t.clone())))
+                .collect(),
+            DynamicConstantNames::Entries(entries) => entries
+                .iter()
+                .map(|e| (e.name.clone(), e.ty.clone()))
                 .collect(),
         }
     }
@@ -234,13 +251,15 @@ pub struct Config {
     /// differs between environments, so their literal value is never
     /// trusted. A plain list reads each one as its value's general type;
     /// a table gives the type explicitly, and a declared value it doesn't
-    /// accept is reported. Config-file-only.
+    /// accept is reported; a list of entries mixes both. Config-file-only.
     ///
     /// ```toml
     /// dynamic_constant_names = ["DEBUG", "App\\Settings::LEVEL"]
     /// # or
     /// [dynamic_constant_names]
     /// DEBUG = "bool"
+    /// # or
+    /// dynamic_constant_names = [{ name = "DEBUG" }, { name = "MODE", type = "'dev'|'prod'" }]
     /// ```
     pub dynamic_constant_names: Option<DynamicConstantNames>,
     /// A project's own custom DQL function registrations - see

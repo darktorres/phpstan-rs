@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "iterate_associative_resolves_a_traversable_of_the_row_shape_keyed_by_int.sql"

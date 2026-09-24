@@ -1,0 +1,10 @@
+[[restricted_symbols]]
+allow_except_in_methods = ["Controller::handleRequest()"]
+class = "Controller"
+kind = "method"
+message = "use a safe redirect instead"
+name = "redirect"
+
+[[restricted_symbols.allow_params_in_allowed]]
+position = 1
+type_string = "SafeUrl"

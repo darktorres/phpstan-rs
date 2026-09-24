@@ -1,0 +1,1 @@
+4:64-4:76 restrictedSymbol.method L0 Other::f | Call to restricted method Logger::log(): use our own logger instead

@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "iterate_column_resolves_a_traversable_of_the_first_columns_own_type.sql"

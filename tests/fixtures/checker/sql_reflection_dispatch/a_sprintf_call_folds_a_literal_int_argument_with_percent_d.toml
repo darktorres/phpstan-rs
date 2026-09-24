@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "a_sprintf_call_folds_a_literal_int_argument_with_percent_d.sql"

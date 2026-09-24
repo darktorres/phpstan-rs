@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "fetch_all_associative_indexed_keys_by_the_first_column_values_by_the_rest.sql"

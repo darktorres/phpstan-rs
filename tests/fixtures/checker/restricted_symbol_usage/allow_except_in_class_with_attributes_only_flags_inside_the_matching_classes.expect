@@ -1,0 +1,3 @@
+2:31-2:61 missingType.return L6 Db::query | Method Db::query() has no return type specified.
+3:15-3:22 attribute.notFound L0 Repo | attribute class Special does not exist
+5:51-5:73 restrictedSymbol.method L0 Repo::f | Call to restricted method Db::query(): use the connection service

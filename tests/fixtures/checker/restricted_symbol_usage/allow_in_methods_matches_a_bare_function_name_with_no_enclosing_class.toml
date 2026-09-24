@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+allow_in_methods = ["var_dump_wrapper()"]
+kind = "function"
+message = "no debug dumps"
+name = "var_dump"

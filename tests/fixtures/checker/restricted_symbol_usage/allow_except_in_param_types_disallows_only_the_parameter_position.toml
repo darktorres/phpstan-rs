@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+allow_except_in_param_types = true
+kind = "class"
+message = "do not accept LegacyValue as a parameter type"
+name = "LegacyValue"

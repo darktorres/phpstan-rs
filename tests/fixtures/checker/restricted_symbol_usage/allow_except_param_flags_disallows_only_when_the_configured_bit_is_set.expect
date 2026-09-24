@@ -1,0 +1,7 @@
+2:13-2:34 missingType.return L6 f | Function f() has no return type specified.
+2:24-2:30 missingType.parameter L6 f | Function f() has parameter $flags with no type specified.
+3:13-3:17 function.resultUnused L4 <main> | Call to function f() on a separate line has no effect.
+3:13-3:17 restrictedSymbol.function L0 <main> | Call to restricted function f(): debug flag is forbidden
+4:13-4:17 function.resultUnused L4 <main> | Call to function f() on a separate line has no effect.
+4:13-4:17 restrictedSymbol.function L0 <main> | Call to restricted function f(): debug flag is forbidden
+5:13-5:17 function.resultUnused L4 <main> | Call to function f() on a separate line has no effect.

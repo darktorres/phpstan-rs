@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "an_entity_field_whose_type_disagrees_incompatibly_does_not_override_the_column_type.sql"

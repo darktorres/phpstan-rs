@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+allow_except_in_return_type = true
+kind = "class"
+message = "do not expose RawData as a return type"
+name = "RawData"

@@ -1,0 +1,4 @@
+[[restricted_symbols]]
+kind = "class"
+message = "do not use Banned"
+name = "Banned"

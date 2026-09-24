@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+class = "Legacy"
+kind = "staticProperty"
+message = "do not read this directly"
+name = "password"

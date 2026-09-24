@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "a_double_quoted_string_with_only_literal_interpolated_parts_is_constant_folded.sql"

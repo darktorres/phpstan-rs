@@ -1,0 +1,6 @@
+[[restricted_symbols]]
+allow_in_class_with_method_attributes = ["AllowedLegacy"]
+class = "Db"
+kind = "method"
+message = "use the connection service"
+name = "query"

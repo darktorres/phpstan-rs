@@ -1,0 +1,2 @@
+8:21-8:23 phpstanRs.assertType L0 f | assertType() mismatch: expected type "?", actual type "int"
+9:40-9:42 phpstanRs.assertType L0 f | assertType() mismatch: expected type "?", actual type "User"

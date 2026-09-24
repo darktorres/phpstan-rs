@@ -1,0 +1,6 @@
+[[restricted_symbols]]
+allow_in_instance_of = ["Handler"]
+class = "Logger"
+kind = "method"
+message = "use our own logger instead"
+name = "log"

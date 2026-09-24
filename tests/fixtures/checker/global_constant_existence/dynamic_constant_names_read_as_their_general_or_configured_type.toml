@@ -1,0 +1,6 @@
+dynamic_constant_names = [
+    { name = "DEBUG" },
+    { name = "MODE", type = "'dev'|'prod'" },
+    { name = "Settings::LEVEL" },
+    { name = "FROM_ENV", type = "string" },
+]

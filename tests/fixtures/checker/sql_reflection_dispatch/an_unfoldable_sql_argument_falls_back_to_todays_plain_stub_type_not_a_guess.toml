@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "an_unfoldable_sql_argument_falls_back_to_todays_plain_stub_type_not_a_guess.sql"

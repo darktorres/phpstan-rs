@@ -1,0 +1,3 @@
+[[doctrine_custom_functions]]
+name = "DATE_FORMAT_YEAR_MONTH"
+kind = "string"

@@ -1,0 +1,5 @@
+5:13-5:62 missingType.return L6 dispatch | Function dispatch() has no return type specified.
+8:21-8:51 function.resultUnused L4 MyHandler::f | Call to function dispatch() on a separate line has no effect.
+8:21-8:51 restrictedSymbol.function L0 MyHandler::f | Call to restricted function dispatch(): use the module-specific handler instead
+9:21-9:46 function.resultUnused L4 MyHandler::f | Call to function dispatch() on a separate line has no effect.
+14:21-14:51 function.resultUnused L4 Other::f | Call to function dispatch() on a separate line has no effect.

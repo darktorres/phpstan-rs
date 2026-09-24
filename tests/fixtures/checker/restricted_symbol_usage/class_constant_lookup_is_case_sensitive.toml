@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+class = "Legacy"
+kind = "classConstant"
+message = "wrong case, should not match"
+name = "version"

@@ -1,0 +1,1 @@
+8:21-8:52 restrictedSymbol.method L0 Controller::handleRequest | Call to restricted method Controller::redirect(): use a safe redirect instead

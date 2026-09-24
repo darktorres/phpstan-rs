@@ -1,0 +1,98 @@
+6:20-6:63 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchAssociative | Method Doctrine\\DBAL\\Result::fetchAssociative() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+7:20-7:60 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchAllAssociative | Method Doctrine\\DBAL\\Result::fetchAllAssociative() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+9:20-9:57 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchFirstColumn | Method Doctrine\\DBAL\\Result::fetchFirstColumn() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+10:20-10:59 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchNumeric | Method Doctrine\\DBAL\\Result::fetchNumeric() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+11:20-11:56 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchAllNumeric | Method Doctrine\\DBAL\\Result::fetchAllNumeric() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+12:20-12:57 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchAllKeyValue | Method Doctrine\\DBAL\\Result::fetchAllKeyValue() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+13:20-13:67 missingType.iterableValue L6 Doctrine\DBAL\Result::fetchAllAssociativeIndexed | Method Doctrine\\DBAL\\Result::fetchAllAssociativeIndexed() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+23:20-23:115 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAssociative | Method Doctrine\\DBAL\\Connection::fetchAssociative() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+23:61-23:79 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAssociative | Method Doctrine\\DBAL\\Connection::fetchAssociative() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+23:81-23:98 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAssociative | Method Doctrine\\DBAL\\Connection::fetchAssociative() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+24:20-24:112 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllAssociative | Method Doctrine\\DBAL\\Connection::fetchAllAssociative() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+24:64-24:82 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllAssociative | Method Doctrine\\DBAL\\Connection::fetchAllAssociative() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+24:84-24:101 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllAssociative | Method Doctrine\\DBAL\\Connection::fetchAllAssociative() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+25:53-25:71 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchOne | Method Doctrine\\DBAL\\Connection::fetchOne() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+25:73-25:90 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchOne | Method Doctrine\\DBAL\\Connection::fetchOne() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+26:20-26:109 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchFirstColumn | Method Doctrine\\DBAL\\Connection::fetchFirstColumn() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+26:61-26:79 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchFirstColumn | Method Doctrine\\DBAL\\Connection::fetchFirstColumn() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+26:81-26:98 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchFirstColumn | Method Doctrine\\DBAL\\Connection::fetchFirstColumn() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+27:20-27:111 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchNumeric | Method Doctrine\\DBAL\\Connection::fetchNumeric() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+27:57-27:75 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchNumeric | Method Doctrine\\DBAL\\Connection::fetchNumeric() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+27:77-27:94 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchNumeric | Method Doctrine\\DBAL\\Connection::fetchNumeric() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+28:20-28:108 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllNumeric | Method Doctrine\\DBAL\\Connection::fetchAllNumeric() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+28:60-28:78 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllNumeric | Method Doctrine\\DBAL\\Connection::fetchAllNumeric() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+28:80-28:97 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllNumeric | Method Doctrine\\DBAL\\Connection::fetchAllNumeric() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+29:20-29:109 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllKeyValue | Method Doctrine\\DBAL\\Connection::fetchAllKeyValue() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+29:61-29:79 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllKeyValue | Method Doctrine\\DBAL\\Connection::fetchAllKeyValue() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+29:81-29:98 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllKeyValue | Method Doctrine\\DBAL\\Connection::fetchAllKeyValue() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+30:20-30:119 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllAssociativeIndexed | Method Doctrine\\DBAL\\Connection::fetchAllAssociativeIndexed() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+30:71-30:89 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllAssociativeIndexed | Method Doctrine\\DBAL\\Connection::fetchAllAssociativeIndexed() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+30:91-30:108 missingType.iterableValue L6 Doctrine\DBAL\Connection::fetchAllAssociativeIndexed | Method Doctrine\\DBAL\\Connection::fetchAllAssociativeIndexed() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+31:63-31:81 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateAssociative | Method Doctrine\\DBAL\\Connection::iterateAssociative() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+31:83-31:100 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateAssociative | Method Doctrine\\DBAL\\Connection::iterateAssociative() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+32:59-32:77 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateNumeric | Method Doctrine\\DBAL\\Connection::iterateNumeric() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+32:79-32:96 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateNumeric | Method Doctrine\\DBAL\\Connection::iterateNumeric() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+33:60-33:78 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateKeyValue | Method Doctrine\\DBAL\\Connection::iterateKeyValue() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+33:80-33:97 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateKeyValue | Method Doctrine\\DBAL\\Connection::iterateKeyValue() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+34:70-34:88 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateAssociativeIndexed | Method Doctrine\\DBAL\\Connection::iterateAssociativeIndexed() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+34:90-34:107 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateAssociativeIndexed | Method Doctrine\\DBAL\\Connection::iterateAssociativeIndexed() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+35:58-35:76 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateColumn | Method Doctrine\\DBAL\\Connection::iterateColumn() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+35:78-35:95 missingType.iterableValue L6 Doctrine\DBAL\Connection::iterateColumn | Method Doctrine\\DBAL\\Connection::iterateColumn() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+36:55-36:73 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeQuery | Method Doctrine\\DBAL\\Connection::executeQuery() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+36:75-36:92 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeQuery | Method Doctrine\\DBAL\\Connection::executeQuery() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+37:59-37:77 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeStatement | Method Doctrine\\DBAL\\Connection::executeStatement() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+37:79-37:96 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeStatement | Method Doctrine\\DBAL\\Connection::executeStatement() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+38:60-38:73 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeCacheQuery | Method Doctrine\\DBAL\\Connection::executeCacheQuery() has parameter $params with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+38:75-38:87 missingType.iterableValue L6 Doctrine\DBAL\Connection::executeCacheQuery | Method Doctrine\\DBAL\\Connection::executeCacheQuery() has parameter $types with no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+48:20-48:63 missingType.iterableValue L6 Doctrine\DBAL\Query\QueryBuilder::fetchAssociative | Method Doctrine\\DBAL\\Query\\QueryBuilder::fetchAssociative() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+49:20-49:60 missingType.iterableValue L6 Doctrine\DBAL\Query\QueryBuilder::fetchAllAssociative | Method Doctrine\\DBAL\\Query\\QueryBuilder::fetchAllAssociative() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type
+51:20-51:57 missingType.iterableValue L6 Doctrine\DBAL\Query\QueryBuilder::fetchFirstColumn | Method Doctrine\\DBAL\\Query\\QueryBuilder::fetchFirstColumn() return type has no value type specified in iterable type array.
+    tip: See: https://phpstan.org/blog/solving-phpstan-no-value-type-specified-in-iterable-type

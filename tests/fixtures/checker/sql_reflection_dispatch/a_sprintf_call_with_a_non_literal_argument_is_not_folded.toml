@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "a_sprintf_call_with_a_non_literal_argument_is_not_folded.sql"

@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "query_builder_execute_query_then_result_fetch_all_associative_resolves_via_the_chain.sql"

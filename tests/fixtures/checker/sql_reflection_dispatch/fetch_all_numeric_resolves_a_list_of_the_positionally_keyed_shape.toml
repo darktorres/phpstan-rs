@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "fetch_all_numeric_resolves_a_list_of_the_positionally_keyed_shape.sql"

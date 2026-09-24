@@ -1,0 +1,6 @@
+[[restricted_symbols]]
+allow_except_in_methods = ["Controller::handleRequest()"]
+class = "Controller"
+kind = "method"
+message = "redirect in startup() instead"
+name = "redirect"

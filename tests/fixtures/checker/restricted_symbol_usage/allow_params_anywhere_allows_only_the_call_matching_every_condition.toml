@@ -1,0 +1,8 @@
+[[restricted_symbols]]
+kind = "function"
+message = "use logging instead"
+name = "print_r"
+
+[[restricted_symbols.allow_params_anywhere]]
+position = 2
+value = true

@@ -1,0 +1,6 @@
+[[restricted_symbols]]
+allow_except_in_instance_of = ["HandlerInterface"]
+class = "Dispatcher"
+kind = "method"
+message = "module handles its own dispatch"
+name = "dispatch"

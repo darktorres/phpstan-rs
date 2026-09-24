@@ -1,0 +1,1 @@
+main.php:5:1-5:32 require.fileNotFound L0 <main> | Path in require() "<fixture>/lib/absent.php" is not a file or it does not exist.

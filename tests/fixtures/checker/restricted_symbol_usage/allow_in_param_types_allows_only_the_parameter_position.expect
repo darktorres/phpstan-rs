@@ -1,0 +1,3 @@
+4:45-4:64 constructor.unusedParameter L1 Foo::__construct | Constructor of class Foo has an unused parameter $service.
+6:28-6:44 restrictedSymbol.class L0 Foo::handle | Instantiation of restricted class OldService: use NewService instead
+8:40-8:50 restrictedSymbol.class L0 Foo::get | Return type references restricted class OldService: use NewService instead

@@ -1,0 +1,4 @@
+
+[sql_reflection]
+driver = "mysql"
+schema_file = "connection_fetch_one_resolves_the_first_selected_columns_own_type.sql"

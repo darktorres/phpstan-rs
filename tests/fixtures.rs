@@ -114,11 +114,11 @@ fn render(
                 d.identifier,
                 d.level,
                 d.location,
-                one_line(&d.message),
+                one_line(&portable(&d.message, base)),
             )
             .unwrap();
             if let Some(tip) = &d.tip {
-                writeln!(out, "    tip: {}", one_line(tip)).unwrap();
+                writeln!(out, "    tip: {}", one_line(&portable(tip, base))).unwrap();
             }
             if let Some(fix) = &d.fix {
                 writeln!(
@@ -139,6 +139,25 @@ fn render(
 
 fn one_line(text: &str) -> String {
     text.replace('\\', "\\\\").replace('\n', "\\n")
+}
+
+/// Messages that print absolute paths (e.g. an include's resolved path)
+/// name the fixture's directory as `<fixture>` and its ancestors as
+/// `<fixture>/..`, `<fixture>/../..`, so expectations don't depend on
+/// where the repository is checked out.
+fn portable(text: &str, base: &Path) -> String {
+    let mut out = text.to_string();
+    let mut placeholder = String::from("<fixture>");
+    let mut dir = Some(base);
+    while let Some(d) = dir {
+        let spelled = d.display().to_string();
+        if spelled.len() > 1 {
+            out = out.replace(&spelled, &placeholder);
+        }
+        placeholder.push_str("/..");
+        dir = d.parent();
+    }
+    out
 }
 
 fn diff(expected: &str, actual: &str) -> String {

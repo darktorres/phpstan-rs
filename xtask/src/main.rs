@@ -963,6 +963,20 @@ fn gates(args: &[String]) -> Result<(), String> {
 
 // --- fixture conversion ----------------------------------------------------
 
+/// A tab-separated table with its body rows sorted, header first.
+fn sorted_table(text: &str) -> String {
+    let mut lines = text.lines();
+    let header = lines.next().unwrap_or("");
+    let mut rows: Vec<&str> = lines.collect();
+    rows.sort();
+    let mut out = format!("{header}\n");
+    for row in rows {
+        out.push_str(row);
+        out.push('\n');
+    }
+    out
+}
+
 /// Builds `tests/fixtures/<area>/<module>/<test>[__<n>].php` (+ `.toml`,
 /// and an empty `.expect` for blessing) from the records the test
 /// helpers write under `PHPSTAN_RS_CAPTURE`, plus
@@ -988,8 +1002,20 @@ fn fixtures_convert(args: &[String]) -> Result<(), String> {
             .or_default() += 1;
     }
     let fixtures = root().join("tests/fixtures");
-    let mut mapping = String::from("test\tindex\tfixture\tfiltered\n");
-    let mut manual = String::from("test\tindex\treason\n");
+    // Rows for tests these records don't cover are kept, so a partial
+    // re-capture merges into the existing tables.
+    let captured: BTreeSet<&str> = records.iter().filter_map(|r| r["test"].as_str()).collect();
+    let keep_rows = |file: &str| -> String {
+        std::fs::read_to_string(fixtures.join(file))
+            .unwrap_or_default()
+            .lines()
+            .skip(1)
+            .filter(|line| !captured.contains(line.split('\t').next().unwrap_or("")))
+            .map(|line| format!("{line}\n"))
+            .collect()
+    };
+    let mut mapping = String::from("test\tindex\tfixture\tfiltered\n") + &keep_rows("MAPPING.tsv");
+    let mut manual = String::from("test\tindex\treason\n") + &keep_rows("MANUAL.tsv");
     let mut written = 0usize;
     for r in &records {
         let test = r["test"].as_str().unwrap_or("");
@@ -1049,6 +1075,16 @@ fn fixtures_convert(args: &[String]) -> Result<(), String> {
         } else {
             std::fs::write(base.with_extension("php"), source).map_err(|e| e.to_string())?;
         }
+        if let (Some(ddl), Some(driver)) = (r["sql_ddl"].as_str(), r["sql_driver"].as_str()) {
+            let schema = base.with_extension("sql");
+            std::fs::write(&schema, ddl).map_err(|e| e.to_string())?;
+            writeln!(
+                toml,
+                "\n[sql_reflection]\ndriver = \"{driver}\"\nschema_file = \"{}\"",
+                schema.file_name().unwrap().to_string_lossy()
+            )
+            .unwrap();
+        }
         let toml = toml.as_str();
         if !toml.is_empty() {
             std::fs::write(base.with_extension("toml"), toml).map_err(|e| e.to_string())?;
@@ -1066,8 +1102,10 @@ fn fixtures_convert(args: &[String]) -> Result<(), String> {
         .unwrap();
         written += 1;
     }
-    std::fs::write(fixtures.join("MAPPING.tsv"), mapping).map_err(|e| e.to_string())?;
-    std::fs::write(fixtures.join("MANUAL.tsv"), manual).map_err(|e| e.to_string())?;
+    std::fs::write(fixtures.join("MAPPING.tsv"), sorted_table(&mapping))
+        .map_err(|e| e.to_string())?;
+    std::fs::write(fixtures.join("MANUAL.tsv"), sorted_table(&manual))
+        .map_err(|e| e.to_string())?;
     eprintln!(
         "{written} fixture(s) written from {} record(s)",
         records.len()

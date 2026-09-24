@@ -1,0 +1,2 @@
+2:31-2:61 missingType.return L6 Db::query | Method Db::query() has no return type specified.
+3:15-3:28 attribute.notFound L0 Repo | attribute class AllowedLegacy does not exist

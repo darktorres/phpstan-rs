@@ -1,0 +1,4 @@
+[dynamic_constant_names]
+DEBUG = "bool"
+MODE = "'dev'|'prod'"
+"Settings::LEVEL" = "int"

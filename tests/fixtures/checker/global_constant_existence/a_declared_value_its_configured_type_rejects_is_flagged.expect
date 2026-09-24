@@ -1,0 +1,3 @@
+2:19-2:32 constant.value L2 <main> | Configuration defined type for constant DEBUG (bool) does not accept value 'yes'.
+3:13-3:38 constant.defineValue L2 <main> | Configuration defined type for constant MODE ('dev'|'prod') does not accept value 'staging'.
+4:36-4:50 classConstant.value L2 Settings | Configuration defined type for constant Settings::LEVEL (int) does not accept value 'high'.

@@ -1,0 +1,1 @@
+CREATE TABLE categories (name varchar(255));

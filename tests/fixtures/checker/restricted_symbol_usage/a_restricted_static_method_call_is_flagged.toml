@@ -1,0 +1,5 @@
+[[restricted_symbols]]
+class = "Db"
+kind = "staticMethod"
+message = "use the connection service"
+name = "query"

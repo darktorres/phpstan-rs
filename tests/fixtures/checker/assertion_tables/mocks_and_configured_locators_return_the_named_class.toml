@@ -1,0 +1,4 @@
+[[class_argument_returns]]
+class = "App\\Locator"
+method = "get"
+argument = 1

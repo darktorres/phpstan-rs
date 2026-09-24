@@ -209,7 +209,7 @@ fn malformed_toml_is_a_real_error_not_a_panic() {
 }
 
 #[test]
-fn dynamic_constant_names_accept_a_list_or_a_typed_table() {
+fn dynamic_constant_names_accept_a_list_a_typed_table_or_mixed_entries() {
     let list: crate::config::Config =
         toml::from_str(r#"dynamic_constant_names = ["DEBUG", "App\\Settings::LEVEL"]"#).unwrap();
     assert_eq!(
@@ -229,5 +229,16 @@ fn dynamic_constant_names_accept_a_list_or_a_typed_table() {
     assert_eq!(
         typed.dynamic_constant_names.unwrap().entries(),
         vec![("DEBUG".to_string(), Some("bool".to_string()))]
+    );
+    let mixed: crate::config::Config = toml::from_str(
+        r#"dynamic_constant_names = [{ name = "DEBUG" }, { name = "MODE", type = "'dev'|'prod'" }]"#,
+    )
+    .unwrap();
+    assert_eq!(
+        mixed.dynamic_constant_names.unwrap().entries(),
+        vec![
+            ("DEBUG".to_string(), None),
+            ("MODE".to_string(), Some("'dev'|'prod'".to_string())),
+        ]
     );
 }

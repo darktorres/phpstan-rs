@@ -1,0 +1,10 @@
+[[restricted_symbols]]
+allow_in_methods = ["Foo::allowed()"]
+class = "Logger"
+kind = "method"
+message = "use our own logger instead"
+name = "log"
+
+[[restricted_symbols.allow_except_params_in_allowed]]
+position = 1
+value = "dangerous"
