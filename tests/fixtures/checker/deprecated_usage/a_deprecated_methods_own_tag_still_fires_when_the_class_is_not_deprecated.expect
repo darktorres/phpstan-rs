@@ -1,1 +1,1 @@
-7:17-7:28 method.deprecated L0 f | Call to deprecated method Foo::bar().
+7:17-7:28 method.deprecated L0 f | Call to deprecated method bar() of class Foo.

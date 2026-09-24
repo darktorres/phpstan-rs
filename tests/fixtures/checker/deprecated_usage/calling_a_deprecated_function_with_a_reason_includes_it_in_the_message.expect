@@ -1,1 +1,1 @@
-4:13-4:22 function.deprecated L0 <main> | Call to deprecated function oldFunc() (use newFunc() instead).
+4:13-4:22 function.deprecated L0 <main> | Call to deprecated function oldFunc():\nuse newFunc() instead

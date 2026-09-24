@@ -1,1 +1,1 @@
-7:24-7:37 staticProperty.deprecated L0 f | Call to deprecated property Foo::$oldProp.
+7:24-7:37 staticProperty.deprecated L0 f | Access to deprecated static property $oldProp of class Foo.

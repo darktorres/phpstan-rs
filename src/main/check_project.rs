@@ -53,7 +53,7 @@ pub(crate) struct CheckProjectArgs {
     /// Enables `@deprecated` usage warnings (`function.deprecated`/
     /// `method.deprecated`/`staticMethod.deprecated`/
     /// `property.deprecated`/`staticProperty.deprecated`/
-    /// `classConstant.deprecated`/`new.deprecated` diagnostics) -
+    /// `classConstant.deprecated`/`new.deprecatedClass` diagnostics) -
     /// flags a call/access/instantiation whose own doc comment (or,
     /// for instantiation, the class's own doc comment) carries
     /// `@deprecated`. Off by default - real PHPStan's own equivalent

@@ -1,1 +1,1 @@
-7:22-7:41 staticMethod.deprecated L0 test | Call to deprecated method Foo::oldMethod().
+7:22-7:41 staticMethod.deprecated L0 test | Call to deprecated method oldMethod() of class Foo.

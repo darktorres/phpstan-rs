@@ -6,7 +6,7 @@
 //! a static method call (`staticMethod.deprecated`), an instance/static
 //! property access (`property.deprecated`/`staticProperty.deprecated`), a
 //! class-constant access (`classConstant.deprecated`), and instantiation
-//! (`new.deprecated`).
+//! (`new.deprecatedClass`).
 //!
 //! A class-level `@deprecated` cascades to every member usage - checked first, as
 //! its own separate branch, independently of whether the member itself
@@ -39,7 +39,7 @@ impl<'a> Checker<'a> {
         let Some(reason) = &sig.deprecated else {
             return;
         };
-        let message = deprecation_message(&format!("function {fqn}()"), reason);
+        let message = with_reason(&format!("Call to deprecated function {fqn}()."), reason);
         self.report(label.to_string(), message, span, 0, "function.deprecated");
     }
 
@@ -72,10 +72,9 @@ impl<'a> Checker<'a> {
             && let Some(reason) = &declaring_info.deprecated
         {
             let type_word = class_type_word(declaring_info.kind);
-            let static_word = if is_static { "static " } else { "" };
-            let message = cascade_deprecation_message(
+            let message = with_reason(
                 &format!(
-                    "Call to {static_word}method {method_name}() of deprecated {} {owner}.",
+                    "Call to method {method_name}() of deprecated {} {owner}.",
                     type_word.to_lowercase()
                 ),
                 reason,
@@ -93,10 +92,11 @@ impl<'a> Checker<'a> {
             return;
         };
         if method_name.eq_ignore_ascii_case("__toString") {
+            // Upstream's own wording keeps the full stop before the colon.
             let message = if reason.is_empty() {
                 format!("Casting class {owner} to string is deprecated.")
             } else {
-                format!("Casting class {owner} to string is deprecated:\n{reason}")
+                format!("Casting class {owner} to string is deprecated.:\n{reason}")
             };
             self.report(
                 label.to_string(),
@@ -107,7 +107,13 @@ impl<'a> Checker<'a> {
             );
             return;
         }
-        let message = deprecation_message(&format!("method {owner}::{method_name}()"), reason);
+        let message = with_reason(
+            &format!(
+                "Call to deprecated method {method_name}() of {} {owner}.",
+                self.class_type_word_of(owner)
+            ),
+            reason,
+        );
         self.report(
             label.to_string(),
             message,
@@ -141,7 +147,7 @@ impl<'a> Checker<'a> {
         {
             let type_word = class_type_word(declaring_info.kind);
             let static_word = if sig.is_static { "static " } else { "" };
-            let message = cascade_deprecation_message(
+            let message = with_reason(
                 &format!(
                     "Access to {static_word}property ${prop_name} of deprecated {} {owner}.",
                     type_word.to_lowercase()
@@ -160,7 +166,14 @@ impl<'a> Checker<'a> {
         let Some(reason) = &sig.deprecated else {
             return;
         };
-        let message = deprecation_message(&format!("property {owner}::${prop_name}"), reason);
+        let static_word = if sig.is_static { "static " } else { "" };
+        let message = with_reason(
+            &format!(
+                "Access to deprecated {static_word}property ${prop_name} of {} {owner}.",
+                self.class_type_word_of(owner)
+            ),
+            reason,
+        );
         self.report(
             label.to_string(),
             message,
@@ -187,7 +200,7 @@ impl<'a> Checker<'a> {
             && let Some(reason) = &declaring_info.deprecated
         {
             let type_word = class_type_word(declaring_info.kind);
-            let message = cascade_deprecation_message(
+            let message = with_reason(
                 &format!(
                     "Fetching class constant {const_name} of deprecated {} {owner}.",
                     type_word.to_lowercase()
@@ -206,7 +219,13 @@ impl<'a> Checker<'a> {
         let Some(reason) = &sig.deprecated else {
             return;
         };
-        let message = deprecation_message(&format!("constant {owner}::{const_name}"), reason);
+        let message = with_reason(
+            &format!(
+                "Fetching deprecated class constant {const_name} of {} {owner}.",
+                self.class_type_word_of(owner)
+            ),
+            reason,
+        );
         self.report(
             label.to_string(),
             message,
@@ -216,9 +235,11 @@ impl<'a> Checker<'a> {
         );
     }
 
-    /// `new.deprecated` - instantiation (`new Foo()`) of a class whose own
-    /// docblock carries `@deprecated`. Independent of whether any of its
-    /// members are individually tagged too.
+    /// `new.deprecatedClass` - instantiation (`new Foo()`) of a class whose
+    /// own docblock carries `@deprecated`, worded as phpstan-deprecation-
+    /// rules' `RestrictedDeprecatedClassNameUsageExtension` does.
+    /// Independent of whether any of its members are individually tagged
+    /// too.
     pub(crate) fn check_deprecated_instantiation(&mut self, class: &str, span: Span, label: &str) {
         if !self.registry.check_deprecated_usage || self.current_scope_deprecated {
             return;
@@ -229,37 +250,33 @@ impl<'a> Checker<'a> {
         let Some(reason) = &info.deprecated else {
             return;
         };
-        let message = if reason.is_empty() {
-            format!("Instantiation of deprecated class {class}.")
-        } else {
-            format!("Instantiation of deprecated class {class} ({reason}).")
-        };
-        self.report(label.to_string(), message, span, 0, "new.deprecated");
+        let message = with_reason(
+            &format!("Instantiation of deprecated class {class}."),
+            reason,
+        );
+        self.report(label.to_string(), message, span, 0, "new.deprecatedClass");
     }
 }
 
-/// `subject` is already `"function foo()"`/`"method Foo::bar()"` -
-/// `reason` is `FunctionSig::deprecated`'s own `Some(String)` payload,
-/// possibly empty (a bare `@deprecated` with no reason given).
-fn deprecation_message(subject: &str, reason: &str) -> String {
-    if reason.is_empty() {
-        format!("Call to deprecated {subject}.")
-    } else {
-        format!("Call to deprecated {subject} ({reason}).")
-    }
-}
-
-/// The declaring-class cascade's own message shape - `sentence`
-/// is already a complete, period-terminated sentence (e.g. `"Call to
-/// method foo() of deprecated class Bar."`), matching real PHPStan's own
-/// `RestrictedDeprecated*UsageExtension` messages, which append the
-/// class's own deprecation description as a *new* line (`:\n{description}`)
-/// rather than a parenthetical - a different shape from `deprecation_message`'s
-/// own `(reason)` suffix, which is for a *member's own* tag, not a cascade.
-fn cascade_deprecation_message(sentence: &str, reason: &str) -> String {
+/// A deprecation message as phpstan-deprecation-rules words it: the
+/// sentence alone, or, when the `@deprecated` tag gives a reason, the
+/// sentence without its full stop, a colon and the reason on a new line.
+fn with_reason(sentence: &str, reason: &str) -> String {
     if reason.is_empty() {
         sentence.to_string()
     } else {
-        format!("{sentence}\n{reason}")
+        format!("{}:\n{reason}", sentence.trim_end_matches('.'))
+    }
+}
+
+impl Checker<'_> {
+    /// `ClassReflection::getClassTypeDescription()` lowercased: `class`,
+    /// `interface`, `trait` or `enum`.
+    fn class_type_word_of(&self, class: &str) -> String {
+        self.registry
+            .classes
+            .get(class)
+            .map_or("class", |info| class_type_word(info.kind))
+            .to_lowercase()
     }
 }
