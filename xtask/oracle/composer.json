@@ -1,0 +1,12 @@
+{
+    "description": "The real PHPStan that `cargo xtask oracle` compares the fixture suite against, pinned to the vendor/phpstan-src submodule's release.",
+    "require": {
+        "phpstan/phpstan": "2.2.11",
+        "phpstan/phpstan-strict-rules": "^2.0",
+        "phpstan/phpstan-deprecation-rules": "^2.0"
+    },
+    "config": {
+        "vendor-dir": "../../target/oracle/vendor",
+        "sort-packages": true
+    }
+}
