@@ -451,7 +451,7 @@ impl Parser {
 
     pub(crate) fn parse_unary_inner(&mut self) -> Result<Expr, ParseError> {
         let start = self.current_pos();
-        if let Some((cast_ty, deprecated_spelling)) = self.try_parse_cast() {
+        if let Some(spelling) = self.try_parse_cast() {
             let operand_start = self.current_pos();
             let operand = self.parse_unary()?;
             // Same real-PHP "assignment as a bare operand" idiom as
@@ -461,10 +461,7 @@ impl Parser {
             // `((int)$v) = 5` (which isn't even a valid assignment
             // target).
             let operand = self.parse_assignment_tail(operand, operand_start)?;
-            return Ok(self.expr(
-                ExprKind::Cast(cast_ty, Box::new(operand), deprecated_spelling),
-                start,
-            ));
+            return Ok(self.expr(ExprKind::Cast(spelling, Box::new(operand)), start));
         }
 
         let op = match self.peek() {
@@ -491,38 +488,17 @@ impl Parser {
     /// `(int)`, `(string)`, etc: a cast is only distinguishable from a
     /// parenthesized expression by 3-token lookahead - `(`, a known cast
     /// keyword, `)` - with nothing else it could be.
-    pub(crate) fn try_parse_cast(&mut self) -> Option<(String, bool)> {
+    pub(crate) fn try_parse_cast(&mut self) -> Option<CastSpelling> {
         if !matches!(self.peek(), Token::LParen) {
             return None;
         }
-        let name = match self.peek_at(1) {
-            Token::Identifier(s) => s.to_ascii_lowercase(),
+        let spelling = match self.peek_at(1) {
+            Token::Identifier(s) => CastSpelling::from_name(s)?,
             // `array` is the one cast name that's also a language keyword
             // (`array(...)`, type hints) rather than a plain identifier -
             // every other cast name (int, string, object, unset, ...)
             // isn't reserved at all.
-            Token::Keyword(Keyword::Array) => "array".to_string(),
-            _ => return None,
-        };
-        // The bool is `DeprecatedCastRule`'s own non-canonical-spelling
-        // flag - see `ExprKind::Cast`'s own doc comment for exactly which
-        // spellings this covers (and which one it deliberately doesn't).
-        let (normalized, deprecated_spelling) = match name.as_str() {
-            "int" => ("int", false),
-            "integer" => ("int", true),
-            "float" | "real" => ("float", false),
-            "double" => ("float", true),
-            "string" => ("string", false),
-            "binary" => ("string", true),
-            "bool" => ("bool", false),
-            "boolean" => ("bool", true),
-            "array" => ("array", false),
-            "object" => ("object", false),
-            "unset" => ("unset", false),
-            // `(void)` - a real, legal cast (discards the value; unlike
-            // every other cast here it doesn't even change the type),
-            // distinct from `void` the return-type keyword.
-            "void" => ("void", false),
+            Token::Keyword(Keyword::Array) => CastSpelling::Array,
             _ => return None,
         };
         if !matches!(self.peek_at(2), Token::RParen) {
@@ -531,7 +507,7 @@ impl Parser {
         self.skip(); // (
         self.skip(); // type identifier
         self.skip(); // )
-        Some((normalized.to_string(), deprecated_spelling))
+        Some(spelling)
     }
 
     pub(crate) fn parse_pow(&mut self) -> Result<Expr, ParseError> {

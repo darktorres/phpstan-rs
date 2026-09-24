@@ -46,7 +46,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::Unary(UnaryOp::Neg, inner) => self.numeric_literal_value(inner).map(|v| -v),
             ExprKind::Unary(UnaryOp::Plus, inner) => self.numeric_literal_value(inner),
-            ExprKind::Cast(target, inner, _) if target == "string" => {
+            ExprKind::Cast(cast, inner) if cast.kind() == CastKind::String => {
                 self.numeric_literal_value(inner)
             }
             ExprKind::Grouping(inner) => self.numeric_literal_value(inner),

@@ -193,17 +193,17 @@ impl<'a> Checker<'a> {
                 }
                 _ => Type::Mixed(false),
             },
-            ExprKind::Cast(kind, _, _) => match kind.as_str() {
-                "int" => Type::Int,
-                "float" => Type::Float,
-                "string" => Type::String,
-                "bool" => Type::Bool,
-                "array" => Type::Array(
+            ExprKind::Cast(cast, _) => match cast.kind() {
+                CastKind::Int => Type::Int,
+                CastKind::Float => Type::Float,
+                CastKind::String => Type::String,
+                CastKind::Bool => Type::Bool,
+                CastKind::Array => Type::Array(
                     Box::new(Type::unknown_array_key()),
                     Box::new(Type::Mixed(false)),
                 ),
-                "unset" => Type::Null,
-                _ => Type::Mixed(false),
+                CastKind::Unset => Type::Null,
+                CastKind::Object | CastKind::Void => Type::Mixed(false),
             },
             ExprKind::New(..) => match self.infer_expr(e, locals) {
                 Type::Object(class, _) => Type::Object(class, Vec::new()),

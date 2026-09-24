@@ -13,6 +13,7 @@
 //! `bool` arm can never actually fire and isn't worth a coercion method
 //! of its own.
 
+use crate::ast::{CastKind, CastSpelling};
 use crate::checker::{Checker, union_types};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::token::Span;
@@ -144,15 +145,15 @@ impl<'a> Checker<'a> {
     /// scalar-coercion casts it names).
     pub(crate) fn check_cast_validity(
         &mut self,
-        cast_ty: &str,
+        cast: CastKind,
         inner_ty: &Type,
         span: Span,
         label: &str,
     ) {
-        let (result, identifier, target_name) = match cast_ty {
-            "int" => (self.type_to_integer(inner_ty), "cast.int", "int"),
-            "float" => (self.type_to_float(inner_ty), "cast.double", "float"),
-            "string" => (self.type_to_string(inner_ty), "cast.string", "string"),
+        let (result, identifier, target_name) = match cast {
+            CastKind::Int => (self.type_to_integer(inner_ty), "cast.int", "int"),
+            CastKind::Float => (self.type_to_float(inner_ty), "cast.double", "float"),
+            CastKind::String => (self.type_to_string(inner_ty), "cast.string", "string"),
             _ => return,
         };
         if result.is_some() {
@@ -227,31 +228,30 @@ impl<'a> Checker<'a> {
     /// Real PHPStan's `DeprecatedCastRule` (`cast.deprecated`) - the
     /// four non-canonical cast spellings (`(integer)`, `(boolean)`,
     /// `(double)`, `(binary)`) are deprecated as of PHP 8.5; `(real)`
-    /// isn't flagged either, faithfully matching real PHPStan's own gap
-    /// (see `ExprKind::Cast`'s doc comment). `cast_ty` is the already-
-    /// normalized target (`"int"`/`"float"`/`"string"`/`"bool"`), which
-    /// uniquely determines which deprecated spelling produced it - the
-    /// parser only ever sets the `deprecated_spelling` flag this is
-    /// gated on for exactly those four normalized targets.
+    /// isn't flagged, matching real PHPStan (its rule only knows
+    /// `KIND_DOUBLE`).
     pub(crate) fn check_deprecated_cast_spelling(
         &mut self,
-        cast_ty: &str,
+        cast: CastSpelling,
         span: Span,
         label: &str,
     ) {
+        if !matches!(
+            cast,
+            CastSpelling::Integer
+                | CastSpelling::Double
+                | CastSpelling::Binary
+                | CastSpelling::Boolean
+        ) {
+            return;
+        }
         let Some(version) = self.registry.php_version else {
             return;
         };
         if !crate::php_version::PhpFeature::DeprecatedNonStandardCasts.is_available(version) {
             return;
         }
-        let (spelling, canonical) = match cast_ty {
-            "int" => ("integer", "int"),
-            "float" => ("double", "float"),
-            "string" => ("binary", "string"),
-            "bool" => ("boolean", "bool"),
-            _ => return,
-        };
+        let (spelling, canonical) = (cast.keyword(), cast.kind().keyword());
         self.report(
             label.to_string(),
             format!(

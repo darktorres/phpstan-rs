@@ -737,6 +737,101 @@ impl StaticTarget {
     }
 }
 
+/// A cast's target, as the type it converts to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastKind {
+    Int,
+    Float,
+    String,
+    Bool,
+    Array,
+    Object,
+    Unset,
+    /// `(void)` (PHP 8.5): discards the value.
+    Void,
+}
+
+impl CastKind {
+    /// The canonical spelling, as written between the parentheses.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            CastKind::Int => "int",
+            CastKind::Float => "float",
+            CastKind::String => "string",
+            CastKind::Bool => "bool",
+            CastKind::Array => "array",
+            CastKind::Object => "object",
+            CastKind::Unset => "unset",
+            CastKind::Void => "void",
+        }
+    }
+}
+
+/// A cast exactly as spelled (`(integer)` and `(int)` are the same cast).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CastSpelling {
+    Int,
+    Integer,
+    Float,
+    Real,
+    Double,
+    String,
+    Binary,
+    Bool,
+    Boolean,
+    Array,
+    Object,
+    Unset,
+    Void,
+}
+
+impl CastSpelling {
+    /// Recognizes a cast name (any case), `None` if it isn't one.
+    pub fn from_name(name: &str) -> Option<CastSpelling> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "int" => CastSpelling::Int,
+            "integer" => CastSpelling::Integer,
+            "float" => CastSpelling::Float,
+            "real" => CastSpelling::Real,
+            "double" => CastSpelling::Double,
+            "string" => CastSpelling::String,
+            "binary" => CastSpelling::Binary,
+            "bool" => CastSpelling::Bool,
+            "boolean" => CastSpelling::Boolean,
+            "array" => CastSpelling::Array,
+            "object" => CastSpelling::Object,
+            "unset" => CastSpelling::Unset,
+            "void" => CastSpelling::Void,
+            _ => return None,
+        })
+    }
+
+    pub fn kind(self) -> CastKind {
+        match self {
+            CastSpelling::Int | CastSpelling::Integer => CastKind::Int,
+            CastSpelling::Float | CastSpelling::Real | CastSpelling::Double => CastKind::Float,
+            CastSpelling::String | CastSpelling::Binary => CastKind::String,
+            CastSpelling::Bool | CastSpelling::Boolean => CastKind::Bool,
+            CastSpelling::Array => CastKind::Array,
+            CastSpelling::Object => CastKind::Object,
+            CastSpelling::Unset => CastKind::Unset,
+            CastSpelling::Void => CastKind::Void,
+        }
+    }
+
+    /// The spelling as written between the parentheses, lowercased.
+    pub fn keyword(self) -> &'static str {
+        match self {
+            CastSpelling::Integer => "integer",
+            CastSpelling::Real => "real",
+            CastSpelling::Double => "double",
+            CastSpelling::Binary => "binary",
+            CastSpelling::Boolean => "boolean",
+            other => other.kind().keyword(),
+        }
+    }
+}
+
 /// An expression, plus the real source span it occupies - see `Stmt`'s
 /// equivalent doc comment.
 #[derive(Debug, Clone)]
@@ -818,14 +913,7 @@ pub enum ExprKind {
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
     Instanceof(Box<Expr>, InstanceofTarget),
-    // Cast target is normalized to one of: int, float, string, bool,
-    // array, object, unset. The trailing `bool` is `DeprecatedCastRule`'s
-    // own concern only: true for the four non-canonical spellings PHP
-    // 8.5 deprecates - `(integer)`, `(boolean)`, `(double)`, `(binary)` -
-    // false for every canonical spelling (including `(real)`, which real
-    // PHPStan's own `DeprecatedCastRule` never flags either, a faithful
-    // gap - see its own `KIND_FLOAT`-vs-`KIND_DOUBLE`-only check).
-    Cast(String, Box<Expr>, bool),
+    Cast(CastSpelling, Box<Expr>),
     Grouping(Box<Expr>),
     // `clone $x` / PHP 8.5's `clone($x, $overrides)` (the second field is
     // the property-overrides array, when present). Both produce an object

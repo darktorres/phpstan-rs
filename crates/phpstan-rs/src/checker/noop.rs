@@ -14,7 +14,7 @@
 //! naming the expression) only when the statement assigns nothing.
 //! Calls and `new` are left to `check_pure_call_without_effect`.
 
-use crate::ast::{BinOp, Expr, ExprKind, FunctionDecl, UnaryOp};
+use crate::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
@@ -108,7 +108,7 @@ impl<'a> Checker<'a> {
             }
             ExprKind::DynamicPropertyAccess(..) => true,
             ExprKind::Index(base, _) => !self.offset_read_is_plain(&self.infer_expr(base, locals)),
-            ExprKind::Cast(target, operand, _) if target == "string" => {
+            ExprKind::Cast(cast, operand) if cast.kind() == CastKind::String => {
                 self.may_be_stringable_object(&self.infer_expr(operand, locals))
             }
             ExprKind::Binary(BinOp::Concat, l, r) => [l, r]

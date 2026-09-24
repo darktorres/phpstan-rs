@@ -360,7 +360,7 @@ impl<'a> Walker<'a> {
                     .build(),
                 );
             }
-            ExprKind::Cast(target, _, _) if target == "float" && self.float_banned() => {
+            ExprKind::Cast(cast, _) if cast.kind() == CastKind::Float && self.float_banned() => {
                 self.out.push(
                     DiagnosticBuilder::new(
                         "<main>".to_string(),

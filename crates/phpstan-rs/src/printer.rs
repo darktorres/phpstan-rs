@@ -346,9 +346,9 @@ fn write_expr(out: &mut String, e: &Expr) {
                 InstanceofTarget::Expr(inner) => write_expr(out, inner),
             }
         }
-        ExprKind::Cast(ty, operand, _) => {
+        ExprKind::Cast(cast, operand) => {
             out.push('(');
-            out.push_str(ty);
+            out.push_str(cast.keyword());
             out.push_str(") ");
             write_expr(out, operand);
         }

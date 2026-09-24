@@ -1798,38 +1798,24 @@ impl<'a> Checker<'a> {
                 to_bitwise_not(&inner_ty).unwrap_or(inner_ty)
             }
             ExprKind::Grouping(inner) => self.check_expr(inner, locals, label),
-            ExprKind::Cast(ty, inner, deprecated_spelling) => {
+            ExprKind::Cast(cast, inner) => {
                 let inner_ty = self.check_expr(inner, locals, label);
-                self.check_cast_validity(ty, &inner_ty, inner.span, label);
-                if ty == "unset" {
+                self.check_cast_validity(cast.kind(), &inner_ty, inner.span, label);
+                if cast.kind() == CastKind::Unset {
                     self.check_unset_cast_supported(e.span, label);
                 }
-                if ty == "void" {
+                if cast.kind() == CastKind::Void {
                     self.check_void_cast(e.span, label, is_bare_statement);
                 }
-                if *deprecated_spelling {
-                    self.check_deprecated_cast_spelling(ty, e.span, label);
-                }
+                self.check_deprecated_cast_spelling(*cast, e.span, label);
                 // An implicit `(string)` cast of an object triggers a
                 // real `__toString()` call - see
                 // `check_implicit_tostring_usage`'s doc comment.
-                if ty == "string" {
+                if cast.kind() == CastKind::String {
                     self.check_implicit_tostring_usage(&inner_ty, e.span, label);
                 }
-                let cast_ty = match ty.as_str() {
-                    "int" => Type::Int,
-                    "float" => Type::Float,
-                    "string" => Type::String,
-                    "bool" => Type::Bool,
-                    "array" => Type::Array(
-                        Box::new(Type::unknown_array_key()),
-                        Box::new(Type::Mixed(false)),
-                    ),
-                    "object" => Type::Object("object".to_string(), Vec::new()),
-                    "unset" => Type::Null,
-                    _ => Type::Mixed(false),
-                };
-                if self.registry.check_useless_casts && ty != "void" {
+                let cast_ty = cast_result_type(cast.kind());
+                if self.registry.check_useless_casts && cast.kind() != CastKind::Void {
                     self.check_useless_cast(&cast_ty, &inner_ty, e.span, label);
                 }
                 cast_ty
@@ -4649,19 +4635,7 @@ impl<'a> Checker<'a> {
             ExprKind::Throw(_) => Type::Never,
             ExprKind::NewAnonymousClass(..) => self.anonymous_class_type(e.span),
             ExprKind::ShellExec(inner) => self.infer_expr(inner, locals),
-            ExprKind::Cast(ty, _, _) => match ty.as_str() {
-                "int" => Type::Int,
-                "float" => Type::Float,
-                "string" => Type::String,
-                "bool" => Type::Bool,
-                "array" => Type::Array(
-                    Box::new(Type::unknown_array_key()),
-                    Box::new(Type::Mixed(false)),
-                ),
-                "object" => Type::Object("object".to_string(), Vec::new()),
-                "unset" => Type::Null,
-                _ => Type::Mixed(false),
-            },
+            ExprKind::Cast(cast, _) => cast_result_type(cast.kind()),
             ExprKind::Unary(UnaryOp::Not, _) => Type::Bool,
             // Real PHP's unary minus/plus convert a numeric string
             // operand to a number (`-"5"` is `int(-5)`, not `"-5"`) -
@@ -6394,6 +6368,23 @@ fn is_false_literal(e: &Expr) -> bool {
 /// `true`, unlike `$preserve_keys`'s "omitted or `false`" default).
 fn is_true_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
+}
+
+/// The type a cast of this kind produces.
+fn cast_result_type(kind: CastKind) -> Type {
+    match kind {
+        CastKind::Int => Type::Int,
+        CastKind::Float => Type::Float,
+        CastKind::String => Type::String,
+        CastKind::Bool => Type::Bool,
+        CastKind::Array => Type::Array(
+            Box::new(Type::unknown_array_key()),
+            Box::new(Type::Mixed(false)),
+        ),
+        CastKind::Object => Type::Object("object".to_string(), Vec::new()),
+        CastKind::Unset => Type::Null,
+        CastKind::Void => Type::Mixed(false),
+    }
 }
 
 /// Doctrine's `AbstractQuery::getResult()` (and every real terminal
