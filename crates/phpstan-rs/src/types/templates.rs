@@ -271,6 +271,6 @@ fn substitute(
         // conditional return type's branches (`subject` is a raw
         // parameter name, not a `Type`, so there's nothing to substitute
         // there).
-        _ => ty.map_children(&mut |t| substitute(t, bindings, to_bound)),
+        _ => super::late::settle(ty.map_children(&mut |t| substitute(t, bindings, to_bound))),
     }
 }

@@ -1211,7 +1211,9 @@ fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
 /// of types, which never contain it.
 pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
     match ty {
-        Type::ValueOf(_) | Type::ClassConstant { .. } => true,
+        Type::ValueOf(_) | Type::KeyOf(_) | Type::OffsetAccess(..) | Type::ClassConstant { .. } => {
+            true
+        }
         _ => ty.any_child(type_contains_deferred_value_of),
     }
 }
@@ -1232,6 +1234,9 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
         Type::ClassConstant { class, pattern } => {
             resolve_class_const_type(&class, &pattern, classes)
         }
+        late @ (Type::KeyOf(_) | Type::OffsetAccess(..)) => crate::types::settle(
+            late.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
+        ),
         other => other.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
     }
 }

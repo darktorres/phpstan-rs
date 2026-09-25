@@ -19,6 +19,14 @@ impl Registry {
     /// which has no notion of class context.
     pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
+            // A `key-of<T>`/`T[K]` still over a template is what `T`'s
+            // bound makes it.
+            (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
+                self.is_assignable(&types::resolve_late_to_bounds(sub), sup)
+            }
+            (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
+                self.is_assignable(sub, &types::resolve_late_to_bounds(sup))
+            }
             // The native `object` type hint is satisfied by *any* class
             // instance - an extremely common pattern, e.g. Doctrine's
             // `EntityRepository<T of object>` - and satisfies no

@@ -113,6 +113,8 @@ impl fmt::Display for Type {
             // form if it ever isn't (an unknown class).
             Type::ClassConstant { class, pattern } => write!(f, "{class}::{pattern}"),
             Type::ValueOf(inner) => write!(f, "value-of<{inner}>"),
+            Type::KeyOf(inner) => write!(f, "key-of<{inner}>"),
+            Type::OffsetAccess(base, key) => write!(f, "{base}[{key}]"),
             Type::Object(name, args) => {
                 let name = match name.as_str() {
                     "$$self" => "self",

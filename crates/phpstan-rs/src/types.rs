@@ -4,12 +4,14 @@ pub use syntax::ast::ClassKind;
 
 mod conditional;
 mod display;
+mod late;
 mod parse;
 mod subtype;
 mod templates;
 
 pub use conditional::resolve_conditional;
 pub(crate) use conditional::{conditional_branch, union_of_branches};
+pub(crate) use late::{contains_late, resolve_late_to_bounds, settle};
 pub use parse::parse_type_string;
 pub(crate) use parse::{
     canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance,
@@ -172,6 +174,12 @@ pub enum Type {
     // a class-constant reference or a template - resolved once the
     // registry exists (`Registry::resolve_deferred_value_of`).
     ValueOf(Box<Type>),
+    // `key-of<T>` over a `T` not known yet (a template): resolved once
+    // `T` is bound (`types::resolve_late`).
+    KeyOf(Box<Type>),
+    // `T['key']` (PHPStan's `OffsetAccessType`) over a `T` not known yet:
+    // the base, and the offset as its literal key type.
+    OffsetAccess(Box<Type>, Box<Type>),
     // `Foo::BAR`/`Foo::BAR_*` (real PHPStan's `ConstTypeNode`, a `*`
     // matching any run of characters): the type of the matching class
     // constants, resolved once the registry exists.
@@ -245,6 +253,8 @@ impl PartialEq for Type {
             (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
             (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
             (Type::ValueOf(a), Type::ValueOf(b)) => a == b,
+            (Type::KeyOf(a), Type::KeyOf(b)) => a == b,
+            (Type::OffsetAccess(ab, ak), Type::OffsetAccess(bb, bk)) => ab == bb && ak == bk,
             (
                 Type::ClassConstant {
                     class: ac,
@@ -503,6 +513,10 @@ impl Type {
                 Type::ReflectedMember(Box::new(f(owner)), member.clone())
             }
             Type::ValueOf(inner) => Type::ValueOf(Box::new(f(inner))),
+            Type::KeyOf(inner) => Type::KeyOf(Box::new(f(inner))),
+            Type::OffsetAccess(base, key) => {
+                Type::OffsetAccess(Box::new(f(base)), Box::new(f(key)))
+            }
             Type::ClassConstant { class, pattern } => Type::ClassConstant {
                 class: Box::new(f(class)),
                 pattern: pattern.clone(),
@@ -539,7 +553,12 @@ impl Type {
             | Type::HasOffsetValue(_, inner)
             | Type::ReflectedMember(inner, _)
             | Type::ValueOf(inner)
+            | Type::KeyOf(inner)
             | Type::ClassConstant { class: inner, .. } => f(inner),
+            Type::OffsetAccess(base, key) => {
+                f(base);
+                f(key);
+            }
             Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
                 for (_, t, _) in fields {
                     f(t);

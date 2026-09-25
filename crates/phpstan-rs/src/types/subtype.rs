@@ -99,6 +99,14 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
     match (sub, sup) {
         (_, Type::Mixed(_)) => true,
         (Type::Never, _) => true,
+        // A `key-of<T>`/`T[K]` still over a template is what `T`'s bound
+        // makes it.
+        (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
+            is_subtype(&crate::types::resolve_late_to_bounds(sub), sup)
+        }
+        (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
+            is_subtype(sub, &crate::types::resolve_late_to_bounds(sup))
+        }
         // `Type` derives plain structural `PartialEq`, so the
         // `a == b` fast path just below is `false` for `FloatLiteral
         // (f64::NAN)` compared to itself (Rust's own `f64: PartialEq`

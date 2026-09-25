@@ -323,8 +323,8 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         return false;
     }
     match m {
-        // A class reference can't be verified this early. A `ValueOf`/
-        // `ClassConstant` is trusted the same way - `Registry::
+        // A class reference can't be verified this early. A late-
+        // resolvable type or a `ClassConstant` is trusted the same way - `Registry::
         // resolve_deferred_value_of`'s own later, whole-registry pass
         // (see its own doc comment) restores the "fall back to native
         // when the resolved doc type turns out to be Mixed" behavior this
@@ -333,6 +333,8 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         Type::Object(_, _)
         | Type::ObjectWithoutClass
         | Type::ValueOf(_)
+        | Type::KeyOf(_)
+        | Type::OffsetAccess(..)
         | Type::ClassConstant { .. } => true,
         // `@return static` under a native `self`/`static`/class hint: the
         // late-bound class is always an instance of the declaring one.

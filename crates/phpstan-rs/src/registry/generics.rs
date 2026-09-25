@@ -206,9 +206,9 @@ impl Registry {
                 .and_then(|b| b.get(&tp.name))
                 .cloned()
                 .unwrap_or_else(|| ty.clone()),
-            _ => ty.map_children(&mut |t| {
+            _ => types::settle(ty.map_children(&mut |t| {
                 Registry::substitute_class_scoped_ancestor_templates(t, ancestor_bindings)
-            }),
+            })),
         }
     }
 }

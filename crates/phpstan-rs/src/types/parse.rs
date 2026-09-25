@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::types::{AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Type};
+use crate::types::{
+    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Type, late,
+};
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
 /// `"int|string"`, `"\App\Foo"`, `"Countable&Iterator"`, or a PHPDoc type
@@ -536,43 +538,6 @@ fn strip_shape_key_quotes(key: &str) -> &str {
     key
 }
 
-/// Real PHPStan's own `OffsetAccessType::getResult()`: extracts `key`'s
-/// value type out of `base`. Only the shapes that come up in practice
-/// are resolved (`ArrayShape`/`ObjectShape`'s per-field lookup, a plain
-/// `Array`'s uniform value type, `Union` recursing member-wise);
-/// anything else falls back to `Mixed`.
-fn offset_access_type(base: &Type, key: &str) -> Type {
-    match base {
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => fields
-            .iter()
-            .find(|(k, _, _)| k == key)
-            .map(|(_, v, _)| v.clone())
-            .unwrap_or(Type::Mixed(false)),
-        Type::Array(_, value_ty) => (**value_ty).clone(),
-        Type::Union(members) => {
-            let resolved: Vec<Type> = members.iter().map(|m| offset_access_type(m, key)).collect();
-            match resolved.len() {
-                0 => Type::Mixed(false),
-                1 => resolved.into_iter().next().unwrap(),
-                _ => Type::Union(resolved),
-            }
-        }
-        _ => Type::Mixed(false),
-    }
-}
-
-/// `key-of<array{foo: string, 5: int}>`'s own per-field answer - a
-/// shape's field name is always stored as a plain `String` (see
-/// `ArrayShape`'s doc comment), so a field name that parses as an
-/// integer names an int key, matching PHP's own key-canonicalization
-/// rule.
-fn shape_key_literal(name: &str) -> Type {
-    match canonical_int_key(name) {
-        Some(n) => Type::IntLiteral(n),
-        None => Type::StringLiteral(name.to_string()),
-    }
-}
-
 /// Real PHP's own array-key canonicalization rule for a string key,
 /// mirroring `ConstantStringType::toArrayKey()`: `Some(n)` exactly when
 /// `key` is a "canonical decimal integer" string - an optional single
@@ -770,7 +735,16 @@ fn parse_type_atom(s: &str) -> Type {
             let base_part = s[..open].trim();
             let key = strip_shape_key_quotes(key_part);
             let base_ty = parse_type_string(base_part);
-            let mut ty = offset_access_type(&base_ty, key);
+            let key_ty = late::shape_key_literal(key);
+            let mut ty = match late::offset_access(&base_ty, &key_ty) {
+                Some(ty) => ty,
+                // Possibly a template, known once `mark_template_params`
+                // runs; resolved when a call binds it.
+                None if matches!(&base_ty, Type::Object(_, args) if args.is_empty()) => {
+                    Type::OffsetAccess(Box::new(base_ty), Box::new(key_ty))
+                }
+                None => Type::Mixed(false),
+            };
             for _ in 0..array_depth {
                 ty = Type::Array(Box::new(Type::benevolent_array_key()), Box::new(ty));
             }
@@ -1020,20 +994,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `Registry::resolve_deferred_value_of`.
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
-                Type::Array(_, value) => *value,
-                // The unsealed-shape sentinel is never a real field -
-                // filtered out before counting/collecting, the same way
-                // `registry::is_assignable`'s `ArrayShape` arms do.
-                Type::ArrayShape(fields) => {
-                    let fields: Vec<_> = fields
-                        .into_iter()
-                        .filter(|(name, _, _)| name != "...")
-                        .collect();
-                    match fields.len() {
-                        0 => Type::Never,
-                        1 => fields.into_iter().next().unwrap().1,
-                        _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
-                    }
+                ty @ (Type::Array(..) | Type::ArrayShape(_)) => {
+                    late::value_of(&ty).unwrap_or(Type::Mixed(false))
                 }
                 Type::Object(name, args) if args.is_empty() => {
                     Type::ValueOf(Box::new(Type::Object(name, args)))
@@ -1045,22 +1007,12 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         },
         "key-of" => match generic_args {
             [single] => match parse_type_string(single) {
-                Type::Array(key, _) => *key,
-                Type::ArrayShape(fields) => {
-                    let fields: Vec<_> = fields
-                        .into_iter()
-                        .filter(|(name, _, _)| name != "...")
-                        .collect();
-                    match fields.len() {
-                        0 => Type::Never,
-                        1 => shape_key_literal(&fields[0].0),
-                        _ => Type::Union(
-                            fields
-                                .iter()
-                                .map(|(name, _, _)| shape_key_literal(name))
-                                .collect(),
-                        ),
-                    }
+                ty @ (Type::Array(..) | Type::ArrayShape(_)) => {
+                    late::key_of(&ty).unwrap_or(Type::Mixed(false))
+                }
+                // Possibly a template: kept until a call binds it.
+                Type::Object(name, args) if args.is_empty() => {
+                    Type::KeyOf(Box::new(Type::Object(name, args)))
                 }
                 _ => Type::Mixed(false),
             },

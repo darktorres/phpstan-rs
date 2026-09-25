@@ -290,7 +290,7 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
                 ),
             }
         }
-        _ => ty.map_children(&mut |t| substitute_scoped(t, bindings, scope)),
+        _ => crate::types::settle(ty.map_children(&mut |t| substitute_scoped(t, bindings, scope))),
     }
 }
 

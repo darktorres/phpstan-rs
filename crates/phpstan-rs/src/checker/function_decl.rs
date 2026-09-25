@@ -550,6 +550,13 @@ impl<'a> Checker<'a> {
                     } else {
                         ty
                     };
+                    // Inside the generic code itself a `key-of<T>`/`T[K]`
+                    // is what `T`'s bound makes it.
+                    let ty = if types::contains_late(&ty) {
+                        types::resolve_late_to_bounds(&ty)
+                    } else {
+                        ty
+                    };
                     self.probe_hit_at(ast_param.name_span, &ty);
                     locals.declare(param.name.to_string(), ty, ast_param.name_span);
                     let native = match class_name {

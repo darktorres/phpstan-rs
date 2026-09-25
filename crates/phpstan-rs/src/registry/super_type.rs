@@ -59,6 +59,12 @@ impl Registry {
     pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> Trinary {
         match (sup, sub) {
             (Type::Mixed(_), _) | (_, Type::Never) => Trinary::Yes,
+            (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
+                self.is_super_type_of(&types::resolve_late_to_bounds(sup), sub)
+            }
+            (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
+                self.is_super_type_of(sup, &types::resolve_late_to_bounds(sub))
+            }
             // A benevolent union (`(int|string)`) is its members for
             // `isSuperTypeOf`; only `accepts` is lenient about it.
             (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
