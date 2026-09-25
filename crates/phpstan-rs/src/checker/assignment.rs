@@ -1,9 +1,9 @@
-use crate::ast::*;
 use crate::checker::{
     Checker, Locals, is_unsealed_shape, narrowing_key, purge_stale_narrowing_for, union_types,
 };
 use crate::diagnostic::DiagnosticBuilder;
 use crate::types::{AccessoryKind, Type, is_subtype};
+use syntax::ast::*;
 
 /// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an
 /// assignment target's own access chain contains a nullsafe `?->`
@@ -700,7 +700,7 @@ impl<'a> Checker<'a> {
         &mut self,
         container: &Type,
         dim: &Type,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         label: &str,
     ) -> bool {
         if offset_verdict(container, dim) != Some(false) {

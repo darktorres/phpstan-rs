@@ -1,6 +1,5 @@
 use rustc_hash::FxHashMap;
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals, class_kind_identifier};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
@@ -8,9 +7,10 @@ use crate::registry::{
     FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
     resolve_names_in_type,
 };
-use crate::token::Span;
 use crate::types::{self, Type};
-use crate::visit::any_child_stmt;
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::any_child_stmt;
 
 mod attributes;
 mod enums;

@@ -3,12 +3,12 @@
 //! `instanceof.alwaysTrue`/`.alwaysFalse`, and `instanceof.invalidExprType`
 //! for a dynamic class-name operand that can't be a string or an object.
 
-use crate::ast::{ClassKind, Expr, InstanceofTarget};
 use crate::checker::expr::type_can_never_be_object;
 use crate::checker::instantiation::type_can_never_name_a_class;
 use crate::checker::{Checker, Locals};
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::{ClassKind, Expr, InstanceofTarget};
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// `is_exempt_last_condition` is the "last `elseif` with no `else`"

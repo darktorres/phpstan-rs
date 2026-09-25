@@ -3,8 +3,8 @@
 //! property's own default value expression's type must be assignable to
 //! its declared (writable) type.
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
+use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's own `getWritableType()` (`set_ty` when a

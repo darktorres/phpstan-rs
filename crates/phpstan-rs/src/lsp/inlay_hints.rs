@@ -13,8 +13,8 @@ use std::sync::Arc;
 use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel, Range as LspRange};
 
 use crate::project::Project;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::token::Span;
 
 use super::protocol::to_lsp_position;
 

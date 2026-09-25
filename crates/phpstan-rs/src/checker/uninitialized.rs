@@ -22,9 +22,9 @@
 
 use rustc_hash::FxHashSet;
 
-use crate::ast::*;
 use crate::checker::Checker;
-use crate::visit::child_stmts;
+use syntax::ast::*;
+use syntax::visit::child_stmts;
 
 impl<'a> Checker<'a> {
     /// Flags `property.uninitialized` for a concrete class's own typed,

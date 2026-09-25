@@ -1,9 +1,9 @@
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::docblock;
 use crate::registry::FunctionSig;
-use crate::token::Span;
 use crate::types::{self, Type};
+use syntax::ast::*;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// Variance-enforcement: composes variance through nested generics

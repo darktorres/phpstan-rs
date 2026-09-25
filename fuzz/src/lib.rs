@@ -69,7 +69,7 @@ fn run_one(source: &str) {
             Path::new("fuzz.php"),
             source,
             false,
-            phpstan_rs::name::Interner::global(),
+            syntax::name::Interner::global(),
         );
     });
 

@@ -12,10 +12,10 @@
 //! statically-declared one.
 
 use crate::checker::{RenamedParameterOverride, RenamedParameterOverrideFacts};
-use crate::token::Span;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use syntax::token::Span;
 
 /// Project-wide merge of every file's own `NamedArgumentCallFacts`,
 /// each call site now tagged with the file it came from (a bare

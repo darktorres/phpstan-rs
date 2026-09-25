@@ -5,12 +5,12 @@
 //! arity and argument types, and `callable.inaccessibleMethod` for a
 //! method the calling scope can't see.
 
-use crate::ast::{Arg, Visibility};
 use crate::checker::calls::CheckArgsCall;
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::{Arg, Visibility};
+use syntax::token::Span;
 
 /// The function or method a callable value names.
 struct NamedCallable<'r> {

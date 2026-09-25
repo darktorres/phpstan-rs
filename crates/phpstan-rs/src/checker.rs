@@ -2,13 +2,13 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::{Cell, RefCell};
 use std::sync::Arc;
 
-use crate::ast::*;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
 use crate::pest_config;
 use crate::registry::Registry;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::name_resolution::NameContext;
+use syntax::token::Span;
 
 /// A checked scope's variable-name-to-inferred-type bindings.
 ///
@@ -838,7 +838,7 @@ pub struct Checker<'a> {
     // existing test, the same "no signal, stay quiet" leniency
     // `pest_this_type`'s own default gets - a lookup miss just falls back
     // to `Type::Mixed(false)`, matching today's unconditional behavior.
-    pub(crate) anonymous_class_names: FxHashMap<crate::token::Span, String>,
+    pub(crate) anonymous_class_names: FxHashMap<syntax::token::Span, String>,
     // The registry name (`anonymous_class_names`' value) of the anonymous
     // class whose own methods are currently being checked - its methods
     // are checked under the placeholder `"class@anonymous"` class name,
@@ -865,7 +865,8 @@ pub struct Checker<'a> {
     // parameter, recorded by `predefine_byref_or_unknown_args` before the
     // arguments are checked - the one read-looking position where PHP
     // accepts an empty dim, since it creates the element.
-    pub(crate) by_ref_empty_dim_args: std::cell::RefCell<rustc_hash::FxHashSet<crate::token::Span>>,
+    pub(crate) by_ref_empty_dim_args:
+        std::cell::RefCell<rustc_hash::FxHashSet<syntax::token::Span>>,
     // Every private property write's own assigned type, discovered
     // anywhere in this file's own `check_program` run - keyed by
     // (declaring class fqn, property name), never reset per-class:
@@ -1329,8 +1330,8 @@ impl<'a> Checker<'a> {
         // both `check_expr` and `infer_expr` (see this field's own doc
         // comment).
         let resolved = (
-            crate::intern::intern(&primary),
-            fallback.as_deref().map(crate::intern::intern),
+            syntax::intern::intern(&primary),
+            fallback.as_deref().map(syntax::intern::intern),
         );
         self.call_candidate_cache
             .borrow_mut()
@@ -1358,7 +1359,7 @@ impl<'a> Checker<'a> {
     pub fn set_pest_hook_properties(&mut self, props: FxHashSet<String>) {
         self.pest_hook_properties = props
             .into_iter()
-            .map(|p| crate::intern::intern(&p))
+            .map(|p| syntax::intern::intern(&p))
             .collect();
     }
 
@@ -1370,7 +1371,7 @@ impl<'a> Checker<'a> {
         self.current_file = Some(path.to_path_buf());
     }
 
-    pub fn set_anonymous_class_names(&mut self, names: FxHashMap<crate::token::Span, String>) {
+    pub fn set_anonymous_class_names(&mut self, names: FxHashMap<syntax::token::Span, String>) {
         self.anonymous_class_names = names;
     }
 
@@ -1740,7 +1741,7 @@ impl<'a> Checker<'a> {
         self.pest_hook_properties.extend(
             pest_config::file_local_hook_properties(program)
                 .into_iter()
-                .map(|p| crate::intern::intern(&p)),
+                .map(|p| syntax::intern::intern(&p)),
         );
 
         let mut top_locals: Locals = Locals::default();

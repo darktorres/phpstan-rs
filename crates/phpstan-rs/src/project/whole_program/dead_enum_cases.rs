@@ -35,10 +35,10 @@
 
 use rustc_hash::FxHashSet;
 
-use crate::ast::ClassKind;
 use crate::project::use_sites::{RefTarget, UseSiteIndex};
 use crate::registry::Registry;
 use crate::types::Type;
+use syntax::ast::ClassKind;
 
 /// Every `(enum FQN, case name)` pair with no recorded usage anywhere in
 /// the project - see this module's own doc comment for what counts as

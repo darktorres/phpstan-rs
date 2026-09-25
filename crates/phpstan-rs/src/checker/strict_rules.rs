@@ -47,11 +47,11 @@
 //!   Concatenation, `==` and `!=` accept any operand that converts to a
 //!   string. Trait bodies are skipped: their `$this` has no single type.
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{FunctionSig, Trinary};
 use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
+use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
@@ -271,7 +271,7 @@ impl<'a> Checker<'a> {
         op: &BinOp,
         l: &Expr,
         r: &Expr,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         locals: &Locals,
         label: &str,
     ) {
@@ -383,7 +383,7 @@ impl<'a> Checker<'a> {
         l: &Expr,
         r: &Expr,
         compound: bool,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         locals: &Locals,
         label: &str,
     ) {
@@ -453,7 +453,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         args: &[Arg],
         locals: &Locals,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         label: &str,
     ) {
         if args.iter().any(|a| a.spread) {
@@ -547,7 +547,7 @@ impl<'a> Checker<'a> {
         &mut self,
         cast: &Type,
         expr: &Type,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         label: &str,
     ) {
         if matches!(expr, Type::Never) || self.registry.is_super_type_of(cast, expr) != Trinary::Yes
@@ -581,7 +581,7 @@ impl<'a> Checker<'a> {
     /// Whether an assignment to `name` could have run before the one at
     /// `site`: it comes earlier, or shares an enclosing loop with it (as
     /// `site` itself does on a later iteration).
-    fn might_be_assigned_before(&self, name: &str, site: crate::token::Span) -> bool {
+    fn might_be_assigned_before(&self, name: &str, site: syntax::token::Span) -> bool {
         let sites = &self.current_function_assigned_variables;
         let own_loops = sites
             .iter()
@@ -602,7 +602,7 @@ impl<'a> Checker<'a> {
         sig: &FunctionSig,
         args: &[Arg],
         locals: &Locals,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         label: &str,
     ) {
         if args.iter().any(|a| a.spread) {
@@ -644,7 +644,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         if self.registry.check_loop_variable_overwrite {
-            let mut overwritten: Vec<(crate::token::Span, &str, String)> = Vec::new();
+            let mut overwritten: Vec<(syntax::token::Span, &str, String)> = Vec::new();
             match &stmt.kind {
                 StmtKind::Foreach { key, value, .. } => {
                     if let Some(key) = key
@@ -697,7 +697,7 @@ impl<'a> Checker<'a> {
                     label.to_string(),
                     format!(
                         "Switch condition type ({subject_ty}) does not match case condition {} ({}).",
-                        crate::printer::print_expr(test),
+                        syntax::printer::print_expr(test),
                         case_ty.describe_type_only()
                     ),
                     case.span,
@@ -838,7 +838,7 @@ impl<'a> Checker<'a> {
 
 /// The plain variables `target` binds (recursing into `[...]`/`list()`
 /// destructuring) that `locals` already defines.
-fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, crate::token::Span)> {
+fn defined_targets(target: &Expr, locals: &Locals) -> Vec<(String, syntax::token::Span)> {
     match &target.kind {
         ExprKind::Variable(name) if locals.contains_key(name) => {
             vec![(name.to_string(), target.span)]
@@ -1037,8 +1037,8 @@ fn collect_array_values(ty: &Type, out: &mut Vec<Type>) -> bool {
 #[derive(Clone)]
 pub(crate) struct AssignedVariable {
     name: std::sync::Arc<str>,
-    span: crate::token::Span,
-    loops: Vec<crate::token::Span>,
+    span: syntax::token::Span,
+    loops: Vec<syntax::token::Span>,
 }
 
 /// Every site in `body` that binds a variable, outside nested functions,
@@ -1052,7 +1052,7 @@ pub(crate) fn assigned_variables(body: &[Stmt]) -> Vec<AssignedVariable> {
     out
 }
 
-fn walk_stmt(stmt: &Stmt, loops: &mut Vec<crate::token::Span>, out: &mut Vec<AssignedVariable>) {
+fn walk_stmt(stmt: &Stmt, loops: &mut Vec<syntax::token::Span>, out: &mut Vec<AssignedVariable>) {
     match &stmt.kind {
         StmtKind::FunctionDecl(_) | StmtKind::ClassDecl(_) | StmtKind::EnumDecl(_) => return,
         StmtKind::Foreach { key, value, .. } => {
@@ -1086,10 +1086,10 @@ fn walk_stmt(stmt: &Stmt, loops: &mut Vec<crate::token::Span>, out: &mut Vec<Ass
         }
         _ => {}
     }
-    for expr in crate::visit::stmt_exprs(stmt) {
+    for expr in syntax::visit::stmt_exprs(stmt) {
         walk_expr(expr, loops, out);
     }
-    for child in crate::visit::child_stmts(stmt) {
+    for child in syntax::visit::child_stmts(stmt) {
         walk_stmt(child, loops, out);
     }
     if matches!(
@@ -1103,7 +1103,7 @@ fn walk_stmt(stmt: &Stmt, loops: &mut Vec<crate::token::Span>, out: &mut Vec<Ass
     }
 }
 
-fn walk_expr(e: &Expr, loops: &mut Vec<crate::token::Span>, out: &mut Vec<AssignedVariable>) {
+fn walk_expr(e: &Expr, loops: &mut Vec<syntax::token::Span>, out: &mut Vec<AssignedVariable>) {
     match &e.kind {
         ExprKind::Closure { .. } | ExprKind::ArrowFn { .. } | ExprKind::NewAnonymousClass(..) => {
             return;
@@ -1115,14 +1115,14 @@ fn walk_expr(e: &Expr, loops: &mut Vec<crate::token::Span>, out: &mut Vec<Assign
         }
         _ => {}
     }
-    for child in crate::visit::child_exprs(e) {
+    for child in syntax::visit::child_exprs(e) {
         walk_expr(child, loops, out);
     }
 }
 
 /// The variables an assignment target binds: a plain variable, the root
 /// of an offset chain, or each element of a destructuring.
-fn bind_targets(target: &Expr, loops: &[crate::token::Span], out: &mut Vec<AssignedVariable>) {
+fn bind_targets(target: &Expr, loops: &[syntax::token::Span], out: &mut Vec<AssignedVariable>) {
     match &target.kind {
         ExprKind::Variable(name) => out.push(AssignedVariable {
             name: name.clone(),

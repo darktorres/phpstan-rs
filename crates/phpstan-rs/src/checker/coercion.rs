@@ -13,11 +13,11 @@
 //! `bool` arm can never actually fire and isn't worth a coercion method
 //! of its own.
 
-use crate::ast::{CastKind, CastSpelling};
 use crate::checker::{Checker, union_types};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
 use crate::types::{AccessoryKind, Type};
+use syntax::ast::{CastKind, CastSpelling};
+use syntax::token::Span;
 
 /// The handful of built-in extension classes real PHPStan's own
 /// `ObjectType::toInteger()`/`toFloat()` special-case as numeric-

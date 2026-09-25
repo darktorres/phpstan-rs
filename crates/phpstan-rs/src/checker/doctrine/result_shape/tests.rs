@@ -1,9 +1,9 @@
 use super::*;
 use crate::checker::doctrine::dql::parse_select_items;
 use crate::checker::doctrine::query_builder::{JoinClause, QueryBuilderChain};
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::registry::Registry;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 const ENTITIES: &str = r#"<?php
     use Doctrine\ORM\Mapping as ORM;

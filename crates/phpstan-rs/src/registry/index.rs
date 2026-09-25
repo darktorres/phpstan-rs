@@ -1,12 +1,12 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, FunctionSig, infer_const_type};
 use crate::types::Type;
+use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 
 /// One declaration's already-built, registry-independent info/sig, plus
 /// the file-position facts (`name`, `conditional`) `Registry::
@@ -698,10 +698,10 @@ fn collect_nested_defines(stmts: &[Stmt], out: &mut Vec<BuiltDecl>) {
                 }
             }
             _ => {
-                for e in crate::visit::stmt_exprs(stmt) {
+                for e in syntax::visit::stmt_exprs(stmt) {
                     collect_defines_in_expr(e, out);
                 }
-                for child in crate::visit::child_stmts(stmt) {
+                for child in syntax::visit::child_stmts(stmt) {
                     collect_nested_defines(std::slice::from_ref(child), out);
                 }
             }
@@ -715,7 +715,7 @@ fn collect_defines_in_expr(e: &Expr, out: &mut Vec<BuiltDecl>) {
     if let Some((name, ty)) = define_call_constant(e) {
         out.push(BuiltDecl::GlobalConst { name, ty });
     }
-    crate::visit::any_child_expr(e, &mut |child| {
+    syntax::visit::any_child_expr(e, &mut |child| {
         collect_defines_in_expr(child, out);
         false
     });

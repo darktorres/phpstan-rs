@@ -1,6 +1,6 @@
 use super::super::*;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::{Position, Span};
+use syntax::token::{Position, Span};
 
 pub(super) fn diag(identifier: &str, message: &str) -> Diagnostic {
     DiagnosticBuilder::new(

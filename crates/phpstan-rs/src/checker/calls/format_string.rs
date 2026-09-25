@@ -11,10 +11,10 @@ use std::sync::LazyLock;
 
 use regex::Regex;
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::php_version::{PhpFeature, PhpVersion};
 use crate::types::{AccessoryKind, Type};
+use syntax::ast::*;
 
 /// What a placeholder accepts (`PrintfPlaceholder::$acceptingType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -345,7 +345,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         label: &str,
-        span: crate::token::Span,
+        span: syntax::token::Span,
     ) {
         let Some(function) = format_function(name) else {
             return;
@@ -373,7 +373,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         label: &str,
-        span: crate::token::Span,
+        span: syntax::token::Span,
     ) -> Option<Vec<usize>> {
         let format_ty = self.infer_expr(&args.get(function.format)?.value, locals);
         let php_version = self.registry.php_version;
@@ -408,7 +408,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         label: &str,
-        span: crate::token::Span,
+        span: syntax::token::Span,
     ) {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;
@@ -439,7 +439,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         label: &str,
-        span: crate::token::Span,
+        span: syntax::token::Span,
     ) {
         if args.len() < function.minimum {
             return;
@@ -529,7 +529,7 @@ impl<'a> Checker<'a> {
         args: &[Arg],
         locals: &Locals,
         label: &str,
-        span: crate::token::Span,
+        span: syntax::token::Span,
     ) {
         if args.iter().any(|a| a.spread) || args.len() < function.minimum {
             return;

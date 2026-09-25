@@ -4,12 +4,12 @@
 //! `ReadOnlyByPhpDocPropertyRule`, `InvalidCallablePropertyTypeRule`, and
 //! `ExistingClassesInPropertiesRule`'s unresolvable-native-type half.
 
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::php_version::PhpFeature;
-use crate::token::Span;
+use syntax::ast::*;
+use syntax::token::Span;
 
 /// One property's declaration-relevant facts, shared by a plain
 /// `PropertyDecl` and a promoted constructor parameter.

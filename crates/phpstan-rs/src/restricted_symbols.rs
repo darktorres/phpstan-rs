@@ -656,7 +656,7 @@ mod tests {
         Diagnostic {
             location: "f".to_string(),
             message: "restricted".to_string(),
-            span: crate::token::Span::default(),
+            span: syntax::token::Span::default(),
             level: 0,
             identifier: "restrictedSymbol.function".to_string(),
             tip: None,

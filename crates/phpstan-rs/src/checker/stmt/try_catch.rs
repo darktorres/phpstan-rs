@@ -1,10 +1,10 @@
-use crate::ast::*;
 use crate::checker::{
     Checker, Locals, collect_exit_point_statements, exit_point_description, merge_scopes,
     purge_stale_narrowing_for,
 };
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     #[hotpath::measure]
@@ -361,7 +361,7 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
         if let ExprKind::Throw(inner) = &e.kind {
             out.push((inner, e.span, false));
         }
-        for child in crate::visit::child_exprs(e) {
+        for child in syntax::visit::child_exprs(e) {
             in_expr(child, out);
         }
     }
@@ -379,10 +379,10 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
                 }
             }
             _ => {
-                for e in crate::visit::stmt_exprs(stmt) {
+                for e in syntax::visit::stmt_exprs(stmt) {
                     in_expr(e, out);
                 }
-                for child in crate::visit::child_stmts(stmt) {
+                for child in syntax::visit::child_stmts(stmt) {
                     collect_throws(std::slice::from_ref(child), false, out);
                 }
             }
@@ -392,7 +392,7 @@ fn collect_throws<'s>(stmts: &'s [Stmt], top: bool, out: &mut Vec<(&'s Expr, Spa
 
 fn mentions_variable(e: &Expr, name: &str) -> bool {
     matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name)
-        || crate::visit::child_exprs(e)
+        || syntax::visit::child_exprs(e)
             .into_iter()
             .any(|child| mentions_variable(child, name))
 }

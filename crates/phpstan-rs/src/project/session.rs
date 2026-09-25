@@ -9,17 +9,17 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::name::Interner;
+use syntax::name::Interner;
 
 use rayon::prelude::*;
 
 use crate::config::{self, Config};
-use crate::token::Span;
 use crate::{
     architecture, assertion_tables, banned, composer, doctrine_functions, ignore_errors,
     parent_calls, php_version, restricted_symbols, sql_reflection_config, sql_reflection_reflector,
     sql_reflection_schema, sql_reflection_schema_drift,
 };
+use syntax::token::Span;
 
 use super::{ParsedFile, Project};
 use crate::diagnostic::{self, Diagnostic};

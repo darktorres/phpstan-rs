@@ -18,12 +18,12 @@
 //! Declined: a method-throw-type covariance check, since no call-graph-
 //! wide implicit-throw model exists to build it on.
 
-use crate::ast::{Expr, ExprKind, Stmt, StmtKind};
 use crate::checker::Checker;
 use crate::registry::{FunctionSig, Registry};
-use crate::token::Span;
 use crate::types::Type;
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
+use syntax::token::Span;
+use syntax::visit::{child_exprs, child_stmts};
 
 mod dynamic;
 mod missing;

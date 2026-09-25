@@ -1,13 +1,13 @@
-use crate::ast::*;
 use crate::checker::expr::type_definitely_excludes_null;
 use crate::checker::{
     Checker, Locals, build_matched_shape, int_range_bounds, literal_string_key, normalize_int_range,
 };
 use crate::regex_groups;
 use crate::registry::{AssertTarget, FunctionSig};
-use crate::token::Span;
 use crate::types::has_explicit_mixed_nested_somewhere;
 use crate::types::{AccessoryKind, Type};
+use syntax::ast::*;
+use syntax::token::Span;
 mod accessory_range;
 mod array_shape;
 mod assertions;
@@ -184,7 +184,7 @@ fn cond_references_variable(e: &Expr, name: &str) -> bool {
     if matches!(&e.kind, ExprKind::Variable(v) if v.as_ref() == name) {
         return true;
     }
-    crate::visit::child_exprs(e)
+    syntax::visit::child_exprs(e)
         .into_iter()
         .any(|child| cond_references_variable(child, name))
 }

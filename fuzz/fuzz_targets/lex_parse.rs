@@ -18,8 +18,8 @@
 //! surfaces as libFuzzer's own real finding.
 
 use libfuzzer_sys::fuzz_target;
-use phpstan_rs::lexer::Lexer;
-use phpstan_rs::parser::Parser;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 const WORKER_STACK_SIZE: usize = 64 * 1024 * 1024;
 

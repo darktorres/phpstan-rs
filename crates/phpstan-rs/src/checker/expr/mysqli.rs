@@ -3,10 +3,10 @@
 //! resulting `mysqli_result<Row>` (a synthesized generic slot, like
 //! `Doctrine\DBAL\Result`'s) types every `fetch_*` method's row.
 
-use crate::ast::*;
 use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals};
 use crate::types::{Type, parse_type_string};
+use syntax::ast::*;
 
 /// The statements that produce a result set - anything else (`INSERT`,
 /// `UPDATE`, `SET`, ...) makes `query()` return `true`.

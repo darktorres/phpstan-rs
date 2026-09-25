@@ -2,10 +2,10 @@
 //! sibling of `resolve_names_in_type`.
 
 use super::super::*;
-use crate::ast::Stmt;
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
 use crate::types::{self, Type};
+use syntax::ast::Stmt;
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 
 fn ctx_for(namespace: &str) -> NameContext {
     let stmts: Vec<Stmt> = Vec::new();

@@ -4,8 +4,6 @@
 //! `@internal` checks, one function per event, each opening with a fast
 //! `is_empty()` bail.
 
-use crate::ast::TypeHint;
-use crate::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
 use crate::checker::internal_usage::class_type_word;
 use crate::checker::internal_usage::collect_referenced_class_names;
 use crate::checker::{Checker, Locals};
@@ -14,8 +12,10 @@ use crate::ignore_errors::glob_matches;
 use crate::restricted_symbols::{
     ParamCondition, ParamFlagsCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
 };
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::TypeHint;
+use syntax::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
+use syntax::token::Span;
 
 /// Where a `Class`-kind ban's own referenced-class check fires -
 /// `allowInParamTypes`/`allowInReturnType` and their `allowExceptIn*`
@@ -164,13 +164,13 @@ impl<'a> Checker<'a> {
                 Some(Type::IntLiteral(n)) => Some(n),
                 _ => None,
             },
-            ExprKind::Binary(crate::ast::BinOp::BitOr, l, r) => {
+            ExprKind::Binary(syntax::ast::BinOp::BitOr, l, r) => {
                 Some(self.fold_int_flags(l)? | self.fold_int_flags(r)?)
             }
-            ExprKind::Binary(crate::ast::BinOp::BitAnd, l, r) => {
+            ExprKind::Binary(syntax::ast::BinOp::BitAnd, l, r) => {
                 Some(self.fold_int_flags(l)? & self.fold_int_flags(r)?)
             }
-            ExprKind::Binary(crate::ast::BinOp::BitXor, l, r) => {
+            ExprKind::Binary(syntax::ast::BinOp::BitXor, l, r) => {
                 Some(self.fold_int_flags(l)? ^ self.fold_int_flags(r)?)
             }
             _ => None,

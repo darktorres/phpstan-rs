@@ -1,8 +1,8 @@
-use crate::ast::*;
 use crate::checker::expr::type_definitely_excludes_null;
 use crate::checker::is_unsealed_shape;
 use crate::checker::type_union::union_types;
 use crate::types::{self, AccessoryKind, Type};
+use syntax::ast::*;
 
 /// `ty`'s own `(min, max)` bound pair when it's
 /// range-representable at all - an `IntLiteral` is a degenerate range

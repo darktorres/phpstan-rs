@@ -5,9 +5,9 @@
 //! isn't modeled), `method.private`/`method.protected`, and
 //! `staticMethod.private`/`staticMethod.protected`.
 
-use crate::ast::{Expr, ExprKind, Literal, Visibility};
 use crate::checker::Checker;
-use crate::token::Span;
+use syntax::ast::{Expr, ExprKind, Literal, Visibility};
+use syntax::token::Span;
 
 /// `check_member_visibility`'s own call bundle - 7 positional
 /// parameters tripped clippy's `too_many_arguments` lint, and a named-

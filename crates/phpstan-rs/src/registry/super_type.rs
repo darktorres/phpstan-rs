@@ -1,6 +1,6 @@
-use crate::ast::ClassKind;
 use crate::registry::Registry;
 use crate::types::{self, AccessoryKind, Type};
+use syntax::ast::ClassKind;
 
 /// Real PHPStan's `TrinaryLogic` result of a `Type::isSuperTypeOf` query.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

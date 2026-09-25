@@ -1,14 +1,14 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::TypeHint;
-use crate::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
-use crate::name_resolution::NameContext;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::has_explicit_mixed_nested_somewhere;
 use crate::types::{self, TemplateParam, Type};
+use syntax::ast::TypeHint;
+use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
+use syntax::name_resolution::NameContext;
 
 mod asserts;
 mod generics;
@@ -190,7 +190,7 @@ pub struct FunctionSig {
 /// (an array, a concatenation, another constant) falls back to `Mixed` -
 /// undefined-constant detection only needs the name to be known, not a
 /// precise type.
-pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
+pub(crate) fn infer_const_type(value: &syntax::ast::Expr) -> Type {
     infer_const_type_with(value, &|_, _| None)
 }
 
@@ -201,7 +201,7 @@ pub(crate) fn infer_const_type(value: &crate::ast::Expr) -> Type {
 /// `Registry::resolve_deferred_value_of`'s constant pre-pass. Only class
 /// constants go through that pass, so only they get this; a global
 /// constant keeps plain `infer_const_type`.
-pub(crate) fn infer_class_const_type(value: &crate::ast::Expr) -> Type {
+pub(crate) fn infer_class_const_type(value: &syntax::ast::Expr) -> Type {
     infer_const_type_with(value, &|class, name| {
         Some(Type::Object(
             "$$classconst".to_string(),
@@ -217,10 +217,10 @@ pub(crate) fn infer_class_const_type(value: &crate::ast::Expr) -> Type {
 /// `class_const_ref` decides what a `Class::NAME` reference inside the
 /// value becomes (`None` falls back to `Mixed`).
 fn infer_const_type_with(
-    value: &crate::ast::Expr,
+    value: &syntax::ast::Expr,
     class_const_ref: &dyn Fn(&str, &str) -> Option<Type>,
 ) -> Type {
-    use crate::ast::Literal;
+    use syntax::ast::Literal;
     match &value.kind {
         ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(*n),
         ExprKind::Literal(Literal::Float(_)) => Type::Float,
@@ -234,7 +234,7 @@ fn infer_const_type_with(
         // Logger::OFF`, the one negative severity level alongside seven
         // non-negative ones) would otherwise silently fall to `Mixed`
         // below.
-        ExprKind::Unary(crate::ast::UnaryOp::Neg, inner) => match &inner.kind {
+        ExprKind::Unary(syntax::ast::UnaryOp::Neg, inner) => match &inner.kind {
             ExprKind::Literal(Literal::Int(n)) => Type::IntLiteral(-n),
             ExprKind::Literal(Literal::Float(_)) => Type::Float,
             _ => Type::Mixed(false),
@@ -249,7 +249,7 @@ fn infer_const_type_with(
         // - unlike falling back to `Mixed` below, which would silently
         // widen every array literal/argument this const then feeds
         // into.
-        ExprKind::Binary(crate::ast::BinOp::Concat, ..) => Type::String,
+        ExprKind::Binary(syntax::ast::BinOp::Concat, ..) => Type::String,
         ExprKind::Grouping(inner) => infer_const_type_with(inner, class_const_ref),
         ExprKind::ClassConstFetch(StaticTarget::Name(class, _), name) => {
             class_const_ref(class, name).unwrap_or(Type::Mixed(false))
@@ -570,7 +570,7 @@ impl FunctionSig {
         let attrs: Vec<Arc<str>> = f
             .attrs
             .iter()
-            .map(|a| crate::intern::intern(&a.name))
+            .map(|a| syntax::intern::intern(&a.name))
             .collect();
 
         let is_internal = doc.as_ref().is_some_and(|d| d.internal);

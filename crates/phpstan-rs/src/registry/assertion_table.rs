@@ -8,10 +8,10 @@ use crate::assertion_tables::{
     AssertWhen, AssertionEntry, ClassArgumentReturn, default_assertions,
     default_class_argument_returns,
 };
-use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{AssertInfo, AssertTarget};
 use crate::registry::{Registry, resolve_names_in_type};
 use crate::types;
+use syntax::name_resolution::NameContext;
 
 static DEFAULT_ASSERTIONS: LazyLock<Vec<AssertionEntry>> = LazyLock::new(default_assertions);
 static DEFAULT_RETURNS: LazyLock<Vec<ClassArgumentReturn>> =

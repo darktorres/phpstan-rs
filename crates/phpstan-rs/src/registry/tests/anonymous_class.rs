@@ -4,12 +4,12 @@
 //! than one anonymous class shares a line) is tested directly, independent
 //! of the end-to-end `project::tests::anonymous_class_naming` suite.
 
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::registry::anonymous_class::synthetic_name;
 use crate::registry::collect_anonymous_classes;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
-fn parse(src: &str) -> Vec<crate::ast::Stmt> {
+fn parse(src: &str) -> Vec<syntax::ast::Stmt> {
     let tokens = Lexer::new(src).tokenize_with_spans();
     Parser::new(tokens).parse_program().unwrap()
 }

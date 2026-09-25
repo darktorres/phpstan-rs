@@ -11,13 +11,17 @@ cargo-fuzz = true
 # "derive" needed for structured_php's/parse_type_string's own local
 # Arbitrary-derived generator types (Fragment/Expr/Ident/...) - lex_parse
 # and token_stream_parse don't need it themselves (Vec<Token>'s Arbitrary
-# impl is a blanket one, and Token's own derive lives behind the main
-# crate's separate "fuzzing" feature below), but it's harmless for them.
+# impl is a blanket one, and Token's own derive lives behind the syntax
+# crate's "fuzzing" feature below), but it's harmless for them.
 arbitrary = { version = "1", features = ["derive"] }
 libfuzzer-sys = "0.4"
 
 [dependencies.phpstan-rs]
 path = "../crates/phpstan-rs"
+
+[dependencies.syntax]
+package = "phpstan-rs-syntax"
+path = "../crates/syntax"
 features = ["fuzzing"]
 
 [lib]

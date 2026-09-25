@@ -3,19 +3,19 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use crate::ast::{ClassKind, Stmt, StmtKind, Visibility};
 use crate::checker::{self, Checker, PropertyAssignFacts};
 use crate::deps;
 use crate::diagnostic::{self, Diagnostic};
 use crate::ignore_comments;
-use crate::lexer::{LexWarning, Lexer};
-use crate::name::Interner;
-use crate::name_resolution::NameContext;
-use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
 use crate::registry::Registry;
-use crate::token::Span;
+use syntax::ast::{ClassKind, Stmt, StmtKind, Visibility};
+use syntax::lexer::{LexWarning, Lexer};
+use syntax::name::Interner;
+use syntax::name_resolution::NameContext;
+use syntax::parser::{ParseError, Parser};
+use syntax::token::Span;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 
 mod architecture;
@@ -53,7 +53,7 @@ struct FileState {
     // See `ParsedFile::anonymous_class_names`'s own doc comment - carried
     // here too so `Project::check_file_impl` can hand it to a fresh
     // `Checker` on every re-check, not just the initial load.
-    anonymous_class_names: FxHashMap<crate::token::Span, String>,
+    anonymous_class_names: FxHashMap<syntax::token::Span, String>,
     // This file's own raw source text, kept only when
     // `Project::retain_source` is on (see that field's own doc comment) -
     // `None` for every ordinary `check-project` batch run, which never
@@ -757,7 +757,7 @@ impl Project {
             let in_trait = |line: u32| trait_lines.iter().any(|(a, b)| (*a..=*b).contains(&line));
             let mut unmatched: Vec<Diagnostic> = Vec::new();
             let mut unmatched_line = |line: u32, message: String, identifier: &str| {
-                let at = crate::token::Position { line, col: 1 };
+                let at = syntax::token::Position { line, col: 1 };
                 unmatched.push(
                     diagnostic::DiagnosticBuilder::new(
                         "<main>".to_string(),
@@ -1666,7 +1666,7 @@ impl Project {
             ));
         }
         for (line, message) in &file.ignores.parse_errors {
-            let at = crate::token::Position {
+            let at = syntax::token::Position {
                 line: *line,
                 col: 1,
             };
@@ -2271,11 +2271,11 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
     let mut stack: Vec<&Stmt> = ast.iter().collect();
     while let Some(stmt) = stack.pop() {
         match &stmt.kind {
-            StmtKind::ClassDecl(c) if c.kind == crate::ast::ClassKind::Trait => {
+            StmtKind::ClassDecl(c) if c.kind == syntax::ast::ClassKind::Trait => {
                 ranges.push((stmt.span.start.line, stmt.span.end.line));
             }
             StmtKind::ClassDecl(_) | StmtKind::FunctionDecl(_) | StmtKind::EnumDecl(_) => {}
-            _ => stack.extend(crate::visit::child_stmts(stmt)),
+            _ => stack.extend(syntax::visit::child_stmts(stmt)),
         }
     }
     ranges
@@ -2345,7 +2345,7 @@ pub struct ParsedFile {
     // `registry::anonymous_class` for why that matters). Carried on
     // `FileState` (below) rather than only used transiently here, since
     // `check_file_impl` needs it again on every re-check.
-    anonymous_class_names: FxHashMap<crate::token::Span, String>,
+    anonymous_class_names: FxHashMap<syntax::token::Span, String>,
     // The class-like counterpart to `duplicate_fn_sites` above, built the
     // same way and for the same reason - `parse_file`'s own `is_stub`
     // parameter is baked into every `ClassDeclSite` here (see that

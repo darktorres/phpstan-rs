@@ -1,0 +1,25 @@
+[package]
+name = "phpstan-rs-syntax"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+name = "syntax"
+
+[dependencies]
+arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
+hotpath = "0.24"
+imbl = "7.0.1"
+rustc-hash = "2.1.3"
+
+[features]
+# `arbitrary::Arbitrary` for tokens, for the token-stream fuzz target.
+fuzzing = ["dep:arbitrary"]
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name = "lex_parse"
+harness = false

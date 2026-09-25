@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
 use crate::types::{CallableParam, CallableSig, Type};
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 
 /// Rewrites every `Object(name)` in a type tree to the fully-qualified
 /// name `ctx` resolves it to - mirrors `mark_template_params`'s exact

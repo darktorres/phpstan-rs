@@ -10,15 +10,15 @@
 //! `check_function`: a trait's methods are checked once per using host
 //! there, which would repeat each diagnostic per host.
 
-use crate::ast::*;
 use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::php_version::PhpFeature;
-use crate::token::Span;
 use crate::types::Type;
-use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PromotionSite {

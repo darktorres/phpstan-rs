@@ -1,6 +1,6 @@
-use crate::ast::ClassKind;
 use crate::registry::Registry;
 use crate::types::{self, Type, Variance};
+use syntax::ast::ClassKind;
 
 // Real PHPStan's own level-gated `RuleLevelHelper` behaviors
 // (`accepts_at_configured_level`/`accepts_at_configured_level_rec`/

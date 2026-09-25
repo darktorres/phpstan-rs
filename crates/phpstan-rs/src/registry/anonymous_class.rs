@@ -25,11 +25,11 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::ast::*;
-use crate::name_resolution::NameContext;
 use crate::registry::{BuiltDecl, ClassInfo};
-use crate::token::Span;
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::*;
+use syntax::name_resolution::NameContext;
+use syntax::token::Span;
+use syntax::visit::{child_exprs, child_stmts};
 
 pub(crate) fn synthetic_name(
     relative_file: &str,

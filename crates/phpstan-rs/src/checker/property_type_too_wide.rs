@@ -14,10 +14,10 @@
 //! here - a disclosed leniency, not a false negative this check claims
 //! to catch.
 
-use crate::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
 use crate::types::Type;
+use syntax::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
 
 fn flatten_union(ty: &Type) -> Vec<&Type> {
     match ty {

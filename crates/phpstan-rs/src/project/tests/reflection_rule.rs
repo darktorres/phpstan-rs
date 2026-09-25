@@ -12,7 +12,7 @@ impl ReflectionRule for FlagsEveryPublicClass {
         vec![Diagnostic {
             location: fqn.to_string(),
             message: format!("saw class {fqn}"),
-            span: crate::token::Span::default(),
+            span: syntax::token::Span::default(),
             level: 0,
             identifier: "test.sawClass".to_string(),
             tip: None,
@@ -30,7 +30,7 @@ impl ReflectionRule for FlagsEveryFunction {
         vec![Diagnostic {
             location: fqn.to_string(),
             message: format!("saw function {fqn}"),
-            span: crate::token::Span::default(),
+            span: syntax::token::Span::default(),
             level: 0,
             identifier: "test.sawFunction".to_string(),
             tip: None,

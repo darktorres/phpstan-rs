@@ -4,8 +4,8 @@
 //! and a whitespace-only run after the last `?>` of the file, of a
 //! namespace, or of a `declare` block (`whitespace.fileEnd`).
 
-use crate::ast::*;
 use crate::checker::Checker;
+use syntax::ast::*;
 
 const BOM: &str = "\u{feff}";
 

@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_METHOD, ATTRIBUTE_TARGET_PARAMETER,
     ATTRIBUTE_TARGET_PROPERTY, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
@@ -12,9 +11,10 @@ use crate::registry::{
     ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
     resolve_names_in_type, resolve_type,
 };
-use crate::token::Span;
 use crate::types::{self, Type};
-use crate::visit::body_contains_yield;
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::body_contains_yield;
 
 impl<'a> Checker<'a> {
     /// A trait's method bodies are checked once per class that `use`s
@@ -237,7 +237,7 @@ impl<'a> Checker<'a> {
             &self.name_ctx,
             &rustc_hash::FxHashMap::default(),
             &rustc_hash::FxHashMap::default(),
-            crate::ast::Visibility::Public,
+            syntax::ast::Visibility::Public,
         );
         Some(self.registry.finalize_standalone_sig(fresh))
     }
@@ -411,17 +411,17 @@ impl<'a> Checker<'a> {
                 let templates: Vec<std::sync::Arc<str>> = doc
                     .templates
                     .iter()
-                    .map(|s| crate::intern::intern(s))
+                    .map(|s| syntax::intern::intern(s))
                     .collect();
                 let bounds: rustc_hash::FxHashMap<std::sync::Arc<str>, Type> = doc
                     .template_bounds
                     .iter()
-                    .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
+                    .map(|(k, v)| (syntax::intern::intern(k), resolve(v)))
                     .collect();
                 let defaults: rustc_hash::FxHashMap<std::sync::Arc<str>, Type> = doc
                     .template_defaults
                     .iter()
-                    .map(|(k, v)| (crate::intern::intern(k), resolve(v)))
+                    .map(|(k, v)| (syntax::intern::intern(k), resolve(v)))
                     .collect();
                 let type_aliases = class_name
                     .and_then(|c| self.registry.classes.get(c))
@@ -980,7 +980,7 @@ impl<'a> Checker<'a> {
         self.current_method_attrs = f
             .attrs
             .iter()
-            .map(|a| crate::intern::intern(&a.name))
+            .map(|a| syntax::intern::intern(&a.name))
             .collect();
         // Mirrors real PHPStan's `DeprecatedScopeHelper` - suppresses
         // every deprecated-usage diagnostic from within a deprecated

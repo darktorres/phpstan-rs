@@ -1,7 +1,7 @@
 use rustc_hash::FxHashSet;
 
-use crate::ast::*;
-use crate::visit::{
+use syntax::ast::*;
+use syntax::visit::{
     Visitor, walk_attribute, walk_catch_clause, walk_class_decl, walk_enum_decl, walk_expr,
     walk_stmts,
 };

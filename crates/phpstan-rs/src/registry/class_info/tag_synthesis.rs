@@ -1,13 +1,13 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::Visibility;
 use crate::docblock;
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{FunctionSig, ParamSig, mark_template_params};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{self, TemplateParam, Type};
+use syntax::ast::Visibility;
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 
 /// Mirrors real PHPStan's own `Type::getObjectClassNames()` for exactly
 /// the shapes `@phpstan-require-extends`/`-implements`/`@phpstan-sealed`

@@ -9,10 +9,10 @@
 //! succeeds) - the base, colon-permissive `Name` grammar, not the
 //! namespace-restricted `NCName` one.
 
-use crate::ast::unwrap_grouping;
-use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
-use crate::token::Span;
+use syntax::ast::unwrap_grouping;
+use syntax::ast::{Arg, ExprKind, Literal};
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// `(new DOMDocument())->createElement($name)` - real PHP throws

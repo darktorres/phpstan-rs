@@ -27,9 +27,9 @@ pub mod manifest;
 
 use std::path::{Path, PathBuf};
 
-use crate::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
-use crate::lexer::Lexer;
-use crate::parser::Parser;
+use syntax::ast::{BinOp, ClassDecl, Expr, ExprKind, Literal, Stmt, StmtKind};
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ComposerContext {

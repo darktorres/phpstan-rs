@@ -1,9 +1,9 @@
 //! The version attributes, checked against the same declarations
 //! written without them.
 
-use crate::ast::*;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
+use syntax::ast::*;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 fn parse(src: &str) -> Vec<Stmt> {
     let mut stmts = Parser::new(Lexer::new(src).tokenize_with_spans())

@@ -32,11 +32,11 @@
 //! elevated false-positive rate against this project's own unions -
 //! not a good trade for a rule whose whole point is confidence.
 
-use crate::ast::unwrap_grouping;
-use crate::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
 use crate::checker::Checker;
-use crate::token::Span;
 use crate::types::{AccessoryKind, Type, is_subtype};
+use syntax::ast::unwrap_grouping;
+use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's own `Type::toNumber()` legality: every
@@ -565,12 +565,12 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_incdec_validity(
         &mut self,
         op: &UnaryOp,
-        target: &crate::ast::Expr,
+        target: &syntax::ast::Expr,
         inner_ty: &Type,
         span: Span,
         label: &str,
     ) {
-        use crate::ast::ExprKind;
+        use syntax::ast::ExprKind;
 
         let name = match op {
             UnaryOp::PreInc => "preInc",

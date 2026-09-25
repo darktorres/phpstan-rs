@@ -4,10 +4,10 @@
 //! deprecated (`ini.deprecated`, with `check_deprecated_usage`). Some
 //! directives are deprecated only to change, so reading them is fine.
 
-use crate::ast::Arg;
 use crate::checker::{Checker, Locals};
 use crate::php_version::PhpVersion;
 use crate::types::Type;
+use syntax::ast::Arg;
 
 /// Directives removed from PHP, with the version that removed them.
 const REMOVED: &[(&str, PhpVersion)] = &[

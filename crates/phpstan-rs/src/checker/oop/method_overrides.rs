@@ -1,9 +1,9 @@
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {

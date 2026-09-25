@@ -6,8 +6,8 @@
 
 use lsp_types::{DocumentSymbol, SymbolKind};
 
-use crate::ast::{ClassDecl, ClassKind, EnumDecl, FunctionDecl, MethodDecl, Stmt, StmtKind};
-use crate::token::Span;
+use syntax::ast::{ClassDecl, ClassKind, EnumDecl, FunctionDecl, MethodDecl, Stmt, StmtKind};
+use syntax::token::Span;
 
 use super::protocol::to_lsp_range;
 
@@ -80,7 +80,7 @@ fn method_symbol(m: &MethodDecl) -> DocumentSymbol {
 /// Shared with `workspace_symbol::workspace_symbols`, which needs the
 /// same mapping for a registry-sourced `ClassInfo.kind` (the AST-level
 /// `ClassDecl.kind` this function itself uses is the same
-/// `crate::ast::ClassKind` type the registry reuses directly, not a
+/// `syntax::ast::ClassKind` type the registry reuses directly, not a
 /// separate registry-local enum).
 pub(super) fn class_kind_symbol_kind(kind: ClassKind) -> SymbolKind {
     match kind {
@@ -127,7 +127,7 @@ fn enum_symbol(e: &EnumDecl) -> DocumentSymbol {
     )
 }
 
-fn const_symbol(cst: &crate::ast::ClassConst) -> DocumentSymbol {
+fn const_symbol(cst: &syntax::ast::ClassConst) -> DocumentSymbol {
     symbol(
         cst.name.to_string(),
         SymbolKind::CONSTANT,

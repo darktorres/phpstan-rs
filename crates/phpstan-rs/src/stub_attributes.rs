@@ -17,11 +17,11 @@
 
 use std::sync::Arc;
 
-use crate::ast::*;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
-use crate::token::{Span, Token};
-use crate::visit::{
+use syntax::ast::*;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
+use syntax::token::{Span, Token};
+use syntax::visit::{
     VisitorMut, walk_class_decl_mut, walk_enum_decl_mut, walk_function_decl_mut, walk_stmt_mut,
 };
 
@@ -200,7 +200,7 @@ pub fn apply_stub_attributes(stmts: &mut Vec<Stmt>) {
     for stmt in stmts.iter_mut() {
         pass.visit_stmt(stmt);
     }
-    crate::name_resolution::resolve_names(stmts);
+    syntax::name_resolution::resolve_names(stmts);
 }
 
 /// Whether any attribute in the file is one of the two (or an alias).
@@ -209,12 +209,12 @@ fn mentions_stub_attributes(stmts: &[Stmt]) -> bool {
         aliases: &'a Aliases,
         found: bool,
     }
-    impl<'ast> crate::visit::Visitor<'ast> for Find<'_> {
+    impl<'ast> syntax::visit::Visitor<'ast> for Find<'_> {
         fn visit_attribute(&mut self, attr: &'ast Attribute) {
             if stub_attribute(attr, self.aliases).is_some() {
                 self.found = true;
             }
-            crate::visit::walk_attribute(self, attr);
+            syntax::visit::walk_attribute(self, attr);
         }
     }
     let aliases = aliases(stmts);
@@ -222,7 +222,7 @@ fn mentions_stub_attributes(stmts: &[Stmt]) -> bool {
         aliases: &aliases,
         found: false,
     };
-    crate::visit::walk_stmts(&mut find, stmts);
+    syntax::visit::walk_stmts(&mut find, stmts);
     find.found
 }
 
@@ -400,7 +400,7 @@ impl VisitorMut for Pass {
             self.strip(attrs);
             self.params(params, &mut None);
         }
-        crate::visit::walk_expr_mut(self, expr);
+        syntax::visit::walk_expr_mut(self, expr);
     }
 }
 

@@ -38,12 +38,12 @@
 use rayon::prelude::*;
 use std::sync::Arc;
 
-use crate::ast::*;
-use crate::intern::intern;
 use crate::registry::{FunctionSig, Registry};
-use crate::token::Span;
 use crate::types::Type;
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::*;
+use syntax::intern::intern;
+use syntax::token::Span;
+use syntax::visit::{child_exprs, child_stmts};
 
 /// One real, resolved call target a declaration's own effect-freedom is
 /// conditional on - `Some(vec![])` (no dependencies at all) is the base

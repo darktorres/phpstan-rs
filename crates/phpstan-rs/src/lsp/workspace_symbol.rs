@@ -13,8 +13,8 @@ use lsp_types::SymbolKind;
 
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::token::Span;
 
 use super::document_symbol::class_kind_symbol_kind;
 

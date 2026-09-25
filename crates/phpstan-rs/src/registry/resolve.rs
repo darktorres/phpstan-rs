@@ -3,11 +3,11 @@ use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use crate::ast::{ClassKind, Visibility};
 use crate::registry::Registry;
 use crate::registry::function_sig;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig, substitute_type_aliases};
 use crate::types::{self, Type};
+use syntax::ast::{ClassKind, Visibility};
 
 impl Registry {
     /// PHP resolves class/interface/trait/enum names case-insensitively

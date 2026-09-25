@@ -5,10 +5,8 @@
 //! `phpstan_rs::project::Project`/`phpstan_rs::checker::Checker`. The full
 //! module paths remain available either way.
 
-pub mod annotations;
 pub mod architecture;
 pub mod assertion_tables;
-pub mod ast;
 pub mod banned;
 pub mod baseline;
 pub mod checker;
@@ -21,14 +19,9 @@ pub mod doctrine_functions;
 pub mod fix;
 pub mod ignore_comments;
 pub mod ignore_errors;
-pub(crate) mod intern;
-pub mod lexer;
 pub mod lsp;
-pub mod name;
-pub(crate) mod name_resolution;
 pub mod output;
 pub mod parent_calls;
-pub mod parser;
 pub(crate) mod pcre_validate;
 pub mod pest_config;
 pub(crate) mod php_date_parser;
@@ -36,7 +29,6 @@ pub(crate) mod php_float_format;
 pub mod php_stubs;
 pub mod php_version;
 pub mod phpdoc_grammar;
-pub mod printer;
 pub mod project;
 pub mod reflection_rule;
 pub mod regex_groups;
@@ -48,9 +40,7 @@ pub mod sql_reflection_reflector;
 pub mod sql_reflection_schema;
 pub mod sql_reflection_schema_drift;
 pub(crate) mod stub_attributes;
-pub mod token;
 pub mod types;
-pub mod visit;
 
 pub use checker::Checker;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, DiagnosticFix};

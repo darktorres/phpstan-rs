@@ -33,9 +33,9 @@
 //! universe is reported as one in the *real* universe, which isn't
 //! always true.
 
-use crate::ast::ClassKind;
 use crate::registry::Registry;
 use rustc_hash::FxHashSet;
+use syntax::ast::ClassKind;
 
 pub(crate) fn find_dead_abstract_classes(registry: &Registry) -> Vec<String> {
     let mut has_concrete_descendant: FxHashSet<std::sync::Arc<str>> = FxHashSet::default();

@@ -35,9 +35,9 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::{Arg, ClassDecl, Visibility};
 use crate::checker::Checker;
-use crate::token::Span;
+use syntax::ast::{Arg, ClassDecl, Visibility};
+use syntax::token::Span;
 
 /// (declaring class, method, parameter name as declared on that
 /// signature) -> every named-argument call site in this one file using
@@ -113,10 +113,10 @@ impl<'a> Checker<'a> {
         {
             return;
         }
-        let method: Arc<str> = crate::intern::intern(method);
+        let method: Arc<str> = syntax::intern::intern(method);
         for arg in args {
             let Some(name) = &arg.name else { continue };
-            let name: Arc<str> = crate::intern::intern(name);
+            let name: Arc<str> = syntax::intern::intern(name);
             self.named_argument_call_facts
                 .entry((owner.clone(), method.clone(), name))
                 .or_default()
@@ -179,9 +179,9 @@ impl<'a> Checker<'a> {
                 self.renamed_parameter_override_facts
                     .push(RenamedParameterOverride {
                         prototype_class: ancestor_owner.clone(),
-                        method: crate::intern::intern(method_name),
+                        method: syntax::intern::intern(method_name),
                         prototype_param: ancestor_param.name.clone(),
-                        overriding_class: crate::intern::intern(fqn),
+                        overriding_class: syntax::intern::intern(fqn),
                         overriding_param: own_param.name.clone(),
                     });
             }

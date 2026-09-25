@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use crate::ast::{FunctionDecl, Stmt, StmtKind, TypeHint};
-use crate::name_resolution::NameContext;
-use crate::token::Span;
+use syntax::ast::{FunctionDecl, Stmt, StmtKind, TypeHint};
+use syntax::name_resolution::NameContext;
+use syntax::token::Span;
 
 /// One top-level `function` declaration's own site, name-keyed the same
 /// way `Registry`/`DeclLocations` are - but every unconditional

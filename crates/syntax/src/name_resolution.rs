@@ -70,7 +70,7 @@ fn strip_namespace_relative_prefix(name: &str) -> Option<&str> {
 /// `new Foo()`) - both need to agree on exactly the same resolution or
 /// the two halves of this registry would disagree with each other.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct NameContext {
+pub struct NameContext {
     // `Arc<str>`, not `String`, for the same O(1)-clone reason `use_map`
     // is `imbl`-backed rather than `std::collections::HashMap` - see
     // `UseMap`'s own doc comment.
@@ -96,7 +96,7 @@ impl NameContext {
     /// genuinely position-independent, whole-file questions that
     /// `check_program` still uses it for (see its own call sites' doc
     /// comments), where "last namespace wins" is not a problem.
-    pub(crate) fn build(stmts: &[Stmt]) -> NameContext {
+    pub fn build(stmts: &[Stmt]) -> NameContext {
         let mut ctx = NameContext::default();
         for stmt in stmts {
             match &stmt.kind {
@@ -114,7 +114,7 @@ impl NameContext {
     /// letting it leak into declarations that follow (relevant for
     /// `namespace { ... } namespace Pdo { ... }`-shaped files - see
     /// `Registry::index`'s doc comment on why that real shape matters).
-    pub(crate) fn set_namespace(&mut self, name: &str) {
+    pub fn set_namespace(&mut self, name: &str) {
         self.namespace = strip_leading_backslash(name).into();
         self.use_map.clear();
     }
@@ -125,7 +125,7 @@ impl NameContext {
     /// through `declared_name`/`resolve` instead; this is the one call
     /// site that genuinely needs the raw current namespace itself, not a
     /// name resolved against it.
-    pub(crate) fn namespace(&self) -> &str {
+    pub fn namespace(&self) -> &str {
         &self.namespace
     }
 
@@ -138,7 +138,7 @@ impl NameContext {
     /// just below - a class-shaped reference can only ever have been
     /// legitimately imported via a plain `use Foo;`, never `use function`/
     /// `use const`.
-    pub(crate) fn is_use_imported(&self, first_segment: &str) -> bool {
+    pub fn is_use_imported(&self, first_segment: &str) -> bool {
         self.use_map
             .contains_key(&(UseKind::Class, first_segment.to_ascii_lowercase()))
     }
@@ -149,7 +149,7 @@ impl NameContext {
     /// `use const Foo\BAR;` a function call `bar()`. Class and function
     /// names resolve case-insensitively and are stored lowercased;
     /// constant names are case-sensitive and stored as written.
-    pub(crate) fn add_uses(&mut self, imports: &[UseImport]) {
+    pub fn add_uses(&mut self, imports: &[UseImport]) {
         for import in imports {
             let path = strip_leading_backslash(&import.path);
             let bare = path.rsplit('\\').next().unwrap_or(&path).to_string();
@@ -162,7 +162,7 @@ impl NameContext {
     /// The fully-qualified name a declaration with this bare name gets,
     /// in the current namespace - declarations are never `use`-resolved
     /// (that only applies to *references*), always just namespace-relative.
-    pub(crate) fn declared_name(&self, bare: &str) -> String {
+    pub fn declared_name(&self, bare: &str) -> String {
         if self.namespace.is_empty() {
             bare.to_string()
         } else {
@@ -181,7 +181,7 @@ impl NameContext {
     /// already turns those into a different `Type` variant before this
     /// runs, and `ExprKind::New`'s self/parent/static branch never calls this
     /// either.
-    pub(crate) fn resolve(&self, name: &str) -> String {
+    pub fn resolve(&self, name: &str) -> String {
         self.resolve_as(name, UseKind::Class)
     }
 
@@ -238,7 +238,7 @@ impl NameContext {
     /// Returns the primary candidate to look up first, plus a
     /// global-namespace fallback candidate when that rule could apply
     /// (namespaced file, unqualified name, no matching import).
-    pub(crate) fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
+    pub fn resolve_function_candidates(&self, name: &str) -> (String, Option<String>) {
         self.resolve_with_global_fallback(name, UseKind::Function)
     }
 
@@ -246,7 +246,7 @@ impl NameContext {
     /// PHP applies the identical current-namespace-then-global fallback
     /// to an unqualified constant, but matches it against `use const`
     /// imports, never `use function` ones.
-    pub(crate) fn resolve_constant_candidates(&self, name: &str) -> (String, Option<String>) {
+    pub fn resolve_constant_candidates(&self, name: &str) -> (String, Option<String>) {
         self.resolve_with_global_fallback(name, UseKind::Const)
     }
 

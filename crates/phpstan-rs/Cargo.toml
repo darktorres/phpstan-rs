@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-arbitrary = { version = "1.4.2", features = ["derive"], optional = true }
+syntax.workspace = true
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
 dhat = { version = "0.3", optional = true }
@@ -52,13 +52,6 @@ dhat-heap = ["dep:dhat"]
 # source at build time) - deliberately not gated behind a feature flag,
 # per the user's own explicit choice recorded in that plan.
 pcre-validate = ["dep:pcre2-sys"]
-# Phase 19 Part A: `Token`/`Keyword`/`StringPart`/`Position` gain a real
-# `arbitrary::Arbitrary` derive under this feature only - the fuzz
-# workspace's own `token_stream_parse` target needs it (bypasses the
-# lexer, feeding an `arbitrary`-derived token stream straight into
-# `Parser::new`), and this keeps the main crate's ordinary build (and
-# every other consumer) from ever pulling `arbitrary` in.
-fuzzing = ["dep:arbitrary"]
 
 [dev-dependencies]
 criterion = "0.8.2"

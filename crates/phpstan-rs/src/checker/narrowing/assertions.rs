@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::checker::narrowing::discriminant_canonical_key;
 use crate::checker::narrowing::predicates::{narrowing_infer_target, narrowing_key};
 use crate::checker::narrowing::type_ops::{
@@ -6,6 +5,7 @@ use crate::checker::narrowing::type_ops::{
 };
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
+use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     /// The type to narrow *from* for a synthetic `narrowing_key` (a

@@ -26,12 +26,12 @@
 //! extension checks this too, but no case-tracking plumbing exists for
 //! attribute-usage positions in this project yet).
 
-use crate::ast::TypeHint;
-use crate::ast::{ClassKind, FunctionDecl, Param};
 use crate::checker::Checker;
 use crate::registry::{ConstSig, FunctionSig, PropertySig};
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::TypeHint;
+use syntax::ast::{ClassKind, FunctionDecl, Param};
+use syntax::token::Span;
 
 /// `Class`/`Interface`/`Trait`/`Enum` - matches real PHPStan's own
 /// `ClassReflection::getClassTypeDescription()`, used both in message
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
         self.check_access_attributes(
             owner,
             method_name,
-            sig.visibility == crate::ast::Visibility::Public,
+            sig.visibility == syntax::ast::Visibility::Public,
             span,
             label,
         );
@@ -299,7 +299,7 @@ impl<'a> Checker<'a> {
             let is_public = self
                 .registry
                 .lookup_method(&canonical, "__construct")
-                .is_none_or(|sig| sig.visibility == crate::ast::Visibility::Public);
+                .is_none_or(|sig| sig.visibility == syntax::ast::Visibility::Public);
             self.check_access_attributes(&canonical, "__construct", is_public, span, label);
         }
         self.check_internal_class_name_usage(class, "Instantiation of", "new", span, label);

@@ -20,15 +20,15 @@
 //! untyped parameters (they're routinely inferred from context, e.g.
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
-use crate::ast::TypeHint;
-use crate::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::FunctionSig;
-use crate::token::Span;
 use crate::types::Type;
 use crate::types::has_explicit_mixed_nested_somewhere;
+use syntax::ast::TypeHint;
+use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
+use syntax::token::Span;
 
 /// Real PHPStan's own tip text (`MissingTypehintCheck::
 /// MISSING_ITERABLE_VALUE_TYPE_TIP`), attached to every

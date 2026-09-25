@@ -1,4 +1,4 @@
-use crate::token::{Position, Span};
+use syntax::token::{Position, Span};
 
 /// PHPDoc's own token set - deliberately much smaller than the full PHP
 /// `Lexer`/`Token` this project already has (`src/lexer.rs`/`src/

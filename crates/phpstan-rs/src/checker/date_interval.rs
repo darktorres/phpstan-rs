@@ -4,9 +4,9 @@
 //! mirrors PHP's two accepted spec formats instead; every malformed spec
 //! gets PHP's one exception message, `Unknown or bad format (<spec>)`.
 
-use crate::ast::Arg;
 use crate::checker::{Checker, Locals};
-use crate::token::Span;
+use syntax::ast::Arg;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// `new DateInterval($spec)` - real PHP throws

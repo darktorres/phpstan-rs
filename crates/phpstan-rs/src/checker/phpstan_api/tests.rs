@@ -18,9 +18,9 @@
 //! multi-namespace test file.
 
 use super::*;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::registry::Registry;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 fn parse(src: &str) -> Vec<Stmt> {
     let tokens = Lexer::new(src).tokenize_with_spans();
@@ -929,9 +929,9 @@ mod namespace_in_3rd_party_package {
     use std::path::{Path, PathBuf};
 
     use super::super::check_phpstan_api_usage;
-    use crate::lexer::Lexer;
-    use crate::parser::Parser;
     use crate::registry::Registry;
+    use syntax::lexer::Lexer;
+    use syntax::parser::Parser;
 
     struct TempDir(PathBuf);
 

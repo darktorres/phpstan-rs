@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::checker::type_union::union_types;
 use crate::checker::{
     ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
@@ -7,9 +6,10 @@ use crate::checker::{
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{self, PropertySig, resolve_names_in_type};
-use crate::token::Span;
 use crate::types::{self, Type};
-use crate::visit::{body_contains_yield, expr_contains_yield};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{body_contains_yield, expr_contains_yield};
 
 impl<'a> Checker<'a> {
     /// PHP 8.4 property hooks: `GetNonVirtualPropertyHookReadRule`/

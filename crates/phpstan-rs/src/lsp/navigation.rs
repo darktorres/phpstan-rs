@@ -42,14 +42,14 @@
 
 use std::sync::Arc;
 
-use crate::ast::*;
-use crate::name_resolution::NameContext;
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::token::{Position, Span};
-use crate::visit::{child_exprs, child_stmts};
 use rustc_hash::FxHashSet;
 use std::path::Path;
+use syntax::ast::*;
+use syntax::name_resolution::NameContext;
+use syntax::token::{Position, Span};
+use syntax::visit::{child_exprs, child_stmts};
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {

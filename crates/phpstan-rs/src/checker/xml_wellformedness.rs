@@ -8,10 +8,10 @@
 //! requirement, strictly cheaper to add than the C dependency this
 //! project already accepts for its PCRE work.
 
-use crate::ast::unwrap_grouping;
-use crate::ast::{Arg, ExprKind, Literal};
 use crate::checker::Checker;
-use crate::token::Span;
+use syntax::ast::unwrap_grouping;
+use syntax::ast::{Arg, ExprKind, Literal};
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// `new SimpleXMLElement($xml)` - real PHP throws a plain `Exception`

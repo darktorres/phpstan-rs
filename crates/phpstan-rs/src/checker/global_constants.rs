@@ -8,11 +8,11 @@
 
 use rustc_hash::FxHashSet;
 
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
-use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 const MAGIC_CONSTANTS: [&str; 10] = [
     "__LINE__",

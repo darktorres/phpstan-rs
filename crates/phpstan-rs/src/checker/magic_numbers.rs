@@ -18,9 +18,9 @@
 //! `magic_number_exemptions` (default `[0, 1]`) lists values accepted
 //! anywhere, compared by numeric value, sign included.
 
-use crate::ast::*;
 use crate::checker::Checker;
-use crate::token::Span;
+use syntax::ast::*;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// The value of `e` when it's a magic number.

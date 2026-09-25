@@ -7,8 +7,8 @@ use std::fmt::Write;
 use std::path::{Path, PathBuf};
 
 use crate::diagnostic::Diagnostic;
-use crate::lexer::Lexer;
-use crate::token::{Position, Token};
+use syntax::lexer::Lexer;
+use syntax::token::{Position, Token};
 
 const CONTEXT_LINES: u32 = 2;
 

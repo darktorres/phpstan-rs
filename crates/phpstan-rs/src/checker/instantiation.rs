@@ -4,11 +4,11 @@
 //! constructor-less class given arguments, an inaccessible constructor,
 //! and a dynamic class-name expression that can't be a class name.
 
-use crate::ast::{ClassKind, Visibility};
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::{ClassKind, Visibility};
+use syntax::token::Span;
 
 /// Whether `ty` can never be a `string` or an object, so `new` on it
 /// always fails. A `Union` answers for its non-`null` members, the

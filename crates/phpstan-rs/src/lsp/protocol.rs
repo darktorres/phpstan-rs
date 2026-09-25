@@ -12,7 +12,7 @@ use lsp_types::{
 };
 
 use crate::diagnostic::{Diagnostic, diagnostic_order};
-use crate::token::{Position, Span};
+use syntax::token::{Position, Span};
 
 /// The outcome of trying to read one framed LSP message. `Eof` (a clean
 /// transport disconnection) and `Disconnected` (a real I/O failure

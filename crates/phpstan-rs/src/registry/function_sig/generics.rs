@@ -2,10 +2,10 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use crate::docblock::DocBlock;
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{self, CallableParam, CallableSig, TemplateParam, Type};
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 
 /// Rewrites every `Object(name, _)` in `ty` whose `name` matches a key in
 /// `aliases` into that alias's own (already fully-resolved) `Type` -

@@ -4,10 +4,10 @@
 //! and `SortParameterCastableToStringRule` (all level 5, `argument.type`),
 //! plus `ArrayUnpackingRule`'s string-key gate for an unpacked array.
 
-use crate::ast::{Arg, Expr, ExprKind};
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
 use crate::types::Type;
+use syntax::ast::{Arg, Expr, ExprKind};
 
 const SORT_REGULAR: i64 = 0;
 const SORT_NUMERIC: i64 = 1;
@@ -252,7 +252,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_unpacked_string_keys(
         &mut self,
         value_ty: &Type,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         label: &str,
     ) {
         if !self.registry.php_version.is_some_and(|v| {

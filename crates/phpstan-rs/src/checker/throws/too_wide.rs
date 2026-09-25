@@ -15,11 +15,11 @@
 //! resolves to no known throw information at all) suppresses this whole
 //! comparison for the declaration.
 
-use crate::ast::Visibility;
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::Visibility;
+use syntax::token::Span;
 
 fn flatten_union(ty: &Type) -> Vec<&Type> {
     match ty {

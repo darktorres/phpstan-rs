@@ -3,7 +3,7 @@ use super::ast::{
     PhpDocTag, PhpDocTagValue, ShapeKey, TypeNode,
 };
 use super::lexer::{Lexer, PhpDocToken};
-use crate::token::{Position, Span};
+use syntax::token::{Position, Span};
 
 /// The whole doc-comment-parsing entry point - preprocesses `raw` into
 /// one logical text span per `@tag` (joining wrapped continuation
@@ -1242,7 +1242,7 @@ pub(crate) fn parse_type_prefix(rest: &str) -> (Option<TypeNode>, &str, Vec<PhpD
 /// wrapped tag's continuation lines are joined with `\n`, see
 /// `docblock::parse`), and Rust slicing is byte-indexed while `text` can
 /// hold multi-byte UTF-8, so both coordinates matter.
-fn byte_offset_of(text: &str, pos: crate::token::Position) -> usize {
+fn byte_offset_of(text: &str, pos: syntax::token::Position) -> usize {
     let line_start = if pos.line <= 1 {
         0
     } else {

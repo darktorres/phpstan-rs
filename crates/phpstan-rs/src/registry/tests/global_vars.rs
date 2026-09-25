@@ -5,10 +5,10 @@
 use std::path::Path;
 
 use super::super::*;
-use crate::ast::Stmt;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::types::Type;
+use syntax::ast::Stmt;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 fn parse(src: &str) -> Vec<Stmt> {
     let tokens = Lexer::new(src).tokenize_with_spans();

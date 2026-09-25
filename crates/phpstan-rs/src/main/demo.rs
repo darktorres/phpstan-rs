@@ -4,8 +4,9 @@ use std::path::Path;
 use checker::Checker;
 use lexer::Lexer;
 use parser::Parser;
-use phpstan_rs::{checker, lexer, output, parser, php_stubs, registry};
+use phpstan_rs::{checker, output, php_stubs, registry};
 use registry::{Registry, format_signature};
+use syntax::{lexer, parser};
 
 const SAMPLE: &str = r#"<?php
 

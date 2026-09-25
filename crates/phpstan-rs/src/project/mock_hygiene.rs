@@ -21,13 +21,13 @@
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
-use crate::ast::*;
-use crate::token::Span;
-use crate::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{Visitor, opens_scope, walk_expr, walk_stmt, walk_stmts};
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 const MOCK_TYPES: [&str; 3] = [
     "PHPUnit\\Framework\\MockObject\\MockObject",

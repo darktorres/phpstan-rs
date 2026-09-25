@@ -11,10 +11,10 @@
 //! overridden method's parameter, an `array_map`/`usort` callback's
 //! parameter, ... all routinely go unused without being a bug).
 
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
+use syntax::ast::*;
+use syntax::token::Span;
 
 mod member_usage;
 mod rebind;

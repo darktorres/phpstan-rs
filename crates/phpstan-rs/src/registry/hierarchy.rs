@@ -4,11 +4,11 @@ use std::sync::Arc;
 
 use rayon::prelude::*;
 
-use crate::ast::ClassKind;
-use crate::intern::intern;
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig};
 use crate::types::Type;
+use syntax::ast::ClassKind;
+use syntax::intern::intern;
 
 impl Registry {
     /// Does `class` derive from or implement `of`, directly or
@@ -1110,7 +1110,7 @@ impl Registry {
         let Some(b_info) = self.classes.get(b) else {
             return true;
         };
-        use crate::ast::ClassKind::{Class, Interface};
+        use syntax::ast::ClassKind::{Class, Interface};
         match (a_info.kind, b_info.kind) {
             (Class, Class) => false,
             (Class, Interface) => !a_info.is_final,

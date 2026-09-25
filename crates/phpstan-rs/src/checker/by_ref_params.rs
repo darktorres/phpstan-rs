@@ -11,10 +11,10 @@
 //! native type with no `@param-out` tag at all, `TooWideParameterOutTypeCheck.php:87-92`'s
 //! identical `getOutType() ?? getType()` fallback).
 
-use crate::ast::{Expr, ExprKind, Visibility};
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
 use crate::types::Type;
+use syntax::ast::{Expr, ExprKind, Visibility};
 
 /// Same shape as the identically-named private helper in
 /// `return_type_too_wide.rs`/`property_type_too_wide.rs`/`throws/
@@ -85,7 +85,7 @@ impl<'a> Checker<'a> {
         &mut self,
         name: &str,
         actual: &Type,
-        span: crate::token::Span,
+        span: syntax::token::Span,
         label: &str,
     ) {
         let Some(declared) = self.current_function_by_ref_params.get(name).cloned() else {
@@ -149,7 +149,7 @@ impl<'a> Checker<'a> {
     /// `@param-out int|string` accepts the union; only a genuinely
     /// unacceptable exit state should ever be reported, not "some path
     /// disagreed with another."
-    pub(crate) fn check_by_ref_execution_end(&mut self, label: &str, span: crate::token::Span) {
+    pub(crate) fn check_by_ref_execution_end(&mut self, label: &str, span: syntax::token::Span) {
         let out_types: Vec<(std::sync::Arc<str>, Type)> = self
             .current_function_by_ref_params_with_tag
             .iter()
@@ -188,7 +188,7 @@ impl<'a> Checker<'a> {
     /// too_wide_by_ref_type` (mirroring `should_check_too_wide_method_
     /// return_type`'s own visibility/finality gate) - callers must check
     /// that before calling this.
-    pub(crate) fn check_too_wide_by_ref_type(&mut self, label: &str, span: crate::token::Span) {
+    pub(crate) fn check_too_wide_by_ref_type(&mut self, label: &str, span: syntax::token::Span) {
         let params: Vec<(std::sync::Arc<str>, Type)> = self
             .current_function_by_ref_params
             .iter()

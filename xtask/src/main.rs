@@ -923,7 +923,7 @@ fn gates(args: &[String]) -> Result<(), String> {
     test_manifest()?;
     modgraph::modgraph(&root(), &[])?;
     run(cargo().args(["doc", "--workspace", "--no-deps", "--quiet"]))?;
-    run(cargo().args(["bench", "--no-run", "--quiet"]))?;
+    run(cargo().args(["bench", "--workspace", "--no-run", "--quiet"]))?;
     run(cargo().args([
         "check",
         "--quiet",

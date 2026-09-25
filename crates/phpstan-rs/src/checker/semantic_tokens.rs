@@ -23,7 +23,7 @@
 
 use crate::checker::Checker;
 use crate::registry::FunctionSig;
-use crate::token::Span;
+use syntax::token::Span;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum UsageTokenKind {

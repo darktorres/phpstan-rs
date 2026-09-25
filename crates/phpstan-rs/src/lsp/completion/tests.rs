@@ -23,8 +23,8 @@ fn pos_after(text: &str, needle: &str) -> Position {
 }
 
 fn parse(text: &str) -> Vec<Stmt> {
-    let tokens = crate::lexer::Lexer::new(text).tokenize_with_spans();
-    crate::parser::Parser::new(tokens).parse_program().unwrap()
+    let tokens = syntax::lexer::Lexer::new(text).tokenize_with_spans();
+    syntax::parser::Parser::new(tokens).parse_program().unwrap()
 }
 
 #[test]

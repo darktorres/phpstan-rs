@@ -14,14 +14,14 @@
 //! naming the expression) only when the statement assigns nothing.
 //! Calls and `new` are left to `check_pure_call_without_effect`.
 
-use crate::ast::TypeHint;
-use crate::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{FunctionSig, collect_impure_points};
 use crate::types::Type;
-use crate::visit::child_exprs;
+use syntax::ast::TypeHint;
+use syntax::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
+use syntax::visit::child_exprs;
 
 const PRECEDENCE_TIP: &str =
     "This operator has unexpected precedence, try disambiguating the logic with parentheses ().";
@@ -224,7 +224,7 @@ impl<'a> Checker<'a> {
             _ => (
                 format!(
                     "Expression \"{}\" on a separate line does not do anything.",
-                    crate::printer::print_expr_first_line(e)
+                    syntax::printer::print_expr_first_line(e)
                 ),
                 "expr.resultUnused",
             ),

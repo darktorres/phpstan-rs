@@ -10,11 +10,11 @@
 //! needle/haystack value type pair can be `==` without being `===`
 //! (`function.looseComparison`).
 
-use crate::ast::Arg;
 use crate::checker::expr::ranges::loose_compare_literals;
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
-use crate::token::Span;
+use syntax::ast::Arg;
+use syntax::token::Span;
 
 use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
 
@@ -149,8 +149,8 @@ impl<'a> Checker<'a> {
     /// `void`.
     pub(crate) fn check_void_match_usage(
         &mut self,
-        arms: &[(Vec<crate::ast::Expr>, crate::ast::Expr)],
-        default: Option<&crate::ast::Expr>,
+        arms: &[(Vec<syntax::ast::Expr>, syntax::ast::Expr)],
+        default: Option<&syntax::ast::Expr>,
         locals: &Locals,
         span: Span,
         label: &str,

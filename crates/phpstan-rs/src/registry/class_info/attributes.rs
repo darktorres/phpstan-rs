@@ -1,4 +1,4 @@
-use crate::ast::{Attribute, BinOp, Expr, ExprKind, Literal};
+use syntax::ast::{Attribute, BinOp, Expr, ExprKind, Literal};
 
 /// PHP's own `Attribute::TARGET_*`/`IS_REPEATABLE` class constant values.
 fn attribute_target_constant_value(name: &str) -> Option<u32> {

@@ -1,9 +1,9 @@
-use crate::ast::StaticTarget;
 use crate::checker::{Checker, Locals, class_type_word};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{self, FunctionSig};
-use crate::token::Span;
 use crate::types::{self, Type};
+use syntax::ast::StaticTarget;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// Resolves a bare name exactly as it appears at an expression site
@@ -711,7 +711,7 @@ impl<'a> Checker<'a> {
                 if self
                     .registry
                     .lookup_class(name)
-                    .is_some_and(|(_, info)| info.kind == crate::ast::ClassKind::Trait)
+                    .is_some_and(|(_, info)| info.kind == syntax::ast::ClassKind::Trait)
                     && !out.iter().any(|n| n == name)
                 {
                     out.push(name.clone());

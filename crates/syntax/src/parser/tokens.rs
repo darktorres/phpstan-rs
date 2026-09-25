@@ -99,7 +99,7 @@ impl Parser {
         }
     }
 
-    pub(crate) fn at_eof(&self) -> bool {
+    pub fn at_eof(&self) -> bool {
         matches!(self.peek(), Token::Eof)
     }
 

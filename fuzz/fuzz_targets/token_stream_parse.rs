@@ -3,10 +3,9 @@
 //! Secondary fuzz target, lower priority than `lex_parse` - bypasses the
 //! lexer entirely, feeding an `arbitrary`-derived token
 //! stream straight into `Parser::new`/`parse_program`. Gated behind the
-//! main crate's own opt-in `fuzzing` Cargo feature (`Token`/`Keyword`/
-//! `StringPart`/`Position` only gain a real `arbitrary::Arbitrary` derive
-//! under it - see `Cargo.toml`'s own doc comment), so an ordinary build
-//! of the main crate never pulls `arbitrary` in.
+//! `syntax` crate's opt-in `fuzzing` feature (`Token`/`Keyword`/
+//! `StringPart`/`Position` only derive `arbitrary::Arbitrary` under it),
+//! so an ordinary build never pulls `arbitrary` in.
 //!
 //! `Position::default()` (real zeros) is used for every synthesized
 //! token's own span rather than an `arbitrary`-derived one: `Parser`
@@ -33,8 +32,8 @@
 //! real source bytes.
 
 use libfuzzer_sys::fuzz_target;
-use phpstan_rs::parser::Parser;
-use phpstan_rs::token::{Position, Span, Token};
+use syntax::parser::Parser;
+use syntax::token::{Position, Span, Token};
 
 fuzz_target!(|tokens: Vec<Token>| {
     if tokens.len() > 2000 {

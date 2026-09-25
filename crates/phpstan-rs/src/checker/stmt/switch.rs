@@ -1,6 +1,6 @@
-use crate::ast::*;
 use crate::checker::{Checker, Locals, is_switch_break_equivalent, merge_scopes};
 use crate::types::Type;
+use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     #[hotpath::measure]
@@ -8,7 +8,7 @@ impl<'a> Checker<'a> {
         &mut self,
         subject: &Expr,
         cases: &[SwitchCase],
-        span: crate::token::Span,
+        span: syntax::token::Span,
         locals: &mut Locals,
         declared_return: Option<&Type>,
         label: &str,

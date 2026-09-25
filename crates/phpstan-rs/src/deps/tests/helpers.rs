@@ -1,6 +1,6 @@
 use super::super::*;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 pub(super) fn refs(src: &str) -> FxHashSet<String> {
     let tokens = Lexer::new(src).tokenize_with_spans();

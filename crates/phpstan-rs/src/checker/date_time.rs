@@ -8,10 +8,10 @@
 //! knows that a string is malformed, not timelib's wording of why, so
 //! the message is this project's own.
 
-use crate::ast::Arg;
 use crate::checker::{Checker, Locals};
 use crate::php_date_parser::validate_date_time_string;
-use crate::token::Span;
+use syntax::ast::Arg;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// `new DateTime($str)`/`new DateTimeImmutable($str)` - real PHP

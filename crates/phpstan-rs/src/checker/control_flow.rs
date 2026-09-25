@@ -1,7 +1,7 @@
-use crate::ast::*;
 use crate::checker::{Checker, Locals, union_types};
 use crate::types::{self, Type};
-use crate::visit::any_stmt_in_body;
+use syntax::ast::*;
+use syntax::visit::any_stmt_in_body;
 
 mod boolean_conditions;
 mod generators;

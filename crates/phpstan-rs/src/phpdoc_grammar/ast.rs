@@ -1,4 +1,4 @@
-use crate::token::Span;
+use syntax::token::Span;
 
 /// The whole parsed doc comment - every tag this Stage A grammar
 /// recognized, plus every recoverable parse failure encountered along

@@ -3,7 +3,7 @@
 
 use rustc_hash::FxHashMap;
 
-use crate::token::Span;
+use syntax::token::Span;
 
 /// Loosely mirrors PHPStan's own rule-gating levels (0 lowest/laxest,
 /// per `conf/config.levelN.neon`): 0 for the

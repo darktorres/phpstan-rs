@@ -6,10 +6,10 @@
 //! or value its `offsetSet()` doesn't accept. An array's invalid key type
 //! is `offsetAccess.invalidOffset`'s concern, on writes as on reads.
 
-use crate::ast::{Expr, ExprKind};
 use crate::checker::assignment::offset_verdict;
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
+use syntax::ast::{Expr, ExprKind};
 
 fn is_string_type(ty: &Type) -> bool {
     match ty {

@@ -2,11 +2,7 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use crate::ast::TypeHint;
-use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use crate::docblock::{self, DocBlock};
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
     build_type_aliases, infer_class_const_type, mark_template_params,
@@ -14,6 +10,10 @@ use crate::registry::function_sig::{
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{self, AccessoryKind, TemplateParam, Type};
+use syntax::ast::TypeHint;
+use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
 
 mod attributes;
 mod doctrine_entity;
@@ -1842,7 +1842,7 @@ impl ClassInfo {
 }
 
 /// A class constant's PHP 8.3 native type, name-resolved.
-fn native_const_type(cc: &crate::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
+fn native_const_type(cc: &syntax::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
     let hint_text = cc.type_hint.as_ref().map(TypeHint::to_string);
     let hint = hint_text.as_deref()?;
     Some(resolve_names_in_type(types::parse_type_string(hint), ctx))

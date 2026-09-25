@@ -25,17 +25,17 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
-use crate::ast::*;
 use crate::composer::constraint;
 use crate::composer::manifest::{ComposerManifest, InstalledPackage, path_starts_with};
 use crate::php_stubs;
-use crate::token::{Position, Span};
-use crate::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::ast::*;
+use syntax::token::{Position, Span};
+use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 /// PSR virtual packages and the interfaces a provider must implement.
 const PSR_VIRTUAL_PACKAGES: &[(&str, &[&str])] = &[

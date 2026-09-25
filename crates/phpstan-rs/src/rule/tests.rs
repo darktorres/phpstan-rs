@@ -1,8 +1,8 @@
 use super::*;
 use crate::checker::Checker;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::registry::Registry;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 /// Flags every bare-variable expression named `$flag_me`, regardless of
 /// its own inferred type - just enough to prove `wants_expr`/

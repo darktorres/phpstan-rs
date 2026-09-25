@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 
 use super::*;
-use crate::token::{Position, Span};
+use syntax::token::{Position, Span};
 
 fn diag(location: &str, message: &str, line: u32, col: u32, level: u8) -> Diagnostic {
     diag_with_identifier(location, message, line, col, level, "variable.undefined")

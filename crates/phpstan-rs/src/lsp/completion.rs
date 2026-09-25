@@ -45,15 +45,15 @@ use std::path::Path;
 
 use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 
-use crate::ast::{ClassKind, Expr, ExprKind, FunctionDecl, NodeId, Stmt, StmtKind, Visibility};
 use crate::project::{self, Project};
 use crate::registry::Registry;
-use crate::token::{Keyword, Position, Span, Token};
 use crate::types::Type;
+use syntax::ast::{ClassKind, Expr, ExprKind, FunctionDecl, NodeId, Stmt, StmtKind, Visibility};
+use syntax::token::{Keyword, Position, Span, Token};
 
 use super::navigation::ProbeScope;
 use super::protocol::to_lsp_range;
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.
@@ -83,7 +83,7 @@ fn pos_le(a: Position, b: Position) -> bool {
 /// `Parser::new` needs but the token-scan functions in this module
 /// don't.
 pub(super) fn tokenize(text: &str) -> Vec<(Token, Span)> {
-    crate::lexer::Lexer::new(text)
+    syntax::lexer::Lexer::new(text)
         .tokenize_with_spans()
         .into_iter()
         .map(|(tok, span, _)| (tok, span))
@@ -160,9 +160,7 @@ fn receiver_start_idx(tokens: &[(Token, Span)], anchor_idx: usize) -> usize {
 }
 
 /// Re-lexes and re-parses an isolated expression fragment (never the
-/// whole file) - the same `Lexer::new_in_php` + real parser reuse
-/// `text_split.rs`'s own `split_identifier_spans` already established
-/// for exactly this "re-parse just this span's own text" shape. The
+/// whole file). The
 /// fragment's own inner spans are deliberately left in slice-local
 /// coordinates and never remapped: nothing downstream reads them (the
 /// probe match is by the two sentinel statements' own spans, never the
@@ -170,8 +168,8 @@ fn receiver_start_idx(tokens: &[(Token, Span)], anchor_idx: usize) -> usize {
 /// pass produces are discarded the same way the existing hover probe
 /// already discards its own).
 fn parse_standalone_expr(text: &str) -> Option<Expr> {
-    let tokens = crate::lexer::Lexer::new_in_php(text).tokenize_with_spans();
-    let mut parser = crate::parser::Parser::new(tokens);
+    let tokens = syntax::lexer::Lexer::new_in_php(text).tokenize_with_spans();
+    let mut parser = syntax::parser::Parser::new(tokens);
     let expr = parser.parse_expression().ok()?;
     parser.at_eof().then_some(expr)
 }

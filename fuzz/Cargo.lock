@@ -1210,7 +1210,6 @@ dependencies = [
 name = "phpstan-rs"
 version = "0.1.0"
 dependencies = [
- "arbitrary",
  "clap",
  "crossbeam-channel",
  "hotpath",
@@ -1221,6 +1220,7 @@ dependencies = [
  "md5",
  "mysql",
  "pcre2-sys",
+ "phpstan-rs-syntax",
  "postgres",
  "r2d2",
  "r2d2_postgres",
@@ -1243,6 +1243,17 @@ dependencies = [
  "arbitrary",
  "libfuzzer-sys",
  "phpstan-rs",
+ "phpstan-rs-syntax",
+]
+
+[[package]]
+name = "phpstan-rs-syntax"
+version = "0.1.0"
+dependencies = [
+ "arbitrary",
+ "hotpath",
+ "imbl",
+ "rustc-hash",
 ]
 
 [[package]]

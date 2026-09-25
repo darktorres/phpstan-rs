@@ -1,10 +1,10 @@
-use crate::ast::*;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS, ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_PROPERTY, Checker,
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
     purge_stale_narrowing_for, union_types,
 };
 use crate::types::Type;
+use syntax::ast::*;
 
 /// See `DiscriminantArrayFactsMap`'s own doc comment (`checker.rs`) - `e`
 /// must be exactly a bare `Variable` (the same narrow shape the write side
@@ -364,9 +364,9 @@ impl<'a> Checker<'a> {
         }
         let class = self.current_class.clone();
         let line = stmt.doc_line.unwrap_or(stmt.span.start.line);
-        let span = crate::token::Span {
-            start: crate::token::Position { line, col: 1 },
-            end: crate::token::Position { line, col: 1 },
+        let span = syntax::token::Span {
+            start: syntax::token::Position { line, col: 1 },
+            end: syntax::token::Position { line, col: 1 },
         };
         for (variable, node) in super::phpdoc_unresolvable::var_tag_nodes(doc) {
             if self.type_node_unresolvable(&node, class.as_deref()) {

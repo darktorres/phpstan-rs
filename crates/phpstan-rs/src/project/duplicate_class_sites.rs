@@ -2,9 +2,9 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use crate::ast::{ClassKind, Stmt, StmtKind};
-use crate::name_resolution::NameContext;
-use crate::token::Span;
+use syntax::ast::{ClassKind, Stmt, StmtKind};
+use syntax::name_resolution::NameContext;
+use syntax::token::Span;
 
 /// One top-level class-like (`class`/`interface`/`trait`/`enum`)
 /// declaration's own site, name-keyed the same way `Registry`/

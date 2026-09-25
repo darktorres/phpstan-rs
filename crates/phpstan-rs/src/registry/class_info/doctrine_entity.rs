@@ -22,12 +22,12 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, StaticTarget};
-use crate::intern::intern;
 use crate::types::Type;
+use syntax::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, StaticTarget};
+use syntax::intern::intern;
 
 use super::PropertySig;
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 /// One Doctrine association property (`#[ORM\ManyToOne]`/`OneToOne`/
 /// `OneToMany`/`ManyToMany`).

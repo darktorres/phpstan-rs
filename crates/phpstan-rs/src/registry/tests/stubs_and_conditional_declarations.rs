@@ -2,8 +2,8 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 #[test]
 fn function_declared_inside_an_if_guard_is_still_indexed() {
@@ -235,7 +235,7 @@ fn merge_stubs_does_not_override_user_functions() {
             return_case_refs: Vec::new(),
             return_explicit_mixed_hint: false,
             no_discard: false,
-            visibility: crate::ast::Visibility::Public,
+            visibility: syntax::ast::Visibility::Public,
             is_internal: false,
             is_api: false,
             has_override_attr: false,

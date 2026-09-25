@@ -67,14 +67,14 @@
 use rustc_hash::FxHashMap;
 use std::path::Path;
 
-use crate::ast::*;
 use crate::checker::{Checker, class_type_word};
 use crate::composer;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
 use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
-use crate::token::Span;
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::*;
+use syntax::name_resolution::NameContext;
+use syntax::token::Span;
+use syntax::visit::{child_exprs, child_stmts};
 
 /// `$variable-name -> resolved fully-qualified class name` for whichever
 /// of the enclosing function/method/closure/arrow-fn's own parameters (or

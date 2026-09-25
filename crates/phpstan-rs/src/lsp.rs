@@ -45,15 +45,15 @@ use lsp_types::{
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 
-use crate::ast::ClassKind;
 use crate::checker::Checker;
 use crate::diagnostic;
 use crate::project::Project;
 use crate::project::use_sites;
 use crate::registry::{FunctionSig, format_signature, param_label};
-use crate::token::Span;
 use crate::types::Type;
 use crate::{baseline, ignore_errors, restricted_symbols};
+use syntax::ast::ClassKind;
+use syntax::token::Span;
 
 mod completion;
 mod debounce;

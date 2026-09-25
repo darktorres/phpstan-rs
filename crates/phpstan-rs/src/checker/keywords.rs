@@ -10,11 +10,11 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
-use crate::visit::child_stmts;
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::child_stmts;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FrameKind {

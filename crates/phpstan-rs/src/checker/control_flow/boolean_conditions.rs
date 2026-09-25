@@ -1,6 +1,6 @@
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
+use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     /// The real, original PHPStan design -

@@ -18,11 +18,11 @@
 //! its parameter types gets the same suggestion for each untyped
 //! parameter (unless that type is only `mixed`).
 
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::php_version::PhpVersion;
 use crate::registry::{FunctionSig, Trinary};
 use crate::types::{AccessoryKind, Type};
+use syntax::ast::*;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Position {

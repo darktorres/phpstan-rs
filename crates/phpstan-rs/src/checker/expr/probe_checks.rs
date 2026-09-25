@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::checker::expr::ranges::{
     NullProbeVerdictFn, compare_range_outcome, expr_reads_a_property, loose_compare_literals,
     numeric_comparison_bounds,
@@ -7,8 +6,9 @@ use crate::checker::{
     Checker, Locals, array_value_type_for_key, literal_string_key,
     narrow_array_shape_by_key_presence, narrowing_type_for_predicate, types_definitely_disjoint,
 };
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,

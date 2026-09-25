@@ -1,13 +1,13 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::TypeHint;
-use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
-use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{mark_template_params, resolve_type};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{TemplateParam, Type};
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::TypeHint;
+use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
+use syntax::name_resolution::NameContext;
+use syntax::visit::{child_exprs, child_stmts};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
 /// accept a wider type than the property's own backing/read type -

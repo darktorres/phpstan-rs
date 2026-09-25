@@ -2,7 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::ast::ClassKind;
+use syntax::ast::ClassKind;
 
 #[test]
 fn class_info_records_its_own_kind_and_final_abstract_readonly_members() {

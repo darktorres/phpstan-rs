@@ -1,10 +1,10 @@
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
-use crate::ast::*;
-use crate::intern::intern;
-use crate::name_resolution::NameContext;
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::*;
+use syntax::intern::intern;
+use syntax::name_resolution::NameContext;
+use syntax::visit::{child_exprs, child_stmts};
 
 // ---------------------------------------------------------------------
 // Private-member usage (consts / methods / properties)

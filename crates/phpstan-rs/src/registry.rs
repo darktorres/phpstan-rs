@@ -1,8 +1,8 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
-use crate::ast::Stmt;
 use crate::types::Type;
+use syntax::ast::Stmt;
 
 pub mod access_attributes;
 mod anonymous_class;

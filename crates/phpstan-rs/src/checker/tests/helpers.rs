@@ -1,8 +1,8 @@
 use super::super::*;
 use crate::diagnostic::Diagnostic;
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::registry::Registry;
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 /// Families that fire on almost any minimal, deliberately untyped test
 /// snippet (untyped declarations, discarded pure calls and expressions,

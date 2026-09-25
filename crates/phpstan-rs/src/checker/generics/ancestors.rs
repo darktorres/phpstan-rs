@@ -6,12 +6,12 @@
 
 use std::sync::Arc;
 
-use crate::ast::{ClassDecl, ClassKind, EnumDecl, QualifiedName};
 use crate::checker::{Checker, class_kind_identifier};
 use crate::phpdoc_grammar::{self, PhpDocTagValue};
 use crate::registry;
-use crate::token::Span;
 use crate::types::{self, Type};
+use syntax::ast::{ClassDecl, ClassKind, EnumDecl, QualifiedName};
+use syntax::token::Span;
 
 type Templates = rustc_hash::FxHashMap<String, types::TemplateParam>;
 

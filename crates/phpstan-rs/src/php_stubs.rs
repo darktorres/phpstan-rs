@@ -42,10 +42,10 @@
 
 use std::sync::Arc;
 
-use crate::lexer::Lexer;
-use crate::parser::Parser;
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
 use crate::types::{self, AccessoryKind, TemplateParam, Type};
+use syntax::lexer::Lexer;
+use syntax::parser::Parser;
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 

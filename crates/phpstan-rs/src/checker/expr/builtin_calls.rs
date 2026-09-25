@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::checker::type_union::{has_offset_value_parts, union_types};
 use crate::checker::{
     Checker, Locals, is_real_variable_key, literal_string_key, narrow_type_excluding,
@@ -6,8 +5,9 @@ use crate::checker::{
     string_type_has_accessory, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
-use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
+use syntax::ast::*;
+use syntax::token::Span;
 
 use super::{
     int_range_bounds, is_canonical_int_key, is_false_literal, is_non_falsy_string, is_true_literal,

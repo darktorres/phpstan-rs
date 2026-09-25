@@ -79,7 +79,7 @@ impl Parser {
         Ok(self.type_hint(TypeHintKind::Name(self.qualified_name(&name)), start))
     }
 
-    pub(crate) fn parse_type_hint(&mut self) -> Result<Option<TypeHint>, ParseError> {
+    pub fn parse_type_hint(&mut self) -> Result<Option<TypeHint>, ParseError> {
         if !self.is_type_start() {
             return Ok(None);
         }

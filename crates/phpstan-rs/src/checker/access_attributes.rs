@@ -6,11 +6,11 @@
 //! type-hint the injectable version, never a subtype of it). A class may
 //! always use its own members.
 
-use crate::ast::*;
 use crate::checker::Checker;
 use crate::registry::access_attributes::AccessAttributes;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::token::Span;
 
 const TEST_BASE_CLASSES: [&str; 2] = ["PHPUnit\\Framework\\TestCase", "Codeception\\Test\\Unit"];
 

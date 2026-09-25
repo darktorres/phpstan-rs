@@ -1,7 +1,7 @@
-use crate::ast::*;
 use crate::checker::{Checker, Locals, MemberVisibilityCheck, UsageTokenKind};
 use crate::php_version::PhpFeature;
 use crate::types;
+use syntax::ast::*;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_property_assignment(
@@ -121,9 +121,9 @@ impl<'a> Checker<'a> {
         // wider than private).
         if prop_sig.write_visibility == Visibility::Private {
             self.property_assign_facts
-                .entry(crate::intern::intern(&owner))
+                .entry(syntax::intern::intern(&owner))
                 .or_default()
-                .entry(crate::intern::intern(&prop.name))
+                .entry(syntax::intern::intern(&prop.name))
                 .or_default()
                 .push(actual.clone());
         }

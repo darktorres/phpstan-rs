@@ -12,11 +12,11 @@
 //! exactly `null`/`true`/`false` ("don't require `@return null` in
 //! descendant classes").
 
-use crate::ast::Visibility;
 use crate::checker::Checker;
 use crate::checker::type_union::union_types;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::Visibility;
+use syntax::token::Span;
 
 fn flatten_union(ty: &Type) -> Vec<&Type> {
     match ty {

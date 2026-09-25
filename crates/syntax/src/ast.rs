@@ -716,7 +716,7 @@ impl StaticTarget {
     /// against the literal `"?"` already always failed/mismatched, the
     /// same outcome `None` naturally produces here too), for every site
     /// that isn't `check_static_call`'s own new receiver-type resolution.
-    pub(crate) fn as_name(&self) -> Option<&str> {
+    pub fn as_name(&self) -> Option<&str> {
         match self {
             StaticTarget::Name(n, _) => Some(n),
             StaticTarget::Expr(_) => None,
@@ -1189,7 +1189,7 @@ pub enum ExprKind {
 /// literal-shaped check like the `Closure::bind`/`->bindTo()` special-
 /// casing needs to see through `(function () {...})` the same as a bare
 /// `function () {...}`.
-pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
+pub fn unwrap_grouping(e: &Expr) -> &Expr {
     match &e.kind {
         ExprKind::Grouping(inner) => unwrap_grouping(inner),
         _ => e,
@@ -1205,7 +1205,7 @@ pub(crate) fn unwrap_grouping(e: &Expr) -> &Expr {
 /// Purely syntactic: a concatenation with a variable operand is never
 /// resolved here even if a caller's type tracking knows it's a literal
 /// value, since this function only sees the raw `Expr`.
-pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
+pub fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>> {
     match &e.kind {
         ExprKind::Literal(Literal::String(s)) => Some(std::borrow::Cow::Borrowed(s.as_ref())),
         ExprKind::Grouping(inner) => literal_string_value(inner),
@@ -1219,7 +1219,7 @@ pub(crate) fn literal_string_value(e: &Expr) -> Option<std::borrow::Cow<'_, str>
 }
 
 /// Whether `name` (without its `$`) is one of PHP's superglobals.
-pub(crate) fn is_superglobal(name: &str) -> bool {
+pub fn is_superglobal(name: &str) -> bool {
     matches!(
         name,
         "GLOBALS"
@@ -1237,7 +1237,7 @@ pub(crate) fn is_superglobal(name: &str) -> bool {
 }
 
 /// Whether `name` is a PHP or PHPDoc keyword type rather than a class name.
-pub(crate) fn is_primitive_type_name(name: &str) -> bool {
+pub fn is_primitive_type_name(name: &str) -> bool {
     matches!(
         name.to_ascii_lowercase().as_str(),
         "int"

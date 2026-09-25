@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use lexer::Lexer;
 use parser::Parser;
-use phpstan_rs::{lexer, parser, project};
+use phpstan_rs::project;
+use syntax::{lexer, parser};
 
 /// `phpstan-rs check <file-or-dir>...` - lex+parse every .php file under
 /// the given paths in a single process (no per-file fork/exec), split

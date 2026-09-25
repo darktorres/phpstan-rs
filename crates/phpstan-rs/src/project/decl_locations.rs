@@ -1,9 +1,9 @@
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
-use crate::ast::{Stmt, StmtKind};
-use crate::name_resolution::NameContext;
-use crate::token::Span;
+use syntax::ast::{Stmt, StmtKind};
+use syntax::name_resolution::NameContext;
+use syntax::token::Span;
 
 /// A symbol's own declaration site, name-keyed the same way `Registry`
 /// is, but carrying `(PathBuf, Span)` instead of type

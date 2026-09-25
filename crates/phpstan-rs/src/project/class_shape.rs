@@ -10,14 +10,14 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
-use crate::ast::*;
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
-use crate::token::Span;
-use crate::visit::{any_child_expr, child_stmts, stmt_exprs};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 

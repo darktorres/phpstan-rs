@@ -39,16 +39,16 @@
 
 use std::path::Path;
 
-use crate::ast::{
-    Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
-};
 use crate::project::Project;
 use crate::registry::Registry;
-use crate::token::{Position, Span};
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::{
+    Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
+};
+use syntax::token::{Position, Span};
+use syntax::visit::{child_exprs, child_stmts};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 /// What a resolved signature-help target needs to look its own
 /// `FunctionSig` up (or, for `Instance`, to run the same checker probe

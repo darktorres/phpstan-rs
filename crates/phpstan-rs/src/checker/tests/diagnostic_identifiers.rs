@@ -6,7 +6,7 @@
 //! itself behaves as a plain, independently-testable unit.
 
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::{Position, Span};
+use syntax::token::{Position, Span};
 
 fn dummy_span() -> Span {
     Span {

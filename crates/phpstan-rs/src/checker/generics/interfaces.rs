@@ -26,8 +26,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
 use crate::registry::ClassInfo;
-use crate::token::Span;
 use crate::types::{self, Type};
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// Entry point - called once per class/interface/enum declaration
@@ -44,7 +44,7 @@ impl<'a> Checker<'a> {
         // exact same helper unchanged, so an enum genuinely gets called a
         // "Class" in this one specific message. Ported as-is, not
         // "corrected" to a third word real PHPStan itself doesn't use here.
-        let kind_word = if root_info.kind == crate::ast::ClassKind::Interface {
+        let kind_word = if root_info.kind == syntax::ast::ClassKind::Interface {
             "Interface"
         } else {
             "Class"
@@ -187,7 +187,7 @@ impl<'a> Checker<'a> {
         let Some(info) = self.registry.classes.get(name) else {
             return;
         };
-        if info.kind == crate::ast::ClassKind::Interface && !info.templates.is_empty() {
+        if info.kind == syntax::ast::ClassKind::Interface && !info.templates.is_empty() {
             match found.get(name) {
                 Some(existing) => {
                     for (idx, (new_ty, old_ty)) in

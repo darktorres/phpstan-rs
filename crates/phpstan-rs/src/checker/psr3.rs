@@ -26,11 +26,11 @@
 //! a Throwable variable is in scope but the context has no `exception`
 //! key.
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::token::Span;
 
 const LEVELS: [&str; 8] = [
     "emergency",

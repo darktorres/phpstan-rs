@@ -18,9 +18,9 @@
 //! (`identical.equalsMethod`): the class compares by value, identity
 //! only holds for the very same instance.
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
+use syntax::ast::*;
 
 fn is_nullable(ty: &Type) -> bool {
     matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Null))
@@ -252,8 +252,8 @@ impl<'a> Checker<'a> {
                     label.to_string(),
                     format!(
                         "{operator} between {class} objects compares identity; {class} defines equals() to compare values, use {negation}{}->equals({}).",
-                        crate::printer::print_expr(receiver),
-                        crate::printer::print_expr(argument)
+                        syntax::printer::print_expr(receiver),
+                        syntax::printer::print_expr(argument)
                     ),
                     e.span,
                     0,
@@ -306,7 +306,7 @@ impl<'a> Checker<'a> {
                     return;
                 }
                 let mut compared: Vec<(String, String)> = Vec::new();
-                let mut chain_ifs: Vec<crate::token::Span> = Vec::new();
+                let mut chain_ifs: Vec<syntax::token::Span> = Vec::new();
                 let mut current = Some(stmt);
                 while let Some(StmtKind::If {
                     cond, else_branch, ..
@@ -323,7 +323,7 @@ impl<'a> Checker<'a> {
                     let Some(enum_name) = self.enum_of(&self.infer_expr(case, locals)) else {
                         break;
                     };
-                    compared.push((crate::printer::print_expr(subject), enum_name));
+                    compared.push((syntax::printer::print_expr(subject), enum_name));
                     chain_ifs.push(current.map_or(stmt.span, |s| s.span));
                     current = else_branch.as_deref();
                 }

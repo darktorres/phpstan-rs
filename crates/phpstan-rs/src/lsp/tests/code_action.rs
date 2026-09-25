@@ -8,9 +8,9 @@ use super::super::*;
 use super::helpers::run;
 use super::helpers::*;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::token::{Position, Span};
 use lsp_types::CodeActionOrCommand;
 use serde_json::{Value, json};
+use syntax::token::{Position, Span};
 
 fn dummy_span() -> Span {
     Span {

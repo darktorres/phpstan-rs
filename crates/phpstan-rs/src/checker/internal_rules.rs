@@ -17,9 +17,9 @@
 //! reaches `check_function` at all - see `check_method_overrides`'s own
 //! doc comment).
 
-use crate::ast::Visibility;
 use crate::checker::Checker;
-use crate::token::Span;
+use syntax::ast::Visibility;
+use syntax::token::Span;
 
 pub(crate) trait InternalRule {
     fn check_method(

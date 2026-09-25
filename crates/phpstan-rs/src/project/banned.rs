@@ -7,16 +7,16 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
-use crate::ast::*;
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
-use crate::token::{Position, Span};
 use crate::types::Type;
-use crate::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::ast::*;
+use syntax::token::{Position, Span};
+use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 const SUPERGLOBALS: [&str; 9] = [
     "GLOBALS", "_SERVER", "_GET", "_POST", "_FILES", "_COOKIE", "_SESSION", "_REQUEST", "_ENV",
@@ -236,7 +236,7 @@ impl<'a> Walker<'a> {
                                 .map(|v| match v {
                                     GlobalVar::Name(n) => format!("${n}"),
                                     GlobalVar::Dynamic(e) => {
-                                        format!("${{{}}}", crate::printer::print_expr(e))
+                                        format!("${{{}}}", syntax::printer::print_expr(e))
                                     }
                                 })
                                 .collect::<Vec<_>>()

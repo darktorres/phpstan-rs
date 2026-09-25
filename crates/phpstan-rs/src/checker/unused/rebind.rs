@@ -1,9 +1,9 @@
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
-use crate::ast::*;
-use crate::name_resolution::NameContext;
-use crate::visit::{child_exprs, child_stmts};
+use syntax::ast::*;
+use syntax::name_resolution::NameContext;
+use syntax::visit::{child_exprs, child_stmts};
 
 // ---------------------------------------------------------------------
 // `Closure::bind`/`->bindTo` rebind targets (see `Checker::

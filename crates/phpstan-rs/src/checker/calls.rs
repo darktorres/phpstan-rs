@@ -1,11 +1,11 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types};
 use crate::registry::{FunctionSig, ParamSig};
-use crate::token::Span;
 use crate::types::{self, Type};
+use syntax::ast::*;
+use syntax::token::Span;
 
 mod closure_context;
 mod format_string;

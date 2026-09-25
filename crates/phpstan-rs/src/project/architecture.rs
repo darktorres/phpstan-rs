@@ -9,16 +9,16 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
-use crate::ast::*;
 use crate::php_stubs;
-use crate::token::Span;
 use crate::types::Type;
-use crate::visit::{child_exprs, child_stmts, stmt_exprs};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::name_resolution::NameContext;
+use syntax::name_resolution::NameContext;
 
 /// A class-like declaration's own facts the registry doesn't keep.
 struct Declared<'a> {

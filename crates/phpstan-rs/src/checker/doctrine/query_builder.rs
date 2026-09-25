@@ -13,10 +13,10 @@
 //! filter/order rows, never add or remove a result column, so this
 //! module never even attempts to resolve their own arguments.
 
-use crate::ast::literal_string_value;
-use crate::ast::{Arg, Expr, ExprKind};
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
+use syntax::ast::literal_string_value;
+use syntax::ast::{Arg, Expr, ExprKind};
 
 /// A cheap syntactic pre-check mirroring `resolve_query_builder_chain`'s
 /// own `MethodCall`/`Grouping` walk - "does this expression's own chain

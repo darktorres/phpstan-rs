@@ -4,8 +4,8 @@
 //! tag's type against the value it describes.
 
 use super::*;
-use crate::ast::literal_string_value;
 use crate::registry::{self, Trinary};
+use syntax::ast::literal_string_value;
 
 /// How the described value was written, for the literal leniency of
 /// `VarTagTypeRuleHelper::isValidSuperTypeOfExpr`.

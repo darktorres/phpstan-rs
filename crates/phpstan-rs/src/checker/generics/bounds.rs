@@ -1,12 +1,12 @@
 use rustc_hash::FxHashMap;
 
-use crate::ast::*;
 use crate::checker::{
     Checker, ITERABLE_GENERIC_CLASS_NAMES, TemplateBindings, class_kind_identifier,
 };
 use crate::docblock;
-use crate::token::Span;
 use crate::types::{self, Type};
+use syntax::ast::*;
+use syntax::token::Span;
 
 impl<'a> Checker<'a> {
     /// Walks `ty` for every `Object(class, args)` naming a class with

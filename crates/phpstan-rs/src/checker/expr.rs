@@ -1,4 +1,3 @@
-use crate::ast::*;
 use crate::checker::calls::parameters::Callee;
 use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
@@ -15,9 +14,10 @@ use crate::diagnostic::DiagnosticBuilder;
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::{FunctionSig, Registry};
-use crate::token::Span;
 use crate::types::{self, AccessoryKind, Type};
-use crate::visit::{body_contains_yield, expr_contains_yield};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{body_contains_yield, expr_contains_yield};
 
 mod array_ops;
 mod builtin_calls;
@@ -5206,7 +5206,7 @@ impl<'a> Checker<'a> {
             }
             _ => {}
         }
-        for child in crate::visit::child_stmts(stmt) {
+        for child in syntax::visit::child_stmts(stmt) {
             self.collect_member_ref_defaults_stmt(child);
         }
     }
@@ -6129,7 +6129,7 @@ impl<'a> Checker<'a> {
                 }
                 _ => {}
             }
-            stack.extend(crate::visit::child_stmts(s));
+            stack.extend(syntax::visit::child_stmts(s));
         }
         let falls_off_end = !body
             .last()
@@ -6892,7 +6892,7 @@ pub(crate) fn unseal_array_shapes(ty: &Type) -> Type {
 
 /// Where a static call's class part (`Foo` in `Foo::bar()`, or `$obj` in
 /// `$obj::bar()`) ends.
-fn static_target_end(target: &StaticTarget) -> crate::token::Position {
+fn static_target_end(target: &StaticTarget) -> syntax::token::Position {
     match target {
         StaticTarget::Name(_, span) => span.end,
         StaticTarget::Expr(expr) => expr.span.end,

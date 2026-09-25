@@ -17,11 +17,11 @@
 //! - `currentTime.requestTime`: `$_SERVER['REQUEST_TIME']` and
 //!   `REQUEST_TIME_FLOAT`.
 
-use crate::ast::*;
 use crate::checker::{Checker, Locals};
 use crate::php_date_parser::depends_on_current_time;
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::*;
+use syntax::token::Span;
 
 const CLOCK_TIP: &str = "rely on an injected clock (PSR-20 ClockInterface) instead";
 

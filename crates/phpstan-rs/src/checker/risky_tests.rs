@@ -14,10 +14,10 @@
 //! overwhelming common real-world shape, and the one this project's
 //! own corpus exclusively uses.
 
-use crate::ast::*;
 use crate::checker::Checker;
-use crate::token::Span;
-use crate::visit::{any_child_expr, any_child_stmt};
+use syntax::ast::*;
+use syntax::token::Span;
+use syntax::visit::{any_child_expr, any_child_stmt};
 
 impl<'a> Checker<'a> {
     /// `fqn`'s own test methods, each checked independently - only fires

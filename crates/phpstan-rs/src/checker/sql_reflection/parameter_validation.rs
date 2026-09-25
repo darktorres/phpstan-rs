@@ -41,14 +41,14 @@
 use sqlparser::dialect::GenericDialect;
 use sqlparser::tokenizer::{Token, Tokenizer};
 
-use crate::ast::{Arg, Expr, ExprKind};
 use crate::checker::sql_reflection::query_builder::{
     ParamBinding, ParamKey, is_array_parameter_type, is_integer_parameter_type,
     param_key_from_expr, value_is_confidently_not_an_integer,
 };
 use crate::checker::{Checker, Locals};
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::{Arg, Expr, ExprKind};
+use syntax::token::Span;
 
 /// Every placeholder the SQL text itself references, in first-occurrence
 /// order, deduplicated by key (a repeated `:name` is the same real bound

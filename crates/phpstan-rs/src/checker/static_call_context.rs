@@ -6,10 +6,10 @@
 //! (`method.staticCall`), and a call to an abstract method
 //! (`method.callToAbstract`/`staticMethod.callToAbstract`).
 
-use crate::ast::StaticTarget;
 use crate::checker::{Checker, Locals};
-use crate::token::Span;
 use crate::types::Type;
+use syntax::ast::StaticTarget;
+use syntax::token::Span;
 
 /// Whether `ty` can never be a class name or an object a static call
 /// could dispatch on. `null` members are skipped, and string members
@@ -118,7 +118,7 @@ impl<'a> Checker<'a> {
             .to_string();
         let is_static = owner_info.static_methods.contains(canonical.as_str());
         let is_abstract = owner_info.abstract_methods.contains(canonical.as_str());
-        let owner_is_interface = owner_info.kind == crate::ast::ClassKind::Interface;
+        let owner_is_interface = owner_info.kind == syntax::ast::ClassKind::Interface;
         if !is_static && !self.static_call_has_compatible_this(class) {
             let dom_load_html = canonical.eq_ignore_ascii_case("loadHTML")
                 && owner.eq_ignore_ascii_case("DOMDocument");

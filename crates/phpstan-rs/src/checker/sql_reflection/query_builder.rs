@@ -27,10 +27,10 @@
 //! keyword) - only syntactic validity matters here, never logical
 //! correctness, since this text is never executed, only prepared.
 
-use crate::ast::literal_string_value;
-use crate::ast::{Arg, Expr, ExprKind, StaticTarget};
 use crate::checker::{Checker, Locals};
 use crate::types::Type;
+use syntax::ast::literal_string_value;
+use syntax::ast::{Arg, Expr, ExprKind, StaticTarget};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JoinKind {
