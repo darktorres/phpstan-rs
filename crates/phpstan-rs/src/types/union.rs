@@ -89,6 +89,22 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     if members.contains(&Type::Mixed(false)) {
         return Type::Mixed(false);
     }
+    // An extension payload whose widened form is already a member adds
+    // nothing - the union cap's widening stays put once it happened.
+    let widened: Vec<Type> = members
+        .iter()
+        .filter_map(|m| match m {
+            Type::Extension(data) => data.widen(),
+            _ => None,
+        })
+        .filter(|w| members.contains(w))
+        .collect();
+    if !widened.is_empty() {
+        members.retain(|m| match m {
+            Type::Extension(data) => !data.widen().is_some_and(|w| widened.contains(&w)),
+            _ => true,
+        });
+    }
     // `void` joined with `null` is just `null`, as in real PHPStan's
     // `TypeCombinator::union` (a nullsafe call to a `void` method reads
     // as `null`).
@@ -186,6 +202,9 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
         members = generalize_by_key_set(members);
     }
     if members.len() > MAX_UNION_MEMBERS {
+        members = widen_extension_types(members);
+    }
+    if members.len() > MAX_UNION_MEMBERS {
         return Type::Mixed(false);
     }
     if members.len() == 1 {
@@ -193,6 +212,23 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     } else {
         Type::Union(members)
     }
+}
+
+/// The union cap's second fallback: each extension payload widened the
+/// way its extension allows (distinct payloads stay distinct below the
+/// cap), duplicates dropped.
+fn widen_extension_types(members: Vec<Type>) -> Vec<Type> {
+    let mut out: Vec<Type> = Vec::new();
+    for m in members {
+        let m = match &m {
+            Type::Extension(data) => data.widen().unwrap_or(m),
+            _ => m,
+        };
+        if !out.contains(&m) {
+            out.push(m);
+        }
+    }
+    out
 }
 
 /// A follow-up to the `MAX_UNION_MEMBERS` cap above: before giving up to

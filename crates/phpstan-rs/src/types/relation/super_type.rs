@@ -17,6 +17,15 @@ impl Relation<'_> {
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
                 self.is_super_type_of(&types::resolve_late_to_bounds(sup), sub)
             }
+            (Type::Extension(a), Type::Extension(b)) => a
+                .is_super_type_of(&**b, self.hierarchy)
+                .unwrap_or_else(|| self.is_super_type_of(&a.base(), &b.base())),
+            // A plain base value may or may not carry the payload.
+            (Type::Extension(a), _) => match self.is_super_type_of(&a.base(), sub) {
+                TrinaryLogic::No => TrinaryLogic::No,
+                _ => TrinaryLogic::Maybe,
+            },
+            (_, Type::Extension(b)) => self.is_super_type_of(sup, &b.base()),
             (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
                 self.is_super_type_of(sup, &types::resolve_late_to_bounds(sub))
             }

@@ -119,6 +119,8 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // special-cases exactly this (`is_nan(a) && is_nan(b)`).
         (Type::FloatLiteral(a), Type::FloatLiteral(b)) if a.is_nan() && b.is_nan() => true,
         (a, b) if a == b => true,
+        // An extension payload is at least its base type.
+        (Type::Extension(data), _) => is_subtype(&data.base(), sup),
 
         // A shaped callable is always compatible with a bare marker -
         // no shape to compare against on the other side at all.

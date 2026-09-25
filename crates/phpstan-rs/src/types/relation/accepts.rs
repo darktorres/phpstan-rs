@@ -27,6 +27,16 @@ impl Relation<'_> {
             (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
                 self.is_assignable(sub, &types::resolve_late_to_bounds(sup))
             }
+            // Two payloads ask the extension; anything else reads a
+            // payload as its base type.
+            (Type::Extension(a), Type::Extension(b)) => {
+                match b.is_super_type_of(&**a, self.hierarchy) {
+                    Some(result) => result.yes(),
+                    None => self.is_assignable(&a.base(), &b.base()),
+                }
+            }
+            (Type::Extension(a), _) => self.is_assignable(&a.base(), sup),
+            (_, Type::Extension(b)) => self.is_assignable(sub, &b.base()),
             // The native `object` type hint is satisfied by *any* class
             // instance - an extremely common pattern, e.g. Doctrine's
             // `EntityRepository<T of object>` - and satisfies no

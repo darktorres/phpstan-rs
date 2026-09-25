@@ -584,3 +584,63 @@ fn a_shape_has_the_offsets_it_requires() {
     assert!(!r.is_assignable(&shape, &has("b")));
     assert!(!r.is_assignable(&shape, &has("c")));
 }
+
+/// A toy extension payload: a `Builder` that knows how many joins it has.
+#[derive(Debug)]
+struct Joins(u32);
+
+impl crate::types::ExtensionTypeData for Joins {
+    fn base(&self) -> Type {
+        Type::Object("Builder".into(), vec![])
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    fn eq_data(&self, other: &dyn crate::types::ExtensionTypeData) -> bool {
+        other
+            .as_any()
+            .downcast_ref::<Joins>()
+            .is_some_and(|o| o.0 == self.0)
+    }
+    fn hash_data(&self, state: &mut dyn std::hash::Hasher) {
+        state.write_u32(self.0);
+    }
+    fn describe(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Builder<joins={}>", self.0)
+    }
+    fn is_super_type_of(
+        &self,
+        other: &dyn crate::types::ExtensionTypeData,
+        _: &dyn crate::types::ClassHierarchy,
+    ) -> Option<crate::types::TrinaryLogic> {
+        let other = other.as_any().downcast_ref::<Joins>()?;
+        Some(crate::types::TrinaryLogic::from_bool(other.0 == self.0))
+    }
+    fn widen(&self) -> Option<Type> {
+        Some(self.base())
+    }
+}
+
+#[test]
+fn an_extension_payload_relates_through_its_hooks_and_its_base() {
+    use crate::types::TrinaryLogic;
+    let r = build_registry("<?php class Builder {}");
+    let joins = |n| Type::Extension(std::sync::Arc::new(Joins(n)));
+    let builder = Type::Object("Builder".into(), vec![]);
+    assert_eq!(joins(1), joins(1));
+    assert_ne!(joins(1), joins(2));
+    assert_eq!(joins(2).to_string(), "Builder<joins=2>");
+    assert!(r.is_assignable(&joins(1), &joins(1)));
+    assert!(!r.is_assignable(&joins(1), &joins(2)));
+    assert!(r.is_assignable(&joins(1), &builder));
+    assert_eq!(r.is_super_type_of(&builder, &joins(3)), TrinaryLogic::Yes);
+    assert_eq!(r.is_super_type_of(&joins(3), &builder), TrinaryLogic::Maybe);
+    // Distinct payloads stay distinct until the union cap, then widen.
+    let two = crate::types::union_types(joins(1), joins(2));
+    assert!(matches!(&two, Type::Union(members) if members.len() == 2));
+    let many = (0..20)
+        .map(joins)
+        .reduce(crate::types::union_types)
+        .unwrap();
+    assert_eq!(many, builder);
+}

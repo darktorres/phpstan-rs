@@ -7,6 +7,7 @@ pub use syntax::name::Name;
 mod coercion;
 mod conditional;
 mod display;
+mod extension;
 mod hierarchy;
 mod late;
 mod parse;
@@ -21,6 +22,7 @@ mod union;
 
 pub use conditional::resolve_conditional;
 pub(crate) use conditional::{conditional_branch, union_of_branches};
+pub use extension::ExtensionTypeData;
 pub use hierarchy::{ClassFacts, ClassHierarchy, effective_slot_variance};
 pub(crate) use late::{contains_late, resolve_late_to_bounds, settle};
 pub use parse::parse_type_string;
@@ -223,6 +225,8 @@ pub enum Type {
     // parameter name with no leading `$`; only a bare `$param` subject is
     // modeled. A consumer that can't resolve this variant falls back to
     // the eager `Union([if_true, if_false])`.
+    // An extension's own payload (`types::ExtensionTypeData`).
+    Extension(Arc<dyn ExtensionTypeData>),
     Conditional {
         subject: String,
         target: Box<Type>,
@@ -285,6 +289,7 @@ impl PartialEq for Type {
             | (Type::HasProperty(a), Type::HasProperty(b)) => a.eq_ignore_case(b),
             (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
             (Type::ValueOf(a), Type::ValueOf(b)) => a == b,
+            (Type::Extension(a), Type::Extension(b)) => a.eq_data(&**b),
             (Type::KeyOf(a), Type::KeyOf(b)) => a == b,
             (Type::OffsetAccess(ab, ak), Type::OffsetAccess(bb, bk)) => ab == bb && ak == bk,
             (
@@ -366,6 +371,7 @@ impl PartialEq for Type {
                 | Type::KeyOf(_)
                 | Type::OffsetAccess(..)
                 | Type::ClassConstant { .. }
+                | Type::Extension(_)
                 | Type::Conditional { .. },
                 _,
             ) => false,
@@ -452,6 +458,10 @@ impl Hash for Type {
             Type::ClassConstant { class, pattern } => {
                 class.hash(state);
                 pattern.hash(state);
+            }
+            Type::Extension(data) => {
+                let state: &mut dyn Hasher = state;
+                data.hash_data(state);
             }
             Type::Conditional {
                 subject,
