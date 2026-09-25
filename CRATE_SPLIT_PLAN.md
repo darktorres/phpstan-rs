@@ -851,7 +851,10 @@ approved delta (none blocks the split):
   not spliced; a failing `array_is_list()` not proving non-emptiness; a
   flag variable set beside a side effect not narrowing; a try block that
   cannot throw leaving its catch live; a non-exhaustive match not
-  throwing `UnhandledMatchError`.
+  throwing `UnhandledMatchError`;
+- found during B3: the purity classifier (`registry/purity.rs`) treats a
+  dynamic method call `$obj->{$m}()` as pure when its receiver and
+  arguments are.
 
 ### Stage B: workspace and leaf layers
 
