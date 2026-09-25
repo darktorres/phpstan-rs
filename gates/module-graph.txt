@@ -58,7 +58,6 @@ module ast syntax
 module printer syntax
 module intern syntax
 module ast_walk syntax
-module text_split syntax
 module types types
 module php_version types
 module php_float_format types

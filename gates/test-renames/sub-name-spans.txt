@@ -1,0 +1,6 @@
+text_split::tests::splits_a_nullable_hint_into_its_one_real_class_name -> parser::tests::type_hints::class_names_skip_keyword_types_and_carry_their_own_spans
+text_split::tests::splits_a_union_hint_into_each_class_name_in_order -> parser::tests::type_hints::class_names_skip_keyword_types_and_carry_their_own_spans
+text_split::tests::a_namespaced_name_is_one_span_not_split_at_its_own_backslashes -> parser::tests::type_hints::class_names_skip_keyword_types_and_carry_their_own_spans
+text_split::tests::split_identifier_spans_does_not_filter_self_static_parent -> parser::tests::spans::member_names_and_static_targets_have_their_own_spans
+text_split::tests::splits_a_static_access_expression_into_its_class_and_member_halves -> parser::tests::spans::member_names_and_static_targets_have_their_own_spans
+text_split::tests::a_mismatched_expected_count_returns_none_rather_than_a_wrong_split -> REMOVED: names carry spans from the parser; nothing is re-lexed to mismatch

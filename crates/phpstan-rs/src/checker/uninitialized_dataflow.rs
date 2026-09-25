@@ -419,9 +419,7 @@ fn walk_expr(
     match &e.kind {
         ExprKind::PropertyAccess(base, name, _) => {
             state = walk_expr(base, state, ctx, declaring_class);
-            if is_this(base)
-                && ctx.candidates.contains(name.as_ref())
-                && !state.contains(name.as_ref())
+            if is_this(base) && ctx.candidates.contains(&*name.name) && !state.contains(&*name.name)
             {
                 ctx.premature_reads.push((name.to_string(), e.span));
             }
@@ -475,7 +473,7 @@ fn walk_expr(
                 if let ExprKind::PropertyAccess(base, name, _) = &a.value.kind
                     && is_this(base)
                 {
-                    state = state.without(name.as_ref());
+                    state = state.without(&*name.name);
                     continue;
                 }
                 state = walk_expr(&a.value, state, ctx, declaring_class);

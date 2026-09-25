@@ -53,7 +53,6 @@ use crate::types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::to_lsp_range;
-use crate::text_split::slice_span;
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.
@@ -729,6 +728,43 @@ pub(super) fn build_member_probe(
         probe_span,
         is_static,
     })
+}
+
+/// `source`'s own substring covered by `span` - `Position`'s own doc
+/// comment: 1-indexed, `col` counts UTF-8 *characters*, not bytes, the
+/// same convention every span in this project already uses.
+pub(crate) fn slice_span(source: &str, span: Span) -> Option<String> {
+    let lines: Vec<&str> = source.lines().collect();
+    let start_line = (span.start.line as usize).checked_sub(1)?;
+    let end_line = (span.end.line as usize).checked_sub(1)?;
+    if start_line == end_line {
+        let chars: Vec<char> = lines.get(start_line)?.chars().collect();
+        let start = (span.start.col as usize).checked_sub(1)?;
+        let end = (span.end.col as usize).checked_sub(1)?;
+        if start > end || end > chars.len() {
+            return None;
+        }
+        return Some(chars[start..end].iter().collect());
+    }
+    let mut out = String::new();
+    let first_chars: Vec<char> = lines.get(start_line)?.chars().collect();
+    let start = (span.start.col as usize).checked_sub(1)?;
+    if start > first_chars.len() {
+        return None;
+    }
+    out.extend(&first_chars[start..]);
+    out.push('\n');
+    for line in lines.get(start_line + 1..end_line)? {
+        out.push_str(line);
+        out.push('\n');
+    }
+    let last_chars: Vec<char> = lines.get(end_line)?.chars().collect();
+    let end = (span.end.col as usize).checked_sub(1)?;
+    if end > last_chars.len() {
+        return None;
+    }
+    out.extend(&last_chars[..end]);
+    Some(out)
 }
 
 #[cfg(test)]

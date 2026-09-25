@@ -30,14 +30,12 @@
 //! sits on the function/method/class name itself, before the opening
 //! paren - too early to offer a *parameter* tooltip for. Step 2 above
 //! additionally requires `pos` to be at or past an args-region boundary,
-//! computed per kind from a span the AST (or `text_split::
-//! split_identifier_spans`) already gives for free: `Call`/`New` ->
-//! `callee.span.end`; `MethodCall` -> the end of the member-name
-//! sub-span (the same `split_identifier_spans` call `navigation::
-//! Walker`'s own `MethodCall` arm already makes); `DynamicMethodCall` ->
+//! computed per kind from a span the AST gives: `Call`/`New` ->
+//! `callee.span.end`; `MethodCall` -> the end of the method name's
+//! span; `DynamicMethodCall` ->
 //! `name_expr.span.end` (a few characters before the real `(` for the
 //! `{$expr}` brace form - narrow, disclosed slack, never a wrong-call
-//! leak); `StaticCall` -> the end of the member sub-span.
+//! leak); `StaticCall` -> the end of the method name's span.
 
 use std::path::Path;
 
@@ -50,7 +48,6 @@ use crate::registry::{NameContext, Registry};
 use crate::token::{Position, Span};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
-use crate::text_split::split_identifier_spans;
 
 /// What a resolved signature-help target needs to look its own
 /// `FunctionSig` up (or, for `Instance`, to run the same checker probe
@@ -83,13 +80,11 @@ pub(crate) struct SigHelp {
 
 pub(crate) fn resolve_at(project: &Project, path: &Path, pos: Position) -> Option<SigHelp> {
     let stmts = project.ast(path)?;
-    let source = project.source(path)?;
     let registry = project.registry();
     let mut ctx = NameContext::default();
     let mut best = None;
     let mut w = Walker {
         registry,
-        source,
         pos,
         top_level_stmts: stmts,
         current_function: None,
@@ -117,7 +112,6 @@ fn active_parameter(args: &[Arg], pos: Position) -> usize {
 
 struct Walker<'a> {
     registry: &'a Registry,
-    source: &'a str,
     pos: Position,
     top_level_stmts: &'a [Stmt],
     current_function: Option<FunctionDecl>,
@@ -338,10 +332,7 @@ impl<'a> Walker<'a> {
             ExprKind::MethodCall(recv, method, args, _) => {
                 if contains(expr.span, self.pos) {
                     *best = None;
-                    if let Some(spans) =
-                        split_identifier_spans(self.source, expr.span, &[method.as_ref()])
-                        && self.pos_past(spans[0].end)
-                    {
+                    if self.pos_past(method.span.end) {
                         if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
                             && let Some(owner) = current_class
                         {
@@ -406,12 +397,7 @@ impl<'a> Walker<'a> {
                     if let Some(class) = target.as_name()
                         && let Some(fqn) =
                             resolve_class_ref(class, current_class, ctx, self.registry)
-                        && let Some(spans) = split_identifier_spans(
-                            self.source,
-                            expr.span,
-                            &[class, member.as_str()],
-                        )
-                        && self.pos_past(spans[1].end)
+                        && self.pos_past(member.span.end)
                     {
                         *best = Some(SigHelp {
                             target: Target::Member(fqn, member.to_string()),

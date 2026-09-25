@@ -731,6 +731,40 @@ impl StaticTarget {
     }
 }
 
+/// A name written in the source - a member, method or constant name -
+/// with its span. Derefs to the name.
+#[derive(Debug, Clone)]
+pub struct Ident {
+    pub name: Arc<str>,
+    pub span: Span,
+}
+
+impl std::ops::Deref for Ident {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.name
+    }
+}
+
+impl PartialEq<str> for Ident {
+    fn eq(&self, other: &str) -> bool {
+        *self.name == *other
+    }
+}
+
+impl PartialEq<&str> for Ident {
+    fn eq(&self, other: &&str) -> bool {
+        *self.name == **other
+    }
+}
+
+impl std::fmt::Display for Ident {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.name)
+    }
+}
+
 /// A native type declaration (`int`, `?Foo`, `A|B`, `(A&B)|null`) as
 /// written, with the span of each part.
 #[derive(Debug, Clone)]
@@ -985,8 +1019,8 @@ pub enum ExprKind {
     // access is a `DynamicPropertyAccess`/`DynamicMethodCall` below, not
     // this variant - `$prop`'s own runtime value, not its declared name,
     // is the real member name.
-    PropertyAccess(Box<Expr>, Arc<str>, bool),
-    MethodCall(Box<Expr>, Arc<str>, Vec<Arg>, bool),
+    PropertyAccess(Box<Expr>, Ident, bool),
+    MethodCall(Box<Expr>, Ident, Vec<Arg>, bool),
     // `$obj->{$name}` / `$obj->{$name}(...)` - the property/method name is
     // itself computed from an expression, not statically known, so it
     // can't share PropertyAccess/MethodCall's plain-String name. Still
@@ -996,11 +1030,11 @@ pub enum ExprKind {
     DynamicPropertyAccess(Box<Expr>, Box<Expr>),
     DynamicMethodCall(Box<Expr>, Box<Expr>, Vec<Arg>),
     /// `Foo::BAR`.
-    ClassConstFetch(StaticTarget, Arc<str>),
+    ClassConstFetch(StaticTarget, Ident),
     /// `Foo::class` (any case).
     ClassNameFetch(StaticTarget),
     /// `Foo::$bar`; the name is without its `$`.
-    StaticPropertyFetch(StaticTarget, Arc<str>),
+    StaticPropertyFetch(StaticTarget, Ident),
     /// `Foo::${expr}` / `Foo::$$name`: the property name is computed.
     DynamicStaticPropertyFetch(StaticTarget, Box<Expr>),
     /// `Foo::{$expr}` (PHP 8.3): the constant name is computed.
@@ -1013,7 +1047,7 @@ pub enum ExprKind {
     // already-parsed receiver `Expr` survives into the AST, letting
     // `check_static_call` resolve its inferred type and check the call
     // against it, the same way a literal class name already is.
-    StaticCall(StaticTarget, String, Vec<Arg>),
+    StaticCall(StaticTarget, Ident, Vec<Arg>),
     /// `Foo::$name()` / `Foo::{$expr}()`: the method name is computed.
     DynamicStaticCall(StaticTarget, Box<Expr>, Vec<Arg>),
     Index(Box<Expr>, Option<Box<Expr>>),

@@ -34,7 +34,6 @@ use std::path::{Path, PathBuf};
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::registry::NameContext;
-use crate::text_split::split_identifier_spans;
 use crate::token::Span;
 
 /// What a reference site points at - no local-variable variant (see
@@ -357,20 +356,14 @@ impl<'a> ClassFnRefWalker<'a> {
             // buried inside it is still picked up by the generic
             // `expr_children` walk below (it's a real child of this
             // node now, not a discarded `"?"` sentinel).
-            ExprKind::StaticCall(StaticTarget::Name(class, _), member, _) => {
+            ExprKind::StaticCall(StaticTarget::Name(class, class_span), _, _) => {
                 if let Some(fqn) = resolve_class_ref(class, current_class, ctx) {
-                    match self.source {
-                        Some(source) => {
-                            if let Some(spans) = split_identifier_spans(
-                                source,
-                                expr.span,
-                                &[class.as_str(), member.as_str()],
-                            ) {
-                                out.push((spans[0], RefTarget::Class(fqn)));
-                            }
-                        }
-                        None => out.push((expr.span, RefTarget::Class(fqn))),
-                    }
+                    let span = if self.source.is_some() {
+                        *class_span
+                    } else {
+                        expr.span
+                    };
+                    out.push((span, RefTarget::Class(fqn)));
                 }
             }
             ExprKind::Instanceof(_, InstanceofTarget::Name(name, span)) => {

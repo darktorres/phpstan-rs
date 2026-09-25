@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ast::Attribute;
+use crate::ast::{Attribute, Ident};
 use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
@@ -224,6 +224,19 @@ impl Parser {
     // source of its own to move (`keyword_raw` is a plain, deliberately
     // non-interned `String` - see its own doc comment), so it's interned
     // here instead, same as any other identifier text.
+    /// `take_name_segment`, with the name's span.
+    pub(crate) fn take_ident(&mut self) -> Option<Ident> {
+        let start = self.current_pos();
+        let name = self.take_name_segment()?;
+        Some(Ident {
+            name,
+            span: Span {
+                start,
+                end: self.previous_end(),
+            },
+        })
+    }
+
     pub(crate) fn take_name_segment(&mut self) -> Option<Arc<str>> {
         match self.peek() {
             Token::Identifier(_) => {

@@ -775,7 +775,7 @@ fn is_duplicate_side_effect_free_operand(l: &Expr, r: &Expr) -> bool {
     match (&unwrap_grouping(l).kind, &unwrap_grouping(r).kind) {
         (ExprKind::Variable(a), ExprKind::Variable(b)) => a == b,
         (ExprKind::PropertyAccess(la, lp, ln), ExprKind::PropertyAccess(ra, rp, rn)) => {
-            ln == rn && lp == rp && is_duplicate_side_effect_free_operand(la, ra)
+            ln == rn && lp.name == rp.name && is_duplicate_side_effect_free_operand(la, ra)
         }
         (ExprKind::Index(la, Some(li)), ExprKind::Index(ra, Some(ri))) => {
             is_duplicate_side_effect_free_operand(la, ra)

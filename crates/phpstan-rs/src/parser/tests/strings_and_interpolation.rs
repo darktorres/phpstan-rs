@@ -196,7 +196,7 @@ fn braced_property_access_interpolation_parses_as_a_property_access() {
         panic!("expected a PropertyAccess part, got {:?}", parts[0].kind);
     };
     assert!(matches!(&base.kind, ExprKind::Variable(v) if **v == *"obj"));
-    assert_eq!(prop.as_ref(), "prop");
+    assert_eq!(&*prop.name, "prop");
     assert!(!nullsafe);
 }
 

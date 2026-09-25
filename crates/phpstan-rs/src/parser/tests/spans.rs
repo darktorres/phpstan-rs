@@ -156,3 +156,58 @@ fn instanceof_target_name_span_points_at_the_class_name() {
     assert_eq!(name, "Foo");
     assert_eq!(text_at(src, *span), "Foo");
 }
+
+#[test]
+fn member_names_and_static_targets_have_their_own_spans() {
+    let src = "<?php self::LIMIT; Foo::bar(); Foo::$count; $o->run(Bar::X); $o->prop;";
+    let program = parse(src);
+    let exprs: Vec<&Expr> = program
+        .iter()
+        .map(|s| match &s.kind {
+            StmtKind::Expression(e) => e,
+            other => panic!("expected an expression statement, got {other:?}"),
+        })
+        .collect();
+    let ExprKind::ClassConstFetch(StaticTarget::Name(_, class_span), name) = &exprs[0].kind else {
+        panic!("expected a class constant fetch");
+    };
+    assert_eq!(text_at(src, *class_span), "self");
+    assert_eq!(text_at(src, name.span), "LIMIT");
+    let ExprKind::StaticCall(StaticTarget::Name(_, class_span), name, _) = &exprs[1].kind else {
+        panic!("expected a static call");
+    };
+    assert_eq!(text_at(src, *class_span), "Foo");
+    assert_eq!(text_at(src, name.span), "bar");
+    let ExprKind::StaticPropertyFetch(_, name) = &exprs[2].kind else {
+        panic!("expected a static property fetch");
+    };
+    assert_eq!(text_at(src, name.span), "$count");
+    let ExprKind::MethodCall(_, name, _, _) = &exprs[3].kind else {
+        panic!("expected a method call");
+    };
+    assert_eq!(text_at(src, name.span), "run");
+    let ExprKind::PropertyAccess(_, name, _) = &exprs[4].kind else {
+        panic!("expected a property access");
+    };
+    assert_eq!(text_at(src, name.span), "prop");
+}
+
+#[test]
+fn an_interpolated_property_name_has_its_own_span() {
+    let src = r#"<?php echo "a $obj->prop b";"#;
+    let program = parse(src);
+    let StmtKind::Echo(exprs) = &program[0].kind else {
+        panic!("expected echo");
+    };
+    let ExprKind::Interpolated(parts) = &exprs[0].kind else {
+        panic!("expected an interpolated string");
+    };
+    let access = parts
+        .iter()
+        .find_map(|p| match &p.kind {
+            ExprKind::PropertyAccess(_, name, _) => Some(name),
+            _ => None,
+        })
+        .expect("a property access part");
+    assert_eq!(text_at(src, access.span), "prop");
+}

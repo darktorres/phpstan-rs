@@ -75,9 +75,7 @@ impl Parser {
                     // (`$obj->match()`, `$obj->new`) - PHP only reserves
                     // these in declaration position, not here.
                     let name = match self.peek() {
-                        Token::Identifier(_) | Token::Keyword(_) => {
-                            self.take_name_segment().unwrap()
-                        }
+                        Token::Identifier(_) | Token::Keyword(_) => self.take_ident().unwrap(),
                         other => {
                             return Err(ParseError {
                                 message: format!(
@@ -118,7 +116,7 @@ impl Parser {
                     // (`Foo::new()`, `Foo::default()`, `Foo::list()`).
                     let member = match self.peek() {
                         Token::Identifier(_) | Token::Keyword(_) => {
-                            StaticMember::Name(self.take_name_segment().unwrap())
+                            StaticMember::Name(self.take_ident().unwrap())
                         }
                         Token::Variable(_) => {
                             let var_start = self.current_pos();
@@ -171,9 +169,7 @@ impl Parser {
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
                         let kind = match member {
-                            StaticMember::Name(n) => {
-                                ExprKind::StaticCall(target, n.to_string(), args)
-                            }
+                            StaticMember::Name(n) => ExprKind::StaticCall(target, n, args),
                             StaticMember::Variable(v, span) => {
                                 let name = Expr {
                                     id: self.node_id(),
@@ -198,8 +194,8 @@ impl Parser {
                                 ExprKind::ClassNameFetch(target)
                             }
                             StaticMember::Name(n) => ExprKind::ClassConstFetch(target, n),
-                            StaticMember::Variable(v, _) => {
-                                ExprKind::StaticPropertyFetch(target, v)
+                            StaticMember::Variable(name, span) => {
+                                ExprKind::StaticPropertyFetch(target, Ident { name, span })
                             }
                             StaticMember::Dynamic(name) => {
                                 ExprKind::DynamicStaticPropertyFetch(target, Box::new(name))
@@ -290,7 +286,7 @@ impl Parser {
 
 /// What follows `::` in a static member access or call.
 enum StaticMember {
-    Name(Arc<str>),
+    Name(Ident),
     /// `$name`, and where it is.
     Variable(Arc<str>, Span),
     Dynamic(Expr),

@@ -1865,13 +1865,13 @@ impl<'a> Checker<'a> {
             if !matches!(&unwrap_grouping(recv).kind, ExprKind::Variable(v) if **v == *"this") {
                 return;
             }
-            if prop_name != &param.name {
+            if **prop_name != *param.name {
                 return;
             }
             if !matches!(&unwrap_grouping(rhs).kind, ExprKind::Variable(v) if v == &param.name) {
                 return;
             }
-            let Some(prop) = c.properties.iter().find(|p| &p.name == prop_name) else {
+            let Some(prop) = c.properties.iter().find(|p| *p.name == **prop_name) else {
                 return;
             };
             if prop.is_static

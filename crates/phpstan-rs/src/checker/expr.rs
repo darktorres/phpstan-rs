@@ -3008,7 +3008,7 @@ impl<'a> Checker<'a> {
                         c == "stdClass"
                             || self.registry.lookup_property(c, prop).is_some()
                             || self.registry.lookup_method(c, "__get").is_some()
-                            || (is_pest_this && self.pest_hook_properties.contains(prop.as_ref()))
+                            || (is_pest_this && self.pest_hook_properties.contains(&*prop.name))
                     })
                 {
                     self.report(
@@ -6275,7 +6275,14 @@ fn is_true_literal(e: &Expr) -> bool {
 fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> Expr {
     Expr {
         id: NodeId::SYNTHETIC,
-        kind: ExprKind::StaticCall(target.clone(), method, args.to_vec()),
+        kind: ExprKind::StaticCall(
+            target.clone(),
+            Ident {
+                name: method.into(),
+                span,
+            },
+            args.to_vec(),
+        ),
         span,
     }
 }
@@ -6286,7 +6293,13 @@ fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
     let kind = if name == "class" {
         ExprKind::ClassNameFetch(target.clone())
     } else {
-        ExprKind::ClassConstFetch(target.clone(), name.into())
+        ExprKind::ClassConstFetch(
+            target.clone(),
+            Ident {
+                name: name.into(),
+                span,
+            },
+        )
     };
     Expr {
         id: NodeId::SYNTHETIC,

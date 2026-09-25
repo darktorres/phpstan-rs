@@ -63,7 +63,21 @@ impl Parser {
                         id: self.node_id(),
                         // Real PHP's simple interpolation syntax has no
                         // `?->` form - always non-nullsafe.
-                        kind: ExprKind::PropertyAccess(Box::new(var_expr), prop, false),
+                        kind: ExprKind::PropertyAccess(
+                            Box::new(var_expr),
+                            Ident {
+                                name: prop,
+                                // Past the `->`, on the variable's line.
+                                span: Span {
+                                    start: Position {
+                                        line: var_end.line,
+                                        col: var_end.col + 2,
+                                    },
+                                    end,
+                                },
+                            },
+                            false,
+                        ),
                         span: Span {
                             start: var_start,
                             end,

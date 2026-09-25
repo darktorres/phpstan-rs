@@ -100,16 +100,16 @@ fn mark_write_target(
 ) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.writes.insert(name.clone());
+            usage.writes.insert(name.name.clone());
             if also_read {
-                usage.reads.insert(name.clone());
+                usage.reads.insert(name.name.clone());
             }
             true
         }
         ExprKind::StaticPropertyFetch(target, prop) if target_is_self(target, fqn, ctx) => {
-            usage.writes.insert(prop.clone());
+            usage.writes.insert(prop.name.clone());
             if also_read {
-                usage.reads.insert(prop.clone());
+                usage.reads.insert(prop.name.clone());
             }
             true
         }
@@ -212,7 +212,7 @@ pub(crate) fn walk_expr_for_members(
             return;
         }
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.reads.insert(name.clone());
+            usage.reads.insert(name.name.clone());
         }
         // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
         // anywhere in the body - see `MemberUsage::aliases`'s own doc
@@ -235,12 +235,12 @@ pub(crate) fn walk_expr_for_members(
         ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
         ExprKind::StaticPropertyFetch(target, prop) => {
             if target_is_self(target, fqn, ctx) {
-                usage.reads.insert(prop.clone());
+                usage.reads.insert(prop.name.clone());
             }
         }
         ExprKind::ClassConstFetch(target, member) => {
             if target_is_self(target, fqn, ctx) {
-                usage.consts.insert(member.clone());
+                usage.consts.insert(member.name.clone());
             }
         }
         ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
@@ -252,10 +252,10 @@ pub(crate) fn walk_expr_for_members(
             _ => usage.escaped = true,
         },
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
-            usage.methods.insert(name.clone());
+            usage.methods.insert(name.name.clone());
         }
         ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
-            usage.methods.insert(Arc::from(name.as_str()));
+            usage.methods.insert(name.name.clone());
         }
         // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
         // access this walker can't attribute to any specific member.

@@ -4,9 +4,8 @@
 //! looking for the innermost name reference or declaration whose span
 //! contains the cursor, resolving it against the file's own namespace/
 //! `use`-imports (`NameContext`, the exact machinery `Checker`/
-//! `Project::declared_names` already use) and, where the AST only has an
-//! *enclosing* span to offer (`Foo::CONST`, `?Foo|Bar`), recovering the
-//! real per-name sub-span via `text_split::split_identifier_spans`.
+//! `Project::declared_names` already use). Each name in a compound
+//! reference (`Foo::CONST`, `?Foo|Bar`) has its own span in the AST.
 //!
 //! Also the traversal `textDocument/documentHighlight` (`lsp::document_
 //! highlight`... no such module - see `Server::document_highlight` in
@@ -50,8 +49,6 @@ use crate::registry::{NameContext, Registry};
 use crate::token::{Position, Span};
 use rustc_hash::FxHashSet;
 use std::path::Path;
-
-use crate::text_split::split_identifier_spans;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {
@@ -172,13 +169,11 @@ pub(crate) fn collect_all(project: &Project, path: &Path) -> Vec<(Span, Resolved
 
 fn walk_file(project: &Project, path: &Path, anchor: Anchor) -> Option<Vec<(Span, Resolved)>> {
     let stmts = project.ast(path)?;
-    let source = project.source(path)?;
     let registry = project.registry();
     let mut ctx = NameContext::default();
     let mut out = Vec::new();
     let mut w = Walker {
         registry,
-        source,
         anchor,
         top_level_stmts: stmts,
         current_function: None,
@@ -248,7 +243,6 @@ enum ScopeFrame {
 
 struct Walker<'a> {
     registry: &'a Registry,
-    source: &'a str,
     anchor: Anchor,
     // The whole file's own top-level statement list - `ProbeScope::
     // TopLevel`'s own source when a probe request lands at script scope
@@ -397,13 +391,9 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// Resolves a compound type-hint's own span (`?Foo`, `Foo|Bar`) to
-    /// whichever single class name inside it the cursor actually lands
-    /// on, if any - via `split_identifier_spans` (section 3's text-split)
-    /// paired positionally with `type_hint_identifiers`' own ordered
-    /// extraction of the same hint text. Under `Anchor::All`, every
-    /// sub-name of a compound hint gets its own entry, not just the one
-    /// (if any) a single cursor position would have landed on.
+    /// Resolves a compound type-hint (`?Foo`, `Foo|Bar`) to whichever
+    /// single class name inside it the cursor lands on, if any. Under
+    /// `Anchor::All`, every class name in the hint gets its own entry.
     fn record_type_hint(
         &self,
         out: &mut Vec<(Span, Resolved)>,
@@ -600,12 +590,11 @@ impl<'a> Walker<'a> {
                     self.record(out, expr.span, resolved);
                 }
             }
-            ExprKind::ClassConstFetch(StaticTarget::Name(class, _), member) => {
+            ExprKind::ClassConstFetch(StaticTarget::Name(class, class_span), member) => {
                 if self.anchor.matches(expr.span)
                     && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
-                    && let Some(spans) =
-                        split_identifier_spans(self.source, expr.span, &[class.as_str(), member])
                 {
+                    let spans = [*class_span, member.span];
                     // Two independent `if`s, not `if`/`else if`: under
                     // `Anchor::All` a single expression can contain both
                     // a class-name occurrence AND a member-name
@@ -621,14 +610,11 @@ impl<'a> Walker<'a> {
                     }
                 }
             }
-            ExprKind::ClassNameFetch(StaticTarget::Name(class, _)) => {
-                if self.anchor.matches(expr.span)
+            ExprKind::ClassNameFetch(StaticTarget::Name(class, class_span)) => {
+                if self.anchor.matches(*class_span)
                     && let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
-                    && let Some(spans) =
-                        split_identifier_spans(self.source, expr.span, &[class.as_str(), "class"])
-                    && self.anchor.matches(spans[0])
                 {
-                    out.push((spans[0], Resolved::Class(fqn)));
+                    out.push((*class_span, Resolved::Class(fqn)));
                 }
             }
             // `Foo::method()` mirrors `ClassConstFetch`/`StaticPropertyFetch` above exactly (a
@@ -642,16 +628,12 @@ impl<'a> Walker<'a> {
             // on the receiver's own resolved class either way).
             ExprKind::StaticCall(target, member, args) => {
                 match target {
-                    StaticTarget::Name(class, _) => {
+                    StaticTarget::Name(class, class_span) => {
                         if self.anchor.matches(expr.span)
                             && let Some(fqn) =
                                 resolve_class_ref(class, current_class, ctx, self.registry)
-                            && let Some(spans) = split_identifier_spans(
-                                self.source,
-                                expr.span,
-                                &[class.as_str(), member.as_str()],
-                            )
                         {
+                            let spans = [*class_span, member.span];
                             if self.anchor.matches(spans[0]) {
                                 out.push((spans[0], Resolved::Class(fqn.clone())));
                             }
@@ -662,13 +644,9 @@ impl<'a> Walker<'a> {
                     }
                     StaticTarget::Expr(receiver) => {
                         self.expr(receiver, ctx, current_class, out);
-                        if self.anchor.matches(expr.span)
-                            && let Some(spans) =
-                                split_identifier_spans(self.source, expr.span, &[member.as_ref()])
-                            && self.anchor.matches(spans[0])
-                        {
+                        if self.anchor.matches(member.span) {
                             out.push((
-                                spans[0],
+                                member.span,
                                 Resolved::Instance {
                                     receiver_span: receiver.span,
                                     member: member.to_string(),
@@ -738,11 +716,8 @@ impl<'a> Walker<'a> {
             ExprKind::MethodCall(recv, method, _, _)
             | ExprKind::PropertyAccess(recv, method, _) => {
                 self.expr(recv, ctx, current_class, out);
-                if self.anchor.matches(expr.span)
-                    && let Some(spans) =
-                        split_identifier_spans(self.source, expr.span, &[method.as_ref()])
-                    && self.anchor.matches(spans[0])
-                {
+                if self.anchor.matches(method.span) {
+                    let spans = [method.span];
                     if matches!(&recv.kind, ExprKind::Variable(v) if **v == *"this")
                         && let Some(owner) = current_class
                     {
