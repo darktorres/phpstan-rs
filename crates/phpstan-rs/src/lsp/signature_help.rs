@@ -41,7 +41,9 @@
 
 use std::path::Path;
 
-use crate::ast::{Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, Stmt, StmtKind};
+use crate::ast::{
+    Arg, ClassDecl, EnumDecl, Expr, ExprKind, FunctionDecl, Param, StaticTarget, Stmt, StmtKind,
+};
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::project::Project;
 use crate::registry::{NameContext, Registry};
@@ -367,6 +369,20 @@ impl<'a> Walker<'a> {
                 }
                 return;
             }
+            ExprKind::DynamicStaticCall(target, name_expr, args) => {
+                // Unresolvable statically - clear only, never set.
+                if contains(expr.span, self.pos) {
+                    *best = None;
+                }
+                if let StaticTarget::Expr(receiver) = target {
+                    self.expr(receiver, ctx, current_class, best);
+                }
+                self.expr(name_expr, ctx, current_class, best);
+                for a in args {
+                    self.expr(&a.value, ctx, current_class, best);
+                }
+                return;
+            }
             ExprKind::DynamicMethodCall(recv, name_expr, args) => {
                 // Unresolvable statically - clear only (Fix 1), never
                 // set. `name_expr.span.end` isn't consulted for a gate
@@ -384,22 +400,18 @@ impl<'a> Walker<'a> {
             ExprKind::StaticCall(target, member, args) => {
                 if contains(expr.span, self.pos) {
                     *best = None;
-                    // A genuinely dynamic receiver has no class-name text
-                    // to resolve here (this pass doesn't run a type
-                    // probe the way `navigation.rs`'s own equivalent
-                    // does) - `unwrap_or("?")` matches the identical
-                    // "unresolvable" outcome the parser's old permanent
-                    // `"?"` sentinel already produced for this case.
-                    let class = target.as_name().unwrap_or("?");
-                    if let Some(fqn) = resolve_class_ref(class, current_class, ctx, self.registry)
+                    // A dynamic receiver has no class-name text to resolve
+                    // here (this pass doesn't run a type probe the way
+                    // `navigation.rs`'s own equivalent does).
+                    if let Some(class) = target.as_name()
+                        && let Some(fqn) =
+                            resolve_class_ref(class, current_class, ctx, self.registry)
                         && let Some(spans) = split_identifier_spans(
                             self.source,
                             expr.span,
                             &[class, member.as_str()],
                         )
                         && self.pos_past(spans[1].end)
-                        && member != "class"
-                        && member != "{dynamic}"
                     {
                         *best = Some(SigHelp {
                             target: Target::Member(fqn, member.to_string()),

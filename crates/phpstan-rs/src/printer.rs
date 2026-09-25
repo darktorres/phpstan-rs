@@ -342,6 +342,12 @@ fn write_expr(out: &mut String, e: &Expr) {
             write_expr(out, name);
             out.push('}');
         }
+        ExprKind::DynamicStaticCall(target, name, args) => {
+            write_static_target(out, target);
+            out.push_str("::");
+            write_member_name(out, name);
+            write_args(out, args);
+        }
         ExprKind::StaticCall(target, member, args) => {
             write_static_target(out, target);
             out.push_str("::");

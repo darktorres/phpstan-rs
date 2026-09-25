@@ -38,15 +38,16 @@ use crate::ast::{Expr, ExprKind, InstanceofTarget, StaticTarget, Stmt, StmtKind}
 /// deliberately return none.
 pub fn expr_children(e: &Expr) -> Vec<&Expr> {
     match &e.kind {
-        ExprKind::Literal(_)
-        | ExprKind::Variable(_)
-        | ExprKind::ClassConstFetch(..)
-        | ExprKind::ClassNameFetch(_)
-        | ExprKind::StaticPropertyFetch(..)
-        | ExprKind::DynamicStaticPropertyFetch(..)
-        | ExprKind::Name(_) => {
-            vec![]
-        }
+        ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => vec![],
+        ExprKind::ClassConstFetch(target, _)
+        | ExprKind::ClassNameFetch(target)
+        | ExprKind::StaticPropertyFetch(target, _) => target.expr().into_iter().collect(),
+        ExprKind::DynamicStaticPropertyFetch(target, name)
+        | ExprKind::DynamicClassConstFetch(target, name) => target
+            .expr()
+            .into_iter()
+            .chain(std::iter::once(name.as_ref()))
+            .collect(),
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
         | ExprKind::Cast(_, inner)
@@ -55,7 +56,6 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
         | ExprKind::ShellExec(inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
-        | ExprKind::DynamicClassConstFetch(_, inner)
         | ExprKind::PropertyAccess(inner, _, _) => vec![inner],
         ExprKind::ArrayLiteral(items) => items
             .iter()
@@ -94,6 +94,12 @@ pub fn expr_children(e: &Expr) -> Vec<&Expr> {
             if let StaticTarget::Expr(t) = target {
                 v.push(t.as_ref());
             }
+            v.extend(args.iter().map(|a| &a.value));
+            v
+        }
+        ExprKind::DynamicStaticCall(target, name, args) => {
+            let mut v: Vec<&Expr> = target.expr().into_iter().collect();
+            v.push(name);
             v.extend(args.iter().map(|a| &a.value));
             v
         }
@@ -259,13 +265,14 @@ pub fn stmt_own_exprs(stmt: &Stmt) -> Vec<&Expr> {
 /// short-circuiting predicate).
 pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
     match &e.kind {
-        ExprKind::Literal(_)
-        | ExprKind::Variable(_)
-        | ExprKind::ClassConstFetch(..)
-        | ExprKind::ClassNameFetch(_)
-        | ExprKind::StaticPropertyFetch(..)
-        | ExprKind::DynamicStaticPropertyFetch(..)
-        | ExprKind::Name(_) => false,
+        ExprKind::Literal(_) | ExprKind::Variable(_) | ExprKind::Name(_) => false,
+        ExprKind::ClassConstFetch(target, _)
+        | ExprKind::ClassNameFetch(target)
+        | ExprKind::StaticPropertyFetch(target, _) => target.expr().is_some_and(f),
+        ExprKind::DynamicStaticPropertyFetch(target, name)
+        | ExprKind::DynamicClassConstFetch(target, name) => {
+            target.expr().is_some_and(&mut f) || f(name)
+        }
         ExprKind::DynamicVariable(inner)
         | ExprKind::Unary(_, inner)
         | ExprKind::Cast(_, inner)
@@ -274,7 +281,6 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
         | ExprKind::ShellExec(inner)
         | ExprKind::Throw(inner)
         | ExprKind::YieldFrom(inner)
-        | ExprKind::DynamicClassConstFetch(_, inner)
         | ExprKind::PropertyAccess(inner, _, _) => f(inner),
         ExprKind::ArrayLiteral(items) => items
             .iter()
@@ -296,6 +302,9 @@ pub fn any_expr_child(e: &Expr, mut f: &mut impl FnMut(&Expr) -> bool) -> bool {
         }
         ExprKind::StaticCall(target, _, args) => {
             matches!(target, StaticTarget::Expr(t) if f(t)) || args.iter().any(|a| f(&a.value))
+        }
+        ExprKind::DynamicStaticCall(target, name, args) => {
+            target.expr().is_some_and(&mut f) || f(name) || args.iter().any(|a| f(&a.value))
         }
         ExprKind::Index(base, idx) => f(base) || idx.as_ref().is_some_and(|i| f(i)),
         ExprKind::Instanceof(inner, target) => {

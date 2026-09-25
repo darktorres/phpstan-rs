@@ -251,6 +251,13 @@ fn bias_expr_spans(expr: &mut Expr, frag_base: Position) {
                 bias_expr_spans(&mut a.value, frag_base);
             }
         }
+        ExprKind::DynamicStaticCall(target, name, args) => {
+            bias_static_target(target, frag_base);
+            bias_expr_spans(name, frag_base);
+            for a in args {
+                bias_expr_spans(&mut a.value, frag_base);
+            }
+        }
         ExprKind::StaticCall(_, _, args) => {
             for a in args {
                 bias_expr_spans(&mut a.value, frag_base);

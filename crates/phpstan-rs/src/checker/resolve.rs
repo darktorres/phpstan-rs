@@ -310,10 +310,9 @@ impl<'a> Checker<'a> {
     ) -> Option<String> {
         match target {
             StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
-            StaticTarget::Expr(receiver) => match self.check_expr(receiver, locals, label) {
-                Type::Object(class, _) => Some(class),
-                _ => None,
-            },
+            StaticTarget::Expr(receiver) => {
+                receiver_class(self.check_expr(receiver, locals, label))
+            }
         }
     }
 
@@ -328,10 +327,7 @@ impl<'a> Checker<'a> {
     ) -> Option<String> {
         match target {
             StaticTarget::Name(name, _) => self.resolve_static_class_name(name),
-            StaticTarget::Expr(receiver) => match self.infer_expr(receiver, locals) {
-                Type::Object(class, _) => Some(class),
-                _ => None,
-            },
+            StaticTarget::Expr(receiver) => receiver_class(self.infer_expr(receiver, locals)),
         }
     }
 
@@ -972,5 +968,14 @@ fn collect_scoped_template_params(
             collect_scoped_template_params(&sig.return_type, scope, out);
         }
         _ => {}
+    }
+}
+
+/// The class a receiver's value is an instance of, when its type names
+/// one (plain `object` names none).
+pub(crate) fn receiver_class(ty: Type) -> Option<String> {
+    match ty {
+        Type::Object(class, _) if class != "object" => Some(class),
+        _ => None,
     }
 }

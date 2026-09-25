@@ -1,0 +1,11 @@
+--- old
++++ new
+@@ -2638,7 +2638,7 @@
+ src/Piwigo/Http/Middleware/ControllerInvokerMiddleware.php	45	55	0	magicNumber.argument	Piwigo\\Http\\Middleware\\ControllerInvokerMiddleware::process	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Http/Middleware/ControllerInvokerMiddleware.php	50	19	2	throws.missing	Piwigo\\Http\\Middleware\\ControllerInvokerMiddleware::process	Method Piwigo\\Http\\Middleware\\ControllerInvokerMiddleware::process() throws LogicException but it's not covered by any @throws tag.	
+ src/Piwigo/Http/Middleware/ExceptionHandlerMiddleware.php	35	16	4	catch.baseWithoutRethrow	Piwigo\\Http\\Middleware\\ExceptionHandlerMiddleware::process	Catching Throwable swallows every such exception unless the catch rethrows; add an unconditional throw.	
+-src/Piwigo/Http/Middleware/ExceptionHandlerMiddleware.php	36	57	0	psr3.contextType	Piwigo\\Http\\Middleware\\ExceptionHandlerMiddleware::process	Context key 'exception' of a logger call expects Throwable, string given.	
++src/Piwigo/Http/Middleware/ExceptionHandlerMiddleware.php	36	57	0	psr3.contextType	Piwigo\\Http\\Middleware\\ExceptionHandlerMiddleware::process	Context key 'exception' of a logger call expects Throwable, class-string<Throwable> given.	
+ src/Piwigo/Http/Middleware/ExceptionHandlerMiddleware.php	44	67	0	magicNumber.argument	Piwigo\\Http\\Middleware\\ExceptionHandlerMiddleware::process	Do not use magic number as a function argument. Move to constant with a suitable name.	
+ src/Piwigo/Http/ResponseEmitter.php	22	16	0	argument.booleanTrap	Piwigo\\Http\\ResponseEmitter::emit	header() argument #2 ($replace) is a bare `true` literal passed positionally into a bool parameter - consider a named argument or a self-documenting constant instead	
+ src/Piwigo/Http/ResponseFactory.php	22	60	0	magicNumber.defaultParameter	Piwigo\\Http\\ResponseFactory::json	Do not use magic number as default parameter. Move to constant with a suitable name.	

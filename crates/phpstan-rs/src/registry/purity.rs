@@ -457,12 +457,15 @@ fn expr_disqualifies(
             let Some(class) = declaring_class else {
                 return true;
             };
-            // A genuinely dynamic receiver is never one of the three
-            // resolvable pseudo-keywords below - `unwrap_or("?")` matches
-            // the identical "disqualifying, unresolvable" outcome the
-            // parser's old permanent `"?"` sentinel already produced.
-            resolve_static_call(class, target.as_name().unwrap_or("?"), name, registry, deps)
+            // A dynamic receiver is never one of the resolvable
+            // pseudo-keywords: unresolvable, so disqualifying.
+            let Some(target) = target.as_name() else {
+                return true;
+            };
+            resolve_static_call(class, target, name, registry, deps)
         }
+        // A computed method name: any method, so unresolvable.
+        ExprKind::DynamicStaticCall(..) => true,
         ExprKind::New(callee, args) => {
             if args
                 .iter()
@@ -928,6 +931,17 @@ fn collect_expr_impure_points(
                 });
             }
             collect_expr_impure_points(recv, declaring_class, registry, out);
+            for a in args {
+                collect_expr_impure_points(&a.value, declaring_class, registry, out);
+            }
+        }
+        ExprKind::DynamicStaticCall(_, _, args) => {
+            out.push(ImpurePointOccurrence {
+                span: e.span,
+                identifier: "methodCall",
+                description: "call to unknown method",
+                certain: false,
+            });
             for a in args {
                 collect_expr_impure_points(&a.value, declaring_class, registry, out);
             }

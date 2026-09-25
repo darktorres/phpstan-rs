@@ -71,6 +71,7 @@ fn expr_side_effects(e: &Expr) -> Effects {
         | ExprKind::MethodCall(..)
         | ExprKind::StaticCall(..)
         | ExprKind::DynamicMethodCall(..)
+        | ExprKind::DynamicStaticCall(..)
         | ExprKind::New(..)
         | ExprKind::NewAnonymousClass(..)
         | ExprKind::Assign(..)

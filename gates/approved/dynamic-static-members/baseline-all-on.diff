@@ -1,0 +1,10 @@
+--- old
++++ new
+@@ -25,6 +25,7 @@
+ src/Piwigo/Controller/CommentsController.php	465	13	5	argument.type	Piwigo\\Controller\\CommentsController::__invoke	Parameter #1 $whereClauses of method Piwigo\\Comment\\CommentService::getAllCommentsWithConditions() expects list<Piwigo\\Permission\\SqlCondition>, non-empty-list given.	
+ src/Piwigo/Group/GroupService.php	270	54	5	argument.type	Piwigo\\Group\\GroupService::merge	Parameter #2 $userIds of method Piwigo\\Group\\GroupRepository::addMembers() expects list<Piwigo\\Common\\ValueObject\\UserId>, list given.	
+ src/Piwigo/Group/GroupService.php	326	48	5	argument.type	Piwigo\\Group\\GroupService::delete	Parameter #2 $objectId of method Piwigo\\Core\\ActivityLoggerInterface::record() expects int|string|array<int, int|string>, list given.	
++src/Piwigo/Http/Middleware/ExceptionHandlerMiddleware.php	36	57	0	psr3.contextType	Piwigo\\Http\\Middleware\\ExceptionHandlerMiddleware::process	Context key 'exception' of a logger call expects Throwable, class-string<Throwable> given.	
+ src/Piwigo/Image/ImageRepository.php	583	36	5	argument.type	Piwigo\\Image\\ImageRepository::massInsertImages	Parameter #2 $dbfields of method Piwigo\\Db\\BatchWriter::massInsert() expects array<(int|string), string>, list given.	
+ src/Piwigo/Mail/MailService.php	885	58	5	argument.type	Piwigo\\Mail\\MailService::mail	Parameter #2 $confMail of static method Piwigo\\Mail\\MailService::resolveMailTheme() expects array{mail_theme?: mixed, ...}, array<string, mixed> given.	
+ src/Piwigo/Menu/BlockManager.php	173	34	5	argument.type	Piwigo\\Menu\\BlockManager::apply	Parameter #1 $block_id of method Piwigo\\Menu\\BlockManager::hideBlock() expects string, (int|string) given.	

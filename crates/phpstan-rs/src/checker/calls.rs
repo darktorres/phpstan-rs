@@ -983,6 +983,10 @@ pub(crate) fn contains_nullsafe_access(expr: &Expr) -> bool {
         ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe_access(base),
         ExprKind::DynamicPropertyAccess(base, _) => contains_nullsafe_access(base),
         ExprKind::DynamicMethodCall(base, _, _) => contains_nullsafe_access(base),
+        ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
+        | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => {
+            contains_nullsafe_access(base)
+        }
         ExprKind::Index(base, _) => contains_nullsafe_access(base),
         _ => false,
     }

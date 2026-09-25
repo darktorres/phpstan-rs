@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use crate::ast::*;
 use crate::parser::{ParseError, Parser};
-use crate::token::Token;
+use crate::token::{Span, Token};
 
 impl Parser {
     pub(crate) fn parse_postfix_from_primary(&mut self) -> Result<Expr, ParseError> {
@@ -121,10 +121,15 @@ impl Parser {
                             StaticMember::Name(self.take_name_segment().unwrap())
                         }
                         Token::Variable(_) => {
+                            let var_start = self.current_pos();
                             let Token::Variable(s) = self.take_token() else {
                                 unreachable!()
                             };
-                            StaticMember::Variable(s)
+                            let span = Span {
+                                start: var_start,
+                                end: self.previous_end(),
+                            };
+                            StaticMember::Variable(s, span)
                         }
                         // `Foo::{$name}` - a computed constant name, or
                         // with `(...)` a computed method name.
@@ -165,12 +170,23 @@ impl Parser {
                     };
                     if self.check(&Token::LParen) {
                         let (args, is_fcc) = self.parse_args()?;
-                        let method = match member {
-                            StaticMember::Name(n) => n.to_string(),
-                            StaticMember::Variable(v) => format!("${v}"),
-                            StaticMember::Dynamic(_) => "{dynamic}".to_string(),
+                        let kind = match member {
+                            StaticMember::Name(n) => {
+                                ExprKind::StaticCall(target, n.to_string(), args)
+                            }
+                            StaticMember::Variable(v, span) => {
+                                let name = Expr {
+                                    id: self.node_id(),
+                                    kind: ExprKind::Variable(v),
+                                    span,
+                                };
+                                ExprKind::DynamicStaticCall(target, Box::new(name), args)
+                            }
+                            StaticMember::Dynamic(name) => {
+                                ExprKind::DynamicStaticCall(target, Box::new(name), args)
+                            }
                         };
-                        let call = self.expr(ExprKind::StaticCall(target, method, args), start);
+                        let call = self.expr(kind, start);
                         expr = if is_fcc {
                             self.expr(ExprKind::FirstClassCallable(Box::new(call)), start)
                         } else {
@@ -182,7 +198,9 @@ impl Parser {
                                 ExprKind::ClassNameFetch(target)
                             }
                             StaticMember::Name(n) => ExprKind::ClassConstFetch(target, n),
-                            StaticMember::Variable(v) => ExprKind::StaticPropertyFetch(target, v),
+                            StaticMember::Variable(v, _) => {
+                                ExprKind::StaticPropertyFetch(target, v)
+                            }
                             StaticMember::Dynamic(name) => {
                                 ExprKind::DynamicStaticPropertyFetch(target, Box::new(name))
                             }
@@ -273,6 +291,7 @@ impl Parser {
 /// What follows `::` in a static member access or call.
 enum StaticMember {
     Name(Arc<str>),
-    Variable(Arc<str>),
+    /// `$name`, and where it is.
+    Variable(Arc<str>, Span),
     Dynamic(Expr),
 }

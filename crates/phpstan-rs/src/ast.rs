@@ -735,6 +735,14 @@ impl StaticTarget {
             StaticTarget::Expr(_) => None,
         }
     }
+
+    /// The receiver expression, or `None` for a literal class name.
+    pub fn expr(&self) -> Option<&Expr> {
+        match self {
+            StaticTarget::Name(..) => None,
+            StaticTarget::Expr(e) => Some(e),
+        }
+    }
 }
 
 /// A cast's target, as the type it converts to.
@@ -916,6 +924,8 @@ pub enum ExprKind {
     // `check_static_call` resolve its inferred type and check the call
     // against it, the same way a literal class name already is.
     StaticCall(StaticTarget, String, Vec<Arg>),
+    /// `Foo::$name()` / `Foo::{$expr}()`: the method name is computed.
+    DynamicStaticCall(StaticTarget, Box<Expr>, Vec<Arg>),
     Index(Box<Expr>, Option<Box<Expr>>),
     Name(String),
     Instanceof(Box<Expr>, InstanceofTarget),

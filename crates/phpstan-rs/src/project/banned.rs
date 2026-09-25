@@ -286,7 +286,8 @@ impl<'a> Walker<'a> {
             ExprKind::New(_, args)
             | ExprKind::MethodCall(_, _, args, _)
             | ExprKind::StaticCall(_, _, args)
-            | ExprKind::DynamicMethodCall(_, _, args) => {
+            | ExprKind::DynamicMethodCall(_, _, args)
+            | ExprKind::DynamicStaticCall(_, _, args) => {
                 self.arguments(args, e.span);
             }
             ExprKind::AssignRef(target, _) => {
@@ -396,16 +397,7 @@ impl<'a> Walker<'a> {
             }
             _ => {}
         }
-        if let ExprKind::DynamicMethodCall(..) = &e.kind {
-            self.ban(
-                BannedConstruct::DynamicMemberAccess,
-                e.span,
-                "A dynamic member name".to_string(),
-            );
-        }
-        if let ExprKind::StaticCall(_, member, _) = &e.kind
-            && member == "{dynamic}"
-        {
+        if let ExprKind::DynamicMethodCall(..) | ExprKind::DynamicStaticCall(..) = &e.kind {
             self.ban(
                 BannedConstruct::DynamicMemberAccess,
                 e.span,

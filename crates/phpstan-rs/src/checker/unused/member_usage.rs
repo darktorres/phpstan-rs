@@ -259,7 +259,9 @@ pub(crate) fn walk_expr_for_members(
         }
         // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
         // access this walker can't attribute to any specific member.
-        ExprKind::DynamicPropertyAccess(..) | ExprKind::DynamicMethodCall(..) => {
+        ExprKind::DynamicPropertyAccess(..)
+        | ExprKind::DynamicMethodCall(..)
+        | ExprKind::DynamicStaticCall(..) => {
             usage.escaped = true;
         }
         // `[$this, 'methodName']` - PHP's array-callable convention

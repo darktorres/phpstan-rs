@@ -17,7 +17,12 @@ pub(crate) fn contains_nullsafe(expr: &Expr) -> bool {
         ExprKind::PropertyAccess(base, _, nullsafe) => *nullsafe || contains_nullsafe(base),
         ExprKind::MethodCall(base, _, _, nullsafe) => *nullsafe || contains_nullsafe(base),
         ExprKind::Index(base, _) => contains_nullsafe(base),
-        ExprKind::StaticCall(StaticTarget::Expr(base), _, _) => contains_nullsafe(base),
+        ExprKind::StaticCall(StaticTarget::Expr(base), _, _)
+        | ExprKind::DynamicStaticCall(StaticTarget::Expr(base), _, _)
+        | ExprKind::StaticPropertyFetch(StaticTarget::Expr(base), _)
+        | ExprKind::DynamicStaticPropertyFetch(StaticTarget::Expr(base), _) => {
+            contains_nullsafe(base)
+        }
         ExprKind::ArrayLiteral(items) => items.iter().any(|item| {
             item.key.as_ref().is_some_and(contains_nullsafe) || contains_nullsafe(&item.value)
         }),

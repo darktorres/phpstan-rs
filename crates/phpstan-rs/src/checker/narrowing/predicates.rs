@@ -81,8 +81,8 @@ pub(crate) fn narrowing_key(e: &Expr) -> Option<String> {
         // `bind_assignment_target` key off `narrowing_key` uniformly,
         // so a later `self::$prop = ...` correctly invalidates/replaces
         // this same entry with no additional wiring needed.
-        ExprKind::StaticPropertyFetch(target, name) => {
-            Some(format!("{}::${name}", target.as_name().unwrap_or("?")))
+        ExprKind::StaticPropertyFetch(StaticTarget::Name(class_name, _), name) => {
+            Some(format!("{class_name}::${name}"))
         }
         ExprKind::Index(base, Some(idx)) => {
             let base_key = narrowing_key(base)?;

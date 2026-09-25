@@ -119,7 +119,7 @@ fn resolve_class_ref(
     ctx: &NameContext,
 ) -> Option<String> {
     match name {
-        "?" | "{dynamic}" | "self" | "static" | "parent" => None,
+        "self" | "static" | "parent" => None,
         _ => Some(ctx.resolve(name)),
     }
 }

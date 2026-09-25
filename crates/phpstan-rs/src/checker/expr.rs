@@ -1,6 +1,7 @@
 use crate::ast::*;
 use crate::ast_walk::{body_contains_yield, expr_contains_yield};
 use crate::checker::calls::parameters::Callee;
+use crate::checker::resolve::receiver_class;
 use crate::checker::suggest;
 use crate::checker::{
     ATTRIBUTE_TARGET_CLASS_CONSTANT, ATTRIBUTE_TARGET_FUNCTION, ATTRIBUTE_TARGET_PROPERTY,
@@ -2829,6 +2830,14 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::DynamicClassConstFetch(target, name) => {
+                // `$obj::{$name}`: the receiver is checked once, whatever
+                // names the fetch may resolve to.
+                let receiver = match target {
+                    StaticTarget::Name(..) => None,
+                    StaticTarget::Expr(receiver) => {
+                        Some(receiver_class(self.check_expr(receiver, locals, label)))
+                    }
+                };
                 let name_ty = self.check_expr(name, locals, label);
                 self.check_dynamic_class_constant_fetch(&name_ty, e.span, label);
                 let literal_names: Option<Vec<String>> = match &name_ty {
@@ -2842,12 +2851,29 @@ impl<'a> Checker<'a> {
                         .collect(),
                     _ => None,
                 };
-                match literal_names {
-                    Some(names) if !names.is_empty() => names
+                match (literal_names, receiver) {
+                    (Some(names), None) if !names.is_empty() => names
                         .into_iter()
                         .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
                         .reduce(crate::checker::type_union::union_types)
                         .unwrap_or(Type::Mixed(false)),
+                    (Some(names), Some(Some(class))) if !names.is_empty() => names
+                        .into_iter()
+                        .map(|n| {
+                            if n == "class" {
+                                Type::ClassString(Box::new(Type::Object(class.clone(), Vec::new())))
+                            } else {
+                                self.static_member_of_class(e, &class, None, &n, false, label)
+                            }
+                        })
+                        .reduce(crate::checker::type_union::union_types)
+                        .unwrap_or(Type::Mixed(false)),
+                    (_, Some(Some(class))) => {
+                        if self.collect_member_refs {
+                            self.record_member_class_escape(&class);
+                        }
+                        Type::Mixed(false)
+                    }
                     _ => {
                         self.record_dynamic_static_member_escape(target);
                         Type::Mixed(false)
@@ -2855,20 +2881,24 @@ impl<'a> Checker<'a> {
                 }
             }
             ExprKind::ClassNameFetch(target) => {
-                // `Foo::class` is a string naming the class, not a member.
-                match target
-                    .as_name()
-                    .and_then(|n| self.resolve_static_class_name(n))
-                {
+                // `Foo::class` / `$obj::class` is a string naming the
+                // class, not a member.
+                match self.resolve_static_target_class(target, locals, label) {
                     Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
-                    // A genuinely dynamic target (`$obj::class`).
                     None => Type::String,
                 }
             }
-            ExprKind::DynamicStaticPropertyFetch(target, _) => {
+            ExprKind::DynamicStaticPropertyFetch(target, name) => {
                 // A computed static property name (`Foo::${$e}`/
                 // `Foo::$$e`) has no statically known name to check.
+                let class = self.resolve_static_target_class(target, locals, label);
+                self.check_expr(name, locals, label);
                 self.record_dynamic_static_member_escape(target);
+                if self.collect_member_refs
+                    && let Some(class) = class
+                {
+                    self.record_member_class_escape(&class);
+                }
                 Type::Mixed(false)
             }
             ExprKind::ClassConstFetch(target, name) => {
@@ -3100,6 +3130,26 @@ impl<'a> Checker<'a> {
                     for class in self.escape_targets_for_receiver_type(&recv_ty) {
                         self.record_member_class_escape(&class);
                     }
+                }
+                Type::Mixed(false)
+            }
+            ExprKind::DynamicStaticCall(target, name, args) => {
+                let name_ty = self.check_expr(name, locals, label);
+                // `Foo::{'bar'}()`, or a name variable holding one known
+                // string: a call to that method.
+                if let Type::StringLiteral(method) = name_ty {
+                    let call = static_call(target, method, args, e.span);
+                    return self.check_expr(&call, locals, label);
+                }
+                let class = self.resolve_static_target_class(target, locals, label);
+                for a in args {
+                    self.check_expr(&a.value, locals, label);
+                }
+                self.record_dynamic_static_member_escape(target);
+                if self.collect_member_refs
+                    && let Some(class) = class
+                {
+                    self.record_member_class_escape(&class);
                 }
                 Type::Mixed(false)
             }
@@ -4326,6 +4376,10 @@ impl<'a> Checker<'a> {
                         self.check_expr(recv, locals, label);
                         self.check_expr(name_expr, locals, label);
                     }
+                    ExprKind::DynamicStaticCall(target, name_expr, _) => {
+                        self.resolve_static_target_class(target, locals, label);
+                        self.check_expr(name_expr, locals, label);
+                    }
                     ExprKind::New(..) => {
                         self.report_builder(
                             DiagnosticBuilder::new(
@@ -4673,6 +4727,14 @@ impl<'a> Checker<'a> {
                     })
                     .unwrap_or(Type::Mixed(false))
             }
+            ExprKind::DynamicStaticCall(target, name, args) => {
+                match self.infer_expr(name, locals) {
+                    Type::StringLiteral(method) => {
+                        self.infer_expr(&static_call(target, method, args, e.span), locals)
+                    }
+                    _ => Type::Mixed(false),
+                }
+            }
             ExprKind::DynamicClassConstFetch(target, name) => {
                 let names: Option<Vec<String>> = match self.infer_expr(name, locals) {
                     Type::StringLiteral(s) => Some(vec![s]),
@@ -4693,10 +4755,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::Mixed(false))
             }
             ExprKind::ClassNameFetch(target) => {
-                match target
-                    .as_name()
-                    .and_then(|n| self.resolve_static_class_name(n))
-                {
+                match self.infer_static_target_class(target, locals) {
                     Some(class) => Type::ClassString(Box::new(Type::Object(class, Vec::new()))),
                     None => Type::String,
                 }
@@ -4713,17 +4772,12 @@ impl<'a> Checker<'a> {
                 // for a locally-narrowed override before falling back to
                 // its own declared type.
                 if locals.may_have_member_narrowing()
-                    && let Some(narrowed) = locals.get(&format!(
-                        "{}::${prop_name}",
-                        target.as_name().unwrap_or("?")
-                    ))
+                    && let Some(class_name) = target.as_name()
+                    && let Some(narrowed) = locals.get(&format!("{class_name}::${prop_name}"))
                 {
                     return narrowed.clone();
                 }
-                let Some(class) = target
-                    .as_name()
-                    .and_then(|n| self.resolve_static_class_name(n))
-                else {
+                let Some(class) = self.infer_static_target_class(target, locals) else {
                     return Type::Mixed(false);
                 };
                 if self.collect_member_refs
@@ -4738,10 +4792,7 @@ impl<'a> Checker<'a> {
                     .unwrap_or(Type::Mixed(false))
             }
             ExprKind::ClassConstFetch(target, member) => {
-                let Some(class) = target
-                    .as_name()
-                    .and_then(|n| self.resolve_static_class_name(n))
-                else {
+                let Some(class) = self.infer_static_target_class(target, locals) else {
                     return Type::Mixed(false);
                 };
                 if self.collect_member_refs
@@ -6186,6 +6237,16 @@ fn is_true_literal(e: &Expr) -> bool {
     matches!(&e.kind, ExprKind::Literal(Literal::Bool(true)))
 }
 
+/// A synthetic `target::method(args)` call, for a computed method name
+/// whose value is known.
+fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) -> Expr {
+    Expr {
+        id: NodeId::SYNTHETIC,
+        kind: ExprKind::StaticCall(target.clone(), method, args.to_vec()),
+        span,
+    }
+}
+
 /// A synthetic `target::NAME` fetch, for a computed constant name whose
 /// possible values are known.
 fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
@@ -6241,26 +6302,47 @@ impl<'a> Checker<'a> {
         target: &StaticTarget,
         member: &str,
         is_property: bool,
-        locals: &Locals,
+        locals: &mut Locals,
         label: &str,
     ) -> Type {
-        let key_class = target.as_name().unwrap_or("?");
+        let class_name = match target {
+            StaticTarget::Name(name, _) => name.as_str(),
+            // `$obj::X` / `$obj::$x`: the class of the receiver's value.
+            StaticTarget::Expr(receiver) => {
+                let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {
+                    return Type::Mixed(false);
+                };
+                return self.static_member_of_class(e, &class, None, member, is_property, label);
+            }
+        };
         // A static property (`self::$prop`) can be narrowed the
         // same way an instance property already is - check for a
         // locally-narrowed override before the undefined-property
         // check/registry lookup below.
         if is_property
             && locals.may_have_member_narrowing()
-            && let Some(narrowed) = locals.get(&format!("{key_class}::${member}"))
+            && let Some(narrowed) = locals.get(&format!("{class_name}::${member}"))
         {
             return narrowed.clone();
         }
-        let Some(class_name) = target.as_name() else {
-            return Type::Mixed(false);
-        };
         let Some(class) = self.resolve_static_class_name(class_name) else {
             return Type::Mixed(false);
         };
+        self.static_member_of_class(e, &class, Some(class_name), member, is_property, label)
+    }
+
+    /// `check_static_member_fetch` once the class is known; `written` is
+    /// the class name as written, absent for a receiver expression.
+    fn static_member_of_class(
+        &mut self,
+        e: &Expr,
+        class: &str,
+        written: Option<&str>,
+        member: &str,
+        is_property: bool,
+        label: &str,
+    ) -> Type {
+        let class = class.to_string();
         // Rebind to the registry's canonical-case spelling up
         // front, same as `ExprKind::New`'s identical fix - without
         // it, a differently-cased real reference (`base::CONST`
@@ -6292,11 +6374,10 @@ impl<'a> Checker<'a> {
             );
             return Type::Mixed(false);
         }
-        // `class.nameCase` - `class_name` is the raw, as-written
-        // text (`resolve_static_class_name` above already
-        // resolved `self`/`parent`/`static`/a variable target to
-        // `class`, but never touches `class_name` itself).
-        self.check_class_name_case(label, class_name, e.span);
+        // `class.nameCase`, against the class name as written.
+        if let Some(written) = written {
+            self.check_class_name_case(label, written, e.span);
+        }
         if is_property {
             let prop_name = member;
             // Unlike an instance property, PHP has no legal way
@@ -6349,7 +6430,7 @@ impl<'a> Checker<'a> {
                 // `AccessPrivatePropertyThroughStaticRule` - same
                 // late-static-binding unsafety as the identical
                 // class-constant rule above.
-                if class_name == "static" && sig.visibility == Visibility::Private {
+                if written == Some("static") && sig.visibility == Visibility::Private {
                     self.check_static_private_property_access(owner, prop_name, e.span, label);
                 }
             }
@@ -6394,7 +6475,7 @@ impl<'a> Checker<'a> {
                 });
                 // Mirrors real PHPStan's
                 // `AccessPrivateConstantThroughStaticRule`.
-                if class_name == "static" && cs.visibility == Visibility::Private {
+                if written == Some("static") && cs.visibility == Visibility::Private {
                     self.check_static_private_constant_access(owner, member, e.span, label);
                 }
             }

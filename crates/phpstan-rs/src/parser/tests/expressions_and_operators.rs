@@ -666,14 +666,14 @@ fn dynamic_property_and_method_access_parse() {
     ));
 
     let StmtKind::Expression(Expr {
-        kind: ExprKind::StaticCall(class, member, _),
+        kind: ExprKind::DynamicStaticCall(class, name, _),
         ..
     }) = &program[2].kind
     else {
-        panic!("expected StaticCall");
+        panic!("expected DynamicStaticCall");
     };
     assert_eq!(class.as_name(), Some("Foo"));
-    assert_eq!(member, "{dynamic}");
+    assert!(matches!(&name.kind, ExprKind::Variable(v) if &**v == "name"));
 }
 
 #[test]

@@ -215,7 +215,6 @@ pub(super) fn resolve_class_ref(
     registry: &Registry,
 ) -> Option<String> {
     match name {
-        "?" | "{dynamic}" => None,
         "self" | "static" => current_class.map(str::to_string),
         "parent" => registry
             .classes
@@ -663,11 +662,7 @@ impl<'a> Walker<'a> {
                             if self.anchor.matches(spans[0]) {
                                 out.push((spans[0], Resolved::Class(fqn.clone())));
                             }
-                            if self.anchor.matches(spans[1])
-                                && member != "class"
-                                && member != "{dynamic}"
-                            {
-                                let member = member.strip_prefix('$').unwrap_or(member);
+                            if self.anchor.matches(spans[1]) {
                                 out.push((spans[1], Resolved::Member(fqn, member.to_string())));
                             }
                         }
@@ -692,6 +687,16 @@ impl<'a> Walker<'a> {
                         }
                     }
                 }
+                for a in args {
+                    self.expr(&a.value, ctx, current_class, out);
+                }
+                return;
+            }
+            ExprKind::DynamicStaticCall(target, name, args) => {
+                if let StaticTarget::Expr(receiver) = target {
+                    self.expr(receiver, ctx, current_class, out);
+                }
+                self.expr(name, ctx, current_class, out);
                 for a in args {
                     self.expr(&a.value, ctx, current_class, out);
                 }

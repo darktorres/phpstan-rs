@@ -124,6 +124,8 @@ impl<'a> Checker<'a> {
             }
             ExprKind::MethodCall(_, _, args, _)
             | ExprKind::StaticCall(_, _, args)
+            | ExprKind::DynamicMethodCall(_, _, args)
+            | ExprKind::DynamicStaticCall(_, _, args)
             | ExprKind::New(_, args) => {
                 self.check_magic_arguments(args, label);
             }
