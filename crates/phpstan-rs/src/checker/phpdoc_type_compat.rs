@@ -313,7 +313,7 @@ impl<'a> Checker<'a> {
                     },
                 };
                 let void = TypeHint {
-                    kind: TypeHintKind::Name("void".to_string()),
+                    kind: TypeHintKind::Name(QualifiedName::new("void")),
                     span,
                 };
                 ("set", vec![value], Some(void))

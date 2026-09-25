@@ -4568,9 +4568,9 @@ impl<'a> Checker<'a> {
             // so a literal `ExprKind::Name("self")` has to be special-cased
             // here rather than showing up as an Object of that name.
             ExprKind::New(class_expr, args) => match &class_expr.kind {
-                ExprKind::Name(name) => match name.as_str() {
+                ExprKind::Name(name) => match name.written.as_ref() {
                     "self" | "parent" | "static" => {
-                        let raw = match name.as_str() {
+                        let raw = match name.written.as_ref() {
                             "self" => Type::SelfRef,
                             "parent" => Type::ParentRef,
                             _ => Type::StaticRef,
@@ -6352,7 +6352,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) -> Type {
         let class_name = match target {
-            StaticTarget::Name(name, _) => name.as_str(),
+            StaticTarget::Name(name, _) => name.written.as_ref(),
             // `$obj::X` / `$obj::$x`: the class of the receiver's value.
             StaticTarget::Expr(receiver) => {
                 let Some(class) = receiver_class(self.check_expr(receiver, locals, label)) else {

@@ -160,7 +160,8 @@ impl Project {
         let Some(info) = self.registry.classes.get(fqn) else {
             return;
         };
-        let attribute_names: Vec<String> = c.attrs.iter().map(|a| a.name.clone()).collect();
+        let attribute_names: Vec<String> =
+            c.attrs.iter().map(|a| a.name.written.to_string()).collect();
         let lower = fqn.to_ascii_lowercase();
         if !info.is_abstract
             && !info.is_final

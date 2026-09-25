@@ -53,7 +53,7 @@ impl<'ast> Visitor<'ast> for Collector {
             | ExprKind::DynamicStaticCall(StaticTarget::Name(class, _), _, _)
             | ExprKind::Name(class)
             | ExprKind::Instanceof(_, InstanceofTarget::Name(class, _)) => {
-                self.names.insert(class.clone());
+                self.names.insert(class.written.to_string());
             }
             _ => {}
         }
@@ -61,20 +61,26 @@ impl<'ast> Visitor<'ast> for Collector {
     }
 
     fn visit_class_decl(&mut self, class: &'ast ClassDecl) {
-        self.names.extend(class.extends.iter().cloned());
-        self.names.extend(class.implements.iter().cloned());
-        self.names.extend(class.uses.iter().cloned());
+        self.names
+            .extend(class.extends.iter().map(|n| n.written.to_string()));
+        self.names
+            .extend(class.implements.iter().map(|n| n.written.to_string()));
+        self.names
+            .extend(class.uses.iter().map(|n| n.written.to_string()));
         walk_class_decl(self, class);
     }
 
     fn visit_enum_decl(&mut self, decl: &'ast EnumDecl) {
-        self.names.extend(decl.implements.iter().cloned());
-        self.names.extend(decl.uses.iter().cloned());
+        self.names
+            .extend(decl.implements.iter().map(|n| n.written.to_string()));
+        self.names
+            .extend(decl.uses.iter().map(|n| n.written.to_string()));
         walk_enum_decl(self, decl);
     }
 
     fn visit_catch_clause(&mut self, clause: &'ast CatchClause) {
-        self.names.extend(clause.types.iter().cloned());
+        self.names
+            .extend(clause.types.iter().map(|n| n.written.to_string()));
         walk_catch_clause(self, clause);
     }
 
@@ -82,7 +88,7 @@ impl<'ast> Visitor<'ast> for Collector {
     /// declaration) has no other node pointing at it, so without this it
     /// would look identically unreferenced to a genuinely dead class.
     fn visit_attribute(&mut self, attribute: &'ast Attribute) {
-        self.names.insert(attribute.name.clone());
+        self.names.insert(attribute.name.written.to_string());
         walk_attribute(self, attribute);
     }
 

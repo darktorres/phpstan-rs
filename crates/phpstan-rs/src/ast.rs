@@ -29,7 +29,7 @@ impl NodeId {
 /// shape, since PHP's grammar doesn't distinguish the two.
 #[derive(Debug, Clone)]
 pub struct Attribute {
-    pub name: String,
+    pub name: QualifiedName,
     pub args: Vec<Arg>,
     pub span: Span,
     // What deleting this attribute removes: its whole `#[...]` group up
@@ -155,7 +155,7 @@ pub struct SwitchCase {
 
 #[derive(Debug, Clone)]
 pub struct CatchClause {
-    pub types: Vec<String>,
+    pub types: Vec<QualifiedName>,
     // Each `types` entry's span (same index).
     pub types_spans: Vec<Span>,
     // Taken via `Parser::expect_variable` - see `FunctionDecl::name`'s
@@ -462,10 +462,10 @@ pub struct ClassDecl {
     // just `span` again, never actually looked up by name.
     pub name_span: Span,
     pub kind: ClassKind,
-    pub extends: Vec<String>,
+    pub extends: Vec<QualifiedName>,
     // Each `extends` entry's span (same index).
     pub extends_spans: Vec<Span>,
-    pub implements: Vec<String>,
+    pub implements: Vec<QualifiedName>,
     pub implements_spans: Vec<Span>,
     pub is_abstract: bool,
     pub is_final: bool,
@@ -479,7 +479,7 @@ pub struct ClassDecl {
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
     // `use TraitA, TraitB;` inside the class body.
-    pub uses: Vec<String>,
+    pub uses: Vec<QualifiedName>,
     pub uses_spans: Vec<Span>,
     // The doc comment of the `use` *statement* each `uses` entry came
     // from (not the class's own, separate `doc_comment` below) - same
@@ -535,12 +535,12 @@ pub struct EnumDecl {
     // "int" | "string" for a backed enum, None for a pure one. Enums can't
     // extend anything or declare instance properties, unlike ClassDecl.
     pub backing_type: Option<TypeHint>,
-    pub implements: Vec<String>,
+    pub implements: Vec<QualifiedName>,
     pub implements_spans: Vec<Span>,
     pub cases: Vec<EnumCase>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
-    pub uses: Vec<String>,
+    pub uses: Vec<QualifiedName>,
     pub uses_spans: Vec<Span>,
     // See `ClassDecl::uses_doc_comments`'s own doc comment.
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
@@ -689,7 +689,7 @@ pub enum InstanceofTarget {
     // The `Span` is the class-name token's own span - see
     // `FunctionDecl::name_span`'s own doc comment for why this differs
     // from `Instanceof`'s own (whole-expression) span.
-    Name(String, Span),
+    Name(QualifiedName, Span),
     Expr(Box<Expr>),
 }
 
@@ -702,7 +702,7 @@ pub enum InstanceofTarget {
 /// name - only the *receiver* side is ever `Expr` here).
 #[derive(Debug, Clone)]
 pub enum StaticTarget {
-    Name(String, Span),
+    Name(QualifiedName, Span),
     Expr(Box<Expr>),
 }
 
@@ -728,6 +728,65 @@ impl StaticTarget {
             StaticTarget::Name(..) => None,
             StaticTarget::Expr(e) => Some(e),
         }
+    }
+}
+
+/// A reference to a class, function or constant by name: as written, and
+/// what it refers to given the file's `namespace` and `use` statements
+/// (filled in by `name_resolution::resolve_names` after parsing). Derefs
+/// to the name as written.
+#[derive(Debug, Clone)]
+pub struct QualifiedName {
+    pub written: Arc<str>,
+    pub resolved: ResolvedName,
+}
+
+/// What a [`QualifiedName`] refers to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ResolvedName {
+    /// `self`, `parent` or `static`, a keyword type, or a name the
+    /// resolution pass has not seen.
+    Unresolved,
+    /// The one fully-qualified name it refers to (no leading `\\`).
+    Exact(Box<str>),
+    /// An unqualified function or constant name in a namespace: this
+    /// namespaced name if one is declared, else the global one, which is
+    /// the name as written.
+    WithGlobalFallback(Box<str>),
+}
+
+impl QualifiedName {
+    pub fn new(written: impl Into<Arc<str>>) -> QualifiedName {
+        QualifiedName {
+            written: written.into(),
+            resolved: ResolvedName::Unresolved,
+        }
+    }
+}
+
+impl std::ops::Deref for QualifiedName {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        &self.written
+    }
+}
+
+impl std::fmt::Display for QualifiedName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.written)
+    }
+}
+
+impl PartialEq<str> for QualifiedName {
+    fn eq(&self, other: &str) -> bool {
+        *self.written == *other
+    }
+}
+
+impl PartialEq<&str> for QualifiedName {
+    fn eq(&self, other: &&str) -> bool {
+        *self.written == **other
     }
 }
 
@@ -777,7 +836,7 @@ pub struct TypeHint {
 pub enum TypeHintKind {
     /// A keyword type or a class name, as written (`int`, `static`,
     /// `\App\Foo`).
-    Name(String),
+    Name(QualifiedName),
     /// `?T`.
     Nullable(Box<TypeHint>),
     /// `A|B`.
@@ -1051,7 +1110,7 @@ pub enum ExprKind {
     /// `Foo::$name()` / `Foo::{$expr}()`: the method name is computed.
     DynamicStaticCall(StaticTarget, Box<Expr>, Vec<Arg>),
     Index(Box<Expr>, Option<Box<Expr>>),
-    Name(String),
+    Name(QualifiedName),
     Instanceof(Box<Expr>, InstanceofTarget),
     Cast(CastSpelling, Box<Expr>),
     Grouping(Box<Expr>),

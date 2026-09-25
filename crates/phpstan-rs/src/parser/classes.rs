@@ -10,7 +10,7 @@ pub(crate) struct ClassBody {
     pub properties: Vec<PropertyDecl>,
     pub methods: Vec<MethodDecl>,
     pub consts: Vec<ClassConst>,
-    pub uses: Vec<String>,
+    pub uses: Vec<QualifiedName>,
     pub uses_spans: Vec<Span>,
     pub uses_doc_comments: Vec<Option<Arc<str>>>,
     pub trait_aliases: Vec<TraitAlias>,
@@ -82,11 +82,11 @@ impl Parser {
         let mut extends_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            extends.push(name);
+            extends.push(QualifiedName::new(name));
             extends_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                extends.push(name);
+                extends.push(QualifiedName::new(name));
                 extends_spans.push(span);
             }
         }
@@ -94,11 +94,11 @@ impl Parser {
         let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(name);
+            implements.push(QualifiedName::new(name));
             implements_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(name);
+                implements.push(QualifiedName::new(name));
                 implements_spans.push(span);
             }
         }
@@ -201,12 +201,12 @@ impl Parser {
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                uses.push(name);
+                uses.push(QualifiedName::new(name));
                 uses_spans.push(span);
                 uses_doc_comments.push(doc.clone());
                 while self.eat(&Token::Comma) {
                     let (name, span) = self.parse_qualified_name_spanned();
-                    uses.push(name);
+                    uses.push(QualifiedName::new(name));
                     uses_spans.push(span);
                     uses_doc_comments.push(doc.clone());
                 }
@@ -593,11 +593,11 @@ impl Parser {
         let mut extends_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Extends)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            extends.push(name);
+            extends.push(QualifiedName::new(name));
             extends_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                extends.push(name);
+                extends.push(QualifiedName::new(name));
                 extends_spans.push(span);
             }
         }
@@ -606,11 +606,11 @@ impl Parser {
         let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(name);
+            implements.push(QualifiedName::new(name));
             implements_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(name);
+                implements.push(QualifiedName::new(name));
                 implements_spans.push(span);
             }
         }

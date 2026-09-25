@@ -303,6 +303,7 @@ impl Parser {
                 stmts.push(self.parse_statement()?);
             }
         }
+        crate::name_resolution::resolve_names(&mut stmts);
         Ok(stmts)
     }
 

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ast::{Attribute, Ident};
+use crate::ast::{Attribute, Ident, QualifiedName};
 use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
@@ -348,7 +348,7 @@ impl Parser {
                     end: self.previous_end(),
                 };
                 attrs.push(Attribute {
-                    name,
+                    name: QualifiedName::new(name),
                     args,
                     span,
                     removal_span: span,

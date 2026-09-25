@@ -2148,7 +2148,7 @@ fn is_instanceof_filter_callback(e: &Expr) -> Option<&str> {
             ExprKind::Instanceof(inner, InstanceofTarget::Name(class_name, _))
                 if is_var_named(inner, param) =>
             {
-                Some(class_name.as_str())
+                Some(class_name.written.as_ref())
             }
             _ => None,
         }
@@ -2194,7 +2194,7 @@ fn is_type_check_filter_callback(e: &Expr) -> Option<Type> {
         match &body.kind {
             ExprKind::Call(callee, args) => match (&callee.kind, args.as_slice()) {
                 (ExprKind::Name(name), [single_arg]) if is_var_named(&single_arg.value, param) => {
-                    Some(name.as_str())
+                    Some(name.written.as_ref())
                 }
                 _ => None,
             },

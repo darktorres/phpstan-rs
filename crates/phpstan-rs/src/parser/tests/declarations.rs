@@ -72,7 +72,10 @@ fn backed_enum_with_interface_and_method_parses() {
         e.backing_type.as_ref().map(TypeHint::to_string).as_deref(),
         Some("string")
     );
-    assert_eq!(e.implements, vec!["\\JsonSerializable".to_string()]);
+    assert_eq!(
+        e.implements.iter().map(|n| &*n.written).collect::<Vec<_>>(),
+        vec!["\\JsonSerializable"]
+    );
     assert!(matches!(
         &e.cases[0].value,
         Some(Expr {
@@ -326,7 +329,13 @@ fn anonymous_class_parses_with_interface_and_constructor_args() {
         panic!("expected NewAnonymousClass");
     };
     assert_eq!(args.len(), 1);
-    assert_eq!(decl.implements, vec!["Countable".to_string()]);
+    assert_eq!(
+        decl.implements
+            .iter()
+            .map(|n| &*n.written)
+            .collect::<Vec<_>>(),
+        vec!["Countable"]
+    );
     assert_eq!(decl.methods.len(), 2);
 }
 
@@ -355,7 +364,13 @@ fn anonymous_class_with_a_leading_attribute_group_parses() {
     };
     assert_eq!(decl.attrs.len(), 1);
     assert_eq!(decl.attrs[0].name, "TemplateAttr");
-    assert_eq!(decl.implements, vec!["Countable".to_string()]);
+    assert_eq!(
+        decl.implements
+            .iter()
+            .map(|n| &*n.written)
+            .collect::<Vec<_>>(),
+        vec!["Countable"]
+    );
 }
 
 #[test]

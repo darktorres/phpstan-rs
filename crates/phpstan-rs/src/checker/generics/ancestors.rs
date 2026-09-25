@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use crate::ast::{ClassDecl, ClassKind, EnumDecl};
+use crate::ast::{ClassDecl, ClassKind, EnumDecl, QualifiedName};
 use crate::checker::{Checker, class_kind_identifier};
 use crate::phpdoc_grammar::{self, PhpDocTagValue};
 use crate::registry;
@@ -282,7 +282,7 @@ impl<'a> Checker<'a> {
         fqn: &str,
         templates: &Templates,
         kind: ClassKind,
-        uses: &[String],
+        uses: &[QualifiedName],
         docs: &[Option<Arc<str>>],
         span: Span,
     ) {

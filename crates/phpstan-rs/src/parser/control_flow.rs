@@ -271,11 +271,11 @@ impl Parser {
             let catch_start = self.previous_end();
             self.expect(&Token::LParen)?;
             let (first_type, first_span) = self.parse_qualified_name_spanned();
-            let mut types = vec![first_type];
+            let mut types = vec![QualifiedName::new(first_type)];
             let mut types_spans = vec![first_span];
             while self.eat(&Token::Pipe) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                types.push(name);
+                types.push(QualifiedName::new(name));
                 types_spans.push(span);
             }
             let mut var_span = None;

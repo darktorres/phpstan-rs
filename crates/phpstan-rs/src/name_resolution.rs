@@ -3,7 +3,11 @@
 
 use std::sync::Arc;
 
-use crate::ast::{Stmt, StmtKind, UseImport, UseKind};
+use crate::ast::*;
+use crate::visit::{
+    VisitorMut, walk_attribute_mut, walk_catch_clause_mut, walk_class_decl_mut, walk_enum_decl_mut,
+    walk_expr_mut, walk_stmt_mut, walk_stmts_mut,
+};
 
 /// `NameContext::use_map`'s own backing map - `imbl::HashMap` (a
 /// persistent, structurally-shared HAMT), not `std::collections::HashMap`:
@@ -265,3 +269,211 @@ fn use_map_key(kind: UseKind, name: &str) -> String {
         UseKind::Class | UseKind::Function => name.to_ascii_lowercase(),
     }
 }
+
+/// Fills in [`QualifiedName::resolved`] for every name in a parsed file,
+/// tracking `namespace` and `use` statements in order: a braced namespace
+/// body shares the context of its `namespace` statement, and each branch
+/// of an `if` gets its own copy.
+pub fn resolve_names(stmts: &mut [Stmt]) {
+    let mut resolver = Resolver {
+        ctx: NameContext::default(),
+    };
+    walk_stmts_mut(&mut resolver, stmts);
+}
+
+struct Resolver {
+    ctx: NameContext,
+}
+
+impl Resolver {
+    fn class(&self, name: &mut QualifiedName) {
+        name.resolved = if is_class_keyword(&name.written) {
+            ResolvedName::Unresolved
+        } else {
+            ResolvedName::Exact(self.ctx.resolve(&name.written).into())
+        };
+    }
+
+    fn function(&self, name: &mut QualifiedName) {
+        let (primary, fallback) = self.ctx.resolve_function_candidates(&name.written);
+        name.resolved = with_fallback(primary, fallback);
+    }
+
+    fn constant(&self, name: &mut QualifiedName) {
+        let (primary, fallback) = self.ctx.resolve_constant_candidates(&name.written);
+        name.resolved = with_fallback(primary, fallback);
+    }
+
+    #[inline(never)]
+    fn resolve_expr(&mut self, expr: &mut Expr) {
+        match &mut expr.kind {
+            ExprKind::Name(name) => self.constant(name),
+
+            ExprKind::Call(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
+                if let ExprKind::Name(name) = &mut callee.kind {
+                    self.function(name);
+                }
+                for arg in args {
+                    self.visit_arg(arg);
+                }
+            }
+            ExprKind::New(callee, args) if matches!(callee.kind, ExprKind::Name(_)) => {
+                if let ExprKind::Name(name) = &mut callee.kind {
+                    self.class(name);
+                }
+                for arg in args {
+                    self.visit_arg(arg);
+                }
+            }
+            ExprKind::ClassConstFetch(target, _)
+            | ExprKind::ClassNameFetch(target)
+            | ExprKind::StaticPropertyFetch(target, _) => self.static_target(target),
+            ExprKind::DynamicStaticPropertyFetch(target, name)
+            | ExprKind::DynamicClassConstFetch(target, name) => {
+                self.static_target(target);
+                self.visit_expr(name);
+            }
+            ExprKind::StaticCall(target, _, args) => {
+                self.static_target(target);
+                for arg in args {
+                    self.visit_arg(arg);
+                }
+            }
+            ExprKind::DynamicStaticCall(target, name, args) => {
+                self.static_target(target);
+                self.visit_expr(name);
+                for arg in args {
+                    self.visit_arg(arg);
+                }
+            }
+            ExprKind::Instanceof(inner, target) => {
+                self.visit_expr(inner);
+                match target {
+                    InstanceofTarget::Name(name, _) => self.class(name),
+                    InstanceofTarget::Expr(e) => self.visit_expr(e),
+                }
+            }
+            _ => walk_expr_mut(self, expr),
+        }
+    }
+
+    fn static_target(&mut self, target: &mut StaticTarget) {
+        match target {
+            StaticTarget::Name(name, _) => self.class(name),
+            StaticTarget::Expr(e) => self.visit_expr(e),
+        }
+    }
+}
+
+/// `self`, `parent` and `static` name a class relative to where they
+/// appear, not by resolution.
+fn is_class_keyword(name: &str) -> bool {
+    ["self", "parent", "static"]
+        .iter()
+        .any(|k| name.eq_ignore_ascii_case(k))
+}
+
+fn with_fallback(primary: String, fallback: Option<String>) -> ResolvedName {
+    match fallback {
+        Some(_) => ResolvedName::WithGlobalFallback(primary.into()),
+        None => ResolvedName::Exact(primary.into()),
+    }
+}
+
+impl VisitorMut for Resolver {
+    fn visit_stmt(&mut self, stmt: &mut Stmt) {
+        match &mut stmt.kind {
+            StmtKind::Namespace(name) => self.ctx.set_namespace(name),
+            StmtKind::Use(imports) => self.ctx.add_uses(imports),
+            StmtKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                self.visit_expr(cond);
+                let outer = self.ctx.clone();
+                self.visit_stmt(then_branch);
+                if let Some(else_branch) = else_branch {
+                    self.ctx = outer.clone();
+                    self.visit_stmt(else_branch);
+                }
+                self.ctx = outer;
+            }
+            _ => walk_stmt_mut(self, stmt),
+        }
+    }
+
+    fn visit_expr(&mut self, expr: &mut Expr) {
+        // Only name-bearing expressions need more than the plain walk;
+        // keeping the rest out of `resolve_expr` keeps the frames of this
+        // recursion small.
+        if matches!(
+            expr.kind,
+            ExprKind::Name(_)
+                | ExprKind::Call(..)
+                | ExprKind::New(..)
+                | ExprKind::ClassConstFetch(..)
+                | ExprKind::ClassNameFetch(_)
+                | ExprKind::StaticPropertyFetch(..)
+                | ExprKind::DynamicStaticPropertyFetch(..)
+                | ExprKind::DynamicClassConstFetch(..)
+                | ExprKind::StaticCall(..)
+                | ExprKind::DynamicStaticCall(..)
+                | ExprKind::Instanceof(..)
+        ) {
+            self.resolve_expr(expr);
+        } else {
+            walk_expr_mut(self, expr);
+        }
+    }
+
+    fn visit_class_decl(&mut self, class: &mut ClassDecl) {
+        for name in class
+            .extends
+            .iter_mut()
+            .chain(class.implements.iter_mut())
+            .chain(class.uses.iter_mut())
+        {
+            self.class(name);
+        }
+        walk_class_decl_mut(self, class);
+    }
+
+    fn visit_enum_decl(&mut self, decl: &mut EnumDecl) {
+        for name in decl.implements.iter_mut().chain(decl.uses.iter_mut()) {
+            self.class(name);
+        }
+        walk_enum_decl_mut(self, decl);
+    }
+
+    fn visit_catch_clause(&mut self, clause: &mut CatchClause) {
+        for name in &mut clause.types {
+            self.class(name);
+        }
+        walk_catch_clause_mut(self, clause);
+    }
+
+    fn visit_attribute(&mut self, attribute: &mut Attribute) {
+        self.class(&mut attribute.name);
+        walk_attribute_mut(self, attribute);
+    }
+
+    fn visit_type_hint(&mut self, hint: &mut TypeHint) {
+        match &mut hint.kind {
+            TypeHintKind::Name(name) => {
+                if !is_primitive_type_name(name.trim_start_matches('\\')) {
+                    self.class(name);
+                }
+            }
+            TypeHintKind::Nullable(inner) => self.visit_type_hint(inner),
+            TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
+                for member in members {
+                    self.visit_type_hint(member);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;
