@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use crate::checker::{Checker, Locals, purge_stale_narrowing_for, union_types};
 use crate::registry::{FunctionSig, ParamSig};
-use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::{self, Type};
 
 mod closure_context;
 mod format_string;
@@ -689,11 +689,11 @@ impl<'a> Checker<'a> {
         let Type::ArrayShape(shape) = &ty else {
             return None;
         };
-        let method_ty = &shape.field(&crate::types::ShapeKey::Int(1))?.ty;
+        let method_ty = &shape.field(&types::ShapeKey::Int(1))?.ty;
         let Type::StringLiteral(method) = method_ty else {
             return None;
         };
-        let class_ty = &shape.field(&crate::types::ShapeKey::Int(0))?.ty;
+        let class_ty = &shape.field(&types::ShapeKey::Int(0))?.ty;
         let class = match class_ty {
             Type::StringLiteral(c) => c.as_str(),
             Type::ClassString(inner) => match inner.as_ref() {

@@ -3,10 +3,10 @@ use crate::checker::expr::{
 };
 use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionSig;
-use crate::types::union_types;
-use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::union_types;
+use types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 
 impl<'a> Checker<'a> {
     /// `DuplicateKeysInLiteralArraysRule` - a later literal key
@@ -363,7 +363,7 @@ impl<'a> Checker<'a> {
             Type::Intersection(members) => {
                 members.contains(&Type::Accessory(AccessoryKind::ArrayList))
             }
-            Type::ArrayShape(shape) => crate::types::shape_fields_are_list_like(shape),
+            Type::ArrayShape(shape) => types::shape_fields_are_list_like(shape),
             // Every branch of a control-flow-merged `Union` must itself
             // be list-like - an `ArrayShape([])` branch (the common
             // "0 iterations" case) already satisfies this vacuously via

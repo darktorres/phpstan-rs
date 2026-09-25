@@ -11,7 +11,6 @@
 
 use super::*;
 use crate::phpdoc_grammar::{self, PhpDocTagValue, TypeNode};
-use crate::types;
 
 /// The winning type node of each tag real PHPStan resolves: plain,
 /// `@phan-`, `@psalm-`, then `@phpstan-`, a later spelling replacing an
@@ -304,8 +303,7 @@ impl<'a> Checker<'a> {
         match &base {
             Type::ArrayShape(shape) => match &key {
                 Some(k) => {
-                    shape.is_sealed()
-                        && shape.field(&crate::types::ShapeKey::from_name(k)).is_none()
+                    shape.is_sealed() && shape.field(&types::ShapeKey::from_name(k)).is_none()
                 }
                 None => false,
             },

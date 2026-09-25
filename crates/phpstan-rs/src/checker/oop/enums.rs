@@ -4,8 +4,8 @@ use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{self};
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 /// The full set of PHP magic-method names (`nikic/php-parser`'s own
 /// `ClassMethod::isMagic()` list) - used only by `check_enum_sanity`

@@ -1,6 +1,6 @@
 use crate::checker::{Checker, TemplateBindings};
 use crate::registry::{AssertInfo, FunctionSig, ParamSig};
-use crate::types::Type;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// Thin delegation to `Registry::class_template_bindings` - kept
@@ -281,16 +281,16 @@ fn substitute_scoped(ty: &Type, bindings: &TemplateBindings, scope: &str) -> Typ
             .is_some_and(|b| !matches!(b, Type::Mixed(_))) =>
         {
             let target = substitute_scoped(target, bindings, scope);
-            match crate::types::conditional_branch(&bindings[subject], &target, *negated) {
+            match types::conditional_branch(&bindings[subject], &target, *negated) {
                 Some(true) => substitute_scoped(if_true, bindings, scope),
                 Some(false) => substitute_scoped(if_false, bindings, scope),
-                None => crate::types::union_of_branches(
+                None => types::union_of_branches(
                     substitute_scoped(if_true, bindings, scope),
                     substitute_scoped(if_false, bindings, scope),
                 ),
             }
         }
-        _ => crate::types::settle(ty.map_children(&mut |t| substitute_scoped(t, bindings, scope))),
+        _ => types::settle(ty.map_children(&mut |t| substitute_scoped(t, bindings, scope))),
     }
 }
 

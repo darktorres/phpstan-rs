@@ -1,14 +1,14 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::checker::union_types;
+use types::union_types;
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::has_explicit_mixed_nested_somewhere;
-use crate::types::{self, Shape, TemplateParam, Type};
 use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use syntax::name_resolution::NameContext;
+use types::has_explicit_mixed_nested_somewhere;
+use types::{self, Shape, TemplateParam, Type};
 
 mod asserts;
 mod generics;

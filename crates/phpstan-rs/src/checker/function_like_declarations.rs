@@ -14,11 +14,11 @@ use crate::checker::calls::contains_nullsafe_access;
 use crate::checker::type_declarations::TypePosition;
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
-use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
+use types::Type;
+use types::php_version::PhpFeature;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PromotionSite {

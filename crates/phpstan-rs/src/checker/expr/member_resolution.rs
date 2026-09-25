@@ -5,9 +5,9 @@ use crate::checker::expr::builtin_calls::{
 use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionSig, PropertySig};
-use crate::types::union_types;
-use crate::types::{self, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
+use types::union_types;
+use types::{self, Shape, ShapeField, ShapeKey, Type};
 
 impl<'a> Checker<'a> {
     /// The declaring class/`PropertySig` pair for `prop` on `base_ty`,

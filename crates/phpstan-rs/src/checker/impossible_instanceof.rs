@@ -6,9 +6,9 @@
 use crate::checker::expr::type_can_never_be_object;
 use crate::checker::instantiation::type_can_never_name_a_class;
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::{ClassKind, Expr, InstanceofTarget};
 use syntax::token::Span;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// `is_exempt_last_condition` is the "last `elseif` with no `else`"

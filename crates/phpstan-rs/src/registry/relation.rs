@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 
 use crate::registry::Registry;
-use crate::types::{ClassFacts, ClassHierarchy, Relation, TrinaryLogic, Type, Variance};
+use types::{ClassFacts, ClassHierarchy, Relation, TrinaryLogic, Type, Variance};
 
 impl ClassHierarchy for Registry {
     fn is_subclass_of(&self, class: &str, of: &str) -> bool {

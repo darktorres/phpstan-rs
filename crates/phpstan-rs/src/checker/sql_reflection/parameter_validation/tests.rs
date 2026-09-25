@@ -1,5 +1,5 @@
 use super::*;
-use crate::types::Shape;
+use types::Shape;
 
 #[test]
 fn extracts_positional_placeholders_in_order() {

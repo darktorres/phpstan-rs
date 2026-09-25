@@ -5,11 +5,11 @@ use crate::checker::{
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{self, PropertySig, resolve_names_in_type};
-use crate::types::union_types;
-use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
+use types::union_types;
+use types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// PHP 8.4 property hooks: `GetNonVirtualPropertyHookReadRule`/

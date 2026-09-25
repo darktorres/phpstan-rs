@@ -1,4 +1,4 @@
-use crate::types::{self, Shape, ShapeField, ShapeKey, Type};
+use crate::{Shape, ShapeField, ShapeKey, Type};
 /// A defensive cap on how many distinct members `union_types` will ever
 /// materialize into a real `Type::Union`. Collapsing to `Mixed` past this
 /// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is
@@ -15,7 +15,7 @@ const MAX_UNION_MEMBERS: usize = 12;
 /// Union of two types for a scope-merge join point - flattens nested
 /// unions and keeps `Mixed` "unknown" rather than let it compose into a
 /// falsely-precise-looking Union (same principle as the ternary inference).
-pub(crate) fn union_types(a: Type, b: Type) -> Type {
+pub fn union_types(a: Type, b: Type) -> Type {
     union_types_impl(a, b, true)
 }
 
@@ -32,12 +32,12 @@ pub(crate) fn union_types(a: Type, b: Type) -> Type {
 /// is what `merge_array_shape_pair`'s subset rule is actually verified
 /// against - see its own doc comment) - collapsing them the same way
 /// would destroy the very discriminant that narrowing depends on.
-pub(crate) fn union_types_keep_shapes_distinct(a: Type, b: Type) -> Type {
+pub fn union_types_keep_shapes_distinct(a: Type, b: Type) -> Type {
     union_types_impl(a, b, false)
 }
 
 fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
-    if types::types_equal_for_union(&a, &b) {
+    if crate::types_equal_for_union(&a, &b) {
         return a;
     }
     if a == Type::Mixed(false) || b == Type::Mixed(false) {
@@ -57,7 +57,7 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     match b {
         Type::Union(m) => {
             for x in m {
-                if !members.iter().any(|m| types::types_equal_for_union(m, &x)) {
+                if !members.iter().any(|m| crate::types_equal_for_union(m, &x)) {
                     members.push(x);
                 }
             }
@@ -65,7 +65,7 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
         other => {
             if !members
                 .iter()
-                .any(|m| types::types_equal_for_union(m, &other))
+                .any(|m| crate::types_equal_for_union(m, &other))
             {
                 members.push(other);
             }
@@ -241,7 +241,7 @@ fn widen_extension_types(members: Vec<Type>) -> Vec<Type> {
 /// value types onto one variable; the cap itself stays as the safety net
 /// for whatever's left ungeneralizable (a variable whose branches
 /// genuinely have different key sets).
-pub(crate) fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
+pub fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
     // A shape's keys, sorted, and whether it's sealed.
     type KeySet = (Vec<ShapeKey>, bool);
     let mut groups: Vec<(KeySet, Vec<Shape>)> = Vec::new();
@@ -340,7 +340,7 @@ fn literal_base_type(t: &Type) -> Option<Type> {
 /// to promote a `hasOffsetValue`-carrying argument's own tracked keys
 /// into real merged-shape fields, not just this module's own pairwise
 /// union merge below.
-pub(crate) fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
+pub fn has_offset_value_parts(t: &Type) -> Option<(Type, Vec<(ShapeKey, Type)>)> {
     match t {
         Type::Array(..) => Some((t.clone(), Vec::new())),
         Type::Intersection(members)

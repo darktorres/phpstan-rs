@@ -19,9 +19,9 @@
 
 use crate::checker::{Checker, Locals};
 use crate::php_date_parser::depends_on_current_time;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Type;
 
 const CLOCK_TIP: &str = "rely on an injected clock (PSR-20 ClockInterface) instead";
 

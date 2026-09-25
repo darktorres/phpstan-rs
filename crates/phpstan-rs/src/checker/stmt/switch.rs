@@ -1,6 +1,6 @@
 use crate::checker::{Checker, Locals, is_switch_break_equivalent, merge_scopes};
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 impl<'a> Checker<'a> {
     #[hotpath::measure]

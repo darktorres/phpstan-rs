@@ -6,8 +6,8 @@
 //! Trusting those literals makes platform checks like `PHP_SAPI !==
 //! 'cli'` look constant.
 
-use crate::types::php_version::PhpVersion;
-use crate::types::{Type, parse_type_string};
+use types::php_version::PhpVersion;
+use types::{Type, parse_type_string};
 
 /// `ConstantResolver::PHP_MIN_ANALYZABLE_VERSION_ID`.
 const PHP_MIN_ANALYZABLE_VERSION_ID: i64 = 50207;

@@ -61,7 +61,7 @@ pub struct Session {
     level: u8,
     configured_level: Option<u8>,
     emission_order: bool,
-    php_version: Option<crate::types::PhpVersion>,
+    php_version: Option<types::PhpVersion>,
     psr3_context_key_pattern: Option<regex::Regex>,
     restricted_symbol_entries: Vec<restricted_symbols::RestrictedSymbolEntry>,
     banned_constructs: Vec<banned::BannedConstruct>,
@@ -176,7 +176,7 @@ impl Session {
             .php_version
             .clone()
             .or(config.php_version.clone())
-            .map(|s| crate::types::parse_php_version(&s))
+            .map(|s| types::parse_php_version(&s))
             .transpose()?;
         let mut restricted_symbol_entries = config.restricted_symbols.clone().unwrap_or_default();
         for preset in config.restricted_symbol_presets.clone().unwrap_or_default() {

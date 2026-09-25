@@ -55,8 +55,8 @@
 
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::Diagnostic;
-use crate::types::Type;
 use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
+use types::Type;
 
 /// One flow-sensitive, per-node-kind rule - see this module's own doc
 /// comment. Default no-op bodies, matching `reflection_rule::

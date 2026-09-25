@@ -4,10 +4,10 @@ use crate::checker::{
 };
 use crate::regex_groups;
 use crate::registry::{AssertTarget, FunctionSig};
-use crate::types::has_explicit_mixed_nested_somewhere;
-use crate::types::{AccessoryKind, Type};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::has_explicit_mixed_nested_somewhere;
+use types::{AccessoryKind, Type};
 mod accessory_range;
 mod array_shape;
 mod assertions;
@@ -604,7 +604,7 @@ impl<'a> Checker<'a> {
                     false,
                 )
             } else {
-                Type::ArrayShape(crate::types::Shape::sealed(Vec::new()))
+                Type::ArrayShape(types::Shape::sealed(Vec::new()))
             };
             purge_stale_narrowing_for(locals, matches_name);
             locals.insert(matches_name.to_string(), narrowed);
@@ -1590,4 +1590,4 @@ impl<'a> Checker<'a> {
     }
 }
 
-pub(crate) use crate::types::types_definitely_disjoint;
+pub(crate) use types::types_definitely_disjoint;

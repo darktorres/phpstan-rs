@@ -4,9 +4,9 @@ use crate::checker::{
     Checker, ITERABLE_GENERIC_CLASS_NAMES, TemplateBindings, class_kind_identifier,
 };
 use crate::docblock;
-use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// Walks `ty` for every `Object(class, args)` naming a class with

@@ -9,8 +9,8 @@
 
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::php_version::PhpFeature;
 use syntax::token::Span;
+use types::php_version::PhpFeature;
 
 const ONLY_STANDALONE: [&str; 3] = ["mixed", "never", "void"];
 
@@ -81,7 +81,7 @@ impl<'a> Checker<'a> {
 
     fn resolve_class_name_for_hint(&self, name: &str) -> String {
         match self.resolve_type_hint(Some(name)) {
-            crate::types::Type::Object(resolved, _) => resolved.to_string(),
+            types::Type::Object(resolved, _) => resolved.to_string(),
             _ => name.trim_start_matches('\\').to_string(),
         }
     }

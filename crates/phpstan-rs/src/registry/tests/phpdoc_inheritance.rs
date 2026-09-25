@@ -4,7 +4,7 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::types::AccessoryKind;
+use types::AccessoryKind;
 
 /// `list<T>` parses to `Type::Intersection([Array(int, T), Accessory
 /// (ArrayList)])` - pulls `T` back out for a plain equality assertion

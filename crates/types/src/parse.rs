@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::types::{
+use crate::{
     AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Shape, ShapeField,
     ShapeKey, Type, late,
 };
@@ -179,7 +179,7 @@ fn matching_close(s: &str, open: usize) -> Option<usize> {
 /// One `T [of|as Bound] [super Lower] [= Default]` entry of a callable's
 /// template list; the lower bound is read and dropped, as PHPStan does
 /// for callables.
-fn parse_callable_template(raw: &str) -> Option<crate::types::TemplateParam> {
+fn parse_callable_template(raw: &str) -> Option<crate::TemplateParam> {
     let name_end = raw
         .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '\\'))
         .unwrap_or(raw.len());
@@ -206,11 +206,11 @@ fn parse_callable_template(raw: &str) -> Option<crate::types::TemplateParam> {
         None if rest.is_empty() => Type::Mixed(false),
         None => return None,
     };
-    Some(crate::types::TemplateParam {
+    Some(crate::TemplateParam {
         name: name.to_string(),
         bound: Box::new(bound),
-        variance: crate::types::Variance::Invariant,
-        scope: Some(crate::types::CALLABLE_TEMPLATE_SCOPE.to_string()),
+        variance: crate::Variance::Invariant,
+        scope: Some(crate::CALLABLE_TEMPLATE_SCOPE.to_string()),
         default,
     })
 }
@@ -240,7 +240,7 @@ fn top_level_find(s: &str, pat: &str) -> Option<usize> {
 /// Turns every bare reference to one of `sig`'s own templates into its
 /// `TemplateParam`.
 fn mark_callable_templates(sig: CallableSig) -> CallableSig {
-    fn mark(ty: &Type, templates: &[crate::types::TemplateParam]) -> Type {
+    fn mark(ty: &Type, templates: &[crate::TemplateParam]) -> Type {
         match ty {
             Type::Object(name, args) if args.is_empty() => {
                 match templates.iter().find(|t| t.name == *name) {
@@ -493,7 +493,7 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
 /// this type stays round-trippable back through this same parser rather
 /// than showing a key text that would parse differently (or not at all)
 /// if pasted back into a real `@var`/`@param` tag.
-pub(crate) fn display_shape_key(key: &str) -> String {
+pub fn display_shape_key(key: &str) -> String {
     let is_bare_integer = canonical_int_key(key).is_some();
     let is_bare_identifier = {
         let mut chars = key.chars();
@@ -534,7 +534,7 @@ fn strip_shape_key_quotes(key: &str) -> &str {
 /// string key). Plain `str::parse::<i64>()` is **not** sufficient: it
 /// happily accepts a leading zero (`"01".parse::<i64>() == Ok(1)`) and
 /// `"-0"`, both of which real PHP does *not* canonicalize.
-pub(crate) fn canonical_int_key(key: &str) -> Option<i64> {
+pub fn canonical_int_key(key: &str) -> Option<i64> {
     let (negative, digits) = match key.strip_prefix('-') {
         Some(rest) => (true, rest),
         None => (false, key),
@@ -855,7 +855,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // `lowercase-string`/`uppercase-string`/`non-empty-
         // lowercase-string`/`non-empty-uppercase-string` are unlike
         // those: case-content genuinely *is* provable, via
-        // `types::subtype`'s `LowercaseString`/`UppercaseString`
+        // `crate::subtype`'s `LowercaseString`/`UppercaseString`
         // literal-fact arms and the `strtolower`/`strtoupper`/etc.
         // case-tracking producers (`checker/expr/builtin_calls.rs`).
         "lowercase-string" => Type::Intersection(vec![
@@ -1190,7 +1190,7 @@ fn parse_generic_arg(a: &str) -> Type {
 /// unwrap to at all - `None` here means "nothing to verify," the same as
 /// this project already treats any other unresolvable/erased generic
 /// argument elsewhere.
-pub(crate) fn strip_call_site_variance(ty: &Type) -> Option<&Type> {
+pub fn strip_call_site_variance(ty: &Type) -> Option<&Type> {
     match ty {
         Type::VarianceArg(CallSiteVariance::Bivariant, _) => None,
         Type::VarianceArg(_, inner) => Some(inner),
@@ -1231,7 +1231,7 @@ fn text_mentions_mixed(text: &str) -> bool {
 /// `mixed` anywhere (see `text_mentions_mixed` for the precision), so a
 /// `mixed` value type nested in an `array`/`iterable`/`list` generic
 /// counts as explicit.
-pub(crate) fn has_explicit_mixed_nested_somewhere(
+pub fn has_explicit_mixed_nested_somewhere(
     native_hint: Option<&str>,
     doc_type: Option<&str>,
 ) -> bool {

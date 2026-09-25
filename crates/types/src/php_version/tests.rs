@@ -160,7 +160,7 @@ fn a_php_version_id_comparison_narrows_the_range() {
 
 #[test]
 fn a_range_supports_a_feature_on_all_some_or_none_of_its_versions() {
-    use crate::types::TrinaryLogic;
+    use crate::TrinaryLogic;
     let range = PhpVersions::new(PhpVersion::new(7, 4), PhpVersion::new(8, 4));
     assert_eq!(
         range.supports(PhpFeature::NamedArguments),

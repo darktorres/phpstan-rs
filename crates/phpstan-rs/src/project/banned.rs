@@ -9,10 +9,10 @@ use std::path::PathBuf;
 
 use crate::banned::BannedConstruct;
 use crate::registry::Registry;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::{Position, Span};
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use types::Type;
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};

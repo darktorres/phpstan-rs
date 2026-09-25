@@ -3,8 +3,8 @@ use crate::checker::{
     Locals, generator_missing_return_type, generator_template_param, merge_scopes,
     purge_stale_narrowing_for, union_types,
 };
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 /// See `DiscriminantArrayFactsMap`'s own doc comment (`checker.rs`) - `e`
 /// must be exactly a bare `Variable` (the same narrow shape the write side

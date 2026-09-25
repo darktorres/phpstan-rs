@@ -6,7 +6,7 @@
 //! (PHPStan's `ObjectType::toInteger()`/`toFloat()`/`toString()`) and in
 //! `ArrayTypeTrait`'s always-`ErrorType` `toString()`.
 
-use crate::types::{AccessoryKind, ClassHierarchy, Type, union_types};
+use crate::{AccessoryKind, ClassHierarchy, Type, union_types};
 
 /// The built-in classes PHPStan's `ObjectType::toInteger()`/`toFloat()`
 /// special-case as numeric-castable; every other object is illegal for

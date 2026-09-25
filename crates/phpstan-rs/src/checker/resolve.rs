@@ -1,9 +1,9 @@
 use crate::checker::{Checker, Locals, class_type_word};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{self, FunctionSig};
-use crate::types::{self, Type};
 use syntax::ast::StaticTarget;
 use syntax::token::Span;
+use types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// Resolves a bare name exactly as it appears at an expression site

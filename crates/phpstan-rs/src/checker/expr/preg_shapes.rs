@@ -1,7 +1,7 @@
 use crate::regex_groups;
-use crate::types::{AccessoryKind, Shape, Type};
-use crate::types::{union_types, union_types_keep_shapes_distinct};
 use syntax::ast::*;
+use types::{AccessoryKind, Shape, Type};
+use types::{union_types, union_types_keep_shapes_distinct};
 
 /// The type of one matched group's "leaf" value in `preg_match`'s own
 /// `$matches` shape - plain `string` normally, or the real, positional

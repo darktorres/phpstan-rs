@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use crate::docblock::DocBlock;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::{self, TemplateParam, Type};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use types::{self, TemplateParam, Type};
 
 /// Rewrites every `Object(name, _)` in `ty` whose `name` matches a key in
 /// `aliases` into that alias's own (already fully-resolved) `Type` -

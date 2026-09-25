@@ -71,11 +71,11 @@ fn interface_string_and_trait_string_are_class_kind_strings() {
     // real `ClassKind` at `registry::is_assignable`.
     assert_eq!(
         parse_type_string("interface-string"),
-        Type::ClassKindString(crate::types::ClassKind::Interface)
+        Type::ClassKindString(crate::ClassKind::Interface)
     );
     assert_eq!(
         parse_type_string("trait-string"),
-        Type::ClassKindString(crate::types::ClassKind::Trait)
+        Type::ClassKindString(crate::ClassKind::Trait)
     );
 }
 
@@ -369,9 +369,9 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     let shape = parse_type_string("array{items: int, ...<string, mixed>}");
     assert_eq!(
         shape,
-        Type::ArrayShape(crate::types::Shape {
-            fields: vec![crate::types::ShapeField::new(
-                crate::types::ShapeKey::from_name("items"),
+        Type::ArrayShape(crate::Shape {
+            fields: vec![crate::ShapeField::new(
+                crate::ShapeKey::from_name("items"),
                 Type::Int,
                 false
             )],
@@ -382,13 +382,11 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     let shape2 = parse_type_string("array{items: int, ...}");
     assert_eq!(
         shape2,
-        Type::ArrayShape(crate::types::Shape::unsealed(vec![
-            crate::types::ShapeField::new(
-                crate::types::ShapeKey::from_name("items"),
-                Type::Int,
-                false
-            ),
-        ]))
+        Type::ArrayShape(crate::Shape::unsealed(vec![crate::ShapeField::new(
+            crate::ShapeKey::from_name("items"),
+            Type::Int,
+            false
+        ),]))
     );
 }
 

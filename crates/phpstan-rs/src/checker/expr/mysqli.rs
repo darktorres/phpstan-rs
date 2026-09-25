@@ -4,9 +4,9 @@
 //! `Doctrine\DBAL\Result`'s) types every `fetch_*` method's row.
 
 use crate::checker::{Checker, Locals};
-use crate::types::union_types;
-use crate::types::{Shape, ShapeField, ShapeKey, Type, parse_type_string};
 use syntax::ast::*;
+use types::union_types;
+use types::{Shape, ShapeField, ShapeKey, Type, parse_type_string};
 
 /// The statements that produce a result set - anything else (`INSERT`,
 /// `UPDATE`, `SET`, ...) makes `query()` return `true`.
@@ -51,7 +51,7 @@ impl<'a> Checker<'a> {
     fn mysqli_throws_exceptions(&self) -> bool {
         self.registry
             .php_version
-            .is_none_or(|version| version >= crate::types::PhpVersion::new(8, 1))
+            .is_none_or(|version| version >= types::PhpVersion::new(8, 1))
     }
 
     /// `mysqli::query($sql)`/`mysqli_query($link, $sql)`.

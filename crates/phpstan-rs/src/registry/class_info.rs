@@ -9,11 +9,11 @@ use crate::registry::function_sig::{
     resolve_type_with_parsed_native, substitute_type_aliases,
 };
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::{self, AccessoryKind, Name, TemplateParam, Type};
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use types::{self, AccessoryKind, Name, TemplateParam, Type};
 
 mod attributes;
 mod doctrine_entity;

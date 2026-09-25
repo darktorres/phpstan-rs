@@ -3,8 +3,8 @@
 //! configured type or the value's general type, never the literal.
 
 use crate::registry::{Registry, resolve_names_in_type};
-use crate::types::{self, Type};
 use syntax::name_resolution::NameContext;
+use types::{self, Type};
 
 /// A value's general type: every literal widened to its base type.
 fn generalize(ty: &Type) -> Type {

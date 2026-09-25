@@ -5,8 +5,8 @@
 
 use super::*;
 use crate::registry;
-use crate::types::TrinaryLogic;
 use syntax::ast::literal_string_value;
+use types::TrinaryLogic;
 
 /// How the described value was written, for the literal leniency of
 /// `VarTagTypeRuleHelper::isValidSuperTypeOfExpr`.
@@ -65,7 +65,7 @@ fn is_array_like(ty: &Type) -> bool {
 fn offset_value_type(ty: &Type, key: &Type) -> Type {
     match ty {
         Type::ArrayShape(shape) => {
-            let Some(key) = crate::types::ShapeKey::from_type(key) else {
+            let Some(key) = types::ShapeKey::from_type(key) else {
                 return Type::Mixed(false);
             };
             shape

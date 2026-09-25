@@ -1,8 +1,8 @@
 use crate::checker::int_range_bounds;
 use crate::checker::narrowing::predicates::narrowing_key;
-use crate::types::format_php_float;
-use crate::types::{self, AccessoryKind, Type};
 use syntax::ast::*;
+use types::format_php_float;
+use types::{self, AccessoryKind, Type};
 
 /// Shared by `narrow_type_excluding_falsy`'s own `Array` arm above and
 /// the `count($x) > 0` narrowing below, so the two "prove this array is

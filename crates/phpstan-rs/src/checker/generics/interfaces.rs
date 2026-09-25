@@ -26,8 +26,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
 use crate::registry::ClassInfo;
-use crate::types::{self, Type};
 use syntax::token::Span;
+use types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// Entry point - called once per class/interface/enum declaration

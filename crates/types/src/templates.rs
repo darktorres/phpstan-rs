@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::types::{CallableSig, TemplateParam, Type};
+use crate::{CallableSig, TemplateParam, Type};
 
 /// Unifies a template-bearing param type against an actual argument type,
 /// recording the binding it implies. Only the two shapes that come up in
@@ -12,8 +12,7 @@ use crate::types::{CallableSig, TemplateParam, Type};
 /// same `T` across multiple params aren't reconciled (no union-widening).
 pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHashMap<String, Type>) {
     match param_ty {
-        Type::TemplateParam(tp)
-            if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) => {}
+        Type::TemplateParam(tp) if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {}
         Type::TemplateParam(tp) => {
             // Reject a bare `T` binding to a *definite scalar* when `T`'s
             // own declared bound requires an object (`@template T of
@@ -161,14 +160,14 @@ impl CallableSig {
     /// The return type of calling a value of this callable type with
     /// arguments of `arg_types`: its own templates bound from them, an
     /// unbound one falling back to its bound.
-    pub(crate) fn instantiated_return(&self, arg_types: &[Type]) -> Type {
+    pub fn instantiated_return(&self, arg_types: &[Type]) -> Type {
         if self.templates.is_empty() {
             return (*self.return_type).clone();
         }
         fn open(ty: &Type) -> Type {
             match ty {
                 Type::TemplateParam(tp)
-                    if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) =>
+                    if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) =>
                 {
                     Type::TemplateParam(TemplateParam {
                         scope: None,
@@ -220,9 +219,7 @@ fn substitute(
     match ty {
         // A callable type's own template stays until that callable is
         // itself called.
-        Type::TemplateParam(tp)
-            if tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE) =>
-        {
+        Type::TemplateParam(tp) if tp.scope.as_deref() == Some(crate::CALLABLE_TEMPLATE_SCOPE) => {
             ty.clone()
         }
         Type::TemplateParam(tp) => bindings.get(&tp.name).cloned().unwrap_or_else(|| {

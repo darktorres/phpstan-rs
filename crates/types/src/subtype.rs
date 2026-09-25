@@ -1,4 +1,4 @@
-use crate::types::{AccessoryKind, CallableParam, CallableSig, Shape, ShapeKey, Type};
+use crate::{AccessoryKind, CallableParam, CallableSig, Shape, ShapeKey, Type};
 
 /// Whether `shape` is a *definite* list: sealed, int-keyed sequentially
 /// from zero, *and* no optional field followed by a later, non-optional
@@ -8,7 +8,7 @@ use crate::types::{AccessoryKind, CallableParam, CallableSig, Shape, ShapeKey, T
 /// leave the remaining keys `{0, 2}` non-sequential - a `Maybe` counts
 /// as "not a definite list" here, the project's false-negative-favoring
 /// default.
-pub(crate) fn shape_fields_are_list_like(shape: &Shape) -> bool {
+pub fn shape_fields_are_list_like(shape: &Shape) -> bool {
     if !shape.is_sealed() {
         return false;
     }
@@ -39,7 +39,7 @@ pub(crate) fn shape_fields_are_list_like(shape: &Shape) -> bool {
 /// fail against an `array<int<0, max>, ...>`-typed parameter (`Type::Int`
 /// isn't a confirmed subtype of `int<0, max>`, even though the one
 /// concrete key written always is non-negative).
-pub(crate) fn shape_key_type(shape: &Shape) -> Type {
+pub fn shape_key_type(shape: &Shape) -> Type {
     let mut key_types: Vec<Type> = Vec::new();
     for field in &shape.fields {
         let kt = match field.key {
@@ -71,7 +71,7 @@ pub(crate) fn shape_key_type(shape: &Shape) -> Type {
 /// `union_types` would print a duplicate `list<int>|list<int>` whenever
 /// a docblock-declared `list<T>` and a runtime-inferred one of the same
 /// element type meet in one union.
-pub(crate) fn types_equal_for_union(a: &Type, b: &Type) -> bool {
+pub fn types_equal_for_union(a: &Type, b: &Type) -> bool {
     if a == b {
         return true;
     }
@@ -104,10 +104,10 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // A `key-of<T>`/`T[K]` still over a template is what `T`'s bound
         // makes it.
         (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
-            is_subtype(&crate::types::resolve_late_to_bounds(sub), sup)
+            is_subtype(&crate::resolve_late_to_bounds(sub), sup)
         }
         (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
-            is_subtype(sub, &crate::types::resolve_late_to_bounds(sup))
+            is_subtype(sub, &crate::resolve_late_to_bounds(sup))
         }
         // `Type` derives plain structural `PartialEq`, so the
         // `a == b` fast path just below is `false` for `FloatLiteral
@@ -465,7 +465,7 @@ fn effective_callable_param_at(params: &[CallableParam], i: usize) -> Option<&Ca
 /// `is_sub` decides each individual parameter/return comparison, so the
 /// registry can supply its hierarchy-aware relation while this module
 /// passes its own structural one.
-pub(crate) fn callable_sig_is_subtype(
+pub fn callable_sig_is_subtype(
     a: &CallableSig,
     b: &CallableSig,
     is_sub: &dyn Fn(&Type, &Type) -> bool,
@@ -520,7 +520,7 @@ pub(crate) fn callable_sig_is_subtype(
 /// leading/trailing whitespace (real PHP's own numeric-string leniency)
 /// then accepts an optional sign, digits, an optional single `.` with
 /// more digits, and an optional exponent.
-pub(crate) fn is_numeric_string_literal(s: &str) -> bool {
+pub fn is_numeric_string_literal(s: &str) -> bool {
     let s = s.trim();
     let s = s.strip_prefix(['+', '-']).unwrap_or(s);
     if s.is_empty() {
@@ -552,7 +552,7 @@ pub(crate) fn is_numeric_string_literal(s: &str) -> bool {
 /// hand, so the same edge cases (`"007"`, `"+1"`, `"-0"`, `""`, `"1.0"`)
 /// are excluded for the identical reason real PHP's int cast excludes
 /// them - a mismatched round trip, not a hand-maintained rule list.
-pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
+pub fn is_decimal_integer_string_literal(s: &str) -> bool {
     s.parse::<i64>().is_ok_and(|n| n.to_string() == s)
 }
 
@@ -572,7 +572,7 @@ pub(crate) fn is_decimal_integer_string_literal(s: &str) -> bool {
 /// object-vs-object disjointness needs a `final`-class/no-subtype-relation
 /// check this primitive deliberately doesn't attempt), `Intersection`,
 /// `Callable`, `Accessory`, templates, and every pseudo-type.
-pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
+pub fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Union(members) | Type::BenevolentUnion(members), _) => {
             members.iter().all(|m| types_definitely_disjoint(m, b))

@@ -77,8 +77,8 @@ impl PhpVersions {
 
     /// Whether `feature` is available on every version in the range
     /// (`Yes`), on none (`No`), or on some.
-    pub fn supports(self, feature: PhpFeature) -> crate::types::TrinaryLogic {
-        use crate::types::TrinaryLogic;
+    pub fn supports(self, feature: PhpFeature) -> crate::TrinaryLogic {
+        use crate::TrinaryLogic;
         match (
             feature.is_available(self.min),
             feature.is_available(self.max),

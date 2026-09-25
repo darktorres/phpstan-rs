@@ -2,7 +2,6 @@
 use super::super::check::check_chunk;
 use super::helpers::*;
 use phpstan_rs::registry::{self, format_signature};
-use phpstan_rs::types;
 
 #[test]
 fn check_chunk_reports_a_read_error_for_a_missing_file_without_panicking() {

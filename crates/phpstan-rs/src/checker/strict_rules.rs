@@ -50,9 +50,9 @@
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::FunctionSig;
-use crate::types::TrinaryLogic;
-use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
 use syntax::ast::*;
+use types::TrinaryLogic;
+use types::{AccessoryKind, Type, is_numeric_string_literal};
 
 impl<'a> Checker<'a> {
     /// The expression-level ports, before `e` itself is checked.
@@ -294,7 +294,7 @@ impl<'a> Checker<'a> {
             if self
                 .registry
                 .php_version
-                .is_some_and(|v| v >= crate::types::PhpVersion::new(8, 4))
+                .is_some_and(|v| v >= types::PhpVersion::new(8, 4))
             {
                 builder = builder.tip("Also BcMath\\Number is allowed.");
             }
@@ -505,7 +505,7 @@ impl<'a> Checker<'a> {
         if !collect_array_values(array, &mut values) {
             return false;
         }
-        let Some(item) = values.into_iter().reduce(crate::types::union_types) else {
+        let Some(item) = values.into_iter().reduce(types::union_types) else {
             return false;
         };
         if let Type::Union(members) = &item {
@@ -954,18 +954,19 @@ fn constant_arrays(ty: &Type) -> Option<Vec<Vec<Type>>> {
 /// `constant_arrays`, when every member is also a list: keys `0..n` in
 /// order, none optional.
 fn list_tuples(ty: &Type) -> Option<Vec<Vec<Type>>> {
-    let is_list =
-        |ty: &Type| -> bool {
-            match ty {
-                Type::ArrayShape(shape) => {
-                    shape.is_sealed()
-                        && shape.fields.iter().enumerate().all(|(i, f)| {
-                            !f.optional && f.key == crate::types::ShapeKey::Int(i as i64)
-                        })
-                }
-                _ => false,
+    let is_list = |ty: &Type| -> bool {
+        match ty {
+            Type::ArrayShape(shape) => {
+                shape.is_sealed()
+                    && shape
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .all(|(i, f)| !f.optional && f.key == types::ShapeKey::Int(i as i64))
             }
-        };
+            _ => false,
+        }
+    };
     let all_lists = match ty {
         Type::Union(members) => members.iter().all(is_list),
         other => is_list(other),

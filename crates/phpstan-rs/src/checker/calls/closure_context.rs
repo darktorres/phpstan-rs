@@ -2,9 +2,9 @@ use crate::checker::{
     Checker, Locals, LoopZeroIterations, collect_goto_targets, purge_stale_narrowing_for,
 };
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::visit::body_contains_yield;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// Checks a closure/arrow-fn literal's body with `$this` seeded to

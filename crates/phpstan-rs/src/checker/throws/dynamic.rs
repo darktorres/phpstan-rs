@@ -26,9 +26,9 @@ use crate::checker::expr::contains_flag_name;
 use crate::checker::xml_name::is_valid_xml_name;
 use crate::checker::xml_wellformedness::is_well_formed_xml;
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::unwrap_grouping;
 use syntax::ast::{Arg, ExprKind, Literal, UnaryOp};
+use types::Type;
 
 fn throwable(class: &str) -> Type {
     Type::Object(class.into(), Vec::new())

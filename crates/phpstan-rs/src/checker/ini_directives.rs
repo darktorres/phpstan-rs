@@ -5,9 +5,9 @@
 //! directives are deprecated only to change, so reading them is fine.
 
 use crate::checker::{Checker, Locals};
-use crate::types::PhpVersion;
-use crate::types::Type;
 use syntax::ast::Arg;
+use types::PhpVersion;
+use types::Type;
 
 /// Directives removed from PHP, with the version that removed them.
 const REMOVED: &[(&str, PhpVersion)] = &[

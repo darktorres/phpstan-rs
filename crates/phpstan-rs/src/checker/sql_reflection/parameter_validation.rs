@@ -46,9 +46,9 @@ use crate::checker::sql_reflection::query_builder::{
     param_key_from_expr, value_is_confidently_not_an_integer,
 };
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::{Arg, Expr, ExprKind};
 use syntax::token::Span;
+use types::Type;
 
 /// Every placeholder the SQL text itself references, in first-occurrence
 /// order, deduplicated by key (a repeated `:name` is the same real bound

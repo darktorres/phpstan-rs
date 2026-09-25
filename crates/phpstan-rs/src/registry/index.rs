@@ -3,10 +3,10 @@ use std::sync::Arc;
 
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, FunctionSig, infer_const_type};
-use crate::types::Type;
 use syntax::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use types::Type;
 
 /// One declaration's already-built, registry-independent info/sig, plus
 /// the file-position facts (`name`, `conditional`) `Registry::

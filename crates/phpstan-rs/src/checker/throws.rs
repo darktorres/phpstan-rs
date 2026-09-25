@@ -20,10 +20,10 @@
 
 use crate::checker::Checker;
 use crate::registry::{FunctionSig, Registry};
-use crate::types::Type;
 use syntax::ast::{Expr, ExprKind, Stmt, StmtKind};
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts};
+use types::Type;
 
 mod dynamic;
 mod missing;

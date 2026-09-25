@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 syntax.workspace = true
+types.workspace = true
 clap = { version = "4", features = ["derive"] }
 crossbeam-channel = "0.5"
 dhat = { version = "0.3", optional = true }

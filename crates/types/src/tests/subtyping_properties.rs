@@ -1,4 +1,4 @@
-//! Proptest-based subtyping properties for `types::is_subtype`. A
+//! Proptest-based subtyping properties for `crate::is_subtype`. A
 //! bounded-depth `Type` generator (`prop_recursive` - the correct tool
 //! for a genuinely recursive ~20-variant enum, not a hand-rolled
 //! recursive fn), plus 5 properties, each evidenced by real reasoning
@@ -14,7 +14,7 @@
 //! need ad hoc generator exclusions purpose-built to dodge this
 //! project's own documented design decisions.
 
-use crate::types::{self, AccessoryKind, Type};
+use crate::{AccessoryKind, Type};
 use proptest::prelude::*;
 
 fn leaf_type() -> impl Strategy<Value = Type> {
@@ -66,21 +66,21 @@ proptest! {
     /// `NAN != NAN`.
     #[test]
     fn reflexivity(t in any_type()) {
-        prop_assert!(types::is_subtype(&t, &t));
+        prop_assert!(crate::is_subtype(&t, &t));
     }
 
     /// `(_, Type::Mixed(false)) => true` is `is_subtype`'s own first arm -
     /// `Mixed` accepts everything.
     #[test]
     fn mixed_is_top(t in any_type()) {
-        prop_assert!(types::is_subtype(&t, &Type::Mixed(false)));
+        prop_assert!(crate::is_subtype(&t, &Type::Mixed(false)));
     }
 
     /// `(Type::Never, _) => true` is `is_subtype`'s own second arm -
     /// `Never` satisfies everything.
     #[test]
     fn never_is_bottom(t in any_type()) {
-        prop_assert!(types::is_subtype(&Type::Never, &t));
+        prop_assert!(crate::is_subtype(&Type::Never, &t));
     }
 
     /// `(_, Type::Union(members)) => members.iter().any(|m| is_subtype
@@ -91,7 +91,7 @@ proptest! {
     fn union_injection(members in prop::collection::vec(any_type(), 2..4)) {
         let union = Type::Union(members.clone());
         for m in &members {
-            prop_assert!(types::is_subtype(m, &union));
+            prop_assert!(crate::is_subtype(m, &union));
         }
     }
 
@@ -103,7 +103,7 @@ proptest! {
     fn intersection_projection(members in prop::collection::vec(any_type(), 2..4)) {
         let intersection = Type::Intersection(members.clone());
         for m in &members {
-            prop_assert!(types::is_subtype(&intersection, m));
+            prop_assert!(crate::is_subtype(&intersection, m));
         }
     }
 }
@@ -113,7 +113,7 @@ proptest! {
 /// `any_type` stopped generating a NaN case.
 #[test]
 fn nan_float_literal_is_reflexive() {
-    assert!(types::is_subtype(
+    assert!(crate::is_subtype(
         &Type::FloatLiteral(f64::NAN),
         &Type::FloatLiteral(f64::NAN)
     ));
@@ -129,6 +129,6 @@ fn nan_float_literal_is_reflexive() {
 fn an_intersection_is_a_subtype_of_its_own_union_shaped_member() {
     let union = Type::Union(vec![Type::Null, Type::Bool]);
     let intersection = Type::Intersection(vec![Type::Void, union.clone()]);
-    assert!(types::is_subtype(&intersection, &union));
-    assert!(types::is_subtype(&intersection, &Type::Void));
+    assert!(crate::is_subtype(&intersection, &union));
+    assert!(crate::is_subtype(&intersection, &Type::Void));
 }

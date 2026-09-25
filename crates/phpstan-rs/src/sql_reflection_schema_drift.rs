@@ -15,7 +15,7 @@
 use crate::sql_reflection_config::SqlDriver;
 use crate::sql_reflection_reflector::QueryReflector;
 use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
-use crate::types::Type;
+use types::Type;
 
 /// One human-readable warning per table whose static and live column
 /// lists disagree. A table the live connection can't reach at all

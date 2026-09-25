@@ -6,8 +6,8 @@
 
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
-use crate::types::Type;
 use syntax::ast::{Arg, Expr, ExprKind};
+use types::Type;
 
 const SORT_REGULAR: i64 = 0;
 const SORT_NUMERIC: i64 = 1;
@@ -261,7 +261,7 @@ impl<'a> Checker<'a> {
         label: &str,
     ) {
         if !self.registry.php_version.is_some_and(|v| {
-            !crate::types::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
+            !types::php_version::PhpFeature::ArrayUnpackingWithStringKeys.is_available(v)
         }) {
             return;
         }

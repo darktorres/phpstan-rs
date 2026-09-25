@@ -7,9 +7,9 @@
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
-use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::php_version::PhpFeature;
 
 /// One property's declaration-relevant facts, shared by a plain
 /// `PropertyDecl` and a promoted constructor parameter.

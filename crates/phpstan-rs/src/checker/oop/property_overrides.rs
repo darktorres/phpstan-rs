@@ -2,9 +2,9 @@ use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::PropertySig;
-use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::php_version::PhpFeature;
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's `OverridingPropertyRule`: the mismatch

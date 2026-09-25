@@ -28,9 +28,9 @@
 
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::{ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::{ShapeKey, Type};
 
 const LEVELS: [&str; 8] = [
     "emergency",
@@ -98,12 +98,9 @@ fn may_be_non_literal_string(ty: &Type) -> bool {
         Type::Union(members) => members.iter().any(may_be_non_literal_string),
         Type::Intersection(members) => {
             members.iter().any(|m| matches!(m, Type::String))
-                && !members.iter().any(|m| {
-                    matches!(
-                        m,
-                        Type::Accessory(crate::types::AccessoryKind::LiteralString)
-                    )
-                })
+                && !members
+                    .iter()
+                    .any(|m| matches!(m, Type::Accessory(types::AccessoryKind::LiteralString)))
         }
         _ => false,
     }
@@ -118,7 +115,7 @@ impl<'a> Checker<'a> {
     fn is_psr3_logger(&self, ty: &Type) -> bool {
         let logger = Type::Object(("Psr\\Log\\LoggerInterface".to_string()).into(), Vec::new());
         !matches!(ty, Type::Mixed(_))
-            && self.registry.is_super_type_of(&logger, ty) == crate::types::TrinaryLogic::Yes
+            && self.registry.is_super_type_of(&logger, ty) == types::TrinaryLogic::Yes
     }
 
     pub(crate) fn check_psr3_call(&mut self, e: &Expr, locals: &Locals, label: &str) {
@@ -190,7 +187,7 @@ impl<'a> Checker<'a> {
                     .filter(|(_, ty)| {
                         self.registry
                             .is_super_type_of(&Type::Object("Throwable".into(), Vec::new()), ty)
-                            == crate::types::TrinaryLogic::Yes
+                            == types::TrinaryLogic::Yes
                     })
                     .map(|(name, _)| name.clone())
                     .min()
@@ -367,8 +364,7 @@ impl<'a> Checker<'a> {
             if key == "exception" {
                 let throwable = Type::Object("Throwable".into(), Vec::new());
                 if !matches!(value, Type::Mixed(_))
-                    && self.registry.is_super_type_of(&throwable, value)
-                        != crate::types::TrinaryLogic::Yes
+                    && self.registry.is_super_type_of(&throwable, value) != types::TrinaryLogic::Yes
                 {
                     self.report(
                         label.to_string(),
@@ -385,12 +381,9 @@ impl<'a> Checker<'a> {
     fn is_literal_string(&self, ty: &Type) -> bool {
         match ty {
             Type::StringLiteral(_) => true,
-            Type::Intersection(members) => members.iter().any(|m| {
-                matches!(
-                    m,
-                    Type::Accessory(crate::types::AccessoryKind::LiteralString)
-                )
-            }),
+            Type::Intersection(members) => members
+                .iter()
+                .any(|m| matches!(m, Type::Accessory(types::AccessoryKind::LiteralString))),
             Type::Union(members) => members.iter().all(|m| self.is_literal_string(m)),
             _ => false,
         }

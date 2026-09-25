@@ -4,10 +4,10 @@ use crate::checker::{
     string_type_has_accessory,
 };
 use crate::registry::{FunctionSig, Registry};
-use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
-use crate::types::{has_offset_value_parts, union_types};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
+use types::{has_offset_value_parts, union_types};
 
 use super::{
     int_range_bounds, is_false_literal, is_non_falsy_string, is_true_literal, normalize_int_range,
@@ -1857,9 +1857,7 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if !crate::types::php_version::PhpFeature::FilterThrowOnFailureConstant
-            .is_available(version)
-        {
+        if !types::php_version::PhpFeature::FilterThrowOnFailureConstant.is_available(version) {
             return;
         }
         let Some(flags_arg) = args.get(2) else {

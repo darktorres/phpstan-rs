@@ -1,7 +1,7 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::types::union_types;
-use crate::types::{self, AccessoryKind, Type};
 use syntax::ast::*;
+use types::union_types;
+use types::{self, AccessoryKind, Type};
 
 /// `ty`'s own `(min, max)` bound pair when it's
 /// range-representable at all - an `IntLiteral` is a degenerate range
@@ -480,7 +480,7 @@ pub(crate) fn type_truthiness(ty: &Type) -> Option<bool> {
 pub(crate) fn loose_compare_literals(
     l: &Type,
     r: &Type,
-    php_version: Option<crate::types::php_version::PhpVersion>,
+    php_version: Option<types::php_version::PhpVersion>,
 ) -> Option<bool> {
     // bool/null vs anything: PHP casts *both* sides to bool and compares
     // - version-independent, and subsumes the same-kind True/False/Null
@@ -506,7 +506,7 @@ pub(crate) fn loose_compare_literals(
         | (Type::StringLiteral(s), Type::IntLiteral(n)) => {
             if types::is_numeric_string_literal(s) {
                 Some(*n as f64 == s.trim().parse::<f64>().ok()?)
-            } else if php_version.is_some_and(|v| v >= crate::types::PhpVersion::new(8, 0)) {
+            } else if php_version.is_some_and(|v| v >= types::PhpVersion::new(8, 0)) {
                 Some(n.to_string() == *s)
             } else {
                 None

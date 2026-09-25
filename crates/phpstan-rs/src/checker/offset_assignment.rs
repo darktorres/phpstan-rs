@@ -8,8 +8,8 @@
 
 use crate::checker::assignment::offset_verdict;
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::{Expr, ExprKind};
+use types::Type;
 
 fn is_string_type(ty: &Type) -> bool {
     match ty {

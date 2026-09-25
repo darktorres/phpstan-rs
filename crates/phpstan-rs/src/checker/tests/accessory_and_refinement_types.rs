@@ -2,8 +2,8 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::types::AccessoryKind;
-use crate::types::Shape;
+use types::AccessoryKind;
+use types::Shape;
 
 // Exact type equality is the wrong tool for "is this the kind of thing
 // being narrowed" - both `narrow_type_to`/`narrow_type_excluding`

@@ -1221,6 +1221,7 @@ dependencies = [
  "mysql",
  "pcre2-sys",
  "phpstan-rs-syntax",
+ "phpstan-rs-types",
  "postgres",
  "r2d2",
  "r2d2_postgres",
@@ -1244,6 +1245,7 @@ dependencies = [
  "libfuzzer-sys",
  "phpstan-rs",
  "phpstan-rs-syntax",
+ "phpstan-rs-types",
 ]
 
 [[package]]
@@ -1253,6 +1255,14 @@ dependencies = [
  "arbitrary",
  "hotpath",
  "imbl",
+ "rustc-hash",
+]
+
+[[package]]
+name = "phpstan-rs-types"
+version = "0.1.0"
+dependencies = [
+ "phpstan-rs-syntax",
  "rustc-hash",
 ]
 

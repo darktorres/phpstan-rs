@@ -16,7 +16,7 @@ use crate::registry::FunctionSig;
 use syntax::ast::Arg;
 use syntax::token::Span;
 
-use crate::types::{AccessoryKind, Type, is_numeric_string_literal};
+use types::{AccessoryKind, Type, is_numeric_string_literal};
 
 /// A value with a finite set of possible values - a literal, `bool`,
 /// `null`, or an enum case.
@@ -69,7 +69,7 @@ impl<'a> Checker<'a> {
         }
         let needle = self.infer_expr(&args[needle_index].value, locals);
         let haystack = self.infer_expr(&args[haystack_index].value, locals);
-        let shapes: Vec<&crate::types::Shape> = match &haystack {
+        let shapes: Vec<&types::Shape> = match &haystack {
             Type::ArrayShape(shape) => vec![shape],
             Type::Union(members) => {
                 let shapes: Vec<_> = members
@@ -232,7 +232,7 @@ impl<'a> Checker<'a> {
         let before_php8 = self
             .registry
             .php_version
-            .is_none_or(|v| v < crate::types::PhpVersion::new(8, 0));
+            .is_none_or(|v| v < types::PhpVersion::new(8, 0));
         let numeric = |k: &LooseKind| matches!(k, Int | Float);
         let possibly_numeric_string = |k: &LooseKind| matches!(k, NumericString | String);
         match (a, b) {

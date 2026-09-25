@@ -2,8 +2,8 @@ use std::fmt;
 
 use syntax::ast::ClassKind;
 
-use crate::types::parse::display_shape_key;
-use crate::types::{AccessoryKind, CallSiteVariance, CallableSig, Shape, Type};
+use crate::parse::display_shape_key;
+use crate::{AccessoryKind, CallSiteVariance, CallableSig, Shape, Type};
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
 /// `Closure(...)` PHPDoc type and a closure literal's own

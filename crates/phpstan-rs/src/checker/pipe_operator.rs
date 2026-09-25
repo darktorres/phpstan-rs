@@ -29,8 +29,8 @@
 
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// `pipe.byRef` - see this module's own doc comment for scope.

@@ -6,9 +6,9 @@ use crate::checker::{
     Checker, Locals, array_value_type_for_key, literal_string_key,
     narrow_array_shape_by_key_presence, narrowing_type_for_predicate, types_definitely_disjoint,
 };
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// Looks up a bare global-constant reference (`ExprKind::Name`,
@@ -667,8 +667,7 @@ impl<'a> Checker<'a> {
                 "function.impossibleType",
             );
         } else if !is_exempt_last_condition
-            && self.registry.is_super_type_of(&target_ty, &arg_ty)
-                == crate::types::TrinaryLogic::Yes
+            && self.registry.is_super_type_of(&target_ty, &arg_ty) == types::TrinaryLogic::Yes
         {
             self.report(
                 label.to_string(),

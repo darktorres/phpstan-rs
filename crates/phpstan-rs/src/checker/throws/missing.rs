@@ -26,7 +26,7 @@
 //! wrong).
 
 use crate::checker::Checker;
-use crate::types::Type;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// `throws` is this declaration's own already-resolved `@throws` tag

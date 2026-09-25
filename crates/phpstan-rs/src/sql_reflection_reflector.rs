@@ -28,7 +28,7 @@ use sqlparser::tokenizer::{Location, Token, Tokenizer};
 
 use crate::sql_reflection_config::{SqlDriver, SqlReflectionConfig};
 use crate::sql_reflection_schema::SchemaCatalog;
-use crate::types::Type;
+use types::Type;
 
 /// One live-or-cached connection's own answer to "what row type does
 /// this SQL string's own result set have?" - `None` when it can't be

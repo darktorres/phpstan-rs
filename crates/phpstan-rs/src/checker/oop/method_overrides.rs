@@ -1,9 +1,9 @@
 use crate::checker::Checker;
 use crate::checker::oop::visibility_word;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Type;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_method_overrides(&mut self, fqn: &str, c: &ClassDecl) {
@@ -645,7 +645,7 @@ impl<'a> Checker<'a> {
         let tentative = ancestor_sig.is_stub
             && has_attr(&ancestor_sig.attrs, "TentativeType")
             && self.registry.php_version.is_none_or(|v| {
-                crate::types::php_version::PhpFeature::TentativeReturnTypes.is_available(v)
+                types::php_version::PhpFeature::TentativeReturnTypes.is_available(v)
             });
         if tentative {
             let will_change = has_attr(&own_sig.attrs, "ReturnTypeWillChange")

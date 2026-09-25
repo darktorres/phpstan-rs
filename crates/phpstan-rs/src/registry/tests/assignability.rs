@@ -2,7 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::types::Shape;
+use types::Shape;
 
 #[test]
 fn is_assignable_uses_class_hierarchy() {
@@ -249,8 +249,8 @@ fn interface_string_and_trait_string_check_the_real_class_kind() {
             class Plain2 {}
         "#,
     );
-    let interface_string = Type::ClassKindString(crate::types::ClassKind::Interface);
-    let trait_string = Type::ClassKindString(crate::types::ClassKind::Trait);
+    let interface_string = Type::ClassKindString(types::ClassKind::Interface);
+    let trait_string = Type::ClassKindString(types::ClassKind::Trait);
 
     assert!(r.is_assignable(
         &Type::ClassString(Box::new(Type::Object("Shape2".into(), vec![]))),
@@ -578,8 +578,8 @@ fn has_method_and_has_property_are_read_off_the_class() {
 #[test]
 fn a_shape_has_the_offsets_it_requires() {
     let r = build_registry("<?php");
-    let shape = crate::types::parse_type_string("array{a: int, b?: string}");
-    let has = |key: &str| Type::HasOffset(crate::types::ShapeKey::from_name(key));
+    let shape = types::parse_type_string("array{a: int, b?: string}");
+    let has = |key: &str| Type::HasOffset(types::ShapeKey::from_name(key));
     assert!(r.is_assignable(&shape, &has("a")));
     assert!(!r.is_assignable(&shape, &has("b")));
     assert!(!r.is_assignable(&shape, &has("c")));
@@ -589,14 +589,14 @@ fn a_shape_has_the_offsets_it_requires() {
 #[derive(Debug)]
 struct Joins(u32);
 
-impl crate::types::ExtensionTypeData for Joins {
+impl types::ExtensionTypeData for Joins {
     fn base(&self) -> Type {
         Type::Object("Builder".into(), vec![])
     }
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
-    fn eq_data(&self, other: &dyn crate::types::ExtensionTypeData) -> bool {
+    fn eq_data(&self, other: &dyn types::ExtensionTypeData) -> bool {
         other
             .as_any()
             .downcast_ref::<Joins>()
@@ -610,11 +610,11 @@ impl crate::types::ExtensionTypeData for Joins {
     }
     fn is_super_type_of(
         &self,
-        other: &dyn crate::types::ExtensionTypeData,
-        _: &dyn crate::types::ClassHierarchy,
-    ) -> Option<crate::types::TrinaryLogic> {
+        other: &dyn types::ExtensionTypeData,
+        _: &dyn types::ClassHierarchy,
+    ) -> Option<types::TrinaryLogic> {
         let other = other.as_any().downcast_ref::<Joins>()?;
-        Some(crate::types::TrinaryLogic::from_bool(other.0 == self.0))
+        Some(types::TrinaryLogic::from_bool(other.0 == self.0))
     }
     fn widen(&self) -> Option<Type> {
         Some(self.base())
@@ -623,7 +623,7 @@ impl crate::types::ExtensionTypeData for Joins {
 
 #[test]
 fn an_extension_payload_relates_through_its_hooks_and_its_base() {
-    use crate::types::TrinaryLogic;
+    use types::TrinaryLogic;
     let r = build_registry("<?php class Builder {}");
     let joins = |n| Type::Extension(std::sync::Arc::new(Joins(n)));
     let builder = Type::Object("Builder".into(), vec![]);
@@ -636,11 +636,8 @@ fn an_extension_payload_relates_through_its_hooks_and_its_base() {
     assert_eq!(r.is_super_type_of(&builder, &joins(3)), TrinaryLogic::Yes);
     assert_eq!(r.is_super_type_of(&joins(3), &builder), TrinaryLogic::Maybe);
     // Distinct payloads stay distinct until the union cap, then widen.
-    let two = crate::types::union_types(joins(1), joins(2));
+    let two = types::union_types(joins(1), joins(2));
     assert!(matches!(&two, Type::Union(members) if members.len() == 2));
-    let many = (0..20)
-        .map(joins)
-        .reduce(crate::types::union_types)
-        .unwrap();
+    let many = (0..20).map(joins).reduce(types::union_types).unwrap();
     assert_eq!(many, builder);
 }

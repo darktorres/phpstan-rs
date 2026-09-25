@@ -14,7 +14,7 @@
 
 use std::path::Path;
 
-use phpstan_rs::{project, types};
+use phpstan_rs::project;
 
 // `project::parse_file` must never crash the process on adversarial
 // input.

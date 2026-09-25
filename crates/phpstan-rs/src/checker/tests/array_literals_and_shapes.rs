@@ -2,7 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::types::Shape;
+use types::Shape;
 
 #[test]
 fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {

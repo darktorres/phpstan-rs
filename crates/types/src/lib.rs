@@ -13,7 +13,7 @@ mod late;
 mod parse;
 mod php_float_format;
 pub mod php_version;
-pub(crate) mod relation;
+pub mod relation;
 mod shape;
 mod subtype;
 mod templates;
@@ -21,21 +21,19 @@ mod trinary;
 mod union;
 
 pub use conditional::resolve_conditional;
-pub(crate) use conditional::{conditional_branch, union_of_branches};
+pub use conditional::{conditional_branch, union_of_branches};
 pub use extension::ExtensionTypeData;
 pub use hierarchy::{ClassFacts, ClassHierarchy, effective_slot_variance};
-pub(crate) use late::{contains_late, resolve_late_to_bounds, settle};
+pub use late::{contains_late, resolve_late_to_bounds, settle};
 pub use parse::parse_type_string;
-pub(crate) use parse::{
-    canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance,
-};
-pub(crate) use php_float_format::format_php_float;
+pub use parse::{canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance};
+pub use php_float_format::format_php_float;
 pub use php_version::{PhpFeature, PhpVersion, PhpVersions, parse_php_version};
 pub use relation::Relation;
 pub use shape::{Shape, ShapeField, ShapeKey};
 pub use subtype::is_subtype;
-pub(crate) use subtype::types_definitely_disjoint;
-pub(crate) use subtype::{
+pub use subtype::types_definitely_disjoint;
+pub use subtype::{
     callable_sig_is_subtype, is_numeric_string_literal, shape_fields_are_list_like, shape_key_type,
     types_equal_for_union,
 };
@@ -44,9 +42,8 @@ pub use templates::{
     substitute_template_resolving_to_bounds,
 };
 pub use trinary::TrinaryLogic;
-#[cfg(test)]
-pub(crate) use union::generalize_by_key_set;
-pub(crate) use union::{has_offset_value_parts, union_types, union_types_keep_shapes_distinct};
+pub use union::generalize_by_key_set;
+pub use union::{has_offset_value_parts, union_types, union_types_keep_shapes_distinct};
 
 // A slice of PHPStan's type system covering what the parser captures as
 // type-hint strings, plus self/parent/static and `@template` generics.
@@ -116,7 +113,7 @@ pub enum Type {
     },
     // A single enum case's singleton type (enum fqn, case name), distinct
     // from the coarser `Object(Suit, [])`. Not a subtype target in
-    // `types::is_subtype`'s class-hierarchy sense; `registry::is_assignable`
+    // `crate::is_subtype`'s class-hierarchy sense; `registry::is_assignable`
     // handles `EnumCase -> Object(enum_fqn)` assignability instead.
     EnumCase(Name, Name),
     // `None` = unknown shape; `Some(sig)` = a parsed `Closure(int):
@@ -206,7 +203,7 @@ pub enum Type {
     // registry exists (`Registry::resolve_deferred_value_of`).
     ValueOf(Box<Type>),
     // `key-of<T>` over a `T` not known yet (a template): resolved once
-    // `T` is bound (`types::resolve_late`).
+    // `T` is bound (`crate::resolve_late`).
     KeyOf(Box<Type>),
     // `T['key']` (PHPStan's `OffsetAccessType`) over a `T` not known yet:
     // the base, and the offset as its literal key type.
@@ -221,11 +218,11 @@ pub enum Type {
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real
     // call-site argument type for `subject` is known
-    // (`types::conditional::resolve_conditional`). `subject` is the raw
+    // (`crate::conditional::resolve_conditional`). `subject` is the raw
     // parameter name with no leading `$`; only a bare `$param` subject is
     // modeled. A consumer that can't resolve this variant falls back to
     // the eager `Union([if_true, if_false])`.
-    // An extension's own payload (`types::ExtensionTypeData`).
+    // An extension's own payload (`crate::ExtensionTypeData`).
     Extension(Arc<dyn ExtensionTypeData>),
     Conditional {
         subject: String,
@@ -572,12 +569,12 @@ pub struct CallableSig {
 }
 
 /// The `TemplateParam::scope` of a callable type's own template.
-pub(crate) const CALLABLE_TEMPLATE_SCOPE: &str = "callable";
+pub const CALLABLE_TEMPLATE_SCOPE: &str = "callable";
 
 impl CallableSig {
     /// `self` with every occurrence of its own templates replaced by the
     /// current `templates` entries - after their bounds changed.
-    pub(crate) fn rebind_templates(mut self) -> CallableSig {
+    pub fn rebind_templates(mut self) -> CallableSig {
         fn rebind(ty: &Type, templates: &[TemplateParam]) -> Type {
             match ty {
                 Type::TemplateParam(tp) if tp.scope.as_deref() == Some(CALLABLE_TEMPLATE_SCOPE) => {
@@ -605,7 +602,7 @@ impl Type {
     /// member's of an intersection, and a union's only when every member
     /// has some (PHPStan's `Type::getConstantStrings()`). Empty for
     /// anything else.
-    pub(crate) fn constant_strings(&self) -> Vec<&str> {
+    pub fn constant_strings(&self) -> Vec<&str> {
         match self {
             Type::StringLiteral(s) => vec![s.as_str()],
             Type::Intersection(members) => {
@@ -628,7 +625,7 @@ impl Type {
 
     /// `VerbosityLevel::typeOnly()`: literal values and array shapes
     /// collapse to their plain type.
-    pub(crate) fn describe_type_only(&self) -> String {
+    pub fn describe_type_only(&self) -> String {
         match self {
             Type::IntLiteral(_) | Type::IntRange(..) => "int".to_string(),
             Type::FloatLiteral(_) => "float".to_string(),
@@ -658,7 +655,7 @@ impl Type {
     /// arguments, array key/value, shape fields, union/intersection
     /// members, callable parameters and return, conditional branches);
     /// a leaf is returned unchanged. `f` decides whether to recurse.
-    pub(crate) fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
+    pub fn map_children(&self, f: &mut impl FnMut(&Type) -> Type) -> Type {
         match self {
             Type::Array(k, v) => Type::Array(Box::new(f(k)), Box::new(f(v))),
             Type::ClassString(inner) => Type::ClassString(Box::new(f(inner))),
@@ -721,7 +718,7 @@ impl Type {
 
     /// Calls `f` on each directly nested type - the children
     /// `map_children` rebuilds, in the same order.
-    pub(crate) fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
+    pub fn for_each_child<'t>(&'t self, f: &mut impl FnMut(&'t Type)) {
         match self {
             Type::Array(k, v) => {
                 f(k);
@@ -766,7 +763,7 @@ impl Type {
     }
 
     /// Whether `f` holds for some directly nested type.
-    pub(crate) fn any_child(&self, mut f: impl FnMut(&Type) -> bool) -> bool {
+    pub fn any_child(&self, mut f: impl FnMut(&Type) -> bool) -> bool {
         let mut found = false;
         self.for_each_child(&mut |t| found = found || f(t));
         found
@@ -774,7 +771,7 @@ impl Type {
 
     /// Whether this is an accessory refinement - only ever an
     /// `Intersection` member alongside the base type it refines.
-    pub(crate) fn is_accessory(&self) -> bool {
+    pub fn is_accessory(&self) -> bool {
         matches!(
             self,
             Type::Accessory(_)
@@ -787,7 +784,7 @@ impl Type {
 
     /// A union of `members` of the same kind as `self`: benevolent when
     /// `self` is a benevolent union, plain otherwise.
-    pub(crate) fn with_members(&self, members: Vec<Type>) -> Type {
+    pub fn with_members(&self, members: Vec<Type>) -> Type {
         match self {
             Type::BenevolentUnion(_) => Type::BenevolentUnion(members),
             _ => Type::Union(members),
@@ -799,7 +796,7 @@ impl Type {
     /// against the `Closure` class) that also carries the literal's own
     /// signature - real PHPStan's `ClosureType`, which is both at once.
     /// `Display` renders this exact pair as `Closure(params): return`.
-    pub(crate) fn closure_literal(sig: CallableSig) -> Type {
+    pub fn closure_literal(sig: CallableSig) -> Type {
         Type::Intersection(vec![
             Type::Object("Closure".into(), Vec::new()),
             Type::Callable(Some(Arc::new(sig))),
@@ -809,7 +806,7 @@ impl Type {
     /// The signature a value of this type can be invoked with, when one
     /// is known: a shaped `Closure(...)`/`callable(...)` PHPDoc type, or a
     /// closure literal's `closure_literal` intersection.
-    pub(crate) fn callable_sig(&self) -> Option<&Arc<CallableSig>> {
+    pub fn callable_sig(&self) -> Option<&Arc<CallableSig>> {
         match self {
             Type::Callable(Some(sig)) => Some(sig),
             Type::Intersection(members) => members.iter().find_map(|m| match m {
@@ -821,7 +818,7 @@ impl Type {
     }
 
     /// `list<element>`: an array whose keys are `0..n` in order.
-    pub(crate) fn list_of(element: Type) -> Type {
+    pub fn list_of(element: Type) -> Type {
         Type::Intersection(vec![
             Type::Array(Box::new(Type::unknown_array_key()), Box::new(element)),
             Type::Accessory(AccessoryKind::ArrayList),
@@ -830,13 +827,13 @@ impl Type {
 
     /// PHP's full legal-array-key domain (`int|string`) - the default for
     /// a bare `array`/`array<V>` with no key argument given.
-    pub(crate) fn unknown_array_key() -> Type {
+    pub fn unknown_array_key() -> Type {
         Type::Union(vec![Type::Int, Type::String])
     }
 
     /// `Type::Array(unknown_array_key(), value)`, for a construction site
     /// with no more precise key type available.
-    pub(crate) fn array_of(value: Type) -> Type {
+    pub fn array_of(value: Type) -> Type {
         Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))
     }
 
@@ -867,7 +864,7 @@ impl Type {
     /// operator fallback) for exactly which real-PHPStan-confirmed
     /// construction sites this marker belongs at, not every "no more
     /// precise key" site project-wide.
-    pub(crate) fn benevolent_array_key() -> Type {
+    pub fn benevolent_array_key() -> Type {
         Type::BenevolentUnion(vec![Type::Int, Type::String])
     }
 }

@@ -34,10 +34,10 @@ use rustc_hash::FxHashSet;
 use std::path::{Path, PathBuf};
 
 use crate::registry::Registry;
-use crate::types::Type;
 use syntax::ast::{Arg, Expr, ExprKind, StaticTarget, Stmt, StmtKind};
 use syntax::ast::{literal_string_value, unwrap_grouping};
 use syntax::name_resolution::NameContext;
+use types::Type;
 
 /// The seven Pest functions whose closure argument gets `$this` rebound.
 pub(crate) fn is_this_binding_call(name: &str) -> bool {

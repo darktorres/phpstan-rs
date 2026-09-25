@@ -3,8 +3,8 @@ use std::sync::Arc;
 
 use crate::docblock;
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::{self, TemplateParam, Type};
 use syntax::intern::intern;
+use types::{self, TemplateParam, Type};
 
 use super::generics::mark_template_params;
 use syntax::name_resolution::NameContext;

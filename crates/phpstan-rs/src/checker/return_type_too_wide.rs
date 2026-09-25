@@ -13,10 +13,10 @@
 //! descendant classes").
 
 use crate::checker::Checker;
-use crate::types::Type;
-use crate::types::union_types;
 use syntax::ast::Visibility;
 use syntax::token::Span;
+use types::Type;
+use types::union_types;
 
 fn flatten_union(ty: &Type) -> Vec<&Type> {
     match ty {
@@ -121,7 +121,7 @@ impl<'a> Checker<'a> {
             let is_used = actual_members.iter().any(|a| {
                 *a == Type::Mixed(false)
                     || self.registry.is_assignable(a, member)
-                    || !crate::types::types_definitely_disjoint(a, member)
+                    || !types::types_definitely_disjoint(a, member)
             });
             if is_used {
                 continue;

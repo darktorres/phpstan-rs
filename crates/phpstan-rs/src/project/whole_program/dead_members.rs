@@ -96,8 +96,8 @@
 
 use crate::project::use_sites::{RefTarget, UseSiteIndex};
 use crate::registry::Registry;
-use crate::types::Type;
 use syntax::ast::{ClassKind, Visibility};
+use types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MemberKind {

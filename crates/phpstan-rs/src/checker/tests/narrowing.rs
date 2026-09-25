@@ -2,7 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
-use crate::types::Shape;
+use types::Shape;
 
 #[test]
 fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {

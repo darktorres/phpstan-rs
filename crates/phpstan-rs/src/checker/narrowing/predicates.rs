@@ -1,6 +1,6 @@
 use crate::checker::{Checker, Locals, literal_string_key, union_types};
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 /// The expression `current_narrowed_type`'s own
 /// fallback should actually infer from, when no prior narrowing entry

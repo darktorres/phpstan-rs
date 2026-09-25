@@ -192,7 +192,7 @@ impl<'a> Checker<'a> {
         &mut self,
         class: Option<&str>,
         name: &str,
-        value: &crate::types::Type,
+        value: &types::Type,
         identifier: &str,
         span: Span,
         label: &str,
@@ -200,7 +200,7 @@ impl<'a> Checker<'a> {
         let Some(configured) = self.registry.configured_constant_type(class, name).cloned() else {
             return;
         };
-        if matches!(value, crate::types::Type::Mixed(false))
+        if matches!(value, types::Type::Mixed(false))
             || self.registry.is_assignable(value, &configured)
         {
             return;
@@ -231,8 +231,7 @@ impl<'a> Checker<'a> {
         let [name_arg, value_arg, ..] = args else {
             return;
         };
-        let crate::types::Type::StringLiteral(name) = self.infer_expr(&name_arg.value, locals)
-        else {
+        let types::Type::StringLiteral(name) = self.infer_expr(&name_arg.value, locals) else {
             return;
         };
         let value = self.infer_expr(&value_arg.value, locals);
@@ -252,13 +251,13 @@ impl<'a> Checker<'a> {
     /// aren't).
     pub(crate) fn check_dynamic_class_constant_fetch(
         &mut self,
-        name_ty: &crate::types::Type,
+        name_ty: &types::Type,
         span: Span,
         label: &str,
     ) {
-        use crate::types::Type;
+        use types::Type;
         if self.registry.php_version.is_some_and(|v| {
-            !crate::types::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
+            !types::php_version::PhpFeature::DynamicClassConstantFetch.is_available(v)
         }) {
             self.report_builder(
                 DiagnosticBuilder::new(

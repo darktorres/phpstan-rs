@@ -1,6 +1,6 @@
 use crate::registry::resolve::type_contains_deferred_value_of;
-use crate::types::{self, Type};
 use syntax::ast::{Expr, ExprKind, Literal};
+use types::{self, Type};
 
 /// Resolves a param's/property's type: a PHPDoc type (when present) wins
 /// over the native hint, since it's usually the more precise of the two

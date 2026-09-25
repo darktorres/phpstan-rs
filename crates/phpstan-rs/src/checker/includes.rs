@@ -13,10 +13,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{any_child_expr, child_stmts, stmt_exprs};
+use types::Type;
 
 const GUARD_FUNCTIONS: [&str; 6] = [
     "file_exists",

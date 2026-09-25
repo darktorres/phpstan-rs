@@ -12,9 +12,9 @@
 //! identical `getOutType() ?? getType()` fallback).
 
 use crate::checker::Checker;
-use crate::types::Type;
-use crate::types::union_types;
 use syntax::ast::{Expr, ExprKind, Visibility};
+use types::Type;
+use types::union_types;
 
 /// Same shape as the identically-named private helper in
 /// `return_type_too_wide.rs`/`property_type_too_wide.rs`/`throws/

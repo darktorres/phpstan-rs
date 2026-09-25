@@ -2,7 +2,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use crate::registry::Registry;
-use crate::types::{self, Type, Variance};
+use types::{self, Type, Variance};
 
 impl Registry {
     /// This class's own declared variance for the `index`-th `@template`

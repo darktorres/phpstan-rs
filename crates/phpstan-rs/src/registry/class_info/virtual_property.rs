@@ -3,11 +3,11 @@ use std::sync::Arc;
 
 use crate::registry::function_sig::{mark_template_params, resolve_type};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
-use crate::types::{TemplateParam, Type};
 use syntax::ast::TypeHint;
 use syntax::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
 use syntax::name_resolution::NameContext;
 use syntax::visit::{child_exprs, child_stmts};
+use types::{TemplateParam, Type};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can
 /// accept a wider type than the property's own backing/read type -

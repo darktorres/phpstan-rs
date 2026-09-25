@@ -6,9 +6,9 @@ use rayon::prelude::*;
 
 use crate::registry::Registry;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig};
-use crate::types::Type;
 use syntax::ast::ClassKind;
 use syntax::intern::intern;
+use types::Type;
 
 impl Registry {
     /// Does `class` derive from or implement `of`, directly or

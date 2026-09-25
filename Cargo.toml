@@ -11,6 +11,7 @@ publish = false
 
 [workspace.dependencies]
 syntax = { package = "phpstan-rs-syntax", path = "crates/syntax" }
+types = { package = "phpstan-rs-types", path = "crates/types" }
 
 # Thin LTO with one codegen unit: about 5% faster on the scoped Piwigo
 # run (26.7 s vs 28.0 s) for a ~3x longer release build, and it keeps

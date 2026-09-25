@@ -1,8 +1,8 @@
 use crate::checker::narrowing::accessory_range::{
     upgrade_array_to_non_empty, upgrade_string_with_accessory,
 };
-use crate::checker::union_types;
-use crate::types::{AccessoryKind, ShapeField, ShapeKey, Type};
+use types::union_types;
+use types::{AccessoryKind, ShapeField, ShapeKey, Type};
 
 /// Narrows `ty` by whether `key` is (`present = true`) or isn't
 /// (`present = false`) provably a real offset of it -

@@ -6,7 +6,7 @@ use std::sync::Arc;
 use rustc_hash::FxHashMap;
 use syntax::ast::ClassKind;
 
-use crate::types::{CallSiteVariance, Type, Variance};
+use crate::{CallSiteVariance, Type, Variance};
 
 /// A class as a type relation sees it.
 pub struct ClassFacts<'a> {

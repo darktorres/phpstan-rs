@@ -12,10 +12,10 @@ use crate::ignore_errors::glob_matches;
 use crate::restricted_symbols::{
     ParamCondition, ParamFlagsCondition, ParamRef, ParamScalarValue, RestrictedSymbolEntry,
 };
-use crate::types::Type;
 use syntax::ast::TypeHint;
 use syntax::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
 use syntax::token::Span;
+use types::Type;
 
 /// Where a `Class`-kind ban's own referenced-class check fires -
 /// `allowInParamTypes`/`allowInReturnType` and their `allowExceptIn*`
@@ -193,7 +193,7 @@ impl<'a> Checker<'a> {
             return false;
         };
         if let Some(type_string) = &cond.type_string {
-            let configured = crate::types::parse_type_string(type_string);
+            let configured = types::parse_type_string(type_string);
             return int_literal_members(&configured)
                 .iter()
                 .any(|flag| (actual & flag) == *flag);
@@ -236,7 +236,7 @@ impl<'a> Checker<'a> {
             return matches!(&ty, Type::Object(name, _) if glob_matches(&pattern.to_lowercase(), &name.to_lowercase()));
         }
         if let Some(type_string) = &cond.type_string {
-            let configured = crate::types::parse_type_string(type_string);
+            let configured = types::parse_type_string(type_string);
             return self.registry.is_assignable(&ty, &configured);
         }
         if let Some(value) = &cond.value {

@@ -43,9 +43,9 @@
 use std::sync::Arc;
 
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
-use crate::types::{self, AccessoryKind, Shape, TemplateParam, Type};
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
+use types::{self, AccessoryKind, Shape, TemplateParam, Type};
 
 include!(concat!(env!("OUT_DIR"), "/phpstorm_stubs_generated.rs"));
 
@@ -374,11 +374,11 @@ fn patch_reflection_class_constructor_template(classes: &mut [(Arc<str>, ClassIn
                 .unwrap_or(Type::Mixed(true)),
         ),
         variance: if info.covariant_templates.contains("T") {
-            crate::types::Variance::Covariant
+            types::Variance::Covariant
         } else if info.contravariant_templates.contains("T") {
-            crate::types::Variance::Contravariant
+            types::Variance::Contravariant
         } else {
-            crate::types::Variance::Invariant
+            types::Variance::Invariant
         },
         scope: Some("ReflectionClass".to_string()),
         default: info.template_defaults.get("T").cloned().map(Box::new),
@@ -461,7 +461,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
         let tp = TemplateParam {
             name: "TClass".to_string(),
             bound: Box::new(Type::ObjectWithoutClass),
-            variance: crate::types::Variance::Covariant,
+            variance: types::Variance::Covariant,
             scope: Some(class_name.to_string()),
             default: None,
         };
@@ -491,11 +491,11 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
                         .unwrap_or(Type::Mixed(true)),
                 ),
                 variance: if info.covariant_templates.contains("T") {
-                    crate::types::Variance::Covariant
+                    types::Variance::Covariant
                 } else if info.contravariant_templates.contains("T") {
-                    crate::types::Variance::Contravariant
+                    types::Variance::Contravariant
                 } else {
-                    crate::types::Variance::Invariant
+                    types::Variance::Invariant
                 },
                 scope: Some("ReflectionClass".to_string()),
                 default: info.template_defaults.get("T").cloned().map(Box::new),

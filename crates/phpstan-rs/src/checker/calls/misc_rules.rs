@@ -1,9 +1,9 @@
 use crate::checker::calls::is_language_construct;
 use crate::checker::{Checker, Locals, narrow_type_excluding};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// The statement half of real PHPStan's own
@@ -139,9 +139,7 @@ impl<'a> Checker<'a> {
         let Some(version) = self.registry.php_version else {
             return;
         };
-        if crate::types::php_version::PhpFeature::CaseInsensitiveConstantsRemoved
-            .is_available(version)
-        {
+        if types::php_version::PhpFeature::CaseInsensitiveConstantsRemoved.is_available(version) {
             return;
         }
         if args.len() < 3 {

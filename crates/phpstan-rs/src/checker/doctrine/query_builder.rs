@@ -14,9 +14,9 @@
 //! module never even attempts to resolve their own arguments.
 
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::literal_string_value;
 use syntax::ast::{Arg, Expr, ExprKind};
+use types::Type;
 
 /// A cheap syntactic pre-check mirroring `resolve_query_builder_chain`'s
 /// own `MethodCall`/`Grouping` walk - "does this expression's own chain

@@ -47,9 +47,9 @@ use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 
 use crate::project::{self, Project};
 use crate::registry::Registry;
-use crate::types::Type;
 use syntax::ast::{ClassKind, Expr, ExprKind, FunctionDecl, NodeId, Stmt, StmtKind, Visibility};
 use syntax::token::{Keyword, Position, Span, Token};
+use types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::to_lsp_range;

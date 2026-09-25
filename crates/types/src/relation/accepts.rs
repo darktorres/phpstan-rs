@@ -1,5 +1,5 @@
-use crate::types::relation::Relation;
-use crate::types::{self, ShapeKey, Type, Variance};
+use crate::relation::Relation;
+use crate::{ShapeKey, Type, Variance};
 use syntax::ast::ClassKind;
 
 // Real PHPStan's own level-gated `RuleLevelHelper` behaviors
@@ -15,17 +15,17 @@ const IMPLICIT_MIXED_CHECK_LEVEL: u8 = 10;
 
 impl Relation<'_> {
     /// Type-compatibility check that consults the class hierarchy for
-    /// `Object` types; every other case defers to `types::is_subtype`,
+    /// `Object` types; every other case defers to `crate::is_subtype`,
     /// which has no notion of class context.
-    pub(crate) fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
+    pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
             // A `key-of<T>`/`T[K]` still over a template is what `T`'s
             // bound makes it.
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
-                self.is_assignable(&types::resolve_late_to_bounds(sub), sup)
+                self.is_assignable(&crate::resolve_late_to_bounds(sub), sup)
             }
             (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
-                self.is_assignable(sub, &types::resolve_late_to_bounds(sup))
+                self.is_assignable(sub, &crate::resolve_late_to_bounds(sup))
             }
             // Two payloads ask the extension; anything else reads a
             // payload as its base type.
@@ -64,7 +64,7 @@ impl Relation<'_> {
             // Type arguments are compared with real variance
             // (`Type::TemplateParam::variance`, `@template-covariant`/
             // `-contravariant`, and call-site `covariant`/`contravariant`/
-            // `*` annotations, `types::parse_generic_arg`), not just
+            // `*` annotations, `crate::parse_generic_arg`), not just
             // skipped (`Collection<Cat>` and `Collection<Dog>` are not
             // mutually assignable). If `sup`'s own class isn't registered
             // at all (an uninstalled dependency, or a PHAR-bundled one
@@ -104,7 +104,7 @@ impl Relation<'_> {
                 // have data to avoid anyway: `ClassInfo` only persists
                 // `template_bounds`, never a class-level `@template T =
                 // Default` map the way `TemplateParam.default` carries
-                // one for a function/method's own templates (`types::
+                // one for a function/method's own templates (`crate::
                 // substitute_template`'s own real, shipped behavior pads
                 // with `.default`, falling back to `Mixed` - never the
                 // bound). Plain `Mixed` is both what's actually available
@@ -144,14 +144,14 @@ impl Relation<'_> {
                     // `vendor/phpstan-src` - `None` here means a `*`
                     // annotation, real PHPStan's own "don't check this
                     // argument at all."
-                    let Some(variance) = types::effective_slot_variance(self.hierarchy, b, i, &b_i)
+                    let Some(variance) = crate::effective_slot_variance(self.hierarchy, b, i, &b_i)
                     else {
                         continue;
                     };
-                    let a_i = types::strip_call_site_variance(&a_i)
+                    let a_i = crate::strip_call_site_variance(&a_i)
                         .cloned()
                         .unwrap_or(Type::Mixed(false));
-                    let b_i = types::strip_call_site_variance(&b_i)
+                    let b_i = crate::strip_call_site_variance(&b_i)
                         .cloned()
                         .unwrap_or(Type::Mixed(false));
                     // Either side unresolved/erased - don't know, don't
@@ -209,7 +209,7 @@ impl Relation<'_> {
                 }
                 true
             }
-            // Hierarchy-aware version of `types::is_subtype`'s own bare
+            // Hierarchy-aware version of `crate::is_subtype`'s own bare
             // `EnumCase -> Object` name-equality rule - a case
             // is assignable not just to its own enum's bare type but to
             // `UnitEnum`/`BackedEnum` (both synthesized `implements`
@@ -223,7 +223,7 @@ impl Relation<'_> {
                 class_a == class_b && case_a == case_b
             }
             // Same hierarchy-aware override as the plain Object-vs-Object
-            // arm just above, one level up: `types::is_subtype`'s own
+            // arm just above, one level up: `crate::is_subtype`'s own
             // `ClassString` arm inherits its non-hierarchy-aware Object
             // comparison (name equality only), so without this a
             // `class-string<Derived>` value would incorrectly fail to
@@ -242,12 +242,12 @@ impl Relation<'_> {
                     .is_some_and(|class| class.kind == *kind)
             }
             (Type::ClassString(a), Type::ClassString(b)) => self.is_assignable(a, b),
-            // Mirrors `types::is_subtype`'s own bound-aware `TemplateParam`
+            // Mirrors `crate::is_subtype`'s own bound-aware `TemplateParam`
             // arm (see its doc comment for the full reasoning and why
             // this needs to run *before* the `Union` arms just below),
             // but recurses through `self.is_assignable` rather than the
-            // plain, hierarchy-*unaware* `types::is_subtype`: delegating
-            // straight to `types::is_subtype(sub, sup)` would silently
+            // plain, hierarchy-*unaware* `crate::is_subtype`: delegating
+            // straight to `crate::is_subtype(sub, sup)` would silently
             // drop the class-hierarchy-walking half of this whole method
             // for any bound check involving a `TemplateParam`, wrongly
             // flagging code where a template's own bound is a union of
@@ -260,7 +260,7 @@ impl Relation<'_> {
             (Type::TemplateParam(tp), _) => {
                 matches!(*tp.bound, Type::Mixed(_)) || self.is_assignable(&tp.bound, sup)
             }
-            // Mirrors `types::is_subtype`'s own identically-placed
+            // Mirrors `crate::is_subtype`'s own identically-placed
             // `Type::Conditional` arm exactly (see that arm's own doc
             // comment) - a real, independent gap this project's own
             // `Type::Conditional`-returning-function corpus checks were
@@ -301,7 +301,7 @@ impl Relation<'_> {
             (_, Type::Union(members) | Type::BenevolentUnion(members)) => {
                 members.iter().any(|m| self.is_assignable(sub, m))
             }
-            // Mirrors `types::is_subtype`'s own dedicated
+            // Mirrors `crate::is_subtype`'s own dedicated
             // Intersection-vs-Intersection rule, and for the same reason
             // - without it, this function's own generic `(Intersection,
             // _) => any(...)` rule below intercepts a same-shaped pair
@@ -324,7 +324,7 @@ impl Relation<'_> {
             // hierarchy: `Closure(Animal): Dog` fits `callable(Dog):
             // Animal`, and `Event` fits a `T of object` template's bound.
             (Type::Callable(Some(a)), Type::Callable(Some(b))) => {
-                types::callable_sig_is_subtype(a, b, &|x, y| self.is_assignable(x, y))
+                crate::callable_sig_is_subtype(a, b, &|x, y| self.is_assignable(x, y))
             }
             // A closure literal (`Type::closure_literal`) checked against a
             // shaped `callable(...)`/`Closure(...)`: only its own
@@ -343,7 +343,7 @@ impl Relation<'_> {
             }
             (Type::Intersection(members), _) => members.iter().any(|m| self.is_assignable(m, sup)),
             (_, Type::Intersection(members)) => members.iter().all(|m| self.is_assignable(sub, m)),
-            // Deliberately more lenient here than types::is_subtype's pure
+            // Deliberately more lenient here than crate::is_subtype's pure
             // structural relation (which correctly treats Array(Mixed) as
             // NOT a subtype of Array(Int)): an array literal's element type
             // is never inferred precisely by this checker, so it always
@@ -382,7 +382,7 @@ impl Relation<'_> {
                 !self.strict_mixed_arrays
                     && matches!(**a, Type::Mixed(_))
                     && (**key == Type::unknown_array_key()
-                        || self.is_assignable(key, &types::shape_key_type(shape)))
+                        || self.is_assignable(key, &crate::shape_key_type(shape)))
             }
             // Now that an array literal carries a real per-position/
             // per-key shape instead of always reading as `Array(Mixed)`,
@@ -403,7 +403,7 @@ impl Relation<'_> {
             // silently accepted as satisfying `array<int, string>`,
             // checking only whether every field's value type matched.
             (Type::ArrayShape(shape), Type::Array(key, b)) => {
-                self.is_assignable(&types::shape_key_type(shape), key)
+                self.is_assignable(&crate::shape_key_type(shape), key)
                     && shape.fields.iter().all(|f| {
                         (!self.strict_mixed_arrays && matches!(f.ty, Type::Mixed(_)))
                             || self.is_assignable(&f.ty, b)
@@ -474,7 +474,7 @@ impl Relation<'_> {
             (_, Type::Object(name, _)) if self.hierarchy.class_exactly(name).is_none() => true,
             // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
             (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => true,
-            _ => types::is_subtype(sub, sup),
+            _ => crate::is_subtype(sub, sup),
         }
     }
 
@@ -507,7 +507,7 @@ impl Relation<'_> {
     /// unchanged), but doesn't get its own separate `.all()`-vs-`.any()`
     /// switch the way `NULLABLES_CHECK_LEVEL` gets its own null-stripping
     /// switch.
-    pub(crate) fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
+    pub fn accepts_at_configured_level(&self, sub: &Type, sup: &Type) -> bool {
         // Never configured means "assume the strictest threshold for
         // `checkNullables`/`checkUnionTypes`" (`NULLABLES_CHECK_LEVEL`,
         // matching this method's own pre-existing behavior exactly - the
@@ -638,7 +638,7 @@ impl Relation<'_> {
     /// `Mixed` a blanket "accepted anywhere" structural rule the way real
     /// PHPStan's own `MixedType::isAcceptedBy()` unconditionally does
     /// (confirmed directly: there is no `(Type::Mixed(_), _) => true` arm
-    /// in `types::is_subtype`, only the mirror-image `(_, Type::Mixed(_))
+    /// in `crate::is_subtype`, only the mirror-image `(_, Type::Mixed(_))
     /// => true`, a different direction entirely) - every one of dozens of
     /// existing call sites instead bails out ad hoc, on its own, whenever
     /// its *own* actual type happens to be `Mixed`. Rather than widen
@@ -666,7 +666,7 @@ impl Relation<'_> {
     /// that threshold. An unconfigured level never triggers it, the same
     /// "`checkExplicitMixed`/`checkImplicitMixed` stay off unless opted
     /// into" default `accepts_at_configured_level` documents.
-    pub(crate) fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
+    pub fn strict_mixed_receiver_level(&self, ty: &Type) -> Option<u8> {
         let Type::Mixed(is_explicit) = ty else {
             return None;
         };
@@ -734,7 +734,7 @@ impl Relation<'_> {
     /// a specific case and its own enum's bare type are never disjoint
     /// (same class name), while two *different* enums always are (an
     /// enum can never extend or be extended).
-    pub(crate) fn types_provably_disjoint(&self, a: &Type, b: &Type) -> bool {
+    pub fn types_provably_disjoint(&self, a: &Type, b: &Type) -> bool {
         match (a, b) {
             (Type::Never, _) | (_, Type::Never) => true,
             (Type::Union(members), _) => members.iter().all(|m| self.types_provably_disjoint(m, b)),
@@ -794,7 +794,7 @@ impl Relation<'_> {
     /// per-arm exhaustiveness reasoning (`MatchExpressionRule.php`'s own
     /// `$armConditionExpr = new Identical($matchCondition, $rawCondition)`
     /// reaches this exact same question, for exactly the same reason).
-    pub(crate) fn identical_result(&self, left: &Type, right: &Type) -> Option<bool> {
+    pub fn identical_result(&self, left: &Type, right: &Type) -> Option<bool> {
         if is_finite_scalar_type(left) && is_finite_scalar_type(right) {
             return Some(left == right);
         }

@@ -7,10 +7,10 @@ use crate::registry::{
     FunctionSig, PropertySig, collect_class_name_case_refs, object_class_names,
     resolve_names_in_type,
 };
-use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::any_child_stmt;
+use types::{self, Type};
 
 mod attributes;
 mod enums;
@@ -991,7 +991,7 @@ impl<'a> Checker<'a> {
             return;
         }
         let definitely = value_type_is_constant(value_ty)
-            || crate::types::types_definitely_disjoint(value_ty, phpdoc_ty);
+            || types::types_definitely_disjoint(value_ty, phpdoc_ty);
         let relation = if definitely {
             "is incompatible with"
         } else {
@@ -1361,7 +1361,7 @@ impl<'a> Checker<'a> {
         span: Span,
     ) {
         if self.registry.php_version.is_some_and(|v| {
-            !crate::types::php_version::PhpFeature::SerializableRequiresMagicMethods.is_available(v)
+            !types::php_version::PhpFeature::SerializableRequiresMagicMethods.is_available(v)
         }) {
             return;
         }
@@ -1415,12 +1415,12 @@ impl<'a> Checker<'a> {
         };
         let (feature, message) = if is_anonymous {
             (
-                crate::types::php_version::PhpFeature::ReadOnlyAnonymousClasses,
+                types::php_version::PhpFeature::ReadOnlyAnonymousClasses,
                 "Anonymous readonly classes are supported only on PHP 8.3 and later.",
             )
         } else {
             (
-                crate::types::php_version::PhpFeature::ReadOnlyClasses,
+                types::php_version::PhpFeature::ReadOnlyClasses,
                 "Readonly classes are supported only on PHP 8.2 and later.",
             )
         };
@@ -1470,7 +1470,7 @@ impl<'a> Checker<'a> {
             );
             if kind == ClassKind::Trait
                 && let Some(version) = version
-                && !crate::types::php_version::PhpFeature::ConstantsInTraits.is_available(version)
+                && !types::php_version::PhpFeature::ConstantsInTraits.is_available(version)
             {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -1485,7 +1485,7 @@ impl<'a> Checker<'a> {
             }
             if c.is_final
                 && let Some(version) = version
-                && !crate::types::php_version::PhpFeature::FinalClassConstants.is_available(version)
+                && !types::php_version::PhpFeature::FinalClassConstants.is_available(version)
             {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -1516,8 +1516,7 @@ impl<'a> Checker<'a> {
             }
             if c.type_hint.is_some()
                 && let Some(version) = version
-                && !crate::types::php_version::PhpFeature::NativeTypedClassConstants
-                    .is_available(version)
+                && !types::php_version::PhpFeature::NativeTypedClassConstants.is_available(version)
             {
                 self.report_builder(
                     DiagnosticBuilder::new(
@@ -1826,9 +1825,11 @@ impl<'a> Checker<'a> {
         if !self.registry.check_promoted_property_suggestions {
             return;
         }
-        if !self.registry.php_version.is_some_and(|v| {
-            crate::types::php_version::PhpFeature::PromotedProperties.is_available(v)
-        }) {
+        if !self
+            .registry
+            .php_version
+            .is_some_and(|v| types::php_version::PhpFeature::PromotedProperties.is_available(v))
+        {
             return;
         }
         let Some(ctor) = c

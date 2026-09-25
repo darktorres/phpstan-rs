@@ -3,9 +3,9 @@ use rustc_hash::FxHashSet;
 use crate::checker::{CheckArgsCall, Checker, Locals, class_type_word};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{is_allow_dynamic_properties_attribute_name, is_deprecated_attribute_name};
-use crate::types::php_version::PhpFeature;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::php_version::PhpFeature;
 
 /// PHP's `Attribute::TARGET_*` values (see
 /// `registry::class_info::attribute_target_constant_value`'s identical
@@ -249,8 +249,7 @@ impl<'a> Checker<'a> {
             return;
         }
         if let Some(version) = self.registry.php_version
-            && !crate::types::php_version::PhpFeature::AttributesOnGlobalConstants
-                .is_available(version)
+            && !types::php_version::PhpFeature::AttributesOnGlobalConstants.is_available(version)
         {
             self.report_builder(
                 DiagnosticBuilder::new(

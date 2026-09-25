@@ -1,7 +1,7 @@
 use crate::checker::Checker;
 use crate::registry::Registry;
-use crate::types::Type;
 use syntax::token::Span;
+use types::Type;
 
 /// Whether `ty` is a real PHP generator-compatible return type,
 /// mirroring real PHP's own engine-level check exactly, which only needs one member of a

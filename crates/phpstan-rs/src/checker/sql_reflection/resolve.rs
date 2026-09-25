@@ -44,8 +44,8 @@ use sqlparser::parser::Parser;
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
 use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
-use crate::types::union_types;
-use crate::types::{Shape, ShapeField, Type};
+use types::union_types;
+use types::{Shape, ShapeField, Type};
 
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
     let driver = registry.sql_reflection_config.as_ref().map(|c| c.driver);
@@ -111,7 +111,7 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
                 .map(|(property, _)| property);
             let entity_ty = property.and_then(|p| entity.fields.get(p));
             match entity_ty {
-                Some(entity_ty) if crate::types::is_subtype(entity_ty, &f.ty) => {
+                Some(entity_ty) if types::is_subtype(entity_ty, &f.ty) => {
                     ShapeField::new(f.key.clone(), entity_ty.clone(), f.optional)
                 }
                 _ => f.clone(),

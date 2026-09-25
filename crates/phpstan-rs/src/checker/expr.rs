@@ -14,10 +14,10 @@ use crate::diagnostic::DiagnosticBuilder;
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::{FunctionSig, Registry};
-use crate::types::{self, AccessoryKind, Shape, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
+use types::{self, AccessoryKind, Shape, ShapeKey, Type};
 
 mod array_ops;
 mod builtin_calls;
@@ -31,9 +31,9 @@ use crate::checker::expr::ranges::{
     checked_bound_op, compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range,
     mul_int_range, numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
 };
-use crate::types::union_types;
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
 pub(crate) use ranges::{int_range_bounds, normalize_int_range};
+use types::union_types;
 
 // `checker::throws::dynamic` reuses this bitwise-or-flag-chain scan for
 // `JSON_THROW_ON_ERROR`/`FILTER_THROW_ON_FAILURE`, the same helper
@@ -2856,7 +2856,7 @@ impl<'a> Checker<'a> {
                     (Some(names), None) if !names.is_empty() => names
                         .into_iter()
                         .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
-                        .reduce(crate::types::union_types)
+                        .reduce(types::union_types)
                         .unwrap_or(Type::Mixed(false)),
                     (Some(names), Some(Some(class))) if !names.is_empty() => names
                         .into_iter()
@@ -2870,7 +2870,7 @@ impl<'a> Checker<'a> {
                                 self.static_member_of_class(e, &class, None, &n, false, label)
                             }
                         })
-                        .reduce(crate::types::union_types)
+                        .reduce(types::union_types)
                         .unwrap_or(Type::Mixed(false)),
                     (_, Some(Some(class))) => {
                         if self.collect_member_refs {
@@ -4148,7 +4148,7 @@ impl<'a> Checker<'a> {
             ExprKind::FirstClassCallable(inner) => {
                 if !matches!(inner.kind, ExprKind::New(..))
                     && self.registry.php_version.is_some_and(|v| {
-                        !crate::types::php_version::PhpFeature::FirstClassCallables.is_available(v)
+                        !types::php_version::PhpFeature::FirstClassCallables.is_available(v)
                     })
                 {
                     self.report_builder(
@@ -4783,7 +4783,7 @@ impl<'a> Checker<'a> {
                     .into_iter()
                     .flatten()
                     .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
-                    .reduce(crate::types::union_types)
+                    .reduce(types::union_types)
                     .unwrap_or(Type::Mixed(false))
             }
             ExprKind::ClassNameFetch(target) => {
@@ -5888,21 +5888,21 @@ pub(crate) fn is_confidently_array(ty: &Type) -> bool {
 /// whose `float`/`null` legality depends on the target `PhpVersion`.
 pub(crate) fn invalid_array_key_description(
     ty: &Type,
-    php_version: Option<crate::types::php_version::PhpVersion>,
+    php_version: Option<types::php_version::PhpVersion>,
 ) -> Option<String> {
     match ty {
         Type::Array(..) | Type::ArrayShape(_) => Some("array".to_string()),
         Type::Object(name, _) => Some(name.clone().to_string()),
         Type::Float
             if php_version.is_some_and(|v| {
-                crate::types::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
+                types::php_version::PhpFeature::DeprecatesFloatArrayKey.is_available(v)
             }) =>
         {
             Some("float".to_string())
         }
         Type::Null
             if php_version.is_some_and(|v| {
-                crate::types::php_version::PhpFeature::DeprecatesNullArrayOffset.is_available(v)
+                types::php_version::PhpFeature::DeprecatesNullArrayOffset.is_available(v)
             }) =>
         {
             Some("null".to_string())
@@ -6260,7 +6260,7 @@ impl<'a> Checker<'a> {
 /// string key here is the same safe-by-omission default this project
 /// uses throughout rather than a wrong answer.
 pub(crate) fn is_canonical_int_key(key: &str) -> bool {
-    crate::types::canonical_int_key(key).is_some()
+    types::canonical_int_key(key).is_some()
 }
 
 /// Whether `e` is the literal `false` - used to scope

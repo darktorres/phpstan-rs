@@ -6,7 +6,7 @@ use std::any::Any;
 use std::fmt;
 use std::hash::Hasher;
 
-use crate::types::{ClassHierarchy, TrinaryLogic, Type};
+use crate::{ClassHierarchy, TrinaryLogic, Type};
 
 pub trait ExtensionTypeData: fmt::Debug + Send + Sync {
     /// The type PHP itself sees (`Doctrine\ORM\QueryBuilder`): what a

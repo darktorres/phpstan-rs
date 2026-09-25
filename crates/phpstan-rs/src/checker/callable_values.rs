@@ -8,9 +8,9 @@
 use crate::checker::calls::CheckArgsCall;
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
-use crate::types::{ShapeKey, Type};
 use syntax::ast::{Arg, Visibility};
 use syntax::token::Span;
+use types::{ShapeKey, Type};
 
 /// The function or method a callable value names.
 struct NamedCallable<'r> {

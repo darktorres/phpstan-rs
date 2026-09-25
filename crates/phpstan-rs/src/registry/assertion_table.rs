@@ -10,7 +10,6 @@ use crate::assertion_tables::{
 };
 use crate::registry::function_sig::{AssertInfo, AssertTarget};
 use crate::registry::{Registry, resolve_names_in_type};
-use crate::types;
 use syntax::name_resolution::NameContext;
 
 static DEFAULT_ASSERTIONS: LazyLock<Vec<AssertionEntry>> = LazyLock::new(default_assertions);

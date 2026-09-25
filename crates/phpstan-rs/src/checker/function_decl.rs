@@ -10,11 +10,11 @@ use crate::registry::{
     ClassInfo, FunctionSig, Registry, collect_class_name_case_refs, mark_template_params,
     resolve_names_in_type, resolve_type,
 };
-use crate::types::php_version::PhpFeature;
-use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::body_contains_yield;
+use types::php_version::PhpFeature;
+use types::{self, Type};
 
 impl<'a> Checker<'a> {
     /// A trait's method bodies are checked once per class that `use`s

@@ -1,5 +1,5 @@
-use crate::types::relation::Relation;
-use crate::types::{self, AccessoryKind, Shape, TrinaryLogic, Type};
+use crate::relation::Relation;
+use crate::{AccessoryKind, Shape, TrinaryLogic, Type};
 use syntax::ast::ClassKind;
 
 impl Relation<'_> {
@@ -11,11 +11,11 @@ impl Relation<'_> {
     /// neither of which can be extended into the other), and anything
     /// unprovable is `Maybe`, including any comparison with a class the
     /// registry doesn't know.
-    pub(crate) fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
+    pub fn is_super_type_of(&self, sup: &Type, sub: &Type) -> TrinaryLogic {
         match (sup, sub) {
             (Type::Mixed(_), _) | (_, Type::Never) => TrinaryLogic::Yes,
             (Type::KeyOf(_) | Type::OffsetAccess(..), _) => {
-                self.is_super_type_of(&types::resolve_late_to_bounds(sup), sub)
+                self.is_super_type_of(&crate::resolve_late_to_bounds(sup), sub)
             }
             (Type::Extension(a), Type::Extension(b)) => a
                 .is_super_type_of(&**b, self.hierarchy)
@@ -27,7 +27,7 @@ impl Relation<'_> {
             },
             (_, Type::Extension(b)) => self.is_super_type_of(sup, &b.base()),
             (_, Type::KeyOf(_) | Type::OffsetAccess(..)) => {
-                self.is_super_type_of(sup, &types::resolve_late_to_bounds(sub))
+                self.is_super_type_of(sup, &crate::resolve_late_to_bounds(sub))
             }
             // A benevolent union (`(int|string)`) is its members for
             // `isSuperTypeOf`; only `accepts` is lenient about it.
@@ -141,7 +141,7 @@ impl Relation<'_> {
                 }
             }
             (Type::Object(a, _), Type::Object(b, _)) => self.object_super_type_of(a, b),
-            _ if types::types_definitely_disjoint(sup, sub) => TrinaryLogic::No,
+            _ if crate::types_definitely_disjoint(sup, sub) => TrinaryLogic::No,
             (Type::Accessory(kind), _) if accessory_refuses(kind, sub) => TrinaryLogic::No,
             _ => TrinaryLogic::Maybe,
         }
@@ -197,7 +197,7 @@ impl Relation<'_> {
     /// `TypeCombinator::union`'s absorption for display: a member some
     /// other member strictly contains is dropped (`object|Foo` is
     /// `object`, `int|1` is `int`).
-    pub(crate) fn absorb_union_subtypes(&self, ty: &Type) -> Type {
+    pub fn absorb_union_subtypes(&self, ty: &Type) -> Type {
         let Type::Union(members) = ty else {
             return ty.clone();
         };
@@ -262,7 +262,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
     match kind {
         AccessoryKind::NonEmptyArray | AccessoryKind::ArrayList => {
             !is_array
-                && types::types_definitely_disjoint(
+                && crate::types_definitely_disjoint(
                     &Type::Array(Box::new(Type::Mixed(false)), Box::new(Type::Mixed(false))),
                     sub,
                 )
@@ -274,7 +274,7 @@ fn accessory_refuses(kind: &AccessoryKind, sub: &Type) -> bool {
         | AccessoryKind::LowercaseString
         | AccessoryKind::UppercaseString
         | AccessoryKind::DecimalIntegerString => {
-            !is_string && types::types_definitely_disjoint(&Type::String, sub)
+            !is_string && crate::types_definitely_disjoint(&Type::String, sub)
         }
     }
 }

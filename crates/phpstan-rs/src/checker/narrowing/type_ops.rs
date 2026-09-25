@@ -1,6 +1,6 @@
 use crate::checker::narrowing::accessory_range::upgrade_array_to_non_empty;
 use crate::registry::Registry;
-use crate::types::{AccessoryKind, Type, is_subtype};
+use types::{AccessoryKind, Type, is_subtype};
 
 /// Narrows `original` to `target` along the branch where a check for
 /// `target` succeeded: if `original` is a union, keep only the member(s)

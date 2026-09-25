@@ -4,8 +4,8 @@ use crate::checker::narrowing::type_ops::{
     is_known_single_value, narrow_type_excluding, narrow_type_to,
 };
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 impl<'a> Checker<'a> {
     /// The type to narrow *from* for a synthetic `narrowing_key` (a
@@ -57,7 +57,7 @@ impl<'a> Checker<'a> {
     /// The union of `in_array()`'s own haystack literal values, if every
     /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`),
     /// or a bare empty-array literal `[]` (just as statically provable a
-    /// single exact type, `Type::ArrayShape(crate::types::Shape::sealed(Vec::new()))`, as any scalar
+    /// single exact type, `Type::ArrayShape(types::Shape::sealed(Vec::new()))`, as any scalar
     /// literal - e.g. `! in_array($raw_tags_post, [null, '0', '', []],
     /// true)`'s 4th haystack element being a non-`Literal` `ArrayLiteral`
     /// must not bail this whole function to `None`, silently narrowing
@@ -124,7 +124,7 @@ impl<'a> Checker<'a> {
             let ty = match &item.value.kind {
                 ExprKind::Literal(_) => self.infer_expr(&item.value, locals),
                 ExprKind::ArrayLiteral(inner) if inner.is_empty() => {
-                    Type::ArrayShape(crate::types::Shape::sealed(Vec::new()))
+                    Type::ArrayShape(types::Shape::sealed(Vec::new()))
                 }
                 _ => return None,
             };

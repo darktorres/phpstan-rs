@@ -831,7 +831,7 @@ impl Project {
     /// `set_strict_mixed_arrays`. `None` means "not configured" (the
     /// default), not "PHP version zero" - every version-gated rule
     /// reading this field needs to treat the two differently.
-    pub fn set_php_version(&mut self, php_version: Option<crate::types::php_version::PhpVersion>) {
+    pub fn set_php_version(&mut self, php_version: Option<types::php_version::PhpVersion>) {
         self.registry.php_version = php_version;
     }
 

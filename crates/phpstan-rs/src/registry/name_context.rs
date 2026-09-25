@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
-use crate::types::{CallableParam, CallableSig, Type};
 use syntax::intern::intern;
 use syntax::name_resolution::NameContext;
+use types::{CallableParam, CallableSig, Type};
 
 /// Rewrites every `Object(name)` in a type tree to the fully-qualified
 /// name `ctx` resolves it to - mirrors `mark_template_params`'s exact
@@ -69,7 +69,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 templates: sig
                     .templates
                     .iter()
-                    .map(|t| crate::types::TemplateParam {
+                    .map(|t| types::TemplateParam {
                         bound: Box::new(resolve_names_in_type((*t.bound).clone(), ctx)),
                         default: t
                             .default

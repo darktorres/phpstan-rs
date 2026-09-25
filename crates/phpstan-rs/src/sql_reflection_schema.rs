@@ -54,7 +54,7 @@ use sqlparser::parser::Parser;
 use sqlparser::tokenizer::{Token, Tokenizer};
 
 use crate::sql_reflection_config::SqlDriver;
-use crate::types::Type;
+use types::Type;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchemaColumn {

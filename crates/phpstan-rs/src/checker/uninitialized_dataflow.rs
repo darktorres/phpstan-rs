@@ -59,10 +59,10 @@ use std::sync::Arc;
 use crate::checker::Checker;
 use crate::checker::uninitialized::property_assigned_anywhere_in_hierarchy;
 use crate::registry::FunctionSig;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::child_exprs;
+use types::Type;
 
 /// Bare property names known-initialized on every path reaching a given
 /// point. Mirrors `checker.rs`'s `ProvenanceSet` type alias (same

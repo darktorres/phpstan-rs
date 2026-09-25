@@ -6,8 +6,8 @@ use std::sync::Arc;
 use crate::registry::Registry;
 use crate::registry::function_sig;
 use crate::registry::{ClassInfo, ConstSig, FunctionSig, PropertySig, substitute_type_aliases};
-use crate::types::{self, Type};
 use syntax::ast::{ClassKind, Visibility};
+use types::{self, Type};
 
 impl Registry {
     /// PHP resolves class/interface/trait/enum names case-insensitively
@@ -821,7 +821,7 @@ impl Registry {
         match ty {
             Type::TemplateParam(tp) => !matches!(
                 tp.scope.as_deref(),
-                Some(s) if s == method_name || s == crate::types::CALLABLE_TEMPLATE_SCOPE
+                Some(s) if s == method_name || s == types::CALLABLE_TEMPLATE_SCOPE
             ),
             _ => ty.any_child(|t| {
                 Registry::type_mentions_foreign_scoped_template_param(t, method_name)
@@ -856,7 +856,7 @@ impl Registry {
         match ty {
             Type::TemplateParam(tp) => {
                 tp.scope.as_deref() == Some(method_name)
-                    || tp.scope.as_deref() == Some(crate::types::CALLABLE_TEMPLATE_SCOPE)
+                    || tp.scope.as_deref() == Some(types::CALLABLE_TEMPLATE_SCOPE)
                     || tp
                         .scope
                         .as_deref()
@@ -1234,7 +1234,7 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
         Type::ClassConstant { class, pattern } => {
             resolve_class_const_type(&class, &pattern, classes)
         }
-        late @ (Type::KeyOf(_) | Type::OffsetAccess(..)) => crate::types::settle(
+        late @ (Type::KeyOf(_) | Type::OffsetAccess(..)) => types::settle(
             late.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
         ),
         other => other.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
@@ -1653,11 +1653,11 @@ impl Registry {
         for m in &members {
             let bound = bind(m);
             let keep = match self.is_super_type_of(&native, &bound) {
-                crate::types::TrinaryLogic::Yes => true,
-                crate::types::TrinaryLogic::No => false,
+                types::TrinaryLogic::Yes => true,
+                types::TrinaryLogic::No => false,
                 // Two fully known class names only partly overlapping: the
                 // hint is what's guaranteed.
-                crate::types::TrinaryLogic::Maybe => {
+                types::TrinaryLogic::Maybe => {
                     !(self.is_fully_known_class_type(&bound)
                         && self.is_fully_known_class_type(&native))
                 }
@@ -1670,7 +1670,7 @@ impl Registry {
             // A wider doc member (`Node` on a `?Class_` hint) still covers
             // the native alternatives it contains.
             for n in &native_members {
-                if self.is_super_type_of(&bound, &bind(n)) == crate::types::TrinaryLogic::Yes
+                if self.is_super_type_of(&bound, &bind(n)) == types::TrinaryLogic::Yes
                     && !kept.contains(n)
                 {
                     kept.push((*n).clone());
@@ -1684,9 +1684,8 @@ impl Registry {
         // alternative the result doesn't cover at all is added back
         // (`?self` documented as `Schema|null` keeps its `self`).
         let covered = |kept: &[Type], n: &Type| {
-            kept.iter().any(|k| {
-                self.is_super_type_of(&bind(n), &bind(k)) != crate::types::TrinaryLogic::No
-            })
+            kept.iter()
+                .any(|k| self.is_super_type_of(&bind(n), &bind(k)) != types::TrinaryLogic::No)
         };
         for n in &native_members {
             if !covered(&kept, n) {

@@ -33,10 +33,10 @@
 //! not a good trade for a rule whose whole point is confidence.
 
 use crate::checker::Checker;
-use crate::types::{AccessoryKind, Type, is_subtype};
 use syntax::ast::unwrap_grouping;
 use syntax::ast::{BinOp, Expr, ExprKind, Literal, UnaryOp};
 use syntax::token::Span;
+use types::{AccessoryKind, Type, is_subtype};
 
 impl<'a> Checker<'a> {
     /// Mirrors real PHPStan's own `Type::toNumber()` legality: every

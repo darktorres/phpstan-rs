@@ -24,11 +24,11 @@ use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::FunctionSig;
-use crate::types::Type;
-use crate::types::has_explicit_mixed_nested_somewhere;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use syntax::token::Span;
+use types::Type;
+use types::has_explicit_mixed_nested_somewhere;
 
 /// Real PHPStan's own tip text (`MissingTypehintCheck::
 /// MISSING_ITERABLE_VALUE_TYPE_TIP`), attached to every

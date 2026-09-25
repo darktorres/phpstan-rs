@@ -1,7 +1,7 @@
 use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type, is_subtype};
 use syntax::ast::*;
+use types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type, is_subtype};
 
 /// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an
 /// assignment target's own access chain contains a nullsafe `?->`
@@ -1393,7 +1393,7 @@ pub(crate) fn offset_verdict(container: &Type, dim: &Type) -> Option<bool> {
         Type::Intersection(members) => {
             let is_list = members
                 .iter()
-                .any(|m| matches!(m, Type::Accessory(crate::types::AccessoryKind::ArrayList)));
+                .any(|m| matches!(m, Type::Accessory(types::AccessoryKind::ArrayList)));
             let key_ty = members.iter().find_map(|m| match m {
                 Type::Array(k, _) => Some(k.as_ref()),
                 _ => None,

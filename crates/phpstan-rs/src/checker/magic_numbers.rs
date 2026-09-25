@@ -251,7 +251,7 @@ impl<'a> Checker<'a> {
 
 /// PHP's `is_numeric()` for a string literal, with its value.
 fn php_numeric_string(s: &str) -> Option<f64> {
-    if !crate::types::is_numeric_string_literal(s) {
+    if !types::is_numeric_string_literal(s) {
         return None;
     }
     s.trim_matches([' ', '\t', '\n', '\r', '\x0b', '\x0c'])

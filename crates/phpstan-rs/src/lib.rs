@@ -38,7 +38,6 @@ pub mod sql_reflection_reflector;
 pub mod sql_reflection_schema;
 pub mod sql_reflection_schema_drift;
 pub(crate) mod stub_attributes;
-pub mod types;
 
 pub use checker::Checker;
 pub use diagnostic::{Diagnostic, DiagnosticBuilder, DiagnosticFix};

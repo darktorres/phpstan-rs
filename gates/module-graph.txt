@@ -51,7 +51,6 @@ crate root syntax types phpdoc stub-sources sql composer config diagnostics refl
 module crate root
 module main bin
 
-module types types
 module phpdoc_grammar phpdoc
 module docblock phpdoc
 module sql_reflection_config sql
@@ -203,9 +202,6 @@ module checker::access_attributes ext-language-extensions
 allow registry sql_reflection_config B6
 allow registry sql_reflection_reflector B6
 allow registry sql_reflection_schema B6
-allow sql_reflection_reflector types B6
-allow sql_reflection_schema types B6
-allow sql_reflection_schema_drift types B6
 
 allow config architecture C1
 allow config assertion_tables C1

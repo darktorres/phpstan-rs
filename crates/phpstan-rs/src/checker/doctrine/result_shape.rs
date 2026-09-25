@@ -8,8 +8,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::checker::Checker;
 use crate::doctrine_functions::DoctrineFunctionKind;
 use crate::registry::ClassInfo;
-use crate::types::union_types;
-use crate::types::{Shape, Type};
+use types::union_types;
+use types::{Shape, Type};
 
 use super::dql::{AggregateFn, FieldRef, SelectItem, SelectItemKind};
 use super::query_builder::{JoinClause, QueryBuilderChain};
@@ -286,7 +286,7 @@ fn aggregate_type(
     else {
         return Type::Mixed(false);
     };
-    let numeric_string = crate::types::parse_type_string("numeric-string");
+    let numeric_string = types::parse_type_string("numeric-string");
     let value = match func {
         AggregateFn::Min | AggregateFn::Max => raw,
         AggregateFn::Sum => union_types(raw, numeric_string),

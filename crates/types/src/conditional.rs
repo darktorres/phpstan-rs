@@ -1,6 +1,6 @@
 use rustc_hash::FxHashMap;
 
-use crate::types::Type;
+use crate::Type;
 
 /// Resolves every `Type::Conditional` node in `ty` against `param_bindings`
 /// (parameter *name* -> the actual, already-inferred type bound to it at
@@ -32,10 +32,10 @@ use crate::types::Type;
 /// `non-empty-array<T>`) keeps both. "No" here is
 /// `types_definitely_disjoint`'s conservative answer; anything it can't
 /// prove disjoint stays "maybe" rather than guessing a branch.
-pub(crate) fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
-    let matches = if crate::types::is_subtype(bound, target) {
+pub fn conditional_branch(bound: &Type, target: &Type, negated: bool) -> Option<bool> {
+    let matches = if crate::is_subtype(bound, target) {
         Some(true)
-    } else if crate::types::types_definitely_disjoint(bound, target) {
+    } else if crate::types_definitely_disjoint(bound, target) {
         Some(false)
     } else {
         None
@@ -75,7 +75,7 @@ pub fn resolve_conditional(ty: &Type, param_bindings: &FxHashMap<String, Type>) 
 /// Both branches of an undecided conditional, flattened and deduplicated
 /// (`T` and `T|null` give `T|null`, not `T|T|null`), collapsing to the
 /// single member when both branches agree.
-pub(crate) fn union_of_branches(a: Type, b: Type) -> Type {
+pub fn union_of_branches(a: Type, b: Type) -> Type {
     let mut members: Vec<Type> = Vec::new();
     for ty in [a, b] {
         let parts = match ty {
@@ -83,10 +83,7 @@ pub(crate) fn union_of_branches(a: Type, b: Type) -> Type {
             other => vec![other],
         };
         for p in parts {
-            if !members
-                .iter()
-                .any(|m| crate::types::types_equal_for_union(m, &p))
-            {
+            if !members.iter().any(|m| crate::types_equal_for_union(m, &p)) {
                 members.push(p);
             }
         }

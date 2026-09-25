@@ -7,9 +7,9 @@
 //! (`method.callToAbstract`/`staticMethod.callToAbstract`).
 
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::StaticTarget;
 use syntax::token::Span;
+use types::Type;
 
 /// Whether `ty` can never be a class name or an object a static call
 /// could dispatch on. `null` members are skipped, and string members

@@ -6,9 +6,9 @@
 
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
 use syntax::ast::{ClassKind, Visibility};
 use syntax::token::Span;
+use types::Type;
 
 /// Whether `ty` can never be a `string` or an object, so `new` on it
 /// always fails. A `Union` answers for its non-`null` members, the
@@ -325,9 +325,9 @@ impl<'a> Checker<'a> {
         {
             return false;
         }
-        let abstract_trait_methods_supported = registry.php_version.is_none_or(|v| {
-            crate::types::php_version::PhpFeature::AbstractTraitMethods.is_available(v)
-        });
+        let abstract_trait_methods_supported = registry
+            .php_version
+            .is_none_or(|v| types::php_version::PhpFeature::AbstractTraitMethods.is_available(v));
         if abstract_trait_methods_supported
             && let Some(t) = &self.current_trait
             && registry

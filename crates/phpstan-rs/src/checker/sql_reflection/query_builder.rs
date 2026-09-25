@@ -28,9 +28,9 @@
 //! correctness, since this text is never executed, only prepared.
 
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::literal_string_value;
 use syntax::ast::{Arg, Expr, ExprKind, StaticTarget};
+use types::Type;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum JoinKind {

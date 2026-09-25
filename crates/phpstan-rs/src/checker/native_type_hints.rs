@@ -20,10 +20,10 @@
 
 use crate::checker::Checker;
 use crate::registry::FunctionSig;
-use crate::types::PhpVersion;
-use crate::types::TrinaryLogic;
-use crate::types::Type;
 use syntax::ast::*;
+use types::PhpVersion;
+use types::TrinaryLogic;
+use types::Type;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Position {
@@ -382,7 +382,7 @@ impl<'a> Checker<'a> {
 
     /// `suggested` as a type, with `self`/`static` bound to `class`.
     fn suggested_type(&self, suggested: &str, class_name: Option<&str>) -> Type {
-        let ty = crate::types::parse_type_string(suggested);
+        let ty = types::parse_type_string(suggested);
         match class_name {
             Some(class) => self.resolve_pseudo(&ty, class),
             None => ty,

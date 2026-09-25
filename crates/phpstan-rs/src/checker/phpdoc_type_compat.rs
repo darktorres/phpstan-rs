@@ -13,7 +13,7 @@
 use super::*;
 use crate::docblock;
 use crate::registry::FunctionSig;
-use crate::types::TrinaryLogic;
+use types::TrinaryLogic;
 
 impl<'a> Checker<'a> {
     pub(crate) fn check_phpdoc_types_against_native(

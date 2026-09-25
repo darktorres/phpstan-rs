@@ -19,7 +19,7 @@ fn a_null_array_literal_key_is_flagged_on_php_8_5_or_later() {
                 return [null => 1];
             }
         "#,
-        |r| r.php_version = Some(crate::types::PhpVersion::new(8, 5)),
+        |r| r.php_version = Some(types::PhpVersion::new(8, 5)),
     );
     assert!(
         d.iter().any(|x| x.identifier == "array.invalidKey"

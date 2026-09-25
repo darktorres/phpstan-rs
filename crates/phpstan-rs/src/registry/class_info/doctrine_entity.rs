@@ -22,9 +22,9 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
-use crate::types::Type;
 use syntax::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, StaticTarget};
 use syntax::intern::intern;
+use types::Type;
 
 use super::PropertySig;
 use syntax::name_resolution::NameContext;

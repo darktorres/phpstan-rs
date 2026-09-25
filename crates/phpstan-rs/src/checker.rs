@@ -5,10 +5,10 @@ use std::sync::Arc;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
 use crate::pest_config;
 use crate::registry::Registry;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::name_resolution::NameContext;
 use syntax::token::Span;
+use types::Type;
 
 /// A checked scope's variable-name-to-inferred-type bindings.
 ///
@@ -590,7 +590,7 @@ pub struct Checker<'a> {
     // The current function's own `@template`s, read from its doc - the
     // only source for one the registry doesn't index (an anonymous
     // class's method).
-    pub(crate) current_method_templates: rustc_hash::FxHashMap<String, crate::types::TemplateParam>,
+    pub(crate) current_method_templates: rustc_hash::FxHashMap<String, types::TemplateParam>,
     // `checker::restricted_symbol_usage`'s own `allow_in_class_with_
     // attributes`/`allow_except_in_class_with_attributes` matching - the
     // enclosing class's own directly-declared attribute names (`Registry::
@@ -1197,9 +1197,6 @@ mod whitespace;
 mod xml_name;
 mod xml_wellformedness;
 
-#[cfg(test)]
-pub(crate) use crate::types::generalize_by_key_set;
-pub(crate) use crate::types::union_types;
 pub(crate) use assignment::{literal_string_key, superglobal_default_type};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use control_flow::{
@@ -1229,6 +1226,9 @@ pub(crate) use oop::{
 pub(crate) use operators::binop_sigil;
 pub(crate) use semantic_tokens::UsageTokenKind;
 pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
+#[cfg(test)]
+pub(crate) use types::generalize_by_key_set;
+pub(crate) use types::union_types;
 pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {

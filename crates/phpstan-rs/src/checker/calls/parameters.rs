@@ -9,10 +9,10 @@ use crate::checker::calls::{contains_nullsafe_access, is_valid_byref_argument_ex
 use crate::checker::{Checker, Locals, union_types};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::registry::{FunctionSig, ParamSig};
-use crate::types::php_version::PhpFeature;
-use crate::types::{Shape, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
+use types::php_version::PhpFeature;
+use types::{Shape, ShapeKey, Type};
 
 /// The callee as a call rule's messages name it.
 #[derive(Clone, Copy)]

@@ -16,10 +16,10 @@
 //! comparison for the declaration.
 
 use crate::checker::Checker;
-use crate::types::Type;
-use crate::types::union_types;
 use syntax::ast::Visibility;
 use syntax::token::Span;
+use types::Type;
+use types::union_types;
 
 fn flatten_union(ty: &Type) -> Vec<&Type> {
     match ty {

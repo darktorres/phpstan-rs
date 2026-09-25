@@ -10,10 +10,10 @@ use std::path::PathBuf;
 
 use crate::architecture::{ArchitectureRule, NamePattern, Selector};
 use crate::php_stubs;
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
+use types::Type;
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};

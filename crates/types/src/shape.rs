@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::types::{Type, parse::canonical_int_key};
+use crate::{Type, parse::canonical_int_key};
 
 /// An array shape key, canonicalized the way PHP canonicalizes an array
 /// key: a decimal integer string is an int key.
@@ -148,7 +148,6 @@ impl Shape {
 
     /// The fields as `(key text, type, optional)` tuples - tests compare
     /// against written-out field lists this way.
-    #[cfg(test)]
     pub fn named_fields(&self) -> Vec<(String, Type, bool)> {
         self.fields
             .iter()

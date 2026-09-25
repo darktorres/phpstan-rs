@@ -2,11 +2,11 @@
 //! answer depends on a `T` that may be a template until a call binds it
 //! (PHPStan's `LateResolvableType`).
 
-use crate::types::{ShapeKey, Type};
+use crate::{ShapeKey, Type};
 
 /// `key-of<ty>` when `ty` is an array type: its key type. `None` for
 /// anything whose keys aren't known from the type alone.
-pub(crate) fn key_of(ty: &Type) -> Option<Type> {
+pub fn key_of(ty: &Type) -> Option<Type> {
     match ty {
         Type::Mixed(_) => Some(Type::Mixed(false)),
         Type::Array(key, _) => Some((**key).clone()),
@@ -21,7 +21,7 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
 
 /// `value-of<ty>` when `ty` is an array type: its value type. An enum's
 /// case values need the registry (`Registry::resolve_deferred_value_of`).
-pub(crate) fn value_of(ty: &Type) -> Option<Type> {
+pub fn value_of(ty: &Type) -> Option<Type> {
     match ty {
         Type::Mixed(_) => Some(Type::Mixed(false)),
         Type::Array(_, value) => Some((**value).clone()),
@@ -39,7 +39,7 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
 /// `base[key]` (PHPStan's `OffsetAccessType::getResult()`): the value
 /// type `base` holds at `key`. A shape without the key, or a non-array
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
-pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
+pub fn offset_access(base: &Type, key: &Type) -> Option<Type> {
     match base {
         Type::ArrayShape(shape) | Type::ObjectShape(shape) => Some(
             ShapeKey::from_type(key)
@@ -64,7 +64,7 @@ pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
 /// access whose operand no longer holds a template is answered, `Mixed`
 /// when the operand isn't an array type; a `value-of` is answered only
 /// over an array type (an enum's needs the registry).
-pub(crate) fn settle(ty: Type) -> Type {
+pub fn settle(ty: Type) -> Type {
     match &ty {
         Type::KeyOf(inner) | Type::OffsetAccess(inner, _) if !mentions_template(inner) => {
             resolve_node(&ty, &|t| t.clone()).unwrap_or(Type::Mixed(false))
@@ -82,7 +82,7 @@ fn mentions_template(ty: &Type) -> bool {
 /// templates' bounds allow - what a template-typed value can be relied
 /// on to be inside the generic code itself. An answer the bound doesn't
 /// give is `Mixed`.
-pub(crate) fn resolve_late_to_bounds(ty: &Type) -> Type {
+pub fn resolve_late_to_bounds(ty: &Type) -> Type {
     let ty = ty.map_children(&mut resolve_late_to_bounds);
     match ty {
         Type::KeyOf(_) | Type::OffsetAccess(..) => {
@@ -96,7 +96,7 @@ pub(crate) fn resolve_late_to_bounds(ty: &Type) -> Type {
 }
 
 /// Whether `ty` holds a `KeyOf`/`OffsetAccess` anywhere.
-pub(crate) fn contains_late(ty: &Type) -> bool {
+pub fn contains_late(ty: &Type) -> bool {
     matches!(ty, Type::KeyOf(_) | Type::OffsetAccess(..)) || ty.any_child(contains_late)
 }
 

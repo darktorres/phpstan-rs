@@ -19,8 +19,8 @@
 //! only holds for the very same instance.
 
 use crate::checker::{Checker, Locals};
-use crate::types::Type;
 use syntax::ast::*;
+use types::Type;
 
 fn is_nullable(ty: &Type) -> bool {
     matches!(ty, Type::Union(members) if members.iter().any(|m| matches!(m, Type::Null))

@@ -5,7 +5,7 @@
 mod accepts;
 mod super_type;
 
-use crate::types::ClassHierarchy;
+use crate::ClassHierarchy;
 
 /// The relations over one class hierarchy, with the settings that make
 /// `accepts` more or less lenient.

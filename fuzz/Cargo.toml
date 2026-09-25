@@ -19,6 +19,10 @@ libfuzzer-sys = "0.4"
 [dependencies.phpstan-rs]
 path = "../crates/phpstan-rs"
 
+[dependencies.types]
+package = "phpstan-rs-types"
+path = "../crates/types"
+
 [dependencies.syntax]
 package = "phpstan-rs-syntax"
 path = "../crates/syntax"

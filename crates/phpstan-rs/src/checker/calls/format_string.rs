@@ -12,9 +12,9 @@ use std::sync::LazyLock;
 use regex::Regex;
 
 use crate::checker::{Checker, Locals};
-use crate::types::php_version::{PhpFeature, PhpVersion};
-use crate::types::{AccessoryKind, Type};
 use syntax::ast::*;
+use types::php_version::{PhpFeature, PhpVersion};
+use types::{AccessoryKind, Type};
 
 /// What a placeholder accepts (`PrintfPlaceholder::$acceptingType`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

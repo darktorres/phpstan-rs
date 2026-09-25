@@ -2,9 +2,9 @@ use crate::checker::{
     Checker, Locals, collect_exit_point_statements, exit_point_description, merge_scopes,
     purge_stale_narrowing_for,
 };
-use crate::types::Type;
 use syntax::ast::*;
 use syntax::token::Span;
+use types::Type;
 
 impl<'a> Checker<'a> {
     #[hotpath::measure]

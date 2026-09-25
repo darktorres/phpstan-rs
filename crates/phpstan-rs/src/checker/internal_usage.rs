@@ -28,10 +28,10 @@
 
 use crate::checker::Checker;
 use crate::registry::{ConstSig, FunctionSig, PropertySig};
-use crate::types::Type;
 use syntax::ast::TypeHint;
 use syntax::ast::{ClassKind, FunctionDecl, Param};
 use syntax::token::Span;
+use types::Type;
 
 /// `Class`/`Interface`/`Trait`/`Enum` - matches real PHPStan's own
 /// `ClassReflection::getClassTypeDescription()`, used both in message
