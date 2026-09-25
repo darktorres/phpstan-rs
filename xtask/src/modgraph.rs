@@ -602,6 +602,21 @@ impl<'ast> Visit<'ast> for Collector<'_, '_> {
         syn::visit::visit_item_impl(self, i);
     }
 
+    /// A trait's methods are definitions too: a name a trait also
+    /// declares isn't distinctive of one type's inherent method.
+    fn visit_item_trait(&mut self, t: &'ast syn::ItemTrait) {
+        for item in &t.items {
+            if let syn::TraitItem::Fn(f) = item {
+                self.methods
+                    .by_name
+                    .entry(f.sig.ident.to_string())
+                    .or_default()
+                    .insert((t.ident.to_string(), self.module.clone()));
+            }
+        }
+        syn::visit::visit_item_trait(self, t);
+    }
+
     fn visit_item_mod(&mut self, m: &'ast syn::ItemMod) {
         if let Some((_, content)) = &m.content {
             for item in content {
