@@ -58,9 +58,10 @@ const USAGE: &str = "usage: cargo xtask <command>
                          gates/module-graph.txt (--inventory lists every
                          crossing edge)
   baseline               generate the reference baselines (Stage A only)
-  approve <slug> [--full]
-                         write HEAD's snapshot diffs against its parent to
-                         gates/approved/<slug>/ (then amend them in)
+  approve <slug> [--full] [--against <commit>]
+                         write HEAD's snapshot diffs against its parent (or
+                         <commit>) to gates/approved/<slug>/ (then amend
+                         them in)
   rekey <old-hash>       move <old-hash>'s snapshots to HEAD after an amend
                          that only added gates/ files";
 
@@ -623,12 +624,23 @@ fn compare(args: &[String]) -> Result<(), String> {
 /// parent's to `gates/approved/<slug>/<artifact>.diff`, for amending
 /// into the commit that makes the change.
 fn approve(args: &[String]) -> Result<(), String> {
-    let slug = args
-        .iter()
-        .find(|a| !a.starts_with("--"))
-        .ok_or("approve needs a slug")?;
+    let mut against = None;
+    let mut slug = None;
+    let mut rest = args.iter();
+    while let Some(arg) = rest.next() {
+        match arg.as_str() {
+            "--against" => against = Some(rest.next().ok_or("--against needs a commit")?),
+            "--full" => {}
+            _ => slug = Some(arg),
+        }
+    }
+    let slug = slug.ok_or("approve needs a slug")?;
     let full = args.iter().any(|a| a == "--full");
-    let (parent, hash) = (parent_hash()?, head_hash()?);
+    let parent = match against {
+        Some(commit) => git(&["rev-parse", commit])?,
+        None => parent_hash()?,
+    };
+    let hash = head_hash()?;
     let dir = root().join("gates/approved").join(slug);
     let mut written = 0usize;
     for (artifact, ext) in compared_artifacts(full) {
