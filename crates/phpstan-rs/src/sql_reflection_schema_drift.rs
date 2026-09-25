@@ -95,8 +95,10 @@ fn live_columns_for_table(
     };
     Some(
         fields
+            .fields
             .into_iter()
-            .map(|(name, ty, _)| match ty {
+            .map(|field| (field.key.to_string(), field.ty))
+            .map(|(name, ty)| match ty {
                 Type::Union(members) if members.contains(&Type::Null) => {
                     let base = members
                         .into_iter()

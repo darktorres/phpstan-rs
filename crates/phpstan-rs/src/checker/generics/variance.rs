@@ -315,7 +315,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::ArrayShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.walk_variance(t, pos, class_name, violations);
                 }
             }
@@ -324,7 +324,7 @@ impl<'a> Checker<'a> {
             // template nested inside one (`object{value: T}`) would go
             // unchecked.
             Type::ObjectShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.walk_variance(t, pos, class_name, violations);
                 }
             }

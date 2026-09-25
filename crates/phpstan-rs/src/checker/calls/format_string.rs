@@ -705,11 +705,12 @@ fn format_value_type() -> Type {
 /// or `None` when it can be any other array.
 fn constant_array_sizes(ty: &Type) -> Option<Vec<Count>> {
     match ty {
-        Type::ArrayShape(fields) => {
-            let required = fields.iter().filter(|(_, _, optional)| !optional).count();
+        Type::ArrayShape(shape) => {
+            let tail = usize::from(!shape.is_sealed());
+            let required = shape.fields.iter().filter(|f| !f.optional).count() + tail;
             Some(vec![Count {
                 min: required,
-                max: fields.len(),
+                max: shape.fields.len() + tail,
             }])
         }
         Type::Union(members) => {

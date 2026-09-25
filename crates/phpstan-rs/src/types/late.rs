@@ -2,7 +2,7 @@
 //! answer depends on a `T` that may be a template until a call binds it
 //! (PHPStan's `LateResolvableType`).
 
-use crate::types::{Type, parse::canonical_int_key};
+use crate::types::{ShapeKey, Type};
 
 /// `key-of<ty>` when `ty` is an array type: its key type. `None` for
 /// anything whose keys aren't known from the type alone.
@@ -10,13 +10,9 @@ pub(crate) fn key_of(ty: &Type) -> Option<Type> {
     match ty {
         Type::Mixed(_) => Some(Type::Mixed(false)),
         Type::Array(key, _) => Some((**key).clone()),
-        Type::ArrayShape(fields) => Some(join(
-            fields
-                .iter()
-                .filter(|(name, _, _)| name != "...")
-                .map(|(name, _, _)| shape_key_literal(name))
-                .collect(),
-        )),
+        Type::ArrayShape(shape) => {
+            Some(join(shape.fields.iter().map(|f| f.key.to_type()).collect()))
+        }
         Type::Intersection(members) => members.iter().find_map(key_of),
         Type::Union(members) => members.iter().map(key_of).collect::<Option<_>>().map(join),
         _ => None,
@@ -29,13 +25,7 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
     match ty {
         Type::Mixed(_) => Some(Type::Mixed(false)),
         Type::Array(_, value) => Some((**value).clone()),
-        Type::ArrayShape(fields) => Some(join(
-            fields
-                .iter()
-                .filter(|(name, _, _)| name != "...")
-                .map(|(_, ty, _)| ty.clone())
-                .collect(),
-        )),
+        Type::ArrayShape(shape) => Some(join(shape.fields.iter().map(|f| f.ty.clone()).collect())),
         Type::Intersection(members) => members.iter().find_map(value_of),
         Type::Union(members) => members
             .iter()
@@ -51,11 +41,10 @@ pub(crate) fn value_of(ty: &Type) -> Option<Type> {
 /// `base`, gives `Mixed`; `None` when `base` isn't known yet.
 pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
     match base {
-        Type::ArrayShape(fields) | Type::ObjectShape(fields) => Some(
-            fields
-                .iter()
-                .find(|(name, _, _)| shape_key_literal(name) == *key)
-                .map(|(_, ty, _)| ty.clone())
+        Type::ArrayShape(shape) | Type::ObjectShape(shape) => Some(
+            ShapeKey::from_type(key)
+                .and_then(|key| shape.field(&key))
+                .map(|field| field.ty.clone())
                 .unwrap_or(Type::Mixed(false)),
         ),
         Type::Array(_, value) => Some((**value).clone()),
@@ -67,15 +56,6 @@ pub(crate) fn offset_access(base: &Type, key: &Type) -> Option<Type> {
             .map(join),
         Type::TemplateParam(_) | Type::Object(_, _) => None,
         _ => Some(Type::Mixed(false)),
-    }
-}
-
-/// A shape field name as the key type it is: an integer-looking name is
-/// an int key, matching PHP's own key canonicalization.
-pub(crate) fn shape_key_literal(name: &str) -> Type {
-    match canonical_int_key(name) {
-        Some(n) => Type::IntLiteral(n),
-        None => Type::StringLiteral(name.to_string()),
     }
 }
 

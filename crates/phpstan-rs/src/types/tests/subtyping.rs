@@ -276,21 +276,21 @@ fn array_accessory_subtype_rules() {
         ),
         Type::Accessory(AccessoryKind::NonEmptyArray),
     ]);
-    let list_shape = Type::ArrayShape(vec![
+    let list_shape = Type::ArrayShape(Shape::from_named(vec![
         ("0".to_string(), Type::IntLiteral(1), false),
         ("1".to_string(), Type::IntLiteral(2), false),
-    ]);
+    ]));
     assert!(is_subtype(&list_shape, &list_ty));
     assert!(is_subtype(&list_shape, &non_empty_ty));
 
-    let gapped_shape = Type::ArrayShape(vec![
+    let gapped_shape = Type::ArrayShape(Shape::from_named(vec![
         ("0".to_string(), Type::IntLiteral(1), false),
         ("2".to_string(), Type::IntLiteral(2), false),
-    ]);
+    ]));
     assert!(!is_subtype(&gapped_shape, &list_ty));
     assert!(is_subtype(&gapped_shape, &non_empty_ty));
 
-    let empty_shape = Type::ArrayShape(vec![]);
+    let empty_shape = Type::ArrayShape(Shape::sealed(Vec::new()));
     assert!(!is_subtype(&empty_shape, &non_empty_ty));
 
     // Real PHPStan's own confirmed strictness: a plain Array(_),
@@ -320,21 +320,21 @@ fn a_shape_with_a_non_trailing_optional_field_is_not_a_definite_list() {
         ),
         Type::Accessory(AccessoryKind::ArrayList),
     ]);
-    let non_trailing_optional = Type::ArrayShape(vec![
+    let non_trailing_optional = Type::ArrayShape(Shape::from_named(vec![
         ("0".to_string(), Type::Int, false),
         ("1".to_string(), Type::String, true),
         ("2".to_string(), Type::Int, false),
-    ]);
+    ]));
     assert!(!is_subtype(&non_trailing_optional, &list_ty));
 
     // A *trailing* run of optional fields is fine - the shape is still a
     // definite list either way (whether the optional suffix is present or
     // not, the present keys are always sequential from zero).
-    let trailing_optional = Type::ArrayShape(vec![
+    let trailing_optional = Type::ArrayShape(Shape::from_named(vec![
         ("0".to_string(), Type::Int, false),
         ("1".to_string(), Type::String, true),
         ("2".to_string(), Type::Int, true),
-    ]);
+    ]));
     assert!(is_subtype(&trailing_optional, &list_ty));
 }
 

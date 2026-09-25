@@ -69,13 +69,13 @@ impl<'a> Checker<'a> {
         }
         let needle = self.infer_expr(&args[needle_index].value, locals);
         let haystack = self.infer_expr(&args[haystack_index].value, locals);
-        let shapes: Vec<&Vec<(String, Type, bool)>> = match &haystack {
-            Type::ArrayShape(fields) => vec![fields],
+        let shapes: Vec<&crate::types::Shape> = match &haystack {
+            Type::ArrayShape(shape) => vec![shape],
             Type::Union(members) => {
                 let shapes: Vec<_> = members
                     .iter()
                     .filter_map(|m| match m {
-                        Type::ArrayShape(fields) => Some(fields),
+                        Type::ArrayShape(shape) => Some(shape),
                         _ => None,
                     })
                     .collect();
@@ -103,11 +103,9 @@ impl<'a> Checker<'a> {
         };
         let mut dead: Vec<(Type, bool)> = Vec::new();
         let mut any_possible_match = false;
-        for fields in shapes {
-            for (key, value, _) in fields {
-                if key == "..." {
-                    continue;
-                }
+        for shape in shapes {
+            for field in &shape.fields {
+                let value = &field.ty;
                 if !can_never_match(self, value) {
                     any_possible_match = true;
                     continue;
@@ -342,13 +340,8 @@ fn haystack_value_types(ty: &Type, out: &mut Vec<Type>) -> bool {
             out.push((**value).clone());
             true
         }
-        Type::ArrayShape(fields) => {
-            out.extend(
-                fields
-                    .iter()
-                    .filter(|(key, ..)| key != "...")
-                    .map(|(_, value, _)| value.clone()),
-            );
+        Type::ArrayShape(shape) => {
+            out.extend(shape.fields.iter().map(|f| f.ty.clone()));
             true
         }
         Type::Union(members) => members.iter().all(|m| haystack_value_types(m, out)),

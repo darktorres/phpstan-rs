@@ -686,20 +686,14 @@ impl<'a> Checker<'a> {
             return self.registry.lookup_function(name.trim_start_matches('\\'));
         }
         let ty = self.infer_expr(callable_expr, locals);
-        let Type::ArrayShape(fields) = &ty else {
+        let Type::ArrayShape(shape) = &ty else {
             return None;
         };
-        let method_ty = fields
-            .iter()
-            .find(|(k, _, _)| k == "1")
-            .map(|(_, t, _)| t)?;
+        let method_ty = &shape.field(&crate::types::ShapeKey::Int(1))?.ty;
         let Type::StringLiteral(method) = method_ty else {
             return None;
         };
-        let class_ty = fields
-            .iter()
-            .find(|(k, _, _)| k == "0")
-            .map(|(_, t, _)| t)?;
+        let class_ty = &shape.field(&crate::types::ShapeKey::Int(0))?.ty;
         let class = match class_ty {
             Type::StringLiteral(c) => c.as_str(),
             Type::ClassString(inner) => match inner.as_ref() {

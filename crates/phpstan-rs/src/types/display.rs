@@ -3,7 +3,7 @@ use std::fmt;
 use syntax::ast::ClassKind;
 
 use crate::types::parse::display_shape_key;
-use crate::types::{AccessoryKind, CallSiteVariance, CallableSig, Type};
+use crate::types::{AccessoryKind, CallSiteVariance, CallableSig, Shape, Type};
 
 /// `keyword(params): return` - shared by a shaped `callable(...)`/
 /// `Closure(...)` PHPDoc type and a closure literal's own
@@ -76,33 +76,8 @@ impl fmt::Display for Type {
             Type::ClassKindString(ClassKind::Trait) => write!(f, "trait-string"),
             Type::ClassKindString(ClassKind::Enum) => write!(f, "enum-string"),
             Type::ClassKindString(ClassKind::Class) => write!(f, "class-string"),
-            Type::ArrayShape(fields) => {
-                let parts: Vec<String> = fields
-                    .iter()
-                    .map(|(name, ty, optional)| {
-                        // The unsealed-shape sentinel (`try_parse_array_
-                        // shape`'s own doc comment) displays as the bare
-                        // `...` marker it was parsed from, not an
-                        // ordinary `key: type` field.
-                        if name == "..." {
-                            return "...".to_string();
-                        }
-                        let q = if *optional { "?" } else { "" };
-                        format!("{}{q}: {ty}", display_shape_key(name))
-                    })
-                    .collect();
-                write!(f, "array{{{}}}", parts.join(", "))
-            }
-            Type::ObjectShape(fields) => {
-                let parts: Vec<String> = fields
-                    .iter()
-                    .map(|(name, ty, optional)| {
-                        let q = if *optional { "?" } else { "" };
-                        format!("{}{q}: {ty}", display_shape_key(name))
-                    })
-                    .collect();
-                write!(f, "object{{{}}}", parts.join(", "))
-            }
+            Type::ArrayShape(shape) => write_shape(f, "array", shape),
+            Type::ObjectShape(shape) => write_shape(f, "object", shape),
             // Real PHPStan's own `GenericTypeNode::__toString()` format.
             Type::VarianceArg(CallSiteVariance::Bivariant, _) => write!(f, "*"),
             Type::VarianceArg(CallSiteVariance::Covariant, inner) => write!(f, "covariant {inner}"),
@@ -298,4 +273,31 @@ fn write_generic(f: &mut fmt::Formatter<'_>, name: &str, args: &[Type]) -> fmt::
         write!(f, "<{}>", parts.join(", "))?;
     }
     Ok(())
+}
+
+/// `keyword{key: type, key?: type, ...}`; an unsealed tail shows as the
+/// bare `...` when its types are the unknown default, `...<K, V>`
+/// otherwise.
+fn write_shape(f: &mut fmt::Formatter<'_>, keyword: &str, shape: &Shape) -> fmt::Result {
+    let mut parts: Vec<String> = shape
+        .fields
+        .iter()
+        .map(|field| {
+            let q = if field.optional { "?" } else { "" };
+            format!(
+                "{}{q}: {}",
+                display_shape_key(&field.key.to_string()),
+                field.ty
+            )
+        })
+        .collect();
+    if let Some(tail) = &shape.unsealed {
+        let (key, value) = &**tail;
+        if *key == Type::unknown_array_key() && matches!(value, Type::Mixed(_)) {
+            parts.push("...".to_string());
+        } else {
+            parts.push(format!("...<{key}, {value}>"));
+        }
+    }
+    write!(f, "{keyword}{{{}}}", parts.join(", "))
 }

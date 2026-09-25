@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::types::Shape;
 
 #[test]
 fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
@@ -36,7 +37,7 @@ fn is_callable_narrowing_catches_misuse_inside_the_guarded_branch() {
 
 #[test]
 fn array_key_exists_on_a_merely_optional_key_narrows_neither_branch() {
-    let shape = Type::ArrayShape(vec![("a".to_string(), Type::Int, true)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, true)]));
     assert_eq!(
         narrowing::narrow_array_shape_by_key_presence(&shape, "a", true),
         shape
@@ -49,7 +50,7 @@ fn array_key_exists_on_a_merely_optional_key_narrows_neither_branch() {
 
 #[test]
 fn array_value_type_for_key_returns_none_for_a_missing_shape_key() {
-    let shape = Type::ArrayShape(vec![("a".to_string(), Type::Int, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, false)]));
     assert_eq!(
         narrowing::array_value_type_for_key(&shape, "b"),
         None,

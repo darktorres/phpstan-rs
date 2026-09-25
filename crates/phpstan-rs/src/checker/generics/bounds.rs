@@ -171,9 +171,10 @@ impl<'a> Checker<'a> {
             Type::Union(members) | Type::Intersection(members) => {
                 members.iter().all(|m| self.is_type_fully_known(m))
             }
-            Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
             // `object{...}`'s own field types need checking too.
-            Type::ObjectShape(fields) => fields.iter().all(|(_, t, _)| self.is_type_fully_known(t)),
+            Type::ArrayShape(shape) | Type::ObjectShape(shape) => {
+                shape.types().all(|t| self.is_type_fully_known(t))
+            }
             _ => true,
         }
     }

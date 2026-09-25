@@ -4,7 +4,7 @@ use crate::checker::expr::{
 use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionSig;
-use crate::types::{self, AccessoryKind, Type};
+use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 
@@ -150,20 +150,26 @@ impl<'a> Checker<'a> {
         if items.iter().any(|item| item.spread) {
             return self.infer_spread_array_literal_type(items, locals);
         }
-        let mut fields: Vec<(String, Type, bool)> = Vec::new();
+        let mut shape = Shape::sealed(Vec::new());
         let mut next_index: i64 = 0;
         for item in items {
             let key = match &item.key {
                 None => {
-                    let k = next_index.to_string();
+                    let k = ShapeKey::Int(next_index);
                     next_index += 1;
                     k
                 }
                 Some(k) => match &k.kind {
-                    ExprKind::Literal(Literal::String(s)) => s.to_string(),
+                    ExprKind::Literal(Literal::String(s)) => {
+                        let key = ShapeKey::from_name(s);
+                        if let ShapeKey::Int(n) = key {
+                            next_index = next_index.max(n + 1);
+                        }
+                        key
+                    }
                     ExprKind::Literal(Literal::Int(n)) => {
                         next_index = next_index.max(n + 1);
-                        n.to_string()
+                        ShapeKey::Int(*n)
                     }
                     _ => {
                         return Type::Array(
@@ -176,12 +182,9 @@ impl<'a> Checker<'a> {
             let value_ty = self.infer_expr(&item.value, locals);
             // A later duplicate key overwrites an earlier one, matching
             // real PHP's own array-literal semantics.
-            match fields.iter_mut().find(|(k, _, _)| *k == key) {
-                Some(field) => field.1 = value_ty,
-                None => fields.push((key, value_ty, false)),
-            }
+            shape.set(ShapeField::new(key, value_ty, false));
         }
-        Type::ArrayShape(fields)
+        Type::ArrayShape(shape)
     }
 
     /// A spread item (`[...$a, ...$b]`) can be tracked precisely as long
@@ -211,7 +214,7 @@ impl<'a> Checker<'a> {
     /// result is non-empty; a spread source only does if it's itself
     /// provably non-empty.
     fn infer_spread_array_literal_type(&self, items: &[ArrayItem], locals: &Locals) -> Type {
-        let mut fields: Vec<(String, Type, bool)> = Vec::new();
+        let mut shape = Shape::sealed(Vec::new());
         let mut next_index: i64 = 0;
         let mut degraded = false;
         let mut elem_types: Vec<Type> = Vec::new();
@@ -223,14 +226,14 @@ impl<'a> Checker<'a> {
             if item.spread {
                 if !degraded {
                     match &value_ty {
-                        Type::ArrayShape(inner_fields) => {
-                            for (k, t, opt) in inner_fields {
+                        Type::ArrayShape(inner) => {
+                            for f in &inner.fields {
                                 Self::merge_shape_field(
-                                    &mut fields,
+                                    &mut shape,
                                     &mut next_index,
-                                    k,
-                                    t.clone(),
-                                    *opt,
+                                    &f.key,
+                                    f.ty.clone(),
+                                    f.optional,
                                 );
                             }
                         }
@@ -269,30 +272,25 @@ impl<'a> Checker<'a> {
                 if !degraded {
                     match &item.key {
                         None => {
-                            let key = next_index.to_string();
+                            let key = ShapeKey::Int(next_index);
                             next_index += 1;
-                            match fields.iter_mut().find(|(fk, _, _)| *fk == key) {
-                                Some(field) => field.1 = value_ty.clone(),
-                                None => fields.push((key, value_ty.clone(), false)),
-                            }
+                            shape.set(ShapeField::new(key, value_ty.clone(), false));
                         }
                         Some(k) => match &k.kind {
                             ExprKind::Literal(Literal::String(s)) => {
-                                match fields
-                                    .iter_mut()
-                                    .find(|(fk, _, _)| fk.as_str() == s.as_ref())
-                                {
-                                    Some(field) => field.1 = value_ty.clone(),
-                                    None => fields.push((s.to_string(), value_ty.clone(), false)),
+                                let key = ShapeKey::from_name(s);
+                                if let ShapeKey::Int(n) = key {
+                                    next_index = next_index.max(n + 1);
                                 }
+                                shape.set(ShapeField::new(key, value_ty.clone(), false));
                             }
                             ExprKind::Literal(Literal::Int(n)) => {
                                 next_index = next_index.max(n + 1);
-                                let key = n.to_string();
-                                match fields.iter_mut().find(|(fk, _, _)| *fk == key) {
-                                    Some(field) => field.1 = value_ty.clone(),
-                                    None => fields.push((key, value_ty.clone(), false)),
-                                }
+                                shape.set(ShapeField::new(
+                                    ShapeKey::Int(*n),
+                                    value_ty.clone(),
+                                    false,
+                                ));
                             }
                             _ => degraded = true,
                         },
@@ -307,9 +305,9 @@ impl<'a> Checker<'a> {
         }
 
         if !degraded {
-            return Type::ArrayShape(fields);
+            return Type::ArrayShape(shape);
         }
-        elem_types.extend(fields.into_iter().map(|(_, t, _)| t));
+        elem_types.extend(shape.fields.into_iter().map(|f| f.ty));
         let elem_ty = elem_types
             .into_iter()
             .reduce(union_types)
@@ -338,23 +336,21 @@ impl<'a> Checker<'a> {
     /// key is kept and fully overwrites a same-named target field
     /// verbatim, its own optional flag included.
     pub(crate) fn merge_shape_field(
-        fields: &mut Vec<(String, Type, bool)>,
+        shape: &mut Shape,
         next_index: &mut i64,
-        key: &str,
+        key: &ShapeKey,
         ty: Type,
         optional: bool,
     ) {
-        let resolved_key = if is_canonical_int_key(key) {
-            let assigned = next_index.to_string();
-            *next_index += 1;
-            assigned
-        } else {
-            key.to_string()
+        let resolved_key = match key {
+            ShapeKey::Int(_) => {
+                let assigned = ShapeKey::Int(*next_index);
+                *next_index += 1;
+                assigned
+            }
+            ShapeKey::Str(_) => key.clone(),
         };
-        match fields.iter_mut().find(|(fk, _, _)| *fk == resolved_key) {
-            Some(field) => *field = (resolved_key, ty, optional),
-            None => fields.push((resolved_key, ty, optional)),
-        }
+        shape.set(ShapeField::new(resolved_key, ty, optional));
     }
 
     /// Whether `ty` is already provably int-key-sequential from zero - a
@@ -367,7 +363,7 @@ impl<'a> Checker<'a> {
             Type::Intersection(members) => {
                 members.contains(&Type::Accessory(AccessoryKind::ArrayList))
             }
-            Type::ArrayShape(fields) => crate::types::shape_fields_are_list_like(fields),
+            Type::ArrayShape(shape) => crate::types::shape_fields_are_list_like(shape),
             // Every branch of a control-flow-merged `Union` must itself
             // be list-like - an `ArrayShape([])` branch (the common
             // "0 iterations" case) already satisfies this vacuously via
@@ -385,7 +381,7 @@ impl<'a> Checker<'a> {
             Type::Intersection(members) => {
                 members.contains(&Type::Accessory(AccessoryKind::NonEmptyArray))
             }
-            Type::ArrayShape(fields) => !fields.is_empty(),
+            Type::ArrayShape(shape) => !shape.fields.is_empty() || !shape.is_sealed(),
             // Non-empty only if *every* branch is - a possibly-empty
             // branch (an `ArrayShape([])`, the common "0 iterations"
             // case) means the merged value isn't provably non-empty.
@@ -401,7 +397,7 @@ impl<'a> Checker<'a> {
     /// array` already applies in the other direction).
     pub(crate) fn is_known_empty_array(ty: &Type) -> bool {
         match ty {
-            Type::ArrayShape(fields) => fields.is_empty(),
+            Type::ArrayShape(shape) => shape.is_empty_array(),
             Type::Union(members) => members.iter().all(Self::is_known_empty_array),
             _ => false,
         }
@@ -793,11 +789,11 @@ impl<'a> Checker<'a> {
     pub(crate) fn array_element_type(ty: &Type) -> Option<Type> {
         match ty {
             Type::Array(_, elem) => Some((**elem).clone()),
-            Type::ArrayShape(fields) => Some(
-                fields
+            Type::ArrayShape(shape) => Some(
+                shape
+                    .fields
                     .iter()
-                    .filter(|(name, _, _)| name != "...")
-                    .map(|(_, t, _)| t.clone())
+                    .map(|f| f.ty.clone())
                     .reduce(union_types)
                     .unwrap_or(Type::Mixed(false)),
             ),
@@ -824,7 +820,7 @@ impl<'a> Checker<'a> {
             Type::Union(members) => {
                 let mut elem_types = Vec::new();
                 for m in members {
-                    if matches!(m, Type::ArrayShape(fields) if fields.is_empty()) {
+                    if matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()) {
                         continue;
                     }
                     elem_types.push(Self::array_element_type(m)?);
@@ -847,9 +843,8 @@ impl<'a> Checker<'a> {
     /// `types::shape_key_type`, also reused directly by
     /// `registry::assignability`/`types::subtype` for the identical
     /// reasoning against a real `Type::Array`'s own declared key type.
-    /// `shape_key_type`'s own `Type::Never` (no real,
-    /// non-"..." field at all - see its own doc comment for the `"..."`
-    /// unsealed-tail-sentinel skip and why) maps back to `None` here, this
+    /// `shape_key_type`'s own `Type::Never` (no field at all; an unsealed
+    /// tail contributes no key) maps back to `None` here, this
     /// function's own existing "don't know" answer, matching every
     /// caller's own existing `unwrap_or_else`/`if let Some` handling.
     pub(crate) fn array_key_type(ty: &Type) -> Option<Type> {
@@ -879,7 +874,7 @@ impl<'a> Checker<'a> {
             Type::Union(members) => {
                 let mut key_types = Vec::new();
                 for m in members {
-                    if matches!(m, Type::ArrayShape(fields) if fields.is_empty()) {
+                    if matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()) {
                         continue;
                     }
                     key_types.push(Self::array_key_type(m)?);
@@ -1009,13 +1004,13 @@ fn array_filter_element_falsy_verdict(ty: &Type) -> Option<bool> {
         Type::True => Some(false),
         Type::IntLiteral(n) => Some(*n == 0),
         Type::StringLiteral(s) => Some(s.is_empty() || s == "0"),
-        Type::ArrayShape(fields) => {
-            if fields.is_empty() {
+        Type::ArrayShape(shape) => {
+            if shape.is_empty_array() {
                 Some(true)
-            } else if fields.iter().any(|(name, _, _)| name != "...") {
+            } else if !shape.fields.is_empty() {
                 Some(false)
             } else {
-                // Only an unsealed `"..."` tail - real size unknown.
+                // Only an unsealed tail - real size unknown.
                 None
             }
         }

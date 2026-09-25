@@ -6,7 +6,7 @@ use crate::checker::expr::doctrine_query_result_list_type;
 use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionSig, PropertySig};
-use crate::types::{self, Type};
+use crate::types::{self, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
 
 impl<'a> Checker<'a> {
@@ -315,10 +315,9 @@ impl<'a> Checker<'a> {
                 .lookup_property_with_owner(fqn, prop)
                 .map(|(owner, p)| self.resolve_pseudo(&p.ty, &owner))
                 .unwrap_or(Type::Mixed(false)),
-            Type::ObjectShape(fields) => fields
-                .iter()
-                .find(|(name, _, _)| name == prop)
-                .map(|(_, ty, _)| ty.clone())
+            Type::ObjectShape(shape) => shape
+                .field(&ShapeKey::from_name(prop))
+                .map(|f| f.ty.clone())
                 .unwrap_or(Type::Mixed(false)),
             // An `Intersection` value genuinely is every member type
             // simultaneously, so the first member whose declaration
@@ -534,7 +533,7 @@ impl<'a> Checker<'a> {
             {
                 Type::Intersection(vec![
                     Type::Object("DateInterval".to_string(), Vec::new()),
-                    Type::ObjectShape(vec![("days".to_string(), Type::Int, false)]),
+                    Type::ObjectShape(Shape::from_named([("days", Type::Int, false)])),
                 ])
             }
             // `SimpleXMLElement::asXML()`'s 0-arg/1-arg overload split
@@ -908,50 +907,57 @@ impl<'a> Checker<'a> {
 /// identical "what does this uncertain-typed value become as a real PHP
 /// array key" question.
 fn dbal_row_method_return_type(method: &str, row_type: Option<Type>) -> Option<Type> {
-    let Some(Type::ArrayShape(fields)) = row_type else {
+    let Some(Type::ArrayShape(shape)) = row_type else {
         return None;
     };
+    let fields = &shape.fields;
     let numeric_shape = || {
-        Type::ArrayShape(
+        Type::ArrayShape(Shape::sealed(
             fields
                 .iter()
                 .enumerate()
-                .map(|(i, (_, ty, opt))| (i.to_string(), ty.clone(), *opt))
+                .map(|(i, f)| ShapeField::new(ShapeKey::Int(i as i64), f.ty.clone(), f.optional))
                 .collect(),
-        )
+        ))
     };
     let traversable_of =
         |key: Type, value: Type| Type::Object("Traversable".to_string(), vec![key, value]);
     match method {
-        "fetchAssociative" => Some(Type::Union(vec![Type::ArrayShape(fields), Type::False])),
-        "fetchAllAssociative" => Some(Type::list_of(Type::ArrayShape(fields))),
-        "iterateAssociative" => Some(traversable_of(Type::Int, Type::ArrayShape(fields))),
+        "fetchAssociative" => Some(Type::Union(vec![
+            Type::ArrayShape(shape.clone()),
+            Type::False,
+        ])),
+        "fetchAllAssociative" => Some(Type::list_of(Type::ArrayShape(shape.clone()))),
+        "iterateAssociative" => Some(traversable_of(Type::Int, Type::ArrayShape(shape.clone()))),
         "fetchNumeric" => Some(Type::Union(vec![numeric_shape(), Type::False])),
         "fetchAllNumeric" => Some(Type::list_of(numeric_shape())),
         "iterateNumeric" => Some(traversable_of(Type::Int, numeric_shape())),
         "fetchOne" if !fields.is_empty() => {
-            Some(Type::Union(vec![fields[0].1.clone(), Type::False]))
+            Some(Type::Union(vec![fields[0].ty.clone(), Type::False]))
         }
-        "fetchFirstColumn" if !fields.is_empty() => Some(Type::list_of(fields[0].1.clone())),
+        "fetchFirstColumn" if !fields.is_empty() => Some(Type::list_of(fields[0].ty.clone())),
         "iterateColumn" if !fields.is_empty() => {
-            Some(traversable_of(Type::Int, fields[0].1.clone()))
+            Some(traversable_of(Type::Int, fields[0].ty.clone()))
         }
         "fetchAllKeyValue" if fields.len() >= 2 => {
-            let key_ty = dynamic_write_key_type(&fields[0].1);
-            Some(Type::Array(Box::new(key_ty), Box::new(fields[1].1.clone())))
+            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            Some(Type::Array(
+                Box::new(key_ty),
+                Box::new(fields[1].ty.clone()),
+            ))
         }
         "iterateKeyValue" if fields.len() >= 2 => {
-            let key_ty = dynamic_write_key_type(&fields[0].1);
-            Some(traversable_of(key_ty, fields[1].1.clone()))
+            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            Some(traversable_of(key_ty, fields[1].ty.clone()))
         }
         "fetchAllAssociativeIndexed" if !fields.is_empty() => {
-            let key_ty = dynamic_write_key_type(&fields[0].1);
-            let rest = Type::ArrayShape(fields[1..].to_vec());
+            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            let rest = Type::ArrayShape(Shape::sealed(fields[1..].to_vec()));
             Some(Type::Array(Box::new(key_ty), Box::new(rest)))
         }
         "iterateAssociativeIndexed" if !fields.is_empty() => {
-            let key_ty = dynamic_write_key_type(&fields[0].1);
-            let rest = Type::ArrayShape(fields[1..].to_vec());
+            let key_ty = dynamic_write_key_type(&fields[0].ty);
+            let rest = Type::ArrayShape(Shape::sealed(fields[1..].to_vec()));
             Some(traversable_of(key_ty, rest))
         }
         _ => None,

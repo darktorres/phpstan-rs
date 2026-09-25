@@ -286,7 +286,7 @@ pub(crate) fn upgrade_array_to_non_empty(ty: &Type) -> Type {
         // falsy`'s own identical arm already uses) rather than staying
         // unchanged, so a `Union` member that's provably empty gets
         // dropped below instead of surviving as a spurious alternative.
-        Type::ArrayShape(fields) if fields.is_empty() => Type::Never,
+        Type::ArrayShape(shape) if shape.is_empty_array() => Type::Never,
         // A loop-built array whose own entry might still be its
         // pre-loop `[]` is a real `Union` including that empty-shape
         // alternative, which a `count($x) > 0` guard immediately

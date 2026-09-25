@@ -1,5 +1,5 @@
 use crate::registry::Registry;
-use crate::types::{self, AccessoryKind, Type};
+use crate::types::{self, AccessoryKind, Shape, Type};
 use syntax::ast::ClassKind;
 
 /// Real PHPStan's `TrinaryLogic` result of a `Type::isSuperTypeOf` query.
@@ -136,8 +136,8 @@ impl Registry {
             {
                 Trinary::Maybe
             }
-            (Type::ArrayShape(sup_fields), Type::ArrayShape(sub_fields)) => {
-                self.shape_super_type_of(sup_fields, sub_fields)
+            (Type::ArrayShape(sup_shape), Type::ArrayShape(sub_shape)) => {
+                self.shape_super_type_of(sup_shape, sub_shape)
             }
             // Arrays compare structurally: `is_assignable` reads an
             // `array<mixed>` value as "unknown" and lets it fit any array,
@@ -176,18 +176,13 @@ impl Registry {
     /// `sup` requires must be one `sub` always has, with a value `sup`
     /// accepts; a key `sup` doesn't declare is fine only when `sup` is
     /// unsealed.
-    fn shape_super_type_of(
-        &self,
-        sup: &[(String, Type, bool)],
-        sub: &[(String, Type, bool)],
-    ) -> Trinary {
-        let sealed = |fields: &[(String, Type, bool)]| !fields.iter().any(|(k, _, _)| k == "...");
+    fn shape_super_type_of(&self, sup: &Shape, sub: &Shape) -> Trinary {
         let mut results = Vec::new();
-        for (key, sup_ty, sup_optional) in sup.iter().filter(|(k, _, _)| k != "...") {
-            match sub.iter().find(|(k, _, _)| k == key) {
-                Some((_, sub_ty, sub_optional)) => {
-                    let value = self.is_super_type_of(sup_ty, sub_ty);
-                    results.push(if *sub_optional && !*sup_optional {
+        for sup_field in &sup.fields {
+            match sub.field(&sup_field.key) {
+                Some(sub_field) => {
+                    let value = self.is_super_type_of(&sup_field.ty, &sub_field.ty);
+                    results.push(if sub_field.optional && !sup_field.optional {
                         // Present only sometimes: never always.
                         match value {
                             Trinary::No => Trinary::No,
@@ -197,15 +192,15 @@ impl Registry {
                         value
                     });
                 }
-                None if *sup_optional => {}
-                None if sealed(sub) => results.push(Trinary::No),
+                None if sup_field.optional => {}
+                None if sub.is_sealed() => results.push(Trinary::No),
                 None => results.push(Trinary::Maybe),
             }
         }
-        if sealed(sup) {
-            for (key, _, optional) in sub.iter().filter(|(k, _, _)| k != "...") {
-                if !sup.iter().any(|(k, _, _)| k == key) {
-                    results.push(if *optional {
+        if sup.is_sealed() {
+            for sub_field in &sub.fields {
+                if sup.field(&sub_field.key).is_none() {
+                    results.push(if sub_field.optional {
                         Trinary::Maybe
                     } else {
                         Trinary::No

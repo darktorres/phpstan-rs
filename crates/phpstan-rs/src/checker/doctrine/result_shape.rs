@@ -9,7 +9,7 @@ use crate::checker::Checker;
 use crate::checker::type_union::union_types;
 use crate::doctrine_functions::DoctrineFunctionKind;
 use crate::registry::ClassInfo;
-use crate::types::Type;
+use crate::types::{Shape, Type};
 
 use super::dql::{AggregateFn, FieldRef, SelectItem, SelectItemKind};
 use super::query_builder::{JoinClause, QueryBuilderChain};
@@ -490,7 +490,11 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
                     .and_then(|t| t.fields.get(id_field))
                     .cloned()
                     .unwrap_or(Type::Mixed(false));
-                Type::ArrayShape(vec![(id_field.to_string(), id_ty, false)])
+                Type::ArrayShape(Shape::from_named(vec![(
+                    id_field.to_string(),
+                    id_ty,
+                    false,
+                )]))
             })
             .unwrap_or(Type::Mixed(false));
         fields.push((name.to_string(), shape, false));
@@ -498,7 +502,7 @@ fn entity_array_shape(checker: &Checker, entity: &str) -> Type {
     // Deterministic order - a `HashMap`'s own iteration order is
     // unspecified, and this shape must render identically across runs.
     fields.sort_by(|a, b| a.0.cmp(&b.0));
-    Type::ArrayShape(fields)
+    Type::ArrayShape(Shape::from_named(fields))
 }
 
 /// Converts an entity object type to its own `HYDRATE_ARRAY` shape when
@@ -537,12 +541,9 @@ pub(crate) fn build_array_result_row_type(
     items: &[SelectItem],
 ) -> Option<Type> {
     build_result_row_type(checker, chain, items).map(|ty| match ty {
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
-                .into_iter()
-                .map(|(k, v, opt)| (k, to_array_mode(checker, v), opt))
-                .collect(),
-        ),
+        Type::ArrayShape(shape) => {
+            Type::ArrayShape(shape.map_types(&mut |v| to_array_mode(checker, v.clone())))
+        }
         other => to_array_mode(checker, other),
     })
 }
@@ -604,7 +605,7 @@ pub(crate) fn build_scalar_result_row_type(
             }
         }
     }
-    Some(Type::ArrayShape(fields))
+    Some(Type::ArrayShape(Shape::from_named(fields)))
 }
 
 #[cfg(test)]

@@ -63,15 +63,10 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHash
                     bind_template_param(inner, arg_inner, bindings);
                 }
             }
-            // An array shape's element type is the union of its real
-            // fields' value types (the `"..."` unsealed-tail sentinel
-            // excluded).
-            Type::ArrayShape(fields) => {
-                let values: Vec<Type> = fields
-                    .iter()
-                    .filter(|(k, _, _)| k != "...")
-                    .map(|(_, v, _)| v.clone())
-                    .collect();
+            // An array shape's element type is the union of its fields'
+            // value types (an unsealed tail's excluded).
+            Type::ArrayShape(shape) => {
+                let values: Vec<Type> = shape.fields.iter().map(|f| f.ty.clone()).collect();
                 let element = match values.len() {
                     0 => return,
                     1 => values.into_iter().next().expect("len checked"),

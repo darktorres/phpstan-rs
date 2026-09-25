@@ -2085,7 +2085,7 @@ fn value_type_is_constant(ty: &Type) -> bool {
         | Type::False
         | Type::Null
         | Type::EnumCase(..) => true,
-        Type::ArrayShape(fields) => fields.iter().all(|(_, t, _)| value_type_is_constant(t)),
+        Type::ArrayShape(shape) => shape.types().all(value_type_is_constant),
         _ => false,
     }
 }

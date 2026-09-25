@@ -57,7 +57,7 @@ impl<'a> Checker<'a> {
     /// The union of `in_array()`'s own haystack literal values, if every
     /// element is a bare, unkeyed literal (`int`/`string`/`bool`/`null`),
     /// or a bare empty-array literal `[]` (just as statically provable a
-    /// single exact type, `Type::ArrayShape(vec![])`, as any scalar
+    /// single exact type, `Type::ArrayShape(crate::types::Shape::sealed(Vec::new()))`, as any scalar
     /// literal - e.g. `! in_array($raw_tags_post, [null, '0', '', []],
     /// true)`'s 4th haystack element being a non-`Literal` `ArrayLiteral`
     /// must not bail this whole function to `None`, silently narrowing
@@ -86,16 +86,15 @@ impl<'a> Checker<'a> {
             return Some((target.clone(), Some(target)));
         }
         let haystack_ty = self.infer_expr(haystack, locals);
-        if let Type::ArrayShape(fields) = &haystack_ty
-            && !fields.is_empty()
-            && fields
-                .iter()
-                .all(|(k, v, _)| k != "..." && is_known_single_value(v))
+        if let Type::ArrayShape(shape) = &haystack_ty
+            && !shape.fields.is_empty()
+            && shape.is_sealed()
+            && shape.fields.iter().all(|f| is_known_single_value(&f.ty))
         {
             let mut values: Vec<Type> = Vec::new();
-            for (_, v, _) in fields {
-                if !values.contains(v) {
-                    values.push(v.clone());
+            for f in &shape.fields {
+                if !values.contains(&f.ty) {
+                    values.push(f.ty.clone());
                 }
             }
             let target = if values.len() == 1 {
@@ -124,7 +123,9 @@ impl<'a> Checker<'a> {
             }
             let ty = match &item.value.kind {
                 ExprKind::Literal(_) => self.infer_expr(&item.value, locals),
-                ExprKind::ArrayLiteral(inner) if inner.is_empty() => Type::ArrayShape(vec![]),
+                ExprKind::ArrayLiteral(inner) if inner.is_empty() => {
+                    Type::ArrayShape(crate::types::Shape::sealed(Vec::new()))
+                }
                 _ => return None,
             };
             if !member_types.contains(&ty) {

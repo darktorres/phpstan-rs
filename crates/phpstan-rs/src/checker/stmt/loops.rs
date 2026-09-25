@@ -874,7 +874,7 @@ fn replace_array_element_type(ty: &Type, new_elem: &Type) -> Type {
 /// `array{}`, or a union made only of it.
 fn type_is_always_empty_array(ty: &Type) -> bool {
     match ty {
-        Type::ArrayShape(fields) => fields.is_empty(),
+        Type::ArrayShape(shape) => shape.is_empty_array(),
         Type::Union(members) => members.iter().all(type_is_always_empty_array),
         _ => false,
     }

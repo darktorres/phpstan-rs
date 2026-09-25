@@ -83,6 +83,7 @@ fn an_array_literal_assigned_global_accumulates_shape_fields_across_files() {
     ]);
     match global_type(&registry, "conf") {
         Some(Type::ArrayShape(fields)) => {
+            let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert!(names.contains(&"a"), "got: {names:?}");
             assert!(names.contains(&"b"), "got: {names:?}");
@@ -205,6 +206,7 @@ fn a_shape_field_picks_up_a_helpers_registry_resolved_return_type() {
     )]);
     match global_type(&registry, "g") {
         Some(Type::ArrayShape(fields)) => {
+            let fields = fields.named_fields();
             let (_, ty, _) = fields
                 .iter()
                 .find(|(k, _, _)| k == "key")
@@ -252,6 +254,7 @@ fn array_merge_with_self_folds_the_calls_resolved_shape_fields_in() {
     )]);
     match global_type(&registry, "g") {
         Some(Type::ArrayShape(fields)) => {
+            let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert!(names.contains(&"a"), "got: {names:?}");
             assert!(names.contains(&"b"), "got: {names:?}");
@@ -271,6 +274,7 @@ fn coalesce_assign_contributes_the_rhs_type_but_compound_concat_assign_is_mixed(
     )]);
     match global_type(&registry, "g") {
         Some(Type::ArrayShape(fields)) => {
+            let fields = fields.named_fields();
             let a = &fields.iter().find(|(k, _, _)| k == "a").expect("a field").1;
             let b = &fields.iter().find(|(k, _, _)| k == "b").expect("b field").1;
             assert_eq!(a, &Type::StringLiteral("default".to_string()));
@@ -455,6 +459,7 @@ fn a_multi_level_nested_index_write_still_records_its_outermost_key() {
     )]);
     match global_type(&registry, "switch_lang") {
         Some(Type::ArrayShape(fields)) => {
+            let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert_eq!(names, vec!["language"], "got: {names:?}");
         }
@@ -476,6 +481,7 @@ fn a_nested_append_write_still_records_its_outermost_key() {
     )]);
     match global_type(&registry, "switch_lang") {
         Some(Type::ArrayShape(fields)) => {
+            let fields = fields.named_fields();
             let names: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
             assert_eq!(names, vec!["stack"], "got: {names:?}");
         }

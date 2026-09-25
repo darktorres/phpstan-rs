@@ -29,7 +29,7 @@ fn object_names(ty: &Type, out: &mut Vec<String>) {
         }
         Type::Array(_, value) | Type::VarianceArg(_, value) => object_names(value, out),
         Type::ArrayShape(fields) => {
-            for (_, t, _) in fields {
+            for t in fields.types() {
                 object_names(t, out);
             }
         }

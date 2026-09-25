@@ -336,10 +336,10 @@ fn array_shape_parses_required_and_optional_fields() {
     let shape = parse_type_string("array{name: string, age?: int}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("name".to_string(), Type::String, false),
             ("age".to_string(), Type::Int, true),
-        ])
+        ]))
     );
 }
 
@@ -348,11 +348,11 @@ fn array_shape_field_can_itself_be_a_union() {
     let shape = parse_type_string("array{value: int|string}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![(
+        Type::ArrayShape(Shape::from_named(vec![(
             "value".to_string(),
             Type::Union(vec![Type::Int, Type::String]),
             false
-        )])
+        )]))
     );
 }
 
@@ -362,28 +362,33 @@ fn array_shape_with_an_unsealed_marker_still_parses_its_real_fields() {
     // unlisted keys too" marker) has no `:` in it, so the field loop's
     // `?` must not propagate a None out of the whole function and
     // silently fail the ENTIRE shape parse over one unmodeled marker.
-    // The marker is recorded as a real sentinel field
-    // (`("...".to_string(), Type::Mixed(false), false)`, see `types::
-    // is_unsealed_shape`'s own doc comment), consumed by
-    // `checker::narrowing`'s "never prove an unsealed shape's key is
-    // absent" gate and `checker::assignment`'s matching
+    // The marker unseals the shape, with the tail's written key and value
+    // types, consumed by `checker::narrowing`'s "never prove an unsealed
+    // shape's key is absent" gate and `checker::assignment`'s matching
     // `isset()`/access-existence leniency.
     let shape = parse_type_string("array{items: int, ...<string, mixed>}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![
-            ("items".to_string(), Type::Int, false),
-            ("...".to_string(), Type::Mixed(false), false),
-        ])
+        Type::ArrayShape(crate::types::Shape {
+            fields: vec![crate::types::ShapeField::new(
+                crate::types::ShapeKey::from_name("items"),
+                Type::Int,
+                false
+            )],
+            unsealed: Some(Box::new((Type::String, Type::Mixed(false)))),
+        })
     );
     // A bare `...` (no generic args) is valid too.
     let shape2 = parse_type_string("array{items: int, ...}");
     assert_eq!(
         shape2,
-        Type::ArrayShape(vec![
-            ("items".to_string(), Type::Int, false),
-            ("...".to_string(), Type::Mixed(false), false),
-        ])
+        Type::ArrayShape(crate::types::Shape::unsealed(vec![
+            crate::types::ShapeField::new(
+                crate::types::ShapeKey::from_name("items"),
+                Type::Int,
+                false
+            ),
+        ]))
     );
 }
 
@@ -397,10 +402,10 @@ fn array_shape_with_positional_fields_numbers_them_like_a_real_array_literal() {
     let shape = parse_type_string("array{int, string}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("0".to_string(), Type::Int, false),
             ("1".to_string(), Type::String, false),
-        ])
+        ]))
     );
 }
 
@@ -410,11 +415,11 @@ fn array_shape_with_positional_int_range_fields_parses() {
     // Each field is a real IntRange, not plain Int.
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("0".to_string(), Type::IntRange(Some(0), Some(255)), false),
             ("1".to_string(), Type::IntRange(Some(0), Some(255)), false),
             ("2".to_string(), Type::IntRange(Some(0), Some(255)), false),
-        ])
+        ]))
     );
 }
 
@@ -423,10 +428,10 @@ fn array_shape_mixing_explicit_int_keys_and_named_keys_still_parses_correctly() 
     let shape = parse_type_string("array{0: int, name: string}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("0".to_string(), Type::Int, false),
             ("name".to_string(), Type::String, false),
-        ])
+        ]))
     );
 }
 
@@ -437,10 +442,10 @@ fn array_shape_with_a_hyphenated_bare_key_still_parses_as_keyed() {
     let shape = parse_type_string("array{domain: string, plural-forms: string}");
     assert_eq!(
         shape,
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("domain".to_string(), Type::String, false),
             ("plural-forms".to_string(), Type::String, false),
-        ])
+        ]))
     );
 }
 
@@ -452,6 +457,7 @@ fn array_shape_with_a_positional_closure_field_is_not_split_at_its_own_colon() {
     let Type::ArrayShape(fields) = &shape else {
         panic!("expected an array shape, got {shape:?}");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].0, "0");
     assert_eq!(fields[0].1.to_string(), "Closure(int): string");
@@ -465,6 +471,7 @@ fn a_positional_class_constant_field_is_not_read_as_a_key() {
     let Type::ArrayShape(fields) = &shape else {
         panic!("expected an array shape, got {shape:?}");
     };
+    let fields = fields.named_fields();
     let keys: Vec<&str> = fields.iter().map(|(k, _, _)| k.as_str()).collect();
     assert_eq!(keys, ["0", "1"]);
 }

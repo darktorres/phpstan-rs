@@ -8,7 +8,7 @@
 use crate::checker::calls::CheckArgsCall;
 use crate::checker::{Checker, Locals};
 use crate::registry::FunctionSig;
-use crate::types::Type;
+use crate::types::{ShapeKey, Type};
 use syntax::ast::{Arg, Visibility};
 use syntax::token::Span;
 
@@ -38,17 +38,21 @@ impl<'a> Checker<'a> {
                     defining_class: None,
                 })
             }
-            Type::ArrayShape(fields) => {
-                let [
-                    (k0, target, false),
-                    (k1, Type::StringLiteral(method), false),
-                ] = fields.as_slice()
-                else {
+            Type::ArrayShape(shape) => {
+                let [first, second] = shape.fields.as_slice() else {
                     return None;
                 };
-                if k0 != "0" || k1 != "1" {
+                let (Type::StringLiteral(method), true) = (&second.ty, shape.is_sealed()) else {
+                    return None;
+                };
+                if first.key != ShapeKey::Int(0)
+                    || second.key != ShapeKey::Int(1)
+                    || first.optional
+                    || second.optional
+                {
                     return None;
                 }
+                let target = &first.ty;
                 let class = match target {
                     Type::Object(class, _) => class.clone(),
                     Type::ClassString(inner) => match inner.as_ref() {

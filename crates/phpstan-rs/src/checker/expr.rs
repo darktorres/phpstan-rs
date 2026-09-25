@@ -14,7 +14,7 @@ use crate::diagnostic::DiagnosticBuilder;
 use crate::pest_config;
 use crate::regex_groups;
 use crate::registry::{FunctionSig, Registry};
-use crate::types::{self, AccessoryKind, Type};
+use crate::types::{self, AccessoryKind, Shape, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 use syntax::visit::{body_contains_yield, expr_contains_yield};
@@ -1032,7 +1032,7 @@ impl<'a> Checker<'a> {
                     // idiom is recovered by `apply_narrowing`'s
                     // `preg_match_condition` recognizer, not by this
                     // unconditional type itself.
-                    let shape = union_types(matched, Type::ArrayShape(vec![]));
+                    let shape = union_types(matched, Type::ArrayShape(Shape::sealed(Vec::new())));
                     purge_stale_narrowing_for(locals, matches_name);
                     // `$matches` is very commonly undeclared before this
                     // exact call - its real first appearance, so
@@ -5801,10 +5801,10 @@ pub(crate) fn index_result_type(container_ty: Type, key: Option<&str>) -> Type {
         // has its own "key not found" diagnostic path
         // (`check_offset_existence`) regardless of what this function
         // returns.
-        Type::ArrayShape(fields) if fields.is_empty() && key.is_none() => Type::Null,
-        Type::ArrayShape(fields) => key
-            .and_then(|k| fields.into_iter().find(|(name, _, _)| name == k))
-            .map(|(_, ty, _)| ty)
+        Type::ArrayShape(shape) if shape.is_empty_array() && key.is_none() => Type::Null,
+        Type::ArrayShape(shape) => key
+            .and_then(|k| shape.field(&ShapeKey::from_name(k)))
+            .map(|f| f.ty.clone())
             .unwrap_or(Type::Mixed(false)),
         Type::Union(members) => members
             .into_iter()
@@ -6881,14 +6881,12 @@ fn bind_static_ref(ty: &Type, class: &str) -> Type {
     }
 }
 
-/// `ty` with every sealed array shape marked unsealed (`types::parse`'s
-/// `"..."` field), so a key it doesn't list isn't proven absent.
+/// `ty` with every sealed array shape marked unsealed, so a key it
+/// doesn't list isn't proven absent.
 pub(crate) fn unseal_array_shapes(ty: &Type) -> Type {
     match ty {
-        Type::ArrayShape(fields) if !fields.iter().any(|(k, _, _)| k == "...") => {
-            let mut fields = fields.clone();
-            fields.push(("...".to_string(), Type::Mixed(false), false));
-            Type::ArrayShape(fields)
+        Type::ArrayShape(shape) if shape.is_sealed() => {
+            Type::ArrayShape(Shape::unsealed(shape.fields.clone()))
         }
         Type::Union(members) => Type::Union(members.iter().map(unseal_array_shapes).collect()),
         other => other.clone(),

@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use crate::types::{
-    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Type, late,
+    AccessoryKind, CallSiteVariance, CallableParam, CallableSig, ClassKind, Shape, ShapeField,
+    ShapeKey, Type, late,
 };
 
 /// Parses one of our parser's raw type-hint strings (`"?string"`,
@@ -344,21 +345,6 @@ fn try_parse_conditional_type(s: &str) -> Option<Type> {
     })
 }
 
-/// `try_parse_array_shape`'s own field accumulator - overwrites an
-/// already-present field with the same key in place (last-one-wins),
-/// matching real PHPStan's own
-/// `ConstantArrayTypeBuilder::setOffsetValueType` (a later call for an
-/// already-seen key always replaces it, never duplicates it). Reachable
-/// via an explicit `0:` field colliding with an earlier *positional*
-/// field's own auto-numbered index (`array{int, 0: string}`), or a
-/// literal duplicate key (`array{1: int, 1: string}`).
-fn push_shape_field(fields: &mut Vec<(String, Type, bool)>, key: String, ty: Type, optional: bool) {
-    match fields.iter_mut().find(|(k, _, _)| *k == key) {
-        Some(field) => *field = (key, ty, optional),
-        None => fields.push((key, ty, optional)),
-    }
-}
-
 /// `array{name: string, age?: int}` - PHPDoc's structural array shape.
 /// Field values can themselves be full type strings (unions, generics,
 /// nested shapes), so each is re-run through `parse_type_string`.
@@ -386,24 +372,26 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
     }
     let inner = &rest[1..rest.len() - 1];
 
-    let mut fields = Vec::new();
+    let mut shape = Shape::sealed(Vec::new());
     let mut next_index: i64 = 0;
     for field_str in split_top_level(inner, ',') {
         let field_str = field_str.trim();
         if field_str.is_empty() {
             continue;
         }
-        // PHPStan/Psalm's "unsealed shape" marker (`...<string, mixed>`
-        // or bare `...`) says the array may carry other, unlisted keys
-        // too. Recorded as a sentinel field (`"..."`, impossible to
-        // collide with any real key this grammar could parse) rather
-        // than tracking the unsealed portion's value type precisely
-        // (`Type::Mixed(false)`, matching a plain `array`'s unknown-value-type
-        // default) - see `is_unsealed_shape`/
-        // `narrowing::narrow_array_shape_by_key_presence` for how this
-        // gets consumed.
-        if field_str.starts_with("...") {
-            fields.push(("...".to_string(), Type::Mixed(false), false));
+        // PHPStan/Psalm's "unsealed shape" marker (`...<string, mixed>`,
+        // `...<mixed>` or bare `...`): the array may carry other,
+        // unlisted entries of those types too.
+        if let Some(tail) = field_str.strip_prefix("...") {
+            let default = Shape::unsealed(Vec::new()).unsealed;
+            shape.unsealed = match split_generic_args(tail.trim()).1.as_slice() {
+                [value] => Some(Box::new((
+                    Type::unknown_array_key(),
+                    parse_type_string(value),
+                ))),
+                [key, value] => Some(Box::new((parse_type_string(key), parse_type_string(value)))),
+                _ => default,
+            };
             continue;
         }
         // A *positional* (unkeyed) field (`array{int, string}`, real
@@ -434,25 +422,24 @@ fn try_parse_array_shape(s: &str) -> Option<Type> {
                 // must be stripped here, or the field ends up keyed by
                 // the *literal* quoted text instead of the real string
                 // PHP would use as the array key.
-                let key = strip_shape_key_quotes(key);
-                if let Some(n) = canonical_int_key(key) {
+                let key = ShapeKey::from_name(strip_shape_key_quotes(key));
+                if let ShapeKey::Int(n) = key {
                     next_index = next_index.max(n + 1);
                 }
-                push_shape_field(
-                    &mut fields,
-                    key.to_string(),
+                shape.set(ShapeField::new(
+                    key,
                     parse_type_string(type_part.trim()),
                     optional,
-                );
+                ));
             }
             None => {
-                let key = next_index.to_string();
+                let key = ShapeKey::Int(next_index);
                 next_index += 1;
-                push_shape_field(&mut fields, key, parse_type_string(field_str), false);
+                shape.set(ShapeField::new(key, parse_type_string(field_str), false));
             }
         }
     }
-    Some(Type::ArrayShape(fields))
+    Some(Type::ArrayShape(shape))
 }
 
 /// `object{name: string, age?: int}` - PHPDoc's structural object shape.
@@ -489,14 +476,14 @@ fn try_parse_object_shape(s: &str) -> Option<Type> {
             Some(k) => (k.trim(), true),
             None => (key_part, false),
         };
-        let key = strip_shape_key_quotes(key);
-        fields.push((
-            key.to_string(),
+        let key = ShapeKey::from_name(strip_shape_key_quotes(key));
+        fields.push(ShapeField::new(
+            key,
             parse_type_string(type_part.trim()),
             optional,
         ));
     }
-    Some(Type::ObjectShape(fields))
+    Some(Type::ObjectShape(Shape::sealed(fields)))
 }
 
 /// The inverse of `strip_shape_key_quotes`, for display: a shape key
@@ -735,7 +722,7 @@ fn parse_type_atom(s: &str) -> Type {
             let base_part = s[..open].trim();
             let key = strip_shape_key_quotes(key_part);
             let base_ty = parse_type_string(base_part);
-            let key_ty = late::shape_key_literal(key);
+            let key_ty = ShapeKey::from_name(key).to_type();
             let mut ty = match late::offset_access(&base_ty, &key_ty) {
                 Some(ty) => ty,
                 // Possibly a template, known once `mark_template_params`

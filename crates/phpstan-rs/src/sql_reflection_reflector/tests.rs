@@ -182,6 +182,7 @@ fn a_real_live_query_against_piwigo_test_reflects_the_real_column_types() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape, got {row_type:?}");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].0, "id");
     assert_eq!(fields[1].0, "name");
@@ -310,6 +311,7 @@ fn a_real_live_postgres_query_reflects_the_real_column_types_and_nullability() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape, got {row_type:?}");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 3);
     assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
     assert_eq!(
@@ -439,6 +441,7 @@ fn a_real_sqlite_query_reflects_real_column_types_and_nullability() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape, got {row_type:?}");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 3);
     assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
     assert_eq!(
@@ -488,6 +491,7 @@ fn a_real_sqlite_computed_column_with_no_backing_table_degrades_honestly() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape, got {row_type:?}");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
     // `id + 1` has no real backing column - `column_metadata()` returns
     // `None` for it, and SQLite's own query planner gives a computed
@@ -663,6 +667,7 @@ fn a_real_live_window_function_query_prepares_successfully_and_reflects_column_t
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape, got {row_type:?}");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0].0, "id");
     assert_eq!(fields[1].0, "total");
@@ -805,6 +810,7 @@ fn a_real_live_derived_table_prepares_and_reflects_via_mysql() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
 }
 
@@ -821,6 +827,7 @@ fn a_real_live_non_recursive_cte_prepares_and_reflects_via_mysql() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
 }
 
@@ -837,6 +844,7 @@ fn a_real_live_union_of_matching_types_stays_that_type_via_mysql() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
 }
 
@@ -853,6 +861,7 @@ fn a_real_live_union_of_mismatched_types_coerces_to_a_single_string_column_via_m
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     // Real MySQL: a UNION's result set has one column definition, not
     // one per branch - `int UNION varchar` reports the whole column as
     // `string`, never a per-row `Type::Union`.
@@ -880,6 +889,7 @@ fn a_real_live_view_prepares_and_reflects_the_underlying_columns_via_mysql() {
     let Type::ArrayShape(fields) = row_type else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(
         fields,
         vec![

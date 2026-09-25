@@ -616,7 +616,7 @@ impl<'a> Checker<'a> {
             }
             Type::ArrayShape(fields) => {
                 let inner = position.compose(Position::Covariant);
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_ancestor_variance(t, inner, fqn, out);
                 }
             }

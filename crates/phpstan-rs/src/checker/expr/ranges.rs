@@ -1,5 +1,4 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::checker::is_unsealed_shape;
 use crate::checker::type_union::union_types;
 use crate::types::{self, AccessoryKind, Type};
 use syntax::ast::*;
@@ -435,13 +434,12 @@ pub(crate) fn type_truthiness(ty: &Type) -> Option<bool> {
         Type::FloatLiteral(n) => Some(*n != 0.0),
         Type::StringLiteral(s) => Some(!s.is_empty() && s != "0"),
         Type::Object(..) | Type::ObjectWithoutClass | Type::Resource { .. } => Some(true),
-        Type::ArrayShape(fields) => {
-            let real_fields: Vec<_> = fields.iter().filter(|(name, _, _)| name != "...").collect();
-            if real_fields.iter().any(|(_, _, optional)| !optional) {
+        Type::ArrayShape(shape) => {
+            if shape.fields.iter().any(|f| !f.optional) {
                 // At least one *required* field guarantees the array can
                 // never be empty, sealed or not.
                 Some(true)
-            } else if real_fields.is_empty() && !is_unsealed_shape(fields) {
+            } else if shape.is_empty_array() {
                 // No fields at all, and sealed - this is exactly `[]`.
                 Some(false)
             } else {

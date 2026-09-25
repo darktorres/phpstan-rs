@@ -934,9 +934,9 @@ fn has_array(ty: &Type) -> bool {
 /// a constant array.
 fn constant_arrays(ty: &Type) -> Option<Vec<Vec<Type>>> {
     match ty {
-        Type::ArrayShape(fields) if fields.iter().all(|(key, ..)| key != "...") => Some(vec![
-            fields.iter().map(|(_, value, _)| value.clone()).collect(),
-        ]),
+        Type::ArrayShape(shape) if shape.is_sealed() => {
+            Some(vec![shape.fields.iter().map(|f| f.ty.clone()).collect()])
+        }
         Type::Union(members) => {
             let mut all = Vec::new();
             for member in members {
@@ -951,15 +951,18 @@ fn constant_arrays(ty: &Type) -> Option<Vec<Vec<Type>>> {
 /// `constant_arrays`, when every member is also a list: keys `0..n` in
 /// order, none optional.
 fn list_tuples(ty: &Type) -> Option<Vec<Vec<Type>>> {
-    let is_list = |ty: &Type| -> bool {
-        match ty {
-            Type::ArrayShape(fields) => fields
-                .iter()
-                .enumerate()
-                .all(|(i, (key, _, optional))| !optional && *key == i.to_string()),
-            _ => false,
-        }
-    };
+    let is_list =
+        |ty: &Type| -> bool {
+            match ty {
+                Type::ArrayShape(shape) => {
+                    shape.is_sealed()
+                        && shape.fields.iter().enumerate().all(|(i, f)| {
+                            !f.optional && f.key == crate::types::ShapeKey::Int(i as i64)
+                        })
+                }
+                _ => false,
+            }
+        };
     let all_lists = match ty {
         Type::Union(members) => members.iter().all(is_list),
         other => is_list(other),
@@ -1013,8 +1016,8 @@ fn collect_array_values(ty: &Type, out: &mut Vec<Type>) -> bool {
             out.push((**value).clone());
             true
         }
-        Type::ArrayShape(fields) => {
-            out.extend(fields.iter().map(|(_, value, _)| value.clone()));
+        Type::ArrayShape(shape) => {
+            out.extend(shape.types().cloned());
             true
         }
         Type::Union(members) => members.iter().all(|m| collect_array_values(m, out)),

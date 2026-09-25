@@ -1,8 +1,6 @@
-use crate::checker::{
-    Checker, Locals, is_unsealed_shape, narrowing_key, purge_stale_narrowing_for, union_types,
-};
+use crate::checker::{Checker, Locals, narrowing_key, purge_stale_narrowing_for, union_types};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::{AccessoryKind, Type, is_subtype};
+use crate::types::{AccessoryKind, Shape, ShapeField, ShapeKey, Type, is_subtype};
 use syntax::ast::*;
 
 /// Real PHPStan's `NullsafeCheck::containsNullSafe` - whether an
@@ -247,17 +245,17 @@ impl<'a> Checker<'a> {
             return;
         };
         match ty {
-            Type::ArrayShape(fields) => {
+            Type::ArrayShape(shape) => {
                 for (position, item) in items.iter().enumerate() {
                     let field_key = match item.key.as_ref().map(|k| &k.kind) {
-                        Some(ExprKind::Literal(Literal::String(s))) => Some(s.to_string()),
-                        Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
+                        Some(ExprKind::Literal(Literal::String(s))) => Some(ShapeKey::from_name(s)),
+                        Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
                         Some(_) => None,
-                        None => Some(position.to_string()),
+                        None => Some(ShapeKey::Int(position as i64)),
                     };
                     let element_ty = field_key
-                        .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
-                        .map(|(_, t, _)| t.clone())
+                        .and_then(|k| shape.field(&k))
+                        .map(|f| f.ty.clone())
                         .unwrap_or(Type::Mixed(false));
                     self.check_param_out_assignment(&item.value, &element_ty, label);
                     self.check_by_ref_destructuring(&item.value, &element_ty, label);
@@ -336,17 +334,19 @@ impl<'a> Checker<'a> {
                 // a positional element (`[$a, $b] = $shaped`, the common
                 // tuple-destructuring case) looks up the field whose key
                 // is that position's own index ("0", "1", ...).
-                Type::ArrayShape(fields) => {
+                Type::ArrayShape(shape) => {
                     for (position, item) in items.iter().enumerate() {
                         let field_key = match item.key.as_ref().map(|k| &k.kind) {
-                            Some(ExprKind::Literal(Literal::String(s))) => Some(s.to_string()),
-                            Some(ExprKind::Literal(Literal::Int(n))) => Some(n.to_string()),
+                            Some(ExprKind::Literal(Literal::String(s))) => {
+                                Some(ShapeKey::from_name(s))
+                            }
+                            Some(ExprKind::Literal(Literal::Int(n))) => Some(ShapeKey::Int(*n)),
                             Some(_) => None,
-                            None => Some(position.to_string()),
+                            None => Some(ShapeKey::Int(position as i64)),
                         };
                         let element_ty = field_key
-                            .and_then(|k| fields.iter().find(|(fk, _, _)| *fk == k))
-                            .map(|(_, t, _)| t.clone())
+                            .and_then(|k| shape.field(&k))
+                            .map(|f| f.ty.clone())
                             .unwrap_or(Type::Mixed(false));
                         self.bind_assignment_target(&item.value, element_ty, locals);
                     }
@@ -434,7 +434,7 @@ impl<'a> Checker<'a> {
                             if is_superglobal(name) {
                                 superglobal_default_type(name)
                             } else {
-                                Type::ArrayShape(vec![])
+                                Type::ArrayShape(Shape::sealed(Vec::new()))
                             }
                         });
                         // `Checker::in_range_index_writes`'s own doc
@@ -474,7 +474,7 @@ impl<'a> Checker<'a> {
                                 .discriminant_array_facts
                                 .get(&key)
                                 .cloned()
-                                .unwrap_or_else(|| Type::ArrayShape(vec![]));
+                                .unwrap_or_else(|| Type::ArrayShape(Shape::sealed(Vec::new())));
                             if let Some(new_slot_ty) = write_index_into(
                                 &prior,
                                 None,
@@ -590,13 +590,13 @@ impl<'a> Checker<'a> {
             ExprKind::Index(..) => self.nested_write_container_type(inner, locals),
             _ => self.infer_expr(inner, locals),
         };
-        let shapes: Vec<&Vec<(String, Type, bool)>> = match &inner_ty {
-            Type::ArrayShape(fields) => vec![fields],
+        let shapes: Vec<&Shape> = match &inner_ty {
+            Type::ArrayShape(shape) => vec![shape],
             Type::Union(members) => {
                 let shapes: Vec<_> = members
                     .iter()
                     .filter_map(|m| match m {
-                        Type::ArrayShape(fields) => Some(fields),
+                        Type::ArrayShape(shape) => Some(shape),
                         _ => None,
                     })
                     .collect();
@@ -607,20 +607,21 @@ impl<'a> Checker<'a> {
             }
             _ => return self.infer_expr(e, locals),
         };
-        if shapes.iter().any(|fields| is_unsealed_shape(fields)) {
+        if shapes.iter().any(|shape| !shape.is_sealed()) {
             return self.infer_expr(e, locals);
         }
         let absent = match idx.as_deref() {
             None => true,
             Some(i) => match literal_string_key(i) {
-                Some(key) => !shapes
-                    .iter()
-                    .any(|fields| fields.iter().any(|(name, _, _)| *name == key)),
-                None => shapes.iter().all(|fields| fields.is_empty()),
+                Some(key) => {
+                    let key = ShapeKey::from_name(&key);
+                    !shapes.iter().any(|shape| shape.field(&key).is_some())
+                }
+                None => shapes.iter().all(|shape| shape.fields.is_empty()),
             },
         };
         if absent {
-            Type::ArrayShape(vec![])
+            Type::ArrayShape(Shape::sealed(Vec::new()))
         } else {
             self.infer_expr(e, locals)
         }
@@ -1130,34 +1131,28 @@ fn write_index_into(
         // provably `Null` doesn't sink the whole write via `Union`'s
         // "all or nothing" `?`.
         Type::Null => write_index_into(
-            &Type::ArrayShape(vec![]),
+            &Type::ArrayShape(Shape::sealed(Vec::new())),
             idx,
             idx_ty,
             value_ty,
             in_range,
             in_loop,
         ),
-        Type::ArrayShape(fields) => match idx
+        Type::ArrayShape(shape) => match idx
             .and_then(literal_string_key)
             .or_else(|| literal_key_from_type(idx_ty))
         {
             Some(key) => {
-                let mut fields = fields.clone();
+                let mut shape = shape.clone();
                 // A written key is present afterwards, even one the shape
                 // only had as optional.
-                match fields.iter_mut().find(|(k, _, _)| *k == key) {
-                    Some(field) => {
-                        field.1 = value_ty;
-                        field.2 = false;
-                    }
-                    None => fields.push((key, value_ty, false)),
-                }
-                Some(Type::ArrayShape(fields))
+                shape.set(ShapeField::new(ShapeKey::from_name(&key), value_ty, false));
+                Some(Type::ArrayShape(shape))
             }
             None => {
-                let widened = fields.iter().fold(value_ty, |acc, (_, field_ty, _)| {
-                    union_types(acc, field_ty.clone())
-                });
+                let widened = shape
+                    .types()
+                    .fold(value_ty, |acc, field_ty| union_types(acc, field_ty.clone()));
                 // A real append (`idx` absent) onto an already list-like
                 // container always assigns the next sequential int key,
                 // so the result stays a list, now provably non-empty. A
@@ -1379,17 +1374,17 @@ fn normalized_literal_key(dim: &Type) -> Option<(String, bool)> {
 /// (`Some(false)`), or might have (`None`) the offset `dim`.
 pub(crate) fn offset_verdict(container: &Type, dim: &Type) -> Option<bool> {
     match container {
-        Type::ArrayShape(fields) => {
-            if is_unsealed_shape(fields) {
+        Type::ArrayShape(shape) => {
+            if !shape.is_sealed() {
                 return None;
             }
-            if fields.is_empty() && !matches!(dim, Type::Mixed(_) | Type::Never) {
+            if shape.fields.is_empty() && !matches!(dim, Type::Mixed(_) | Type::Never) {
                 return Some(false);
             }
             let (key, _) = normalized_literal_key(dim)?;
-            match fields.iter().find(|(name, _, _)| *name == key) {
-                Some((_, _, false)) => Some(true),
-                Some((_, _, true)) => None,
+            match shape.field(&ShapeKey::from_name(&key)) {
+                Some(field) if !field.optional => Some(true),
+                Some(_) => None,
                 None => Some(false),
             }
         }

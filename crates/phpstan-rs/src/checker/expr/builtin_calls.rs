@@ -5,13 +5,12 @@ use crate::checker::{
     string_type_has_accessory, to_absolute_number,
 };
 use crate::registry::{FunctionSig, Registry};
-use crate::types::{self, AccessoryKind, Type};
+use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 
 use super::{
-    int_range_bounds, is_canonical_int_key, is_false_literal, is_non_falsy_string, is_true_literal,
-    normalize_int_range,
+    int_range_bounds, is_false_literal, is_non_falsy_string, is_true_literal, normalize_int_range,
 };
 
 impl<'a> Checker<'a> {
@@ -105,10 +104,11 @@ impl<'a> Checker<'a> {
             // gets the same always-true "never negative" floor `strlen`
             // above does.
             "count" | "sizeof" if args.len() == 1 => {
-                if let Type::ArrayShape(fields) = self.infer_expr(&args[0].value, locals)
-                    && fields.iter().all(|(_, _, optional)| !optional)
+                if let Type::ArrayShape(shape) = self.infer_expr(&args[0].value, locals)
+                    && shape.is_sealed()
+                    && shape.fields.iter().all(|f| !f.optional)
                 {
-                    return Type::IntLiteral(fields.len() as i64);
+                    return Type::IntLiteral(shape.fields.len() as i64);
                 }
                 return Type::IntRange(Some(0), None);
             }
@@ -572,38 +572,25 @@ impl<'a> Checker<'a> {
                 // A real `Type::ArrayShape` gets a precise, field-by-field
                 // flip: a field whose own value is an int/string literal
                 // becomes a real named field in the result (keyed by that
-                // literal, valued at the original field's own key -
-                // `types::canonical_int_key` recovers an int-keyed field's
-                // real numeric key from its shape-internal string name).
-                // A field whose value isn't a literal can't name a real
+                // literal, valued at the original field's own key). A
+                // field whose value isn't a literal can't name a real
                 // result field at all (real PHP requires an int|string
                 // value here, or throws - either way the exact resulting
-                // key isn't knowable), so it degrades only that one field
-                // into the shape's own unsealed `"..."` tail, matching
-                // this project's existing "..." convention for "more real
-                // keys exist here, just not statically known which."
-                if let Some(fields) = extract_array_shape_fields(&arr_ty) {
-                    let mut flipped: Vec<(String, Type, bool)> = Vec::new();
-                    for (name, field_ty, optional) in fields {
-                        if name == "..." {
-                            push_unsealed_tail(&mut flipped);
-                            continue;
-                        }
-                        let old_key_ty = match types::canonical_int_key(name) {
-                            Some(n) => Type::IntLiteral(n),
-                            None => Type::StringLiteral(name.clone()),
-                        };
-                        let new_key = match field_ty {
-                            Type::IntLiteral(n) => Some(n.to_string()),
-                            Type::StringLiteral(s) => Some(s.clone()),
-                            _ => None,
-                        };
-                        match new_key {
-                            Some(key) => match flipped.iter_mut().find(|(k, _, _)| *k == key) {
-                                Some(existing) => *existing = (key, old_key_ty, *optional),
-                                None => flipped.push((key, old_key_ty, *optional)),
-                            },
-                            None => push_unsealed_tail(&mut flipped),
+                // key isn't knowable), so it only unseals the result:
+                // more keys exist, just not statically known which.
+                if let Some(shape) = extract_array_shape(&arr_ty) {
+                    let mut flipped = Shape::sealed(Vec::new());
+                    if !shape.is_sealed() {
+                        unseal(&mut flipped);
+                    }
+                    for field in &shape.fields {
+                        match ShapeKey::from_type(&field.ty) {
+                            Some(key) => flipped.set(ShapeField::new(
+                                key,
+                                field.key.to_type(),
+                                field.optional,
+                            )),
+                            None => unseal(&mut flipped),
                         }
                     }
                     return Type::ArrayShape(flipped);
@@ -640,17 +627,18 @@ impl<'a> Checker<'a> {
             // set genuinely isn't knowable, not just that one argument's
             // own names.
             "compact" if !args.is_empty() && !args.iter().any(|a| a.spread) => {
-                let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                let mut shape = Shape::sealed(Vec::new());
                 let mut resolvable = true;
                 for arg in args {
                     match compact_argument_names(&arg.value) {
                         Some(names) => {
                             for name in names {
-                                if fields.iter().any(|(k, _, _)| *k == name) {
+                                let key = ShapeKey::from_name(&name);
+                                if shape.field(&key).is_some() {
                                     continue;
                                 }
                                 if let Some(ty) = locals.get(&name) {
-                                    fields.push((name, ty.clone(), false));
+                                    shape.fields.push(ShapeField::new(key, ty.clone(), false));
                                 }
                             }
                         }
@@ -661,7 +649,7 @@ impl<'a> Checker<'a> {
                     }
                 }
                 if resolvable {
-                    return Type::ArrayShape(fields);
+                    return Type::ArrayShape(shape);
                 }
             }
             // Every currently-tracked entry in `locals`, the identical
@@ -696,12 +684,12 @@ impl<'a> Checker<'a> {
                 if locals.any_variable_may_exist {
                     return Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
                 }
-                let fields: Vec<(String, Type, bool)> = locals
+                let fields: Vec<ShapeField> = locals
                     .iter()
                     .filter(|(name, _)| is_real_variable_key(name))
-                    .map(|(name, ty)| (name.clone(), ty.clone(), false))
+                    .map(|(name, ty)| ShapeField::new(ShapeKey::from_name(name), ty.clone(), false))
                     .collect();
-                return Type::ArrayShape(fields);
+                return Type::ArrayShape(Shape::sealed(fields));
             }
             // `array_pop`/`array_shift` remove and return the last/first
             // element (by reference - the caller's argument shrinks by
@@ -929,9 +917,10 @@ impl<'a> Checker<'a> {
                             || has_offset_value_parts(t).is_some_and(|(_, pairs)| !pairs.is_empty())
                     })
                     && arg_types.iter().all(|t| match t {
-                        Type::ArrayShape(fields) => fields
+                        Type::ArrayShape(shape) => shape
+                            .fields
                             .iter()
-                            .all(|(k, _, _)| k == "..." || !is_canonical_int_key(k)),
+                            .all(|f| matches!(f.key, ShapeKey::Str(_))),
                         // A plain array (`hasOffsetValue`-tracked or not)
                         // is only eligible when its own key type is
                         // confidently *not* int - one that could
@@ -946,39 +935,25 @@ impl<'a> Checker<'a> {
                             .is_some_and(|k| !Self::key_type_could_be_int(&k)),
                     });
                 if all_string_keyed_or_shape {
-                    let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                    let mut merged = Shape::sealed(Vec::new());
                     let mut next_index: i64 = 0; // unused - no int keys reach this path
                     for arg_ty in &arg_types {
                         match arg_ty {
                             Type::ArrayShape(inner) => {
-                                for (k, t, opt) in inner {
-                                    if k != "..." {
-                                        Self::merge_shape_field(
-                                            &mut fields,
-                                            &mut next_index,
-                                            k,
-                                            t.clone(),
-                                            *opt,
-                                        );
-                                    } else if !fields.iter().any(|(fk, _, _)| fk == "...") {
-                                        // An unsealed argument's own
-                                        // `"..."` must still propagate
-                                        // into the merged result - this
-                                        // argument's own real, but
-                                        // untracked keys could still be
-                                        // present in the merge too. Only
-                                        // newly reachable once an
-                                        // argument can itself be an
-                                        // unsealed shape (e.g. promoted
-                                        // via a `hasOffsetValue`-tracked
-                                        // plain argument's own "..."
-                                        // widening, just below) - before
-                                        // that, every `ArrayShape`
-                                        // argument reaching this branch
-                                        // was already sealed, so this
-                                        // never fired.
-                                        fields.push(("...".to_string(), Type::Mixed(false), false));
-                                    }
+                                for f in &inner.fields {
+                                    Self::merge_shape_field(
+                                        &mut merged,
+                                        &mut next_index,
+                                        &f.key,
+                                        f.ty.clone(),
+                                        f.optional,
+                                    );
+                                }
+                                // An unsealed argument's own untracked
+                                // keys could still be present in the
+                                // merge too.
+                                if !inner.is_sealed() {
+                                    unseal(&mut merged);
                                 }
                             }
                             _ => {
@@ -992,14 +967,12 @@ impl<'a> Checker<'a> {
                                 // array_merge never touches).
                                 let elem_ty =
                                     Self::array_element_type(arg_ty).unwrap_or(Type::Mixed(false));
-                                for (_, t, _) in fields.iter_mut() {
-                                    *t = union_types(t.clone(), elem_ty.clone());
+                                for f in merged.fields.iter_mut() {
+                                    f.ty = union_types(f.ty.clone(), elem_ty.clone());
                                 }
                                 // Mark unsealed - the plain array may also
                                 // contribute keys this shape never had.
-                                if !fields.iter().any(|(k, _, _)| k == "...") {
-                                    fields.push(("...".to_string(), Type::Mixed(false), false));
-                                }
+                                unseal(&mut merged);
                                 // On top of the coarse widening above, a
                                 // `hasOffsetValue`-tracked key gets
                                 // promoted to a real, precise field via
@@ -1008,7 +981,7 @@ impl<'a> Checker<'a> {
                                 // above - closing the gap this arm used to
                                 // leave (a tracked plain argument's own
                                 // known keys were previously discarded
-                                // into the generic "..." widening just
+                                // into the generic unsealed widening just
                                 // like any other unknown key). A bare
                                 // `Type::Array` (no tracked keys at all)
                                 // gets an empty `pairs`, so this is a
@@ -1017,9 +990,9 @@ impl<'a> Checker<'a> {
                                 if let Some((_, pairs)) = has_offset_value_parts(arg_ty) {
                                     for (k, v) in pairs {
                                         Self::merge_shape_field(
-                                            &mut fields,
+                                            &mut merged,
                                             &mut next_index,
-                                            &k,
+                                            &ShapeKey::from_name(&k),
                                             v,
                                             false,
                                         );
@@ -1028,25 +1001,28 @@ impl<'a> Checker<'a> {
                             }
                         }
                     }
-                    return Type::ArrayShape(fields);
+                    return Type::ArrayShape(merged);
                 }
                 if !has_spread && arg_types.iter().all(|t| matches!(t, Type::ArrayShape(_))) {
-                    let mut fields: Vec<(String, Type, bool)> = Vec::new();
+                    let mut merged = Shape::sealed(Vec::new());
                     let mut next_index: i64 = 0;
                     for arg_ty in &arg_types {
                         if let Type::ArrayShape(inner) = arg_ty {
-                            for (k, t, opt) in inner {
+                            for f in &inner.fields {
                                 Self::merge_shape_field(
-                                    &mut fields,
+                                    &mut merged,
                                     &mut next_index,
-                                    k,
-                                    t.clone(),
-                                    *opt,
+                                    &f.key,
+                                    f.ty.clone(),
+                                    f.optional,
                                 );
+                            }
+                            if !inner.is_sealed() {
+                                unseal(&mut merged);
                             }
                         }
                     }
-                    return Type::ArrayShape(fields);
+                    return Type::ArrayShape(merged);
                 }
                 let mut elem_types: Vec<Type> = Vec::new();
                 let mut all_list = true;
@@ -1262,9 +1238,9 @@ impl<'a> Checker<'a> {
                     // precision to offer, so every column read is simply
                     // the row's own uniform element type.
                     let field_ty = match &row_ty {
-                        Type::ArrayShape(fields) => literal_string_key(&args[1].value)
-                            .and_then(|key| fields.iter().find(|(n, _, _)| *n == key))
-                            .map(|(_, ty, _)| ty.clone()),
+                        Type::ArrayShape(shape) => literal_string_key(&args[1].value)
+                            .and_then(|key| shape.field(&ShapeKey::from_name(&key)))
+                            .map(|f| f.ty.clone()),
                         _ if Self::is_array_like(&row_ty) => Self::array_element_type(&row_ty),
                         _ => None,
                     };
@@ -2051,20 +2027,19 @@ fn is_or_wraps_array_shape(ty: &Type) -> bool {
 /// `is_or_wraps_array_shape`'s own field-extracting counterpart, for a
 /// caller (`array_flip`) that needs the real fields themselves, not just
 /// a yes/no answer.
-fn extract_array_shape_fields(ty: &Type) -> Option<&Vec<(String, Type, bool)>> {
+fn extract_array_shape(ty: &Type) -> Option<&Shape> {
     match ty {
-        Type::ArrayShape(fields) => Some(fields),
-        Type::Intersection(members) => members.iter().find_map(extract_array_shape_fields),
+        Type::ArrayShape(shape) => Some(shape),
+        Type::Intersection(members) => members.iter().find_map(extract_array_shape),
         _ => None,
     }
 }
 
-/// Appends the shape-internal `"..."` unsealed-tail sentinel to `fields`,
-/// unless one is already present - shared by every `array_flip` field
-/// that can't itself become a real, precisely-named result field.
-fn push_unsealed_tail(fields: &mut Vec<(String, Type, bool)>) {
-    if !fields.iter().any(|(k, _, _)| k == "...") {
-        fields.push(("...".to_string(), Type::Mixed(false), false));
+/// Marks `shape` unsealed (other, unknown entries may exist), unless it
+/// already is.
+fn unseal(shape: &mut Shape) {
+    if shape.is_sealed() {
+        *shape = Shape::unsealed(std::mem::take(&mut shape.fields));
     }
 }
 
@@ -2112,22 +2087,25 @@ fn strip_null_from_array_element(ty: Type) -> Type {
 fn filter_array_elements(ty: Type, keep: &dyn Fn(&Type) -> Type) -> Type {
     match ty {
         Type::Array(key, elem) => Type::Array(key, Box::new(keep(&elem))),
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
+        Type::ArrayShape(shape) => Type::ArrayShape(Shape {
+            fields: shape
+                .fields
                 .into_iter()
-                .filter_map(|(key, field_ty, optional)| {
-                    if key == "..." {
-                        return Some((key, field_ty, optional));
-                    }
-                    let narrowed = keep(&field_ty);
+                .filter_map(|field| {
+                    let narrowed = keep(&field.ty);
                     if narrowed == Type::Never {
                         return None;
                     }
-                    let maybe_dropped = narrowed != field_ty;
-                    Some((key, narrowed, optional || maybe_dropped))
+                    let maybe_dropped = narrowed != field.ty;
+                    Some(ShapeField::new(
+                        field.key,
+                        narrowed,
+                        field.optional || maybe_dropped,
+                    ))
                 })
                 .collect(),
-        ),
+            unsealed: shape.unsealed,
+        }),
         Type::Union(members) => Type::Union(
             members
                 .into_iter()
@@ -2277,8 +2255,8 @@ fn filter_validate_result(
     let flags_ty_ref = flags_ty.expect("flags_is_options_array implies Some");
     let fields = filter_var_options_fields(flags_ty_ref);
     if fields.is_none()
-        && let Type::ArrayShape(flags_fields) = flags_ty_ref
-        && flags_fields.iter().any(|(k, _, _)| k == "options")
+        && let Type::ArrayShape(flags_shape) = flags_ty_ref
+        && flags_shape.field(&ShapeKey::from_name("options")).is_some()
     {
         return None;
     }
@@ -2307,24 +2285,22 @@ fn filter_validate_result(
     Some((element_ty, fallback, throw_on_failure))
 }
 
-fn filter_var_options_fields(flags_ty: &Type) -> Option<&Vec<(String, Type, bool)>> {
-    let Type::ArrayShape(fields) = flags_ty else {
+fn filter_var_options_fields(flags_ty: &Type) -> Option<&Shape> {
+    let Type::ArrayShape(shape) = flags_ty else {
         return None;
     };
-    let (_, options_ty, _) = fields.iter().find(|(k, _, _)| k == "options")?;
-    match options_ty {
-        Type::ArrayShape(sub_fields) => Some(sub_fields),
+    match &shape.field(&ShapeKey::from_name("options"))?.ty {
+        Type::ArrayShape(options) => Some(options),
         _ => None,
     }
 }
 
 /// One named option's value type (`'default'`/`'min_range'`/`'max_range'`)
 /// out of an already-extracted `filter_var_options_fields` result.
-fn filter_var_option(fields: &[(String, Type, bool)], name: &str) -> Option<Type> {
-    fields
-        .iter()
-        .find(|(k, _, _)| k == name)
-        .map(|(_, t, _)| t.clone())
+fn filter_var_option(options: &Shape, name: &str) -> Option<Type> {
+    options
+        .field(&ShapeKey::from_name(name))
+        .map(|f| f.ty.clone())
 }
 
 fn filter_validate_type_for_constant(name: &str) -> Option<Type> {
@@ -2414,17 +2390,12 @@ fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
         // field entirely when it's provably always-falsy, and can no
         // longer guarantee a field's presence when it's merely possibly
         // falsy.
-        Type::ArrayShape(fields) => Type::ArrayShape(
-            fields
+        Type::ArrayShape(shape) => Type::ArrayShape(Shape {
+            fields: shape
+                .fields
                 .into_iter()
-                .filter_map(|(key, field_ty, optional)| {
-                    // The unsealed-tail sentinel isn't a real field - its
-                    // own type is always `Mixed` (never falsy-provable) -
-                    // leave it untouched.
-                    if key == "..." {
-                        return Some((key, field_ty, optional));
-                    }
-                    let narrowed = narrow_type_excluding_falsy(&field_ty);
+                .filter_map(|field| {
+                    let narrowed = narrow_type_excluding_falsy(&field.ty);
                     if narrowed == Type::Never {
                         // Provably always-falsy (a bare `null`, `false`,
                         // literal `0`/`''`/`'0'`) - array_filter always
@@ -2438,12 +2409,17 @@ fn narrow_array_element_type_excluding_falsy(ty: Type) -> Type {
                         // (or stays optional, if it already was), same as
                         // real PHP's own "may or may not survive"
                         // filtering.
-                        let could_be_falsy = narrowed != field_ty;
-                        Some((key, narrowed, optional || could_be_falsy))
+                        let could_be_falsy = narrowed != field.ty;
+                        Some(ShapeField::new(
+                            field.key,
+                            narrowed,
+                            field.optional || could_be_falsy,
+                        ))
                     }
                 })
                 .collect(),
-        ),
+            unsealed: shape.unsealed,
+        }),
         other => other,
     }
 }
@@ -2964,19 +2940,19 @@ pub(crate) fn date_interval_format_return_type(format: &str) -> Option<Type> {
 /// present.
 fn pathinfo_array_shape(path_ty: &Type) -> Type {
     let dirname_optional = !string_type_has_accessory(path_ty, AccessoryKind::NonEmptyString);
-    Type::ArrayShape(vec![
+    Type::ArrayShape(Shape::from_named(vec![
         ("dirname".to_string(), Type::String, dirname_optional),
         ("basename".to_string(), Type::String, false),
         ("extension".to_string(), Type::String, true),
         ("filename".to_string(), Type::String, false),
-    ])
+    ]))
 }
 
 /// `parse_url($url)`'s "all components" array shape - every field
 /// genuinely optional, `port` alone typed `IntRange(0, 65535)` rather
 /// than plain `String` like the rest.
 fn parse_url_components_array_shape() -> Type {
-    Type::ArrayShape(vec![
+    Type::ArrayShape(Shape::from_named(vec![
         ("scheme".to_string(), Type::String, true),
         ("host".to_string(), Type::String, true),
         (
@@ -2989,7 +2965,7 @@ fn parse_url_components_array_shape() -> Type {
         ("path".to_string(), Type::String, true),
         ("query".to_string(), Type::String, true),
         ("fragment".to_string(), Type::String, true),
-    ])
+    ]))
 }
 
 /// `parse_url($url, PHP_URL_*)`'s per-component return type, transcribed
@@ -3182,17 +3158,21 @@ fn sscanf_field_type(length: Option<u32>, specifier: &SscanfSpecifier) -> Type {
 /// by each field's canonical string form of its integer index (`"0"`,
 /// `"1"`, ...), the same way `Type::ArrayShape` represents an int-keyed
 /// array elsewhere in this project (see `literal_string_key`).
-fn sscanf_result_fields(format: &str) -> Option<Vec<(String, Type, bool)>> {
+fn sscanf_result_fields(format: &str) -> Option<Shape> {
     let specs = parse_sscanf_format(format)?;
-    Some(
+    Some(Shape::sealed(
         specs
             .into_iter()
             .enumerate()
             .map(|(i, (length, specifier))| {
-                (i.to_string(), sscanf_field_type(length, &specifier), false)
+                ShapeField::new(
+                    ShapeKey::Int(i as i64),
+                    sscanf_field_type(length, &specifier),
+                    false,
+                )
             })
             .collect(),
-    )
+    ))
 }
 
 /// `hrtime(false)`/`hrtime()`'s 2-element `[seconds, nanoseconds]` list
@@ -3200,14 +3180,14 @@ fn sscanf_result_fields(format: &str) -> Option<Vec<(String, Type, bool)>> {
 /// never returns `0` in practice); `nanoseconds` is always a sub-second
 /// remainder, `0` to `999_999_999` inclusive.
 fn hrtime_array_shape() -> Type {
-    Type::ArrayShape(vec![
+    Type::ArrayShape(Shape::from_named(vec![
         ("0".to_string(), Type::IntRange(Some(1), None), false),
         (
             "1".to_string(),
             Type::IntRange(Some(0), Some(999_999_999)),
             false,
         ),
-    ])
+    ]))
 }
 
 /// `hrtime(true)`'s single-number nanosecond-count form.
@@ -3221,21 +3201,20 @@ fn hrtime_number_type() -> Type {
 /// its string name; only the string-keyed half is modeled here, the way
 /// real code actually reads it (`$stat['size']`, not `$stat[7]`).
 fn stat_array_shape() -> Type {
-    Type::ArrayShape(
+    Type::ArrayShape(Shape::from_named(
         [
             "dev", "ino", "mode", "nlink", "uid", "gid", "rdev", "size", "atime", "mtime", "ctime",
             "blksize", "blocks",
         ]
         .into_iter()
-        .map(|key| (key.to_string(), Type::Int, false))
-        .collect(),
-    )
+        .map(|key| (key, Type::Int, false)),
+    ))
 }
 
 /// `dio_stat()`'s 13-key shape - the same values-are-all-`int` shape as
 /// `stat_array_shape` above, under `dio_stat`'s own distinct key names.
 fn dio_stat_array_shape() -> Type {
-    Type::ArrayShape(
+    Type::ArrayShape(Shape::from_named(
         [
             "device",
             "inode",
@@ -3252,9 +3231,8 @@ fn dio_stat_array_shape() -> Type {
             "ctime",
         ]
         .into_iter()
-        .map(|key| (key.to_string(), Type::Int, false))
-        .collect(),
-    )
+        .map(|key| (key, Type::Int, false)),
+    ))
 }
 
 /// `list<non-empty-string>` - `hash_algos()`/`openssl_get_cipher_methods()`/

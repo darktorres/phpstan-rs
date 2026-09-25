@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::types::Shape;
 
 #[test]
 fn is_assignable_uses_class_hierarchy() {
@@ -75,7 +76,11 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
         Box::new(Type::unknown_array_key()),
         Box::new(Type::Mixed(false)),
     );
-    let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![(
+        "name".to_string(),
+        Type::String,
+        false,
+    )]));
     assert!(r.is_assignable(&unknown, &shape));
     // A genuinely known, homogeneous array still doesn't satisfy an
     // arbitrary shape.
@@ -92,7 +97,7 @@ fn is_assignable_treats_unknown_array_as_compatible_with_a_shape() {
 fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
     let r = Registry::default();
     let strings = Type::Array(Box::new(Type::String), Box::new(Type::Mixed(false)));
-    let shape = Type::ArrayShape(vec![("0".to_string(), Type::Int, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![("0".to_string(), Type::Int, false)]));
     assert!(!r.is_assignable(&strings, &shape));
 }
 
@@ -100,14 +105,22 @@ fn a_string_keyed_array_type_is_not_assignable_to_an_int_keyed_shape() {
 fn an_int_keyed_array_type_is_not_assignable_to_a_string_keyed_shape() {
     let r = Registry::default();
     let ints = Type::Array(Box::new(Type::Int), Box::new(Type::Mixed(false)));
-    let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![(
+        "name".to_string(),
+        Type::String,
+        false,
+    )]));
     assert!(!r.is_assignable(&ints, &shape));
 }
 
 #[test]
 fn a_string_keyed_shape_is_not_assignable_to_an_int_keyed_array_type() {
     let r = Registry::default();
-    let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![(
+        "name".to_string(),
+        Type::String,
+        false,
+    )]));
     let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
     assert!(!r.is_assignable(&shape, &ints));
 }
@@ -115,7 +128,11 @@ fn a_string_keyed_shape_is_not_assignable_to_an_int_keyed_array_type() {
 #[test]
 fn an_int_keyed_shape_is_still_assignable_to_a_matching_int_keyed_array_type() {
     let r = Registry::default();
-    let shape = Type::ArrayShape(vec![("0".to_string(), Type::String, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![(
+        "0".to_string(),
+        Type::String,
+        false,
+    )]));
     let ints = Type::Array(Box::new(Type::Int), Box::new(Type::String));
     assert!(r.is_assignable(&shape, &ints));
 }
@@ -154,7 +171,11 @@ fn strict_mixed_arrays_opts_out_of_the_unknown_array_shape_leniency() {
         Box::new(Type::unknown_array_key()),
         Box::new(Type::Mixed(false)),
     );
-    let shape = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let shape = Type::ArrayShape(Shape::from_named(vec![(
+        "name".to_string(),
+        Type::String,
+        false,
+    )]));
     assert!(!r.is_assignable(&unknown, &shape));
 }
 

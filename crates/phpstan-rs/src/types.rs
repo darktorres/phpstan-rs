@@ -6,6 +6,7 @@ mod conditional;
 mod display;
 mod late;
 mod parse;
+mod shape;
 mod subtype;
 mod templates;
 
@@ -16,6 +17,7 @@ pub use parse::parse_type_string;
 pub(crate) use parse::{
     canonical_int_key, has_explicit_mixed_nested_somewhere, strip_call_site_variance,
 };
+pub use shape::{Shape, ShapeField, ShapeKey};
 pub use subtype::is_subtype;
 pub(crate) use subtype::types_definitely_disjoint;
 pub(crate) use subtype::{
@@ -74,13 +76,12 @@ pub enum Type {
     // checked here too.
     ClassKindString(ClassKind),
     // `array{name: string, age?: int}` - PHPDoc's structural array type.
-    // (field name, field type, optional)
-    ArrayShape(Vec<(String, Type, bool)>),
+    ArrayShape(Shape),
     // `object{name: string, age?: int}` - the `object`-flavored sibling
     // of `ArrayShape`. Structural, not a real registered class:
     // `registry::is_assignable` checks a real instance against it
     // property-by-property.
-    ObjectShape(Vec<(String, Type, bool)>),
+    ObjectShape(Shape),
     // A class name plus its resolved `@template` type arguments, if any;
     // empty for a non-generic class or a generic one referenced bare
     // (unspecified/erased, as real PHPStan treats it). Deliberately
@@ -480,18 +481,8 @@ impl Type {
         match self {
             Type::Array(k, v) => Type::Array(Box::new(f(k)), Box::new(f(v))),
             Type::ClassString(inner) => Type::ClassString(Box::new(f(inner))),
-            Type::ArrayShape(fields) => Type::ArrayShape(
-                fields
-                    .iter()
-                    .map(|(k, t, o)| (k.clone(), f(t), *o))
-                    .collect(),
-            ),
-            Type::ObjectShape(fields) => Type::ObjectShape(
-                fields
-                    .iter()
-                    .map(|(k, t, o)| (k.clone(), f(t), *o))
-                    .collect(),
-            ),
+            Type::ArrayShape(shape) => Type::ArrayShape(shape.map_types(f)),
+            Type::ObjectShape(shape) => Type::ObjectShape(shape.map_types(f)),
             Type::Object(name, args) => {
                 Type::Object(name.clone(), args.iter().map(&mut *f).collect())
             }
@@ -566,11 +557,7 @@ impl Type {
                 f(base);
                 f(key);
             }
-            Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-                for (_, t, _) in fields {
-                    f(t);
-                }
-            }
+            Type::ArrayShape(shape) | Type::ObjectShape(shape) => shape.types().for_each(f),
             Type::Object(_, args) | Type::SelfRef(args) | Type::StaticRef(args) => {
                 args.iter().for_each(f)
             }

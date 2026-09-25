@@ -245,7 +245,7 @@ fn collect_iterable_missing_value_types(ty: &Type, explicit_mixed: bool, out: &m
             collect_iterable_missing_value_types(inner, explicit_mixed, out)
         }
         Type::ArrayShape(fields) => {
-            for (_, t, _) in fields {
+            for t in fields.types() {
                 collect_iterable_missing_value_types(t, explicit_mixed, out);
             }
         }
@@ -303,7 +303,7 @@ fn collect_callables_with_missing_signature(ty: &Type, out: &mut Vec<String>) {
             }
         }
         Type::ArrayShape(fields) => {
-            for (_, t, _) in fields {
+            for t in fields.types() {
                 collect_callables_with_missing_signature(t, out);
             }
         }
@@ -377,7 +377,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::ArrayShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_non_generic_generic_class(t, out);
                 }
             }

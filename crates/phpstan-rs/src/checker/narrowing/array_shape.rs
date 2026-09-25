@@ -2,7 +2,7 @@ use crate::checker::narrowing::accessory_range::{
     upgrade_array_to_non_empty, upgrade_string_with_accessory,
 };
 use crate::checker::union_types;
-use crate::types::{AccessoryKind, Type};
+use crate::types::{AccessoryKind, ShapeField, ShapeKey, Type};
 
 /// Narrows `ty` by whether `key` is (`present = true`) or isn't
 /// (`present = false`) provably a real offset of it -
@@ -16,29 +16,18 @@ use crate::types::{AccessoryKind, Type};
 /// the same way `narrow_type_to`/`narrow_type_excluding` do; anything
 /// that isn't an `ArrayShape` (or a `Union` of them) is left untouched,
 /// this project's usual "don't guess" precedent.
-/// Whether `fields` (an `ArrayShape`'s own field list) carries the
-/// unsealed-shape sentinel (`types::try_parse_array_shape`'s own
-/// `"..."` marker for a real `array{a: int, ...}` PHPDoc shape) - a
-/// shape written this way may hold additional, unlisted keys, so "this
-/// key isn't one of the declared fields" alone is never proof it's
-/// absent the way it is for an ordinary, sealed shape.
-pub(crate) fn is_unsealed_shape(fields: &[(String, Type, bool)]) -> bool {
-    fields.iter().any(|(name, _, _)| name == "...")
-}
-
 pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: bool) -> Type {
     match ty {
-        Type::ArrayShape(fields) => match fields.iter().find(|(k, _, _)| k == key) {
-            Some((_, _, optional)) => {
-                if !present && !*optional {
+        Type::ArrayShape(shape) => match shape.field(&ShapeKey::from_name(key)) {
+            Some(field) => {
+                if !present && !field.optional {
                     Type::Never
                 } else {
                     ty.clone()
                 }
             }
-            // An *unsealed* shape (`array{a: int, ...}`, `types::
-            // try_parse_array_shape`'s own `"..."` sentinel field) can
-            // carry keys beyond the ones it lists - `key` simply not
+            // An *unsealed* shape (`array{a: int, ...}`) can carry keys
+            // beyond the ones it lists - `key` simply not
             // being one of the declared fields is never proof it's
             // absent, unlike a sealed shape's identical situation just
             // below. Only the `present` direction is affected: "is `key`
@@ -46,7 +35,7 @@ pub(crate) fn narrow_array_shape_by_key_presence(ty: &Type, key: &str, present: 
             // either way (an unsealed shape doesn't promise anything
             // about a specific unlisted key being there, only that it
             // *could* be).
-            None if is_unsealed_shape(fields) => ty.clone(),
+            None if !shape.is_sealed() => ty.clone(),
             None => {
                 if present {
                     Type::Never
@@ -93,28 +82,21 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
                 return ty.clone();
             };
             match narrow_array_shape_by_key_presence(ty, key, true) {
-                Type::ArrayShape(mut fields) => {
-                    match fields.iter_mut().find(|(k, _, _)| k == key) {
-                        Some(field) => {
-                            field.1 = crate::checker::narrow_type_excluding(&field.1, &Type::Null);
-                            field.2 = false;
-                        }
-                        // An unsealed shape's `...` tail held it.
-                        None => {
-                            let tail = fields
-                                .iter()
-                                .find(|(k, _, _)| k == "...")
-                                .map(|(_, t, _)| t.clone())
-                                .unwrap_or(Type::Mixed(false));
-                            let value = crate::checker::narrow_type_excluding(&tail, &Type::Null);
-                            let entry = (key.to_string(), value, false);
-                            match fields.iter().position(|(k, _, _)| k == "...") {
-                                Some(i) => fields.insert(i, entry),
-                                None => fields.push(entry),
-                            }
-                        }
-                    }
-                    Type::ArrayShape(fields)
+                Type::ArrayShape(mut shape) => {
+                    let key = ShapeKey::from_name(key);
+                    // An unsealed shape's tail held it when it isn't
+                    // listed.
+                    let held = match shape.field(&key) {
+                        Some(field) => field.ty.clone(),
+                        None => shape
+                            .unsealed
+                            .as_deref()
+                            .map(|tail| tail.1.clone())
+                            .unwrap_or(Type::Mixed(false)),
+                    };
+                    let value = crate::checker::narrow_type_excluding(&held, &Type::Null);
+                    shape.set(ShapeField::new(key, value, false));
+                    Type::ArrayShape(shape)
                 }
                 other => other,
             }
@@ -195,10 +177,7 @@ pub(crate) fn narrow_isset_container(ty: &Type, key: Option<&str>) -> Type {
 /// branch anyway).
 pub(crate) fn array_value_type_for_key(ty: &Type, key: &str) -> Option<Type> {
     match ty {
-        Type::ArrayShape(fields) => fields
-            .iter()
-            .find(|(k, _, _)| k == key)
-            .map(|(_, v, _)| v.clone()),
+        Type::ArrayShape(shape) => shape.field(&ShapeKey::from_name(key)).map(|f| f.ty.clone()),
         Type::Array(_, value_ty) => Some((**value_ty).clone()),
         Type::Union(members) => members
             .iter()
@@ -236,7 +215,7 @@ pub(crate) fn narrow_type_excluding_falsy(original: &Type) -> Type {
         }
         Type::Null | Type::False | Type::IntLiteral(0) => Type::Never,
         Type::StringLiteral(s) if s.is_empty() || s == "0" => Type::Never,
-        Type::ArrayShape(fields) if fields.is_empty() => Type::Never,
+        Type::ArrayShape(shape) if shape.is_empty_array() => Type::Never,
         Type::Array(_, _) => upgrade_array_to_non_empty(original),
         // Delegates to the same general-purpose "add one more accessory
         // fact onto a string, bare or already-refined" helper the

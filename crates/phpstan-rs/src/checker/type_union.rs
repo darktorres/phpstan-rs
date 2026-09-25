@@ -1,4 +1,4 @@
-use crate::types::{self, Type};
+use crate::types::{self, Shape, ShapeField, ShapeKey, Type};
 /// A defensive cap on how many distinct members `union_types` will ever
 /// materialize into a real `Type::Union`. Collapsing to `Mixed` past this
 /// point is a stable fixed point (`union_types(Mixed, _) == Mixed` is
@@ -145,7 +145,7 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
     // is correctly still kept apart.
     let has_general_array = members.iter().any(|m| matches!(m, Type::Array(_, _)));
     if has_general_array {
-        members.retain(|m| !matches!(m, Type::ArrayShape(fields) if fields.is_empty()));
+        members.retain(|m| !matches!(m, Type::ArrayShape(shape) if shape.is_empty_array()));
     }
     // Two structurally different `Array(key, val)` members merge into
     // one precise `Array(key1|key2, val1|val2)` instead of staying
@@ -206,17 +206,19 @@ fn union_types_impl(a: Type, b: Type, merge_shapes: bool) -> Type {
 /// for whatever's left ungeneralizable (a variable whose branches
 /// genuinely have different key sets).
 pub(crate) fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
-    type ShapeFields = Vec<(String, Type, bool)>;
-    let mut groups: Vec<(Vec<String>, Vec<ShapeFields>)> = Vec::new();
+    // A shape's keys, sorted, and whether it's sealed.
+    type KeySet = (Vec<ShapeKey>, bool);
+    let mut groups: Vec<(KeySet, Vec<Shape>)> = Vec::new();
     let mut passthrough: Vec<Type> = Vec::new();
     for m in members {
         match m {
-            Type::ArrayShape(fields) => {
-                let mut key_set: Vec<String> = fields.iter().map(|(k, _, _)| k.clone()).collect();
-                key_set.sort();
+            Type::ArrayShape(shape) => {
+                let mut keys: Vec<ShapeKey> = shape.fields.iter().map(|f| f.key.clone()).collect();
+                keys.sort();
+                let key_set = (keys, shape.is_sealed());
                 match groups.iter_mut().find(|(k, _)| *k == key_set) {
-                    Some((_, variants)) => variants.push(fields),
-                    None => groups.push((key_set, vec![fields])),
+                    Some((_, variants)) => variants.push(shape),
+                    None => groups.push((key_set, vec![shape])),
                 }
             }
             other => passthrough.push(other),
@@ -227,25 +229,29 @@ pub(crate) fn generalize_by_key_set(members: Vec<Type>) -> Vec<Type> {
             passthrough.push(Type::ArrayShape(variants.into_iter().next().unwrap()));
             continue;
         }
-        let field_names: Vec<String> = variants[0].iter().map(|(k, _, _)| k.clone()).collect();
-        let merged = field_names
-            .into_iter()
-            .map(|name| {
+        let fields = variants[0]
+            .fields
+            .iter()
+            .map(|first| {
                 let mut ty: Option<Type> = None;
                 let mut optional = false;
-                for fields in &variants {
-                    let (_, field_ty, field_opt) =
-                        fields.iter().find(|(k, _, _)| *k == name).unwrap();
+                for shape in &variants {
+                    let field = shape.field(&first.key).unwrap();
                     ty = Some(match ty {
-                        None => field_ty.clone(),
-                        Some(acc) => union_types(acc, field_ty.clone()),
+                        None => field.ty.clone(),
+                        Some(acc) => union_types(acc, field.ty.clone()),
                     });
-                    optional |= *field_opt;
+                    optional |= field.optional;
                 }
-                (name, ty.unwrap(), optional)
+                ShapeField::new(first.key.clone(), ty.unwrap(), optional)
             })
             .collect();
-        passthrough.push(Type::ArrayShape(merged));
+        let unsealed = variants
+            .iter()
+            .filter_map(|shape| shape.unsealed.as_deref().cloned())
+            .reduce(|(ka, va), (kb, vb)| (union_types(ka, kb), union_types(va, vb)))
+            .map(Box::new);
+        passthrough.push(Type::ArrayShape(Shape { fields, unsealed }));
     }
     passthrough
 }
@@ -386,7 +392,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
 /// scope-merge join point, mirroring real PHPStan's own observed
 /// behavior exactly (confirmed via `assertType()`/`dumpType()` against
 /// the vendored phar, not guessed): the two shapes only merge into one
-/// when one side's own real (non-`"..."`) key set is a *subset* of the
+/// when one side's own key set is a *subset* of the
 /// other's - the common shape a branch join actually produces (an `if`
 /// without an `else` merges the pre-branch shape with a strict extension
 /// of itself; a ternary between a shape and one of its own supersets
@@ -395,7 +401,7 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
 /// only one side becomes *optional* (not dropped - the value type it had
 /// on the one side that wrote it is still real, precise information)
 /// with that side's own value type - unioned with the other side's
-/// `...` tail type when that side is unsealed, since the key may live
+/// unsealed tail's value type, since the key may live
 /// there.
 ///
 /// Two shapes with genuinely incomparable key sets (neither a subset of
@@ -418,72 +424,57 @@ fn merge_has_offset_value_pair(a: &Type, b: &Type) -> Option<Type> {
 /// instead - a real, measured regression (confirmed via a dedicated
 /// probe test before this fix was written), not a hypothetical one.
 fn merge_array_shape_pair(a: &Type, b: &Type) -> Option<Type> {
-    let (Type::ArrayShape(fa), Type::ArrayShape(fb)) = (a, b) else {
+    let (Type::ArrayShape(sa), Type::ArrayShape(sb)) = (a, b) else {
         return None;
     };
-    fn field<'a>(
-        fields: &'a [(String, Type, bool)],
-        name: &str,
-    ) -> Option<&'a (String, Type, bool)> {
-        fields.iter().find(|(k, _, _)| k == name)
-    }
-    fn real_names(fields: &[(String, Type, bool)]) -> Vec<&str> {
-        fields
-            .iter()
-            .filter(|(k, _, _)| k != "...")
-            .map(|(k, _, _)| k.as_str())
-            .collect()
-    }
-    let (names_a, names_b) = (real_names(fa), real_names(fb));
-    let is_subset = |xs: &[&str], ys: &[&str]| xs.iter().all(|x| ys.contains(x));
-    if !(is_subset(&names_a, &names_b) || is_subset(&names_b, &names_a)) {
+    let is_subset = |xs: &Shape, ys: &Shape| xs.fields.iter().all(|f| ys.field(&f.key).is_some());
+    if !(is_subset(sa, sb) || is_subset(sb, sa)) {
         return None;
     }
-    // An unsealed side's `...` tail can hold any key it doesn't name, so
-    // a key named only by the other side may exist there too, with the
-    // tail's value type.
-    let rest_a = field(fa, "...").map(|(_, t, _)| t.clone());
-    let rest_b = field(fb, "...").map(|(_, t, _)| t.clone());
-    let mut all_names: Vec<&str> = names_a.clone();
-    for n in &names_b {
-        if !all_names.contains(n) {
-            all_names.push(n);
+    // An unsealed side's tail can hold any key it doesn't name, so a key
+    // named only by the other side may exist there too, with the tail's
+    // value type.
+    let rest_a = sa.unsealed.as_deref().map(|tail| tail.1.clone());
+    let rest_b = sb.unsealed.as_deref().map(|tail| tail.1.clone());
+    let mut keys: Vec<&ShapeKey> = sa.fields.iter().map(|f| &f.key).collect();
+    for f in &sb.fields {
+        if !keys.contains(&&f.key) {
+            keys.push(&f.key);
         }
     }
-    let mut merged: Vec<(String, Type, bool)> = Vec::new();
-    for name in all_names {
-        match (field(fa, name), field(fb, name)) {
-            (Some((_, ta, oa)), Some((_, tb, ob))) => {
-                merged.push((
-                    name.to_string(),
-                    union_types(ta.clone(), tb.clone()),
-                    *oa || *ob,
-                ));
-            }
-            (Some((_, ta, _)), None) => {
+    let mut merged = Shape::sealed(Vec::new());
+    for key in keys {
+        let field = match (sa.field(key), sb.field(key)) {
+            (Some(fa), Some(fb)) => ShapeField::new(
+                key.clone(),
+                union_types(fa.ty.clone(), fb.ty.clone()),
+                fa.optional || fb.optional,
+            ),
+            (Some(fa), None) => {
                 let ty = match &rest_b {
-                    Some(rest) => union_types(ta.clone(), rest.clone()),
-                    None => ta.clone(),
+                    Some(rest) => union_types(fa.ty.clone(), rest.clone()),
+                    None => fa.ty.clone(),
                 };
-                merged.push((name.to_string(), ty, true));
+                ShapeField::new(key.clone(), ty, true)
             }
-            (None, Some((_, tb, _))) => {
+            (None, Some(fb)) => {
                 let ty = match &rest_a {
-                    Some(rest) => union_types(tb.clone(), rest.clone()),
-                    None => tb.clone(),
+                    Some(rest) => union_types(fb.ty.clone(), rest.clone()),
+                    None => fb.ty.clone(),
                 };
-                merged.push((name.to_string(), ty, true));
+                ShapeField::new(key.clone(), ty, true)
             }
-            (None, None) => unreachable!("name came from one of the two lists"),
-        }
+            (None, None) => unreachable!("key came from one of the two shapes"),
+        };
+        merged.fields.push(field);
     }
-    let rest = match (rest_a, rest_b) {
-        (Some(a), Some(b)) => Some(union_types(a, b)),
-        (Some(r), None) | (None, Some(r)) => Some(r),
+    merged.unsealed = match (sa.unsealed.as_deref(), sb.unsealed.as_deref()) {
+        (Some((ka, va)), Some((kb, vb))) => Some(Box::new((
+            union_types(ka.clone(), kb.clone()),
+            union_types(va.clone(), vb.clone()),
+        ))),
+        (Some(tail), None) | (None, Some(tail)) => Some(Box::new(tail.clone())),
         (None, None) => None,
     };
-    if let Some(rest) = rest {
-        merged.push(("...".to_string(), rest, false));
-    }
     Some(Type::ArrayShape(merged))
 }

@@ -5,7 +5,7 @@ use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
 use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::has_explicit_mixed_nested_somewhere;
-use crate::types::{self, TemplateParam, Type};
+use crate::types::{self, Shape, TemplateParam, Type};
 use syntax::ast::TypeHint;
 use syntax::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use syntax::name_resolution::NameContext;
@@ -290,7 +290,7 @@ fn infer_const_type_with(
                 }
             }
             if exact {
-                Type::ArrayShape(fields)
+                Type::ArrayShape(Shape::from_named(fields))
             } else {
                 let mut values: Vec<Type> = Vec::new();
                 for (_, t, _) in fields {

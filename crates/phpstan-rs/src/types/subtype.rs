@@ -1,31 +1,33 @@
-use crate::types::{AccessoryKind, CallableParam, CallableSig, Type};
+use crate::types::{AccessoryKind, CallableParam, CallableSig, Shape, ShapeKey, Type};
 
-/// Whether `fields` (an `ArrayShape`'s field list) is a *definite* list,
-/// canonical-int-key-sequential from zero *and* no optional field
-/// followed by a later, non-optional one. Per real PHPStan's own
+/// Whether `shape` is a *definite* list: sealed, int-keyed sequentially
+/// from zero, *and* no optional field followed by a later, non-optional
+/// one. Per real PHPStan's own
 /// `ConstantArrayTypeBuilder` algorithm, `array{0: int, 1?: string, 2:
 /// int}` is only `Maybe`-a-list, since an absent optional field 1 would
 /// leave the remaining keys `{0, 2}` non-sequential - a `Maybe` counts
 /// as "not a definite list" here, the project's false-negative-favoring
 /// default.
-pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> bool {
+pub(crate) fn shape_fields_are_list_like(shape: &Shape) -> bool {
+    if !shape.is_sealed() {
+        return false;
+    }
     let mut seen_optional = false;
-    for (i, (k, _, optional)) in fields.iter().enumerate() {
-        if k != &i.to_string() {
+    for (i, field) in shape.fields.iter().enumerate() {
+        if field.key != ShapeKey::Int(i as i64) {
             return false;
         }
-        if seen_optional && !optional {
+        if seen_optional && !field.optional {
             return false;
         }
-        seen_optional |= optional;
+        seen_optional |= field.optional;
     }
     true
 }
 
 /// The aggregate key type real PHPStan's `ConstantArrayType::
-/// getIterableKeyType()` reports for a shape - the union of each *real*
-/// field's key kind (the `"..."` unsealed-tail sentinel contributes
-/// nothing). Lets `registry::assignability`/`is_subtype` compare an
+/// getIterableKeyType()` reports for a shape - the union of each
+/// field's key kind (an unsealed tail contributes nothing). Lets `registry::assignability`/`is_subtype` compare an
 /// `ArrayShape`'s real key type against a `Type::Array`'s declared one,
 /// so `array{name: string}` isn't wrongly assignable to
 /// `array<int, string>`. `Type::Never` for a shape with no real fields
@@ -37,12 +39,12 @@ pub(crate) fn shape_fields_are_list_like(fields: &[(String, Type, bool)]) -> boo
 /// fail against an `array<int<0, max>, ...>`-typed parameter (`Type::Int`
 /// isn't a confirmed subtype of `int<0, max>`, even though the one
 /// concrete key written always is non-negative).
-pub(crate) fn shape_key_type(fields: &[(String, Type, bool)]) -> Type {
+pub(crate) fn shape_key_type(shape: &Shape) -> Type {
     let mut key_types: Vec<Type> = Vec::new();
-    for (key, _, _) in fields.iter().filter(|(k, _, _)| k != "...") {
-        let kt = match crate::types::canonical_int_key(key) {
-            Some(n) => Type::IntLiteral(n),
-            None => Type::String,
+    for field in &shape.fields {
+        let kt = match field.key {
+            ShapeKey::Int(n) => Type::IntLiteral(n),
+            ShapeKey::Str(_) => Type::String,
         };
         if !key_types.contains(&kt) {
             key_types.push(kt);
@@ -211,11 +213,11 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
                 | AccessoryKind::NonEmptyString,
             ),
         ) => true,
-        (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
-            fields.iter().any(|(name, _, _)| name != "...")
+        (Type::ArrayShape(shape), Type::Accessory(AccessoryKind::NonEmptyArray)) => {
+            !shape.fields.is_empty()
         }
-        (Type::ArrayShape(fields), Type::Accessory(AccessoryKind::ArrayList)) => {
-            shape_fields_are_list_like(fields)
+        (Type::ArrayShape(shape), Type::Accessory(AccessoryKind::ArrayList)) => {
+            shape_fields_are_list_like(shape)
         }
 
         // An unbound template parameter is a placeholder; call sites
@@ -374,8 +376,8 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // be a subtype of the array's own declared key type -
         // `array{name: string}` (all-string-keyed) must never satisfy
         // `array<int, mixed>` just because the value side is lenient.
-        (Type::ArrayShape(fields), Type::Array(key, b)) => {
-            matches!(**b, Type::Mixed(_)) && is_subtype(&shape_key_type(fields), key)
+        (Type::ArrayShape(shape), Type::Array(key, b)) => {
+            matches!(**b, Type::Mixed(_)) && is_subtype(&shape_key_type(shape), key)
         }
 
         // An object shape is structurally an object, so it

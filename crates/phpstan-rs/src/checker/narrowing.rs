@@ -21,8 +21,8 @@ use accessory_range::{
 };
 pub(crate) use accessory_range::{resolve_concat_type, string_type_has_accessory};
 pub(crate) use array_shape::{
-    array_value_type_for_key, is_unsealed_shape, narrow_array_shape_by_key_presence,
-    narrow_isset_container, narrow_type_excluding_falsy,
+    array_value_type_for_key, narrow_array_shape_by_key_presence, narrow_isset_container,
+    narrow_type_excluding_falsy,
 };
 use predicates::preg_match_condition;
 pub(crate) use predicates::{
@@ -604,7 +604,7 @@ impl<'a> Checker<'a> {
                     false,
                 )
             } else {
-                Type::ArrayShape(vec![])
+                Type::ArrayShape(crate::types::Shape::sealed(Vec::new()))
             };
             purge_stale_narrowing_for(locals, matches_name);
             locals.insert(matches_name.to_string(), narrowed);

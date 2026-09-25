@@ -43,7 +43,7 @@
 use std::sync::Arc;
 
 use crate::registry::{ClassInfo, FunctionSig, Registry, register_global_constant};
-use crate::types::{self, AccessoryKind, TemplateParam, Type};
+use crate::types::{self, AccessoryKind, Shape, TemplateParam, Type};
 use syntax::lexer::Lexer;
 use syntax::parser::Parser;
 
@@ -542,7 +542,7 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
 /// dynamic-return-type extensions, not from either function's own bare
 /// `array`-returning stub text).
 fn backtrace_frame_list_type() -> Type {
-    let frame_shape = Type::ArrayShape(vec![
+    let frame_shape = Type::ArrayShape(Shape::from_named(vec![
         ("function".to_string(), Type::String, false),
         ("line".to_string(), Type::Int, true),
         ("file".to_string(), Type::String, true),
@@ -571,7 +571,7 @@ fn backtrace_frame_list_type() -> Type {
             true,
         ),
         ("object".to_string(), Type::ObjectWithoutClass, true),
-    ]);
+    ]));
     Type::Intersection(vec![
         Type::Array(Box::new(Type::unknown_array_key()), Box::new(frame_shape)),
         Type::Accessory(AccessoryKind::ArrayList),

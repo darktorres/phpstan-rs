@@ -1,4 +1,5 @@
 use super::*;
+use crate::types::Shape;
 
 #[test]
 fn extracts_positional_placeholders_in_order() {
@@ -33,11 +34,9 @@ fn describe_key_formats_named_and_positional_differently() {
 #[test]
 fn value_is_definitely_array_recognizes_both_array_type_shapes() {
     assert!(value_is_definitely_array(&Type::array_of(Type::Int)));
-    assert!(value_is_definitely_array(&Type::ArrayShape(vec![(
-        "a".to_string(),
-        Type::Int,
-        false
-    )])));
+    assert!(value_is_definitely_array(&Type::ArrayShape(
+        Shape::from_named(vec![("a".to_string(), Type::Int, false)])
+    )));
     assert!(!value_is_definitely_array(&Type::String));
     assert!(!value_is_definitely_array(&Type::Mixed(false)));
 }

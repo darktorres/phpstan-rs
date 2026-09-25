@@ -1392,11 +1392,11 @@ fn value_of_type(ty: Type) -> Type {
             .into_iter()
             .find(|m| matches!(m, Type::Array(..)))
             .map_or(Type::Mixed(false), value_of_type),
-        Type::ArrayShape(fields) => {
+        Type::ArrayShape(shape) => {
             let mut members: Vec<Type> = Vec::new();
-            for (name, t, _) in fields {
-                if name != "..." && !members.contains(&t) {
-                    members.push(t);
+            for f in shape.fields {
+                if !members.contains(&f.ty) {
+                    members.push(f.ty);
                 }
             }
             match members.len() {

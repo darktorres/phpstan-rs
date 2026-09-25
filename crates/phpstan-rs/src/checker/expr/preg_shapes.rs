@@ -1,6 +1,6 @@
 use crate::checker::type_union::{union_types, union_types_keep_shapes_distinct};
 use crate::regex_groups;
-use crate::types::{AccessoryKind, Type};
+use crate::types::{AccessoryKind, Shape, Type};
 use syntax::ast::*;
 
 /// The type of one matched group's "leaf" value in `preg_match`'s own
@@ -9,10 +9,10 @@ use syntax::ast::*;
 /// actually produces at runtime (the match text and its byte offset).
 pub(super) fn preg_leaf_type(offset_capture: bool) -> Type {
     if offset_capture {
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("0".to_string(), Type::String, false),
             ("1".to_string(), Type::Int, false),
-        ])
+        ]))
     } else {
         Type::String
     }
@@ -64,10 +64,11 @@ fn accessory_string(kind: AccessoryKind) -> Type {
 fn refine_leaf(leaf: &Type, refined: Type) -> Type {
     match leaf {
         Type::String => refined,
-        Type::ArrayShape(fields) if fields.len() == 2 => Type::ArrayShape(vec![
-            (fields[0].0.clone(), refined, fields[0].2),
-            fields[1].clone(),
-        ]),
+        Type::ArrayShape(shape) if shape.fields.len() == 2 => {
+            let mut shape = shape.clone();
+            shape.fields[0].ty = refined;
+            Type::ArrayShape(shape)
+        }
         _ => leaf.clone(),
     }
 }
@@ -156,7 +157,7 @@ pub(crate) fn preg_match_matches_shape(
             fields.push((name.clone(), ty, optional));
         }
     }
-    Type::ArrayShape(fields)
+    Type::ArrayShape(Shape::from_named(fields))
 }
 
 /// Dispatches `preg_match`'s own unconditional `$matches` shape to one of
@@ -376,7 +377,7 @@ pub(super) fn preg_match_all_pattern_order_shape(
             fields.push((name.clone(), arr_ty, false));
         }
     }
-    Type::ArrayShape(fields)
+    Type::ArrayShape(Shape::from_named(fields))
 }
 
 /// A bitwise-OR-chain flag collector for `preg_match`/`preg_match_all`'s

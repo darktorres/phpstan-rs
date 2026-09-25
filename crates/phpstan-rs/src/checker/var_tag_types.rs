@@ -63,16 +63,13 @@ fn is_array_like(ty: &Type) -> bool {
 
 fn offset_value_type(ty: &Type, key: &Type) -> Type {
     match ty {
-        Type::ArrayShape(fields) => {
-            let name = match key {
-                Type::IntLiteral(n) => n.to_string(),
-                Type::StringLiteral(s) => s.clone(),
-                _ => return Type::Mixed(false),
+        Type::ArrayShape(shape) => {
+            let Some(key) = crate::types::ShapeKey::from_type(key) else {
+                return Type::Mixed(false);
             };
-            fields
-                .iter()
-                .find(|(k, _, _)| *k == name)
-                .map_or(Type::Mixed(false), |(_, t, _)| t.clone())
+            shape
+                .field(&key)
+                .map_or(Type::Mixed(false), |f| f.ty.clone())
         }
         other => Checker::array_element_type(other).unwrap_or(Type::Mixed(false)),
     }
@@ -747,7 +744,7 @@ impl<'a> Checker<'a> {
         if matches!(ty, Type::Mixed(_)) {
             return true;
         }
-        if matches!(ty, Type::ArrayShape(fields) if fields.is_empty()) {
+        if matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array()) {
             let array = Type::Array(
                 Box::new(Type::unknown_array_key()),
                 Box::new(Type::Mixed(false)),

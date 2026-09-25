@@ -178,7 +178,7 @@ pub(crate) fn is_known_single_value(ty: &Type) -> bool {
     // excludes the empty shape - an empty array literal is exactly as
     // exhaustively single-valued as `''`/a literal int, just structural
     // rather than a scalar `Type` variant.
-    matches!(ty, Type::ArrayShape(fields) if fields.is_empty())
+    matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array())
 }
 
 pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
@@ -218,7 +218,7 @@ pub(crate) fn narrow_type_excluding(original: &Type, excluded: &Type) -> Type {
         // `upgrade_array_to_non_empty` with `!empty($x)`/`count($x) > 0`
         // so the three
         // "prove this array is non-empty" paths can't drift apart.
-        Type::Array(..) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(fields) if fields.is_empty()) => {
+        Type::Array(..) | Type::Intersection(_) if matches!(excluded, Type::ArrayShape(shape) if shape.is_empty_array()) => {
             upgrade_array_to_non_empty(original)
         }
         // Real PHP's own `Traversable` is a marker interface userland

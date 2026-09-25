@@ -28,7 +28,7 @@
 
 use crate::checker::{Checker, Locals};
 use crate::diagnostic::DiagnosticBuilder;
-use crate::types::Type;
+use crate::types::{ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 
@@ -178,9 +178,9 @@ impl<'a> Checker<'a> {
         if self.registry.check_psr3_exception_context && !levels.is_empty() {
             let has_exception_key = match &context_ty {
                 None => false,
-                Some(Type::ArrayShape(fields)) => fields
-                    .iter()
-                    .any(|(k, _, optional)| k == "exception" && !optional),
+                Some(Type::ArrayShape(shape)) => shape
+                    .field(&ShapeKey::from_name("exception"))
+                    .is_some_and(|f| !f.optional),
                 Some(_) => true,
             };
             if !has_exception_key
@@ -301,15 +301,15 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let Type::ArrayShape(fields) = context_ty else {
+            let Type::ArrayShape(shape) = context_ty else {
                 continue;
             };
             let missing: Vec<String> = names
                 .iter()
-                .filter(|n| !fields.iter().any(|(k, _, _)| k == *n))
+                .filter(|n| shape.field(&ShapeKey::from_name(n)).is_none())
                 .map(|n| format!("{{{n}}}"))
                 .collect();
-            if !missing.is_empty() && !fields.iter().any(|(k, ..)| k == "...") {
+            if !missing.is_empty() && shape.is_sealed() {
                 self.report(
                     label.to_string(),
                     format!(
@@ -321,7 +321,8 @@ impl<'a> Checker<'a> {
                     "psr3.placeholderMissingKey",
                 );
             }
-            for (key, value, _) in fields {
+            for field in &shape.fields {
+                let (key, value) = (field.key.to_string(), &field.ty);
                 if names.contains(&key.as_str()) && !self.converts_to_string(value) {
                     self.report(
                         label.to_string(),
@@ -336,13 +337,11 @@ impl<'a> Checker<'a> {
     }
 
     fn check_psr3_context(&mut self, context: &Type, span: Span, label: &str) {
-        let Type::ArrayShape(fields) = context else {
+        let Type::ArrayShape(shape) = context else {
             return;
         };
-        for (key, value, _) in fields {
-            if key == "..." {
-                continue;
-            }
+        for field in &shape.fields {
+            let (key, value) = (field.key.to_string(), &field.ty);
             if key.is_empty() || key.parse::<i64>().is_ok() {
                 self.report(
                     label.to_string(),
@@ -353,7 +352,7 @@ impl<'a> Checker<'a> {
                 );
             }
             if let Some(pattern) = &self.registry.psr3_context_key_pattern
-                && !pattern.is_match(key)
+                && !pattern.is_match(&key)
             {
                 self.report(
                     label.to_string(),

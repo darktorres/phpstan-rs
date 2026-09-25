@@ -152,11 +152,11 @@ fn a_positional_array_shape_wrapped_in_array_shorthand_parses() {
         parse_type_string("array{int, string, string}[]"),
         Type::Array(
             Box::new(Type::benevolent_array_key()),
-            Box::new(Type::ArrayShape(vec![
+            Box::new(Type::ArrayShape(Shape::from_named(vec![
                 ("0".to_string(), Type::Int, false),
                 ("1".to_string(), Type::String, false),
                 ("2".to_string(), Type::String, false),
-            ]))
+            ])))
         )
     );
 }
@@ -205,10 +205,10 @@ fn a_list_shape_parses_identically_to_the_array_shape_spelling() {
     // qualified "class name" instead.
     assert_eq!(
         parse_type_string("list{int, string}"),
-        Type::ArrayShape(vec![
+        Type::ArrayShape(Shape::from_named(vec![
             ("0".to_string(), Type::Int, false),
             ("1".to_string(), Type::String, false),
-        ])
+        ]))
     );
 }
 
@@ -216,11 +216,11 @@ fn a_list_shape_parses_identically_to_the_array_shape_spelling() {
 fn a_non_empty_array_shape_and_a_non_empty_list_shape_both_parse() {
     assert_eq!(
         parse_type_string("non-empty-array{a: int}"),
-        Type::ArrayShape(vec![("a".to_string(), Type::Int, false)])
+        Type::ArrayShape(Shape::from_named(vec![("a".to_string(), Type::Int, false)]))
     );
     assert_eq!(
         parse_type_string("non-empty-list{int}"),
-        Type::ArrayShape(vec![("0".to_string(), Type::Int, false)])
+        Type::ArrayShape(Shape::from_named(vec![("0".to_string(), Type::Int, false)]))
     );
 }
 
@@ -236,7 +236,11 @@ fn a_class_name_merely_starting_with_list_is_not_mistaken_for_a_list_shape() {
 fn a_negative_shape_key_parses_as_a_real_int_literal() {
     assert_eq!(
         parse_type_string("array{-5: int}"),
-        Type::ArrayShape(vec![("-5".to_string(), Type::Int, false)])
+        Type::ArrayShape(Shape::from_named(vec![(
+            "-5".to_string(),
+            Type::Int,
+            false
+        )]))
     );
 }
 
@@ -244,7 +248,11 @@ fn a_negative_shape_key_parses_as_a_real_int_literal() {
 fn a_leading_zero_shape_key_stays_a_string_literal_not_an_int() {
     assert_eq!(
         parse_type_string("array{'01': int}"),
-        Type::ArrayShape(vec![("01".to_string(), Type::Int, false)])
+        Type::ArrayShape(Shape::from_named(vec![(
+            "01".to_string(),
+            Type::Int,
+            false
+        )]))
     );
     // The key itself isn't the assertion - `shape_key_literal` (the
     // Type::IntLiteral/StringLiteral choice `value-of<T>`/`key-of<T>` and
@@ -261,7 +269,11 @@ fn an_explicit_zero_key_collides_with_and_overwrites_an_earlier_positional_field
     // fields both keyed "0".
     assert_eq!(
         parse_type_string("array{int, 0: string}"),
-        Type::ArrayShape(vec![("0".to_string(), Type::String, false)])
+        Type::ArrayShape(Shape::from_named(vec![(
+            "0".to_string(),
+            Type::String,
+            false
+        )]))
     );
 }
 
@@ -269,7 +281,11 @@ fn an_explicit_zero_key_collides_with_and_overwrites_an_earlier_positional_field
 fn a_literal_duplicate_shape_key_is_merged_last_one_wins() {
     assert_eq!(
         parse_type_string("array{foo: int, foo: string}"),
-        Type::ArrayShape(vec![("foo".to_string(), Type::String, false)])
+        Type::ArrayShape(Shape::from_named(vec![(
+            "foo".to_string(),
+            Type::String,
+            false
+        )]))
     );
 }
 
@@ -279,7 +295,11 @@ fn a_keyed_array_shape_wrapped_in_array_shorthand_parses() {
         parse_type_string("array{a: int}[]"),
         Type::Array(
             Box::new(Type::benevolent_array_key()),
-            Box::new(Type::ArrayShape(vec![("a".to_string(), Type::Int, false)]))
+            Box::new(Type::ArrayShape(Shape::from_named(vec![(
+                "a".to_string(),
+                Type::Int,
+                false
+            )])))
         )
     );
 }
@@ -290,7 +310,11 @@ fn an_object_shape_wrapped_in_array_shorthand_parses() {
         parse_type_string("object{a: int}[]"),
         Type::Array(
             Box::new(Type::benevolent_array_key()),
-            Box::new(Type::ObjectShape(vec![("a".to_string(), Type::Int, false)]))
+            Box::new(Type::ObjectShape(Shape::from_named(vec![(
+                "a".to_string(),
+                Type::Int,
+                false
+            )])))
         )
     );
 }
@@ -744,13 +768,13 @@ fn a_quoted_literal_containing_a_bracket_shaped_character_does_not_corrupt_the_u
 fn a_quoted_literal_containing_a_bracket_shaped_character_inside_an_array_shape() {
     assert_eq!(
         parse_type_string("array{type?: '->'|'::'}"),
-        Type::ArrayShape(vec![(
+        Type::ArrayShape(Shape::from_named(vec![(
             "type".to_string(),
             Type::Union(vec![
                 Type::StringLiteral("->".to_string()),
                 Type::StringLiteral("::".to_string()),
             ]),
             true,
-        )])
+        )]))
     );
 }

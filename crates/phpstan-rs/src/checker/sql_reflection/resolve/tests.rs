@@ -18,6 +18,7 @@ fn a_wildcard_select_resolves_every_column_in_declared_order() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 3);
     assert_eq!(fields[0].0, "id");
     assert_eq!(fields[1].0, "name");
@@ -31,6 +32,7 @@ fn an_explicit_column_list_resolves_only_those_columns() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 2);
     assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
     assert_eq!(fields[1], ("name".to_string(), Type::String, false));
@@ -44,6 +46,7 @@ fn an_aliased_column_uses_the_alias_as_the_field_name() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("category_id".to_string(), Type::Int, false));
 }
 
@@ -54,6 +57,7 @@ fn a_table_qualified_column_resolves_by_its_own_bare_name() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
 }
 
@@ -95,6 +99,7 @@ fn resolve_sql_row_type_uses_the_static_schema_when_configured_and_no_live_refle
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields.len(), 2);
 }
 
@@ -142,14 +147,15 @@ fn count_column_positions_does_not_match_sum_or_other_aggregates() {
 
 #[test]
 fn refine_count_columns_overwrites_only_the_count_field() {
-    let row_type = Type::ArrayShape(vec![
+    let row_type = Type::ArrayShape(Shape::from_named(vec![
         ("id".to_string(), Type::Int, false),
         ("total".to_string(), Type::String, false),
-    ]);
+    ]));
     let refined = refine_count_columns("SELECT id, COUNT(*) AS total FROM categories", row_type);
     let Type::ArrayShape(fields) = refined else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("id".to_string(), Type::Int, false));
     assert_eq!(
         fields[1],
@@ -159,11 +165,16 @@ fn refine_count_columns_overwrites_only_the_count_field() {
 
 #[test]
 fn refine_count_columns_leaves_non_count_rows_untouched() {
-    let row_type = Type::ArrayShape(vec![("total".to_string(), Type::String, false)]);
+    let row_type = Type::ArrayShape(Shape::from_named(vec![(
+        "total".to_string(),
+        Type::String,
+        false,
+    )]));
     let refined = refine_count_columns("SELECT SUM(id) AS total FROM categories", row_type);
     let Type::ArrayShape(fields) = refined else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("total".to_string(), Type::String, false));
 }
 
@@ -180,6 +191,7 @@ fn resolve_pure_ast_resolves_integer_and_string_literals_with_no_driver_at_all()
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("1".to_string(), Type::Int, false));
     assert_eq!(fields[1], ("x".to_string(), Type::String, false));
 }
@@ -190,6 +202,7 @@ fn resolve_pure_ast_resolves_null_and_a_negative_integer() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("NULL".to_string(), Type::Null, false));
     assert_eq!(fields[1], ("-1".to_string(), Type::Int, false));
 }
@@ -200,6 +213,7 @@ fn resolve_pure_ast_uses_an_alias_over_the_source_text_when_present() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0], ("one".to_string(), Type::Int, false));
 }
 
@@ -209,6 +223,7 @@ fn resolve_pure_ast_resolves_a_bare_count_star_with_no_from_at_all() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0].0, "COUNT(*)");
     assert_eq!(fields[0].1, Type::Int);
 }
@@ -224,6 +239,7 @@ fn resolve_pure_ast_resolves_a_decimal_literal_as_string_for_mysql() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0].1, Type::String);
 }
 
@@ -233,6 +249,7 @@ fn resolve_pure_ast_resolves_a_decimal_literal_as_float_for_sqlite() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0].1, Type::Float);
 }
 
@@ -247,13 +264,13 @@ fn resolve_pure_ast_resolves_a_boolean_literal_as_bool_for_postgres_but_int_for_
     let Type::ArrayShape(pg_fields) = pg else {
         panic!("expected an ArrayShape");
     };
-    assert_eq!(pg_fields[0].1, Type::Bool);
+    assert_eq!(pg_fields.fields[0].ty, Type::Bool);
 
     let mysql = resolve_pure_ast("SELECT true", Some(SqlDriver::Mysql)).unwrap();
     let Type::ArrayShape(mysql_fields) = mysql else {
         panic!("expected an ArrayShape");
     };
-    assert_eq!(mysql_fields[0].1, Type::Int);
+    assert_eq!(mysql_fields.fields[0].ty, Type::Int);
 }
 
 #[test]
@@ -268,6 +285,7 @@ fn resolve_sql_row_type_answers_a_pure_literal_query_with_nothing_configured_at_
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields[0].1, Type::Int);
     assert_eq!(fields[1].1, Type::String);
 }
@@ -311,7 +329,11 @@ fn single_table_name_returns_none_for_a_join() {
 #[test]
 fn cross_reference_entity_fields_is_a_no_op_with_no_matching_entity() {
     let registry = Registry::default();
-    let row_type = Type::ArrayShape(vec![("name".to_string(), Type::String, false)]);
+    let row_type = Type::ArrayShape(Shape::from_named(vec![(
+        "name".to_string(),
+        Type::String,
+        false,
+    )]));
     let result =
         cross_reference_entity_fields(&registry, "SELECT name FROM categories", row_type.clone());
     assert_eq!(result, row_type);
@@ -328,6 +350,7 @@ fn a_derived_table_resolves_through_the_same_static_schema_lookup() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields, vec![("id".to_string(), Type::Int, false)]);
 }
 
@@ -342,6 +365,7 @@ fn a_non_recursive_cte_resolves_through_the_same_static_schema_lookup() {
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
+    let fields = fields.named_fields();
     assert_eq!(fields, vec![("name".to_string(), Type::String, false)]);
 }
 

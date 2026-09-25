@@ -302,13 +302,13 @@ impl<'a> Checker<'a> {
         };
         let int_key = matches!(offset.unwrap_paren(), TypeNode::IntLiteral(_));
         match &base {
-            Type::ArrayShape(fields) => {
-                let sealed = !fields.iter().any(|(k, _, _)| k == "...");
-                match &key {
-                    Some(k) => sealed && !fields.iter().any(|(name, _, _)| name == k),
-                    None => false,
+            Type::ArrayShape(shape) => match &key {
+                Some(k) => {
+                    shape.is_sealed()
+                        && shape.field(&crate::types::ShapeKey::from_name(k)).is_none()
                 }
-            }
+                None => false,
+            },
             Type::Array(..) | Type::Intersection(_) => {
                 key.is_none() && is_class_name_offset(offset)
             }

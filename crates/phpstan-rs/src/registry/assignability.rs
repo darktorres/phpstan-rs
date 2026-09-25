@@ -364,11 +364,11 @@ impl Registry {
             // the value-side `Mixed` check right next to it - only a
             // *genuinely narrower, known* key type (a real `Type::Int`/
             // `Type::String`) is held to the real subtyping check.
-            (Type::Array(key, a), Type::ArrayShape(fields)) => {
+            (Type::Array(key, a), Type::ArrayShape(shape)) => {
                 !self.strict_mixed_arrays
                     && matches!(**a, Type::Mixed(_))
                     && (**key == Type::unknown_array_key()
-                        || self.is_assignable(key, &types::shape_key_type(fields)))
+                        || self.is_assignable(key, &types::shape_key_type(shape)))
             }
             // Now that an array literal carries a real per-position/
             // per-key shape instead of always reading as `Array(Mixed)`,
@@ -388,15 +388,12 @@ impl Registry {
             // `array{name: string}` (an all-string-keyed shape) would be
             // silently accepted as satisfying `array<int, string>`,
             // checking only whether every field's value type matched.
-            (Type::ArrayShape(fields), Type::Array(key, b)) => {
-                self.is_assignable(&types::shape_key_type(fields), key)
-                    && fields
-                        .iter()
-                        .filter(|(name, _, _)| name != "...")
-                        .all(|(_, ty, _)| {
-                            (!self.strict_mixed_arrays && matches!(ty, Type::Mixed(_)))
-                                || self.is_assignable(ty, b)
-                        })
+            (Type::ArrayShape(shape), Type::Array(key, b)) => {
+                self.is_assignable(&types::shape_key_type(shape), key)
+                    && shape.fields.iter().all(|f| {
+                        (!self.strict_mixed_arrays && matches!(f.ty, Type::Mixed(_)))
+                            || self.is_assignable(&f.ty, b)
+                    })
             }
             // Same completion for shape-to-shape: a literal's own shape
             // satisfies a declared shape when every field the declared
@@ -404,25 +401,13 @@ impl Registry {
             // be missing) with an assignable type - extra fields the
             // literal has beyond what's required are ignored, the same
             // "structural, not exact" spirit `Array(Mixed)`'s own
-            // leniency already uses elsewhere in this match. The
-            // unsealed-shape sentinel (`is_unsealed_shape`'s own doc
-            // comment) is filtered out of both sides first - it's a
-            // marker, not a real required field, and would otherwise
-            // wrongly fail this check the moment either shape happened
-            // to be unsealed (`None => *optional` sees a "required"
-            // field named `"..."` that plainly never exists on the
-            // other side).
-            (Type::ArrayShape(sub_fields), Type::ArrayShape(sup_fields)) => {
-                sup_fields.iter().filter(|(name, _, _)| name != "...").all(
-                    |(name, sup_ty, optional)| match sub_fields
-                        .iter()
-                        .filter(|(n, _, _)| n != "...")
-                        .find(|(n, _, _)| n == name)
-                    {
-                        Some((_, sub_ty, _)) => self.is_assignable(sub_ty, sup_ty),
-                        None => *optional,
-                    },
-                )
+            // leniency already uses elsewhere in this match. Either
+            // side's unsealed tail takes no part.
+            (Type::ArrayShape(sub), Type::ArrayShape(sup)) => {
+                sup.fields.iter().all(|f| match sub.field(&f.key) {
+                    Some(sub_field) => self.is_assignable(&sub_field.ty, &f.ty),
+                    None => f.optional,
+                })
             }
             // The `object{...}`-flavored sibling of the two `ArrayShape`
             // rules just above - a real class instance
@@ -437,21 +422,19 @@ impl Registry {
             // matching `Array(Mixed)`'s own established leniency for the
             // identical "can't verify, don't guess wrong" situation.
             (Type::ObjectWithoutClass, Type::ObjectShape(_)) => true,
-            (Type::Object(class, _), Type::ObjectShape(fields)) => {
+            (Type::Object(class, _), Type::ObjectShape(shape)) => {
                 class == "stdClass"
-                    || fields.iter().all(|(name, sup_ty, optional)| {
-                        match self.lookup_property(class, name) {
-                            Some(p) => self.is_assignable(&p.ty, sup_ty),
-                            None => *optional,
+                    || shape.fields.iter().all(|f| {
+                        match self.lookup_property(class, &f.key.to_string()) {
+                            Some(p) => self.is_assignable(&p.ty, &f.ty),
+                            None => f.optional,
                         }
                     })
             }
-            (Type::ObjectShape(sub_fields), Type::ObjectShape(sup_fields)) => {
-                sup_fields.iter().all(|(name, sup_ty, optional)| {
-                    match sub_fields.iter().find(|(n, _, _)| n == name) {
-                        Some((_, sub_ty, _)) => self.is_assignable(sub_ty, sup_ty),
-                        None => *optional,
-                    }
+            (Type::ObjectShape(sub), Type::ObjectShape(sup)) => {
+                sup.fields.iter().all(|f| match sub.field(&f.key) {
+                    Some(sub_field) => self.is_assignable(&sub_field.ty, &f.ty),
+                    None => f.optional,
                 })
             }
             // Same unresolved-`@phpstan-type`-alias leniency as the
@@ -813,7 +796,7 @@ fn is_finite_scalar_type(ty: &Type) -> bool {
             | Type::StringLiteral(_)
             | Type::FloatLiteral(_)
             | Type::EnumCase(_, _)
-    ) || matches!(ty, Type::ArrayShape(fields) if fields.is_empty())
+    ) || matches!(ty, Type::ArrayShape(shape) if shape.is_empty_array())
 }
 
 #[derive(PartialEq)]

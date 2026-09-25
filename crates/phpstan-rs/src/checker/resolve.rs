@@ -598,14 +598,14 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::ArrayShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_unknown_class_names(t, out);
                 }
             }
             // `object{...}`'s own field types need checking for
             // existence too.
             Type::ObjectShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_unknown_class_names(t, out);
                 }
             }
@@ -645,12 +645,12 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::ArrayShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_trait_class_names(t, out);
                 }
             }
             Type::ObjectShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_trait_class_names(t, out);
                 }
             }
@@ -711,7 +711,7 @@ impl<'a> Checker<'a> {
                 }
             }
             Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-                for (_, t, _) in fields {
+                for t in fields.types() {
                     self.collect_bare_parent_refs(t, found);
                 }
             }
@@ -827,7 +827,7 @@ fn collect_prefixed_class_names<'b>(ty: &'b Type, out: &mut Vec<(&'b str, &'stat
             }
         }
         Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
-            for (_, t, _) in fields {
+            for t in fields.types() {
                 collect_prefixed_class_names(t, out);
             }
         }

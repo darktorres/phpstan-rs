@@ -5,7 +5,7 @@
 
 use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals};
-use crate::types::{Type, parse_type_string};
+use crate::types::{Shape, ShapeField, ShapeKey, Type, parse_type_string};
 use syntax::ast::*;
 
 /// The statements that produce a result set - anything else (`INSERT`,
@@ -65,11 +65,8 @@ impl<'a> Checker<'a> {
                     sql,
                 );
                 match row {
-                    Some(Type::ArrayShape(fields)) => {
-                        let widened = fields
-                            .into_iter()
-                            .map(|(k, ty, opt)| (k, widen_for_text_protocol(&ty), opt))
-                            .collect();
+                    Some(Type::ArrayShape(shape)) => {
+                        let widened = shape.map_types(&mut widen_for_text_protocol);
                         Type::Object("mysqli_result".to_string(), vec![Type::ArrayShape(widened)])
                     }
                     _ => Type::Object("mysqli_result".to_string(), Vec::new()),
@@ -98,26 +95,33 @@ impl<'a> Checker<'a> {
         row: Option<&Type>,
         arg: Option<&Expr>,
     ) -> Option<Type> {
-        let Some(Type::ArrayShape(fields)) = row else {
+        let Some(Type::ArrayShape(shape)) = row else {
             return None;
         };
-        let assoc = || Type::ArrayShape(fields.clone());
+        let fields = &shape.fields;
+        let assoc = || Type::ArrayShape(shape.clone());
         let numeric = || {
-            Type::ArrayShape(
+            Type::ArrayShape(Shape::sealed(
                 fields
                     .iter()
                     .enumerate()
-                    .map(|(i, (_, ty, opt))| (i.to_string(), ty.clone(), *opt))
+                    .map(|(i, f)| {
+                        ShapeField::new(ShapeKey::Int(i as i64), f.ty.clone(), f.optional)
+                    })
                     .collect(),
-            )
+            ))
         };
         let both = || {
             let mut merged = Vec::new();
-            for (i, (key, ty, opt)) in fields.iter().enumerate() {
-                merged.push((i.to_string(), ty.clone(), *opt));
-                merged.push((key.clone(), ty.clone(), *opt));
+            for (i, f) in fields.iter().enumerate() {
+                merged.push(ShapeField::new(
+                    ShapeKey::Int(i as i64),
+                    f.ty.clone(),
+                    f.optional,
+                ));
+                merged.push(f.clone());
             }
-            Type::ArrayShape(merged)
+            Type::ArrayShape(Shape::sealed(merged))
         };
         // `false` only reports a failure the exception mode throws for.
         let end = if self.mysqli_throws_exceptions() {
@@ -154,9 +158,9 @@ impl<'a> Checker<'a> {
                     Some(ExprKind::Literal(Literal::Int(n))) if *n >= 0 => *n as usize,
                     _ => return None,
                 };
-                let (_, ty, _) = fields.get(index)?;
+                let field = fields.get(index)?;
                 // No more rows is `false` here, not `null`.
-                union_types(ty.clone(), Type::False)
+                union_types(field.ty.clone(), Type::False)
             }
             _ => return None,
         })

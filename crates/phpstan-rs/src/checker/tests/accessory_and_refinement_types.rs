@@ -3,6 +3,7 @@
 use super::super::*;
 use super::helpers::*;
 use crate::types::AccessoryKind;
+use crate::types::Shape;
 
 // Exact type equality is the wrong tool for "is this the kind of thing
 // being narrowed" - both `narrow_type_to`/`narrow_type_excluding`
@@ -140,7 +141,7 @@ fn union_types_does_not_collapse_a_real_class_intersection() {
 #[test]
 fn union_types_caps_runaway_member_growth_instead_of_hanging() {
     let result = (0..20)
-        .map(|i| Type::ArrayShape(vec![(i.to_string(), Type::Int, false)]))
+        .map(|i| Type::ArrayShape(Shape::from_named(vec![(i.to_string(), Type::Int, false)])))
         .reduce(union_types)
         .unwrap();
     assert_eq!(
@@ -177,7 +178,7 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
         (0..12)
             .map(|i| {
                 let value = if i % 2 == 0 { Type::True } else { Type::False };
-                Type::ArrayShape(vec![("x".to_string(), value, false)])
+                Type::ArrayShape(Shape::from_named(vec![("x".to_string(), value, false)]))
             })
             .collect(),
     );
@@ -186,10 +187,15 @@ fn union_types_itself_generalizes_before_collapsing_to_mixed() {
     // existing dedup (`!members.contains(&other)`) would otherwise
     // silently no-op adding a 13th member that already exists,
     // masking whether generalization ran at all.
-    let thirteenth = Type::ArrayShape(vec![("x".to_string(), Type::Null, false)]);
+    let thirteenth = Type::ArrayShape(Shape::from_named(vec![(
+        "x".to_string(),
+        Type::Null,
+        false,
+    )]));
     let result = union_types(first_twelve, thirteenth);
     match result {
         Type::ArrayShape(fields) => {
+            let fields = fields.named_fields();
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, "x");
         }

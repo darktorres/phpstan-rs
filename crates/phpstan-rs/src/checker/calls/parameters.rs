@@ -10,7 +10,7 @@ use crate::checker::{Checker, Locals, union_types};
 use crate::diagnostic::DiagnosticBuilder;
 use crate::php_version::PhpFeature;
 use crate::registry::{FunctionSig, ParamSig};
-use crate::types::Type;
+use crate::types::{Shape, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;
 
@@ -363,45 +363,49 @@ impl<'a> Checker<'a> {
         ty: &Type,
         has_named: &mut bool,
     ) -> Option<Vec<Argument<'e>>> {
-        let shapes: Vec<&Vec<(String, Type, bool)>> = match ty {
-            Type::ArrayShape(fields) => vec![fields],
+        let shapes: Vec<&Shape> = match ty {
+            Type::ArrayShape(shape) => vec![shape],
             Type::Union(members) => members
                 .iter()
                 .map(|m| match m {
-                    Type::ArrayShape(fields) => Some(fields),
+                    Type::ArrayShape(shape) => Some(shape),
                     _ => None,
                 })
                 .collect::<Option<Vec<_>>>()?,
             _ => return None,
         };
-        let unsealed = shapes.iter().any(|f| f.iter().any(|(k, _, _)| k == "..."));
+        let unsealed = shapes.iter().any(|shape| !shape.is_sealed());
         let size = if unsealed {
             0
         } else {
-            shapes.iter().map(|f| f.len()).min().unwrap_or(0)
+            shapes
+                .iter()
+                .map(|shape| shape.fields.len())
+                .min()
+                .unwrap_or(0)
         };
         let mut out = Vec::new();
         for j in 0..size {
             let mut value_ty: Option<Type> = None;
-            let mut common_key: Option<Option<&str>> = None;
+            let mut common_key: Option<Option<&ShapeKey>> = None;
             let mut optional = false;
-            for fields in &shapes {
-                let (key, field_ty, is_optional) = &fields[j];
-                optional = *is_optional;
+            for shape in &shapes {
+                let field = &shape.fields[j];
+                optional = field.optional;
                 value_ty = Some(match value_ty {
-                    Some(t) => union_types(t, field_ty.clone()),
-                    None => field_ty.clone(),
+                    Some(t) => union_types(t, field.ty.clone()),
+                    None => field.ty.clone(),
                 });
                 common_key = match common_key {
-                    None => Some(Some(key.as_str())),
-                    Some(Some(k)) if k == key => Some(Some(k)),
+                    None => Some(Some(&field.key)),
+                    Some(Some(k)) if *k == field.key => Some(Some(k)),
                     _ => Some(None),
                 };
             }
-            let name = common_key
-                .flatten()
-                .filter(|k| crate::types::canonical_int_key(k).is_none())
-                .map(str::to_string);
+            let name = match common_key.flatten() {
+                Some(ShapeKey::Str(name)) => Some(name.clone()),
+                _ => None,
+            };
             if name.is_some() {
                 *has_named = true;
             }

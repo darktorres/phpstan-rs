@@ -2,6 +2,7 @@
 
 use super::super::*;
 use super::helpers::*;
+use crate::types::Shape;
 
 #[test]
 fn a_dynamic_write_disables_typo_catching_for_the_rest_of_that_variable() {
@@ -48,7 +49,7 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
     let members: Vec<Type> = (0..13)
         .map(|i| {
             let value = if i % 2 == 0 { Type::True } else { Type::False };
-            Type::ArrayShape(vec![("x".to_string(), value, false)])
+            Type::ArrayShape(Shape::from_named(vec![("x".to_string(), value, false)]))
         })
         .collect();
     let result = generalize_by_key_set(members);
@@ -59,6 +60,7 @@ fn generalize_by_key_set_merges_same_key_set_shapes_instead_of_collapsing() {
     );
     match &result[0] {
         Type::ArrayShape(fields) => {
+            let fields = fields.named_fields();
             assert_eq!(fields.len(), 1);
             assert_eq!(fields[0].0, "x");
             assert!(!fields[0].2, "the merged field must not be optional");
@@ -80,10 +82,14 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
     let mut members: Vec<Type> = (0..13)
         .map(|i| {
             let value = if i % 2 == 0 { Type::True } else { Type::False };
-            Type::ArrayShape(vec![("x".to_string(), value, false)])
+            Type::ArrayShape(Shape::from_named(vec![("x".to_string(), value, false)]))
         })
         .collect();
-    members.extend((0..5).map(|i| Type::ArrayShape(vec![(format!("y{i}"), Type::Int, false)])));
+    members.extend(
+        (0..5).map(|i| {
+            Type::ArrayShape(Shape::from_named(vec![(format!("y{i}"), Type::Int, false)]))
+        }),
+    );
     let result = generalize_by_key_set(members);
     // The 13 same-key-set ("x") shapes merge into 1; the 5
     // different-key-set ("y0".."y4") shapes each stay distinct and
@@ -91,7 +97,7 @@ fn generalize_by_key_set_only_merges_the_matching_subset() {
     assert_eq!(result.len(), 6, "expected 1 merged + 5 untouched members");
     let untouched_y_shapes = result
             .iter()
-            .filter(|m| matches!(m, Type::ArrayShape(fields) if fields.len() == 1 && fields[0].0.starts_with('y')))
+            .filter(|m| matches!(m, Type::ArrayShape(shape) if shape.fields.len() == 1 && shape.fields[0].key.to_string().starts_with('y')))
             .count();
     assert_eq!(
         untouched_y_shapes, 5,

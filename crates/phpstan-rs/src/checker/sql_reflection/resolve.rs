@@ -45,7 +45,7 @@ use crate::checker::type_union::union_types;
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
 use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
-use crate::types::Type;
+use crate::types::{Shape, ShapeField, Type};
 
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
     let driver = registry.sql_reflection_config.as_ref().map(|c| c.driver);
@@ -100,8 +100,10 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
         return row_type;
     };
     let refined = fields
+        .fields
         .iter()
-        .map(|(name, ty, optional)| {
+        .map(|f| {
+            let name = f.key.to_string();
             let property = entity
                 .column_names
                 .iter()
@@ -109,14 +111,17 @@ fn cross_reference_entity_fields(registry: &Registry, sql: &str, row_type: Type)
                 .map(|(property, _)| property);
             let entity_ty = property.and_then(|p| entity.fields.get(p));
             match entity_ty {
-                Some(entity_ty) if crate::types::is_subtype(entity_ty, ty) => {
-                    (name.clone(), entity_ty.clone(), *optional)
+                Some(entity_ty) if crate::types::is_subtype(entity_ty, &f.ty) => {
+                    ShapeField::new(f.key.clone(), entity_ty.clone(), f.optional)
                 }
-                _ => (name.clone(), ty.clone(), *optional),
+                _ => f.clone(),
             }
         })
         .collect();
-    Type::ArrayShape(refined)
+    Type::ArrayShape(Shape {
+        fields: refined,
+        unsealed: fields.unsealed.clone(),
+    })
 }
 
 /// The exact `single-table, no JOIN` scope `resolve_select_from_static_
@@ -188,7 +193,7 @@ fn resolve_pure_ast(sql: &str, driver: Option<SqlDriver>) -> Option<Type> {
     if fields.is_empty() {
         return None;
     }
-    Some(Type::ArrayShape(fields))
+    Some(Type::ArrayShape(Shape::from_named(fields)))
 }
 
 /// Resolves both the unaliased column name real driver metadata reports
@@ -326,8 +331,8 @@ fn refine_count_columns(sql: &str, row_type: Type) -> Type {
     };
     if let Some(positions) = count_column_positions(sql) {
         for i in positions {
-            if let Some(field) = fields.get_mut(i) {
-                field.1 = Type::IntRange(Some(0), None);
+            if let Some(field) = fields.fields.get_mut(i) {
+                field.ty = Type::IntRange(Some(0), None);
             }
         }
     }
@@ -385,7 +390,7 @@ fn resolve_from_static_schema(schema: &SchemaCatalog, sql: &str) -> Option<Type>
         return None;
     };
     let fields = resolve_select_from_static_schema(schema, &select, &ctes)?;
-    Some(Type::ArrayShape(fields))
+    Some(Type::ArrayShape(Shape::from_named(fields)))
 }
 
 /// A non-recursive `WITH cte AS (<query>) ...`'s own defining queries,

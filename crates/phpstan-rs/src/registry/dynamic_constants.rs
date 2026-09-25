@@ -13,11 +13,11 @@ fn generalize(ty: &Type) -> Type {
         Type::StringLiteral(_) => Type::String,
         Type::FloatLiteral(_) => Type::Float,
         Type::True | Type::False => Type::Bool,
-        Type::ArrayShape(fields) => {
-            let value = fields
+        Type::ArrayShape(shape) => {
+            let value = shape
+                .fields
                 .iter()
-                .filter(|(key, _, _)| key != "...")
-                .map(|(_, t, _)| generalize(t))
+                .map(|f| generalize(&f.ty))
                 .reduce(|a, b| if a == b { a } else { Type::Union(vec![a, b]) })
                 .unwrap_or(Type::Mixed(false));
             Type::Array(Box::new(Type::unknown_array_key()), Box::new(value))

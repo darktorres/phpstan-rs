@@ -27,7 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::union_types;
 use crate::registry::infer_const_type;
-use crate::types::Type;
+use crate::types::{Shape, Type};
 use syntax::ast::{BinOp, Expr, ExprKind, GlobalVar, Literal, StaticTarget, Stmt, StmtKind};
 use syntax::visit::{child_exprs, child_stmts, stmt_exprs};
 
@@ -83,7 +83,7 @@ impl GlobalAccumulator {
                 Box::new(Type::Mixed(false)),
             )
         } else {
-            Type::ArrayShape(self.shape_fields.clone())
+            Type::ArrayShape(Shape::from_named(self.shape_fields.clone()))
         }
     }
 
@@ -116,9 +116,9 @@ enum SiteContribution {
 impl SiteContribution {
     fn apply(self, acc: &mut GlobalAccumulator) {
         match self {
-            SiteContribution::WholeValue(Type::ArrayShape(fields)) => {
-                for (key, ty, _) in fields {
-                    acc.add_shape_field(key, ty);
+            SiteContribution::WholeValue(Type::ArrayShape(shape)) => {
+                for f in shape.fields {
+                    acc.add_shape_field(f.key.to_string(), f.ty);
                 }
             }
             SiteContribution::WholeValue(ty) => acc.add_other(ty),
@@ -578,10 +578,14 @@ fn array_merge_self_fields(
         return None;
     }
     match resolve_static_expr_type(&args[1].value, registry, ctx) {
-        Type::ArrayShape(fields) => Some(
-            fields
+        Type::ArrayShape(shape) => Some(
+            shape
+                .fields
                 .into_iter()
-                .map(|(key, ty, _)| FieldContribution { key, ty })
+                .map(|f| FieldContribution {
+                    key: f.key.to_string(),
+                    ty: f.ty,
+                })
                 .collect(),
         ),
         _ => None,
@@ -668,7 +672,7 @@ fn resolve_static_expr_type(expr: &Expr, registry: &Registry, ctx: &NameContext)
                 let ty = resolve_static_expr_type(&item.value, registry, ctx);
                 fields.push((key, ty, false));
             }
-            Type::ArrayShape(fields)
+            Type::ArrayShape(Shape::from_named(fields))
         }
         ExprKind::Call(callee, _args) => {
             let ExprKind::Name(name) = &unwrap_grouping(callee).kind else {
