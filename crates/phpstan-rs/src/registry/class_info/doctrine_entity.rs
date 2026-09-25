@@ -24,10 +24,10 @@ use std::sync::Arc;
 
 use crate::ast::{ArrayItem, Attribute, ClassDecl, Expr, ExprKind, Literal, StaticTarget};
 use crate::intern::intern;
-use crate::registry::name_context::NameContext;
 use crate::types::Type;
 
 use super::PropertySig;
+use crate::name_resolution::NameContext;
 
 /// One Doctrine association property (`#[ORM\ManyToOne]`/`OneToOne`/
 /// `OneToMany`/`ManyToMany`).

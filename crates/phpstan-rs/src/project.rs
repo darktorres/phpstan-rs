@@ -9,10 +9,11 @@ use crate::deps;
 use crate::diagnostic::{self, Diagnostic};
 use crate::ignore_comments;
 use crate::lexer::Lexer;
+use crate::name_resolution::NameContext;
 use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
 use crate::php_stubs;
-use crate::registry::{NameContext, Registry};
+use crate::registry::Registry;
 use crate::token::Span;
 use whole_program::renamed_named_arguments::NamedArgumentCallFactsWithPath;
 

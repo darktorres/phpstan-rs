@@ -35,6 +35,7 @@ use crate::token::{Position, Span};
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use crate::name_resolution::NameContext;
 
 /// PSR virtual packages and the interfaces a provider must implement.
 const PSR_VIRTUAL_PACKAGES: &[(&str, &[&str])] = &[
@@ -590,11 +591,7 @@ impl Project {
         diagnostics: &mut Vec<Diagnostic>,
     ) {
         let mut declared: Vec<(String, Span)> = Vec::new();
-        collect_declared_classes(
-            &file.ast,
-            &mut crate::registry::NameContext::default(),
-            &mut declared,
-        );
+        collect_declared_classes(&file.ast, &mut NameContext::default(), &mut declared);
         if declared.is_empty() {
             return;
         }
@@ -844,11 +841,7 @@ fn check_platform_php(manifest: &ComposerManifest, diagnostics: &mut Vec<Diagnos
 }
 
 /// Every class-like `stmts` declares, with its name's span.
-fn collect_declared_classes(
-    stmts: &[Stmt],
-    ctx: &mut crate::registry::NameContext,
-    out: &mut Vec<(String, Span)>,
-) {
+fn collect_declared_classes(stmts: &[Stmt], ctx: &mut NameContext, out: &mut Vec<(String, Span)>) {
     for stmt in stmts {
         match &stmt.kind {
             StmtKind::Namespace(name) => ctx.set_namespace(name),

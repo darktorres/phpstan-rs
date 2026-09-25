@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use crate::ast::{Attribute, Expr, ExprKind, Literal, StaticTarget};
 use crate::intern::intern;
-use crate::registry::NameContext;
+use crate::name_resolution::NameContext;
 
 /// `NamespaceVisibility`: callers must be in `namespace` (or, unless
 /// `exclude_sub_namespaces`, below it).

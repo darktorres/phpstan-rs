@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::registry::NameContext;
+use crate::name_resolution::NameContext;
 
 // ---------------------------------------------------------------------
 // Private-member usage (consts / methods / properties)

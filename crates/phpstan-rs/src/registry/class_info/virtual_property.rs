@@ -4,10 +4,9 @@ use std::sync::Arc;
 use crate::ast::TypeHint;
 use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children};
+use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{mark_template_params, resolve_type};
-use crate::registry::name_context::{
-    NameContext, collect_class_name_case_refs, resolve_names_in_type,
-};
+use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{TemplateParam, Type};
 
 /// PHP 8.4 property hooks: an explicit `set(Type $value) { ... }` hook can

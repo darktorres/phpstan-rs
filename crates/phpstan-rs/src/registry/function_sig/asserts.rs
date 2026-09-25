@@ -3,12 +3,11 @@ use std::sync::Arc;
 
 use crate::docblock;
 use crate::intern::intern;
-use crate::registry::name_context::{
-    NameContext, collect_class_name_case_refs, resolve_names_in_type,
-};
+use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{self, TemplateParam, Type};
 
 use super::generics::mark_template_params;
+use crate::name_resolution::NameContext;
 
 /// Which real, checkable thing a `@phpstan-assert`-family tag's own
 /// `$target` text names - classified once here (registry-build time,

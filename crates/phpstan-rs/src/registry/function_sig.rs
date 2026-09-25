@@ -5,9 +5,8 @@ use crate::ast::TypeHint;
 use crate::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
-use crate::registry::name_context::{
-    NameContext, collect_class_name_case_refs, resolve_names_in_type,
-};
+use crate::name_resolution::NameContext;
+use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::has_explicit_mixed_nested_somewhere;
 use crate::types::{self, TemplateParam, Type};
 

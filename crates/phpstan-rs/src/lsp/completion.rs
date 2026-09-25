@@ -47,12 +47,13 @@ use lsp_types::{CompletionItem, CompletionItemKind, TextEdit};
 
 use crate::ast::{ClassKind, Expr, ExprKind, FunctionDecl, NodeId, Stmt, StmtKind, Visibility};
 use crate::project::{self, Project};
-use crate::registry::{NameContext, Registry};
+use crate::registry::Registry;
 use crate::token::{Keyword, Position, Span, Token};
 use crate::types::Type;
 
 use super::navigation::ProbeScope;
 use super::protocol::to_lsp_range;
+use crate::name_resolution::NameContext;
 
 /// The synthetic local `Locals`/the checker never sees a real declaration
 /// for - deliberately unlikely to collide with a real user variable.

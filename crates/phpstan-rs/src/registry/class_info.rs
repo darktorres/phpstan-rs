@@ -6,14 +6,13 @@ use crate::ast::TypeHint;
 use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use crate::docblock::{self, DocBlock};
 use crate::intern::intern;
+use crate::name_resolution::NameContext;
 use crate::registry::function_sig::{
     FunctionSig, ParamSig, apply_implicit_nullable_default, build_template_params,
     build_type_aliases, infer_class_const_type, mark_template_params,
     resolve_type_with_parsed_native, substitute_type_aliases,
 };
-use crate::registry::name_context::{
-    NameContext, collect_class_name_case_refs, resolve_names_in_type,
-};
+use crate::registry::name_context::{collect_class_name_case_refs, resolve_names_in_type};
 use crate::types::{self, AccessoryKind, TemplateParam, Type};
 
 mod attributes;

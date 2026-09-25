@@ -3,8 +3,9 @@ use std::sync::Arc;
 
 use crate::ast::{Expr, ExprKind, Literal, Stmt, StmtKind, Visibility};
 use crate::intern::intern;
+use crate::name_resolution::NameContext;
 use crate::registry::Registry;
-use crate::registry::{ClassInfo, FunctionSig, NameContext, infer_const_type};
+use crate::registry::{ClassInfo, FunctionSig, infer_const_type};
 use crate::types::Type;
 
 /// One declaration's already-built, registry-independent info/sig, plus

@@ -44,10 +44,11 @@ use crate::ast::{
 };
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::project::Project;
-use crate::registry::{NameContext, Registry};
+use crate::registry::Registry;
 use crate::token::{Position, Span};
 
 use super::navigation::{ProbeScope, contains, resolve_class_ref};
+use crate::name_resolution::NameContext;
 
 /// What a resolved signature-help target needs to look its own
 /// `FunctionSig` up (or, for `Instance`, to run the same checker probe

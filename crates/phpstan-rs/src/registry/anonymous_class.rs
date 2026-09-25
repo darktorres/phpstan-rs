@@ -27,7 +27,8 @@ use rustc_hash::FxHashMap;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::registry::{BuiltDecl, ClassInfo, NameContext};
+use crate::name_resolution::NameContext;
+use crate::registry::{BuiltDecl, ClassInfo};
 use crate::token::Span;
 
 pub(crate) fn synthetic_name(

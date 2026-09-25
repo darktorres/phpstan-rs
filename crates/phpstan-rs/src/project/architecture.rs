@@ -12,13 +12,13 @@ use crate::architecture::{ArchitectureRule, NamePattern, Selector};
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children, stmt_own_exprs};
 use crate::php_stubs;
-use crate::registry::NameContext;
 use crate::token::Span;
 use crate::types::Type;
 
 use super::Project;
 use super::use_sites::{RefTarget, index_class_fn_refs_without_source};
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use crate::name_resolution::NameContext;
 
 /// A class-like declaration's own facts the registry doesn't keep.
 struct Declared<'a> {

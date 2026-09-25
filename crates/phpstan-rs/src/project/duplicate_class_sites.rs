@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use rustc_hash::FxHashMap;
 
 use crate::ast::{ClassKind, Stmt, StmtKind};
-use crate::registry::NameContext;
+use crate::name_resolution::NameContext;
 use crate::token::Span;
 
 /// One top-level class-like (`class`/`interface`/`trait`/`enum`)

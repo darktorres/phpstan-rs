@@ -14,7 +14,7 @@ use crate::ast_walk::{expr_children, stmt_children};
 /// Names are kept exactly as the AST spells them (no backslash-stripping,
 /// no namespace/`use`-import resolution) - a deliberate, still-safe
 /// simplification even though the registry itself is namespace-aware
-/// (`registry::NameContext`): this is only ever used to decide
+/// (`name_resolution::NameContext`): this is only ever used to decide
 /// which files *might* need re-checking, never to look anything up in the
 /// registry directly, so a same-named-but-different-namespace false
 /// match just costs one harmless extra re-check (this function already

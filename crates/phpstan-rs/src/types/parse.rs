@@ -845,7 +845,7 @@ fn parse_int_bound(s: &str) -> Option<Option<i64>> {
 /// (backslash-preserved) is what the class-name fallback arm constructs
 /// its `Type::Object` from - a leading `\` means "already fully
 /// qualified from the global namespace," which
-/// `registry::NameContext::resolve` needs to see later (its first check
+/// `name_resolution::NameContext::resolve` needs to see later (its first check
 /// is exactly `strip_prefix('\\')`) to know not to re-qualify it against
 /// the current file's namespace. Stripping the backslash before it
 /// reaches `resolve` would make every absolute native type hint

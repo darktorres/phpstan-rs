@@ -2,7 +2,8 @@
 //! only what one environment defines, so a read of it sees either the
 //! configured type or the value's general type, never the literal.
 
-use crate::registry::{NameContext, Registry, resolve_names_in_type};
+use crate::name_resolution::NameContext;
+use crate::registry::{Registry, resolve_names_in_type};
 use crate::types::{self, Type};
 
 /// A value's general type: every literal widened to its base type.

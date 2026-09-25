@@ -37,7 +37,7 @@ pub(crate) use function_sig::{
     build_template_params, infer_const_type, mark_template_params, substitute_type_aliases,
 };
 pub(crate) use index::{BuiltDecl, build_declarations, register_global_constant};
-pub(crate) use name_context::{NameContext, collect_class_name_case_refs, resolve_names_in_type};
+pub(crate) use name_context::{collect_class_name_case_refs, resolve_names_in_type};
 pub use purity::PurityDependency;
 pub(crate) use purity::{collect_impure_points, is_non_overridable};
 pub use super_type::Trinary;

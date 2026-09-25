@@ -44,8 +44,9 @@ use std::sync::Arc;
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
+use crate::name_resolution::NameContext;
 use crate::project::Project;
-use crate::registry::{NameContext, Registry};
+use crate::registry::Registry;
 use crate::token::{Position, Span};
 use rustc_hash::FxHashSet;
 use std::path::Path;

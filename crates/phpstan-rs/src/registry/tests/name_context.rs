@@ -4,6 +4,7 @@
 use super::super::*;
 use crate::ast::Stmt;
 use crate::intern::intern;
+use crate::name_resolution::NameContext;
 use crate::types::{self, Type};
 
 fn ctx_for(namespace: &str) -> NameContext {

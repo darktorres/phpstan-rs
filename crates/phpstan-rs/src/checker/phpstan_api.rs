@@ -72,7 +72,8 @@ use crate::ast_walk::{expr_children, stmt_children};
 use crate::checker::{Checker, class_type_word};
 use crate::composer;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
-use crate::registry::{FunctionSig, NameContext, Registry, is_phpstan_namespace};
+use crate::name_resolution::NameContext;
+use crate::registry::{FunctionSig, Registry, is_phpstan_namespace};
 use crate::token::Span;
 
 /// `$variable-name -> resolved fully-qualified class name` for whichever

@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
 use crate::ast::{Stmt, StmtKind};
-use crate::registry::NameContext;
+use crate::name_resolution::NameContext;
 use crate::token::Span;
 
 /// A symbol's own declaration site, name-keyed the same way `Registry`

@@ -13,11 +13,11 @@ use std::path::PathBuf;
 use crate::ast::*;
 use crate::ast_walk::{any_expr_child, stmt_children, stmt_own_exprs};
 use crate::parent_calls::{HasContent, Invocation, ParentCallRule};
-use crate::registry::NameContext;
 use crate::token::Span;
 
 use super::Project;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use crate::name_resolution::NameContext;
 
 const DOCTRINE_MAPPED: [&str; 3] = ["Entity", "Embeddable", "MappedSuperclass"];
 

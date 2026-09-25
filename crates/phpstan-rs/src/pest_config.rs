@@ -35,7 +35,8 @@ use std::path::{Path, PathBuf};
 
 use crate::ast::{Arg, Expr, ExprKind, StaticTarget, Stmt, StmtKind};
 use crate::ast::{literal_string_value, unwrap_grouping};
-use crate::registry::{NameContext, Registry};
+use crate::name_resolution::NameContext;
+use crate::registry::Registry;
 use crate::types::Type;
 
 /// The seven Pest functions whose closure argument gets `$this` rebound.

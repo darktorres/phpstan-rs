@@ -4,8 +4,9 @@ use std::sync::Arc;
 
 use crate::ast::*;
 use crate::diagnostic::{Diagnostic, DiagnosticBuilder};
+use crate::name_resolution::NameContext;
 use crate::pest_config;
-use crate::registry::{NameContext, Registry};
+use crate::registry::Registry;
 use crate::token::Span;
 use crate::types::Type;
 
@@ -552,7 +553,7 @@ pub(crate) type PropertyAssignFacts = FxHashMap<Arc<str>, FxHashMap<Arc<str>, Ve
 /// there rather than an incorrect one.
 ///
 /// Undefined-class/function/method reference checks resolve every name to
-/// a fully-qualified one first via `registry::NameContext` (tracking each
+/// a fully-qualified one first via `name_resolution::NameContext` (tracking each
 /// file's `namespace`/`use` statements) before any registry key is read or
 /// written - two classes with the same short name in different namespaces
 /// get distinct keys, the same way real PHP tells them apart.

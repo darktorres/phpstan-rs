@@ -33,7 +33,7 @@ use std::path::{Path, PathBuf};
 
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
-use crate::registry::NameContext;
+use crate::name_resolution::NameContext;
 use crate::token::Span;
 
 /// What a reference site points at - no local-variable variant (see
