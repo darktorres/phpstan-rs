@@ -236,7 +236,12 @@ section, settings, fixtures and diagnostics (Appendix A lists every module):
   - variance-annotated generic arguments;
   - late-resolvable types (value-of, key-of, offset-access, class-constant
     access, conditional);
-  - `Static`/`This` with their bound class;
+  - `Static`/`This` with their bound class (B4 ships them unbound, with
+    `self<T>`/`static<T>` arguments on the variants and `self` bound to the
+    declaring class at a member read; the bound form, `static(Base)`/
+    `$this(Base)` and `@return $this` refusing `new static()`, lands in D4,
+    where member access goes through one object view instead of ~540
+    `Type::Object` matches);
   - `ObjectWithoutClass`, `Resource`, `BenevolentUnion`.
 - **Shapes and names:**
   - shape keys use a typed key enum, with an explicit unsealed tail
@@ -1031,6 +1036,9 @@ deleted.
 
 **D4. One inference path.** ExprHandlers, per-`NodeId` results, `infer_expr`
 deleted, RefCell channels removed; the file-size gate.
+- `$this`/`static` inside a class body carry their bound class
+  (`Type::This`/`StaticRef` bound), displayed `$this(Base)`/`static(Base)`,
+  and `@return $this` rejects a returned `new static()`.
 
 **D5. NodeCallback sink** (approved deltas for `return.unusedType`,
 `throws.*` and `property.unusedType`).
