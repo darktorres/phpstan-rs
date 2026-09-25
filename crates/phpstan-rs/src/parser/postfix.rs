@@ -195,6 +195,7 @@ impl Parser {
                             }
                             StaticMember::Name(n) => ExprKind::ClassConstFetch(target, n),
                             StaticMember::Variable(name, span) => {
+                                let name = self.interner.name(&name);
                                 ExprKind::StaticPropertyFetch(target, Ident { name, span })
                             }
                             StaticMember::Dynamic(name) => {

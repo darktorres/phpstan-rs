@@ -63,11 +63,11 @@ impl Parser {
         let mut implements_spans = Vec::new();
         if self.eat(&Token::Keyword(Keyword::Implements)) {
             let (name, span) = self.parse_qualified_name_spanned();
-            implements.push(QualifiedName::new(name));
+            implements.push(self.qualified_name(&name));
             implements_spans.push(span);
             while self.eat(&Token::Comma) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                implements.push(QualifiedName::new(name));
+                implements.push(self.qualified_name(&name));
                 implements_spans.push(span);
             }
         }
@@ -105,12 +105,12 @@ impl Parser {
 
             if self.eat(&Token::Keyword(Keyword::Use)) {
                 let (name, span) = self.parse_qualified_name_spanned();
-                uses.push(QualifiedName::new(name));
+                uses.push(self.qualified_name(&name));
                 uses_spans.push(span);
                 uses_doc_comments.push(doc.clone());
                 while self.eat(&Token::Comma) {
                     let (name, span) = self.parse_qualified_name_spanned();
-                    uses.push(QualifiedName::new(name));
+                    uses.push(self.qualified_name(&name));
                     uses_spans.push(span);
                     uses_doc_comments.push(doc.clone());
                 }

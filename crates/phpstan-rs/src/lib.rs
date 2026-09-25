@@ -24,6 +24,7 @@ pub mod ignore_errors;
 pub(crate) mod intern;
 pub mod lexer;
 pub mod lsp;
+pub mod name;
 pub(crate) mod name_resolution;
 pub mod output;
 pub mod parent_calls;

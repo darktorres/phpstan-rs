@@ -29,8 +29,10 @@ impl Parser {
                 StringPart::ComplexExpr(src, frag_base) => {
                     // Lexed where it sits in the file, so every span in
                     // the fragment is already the real one.
-                    let tokens = Lexer::new_in_php_at(&src, frag_base).tokenize_with_spans();
-                    let mut sub = Parser::new(tokens);
+                    let tokens = Lexer::new_in_php_at(&src, frag_base)
+                        .with_interner(&self.interner)
+                        .tokenize_with_spans();
+                    let mut sub = Parser::new(tokens).with_interner(&self.interner);
                     sub.next_node_id.set(self.next_node_id.get());
                     let parsed = sub.parse_expression()?;
                     self.next_node_id.set(sub.next_node_id.get());
@@ -63,7 +65,7 @@ impl Parser {
                         kind: ExprKind::PropertyAccess(
                             Box::new(var_expr),
                             Ident {
-                                name: prop,
+                                name: self.interner.name(&prop),
                                 // Past the `->`, on the variable's line.
                                 span: Span {
                                     start: Position {

@@ -1,7 +1,8 @@
 use std::borrow::Cow;
 
-use crate::intern::intern;
+use crate::name::Interner;
 use crate::token::{Keyword, Position, Span, Token};
+use std::sync::Arc;
 
 mod strings;
 
@@ -62,6 +63,8 @@ pub struct Lexer<'a> {
     // (doc comments are tokens of their own).
     comments: Vec<(usize, usize)>,
     warnings: Vec<LexWarning>,
+    // What identifiers, variables and other token text are interned into.
+    interner: Arc<Interner>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -116,6 +119,7 @@ impl<'a> Lexer<'a> {
             pending_keyword_raw: None,
             comments: Vec::new(),
             warnings: Vec::new(),
+            interner: Arc::clone(Interner::global()),
         }
     }
 
@@ -135,7 +139,14 @@ impl<'a> Lexer<'a> {
             pending_keyword_raw: None,
             comments: Vec::new(),
             warnings: Vec::new(),
+            interner: Arc::clone(Interner::global()),
         }
+    }
+
+    /// Interns token text into `interner` rather than the global one.
+    pub fn with_interner(mut self, interner: &Arc<Interner>) -> Self {
+        self.interner = Arc::clone(interner);
+        self
     }
 
     /// `new_in_php` for a fragment that starts at `base` in its file:
@@ -333,7 +344,7 @@ impl<'a> Lexer<'a> {
         if c == b'$' && (is_ident_start(self.peek_at(1))) {
             self.pos += 1;
             let s = self.lex_ident_raw();
-            return Token::Variable(intern(&s));
+            return Token::Variable(self.interner.str(&s));
         }
 
         // `${expr}` - the older "variable variable" syntax, where the
@@ -385,7 +396,7 @@ impl<'a> Lexer<'a> {
                 return Token::Keyword(kw);
             }
             let s = String::from_utf8_lossy(&self.src[span]);
-            return Token::Identifier(intern(&s));
+            return Token::Identifier(self.interner.str(&s));
         }
 
         if c.is_ascii_digit() || (c == b'.' && self.peek_at(1).is_ascii_digit()) {
@@ -425,7 +436,7 @@ impl<'a> Lexer<'a> {
             // The HTML before it is its own token; `<?=` is left for the
             // next call, which surfaces it as `echo`.
             if !html.is_empty() {
-                return Token::InlineHtml(intern(&html));
+                return Token::InlineHtml(self.interner.str(&html));
             }
             self.pos += 3;
             self.in_php = true;
@@ -440,7 +451,7 @@ impl<'a> Lexer<'a> {
             }
             return self.next_token();
         }
-        Token::InlineHtml(intern(&html))
+        Token::InlineHtml(self.interner.str(&html))
     }
 
     /// Advances past a single- or double-quoted string literal starting
@@ -558,9 +569,10 @@ impl<'a> Lexer<'a> {
         start..self.pos
     }
 
-    fn lex_ident_raw(&mut self) -> std::borrow::Cow<'_, str> {
+    fn lex_ident_raw(&mut self) -> std::borrow::Cow<'a, str> {
         let span = self.lex_ident_span();
-        String::from_utf8_lossy(&self.src[span])
+        let src: &'a [u8] = self.src;
+        String::from_utf8_lossy(&src[span])
     }
 
     fn lex_number(&mut self) -> Token {
@@ -647,7 +659,10 @@ impl<'a> Lexer<'a> {
             self.pos += 1;
         }
         self.pos = (self.pos + 2).min(self.src.len());
-        Token::DocComment(intern(&String::from_utf8_lossy(&self.src[start..self.pos])))
+        Token::DocComment(
+            self.interner
+                .str(&String::from_utf8_lossy(&self.src[start..self.pos])),
+        )
     }
 
     fn lex_operator(&mut self) -> Token {

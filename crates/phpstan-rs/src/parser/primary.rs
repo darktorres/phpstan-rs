@@ -177,7 +177,7 @@ impl Parser {
                     _ => {
                         let s = self.current_pos();
                         let name = self.parse_qualified_name();
-                        self.expr(ExprKind::Name(QualifiedName::new(name)), s)
+                        self.expr(ExprKind::Name(self.qualified_name(&name)), s)
                     }
                 };
                 // `new Foo(...)` parses but is a compile error in PHP (a
@@ -209,10 +209,7 @@ impl Parser {
                     self.skip();
                     self.skip();
                     self.skip();
-                    let name = self.expr(
-                        ExprKind::Name(QualifiedName::new("clone".to_string())),
-                        start,
-                    );
+                    let name = self.expr(ExprKind::Name(self.qualified_name("clone")), start);
                     return Ok(self.expr(ExprKind::FirstClassCallable(Box::new(name)), start));
                 }
                 // PHP 8.5's `clone($obj, $overrides)` - a distinct grammar
@@ -249,10 +246,7 @@ impl Parser {
             Token::Keyword(Keyword::Print) => {
                 self.skip();
                 let e = self.parse_assignment()?;
-                let name = self.expr(
-                    ExprKind::Name(QualifiedName::new("print".to_string())),
-                    start,
-                );
+                let name = self.expr(ExprKind::Name(self.qualified_name("print")), start);
                 self.expr(
                     ExprKind::Call(
                         Box::new(name),
@@ -335,10 +329,7 @@ impl Parser {
                 let kw = kw.clone();
                 self.skip();
                 let e = self.parse_assignment()?;
-                let name = self.expr(
-                    ExprKind::Name(QualifiedName::new(kw.as_str().to_string())),
-                    start,
-                );
+                let name = self.expr(ExprKind::Name(self.qualified_name(kw.as_str())), start);
                 self.expr(
                     ExprKind::Call(
                         Box::new(name),
@@ -387,10 +378,7 @@ impl Parser {
             }
             Token::Keyword(Keyword::Static) => {
                 self.skip();
-                self.expr(
-                    ExprKind::Name(QualifiedName::new("static".to_string())),
-                    start,
-                )
+                self.expr(ExprKind::Name(self.qualified_name("static")), start)
             }
             Token::Keyword(Keyword::Function) => self.parse_closure_like(false)?,
             // `fn` is only reserved as the arrow-function keyword when
@@ -408,7 +396,7 @@ impl Parser {
             }
             Token::Keyword(Keyword::Fn) => {
                 let name = self.parse_qualified_name();
-                self.expr(ExprKind::Name(QualifiedName::new(name)), start)
+                self.expr(ExprKind::Name(self.qualified_name(&name)), start)
             }
             Token::Keyword(Keyword::Match) => self.parse_match_expr()?,
             Token::InterpString(_) => {
@@ -426,10 +414,7 @@ impl Parser {
                     unreachable!()
                 };
                 let cmd = self.build_interpolated(parts, start)?;
-                let name = self.expr(
-                    ExprKind::Name(QualifiedName::new("shell_exec".to_string())),
-                    start,
-                );
+                let name = self.expr(ExprKind::Name(self.qualified_name("shell_exec")), start);
                 let call = self.expr(
                     ExprKind::Call(
                         Box::new(name),
@@ -468,7 +453,7 @@ impl Parser {
                 let is_bare_exit = (name.eq_ignore_ascii_case("exit")
                     || name.eq_ignore_ascii_case("die"))
                     && !self.check(&Token::LParen);
-                let name_expr = self.expr(ExprKind::Name(QualifiedName::new(name)), start);
+                let name_expr = self.expr(ExprKind::Name(self.qualified_name(&name)), start);
                 if is_bare_exit {
                     // `exit;` is the same construct as `exit()`.
                     self.expr(ExprKind::Call(Box::new(name_expr), Vec::new()), start)

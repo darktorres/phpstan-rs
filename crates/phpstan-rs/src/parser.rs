@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::ast::*;
+use crate::name::Interner;
 use crate::token::{Keyword, Position, Span, Token};
 
 // Real PHP's own engine imposes a call-stack-depth guard specifically so
@@ -72,6 +73,8 @@ pub struct Parser {
     pub(crate) expr_depth: usize,
     // The id the next node built gets - see `NodeId`.
     pub(crate) next_node_id: std::cell::Cell<u32>,
+    // What names in the tree are interned into.
+    pub(crate) interner: Arc<Interner>,
 }
 
 mod classes;
@@ -146,6 +149,7 @@ impl Parser {
             doc_comment_starts,
             expr_depth: 0,
             next_node_id: std::cell::Cell::new(0),
+            interner: Arc::clone(Interner::global()),
         }
     }
 
@@ -229,6 +233,17 @@ impl Parser {
             .or_else(|| self.spans.last())
             .map(|s| s.end)
             .unwrap_or_default()
+    }
+
+    /// Interns names into `interner` rather than the global one.
+    pub fn with_interner(mut self, interner: &Arc<Interner>) -> Self {
+        self.interner = Arc::clone(interner);
+        self
+    }
+
+    /// A reference by name, not yet resolved.
+    pub(crate) fn qualified_name(&self, written: &str) -> QualifiedName {
+        QualifiedName::new(self.interner.name(written))
     }
 
     /// A fresh id for the node being built.

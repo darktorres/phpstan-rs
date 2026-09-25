@@ -6278,7 +6278,7 @@ fn static_call(target: &StaticTarget, method: String, args: &[Arg], span: Span) 
         kind: ExprKind::StaticCall(
             target.clone(),
             Ident {
-                name: method.into(),
+                name: method.as_str().into(),
                 span,
             },
             args.to_vec(),
@@ -6296,7 +6296,7 @@ fn constant_fetch(target: &StaticTarget, name: String, span: Span) -> Expr {
         ExprKind::ClassConstFetch(
             target.clone(),
             Ident {
-                name: name.into(),
+                name: name.as_str().into(),
                 span,
             },
         )

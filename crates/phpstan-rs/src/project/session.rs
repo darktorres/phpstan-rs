@@ -9,6 +9,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::name::Interner;
+
 use rayon::prelude::*;
 
 use crate::config::{self, Config};
@@ -507,12 +509,18 @@ impl Session {
         );
     }
 
-    fn read_and_parse_file(&self, path: &Path, is_stub: bool) -> Option<(String, ParsedFile)> {
+    fn read_and_parse_file(
+        &self,
+        path: &Path,
+        is_stub: bool,
+        interner: &Arc<Interner>,
+    ) -> Option<(String, ParsedFile)> {
         let bytes = std::fs::read(self.root.join(path)).ok()?;
         let source = String::from_utf8_lossy(&bytes).into_owned();
-        let parsed = std::panic::catch_unwind(|| super::parse_file(path, &source, is_stub))
-            .ok()?
-            .ok()?;
+        let parsed =
+            std::panic::catch_unwind(|| super::parse_file(path, &source, is_stub, interner))
+                .ok()?
+                .ok()?;
         Some((source, parsed))
     }
 
@@ -544,6 +552,7 @@ impl Session {
         }
 
         let mut project = Project::new();
+        let interner = Arc::clone(project.interner());
         self.configure(&mut project);
 
         // Deep recursion in the checker needs more than rayon's default
@@ -565,7 +574,7 @@ impl Session {
         let mut combined_parsed: Vec<Option<(String, ParsedFile)>> = pool.install(|| {
             combined_files
                 .par_iter()
-                .map(|p| self.read_and_parse_file(p, stub_files.contains(p.as_path())))
+                .map(|p| self.read_and_parse_file(p, stub_files.contains(p.as_path()), &interner))
                 .collect()
         });
         let analyze_parsed = combined_parsed.split_off(context_files.len());

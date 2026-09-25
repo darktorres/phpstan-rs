@@ -1,4 +1,4 @@
-use crate::ast::{QualifiedName, TypeHint, TypeHintKind};
+use crate::ast::{TypeHint, TypeHintKind};
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Position, Span, Token};
 
@@ -76,7 +76,7 @@ impl Parser {
             // identifiers glued together with no backslash between them.
             None => self.parse_qualified_name(),
         };
-        Ok(self.type_hint(TypeHintKind::Name(QualifiedName::new(name)), start))
+        Ok(self.type_hint(TypeHintKind::Name(self.qualified_name(&name)), start))
     }
 
     pub(crate) fn parse_type_hint(&mut self) -> Result<Option<TypeHint>, ParseError> {

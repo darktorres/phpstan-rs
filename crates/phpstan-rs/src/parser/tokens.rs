@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use crate::ast::{Attribute, Ident, QualifiedName};
+use crate::ast::{Attribute, Ident};
 use crate::intern::intern;
 use crate::parser::{ParseError, Parser};
 use crate::token::{Keyword, Span, Token};
@@ -229,7 +229,7 @@ impl Parser {
         let start = self.current_pos();
         let name = self.take_name_segment()?;
         Some(Ident {
-            name,
+            name: self.interner.name(&name),
             span: Span {
                 start,
                 end: self.previous_end(),
@@ -348,7 +348,7 @@ impl Parser {
                     end: self.previous_end(),
                 };
                 attrs.push(Attribute {
-                    name: QualifiedName::new(name),
+                    name: self.qualified_name(&name),
                     args,
                     span,
                     removal_span: span,

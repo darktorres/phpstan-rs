@@ -1,5 +1,5 @@
-use crate::intern::intern;
 use crate::lexer::{Lexer, is_ident_continue, is_ident_start, skip_string_literal_bytes};
+use crate::name::Interner;
 use crate::token::{SimpleIndexKey, StringPart, Token};
 
 /// Whether `s` is a full, well-formed PHP identifier (not just that it
@@ -106,14 +106,14 @@ fn try_parse_simple_interpolation(bytes: &[u8]) -> Option<SimpleInterpolationSha
 /// them (the caller then falls back to `StringPart::ComplexExpr`'s re-lex
 /// path) - see `SimpleIndexKey`'s own doc comment for what real PHP accepts
 /// here.
-fn classify_index_key(key: &str) -> Option<SimpleIndexKey> {
+fn classify_index_key(key: &str, interner: &Interner) -> Option<SimpleIndexKey> {
     if let Some(var_name) = key.strip_prefix('$') {
-        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(intern(var_name)));
+        return is_full_identifier(var_name).then(|| SimpleIndexKey::Var(interner.str(var_name)));
     }
     if let Ok(n) = key.parse::<i64>() {
         return Some(SimpleIndexKey::Int(n));
     }
-    is_full_identifier(key).then(|| SimpleIndexKey::Str(intern(key)))
+    is_full_identifier(key).then(|| SimpleIndexKey::Str(interner.str(key)))
 }
 
 impl<'a> Lexer<'a> {
@@ -333,7 +333,9 @@ impl<'a> Lexer<'a> {
         macro_rules! flush {
             () => {
                 if !literal.is_empty() {
-                    parts.push(StringPart::Literal(intern(&std::mem::take(&mut literal))));
+                    parts.push(StringPart::Literal(
+                        self.interner.str(&std::mem::take(&mut literal)),
+                    ));
                 }
             };
         }
@@ -475,8 +477,12 @@ impl<'a> Lexer<'a> {
                         name_end,
                         prop_start,
                     }) => {
-                        let name = intern(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
-                        let prop = intern(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
+                        let name = self
+                            .interner
+                            .str(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                        let prop = self
+                            .interner
+                            .str(&String::from_utf8_lossy(&inner_bytes[prop_start..]));
                         let var_end = self.line_col_at(abs_base + start + name_end);
                         let end = self.line_col_at(abs_base + close_brace_pos);
                         parts.push(StringPart::PropertyAccess {
@@ -493,10 +499,11 @@ impl<'a> Lexer<'a> {
                         key_end,
                     }) => {
                         let key_text = String::from_utf8_lossy(&inner_bytes[key_start..key_end]);
-                        match classify_index_key(&key_text) {
+                        match classify_index_key(&key_text, &self.interner) {
                             Some(key) => {
-                                let name =
-                                    intern(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
+                                let name = self
+                                    .interner
+                                    .str(&String::from_utf8_lossy(&inner_bytes[1..name_end]));
                                 let var_end = self.line_col_at(abs_base + start + name_end);
                                 let end = self.line_col_at(abs_base + close_brace_pos);
                                 parts.push(StringPart::Index {
@@ -528,7 +535,9 @@ impl<'a> Lexer<'a> {
                 while i < bytes.len() && is_ident_continue(bytes[i]) {
                     i += 1;
                 }
-                let name = intern(&String::from_utf8_lossy(&bytes[name_start..i]));
+                let name = self
+                    .interner
+                    .str(&String::from_utf8_lossy(&bytes[name_start..i]));
                 // Points at the `$` itself (one byte before `name_start`),
                 // matching where the reconstructed `${name}...` string below
                 // begins - precision within the reconstruction (distinguishing
@@ -546,7 +555,9 @@ impl<'a> Lexer<'a> {
                     while i < bytes.len() && is_ident_continue(bytes[i]) {
                         i += 1;
                     }
-                    let prop = intern(&String::from_utf8_lossy(&bytes[prop_start..i]));
+                    let prop = self
+                        .interner
+                        .str(&String::from_utf8_lossy(&bytes[prop_start..i]));
                     let end = self.line_col_at(abs_base + i);
                     parts.push(StringPart::PropertyAccess {
                         var: name,
@@ -564,7 +575,7 @@ impl<'a> Lexer<'a> {
                     }
                     let key = String::from_utf8_lossy(&bytes[key_start..i]).into_owned();
                     i = (i + 1).min(bytes.len());
-                    match classify_index_key(&key) {
+                    match classify_index_key(&key, &self.interner) {
                         Some(key) => {
                             let end = self.line_col_at(abs_base + i);
                             parts.push(StringPart::Index {
@@ -618,7 +629,7 @@ impl<'a> Lexer<'a> {
         flush!();
 
         if parts.is_empty() {
-            parts.push(StringPart::Literal(intern("")));
+            parts.push(StringPart::Literal(self.interner.str("")));
         }
         parts
     }

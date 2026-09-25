@@ -57,6 +57,7 @@ module parser syntax
 module ast syntax
 module printer syntax
 module intern syntax
+module name syntax
 module name_resolution syntax
 module visit syntax
 module annotations syntax

@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use crate::name::Name;
 use crate::token::Span;
 
 /// A syntax node's identity within one parsed file: the parser numbers
@@ -737,7 +738,7 @@ impl StaticTarget {
 /// to the name as written.
 #[derive(Debug, Clone)]
 pub struct QualifiedName {
-    pub written: Arc<str>,
+    pub written: Name,
     pub resolved: ResolvedName,
 }
 
@@ -756,7 +757,7 @@ pub enum ResolvedName {
 }
 
 impl QualifiedName {
-    pub fn new(written: impl Into<Arc<str>>) -> QualifiedName {
+    pub fn new(written: impl Into<Name>) -> QualifiedName {
         QualifiedName {
             written: written.into(),
             resolved: ResolvedName::Unresolved,
@@ -780,13 +781,13 @@ impl std::fmt::Display for QualifiedName {
 
 impl PartialEq<str> for QualifiedName {
     fn eq(&self, other: &str) -> bool {
-        *self.written == *other
+        self.written == *other
     }
 }
 
 impl PartialEq<&str> for QualifiedName {
     fn eq(&self, other: &&str) -> bool {
-        *self.written == **other
+        self.written == **other
     }
 }
 
@@ -794,7 +795,7 @@ impl PartialEq<&str> for QualifiedName {
 /// with its span. Derefs to the name.
 #[derive(Debug, Clone)]
 pub struct Ident {
-    pub name: Arc<str>,
+    pub name: Name,
     pub span: Span,
 }
 
@@ -808,13 +809,13 @@ impl std::ops::Deref for Ident {
 
 impl PartialEq<str> for Ident {
     fn eq(&self, other: &str) -> bool {
-        *self.name == *other
+        self.name == *other
     }
 }
 
 impl PartialEq<&str> for Ident {
     fn eq(&self, other: &&str) -> bool {
-        *self.name == **other
+        self.name == **other
     }
 }
 

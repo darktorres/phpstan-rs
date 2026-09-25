@@ -65,7 +65,12 @@ fn run_one(source: &str) {
     let result = std::panic::catch_unwind(|| {
         // `is_stub: false` - a generated source string is treated the
         // same way an ordinary, real (non-stub) user file would be.
-        let _ = project::parse_file(Path::new("fuzz.php"), source, false);
+        let _ = project::parse_file(
+            Path::new("fuzz.php"),
+            source,
+            false,
+            phpstan_rs::name::Interner::global(),
+        );
     });
 
     std::panic::set_hook(default_hook);

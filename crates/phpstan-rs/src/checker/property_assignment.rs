@@ -123,7 +123,7 @@ impl<'a> Checker<'a> {
             self.property_assign_facts
                 .entry(crate::intern::intern(&owner))
                 .or_default()
-                .entry(prop.name.clone())
+                .entry(crate::intern::intern(&prop.name))
                 .or_default()
                 .push(actual.clone());
         }

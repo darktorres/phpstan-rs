@@ -1,0 +1,3 @@
+intern::tests::interns_identical_text_to_the_same_allocation -> name::tests::identical_text_shares_one_allocation
+intern::tests::distinct_text_gets_distinct_allocations -> name::tests::a_name_keeps_its_spelling_and_its_lowercase_key
+intern::tests::concurrent_interning_of_the_same_new_text_converges_on_one_allocation -> name::tests::concurrent_interning_of_new_text_converges_on_one_allocation

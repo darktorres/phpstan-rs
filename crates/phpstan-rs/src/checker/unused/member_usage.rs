@@ -2,6 +2,7 @@ use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 use crate::ast::*;
+use crate::intern::intern;
 use crate::name_resolution::NameContext;
 use crate::visit::{child_exprs, child_stmts};
 
@@ -100,16 +101,16 @@ fn mark_write_target(
 ) -> bool {
     match &l.kind {
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.writes.insert(name.name.clone());
+            usage.writes.insert(intern(&name.name));
             if also_read {
-                usage.reads.insert(name.name.clone());
+                usage.reads.insert(intern(&name.name));
             }
             true
         }
         ExprKind::StaticPropertyFetch(target, prop) if target_is_self(target, fqn, ctx) => {
-            usage.writes.insert(prop.name.clone());
+            usage.writes.insert(intern(&prop.name));
             if also_read {
-                usage.reads.insert(prop.name.clone());
+                usage.reads.insert(intern(&prop.name));
             }
             true
         }
@@ -212,7 +213,7 @@ pub(crate) fn walk_expr_for_members(
             return;
         }
         ExprKind::PropertyAccess(base, name, _) if is_this_or_aliased(base, usage) => {
-            usage.reads.insert(name.name.clone());
+            usage.reads.insert(intern(&name.name));
         }
         // `$var instanceof self`/`static`/`<SameClass>`, either polarity,
         // anywhere in the body - see `MemberUsage::aliases`'s own doc
@@ -235,12 +236,12 @@ pub(crate) fn walk_expr_for_members(
         ExprKind::DynamicStaticPropertyFetch(..) => usage.escaped = true,
         ExprKind::StaticPropertyFetch(target, prop) => {
             if target_is_self(target, fqn, ctx) {
-                usage.reads.insert(prop.name.clone());
+                usage.reads.insert(intern(&prop.name));
             }
         }
         ExprKind::ClassConstFetch(target, member) => {
             if target_is_self(target, fqn, ctx) {
-                usage.consts.insert(member.name.clone());
+                usage.consts.insert(intern(&member.name));
             }
         }
         ExprKind::DynamicClassConstFetch(target, name) => match &name.kind {
@@ -252,10 +253,10 @@ pub(crate) fn walk_expr_for_members(
             _ => usage.escaped = true,
         },
         ExprKind::MethodCall(recv, name, ..) if is_this_or_aliased(recv, usage) => {
-            usage.methods.insert(name.name.clone());
+            usage.methods.insert(intern(&name.name));
         }
         ExprKind::StaticCall(target, name, _) if target_is_self(target, fqn, ctx) => {
-            usage.methods.insert(name.name.clone());
+            usage.methods.insert(intern(&name.name));
         }
         // `$obj->{$expr}` / `$obj->$name(...)` - a fully dynamic member
         // access this walker can't attribute to any specific member.

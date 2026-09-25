@@ -9,6 +9,7 @@ use crate::deps;
 use crate::diagnostic::{self, Diagnostic};
 use crate::ignore_comments;
 use crate::lexer::{LexWarning, Lexer};
+use crate::name::Interner;
 use crate::name_resolution::NameContext;
 use crate::parser::{ParseError, Parser};
 use crate::pest_config::PestConfig;
@@ -87,6 +88,9 @@ struct FileState {
 /// in practice.
 pub struct Project {
     files: FxHashMap<PathBuf, FileState>,
+    // What the names in this project's parsed files are interned into,
+    // freed with the project.
+    interner: Arc<Interner>,
     dependents: FxHashMap<String, FxHashSet<PathBuf>>,
     registry: Registry,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
@@ -198,6 +202,12 @@ pub type CheckWithMemberRefs = (
 );
 
 impl Project {
+    /// What this project's names are interned into; a file parsed for it
+    /// elsewhere (`parse_file`) should use it too.
+    pub fn interner(&self) -> &Arc<Interner> {
+        &self.interner
+    }
+
     pub fn new() -> Self {
         let mut registry = Registry::default();
         registry.merge_stubs(php_stubs::generated_stubs());
@@ -205,6 +215,7 @@ impl Project {
         registry.merge_stub_constants(php_stubs::generated_stub_constants());
         Project {
             files: FxHashMap::default(),
+            interner: Arc::new(Interner::new()),
             dependents: FxHashMap::default(),
             registry,
             pest_config: PestConfig::default(),
@@ -895,7 +906,7 @@ impl Project {
         // concept at all (that's a batch `check-project`-only config key,
         // wired through `read_and_parse_file` instead) and no way to
         // enable `check_duplicate_class_declarations` in the first place.
-        let parsed = parse_file(&path, source, false)?;
+        let parsed = parse_file(&path, source, false, &self.interner)?;
         self.insert_parsed_file(path, parsed, source.to_string(), analyzed);
         Ok(())
     }
@@ -1200,7 +1211,7 @@ impl Project {
         // *before* the very edit that introduced its own trigger) for as
         // long as the file kept failing to parse, not just for the one
         // request that happened to race a genuinely-invalid save.
-        let (ast, ignores, _) = parse_with_ignores(new_source)?;
+        let (ast, ignores, _) = parse_with_ignores(new_source, &self.interner)?;
         let mut changed_symbols: FxHashSet<String> = FxHashSet::default();
         self.unindex_file(path, &mut changed_symbols);
         let (functions, classes) = declared_names(&ast);
@@ -2274,10 +2285,14 @@ fn trait_line_ranges(ast: &[Stmt]) -> Vec<(u32, u32)> {
 /// lexing.
 type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
 
-fn parse_with_ignores(source: &str) -> Result<Parsed, ParseError> {
-    let (tokens, comments, warnings) = Lexer::new(source).tokenize_with_comments();
+fn parse_with_ignores(source: &str, interner: &Arc<Interner>) -> Result<Parsed, ParseError> {
+    let (tokens, comments, warnings) = Lexer::new(source)
+        .with_interner(interner)
+        .tokenize_with_comments();
     let ignores = ignore_comments::scan_tokens(&tokens, &comments);
-    let mut ast = Parser::new(tokens).parse_program()?;
+    let mut ast = Parser::new(tokens)
+        .with_interner(interner)
+        .parse_program()?;
     crate::stub_attributes::apply_stub_attributes(&mut ast);
     Ok((ast, ignores, warnings))
 }
@@ -2351,8 +2366,13 @@ pub struct ParsedFile {
 /// caller building many `ParsedFile`s concurrently passes a different
 /// `path` to each call with no coordination needed between them.
 #[hotpath::measure]
-pub fn parse_file(path: &Path, source: &str, is_stub: bool) -> Result<ParsedFile, ParseError> {
-    let (ast, ignores, lex_warnings) = parse_with_ignores(source)?;
+pub fn parse_file(
+    path: &Path,
+    source: &str,
+    is_stub: bool,
+    interner: &Arc<Interner>,
+) -> Result<ParsedFile, ParseError> {
+    let (ast, ignores, lex_warnings) = parse_with_ignores(source, interner)?;
     let (functions, classes) = declared_names(&ast);
     let references = deps::referenced_names(&ast);
     let built_decls = crate::registry::build_declarations(&ast);
