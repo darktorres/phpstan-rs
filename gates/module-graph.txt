@@ -81,6 +81,7 @@ module php_date_parser builtins
 module regex_groups builtins
 module pcre_validate builtins
 module php_stubs reflection
+module stub_attributes reflection
 module registry reflection
 module registry::assignability types
 module registry::assertion_table reflection

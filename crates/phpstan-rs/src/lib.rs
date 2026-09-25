@@ -45,6 +45,7 @@ pub mod sql_reflection_config;
 pub mod sql_reflection_reflector;
 pub mod sql_reflection_schema;
 pub mod sql_reflection_schema_drift;
+pub(crate) mod stub_attributes;
 pub mod token;
 pub mod types;
 pub mod visit;

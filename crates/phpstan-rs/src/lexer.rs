@@ -4,10 +4,6 @@ use crate::intern::intern;
 use crate::token::{Keyword, Position, Span, Token};
 
 mod strings;
-mod stub_attrs;
-use stub_attrs::{
-    append_param_type_override, append_return_type_override, skip_trailing_attribute_groups,
-};
 
 /// Something the lexer skipped over rather than failing on.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -53,41 +49,8 @@ pub struct Lexer<'a> {
     // file; a string interpolation fragment's own position when one is
     // lexed on its own, so its tokens get their real positions.
     base: Position,
-    // Set by `skip_language_level_type_aware_attribute` when it finds a
-    // return-type-gating `#[LanguageLevelTypeAware(...)]` -
-    // `tokenize_with_spans` checks this right after the `next_token()`
-    // call that set it (before pushing that call's own token) and, if
-    // set, rewrites the immediately-preceding `Token::DocComment` to
-    // carry the modern type instead of the stub's stale one.
-    pending_return_type_override: Option<String>,
-    // The parameter-gating sibling of the field above - set when the
-    // attribute instead gates a parameter (`finfo_file`'s
-    // `#[LanguageLevelTypeAware(['8.1' => 'finfo'], default: 'resource')]
-    // $finfo`). `tokenize_with_spans` inserts these as real synthetic
-    // tokens right before the upcoming `$name` token, since a parameter
-    // has no docblock tag guaranteed to exist for it the way a function's
-    // one-per-signature `@return` line does.
-    pending_param_type_tokens: Option<Vec<Token>>,
-    // `pending_param_type_tokens` alone loses to a competing legacy
-    // `@param` docblock tag (`resolve_type` treats a matching doc tag as
-    // authoritative over the native hint) - real shape: `ini_set`'s
-    // `@param string $value` next to a native
-    // `#[LanguageLevelTypeAware(['8.1' => 'string|int|float|bool|null'],
-    // default: 'string')] $value`. Set alongside
-    // `pending_param_type_tokens` to (parameter name, override type);
-    // `tokenize_with_spans` searches `tokens` backward for the nearest
-    // enclosing `Token::DocComment` and splices a fresh `@param` line onto
-    // it - mirroring `pending_return_type_override`'s own `@return`
-    // splice, but needing its own field since a parameter override,
-    // unlike a return override, isn't found immediately after the doc
-    // comment that owns it (other parameters/attributes/commas sit in
-    // between), so the backward search can only happen where `tokens`
-    // itself lives - `tokenize_with_spans`'s own loop, not this lexer's
-    // inner methods.
-    pending_param_doc_override: Option<(String, String)>,
     // The just-lexed keyword's own original source-text spelling, stashed
-    // out of band the same way the three `pending_*` fields above already
-    // do for unrelated data - `Token::Keyword` itself carries only the
+    // out of band - `Token::Keyword` itself carries only the
     // keyword's canonical (always-lowercase) spelling, never the raw
     // bytes, so a keyword-shaped identifier (`class Enum { ... }`, a real
     // vendored class literally named the same as the `enum` keyword)
@@ -99,10 +62,6 @@ pub struct Lexer<'a> {
     // (doc comments are tokens of their own).
     comments: Vec<(usize, usize)>,
     warnings: Vec<LexWarning>,
-    // `#[Alias(` prefixes this file imports for the two stub attributes
-    // (`use JetBrains\PhpStorm\Internal\PhpStormStubsElementAvailable
-    // as Alias;`): (prefix, is the availability attribute).
-    stub_attribute_aliases: Vec<(String, bool)>,
 }
 
 /// Advances past a single- or double-quoted string literal starting at
@@ -143,35 +102,6 @@ fn compute_line_starts(src: &[u8]) -> Vec<usize> {
 /// A token, its span, and a keyword's original spelling.
 pub type SpannedToken = (Token, Span, Option<String>);
 
-/// The `#[Alias(` prefixes `src` imports for phpstorm-stubs' two
-/// version attributes, with whether each is the availability one.
-fn stub_attribute_aliases(src: &str) -> Vec<(String, bool)> {
-    const NAMESPACE: &str = "use JetBrains\\PhpStorm\\Internal\\";
-    let mut aliases = Vec::new();
-    if !src.contains(NAMESPACE) {
-        return aliases;
-    }
-    for (pos, _) in src.match_indices(NAMESPACE) {
-        let rest = &src[pos + NAMESPACE.len()..];
-        let Some(statement) = rest.split(';').next() else {
-            continue;
-        };
-        let Some((class, alias)) = statement.split_once(" as ") else {
-            continue;
-        };
-        let is_availability = match class.trim() {
-            "PhpStormStubsElementAvailable" => true,
-            "LanguageLevelTypeAware" => false,
-            _ => continue,
-        };
-        let alias = alias.trim();
-        if alias.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') && !alias.is_empty() {
-            aliases.push((format!("#[{alias}("), is_availability));
-        }
-    }
-    aliases
-}
-
 impl<'a> Lexer<'a> {
     pub fn new(src: &'a str) -> Self {
         let bytes = src.as_bytes();
@@ -183,13 +113,9 @@ impl<'a> Lexer<'a> {
             last_token_start: 0,
             pos_cache: (0, Position { line: 1, col: 1 }),
             base: Position { line: 1, col: 1 },
-            pending_return_type_override: None,
-            pending_param_type_tokens: None,
-            pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
             warnings: Vec::new(),
-            stub_attribute_aliases: stub_attribute_aliases(src),
         }
     }
 
@@ -206,13 +132,9 @@ impl<'a> Lexer<'a> {
             last_token_start: 0,
             pos_cache: (0, Position { line: 1, col: 1 }),
             base: Position { line: 1, col: 1 },
-            pending_return_type_override: None,
-            pending_param_type_tokens: None,
-            pending_param_doc_override: None,
             pending_keyword_raw: None,
             comments: Vec::new(),
             warnings: Vec::new(),
-            stub_attribute_aliases: stub_attribute_aliases(src),
         }
     }
 
@@ -329,63 +251,6 @@ impl<'a> Lexer<'a> {
         loop {
             let tok = self.next_token();
             let keyword_raw = self.pending_keyword_raw.take();
-            if let Some(override_ty) = self.pending_return_type_override.take() {
-                // A plain `tokens.last_mut()` check would assume the doc
-                // comment is always the immediately-preceding token - not
-                // true once a generic `#[Attr]` group is a real,
-                // individually-tokenized token: phpstorm-stubs' own
-                // `substr()` stub is `/** @return string|false */ #[Pure]
-                // #[LanguageLevelTypeAware(...)] function substr(...) {}`
-                // - `#[Pure]` sits directly between the doc comment and
-                // the special-cased attribute that actually sets
-                // `pending_return_type_override`, hiding the doc comment
-                // from a bare `tokens.last_mut()` look and silently
-                // dropping the override. Skipping back past any such
-                // trailing attribute group(s) first restores the intended
-                // adjacency.
-                let end = skip_trailing_attribute_groups(&tokens);
-                if let Some((Token::DocComment(doc), _, _)) =
-                    end.checked_sub(1).and_then(|i| tokens.get_mut(i))
-                {
-                    *doc = append_return_type_override(doc, &override_ty).into();
-                }
-            }
-            if let Some(type_tokens) = self.pending_param_type_tokens.take() {
-                // Synthetic tokens with no real source text of their own -
-                // a zero-width span at the upcoming real token's own
-                // start (computed the same way just below) is the most
-                // sensible position to attribute them to.
-                let synthetic_pos = self.line_col_at(self.last_token_start);
-                let synthetic_span = Span {
-                    start: synthetic_pos,
-                    end: synthetic_pos,
-                };
-                for t in type_tokens {
-                    tokens.push((t, synthetic_span, None));
-                }
-            }
-            if let Some((name, override_ty)) = self.pending_param_doc_override.take() {
-                // Unlike a return override (found immediately after the
-                // doc comment that owns it, via `tokens.last_mut()`
-                // above), a parameter override can be many tokens past its
-                // own enclosing doc comment (other parameters, attributes,
-                // commas) - so this searches backward through everything
-                // `tokens` holds so far, stopping (doing nothing) the
-                // moment a statement/declaration boundary token is crossed,
-                // to avoid misattributing the override to an unrelated
-                // *earlier* declaration's docblock when the current
-                // function has none of its own.
-                for (t, _, _) in tokens.iter_mut().rev() {
-                    match t {
-                        Token::DocComment(doc) => {
-                            *doc = append_param_type_override(doc, &name, &override_ty).into();
-                            break;
-                        }
-                        Token::Semicolon | Token::LBrace | Token::RBrace => break,
-                        _ => {}
-                    }
-                }
-            }
             let span = Span {
                 start: self.line_col_at(self.last_token_start),
                 end: self.line_col_at(self.pos),
@@ -604,42 +469,9 @@ impl<'a> Lexer<'a> {
                     self.pos += 1;
                 }
                 b'#' => {
-                    let alias = self
-                        .stub_attribute_aliases
-                        .iter()
-                        .find(|(prefix, _)| self.starts_with(prefix))
-                        .cloned();
-                    if let Some((prefix, true)) = &alias {
-                        self.skip_stub_availability_attribute(prefix.len());
-                    } else if let Some((prefix, false)) = &alias {
-                        self.skip_language_level_type_aware_attribute(prefix);
-                    } else if self.starts_with("#[PhpStormStubsElementAvailable(") {
-                        self.skip_stub_availability_attribute(
-                            "#[PhpStormStubsElementAvailable(".len(),
-                        );
-                    } else if self.starts_with("#[LanguageLevelTypeAware(") {
-                        self.skip_language_level_type_aware_attribute("#[LanguageLevelTypeAware(");
-                    } else if self.starts_with("#[PhpVersionAware(") {
-                        // Real phpstorm-stubs shape (`ldap/ldap.php`'s own
-                        // `use JetBrains\PhpStorm\Internal\
-                        // LanguageLevelTypeAware as PhpVersionAware;`) -
-                        // `PhpVersionAware` is a plain PHP `use`-import
-                        // alias for the identical attribute class handled
-                        // above, not a different attribute - every
-                        // `ldap_*` function stub in that one file uses
-                        // this spelling exclusively, so without this arm
-                        // every one fell through to the generic `#[`
-                        // attribute-token path below, leaving its param/
-                        // return type stuck on the stale pre-8.1 `@param
-                        // resource $ldap`-style doc comment instead of the
-                        // real `\LDAP\Connection`/`\LDAP\Result` override
-                        // this attribute exists to apply.
-                        self.skip_language_level_type_aware_attribute("#[PhpVersionAware(");
-                    } else if self.starts_with("#[") {
-                        // A general `#[Attribute(...)]` group isn't
-                        // thrown away here - only the two special-cased
-                        // stub-generation attributes above get raw-text
-                        // treatment. Breaking out of this whitespace/
+                    if self.starts_with("#[") {
+                        // An `#[Attribute(...)]` group is real code, not
+                        // a comment. Breaking out of this whitespace/
                         // comment loop (without consuming `#[` itself)
                         // hands control back to `next_token`, which emits
                         // a real `AttributeStart` token for it and lets

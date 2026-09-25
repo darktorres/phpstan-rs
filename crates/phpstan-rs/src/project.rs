@@ -2277,7 +2277,9 @@ type Parsed = (Vec<Stmt>, ignore_comments::IgnoreComments, Vec<LexWarning>);
 fn parse_with_ignores(source: &str) -> Result<Parsed, ParseError> {
     let (tokens, comments, warnings) = Lexer::new(source).tokenize_with_comments();
     let ignores = ignore_comments::scan_tokens(&tokens, &comments);
-    Ok((Parser::new(tokens).parse_program()?, ignores, warnings))
+    let mut ast = Parser::new(tokens).parse_program()?;
+    crate::stub_attributes::apply_stub_attributes(&mut ast);
+    Ok((ast, ignores, warnings))
 }
 
 /// Everything about loading one file that's pure - parsing, plus every

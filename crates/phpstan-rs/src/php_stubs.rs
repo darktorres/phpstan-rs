@@ -694,9 +694,10 @@ fn patch_spl_iterator_templates(classes: &mut [(Arc<str>, ClassInfo)]) {
 fn patch_phpstan_stub_classes(classes: &mut [(Arc<str>, ClassInfo)]) {
     for source in PHPSTAN_STUB_SOURCES {
         let tokens = Lexer::new(source).tokenize_with_spans();
-        let Ok(program) = Parser::new(tokens).parse_program() else {
+        let Ok(mut program) = Parser::new(tokens).parse_program() else {
             continue;
         };
+        crate::stub_attributes::apply_stub_attributes(&mut program);
         let registry = Registry::index_and_flatten(&program);
         for (name, stub) in registry.classes {
             let Some((_, info)) = classes
@@ -884,9 +885,10 @@ fn generated_stub_data() -> &'static GeneratedStubData {
             .zip(extensions)
         {
             let tokens = Lexer::new(source).tokenize_with_spans();
-            let program = Parser::new(tokens)
+            let mut program = Parser::new(tokens)
                 .parse_program()
                 .expect("vendored phpstorm-stubs source failed to parse");
+            crate::stub_attributes::apply_stub_attributes(&mut program);
             let registry = Registry::index_and_flatten(&program);
             for (name, mut sig) in registry.functions {
                 // See `FunctionSig::is_stub`'s own doc comment: a stub
