@@ -361,25 +361,40 @@ impl<'a> Checker<'a> {
     /// reverse direction is handled), so a bare `self` return type
     /// wrapped in any union must be resolved here first.
     pub(crate) fn resolve_pseudo(&self, ty: &Type, defining_class: &str) -> Type {
+        self.resolve_pseudo_at(ty, defining_class, defining_class)
+    }
+
+    /// `resolve_pseudo` for a member read through an instance of
+    /// `called_class`: `self`/`parent` stay relative to `declaring_class`,
+    /// the class that declares the member, while `static`/`$this` are
+    /// the called class (late static binding).
+    pub(crate) fn resolve_pseudo_at(
+        &self,
+        ty: &Type,
+        declaring_class: &str,
+        called_class: &str,
+    ) -> Type {
+        let recurse = |t: &Type| self.resolve_pseudo_at(t, declaring_class, called_class);
         match ty {
-            Type::SelfRef(args) | Type::StaticRef(args) => Type::Object(
-                defining_class.to_string(),
-                args.iter()
-                    .map(|a| self.resolve_pseudo(a, defining_class))
-                    .collect(),
+            Type::SelfRef(args) => Type::Object(
+                declaring_class.to_string(),
+                args.iter().map(recurse).collect(),
             ),
-            Type::This => Type::Object(defining_class.to_string(), Vec::new()),
+            Type::StaticRef(args) => {
+                Type::Object(called_class.to_string(), args.iter().map(recurse).collect())
+            }
+            Type::This => Type::Object(called_class.to_string(), Vec::new()),
             Type::ParentRef => self
                 .registry
                 .classes
-                .get(defining_class)
+                .get(declaring_class)
                 .and_then(|info| info.extends.first())
                 .map(|p| Type::Object(p.to_string(), Vec::new()))
                 .unwrap_or_else(|| ty.clone()),
             // Every nested position too: a generic class's own template
             // arguments (`SortEntry<self, string>`), a conditional return
             // type's branches, a `Closure(self): static` shape.
-            _ => ty.map_children(&mut |t| self.resolve_pseudo(t, defining_class)),
+            _ => ty.map_children(&mut |t| recurse(t)),
         }
     }
 

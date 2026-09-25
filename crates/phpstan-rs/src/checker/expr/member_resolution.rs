@@ -283,7 +283,7 @@ impl<'a> Checker<'a> {
                 .map(|(owner, p)| {
                     let bindings = self.class_template_bindings(class, type_args, &owner);
                     let resolved = types::substitute_template(&p.ty, &bindings);
-                    self.resolve_pseudo(&resolved, class)
+                    self.resolve_pseudo_at(&resolved, &owner, class)
                 })
                 .unwrap_or_else(|| {
                     // `SimpleXMLElementClassPropertyReflectionExtension`'s
@@ -834,7 +834,7 @@ impl<'a> Checker<'a> {
                 let sig = self.substitute_class_templates(sig, class, type_args, &owner);
                 let resolved_args = resolve_call_args(args, &sig.params);
                 let resolved = self.infer_call_return_type(&sig, &resolved_args, locals);
-                self.resolve_pseudo(&resolved, class)
+                self.resolve_pseudo_at(&resolved, &owner, class)
             })
             .unwrap_or(Type::Mixed(false))
     }
@@ -848,7 +848,7 @@ impl<'a> Checker<'a> {
             .map(|(owner, sig)| {
                 let ty =
                     self.substitute_class_template_property_type(&sig.ty, class, type_args, &owner);
-                self.resolve_pseudo(&ty, class)
+                self.resolve_pseudo_at(&ty, &owner, class)
             })
             .unwrap_or(Type::Mixed(false))
     }
