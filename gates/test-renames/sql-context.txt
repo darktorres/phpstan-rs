@@ -1,0 +1,1 @@
+checker::sql_reflection::resolve::tests::resolve_sql_row_type_caches_an_undecidable_answer_by_sql_text -> sql_reflection_context::tests::an_unconfigured_context_reflects_nothing_and_remembers_the_answer

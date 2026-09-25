@@ -43,39 +43,32 @@ use sqlparser::parser::Parser;
 
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
+use crate::sql_reflection_context::SqlContext;
 use crate::sql_reflection_schema::SchemaCatalog;
 use types::union_types;
 use types::{Shape, ShapeField, Type};
 
-pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {
-    let driver = registry.sql_reflection_config.as_ref().map(|c| c.driver);
-    if let Some(ty) = resolve_pure_ast(sql, driver) {
+pub(crate) fn resolve_sql_row_type(
+    registry: &Registry,
+    context: &SqlContext,
+    sql: &str,
+) -> Option<Type> {
+    if let Some(ty) = resolve_pure_ast(sql, context.driver()) {
         let ty = refine_count_columns(sql, ty);
         return Some(cross_reference_entity_fields(registry, sql, ty));
     }
-    if let Some(cached) = registry.sql_reflection_cache.lock().unwrap().get(sql) {
-        return cached.clone();
-    }
-    let row_type = if let Some(schema) = &registry.sql_reflection_schema
-        && let Some(ty) = resolve_from_static_schema(schema, sql)
+    let row_type = match context
+        .schema()
+        .and_then(|schema| resolve_from_static_schema(schema, sql))
     {
-        Some(ty)
-    } else {
-        registry
-            .sql_reflector
-            .get(registry.sql_reflection_config.as_ref())
-            .and_then(|r| r.reflect(sql))
-            .map(|columns| super::row_type(&columns))
+        Some(ty) => Some(ty),
+        None => context
+            .reflect(sql)
+            .map(|columns| super::row_type(&columns)),
     };
-    let result = row_type
+    row_type
         .map(|ty| refine_count_columns(sql, ty))
-        .map(|ty| cross_reference_entity_fields(registry, sql, ty));
-    registry
-        .sql_reflection_cache
-        .lock()
-        .unwrap()
-        .insert(sql.to_string(), result.clone());
-    result
+        .map(|ty| cross_reference_entity_fields(registry, sql, ty))
 }
 
 /// Gap #9: a raw SQL query against a table a `DoctrineEntity` already

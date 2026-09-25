@@ -305,7 +305,7 @@ fn raw_field_type(checker: &Checker, aliases: &AliasMap, r: &FieldRef) -> Option
     let entity = aliases.get(alias)?;
     let de = entity_info(checker, entity)?.doctrine_entity.as_ref()?;
     let join_nullable = aliases.is_nullable(alias);
-    if let Some(schema) = &checker.registry.sql_reflection_schema
+    if let Some(schema) = checker.sql.schema()
         && let Some(table) = &de.table_name
         && let Some(column_name) = de.column_names.get(field.as_str())
         && let Some(column) = schema.column(table, column_name)

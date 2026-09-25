@@ -93,6 +93,7 @@ pub struct Project {
     interner: Arc<Interner>,
     dependents: FxHashMap<String, FxHashSet<PathBuf>>,
     registry: Registry,
+    sql: crate::sql_reflection_context::SqlContext,
     // Directory-scoped Pest `$this`-binding config, rebuilt from every
     // currently-loaded `Pest.php` file whenever the loaded file set could
     // have changed (`finish_loading`/`update_file`) - see `pest_config`'s
@@ -218,6 +219,7 @@ impl Project {
             interner: Arc::new(Interner::new()),
             dependents: FxHashMap::default(),
             registry,
+            sql: crate::sql_reflection_context::SqlContext::default(),
             pest_config: PestConfig::default(),
             working_dir: None,
             phpstan_api_check_enabled: false,
@@ -317,26 +319,27 @@ impl Project {
             .collect();
     }
 
-    /// Stores a project's own configured `[sql_reflection]` block on the
-    /// `Registry`, inert until the live SQL query reflection feature
-    /// (`checker::sql_reflection`) is built on top of it. `None` (no
-    /// block configured) is the default and keeps every raw-SQL call
-    /// site on today's fallback behavior, unchanged.
+    /// Sets the project's `[sql_reflection]` block. `None` (no block
+    /// configured) keeps every raw-SQL call site on its fallback.
     pub fn set_sql_reflection_config(
         &mut self,
         config: Option<crate::sql_reflection_config::SqlReflectionConfig>,
     ) {
-        self.registry.sql_reflection_config = config;
+        self.sql.set_config(config);
     }
 
-    /// Stores a project's own parsed `schema_file` catalog (sub-phase
-    /// A2), inert until sub-phase C's reflector consults it. `None`
-    /// when no `schema_file` is configured.
+    /// Sets the project's parsed `schema_file` catalog - `None` when no
+    /// `schema_file` is configured.
     pub fn set_sql_reflection_schema(
         &mut self,
         schema: Option<crate::sql_reflection_schema::SchemaCatalog>,
     ) {
-        self.registry.sql_reflection_schema = schema;
+        self.sql.set_schema(schema);
+    }
+
+    /// The project's SQL reflection service.
+    pub fn sql(&self) -> &crate::sql_reflection_context::SqlContext {
+        &self.sql
     }
 
     /// Opts the whole project's checking into `use function`'s own
@@ -1586,7 +1589,7 @@ impl Project {
     /// facts pass to plug in).
     pub(crate) fn checker_for(&self, path: &Path) -> Option<(Checker<'_>, &[Stmt])> {
         let file = self.files.get(path)?;
-        let mut checker = Checker::new(&self.registry);
+        let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
@@ -1635,7 +1638,7 @@ impl Project {
                 FxHashSet::default(),
             );
         };
-        let mut checker = Checker::new(&self.registry);
+        let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
         checker.set_pest_this_type(self.pest_config.resolve_this_type(path, &self.registry));
         checker.set_pest_hook_properties(self.pest_config.resolve_hook_properties(path));
         checker.set_anonymous_class_names(file.anonymous_class_names.clone());
@@ -1836,7 +1839,7 @@ impl Project {
             if !self.file_may_write_private_property(file) {
                 continue;
             }
-            let mut checker = Checker::new(&self.registry);
+            let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
             checker.set_facts_only(true);
             checker.check_program(&file.ast);
             for (fqn, props) in checker.take_property_assign_facts() {
@@ -1872,7 +1875,7 @@ impl Project {
             let Some(file) = self.files.get(path) else {
                 continue;
             };
-            let mut checker = Checker::new(&self.registry);
+            let mut checker = Checker::new(&self.registry).with_sql(&self.sql);
             checker.set_facts_only(true);
             checker.check_program(&file.ast);
             for (key, spans) in checker.take_named_argument_call_facts() {

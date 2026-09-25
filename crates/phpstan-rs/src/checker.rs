@@ -559,6 +559,9 @@ pub(crate) type PropertyAssignFacts = FxHashMap<Arc<str>, FxHashMap<Arc<str>, Ve
 /// get distinct keys, the same way real PHP tells them apart.
 pub struct Checker<'a> {
     pub(crate) registry: &'a Registry,
+    // The project's SQL reflection service - an unconfigured one unless
+    // `with_sql` supplies the project's.
+    pub(crate) sql: &'a crate::sql_reflection_context::SqlContext,
     pub(crate) diagnostics: Vec<Diagnostic>,
     // `textDocument/semanticTokens/full`'s own accumulator - every
     // `@deprecated`/`@internal` usage site flagged regardless of whether
@@ -1232,9 +1235,18 @@ pub(crate) use types::union_types;
 pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {
+    /// Checks against the project's SQL reflection service.
+    pub fn with_sql(mut self, sql: &'a crate::sql_reflection_context::SqlContext) -> Self {
+        self.sql = sql;
+        self
+    }
+
     pub fn new(registry: &'a Registry) -> Self {
+        static NO_SQL: std::sync::LazyLock<crate::sql_reflection_context::SqlContext> =
+            std::sync::LazyLock::new(Default::default);
         Checker {
             registry,
+            sql: &NO_SQL,
             diagnostics: Vec::new(),
             name_ctx: NameContext::default(),
             current_class: None,

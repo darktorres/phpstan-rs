@@ -1,4 +1,5 @@
 use super::*;
+use crate::sql_reflection_context::SqlContext;
 
 fn fixture_schema() -> SchemaCatalog {
     crate::sql_reflection_schema::parse_ddl(
@@ -93,9 +94,9 @@ fn an_unknown_column_falls_through() {
 
 #[test]
 fn resolve_sql_row_type_uses_the_static_schema_when_configured_and_no_live_reflector_exists() {
-    let mut registry = Registry::default();
-    registry.sql_reflection_schema = Some(fixture_schema());
-    let ty = resolve_sql_row_type(&registry, "SELECT id, name FROM categories").unwrap();
+    let registry = Registry::default();
+    let context = SqlContext::new(None, Some(fixture_schema()));
+    let ty = resolve_sql_row_type(&registry, &context, "SELECT id, name FROM categories").unwrap();
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
@@ -106,7 +107,8 @@ fn resolve_sql_row_type_uses_the_static_schema_when_configured_and_no_live_refle
 #[test]
 fn resolve_sql_row_type_returns_none_with_nothing_configured_at_all() {
     let registry = Registry::default();
-    assert!(resolve_sql_row_type(&registry, "SELECT id FROM categories").is_none());
+    let context = SqlContext::default();
+    assert!(resolve_sql_row_type(&registry, &context, "SELECT id FROM categories").is_none());
 }
 
 #[test]
@@ -115,9 +117,9 @@ fn resolve_sql_row_type_falls_through_to_the_live_reflector_when_static_cannot_a
     // static path can't answer (unknown table), and the live fallback
     // has nothing to connect to either, so this must cleanly degrade to
     // None rather than panic.
-    let mut registry = Registry::default();
-    registry.sql_reflection_schema = Some(fixture_schema());
-    assert!(resolve_sql_row_type(&registry, "SELECT id FROM some_other_table").is_none());
+    let registry = Registry::default();
+    let context = SqlContext::new(None, Some(fixture_schema()));
+    assert!(resolve_sql_row_type(&registry, &context, "SELECT id FROM some_other_table").is_none());
 }
 
 #[test]
@@ -281,33 +283,14 @@ fn resolve_pure_ast_bails_when_any_select_item_references_a_column() {
 #[test]
 fn resolve_sql_row_type_answers_a_pure_literal_query_with_nothing_configured_at_all() {
     let registry = Registry::default();
-    let ty = resolve_sql_row_type(&registry, "SELECT 1, 'x'").unwrap();
+    let context = SqlContext::default();
+    let ty = resolve_sql_row_type(&registry, &context, "SELECT 1, 'x'").unwrap();
     let Type::ArrayShape(fields) = ty else {
         panic!("expected an ArrayShape");
     };
     let fields = fields.named_fields();
     assert_eq!(fields[0].1, Type::Int);
     assert_eq!(fields[1].1, Type::String);
-}
-
-#[test]
-fn resolve_sql_row_type_caches_an_undecidable_answer_by_sql_text() {
-    let mut registry = Registry::default();
-    registry.sql_reflection_schema = Some(fixture_schema());
-    let sql = "SELECT nope FROM categories";
-    assert!(resolve_sql_row_type(&registry, sql).is_none());
-    assert!(
-        registry
-            .sql_reflection_cache
-            .lock()
-            .unwrap()
-            .contains_key(sql),
-        "expected the undecidable result to be cached"
-    );
-    // A second call must stay `None`, served from the cache rather than
-    // re-deriving (observably identical either way, but exercises the
-    // cache-hit path without panicking).
-    assert!(resolve_sql_row_type(&registry, sql).is_none());
 }
 
 #[test]

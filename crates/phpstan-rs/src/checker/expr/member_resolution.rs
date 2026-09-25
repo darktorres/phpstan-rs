@@ -714,6 +714,7 @@ impl<'a> Checker<'a> {
                     .and_then(|sql| {
                         crate::checker::sql_reflection::resolve::resolve_sql_row_type(
                             self.registry,
+                            self.sql,
                             &sql,
                         )
                     });
@@ -750,6 +751,7 @@ impl<'a> Checker<'a> {
                     .and_then(|sql| {
                         crate::checker::sql_reflection::resolve::resolve_sql_row_type(
                             self.registry,
+                            self.sql,
                             &sql,
                         )
                     });

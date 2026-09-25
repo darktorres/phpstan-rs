@@ -53,6 +53,7 @@ module main bin
 
 module sql_reflection_column sql
 module sql_reflection_config sql
+module sql_reflection_context sql
 module sql_reflection_schema sql
 module sql_reflection_reflector sql
 module sql_reflection_schema_drift sql
@@ -198,9 +199,6 @@ module checker::access_attributes ext-language-extensions
 # allow <from> <to> <phase that removes the edge>
 
 
-allow registry sql_reflection_config B6
-allow registry sql_reflection_reflector B6
-allow registry sql_reflection_schema B6
 
 allow config architecture C1
 allow config assertion_tables C1
@@ -390,6 +388,7 @@ allow checker::expr checker::doctrine E4
 allow checker::expr checker::magic_numbers E4
 allow checker::expr checker::psr3 E4
 allow checker::expr checker::risky_tests E4
+allow checker sql_reflection_context E4
 allow checker::expr checker::sql_reflection E4
 allow checker::expr checker::strict_idioms E4
 allow checker::expr checker::strict_rules E4
@@ -434,6 +433,7 @@ allow project parent_calls F1
 allow project pest_config F1
 allow project restricted_symbols F1
 allow project sql_reflection_config F1
+allow project sql_reflection_context F1
 allow project sql_reflection_reflector F1
 allow project sql_reflection_schema F1
 allow project sql_reflection_schema_drift F1
