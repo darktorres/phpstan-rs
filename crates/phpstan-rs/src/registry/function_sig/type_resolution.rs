@@ -146,14 +146,13 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
     // it at all) survives verbatim.
     //
     // Skipped whenever a kept member still contains an unresolved
-    // `"$$valueof"` sentinel (`value-of<T>` on a still-unbound
-    // `@template` - `types::parse_type_keyword_or_class`'s own deferred
-    // marker): `Registry::resolve_deferred_value_of_with_native_fallback`
-    // runs *after* this function, expects to find the sentinel alone
+    // `Type::ValueOf` (`value-of<T>` on a still-unbound `@template`):
+    // `Registry::resolve_deferred_value_of_with_native_fallback`
+    // runs *after* this function, expects to find the `ValueOf` alone
     // (not already unioned with extra native members this function
     // doesn't yet know will turn out unneeded), and does its own,
     // separate "resolved to bare `Mixed`? use the native type instead"
-    // swap once the sentinel's real value is known - unioning native
+    // swap once its real value is known - unioning native
     // members in early would corrupt that later check's own `resolved ==
     // Type::Mixed(false)` test (a real regression caught by this project's own
     // existing `value_of_on_an_unresolvable_template_falls_back_to_the_native_return_type`
@@ -324,17 +323,17 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         return false;
     }
     match m {
-        // `"$$valueof"` (`types::parse_type_keyword_or_class`'s own
-        // `value-of<T>`-on-an-enum sentinel) is deliberately trusted here
-        // exactly like a genuine (if unverifiable) class reference -
-        // `Registry::resolve_deferred_value_of`'s own later, whole-
-        // registry pass (see its own doc comment) restores the identical
-        // "fall back to native when the resolved doc type turns out to be
-        // Mixed" behavior this function would otherwise have given for
-        // free, once the sentinel's real value is actually known (a
-        // narrower value than the generic Object case can safely give
-        // here, this early in the pipeline).
-        Type::Object(_, _) | Type::ObjectWithoutClass => true,
+        // A class reference can't be verified this early. A `ValueOf`/
+        // `ClassConstant` is trusted the same way - `Registry::
+        // resolve_deferred_value_of`'s own later, whole-registry pass
+        // (see its own doc comment) restores the "fall back to native
+        // when the resolved doc type turns out to be Mixed" behavior this
+        // function would otherwise have given for free, once its real
+        // value is actually known.
+        Type::Object(_, _)
+        | Type::ObjectWithoutClass
+        | Type::ValueOf(_)
+        | Type::ClassConstant { .. } => true,
         // `@return static` under a native `self`/`static`/class hint: the
         // late-bound class is always an instance of the declaring one.
         Type::StaticRef | Type::SelfRef => !matches!(

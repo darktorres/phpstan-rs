@@ -584,6 +584,9 @@ impl<'a> Checker<'a> {
                     );
                 }
             }
+            Type::ValueOf(_) | Type::ClassConstant { .. } => ty.for_each_child(&mut |t| {
+                self.collect_ancestor_variance(t, position.compose(Position::Bivariant), fqn, out)
+            }),
             Type::Object(class, args) => {
                 for (i, arg) in args.iter().enumerate() {
                     let slot = self
@@ -595,7 +598,9 @@ impl<'a> Checker<'a> {
                         _ => Position::from_variance(slot),
                     };
                     let inner = match arg {
-                        Type::VarianceArg(_, inner) => inner,
+                        Type::VarianceArg(_, inner)
+                        | Type::ValueOf(inner)
+                        | Type::ClassConstant { class: inner, .. } => inner,
                         Type::Object(n, inner_args) if n.starts_with("$$") => {
                             inner_args.first().unwrap_or(arg)
                         }
@@ -657,12 +662,7 @@ fn collect_class_names(ty: &Type, out: &mut Vec<String>) {
             }
         }
         Type::TemplateParam(_) => {}
-        other => {
-            let _ = other.map_children(&mut |c| {
-                collect_class_names(c, out);
-                c.clone()
-            });
-        }
+        other => other.for_each_child(&mut |c| collect_class_names(c, out)),
     }
 }
 

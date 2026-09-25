@@ -118,6 +118,8 @@ impl Registry {
             {
                 Trinary::Maybe
             }
+            (Type::ValueOf(_) | Type::ClassConstant { .. }, _)
+            | (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => Trinary::Maybe,
             (Type::Object(a, a_args), Type::Object(b, b_args))
                 if a == b && a_args.is_empty() && b_args.is_empty() =>
             {

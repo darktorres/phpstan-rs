@@ -801,23 +801,20 @@ fn parse_type_atom(s: &str) -> Type {
     let bare = original.trim_start_matches('\\');
     let mut ty = if let Some((class_part, const_part)) = original.split_once("::") {
         // A class-constant-reference type (`Foo::BAR`, `self::RFC_*`,
-        // `Foo::*` - real PHPStan's `ConstTypeNode`, a `*` matching any
-        // run of characters) isn't a class name even though it's shaped
-        // like one. Resolving it means reading the referenced class's own
-        // constants, which only exist once the registry is built, so it's
-        // encoded as a `"$$classconst"` sentinel (the class reference plus
-        // the name pattern) and resolved by `Registry::
-        // resolve_deferred_value_of`/`resolve_deferred_value_of_now`,
-        // alongside `value-of<T>`'s own sentinel. `Foo::class` is just a
+        // `Foo::*`) isn't a class name even though it's shaped like one.
+        // Resolving it means reading the referenced class's own
+        // constants, which only exist once the registry is built
+        // (`Registry::resolve_deferred_value_of`/
+        // `resolve_deferred_value_of_now`). `Foo::class` is just a
         // class-string.
         let class_ty = parse_type_string(class_part);
         if const_part.eq_ignore_ascii_case("class") {
             Type::ClassString(Box::new(class_ty))
         } else {
-            Type::Object(
-                "$$classconst".to_string(),
-                vec![class_ty, Type::StringLiteral(const_part.to_string())],
-            )
+            Type::ClassConstant {
+                class: Box::new(class_ty),
+                pattern: const_part.to_string(),
+            }
         }
     } else {
         parse_type_keyword_or_class(bare, original, &generic_args)
@@ -1019,11 +1016,8 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // reference is real PHPStan's own `value-of<T>`-on-an-enum
         // special case (`key-of<T>` has no such case) and genuinely
         // needs registry access this parse-time function doesn't have,
-        // so it's encoded as a sentinel
-        // (`Type::Object("$$valueof", [Type::Object(name, [])])`),
-        // resolved later by `Registry::resolve_deferred_value_of` - the
-        // same "impossible name" idiom `"resource"`/`"object"` use
-        // (`$` can never appear in a real PHP identifier).
+        // so it stays a `Type::ValueOf`, resolved later by
+        // `Registry::resolve_deferred_value_of`.
         "value-of" => match generic_args {
             [single] => match parse_type_string(single) {
                 Type::Array(_, value) => *value,
@@ -1041,9 +1035,10 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
                         _ => Type::Union(fields.into_iter().map(|(_, ty, _)| ty).collect()),
                     }
                 }
-                Type::Object(name, args) if args.is_empty() || name == "$$classconst" => {
-                    Type::Object("$$valueof".to_string(), vec![Type::Object(name, args)])
+                Type::Object(name, args) if args.is_empty() => {
+                    Type::ValueOf(Box::new(Type::Object(name, args)))
                 }
+                target @ Type::ClassConstant { .. } => Type::ValueOf(Box::new(target)),
                 _ => Type::Mixed(false),
             },
             _ => Type::Mixed(false),

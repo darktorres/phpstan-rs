@@ -359,9 +359,9 @@ impl Registry {
         }
     }
 
-    /// Resolves `types::parse_type_keyword_or_class`'s `value-of<T>`-on-
-    /// a-class/enum sentinel (`Type::Object("$$valueof",
-    /// [Type::Object(target_fqn, [])])`) now that every class/enum is
+    /// Resolves every `Type::ValueOf`/`Type::ClassConstant` (`types::
+    /// parse_type_keyword_or_class`'s `value-of<T>`-on-a-class/enum, and
+    /// `Foo::BAR` references) now that every class/enum is
     /// actually indexed - see that function's doc comment for why this
     /// can't happen at parse time. A single pass, not a fixed-point loop
     /// like `flatten_phpdoc_inheritance` above: a `value-of<value-of<X>>`-
@@ -530,7 +530,7 @@ impl Registry {
         }
     }
 
-    /// Resolves every `"$$classconst"` sentinel inside class constants'
+    /// Resolves every `ClassConstant` inside class constants'
     /// own types (`const B = self::A;`, `const ALL = [self::A,
     /// Other::B];` - `infer_class_const_type`'s output) before anything
     /// else reads them. Iterated to a fixpoint so a chain (`A = self::B`,
@@ -752,7 +752,7 @@ impl Registry {
     /// value_of` above, for a `Type` parsed directly from a raw docblock
     /// string during checking rather than at registry-build time - by
     /// then every class/enum genuinely is already fully indexed, so this
-    /// resolves the `"$$valueof"` sentinel immediately, inline, with no
+    /// resolves a `ValueOf`/`ClassConstant` immediately, inline, with no
     /// pass needed. Every checker-side call site that parses a docblock
     /// type string independently of the registry's own
     /// `FunctionSig::from_decl`/`ClassInfo::from_decl` pipeline (which
@@ -1205,39 +1205,38 @@ fn declared_name_in_namespace(namespace: &str, bare: &str) -> String {
 }
 
 /// Cheap, read-only pre-check for `Registry::resolve_deferred_value_of`:
-/// does `ty` contain the `"$$valueof"` sentinel anywhere in its tree - lets
+/// does `ty` contain a `ValueOf`/`ClassConstant` anywhere in its tree - lets
 /// every call site skip the much more expensive rebuild-with-clone
 /// `resolve_deferred_value_of_in_type` does for the overwhelming majority
 /// of types, which never contain it.
 pub(crate) fn type_contains_deferred_value_of(ty: &Type) -> bool {
     match ty {
-        Type::Object(name, _) if name == "$$valueof" || name == "$$classconst" => true,
+        Type::ValueOf(_) | Type::ClassConstant { .. } => true,
         _ => ty.any_child(type_contains_deferred_value_of),
     }
 }
 
-/// The actual substitution: every `"$$valueof"`/`"$$classconst"`
-/// sentinel in `ty`, at any depth. See `Registry::resolve_deferred_value_of`'s doc
-/// comment for why this exists, and
-/// `types::parse_type_keyword_or_class`'s `"value-of"` arm for where the
-/// sentinel is produced.
+/// The actual substitution: every `ValueOf`/`ClassConstant` in `ty`, at
+/// any depth. See `Registry::resolve_deferred_value_of`'s doc comment
+/// for why this exists, and `types::parse_type_keyword_or_class`'s
+/// `"value-of"` arm for where a `ValueOf` is produced.
 fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
     match ty {
-        Type::Object(name, mut args) if name == "$$valueof" => match args.pop() {
-            Some(Type::Object(target, inner)) if target == "$$classconst" => value_of_type(
-                resolve_deferred_value_of_in_type(Type::Object(target, inner), classes),
-            ),
-            Some(Type::Object(target_fqn, _)) => resolve_value_of_target(&target_fqn, classes),
+        Type::ValueOf(target) => match *target {
+            target @ Type::ClassConstant { .. } => {
+                value_of_type(resolve_deferred_value_of_in_type(target, classes))
+            }
+            Type::Object(target_fqn, _) => resolve_value_of_target(&target_fqn, classes),
             _ => Type::Mixed(false),
         },
-        Type::Object(name, args) if name == "$$classconst" => {
-            resolve_class_const_type(&args, classes)
+        Type::ClassConstant { class, pattern } => {
+            resolve_class_const_type(&class, &pattern, classes)
         }
         other => other.map_children(&mut |t| resolve_deferred_value_of_in_type(t.clone(), classes)),
     }
 }
 
-/// A `"$$classconst"` sentinel's value: the union of every matching
+/// A `ClassConstant`'s value: the union of every matching
 /// constant's own type (an enum case's `Type::EnumCase`, a literal
 /// constant's literal type), mirroring real PHPStan's `TypeNodeResolver`
 /// for a `ConstTypeNode` - a `*` in the name matches any run of
@@ -1248,8 +1247,12 @@ fn resolve_deferred_value_of_in_type(ty: Type, classes: &FxHashMap<Arc<str>, Cla
 /// `static` reference has already been bound to the owning class by
 /// `bind_class_const_self`, or stays unresolved (`Mixed`) where no owning
 /// class exists.
-fn resolve_class_const_type(args: &[Type], classes: &FxHashMap<Arc<str>, ClassInfo>) -> Type {
-    let [Type::Object(fqn, _), Type::StringLiteral(pattern)] = args else {
+fn resolve_class_const_type(
+    class: &Type,
+    pattern: &str,
+    classes: &FxHashMap<Arc<str>, ClassInfo>,
+) -> Type {
+    let Type::Object(fqn, _) = class else {
         return Type::Mixed(false);
     };
     let fqn = fqn.trim_start_matches('\\');
@@ -1401,7 +1404,7 @@ fn value_of_type(ty: Type) -> Type {
     }
 }
 
-/// Resolves every `"$$classconst"` sentinel in `ty` that names `class`
+/// Resolves every `ClassConstant` in `ty` that names `class`
 /// itself (`self::X`, `static::X`, or `class`'s own name) straight from
 /// `own_consts`. `resolve_deferred_value_of` takes the class being
 /// rewritten out of the registry's class map while rewriting it, so
@@ -1424,32 +1427,38 @@ fn bind_class_const_self_at(
     const MAX_DEPTH: usize = 16;
     let recurse = |t: Type| bind_class_const_self_at(t, class, own_consts, depth);
     match ty {
-        Type::Object(name, args) if name == "$$classconst" => {
-            let names_self = match args.first() {
-                Some(Type::SelfRef | Type::StaticRef) => true,
-                Some(Type::Object(fqn, _)) => fqn.trim_start_matches('\\') == class,
+        Type::ClassConstant {
+            class: owner,
+            pattern,
+        } => {
+            let names_self = match &*owner {
+                Type::SelfRef | Type::StaticRef => true,
+                Type::Object(fqn, _) => fqn.trim_start_matches('\\') == class,
                 _ => false,
             };
-            match (names_self, args.get(1)) {
-                (true, Some(Type::StringLiteral(_))) if depth >= MAX_DEPTH => Type::Mixed(false),
-                (true, Some(Type::StringLiteral(pattern))) => bind_class_const_self_at(
-                    matching_class_const_type(own_consts, pattern),
+            match names_self {
+                true if depth >= MAX_DEPTH => Type::Mixed(false),
+                true => bind_class_const_self_at(
+                    matching_class_const_type(own_consts, &pattern),
                     class,
                     own_consts,
                     depth + 1,
                 ),
-                _ => Type::Object(name, args),
+                false => Type::ClassConstant {
+                    class: owner,
+                    pattern,
+                },
             }
         }
         other => other.map_children(&mut |t| recurse(t.clone())),
     }
 }
 
-/// Replaces every `"$$classconst"` sentinel still left in `ty` with
+/// Replaces every `ClassConstant` still left in `ty` with
 /// `Mixed` - see `resolve_class_constant_references`.
 fn unresolved_class_const_to_mixed(ty: Type) -> Type {
     match ty {
-        Type::Object(name, _) if name == "$$classconst" => Type::Mixed(false),
+        Type::ClassConstant { .. } => Type::Mixed(false),
         other => other.map_children(&mut |t| unresolved_class_const_to_mixed(t.clone())),
     }
 }
@@ -1476,8 +1485,8 @@ fn resolve_value_of_target(target_fqn: &str, classes: &FxHashMap<Arc<str>, Class
     }
 }
 
-/// Resolves `ty` (a param/return type that may contain the `"$$valueof"`
-/// sentinel) and, if the result is bare `Type::Mixed(false)`, falls back to
+/// Resolves `ty` (a param/return type that may contain a `ValueOf`)
+/// and, if the result is bare `Type::Mixed(false)`, falls back to
 /// `native` instead when that's itself something more useful - restores
 /// `function_sig::reconcile_with_native` behavior for a `value-of<T>`
 /// that turns out unresolvable (`T` not a real, registered enum): without

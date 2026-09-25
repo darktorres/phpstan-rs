@@ -21,9 +21,8 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // bare spelling) - `Traversable` isn't only this project's own
         // internal `iterable`-desugaring synthetic, it's also real,
         // directly-written PHPDoc syntax, so its own type arguments still
-        // need ordinary name resolution here, the same as `$$valueof`'s
-        // wrapped argument just below - only the outer name itself must
-        // stay untouched.
+        // need ordinary name resolution here - only the outer name itself
+        // must stay untouched.
         Type::Object(name, args) if name == "Traversable" => Type::Object(
             name,
             args.into_iter()
@@ -38,25 +37,6 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),
         ),
-        // `"$$valueof"` (`types::parse_type_keyword_or_class`'s own
-        // `value-of<T>`-on-a-class/enum sentinel, `Type::Object("$$valueof",
-        // [Type::Object(name, [])])`) is a marker, not a class reference
-        // itself - resolved later by `Registry::resolve_deferred_value_of`
-        // once real class/enum data exists - but unlike `object`/
-        // `Traversable`/`resource` above, its own *argument* (the real
-        // class/enum name it wraps) still needs ordinary name resolution
-        // here, the same as any other `Object`'s type arguments - without
-        // this special case, the generic arm just below would instead try
-        // to resolve `"$$valueof"` itself as if it were a genuine (and
-        // nonsensical) class reference.
-        Type::Object(name, args) if matches!(name.as_str(), "$$valueof" | "$$classconst") => {
-            Type::Object(
-                name,
-                args.into_iter()
-                    .map(|a| resolve_names_in_type(a, ctx))
-                    .collect(),
-            )
-        }
         Type::Object(name, args) => Type::Object(
             ctx.resolve(&name),
             args.into_iter()
@@ -145,9 +125,7 @@ pub(crate) fn collect_class_name_case_refs(
         // `$$static` are never a real class reference to check the case
         // of.
         Type::Object(name, _) if name == "$$self" || name == "$$static" => {}
-        Type::Object(name, args)
-            if matches!(name.as_str(), "$$valueof" | "$$classconst" | "Traversable") =>
-        {
+        Type::Object(name, args) if name == "Traversable" => {
             for a in args {
                 collect_class_name_case_refs(a, ctx, out);
             }

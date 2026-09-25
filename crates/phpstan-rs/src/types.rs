@@ -168,6 +168,17 @@ pub enum Type {
     // produces this - matching this project's own "don't guess" leniency
     // for every other literal-key-aware construction site.
     ReflectedMember(Box<Type>, String),
+    // `value-of<T>` whose `T` a parse alone can't see through - an enum,
+    // a class-constant reference or a template - resolved once the
+    // registry exists (`Registry::resolve_deferred_value_of`).
+    ValueOf(Box<Type>),
+    // `Foo::BAR`/`Foo::BAR_*` (real PHPStan's `ConstTypeNode`, a `*`
+    // matching any run of characters): the type of the matching class
+    // constants, resolved once the registry exists.
+    ClassConstant {
+        class: Box<Type>,
+        pattern: String,
+    },
     // `($subject is $target ? $if_true : $if_false)` - PHPDoc's
     // conditional-return-type syntax, lazily resolved once the real
     // call-site argument type for `subject` is known
@@ -233,6 +244,17 @@ impl PartialEq for Type {
             (Type::Accessory(a), Type::Accessory(b)) => a == b,
             (Type::HasOffsetValue(ak, av), Type::HasOffsetValue(bk, bv)) => ak == bk && av == bv,
             (Type::ReflectedMember(ao, an), Type::ReflectedMember(bo, bn)) => ao == bo && an == bn,
+            (Type::ValueOf(a), Type::ValueOf(b)) => a == b,
+            (
+                Type::ClassConstant {
+                    class: ac,
+                    pattern: ap,
+                },
+                Type::ClassConstant {
+                    class: bc,
+                    pattern: bp,
+                },
+            ) => ac == bc && ap == bp,
             (
                 Type::Conditional {
                     subject: a_subject,
@@ -480,6 +502,11 @@ impl Type {
             Type::ReflectedMember(owner, member) => {
                 Type::ReflectedMember(Box::new(f(owner)), member.clone())
             }
+            Type::ValueOf(inner) => Type::ValueOf(Box::new(f(inner))),
+            Type::ClassConstant { class, pattern } => Type::ClassConstant {
+                class: Box::new(f(class)),
+                pattern: pattern.clone(),
+            },
             Type::Conditional {
                 subject,
                 target,
@@ -510,7 +537,9 @@ impl Type {
             Type::ClassString(inner)
             | Type::VarianceArg(_, inner)
             | Type::HasOffsetValue(_, inner)
-            | Type::ReflectedMember(inner, _) => f(inner),
+            | Type::ReflectedMember(inner, _)
+            | Type::ValueOf(inner)
+            | Type::ClassConstant { class: inner, .. } => f(inner),
             Type::ArrayShape(fields) | Type::ObjectShape(fields) => {
                 for (_, t, _) in fields {
                     f(t);

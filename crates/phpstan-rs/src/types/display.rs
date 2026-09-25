@@ -111,13 +111,8 @@ impl fmt::Display for Type {
             }
             // Normally resolved away before display; shown in its source
             // form if it ever isn't (an unknown class).
-            Type::Object(name, args) if name == "$$classconst" && args.len() == 2 => {
-                let pattern = match &args[1] {
-                    Type::StringLiteral(s) => s.as_str(),
-                    _ => "*",
-                };
-                write!(f, "{}::{pattern}", args[0])
-            }
+            Type::ClassConstant { class, pattern } => write!(f, "{class}::{pattern}"),
+            Type::ValueOf(inner) => write!(f, "value-of<{inner}>"),
             Type::Object(name, args) => {
                 let name = match name.as_str() {
                     "$$self" => "self",

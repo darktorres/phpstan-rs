@@ -1,0 +1,1 @@
+types::tests::parsing::class_constant_reference_types_parse_to_a_deferred_sentinel -> types::tests::parsing::class_constant_reference_types_parse_to_a_class_constant

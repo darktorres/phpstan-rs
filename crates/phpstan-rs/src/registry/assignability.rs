@@ -455,6 +455,8 @@ impl Registry {
             // Object-vs-Object arm's leniency would leave those failing
             // just the same way.
             (_, Type::Object(name, _)) if !self.classes.contains_key(name.as_str()) => true,
+            // An unresolved `value-of<T>`/`Foo::BAR` is just as unknown.
+            (_, Type::ValueOf(_) | Type::ClassConstant { .. }) => true,
             _ => types::is_subtype(sub, sup),
         }
     }
