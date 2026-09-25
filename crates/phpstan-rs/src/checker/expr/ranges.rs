@@ -434,7 +434,7 @@ pub(crate) fn type_truthiness(ty: &Type) -> Option<bool> {
         Type::IntLiteral(n) => Some(*n != 0),
         Type::FloatLiteral(n) => Some(*n != 0.0),
         Type::StringLiteral(s) => Some(!s.is_empty() && s != "0"),
-        Type::Object(..) => Some(true),
+        Type::Object(..) | Type::ObjectWithoutClass | Type::Resource { .. } => Some(true),
         Type::ArrayShape(fields) => {
             let real_fields: Vec<_> = fields.iter().filter(|(name, _, _)| name != "...").collect();
             if real_fields.iter().any(|(_, _, optional)| !optional) {

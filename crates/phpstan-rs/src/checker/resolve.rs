@@ -452,14 +452,9 @@ impl<'a> Checker<'a> {
 
     /// The "does this name actually resolve" primitive: `name` is a
     /// real class/interface/trait/enum this checker's `Registry`
-    /// indexed, or one of the small, fixed set of native type-hint
-    /// keywords `types::parse_type_keyword_or_class` deliberately
-    /// encodes as `Type::Object` despite not being a real class
-    /// reference (mirrors `is_type_fully_known`'s identical `"object"`
-    /// exemption, plus `resolve_names_in_type`'s
-    /// `"Traversable"`/`"resource"` exemptions), so a plain
-    /// `object`/`resource`-typed parameter or `iterable` (desugared to
-    /// `array|Traversable`) never gets flagged as an unresolvable class.
+    /// indexed, or `Traversable` (`iterable` desugars to
+    /// `array|Traversable`), so an `iterable` never gets flagged as an
+    /// unresolvable class.
     /// `"class@anonymous"` is this project's fixed, literal synthetic
     /// name for every anonymous class, deliberately never indexed into
     /// the registry - without this exemption, a `self`/`static`-typed
@@ -468,13 +463,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn class_name_exists(&self, name: &str) -> bool {
         matches!(
             name,
-            "object"
-                | "Traversable"
-                | "resource"
-                | "closed-resource"
-                | "class@anonymous"
-                | "$$self"
-                | "$$static"
+            "Traversable" | "class@anonymous" | "$$self" | "$$static"
         ) || self.registry.lookup_class(name).is_some()
     }
 
@@ -972,10 +961,10 @@ fn collect_scoped_template_params(
 }
 
 /// The class a receiver's value is an instance of, when its type names
-/// one (plain `object` names none).
+/// one.
 pub(crate) fn receiver_class(ty: Type) -> Option<String> {
     match ty {
-        Type::Object(class, _) if class != "object" => Some(class),
+        Type::Object(class, _) => Some(class),
         _ => None,
     }
 }

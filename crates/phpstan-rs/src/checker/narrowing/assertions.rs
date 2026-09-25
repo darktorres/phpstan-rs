@@ -341,7 +341,7 @@ impl<'a> Checker<'a> {
             "assertIsFloat" => narrow_to(locals, 0, &Type::Float),
             "assertIsBool" | "assertIsBoolean" => narrow_to(locals, 0, &Type::Bool),
             "assertIsResource" => {
-                narrow_to(locals, 0, &Type::Object("resource".to_string(), Vec::new()));
+                narrow_to(locals, 0, &Type::Resource { closed: false });
             }
             "assertNull" => narrow_to(locals, 0, &Type::Null),
             "assertTrue" => narrow_to(locals, 0, &Type::True),

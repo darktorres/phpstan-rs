@@ -202,11 +202,7 @@ impl<'a> Checker<'a> {
             TypeNode::Intersection(members) => {
                 let types: Vec<Type> = members.iter().map(|m| self.node_type(m, class)).collect();
                 // A class the registry never saw proves nothing either way.
-                let unknown_class = |t: &Type| {
-                    matches!(t, Type::Object(n, _)
-                        if !matches!(n.as_str(), "object" | "resource" | "closed-resource")
-                            && self.registry.lookup_class(n).is_none())
-                };
+                let unknown_class = |t: &Type| matches!(t, Type::Object(n, _) if self.registry.lookup_class(n).is_none());
                 if types.iter().any(unknown_class) {
                     return false;
                 }
@@ -251,7 +247,7 @@ impl<'a> Checker<'a> {
                 name.contains('-')
                     && !name.trim_start_matches('\\').starts_with("OCI-")
                     && matches!(types::parse_type_string(name),
-                        Type::Object(n, _) if n.contains('-') && n != "closed-resource")
+                        Type::Object(n, _) if n.contains('-'))
             }
         }
     }

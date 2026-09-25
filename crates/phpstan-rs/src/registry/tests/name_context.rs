@@ -35,7 +35,7 @@ fn collects_a_representative_nested_type_s_own_class_name_refs() {
 fn skips_the_object_traversable_and_resource_sentinels() {
     let ctx = ctx_for("App");
     for sentinel in ["object", "Traversable", "resource"] {
-        let ty = Type::Object(sentinel.to_string(), Vec::new());
+        let ty = types::parse_type_string(sentinel);
         let mut out = Vec::new();
         collect_class_name_case_refs(&ty, &ctx, &mut out);
         assert!(

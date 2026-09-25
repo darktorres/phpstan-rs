@@ -217,7 +217,11 @@ pub(crate) fn reconcile_with_native(doc_ty: Type, native_ty: Type) -> Type {
 fn native_member_addable(native_member: &Type) -> bool {
     !matches!(
         native_member,
-        Type::Object(_, _) | Type::SelfRef | Type::StaticRef | Type::ParentRef
+        Type::Object(_, _)
+            | Type::ObjectWithoutClass
+            | Type::SelfRef
+            | Type::StaticRef
+            | Type::ParentRef
     )
 }
 
@@ -247,7 +251,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
         return m;
     }
     match native_ty {
-        Type::Object(_, _) => native_ty.clone(),
+        Type::Object(_, _) | Type::ObjectWithoutClass => native_ty.clone(),
         Type::Union(members) => {
             match members
                 .iter()
@@ -255,7 +259,7 @@ fn refine_callable_member(m: Type, native_ty: &Type) -> Type {
                 .collect::<Vec<_>>()
                 .as_slice()
             {
-                [Type::Object(_, _)] => members
+                [Type::Object(_, _) | Type::ObjectWithoutClass] => members
                     .iter()
                     .find(|t| **t != Type::Null)
                     .cloned()
@@ -320,7 +324,6 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         return false;
     }
     match m {
-        Type::Object(name, _) if name == "resource" => types::is_subtype(m, native_ty),
         // `"$$valueof"` (`types::parse_type_keyword_or_class`'s own
         // `value-of<T>`-on-an-enum sentinel) is deliberately trusted here
         // exactly like a genuine (if unverifiable) class reference -
@@ -331,7 +334,7 @@ fn member_possible_given_native(m: &Type, native_ty: &Type) -> bool {
         // free, once the sentinel's real value is actually known (a
         // narrower value than the generic Object case can safely give
         // here, this early in the pipeline).
-        Type::Object(_, _) => true,
+        Type::Object(_, _) | Type::ObjectWithoutClass => true,
         // `@return static` under a native `self`/`static`/class hint: the
         // late-bound class is always an instance of the declaring one.
         Type::StaticRef | Type::SelfRef => !matches!(

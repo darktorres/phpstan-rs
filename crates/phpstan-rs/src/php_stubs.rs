@@ -456,13 +456,11 @@ fn patch_reflection_method_and_property_templates(classes: &mut [(Arc<str>, Clas
         }
         info.templates.push(Arc::from("TClass"));
         info.covariant_templates.insert(Arc::from("TClass"));
-        info.template_bounds.insert(
-            Arc::from("TClass"),
-            Type::Object("object".to_string(), Vec::new()),
-        );
+        info.template_bounds
+            .insert(Arc::from("TClass"), Type::ObjectWithoutClass);
         let tp = TemplateParam {
             name: "TClass".to_string(),
-            bound: Box::new(Type::Object("object".to_string(), Vec::new())),
+            bound: Box::new(Type::ObjectWithoutClass),
             variance: crate::types::Variance::Covariant,
             scope: Some(class_name.to_string()),
             default: None,
@@ -572,11 +570,7 @@ fn backtrace_frame_list_type() -> Type {
             ]),
             true,
         ),
-        (
-            "object".to_string(),
-            Type::Object("object".to_string(), Vec::new()),
-            true,
-        ),
+        ("object".to_string(), Type::ObjectWithoutClass, true),
     ]);
     Type::Intersection(vec![
         Type::Array(Box::new(Type::unknown_array_key()), Box::new(frame_shape)),

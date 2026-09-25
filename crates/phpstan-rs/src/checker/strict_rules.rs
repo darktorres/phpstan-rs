@@ -918,6 +918,8 @@ fn not_convertible_to_number(ty: &Type) -> bool {
         Type::Array(..)
         | Type::ArrayShape(_)
         | Type::Object(..)
+        | Type::ObjectWithoutClass
+        | Type::Resource { .. }
         | Type::ObjectShape(_)
         | Type::EnumCase(..)
         | Type::Callable(_)

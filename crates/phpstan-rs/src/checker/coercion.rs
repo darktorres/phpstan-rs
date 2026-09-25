@@ -30,22 +30,18 @@ const FLOAT_CASTABLE_CLASSES: &[&str] = &["SimpleXMLElement", "GMP"];
 
 impl<'a> Checker<'a> {
     /// `(int) $expr` / an implicit int-coercion context. `None` = PHP
-    /// itself cannot legally produce an int this way. `resource` (this
-    /// project's own sentinel `Object("resource", [])`, not a real
-    /// class - see `parse_type_keyword_or_class`'s own comment) is
+    /// itself cannot legally produce an int this way. `resource` is
     /// always legal here, matching real PHPStan's own dedicated
     /// `ResourceType::toInteger()` - a real, common idiom (`(int)
     /// $fileHandle` for a resource's own unique id), unlike an
     /// arbitrary object.
     pub(crate) fn type_to_integer(&self, ty: &Type) -> Option<Type> {
         match ty {
-            Type::Object(name, _) if name == "resource" || name == "closed-resource" => {
-                Some(Type::Int)
-            }
+            Type::Resource { .. } => Some(Type::Int),
             Type::Object(name, _) if self.is_castable_object(name, INT_CASTABLE_CLASSES) => {
                 Some(Type::Int)
             }
-            Type::Object(..) => None,
+            Type::Object(..) | Type::ObjectWithoutClass => None,
             // `Type::Intersection` must not fall to the permissive
             // `_ => Some(Type::Int)` catch-all below, or `(int) $x` on
             // an intersection of two genuinely non-castable objects
@@ -69,13 +65,11 @@ impl<'a> Checker<'a> {
     /// no meaningful float value).
     pub(crate) fn type_to_float(&self, ty: &Type) -> Option<Type> {
         match ty {
-            Type::Object(name, _) if name == "resource" || name == "closed-resource" => {
-                Some(Type::Float)
-            }
+            Type::Resource { .. } => Some(Type::Float),
             Type::Object(name, _) if self.is_castable_object(name, FLOAT_CASTABLE_CLASSES) => {
                 Some(Type::Float)
             }
-            Type::Object(..) => None,
+            Type::Object(..) | Type::ObjectWithoutClass => None,
             // Same reasoning as `type_to_integer` just above.
             Type::Union(members) | Type::Intersection(members) => {
                 union_coercion(members, |m| self.type_to_float(m))
@@ -106,7 +100,7 @@ impl<'a> Checker<'a> {
             // unlike `(int)`/`(float)` just above, a resource-to-string
             // cast is treated as illegal even though real PHP itself
             // produces a "Resource id #N" string with no warning.
-            Type::Object(name, _) if name == "resource" || name == "closed-resource" => None,
+            Type::Resource { .. } => None,
             Type::Object(name, _) => {
                 if self.registry.is_subclass_of(name, "GMP")
                     || self.registry.is_subclass_of(name, "BcMath\\Number")

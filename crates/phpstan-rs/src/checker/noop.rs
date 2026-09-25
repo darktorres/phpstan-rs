@@ -170,7 +170,7 @@ impl<'a> Checker<'a> {
     fn may_be_stringable_object(&self, ty: &Type) -> bool {
         match ty {
             Type::Union(members) => members.iter().any(|m| self.may_be_stringable_object(m)),
-            Type::Object(..) | Type::Intersection(..) => true,
+            Type::Object(..) | Type::ObjectWithoutClass | Type::Intersection(..) => true,
             _ => false,
         }
     }

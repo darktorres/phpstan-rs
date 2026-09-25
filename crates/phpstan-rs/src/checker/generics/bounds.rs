@@ -192,7 +192,7 @@ impl<'a> Checker<'a> {
                     .is_none_or(|inner| self.is_type_fully_known(inner))
             }
             Type::Object(name, args) => {
-                (name == "object" || self.registry.classes.contains_key(name.as_str()))
+                self.registry.classes.contains_key(name.as_str())
                     && args.iter().all(|a| self.is_type_fully_known(a))
             }
             Type::Array(key, inner) => {
@@ -807,6 +807,7 @@ fn is_supported_generic_bound(ty: &Type) -> bool {
             | Type::True
             | Type::False
             | Type::Object(_, _)
+            | Type::ObjectWithoutClass
             | Type::ObjectShape(_)
             | Type::Union(_)
             | Type::Intersection(_)

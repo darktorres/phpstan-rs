@@ -79,6 +79,13 @@ pub enum Type {
     // invariant, call-site-only substitution - no variance checking or
     // template bound enforcement.
     Object(String, Vec<Type>),
+    // The native `object` type: an instance of no particular class.
+    ObjectWithoutClass,
+    // A `resource` (file/curl/... handle); `closed` for PHPDoc's
+    // `closed-resource`, the kind `is_resource()` rejects.
+    Resource {
+        closed: bool,
+    },
     // A single enum case's singleton type (enum fqn, case name), distinct
     // from the coarser `Object(Suit, [])`. Not a subtype target in
     // `types::is_subtype`'s class-hierarchy sense; `registry::is_assignable`
@@ -191,6 +198,8 @@ impl PartialEq for Type {
             (Type::ArrayShape(a), Type::ArrayShape(b)) => a == b,
             (Type::ObjectShape(a), Type::ObjectShape(b)) => a == b,
             (Type::Object(an, aa), Type::Object(bn, ba)) => an == bn && aa == ba,
+            (Type::ObjectWithoutClass, Type::ObjectWithoutClass) => true,
+            (Type::Resource { closed: a }, Type::Resource { closed: b }) => a == b,
             (Type::EnumCase(ae, ac), Type::EnumCase(be, bc)) => ae == be && ac == bc,
             (Type::Callable(a), Type::Callable(b)) => a == b,
             (Type::SelfRef, Type::SelfRef) => true,

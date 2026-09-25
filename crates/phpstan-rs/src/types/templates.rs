@@ -32,8 +32,7 @@ pub fn bind_template_param(param_ty: &Type, arg_ty: &Type, bindings: &mut FxHash
             // argument, the common case) from an unrelated class - only
             // a scalar-vs-object mismatch is structurally unambiguous
             // without one.
-            let bound_requires_object =
-                matches!(&*tp.bound, Type::Object(name, _) if name == "object");
+            let bound_requires_object = matches!(&*tp.bound, Type::ObjectWithoutClass);
             let arg_is_definite_scalar = matches!(
                 arg_ty,
                 Type::String

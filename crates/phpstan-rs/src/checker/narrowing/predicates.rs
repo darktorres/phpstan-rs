@@ -370,16 +370,13 @@ pub(crate) fn narrowing_type_for_predicate(name: &str) -> Option<Type> {
             Type::Object("Traversable".to_string(), Vec::new()),
         ])),
         "is_null" => Some(Type::Null),
-        "is_object" => Some(Type::Object("object".to_string(), Vec::new())),
+        "is_object" => Some(Type::ObjectWithoutClass),
         "is_callable" => Some(Type::Callable(None)),
         // `proc_open()`/`fsockopen()` return
         // `resource|false`, commonly guarded with
         // `if (! is_resource($x)) { throw ...; }` before `fclose`/
-        // `fwrite`/`fread`/`proc_close`/etc. - `resource` has no native
-        // PHP type declaration, so it's represented the same
-        // `Type::Object("resource", _)` way every other stub/checker
-        // site in this project already does.
-        "is_resource" => Some(Type::Object("resource".to_string(), Vec::new())),
+        // `fwrite`/`fread`/`proc_close`/etc.
+        "is_resource" => Some(Type::Resource { closed: false }),
         // `is_scalar($x)` is true for exactly `int|float|string|bool` -
         // unlike `is_numeric` (its own dedicated arm above, not a plain
         // table entry here, since a string only *sometimes* qualifies),

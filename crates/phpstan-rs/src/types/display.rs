@@ -133,6 +133,9 @@ impl fmt::Display for Type {
                 }
                 Ok(())
             }
+            Type::ObjectWithoutClass => write!(f, "object"),
+            Type::Resource { closed: false } => write!(f, "resource"),
+            Type::Resource { closed: true } => write!(f, "closed-resource"),
             Type::EnumCase(fqn, case) => write!(f, "{fqn}::{case}"),
             Type::Callable(None) => write!(f, "callable"),
             Type::Callable(Some(sig)) => write_callable_sig(f, "callable", sig),

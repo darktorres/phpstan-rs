@@ -12,17 +12,8 @@ use syntax::name_resolution::NameContext;
 /// isn't a real class reference to resolve at all.
 pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
     match ty {
-        // `object` (the native type-hint keyword, not a real class) is
-        // represented as `Type::Object("object")` - `parse_type_string`'s
-        // own sentinel for it (see its `"object" => Type::Object(...)`
-        // arm) - and is never a genuine reference to resolve: `object` is
-        // a PHP-reserved word, so no real class can ever be named that.
-        // Without this, a plain `object` type hint got namespace-qualified
-        // into nonsense like `App\Some\Namespace\object`.
-        Type::Object(name, args) if name == "object" => Type::Object(name, args),
-        // Same reasoning as `object` above for the *name* itself, but
-        // unlike `object`/`resource` (always argument-less in practice -
-        // real PHP forbids generics on either native keyword), a real,
+        // `Traversable` is this project's own `iterable`-desugaring
+        // synthetic, never a reference to resolve, but a real,
         // programmer-written `@return Traversable<Edge>`/`Iterator<K, V>`
         // tag is common (confirmed via a real corpus false positive:
         // `bacon/bacon-qr-code`'s own `@return Traversable<Edge>`, `Edge`
@@ -32,23 +23,13 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
         // directly-written PHPDoc syntax, so its own type arguments still
         // need ordinary name resolution here, the same as `$$valueof`'s
         // wrapped argument just below - only the outer name itself must
-        // stay untouched, for the reason already given.
+        // stay untouched.
         Type::Object(name, args) if name == "Traversable" => Type::Object(
             name,
             args.into_iter()
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),
         ),
-        // Same reasoning as `object`/`Traversable` above: `resource` is
-        // a sentinel for a real PHP value kind with no actual class
-        // behind it (`types::parse_type_keyword_or_class`'s own
-        // `"resource" => Type::Object("resource", ...)` arm), not a
-        // class reference to resolve - without this, the same pseudo-
-        // type used in two different namespaces was treated as two
-        // unrelated "classes" (`App\resource` vs. plain `resource`).
-        Type::Object(name, args) if name == "resource" || name == "closed-resource" => {
-            Type::Object(name, args)
-        }
         // `self<T>`/`static<T>` sentinels: only their arguments name
         // classes.
         Type::Object(name, args) if name == "$$self" || name == "$$static" => Type::Object(
@@ -57,7 +38,7 @@ pub(crate) fn resolve_names_in_type(ty: Type, ctx: &NameContext) -> Type {
                 .map(|a| resolve_names_in_type(a, ctx))
                 .collect(),
         ),
-        // Same reasoning again: `"$$interface"`/`"$$trait"`
+        // `"$$interface"`/`"$$trait"`
         // (`types::parse_type_keyword_or_class`'s own bare `interface-
         // string`/`trait-string` sentinels, always argument-less) are
         // internal markers `registry::is_assignable`'s `ClassString` arm
@@ -232,7 +213,7 @@ pub(crate) fn collect_class_name_case_refs(
 ) {
     match ty {
         // Mirrors `resolve_names_in_type`'s own sentinel arms exactly:
-        // `object`/`resource`/`$$interface`/`$$trait` are never a real
+        // `$$interface`/`$$trait` are never a real
         // class reference to check the case of, and (unlike the
         // `$$valueof`/variance sentinels just below) their own argument
         // list isn't recursed into there either, so this doesn't either -
@@ -240,13 +221,7 @@ pub(crate) fn collect_class_name_case_refs(
         Type::Object(name, _)
             if matches!(
                 name.as_str(),
-                "object"
-                    | "resource"
-                    | "closed-resource"
-                    | "$$interface"
-                    | "$$trait"
-                    | "$$self"
-                    | "$$static"
+                "$$interface" | "$$trait" | "$$self" | "$$static"
             ) => {}
         Type::Object(name, args)
             if matches!(

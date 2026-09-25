@@ -2739,7 +2739,9 @@ fn gettype_string_for(ty: &Type) -> Option<&'static str> {
         Type::Int | Type::IntLiteral(_) | Type::IntRange(_, _) => Some("integer"),
         Type::Float | Type::FloatLiteral(_) => Some("double"),
         Type::Null => Some("NULL"),
-        Type::Object(_, _) | Type::EnumCase(_, _) => Some("object"),
+        Type::Object(_, _) | Type::ObjectWithoutClass | Type::EnumCase(_, _) => Some("object"),
+        Type::Resource { closed: false } => Some("resource"),
+        Type::Resource { closed: true } => Some("resource (closed)"),
         Type::Intersection(members) => members.iter().find_map(gettype_string_for),
         _ => None,
     }

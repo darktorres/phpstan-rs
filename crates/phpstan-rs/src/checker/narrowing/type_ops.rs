@@ -76,7 +76,7 @@ pub(crate) fn narrow_instanceof_true(current: &Type, target: &Type) -> Type {
 
 fn is_object_like(ty: &Type) -> bool {
     match ty {
-        Type::Object(..) => true,
+        Type::Object(..) | Type::ObjectWithoutClass => true,
         Type::Union(members) | Type::Intersection(members) => members.iter().all(is_object_like),
         _ => false,
     }

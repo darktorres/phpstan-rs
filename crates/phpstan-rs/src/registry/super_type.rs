@@ -125,9 +125,7 @@ impl Registry {
                 Trinary::Yes
             }
             (Type::Object(a, _), Type::Object(b, _))
-                if [a, b]
-                    .iter()
-                    .any(|n| !is_sentinel_class(n) && self.lookup_class(n).is_none()) =>
+                if [a, b].iter().any(|n| self.lookup_class(n).is_none()) =>
             {
                 Trinary::Maybe
             }
@@ -243,7 +241,7 @@ impl Registry {
     }
 
     fn object_super_type_of(&self, sup: &str, sub: &str) -> Trinary {
-        if sup == sub || sup == "object" || sub == "object" {
+        if sup == sub {
             return Trinary::Maybe;
         }
         let (Some((_, sup_info)), Some((_, sub_info))) =
@@ -317,12 +315,6 @@ fn benevolent_inner(members: &[Type]) -> Type {
         1 => rest.into_iter().next().unwrap(),
         _ => Type::Intersection(rest),
     }
-}
-
-/// The `Object` names that stand for a value kind rather than a class.
-/// An unresolved `$$` sentinel isn't one: it proves nothing either way.
-fn is_sentinel_class(name: &str) -> bool {
-    matches!(name, "object" | "resource" | "closed-resource")
 }
 
 /// A constant reference (`Foo::BAR`) or `$$` sentinel left unresolved:

@@ -371,11 +371,14 @@ pub fn is_subtype(sub: &Type, sup: &Type) -> bool {
         // properties needs the registry - `registry::is_assignable`'s
         // own `ObjectShape` arm handles that hierarchy/property-aware
         // direction; this function has no class context to consult.
-        (Type::ObjectShape(_), Type::Object(name, _)) if name == "object" => true,
+        (Type::ObjectShape(_), Type::ObjectWithoutClass) => true,
         // Every class instance and enum case is an `object`.
-        (Type::Object(..) | Type::EnumCase(..), Type::Object(name, _)) if name == "object" => true,
+        (Type::Object(..) | Type::EnumCase(..), Type::ObjectWithoutClass) => true,
 
-        (Type::SelfRef | Type::ParentRef | Type::StaticRef, Type::Object(..)) => true,
+        (
+            Type::SelfRef | Type::ParentRef | Type::StaticRef,
+            Type::Object(..) | Type::ObjectWithoutClass,
+        ) => true,
 
         // A specific case is a real instance of its own enum -
         // the exact-name check here is the same non-hierarchy-aware
@@ -558,14 +561,7 @@ pub(crate) fn types_definitely_disjoint(a: &Type, b: &Type) -> bool {
         (Type::IntLiteral(x), Type::IntLiteral(y)) => x != y,
         (Type::True, Type::False) | (Type::False, Type::True) => true,
         // An open and a closed resource are never the same value.
-        (Type::Object(x, _), Type::Object(y, _))
-            if matches!(
-                (x.as_str(), y.as_str()),
-                ("resource", "closed-resource") | ("closed-resource", "resource")
-            ) =>
-        {
-            true
-        }
+        (Type::Resource { closed: a }, Type::Resource { closed: b }) => a != b,
         (Type::EnumCase(class_a, case_a), Type::EnumCase(class_b, case_b)) => {
             class_a == class_b && case_a != case_b
         }
@@ -589,6 +585,7 @@ enum ScalarFamily {
     Null,
     Array,
     Object,
+    Resource,
 }
 
 fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
@@ -599,9 +596,11 @@ fn scalar_family(ty: &Type) -> Option<ScalarFamily> {
         Type::Bool | Type::True | Type::False => Some(ScalarFamily::Bool),
         Type::Null => Some(ScalarFamily::Null),
         Type::Array(_, _) | Type::ArrayShape(_) => Some(ScalarFamily::Array),
-        Type::Object(_, _) | Type::EnumCase(_, _) | Type::ObjectShape(_) => {
-            Some(ScalarFamily::Object)
-        }
+        Type::Object(_, _)
+        | Type::ObjectWithoutClass
+        | Type::EnumCase(_, _)
+        | Type::ObjectShape(_) => Some(ScalarFamily::Object),
+        Type::Resource { .. } => Some(ScalarFamily::Resource),
         _ => None,
     }
 }

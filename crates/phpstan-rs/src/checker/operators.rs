@@ -64,7 +64,7 @@ impl<'a> Checker<'a> {
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::String)) => {
                 is_subtype(ty, &Type::Accessory(AccessoryKind::NumericString))
             }
-            Type::Object(name, _) if name == "resource" || name == "closed-resource" => false,
+            Type::Resource { .. } => false,
             Type::Object(name, _) if self.registry.classes.contains_key(name.as_str()) => {
                 self.registry.is_subclass_of(name, "SimpleXMLElement")
                     || self.registry.is_subclass_of(name, "GMP")
@@ -659,7 +659,12 @@ impl<'a> Checker<'a> {
 fn is_bitwise_not_operand(ty: &Type) -> bool {
     match ty {
         Type::Bool | Type::True | Type::False | Type::Null => false,
-        Type::Array(..) | Type::ArrayShape(_) | Type::Object(..) | Type::ClassString(_) => false,
+        Type::Array(..)
+        | Type::ArrayShape(_)
+        | Type::Object(..)
+        | Type::ObjectWithoutClass
+        | Type::Resource { .. }
+        | Type::ClassString(_) => false,
         Type::Intersection(members) => members
             .iter()
             .any(|m| matches!(m, Type::String | Type::Int | Type::Float)),
@@ -684,7 +689,7 @@ fn comparison_identifier(op: &BinOp) -> Option<&'static str> {
 fn is_object_or_null(ty: &Type) -> bool {
     match ty {
         Type::Null => true,
-        Type::Object(name, _) => name != "resource" && name != "closed-resource",
+        Type::Object(..) | Type::ObjectWithoutClass => true,
         // A `Union` is definitely object-or-null only when every
         // member is (any other member could be the runtime value
         // instead); an `Intersection` value genuinely is every member at

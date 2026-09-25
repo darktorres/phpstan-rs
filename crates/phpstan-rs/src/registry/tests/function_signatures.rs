@@ -24,8 +24,7 @@ fn an_untyped_parameter_resolves_to_implicit_mixed() {
 #[test]
 fn the_object_type_hint_is_not_namespace_qualified() {
     // `object` is a PHP-reserved word - no real class can ever be
-    // named that, so `Type::Object("object")` (parse_type_string's
-    // own sentinel for the native `object` type hint) must never be
+    // named that, so the native `object` type hint must never be
     // resolved as if it were a genuine class reference.
     let r = build_registry(
         r#"<?php
@@ -37,10 +36,7 @@ fn the_object_type_hint_is_not_namespace_qualified() {
     let sig = r
         .lookup_method("App\\Some\\Deep\\Namespace_\\Foo", "bar")
         .unwrap();
-    assert_eq!(
-        sig.return_type,
-        Type::Object("object".to_string(), Vec::new())
-    );
+    assert_eq!(sig.return_type, Type::ObjectWithoutClass);
 }
 
 #[test]
@@ -277,7 +273,7 @@ fn an_override_is_not_spliced_onto_an_unrelated_earlier_declaration_s_docblock()
     );
     assert_eq!(
         r.functions["earlier"].params[0].ty,
-        Type::Object("resource".to_string(), Vec::new()),
+        Type::Resource { closed: false },
         "earlier's own docblock must be untouched by later's override"
     );
     assert_eq!(
@@ -502,10 +498,7 @@ fn a_mixed_native_hint_still_trusts_the_doc_type_fully() {
     );
     assert_eq!(
         r.functions["f"].return_type,
-        Type::Union(vec![
-            Type::Object("resource".to_string(), Vec::new()),
-            Type::False
-        ])
+        Type::Union(vec![Type::Resource { closed: false }, Type::False])
     );
 }
 

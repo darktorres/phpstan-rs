@@ -916,11 +916,7 @@ impl<'a> Checker<'a> {
     /// either precisely enough to ever say "no" needs machinery well
     /// beyond this check's scope, matching real PHPStan's own
     /// `MaybeCallableTypeTrait` default for these two type families.
-    /// `resource` (this project's `Object("resource", [])` convention -
-    /// `resource` is never a real registered class) gets its own
-    /// explicit arm ahead of the general `Object` one, which would
-    /// otherwise treat it as an unregistered-class "maybe" - the wrong
-    /// answer for a well-understood, permanently-uninvokable pseudo-type.
+    /// A `resource` is never invokable either.
     pub(crate) fn type_confirmed_not_callable(&self, ty: &Type) -> bool {
         match ty {
             Type::Null
@@ -932,10 +928,8 @@ impl<'a> Checker<'a> {
             | Type::IntLiteral(_)
             | Type::IntRange(..)
             | Type::Float
-            | Type::FloatLiteral(_) => true,
-            Type::Object(class, _) if matches!(class.as_str(), "resource" | "closed-resource") => {
-                true
-            }
+            | Type::FloatLiteral(_)
+            | Type::Resource { .. } => true,
             Type::Object(class, _) | Type::EnumCase(class, _) => {
                 class.as_str() != "Closure"
                     && self

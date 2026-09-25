@@ -40,12 +40,12 @@ fn any_class_instance_is_assignable_to_the_native_object_type() {
     let r = build_registry("<?php class Foo {}");
     assert!(r.is_assignable(
         &Type::Object("Foo".to_string(), Vec::new()),
-        &Type::Object("object".to_string(), Vec::new())
+        &Type::ObjectWithoutClass
     ));
     // Not the other way around - a plain `object` isn't known to be
     // any particular class.
     assert!(!r.is_assignable(
-        &Type::Object("object".to_string(), Vec::new()),
+        &Type::ObjectWithoutClass,
         &Type::Object("Foo".to_string(), Vec::new())
     ));
 }

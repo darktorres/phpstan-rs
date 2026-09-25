@@ -1019,9 +1019,13 @@ fn array_filter_element_falsy_verdict(ty: &Type) -> Option<bool> {
                 None
             }
         }
-        // An object/enum-case instance, or a `class-string`, is always
-        // truthy in real PHP regardless of its own contents.
-        Type::Object(..) | Type::EnumCase(..) | Type::ClassString(..) => Some(false),
+        // An object/enum-case instance, a resource, or a `class-string`,
+        // is always truthy in real PHP regardless of its own contents.
+        Type::Object(..)
+        | Type::ObjectWithoutClass
+        | Type::Resource { .. }
+        | Type::EnumCase(..)
+        | Type::ClassString(..) => Some(false),
         // A `non-falsy-string` (never `""`/`"0"`) or `non-empty-array`
         // (never the empty array) accessory intersection is confidently
         // never falsy, whatever its own unrefined base type is. `list`

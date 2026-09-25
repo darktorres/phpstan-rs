@@ -415,7 +415,7 @@ pub(crate) fn single_scalar_column_type(
     let [item] = items else { return None };
     let aliases = build_alias_map(checker, chain);
     match select_item_type(checker, &aliases, item) {
-        Type::Object(..) => None,
+        Type::Object(..) | Type::ObjectWithoutClass => None,
         ty => Some(ty),
     }
 }
@@ -424,7 +424,7 @@ pub(crate) fn single_scalar_column_type(
 /// Object` member.
 fn contains_object(ty: &Type) -> bool {
     match ty {
-        Type::Object(..) => true,
+        Type::Object(..) | Type::ObjectWithoutClass => true,
         Type::Union(members) | Type::Intersection(members) => members.iter().any(contains_object),
         _ => false,
     }

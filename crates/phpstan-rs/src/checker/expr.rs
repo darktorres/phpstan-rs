@@ -1108,7 +1108,7 @@ impl<'a> Checker<'a> {
                 {
                     let shape = Type::Array(
                         Box::new(Type::Int),
-                        Box::new(Type::Object("resource".to_string(), Vec::new())),
+                        Box::new(Type::Resource { closed: false }),
                     );
                     purge_stale_narrowing_for(locals, pipes_name);
                     if locals.contains_key(pipes_name) {
@@ -6319,7 +6319,7 @@ fn cast_result_type(kind: CastKind) -> Type {
             Box::new(Type::unknown_array_key()),
             Box::new(Type::Mixed(false)),
         ),
-        CastKind::Object => Type::Object("object".to_string(), Vec::new()),
+        CastKind::Object => Type::ObjectWithoutClass,
         CastKind::Unset => Type::Null,
         CastKind::Void => Type::Mixed(false),
     }

@@ -29,14 +29,18 @@ fn is_nullable(ty: &Type) -> bool {
 
 fn is_object_like(ty: &Type) -> bool {
     match ty {
-        Type::Object(name, _) => !matches!(name.as_str(), "resource" | "closed-resource"),
+        Type::Object(..) | Type::ObjectWithoutClass => true,
         Type::Union(members) => {
-            members.iter().any(|m| matches!(m, Type::Object(..)))
+            members
+                .iter()
+                .any(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass))
                 && members
                     .iter()
-                    .all(|m| matches!(m, Type::Object(..) | Type::Null))
+                    .all(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass | Type::Null))
         }
-        Type::Intersection(members) => members.iter().all(|m| matches!(m, Type::Object(..))),
+        Type::Intersection(members) => members
+            .iter()
+            .all(|m| matches!(m, Type::Object(..) | Type::ObjectWithoutClass)),
         _ => false,
     }
 }
@@ -75,7 +79,7 @@ impl<'a> Checker<'a> {
         let Type::Object(class, _) = ty else {
             return None;
         };
-        if !matches!(other, Type::Object(..)) {
+        if !matches!(other, Type::Object(..) | Type::ObjectWithoutClass) {
             return None;
         }
         let info = self.registry.classes.get(class.as_str())?;

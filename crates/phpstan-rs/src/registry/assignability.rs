@@ -19,12 +19,12 @@ impl Registry {
     /// which has no notion of class context.
     pub fn is_assignable(&self, sub: &Type, sup: &Type) -> bool {
         match (sub, sup) {
-            // The native `object` type hint (`Type::Object("object", _)` -
-            // `types::parse_type_string`'s own sentinel for it, since
-            // `object` is a reserved word no real class can ever be named)
-            // is satisfied by *any* class instance - an extremely common
-            // pattern, e.g. Doctrine's `EntityRepository<T of object>`.
-            (Type::Object(_, _), Type::Object(b, _)) if b == "object" => true,
+            // The native `object` type hint is satisfied by *any* class
+            // instance - an extremely common pattern, e.g. Doctrine's
+            // `EntityRepository<T of object>` - and satisfies no
+            // particular class.
+            (Type::Object(_, _), Type::ObjectWithoutClass) => true,
+            (Type::ObjectWithoutClass, Type::Object(_, _)) => false,
             // Real PHP recognizes (at least) four distinct shapes as a
             // valid `callable`: an actual `Closure` (already handled by
             // the ordinary class-hierarchy arm just below, since
@@ -499,9 +499,9 @@ impl Registry {
             // track the real fields of) are accepted unconditionally,
             // matching `Array(Mixed)`'s own established leniency for the
             // identical "can't verify, don't guess wrong" situation.
+            (Type::ObjectWithoutClass, Type::ObjectShape(_)) => true,
             (Type::Object(class, _), Type::ObjectShape(fields)) => {
-                class == "object"
-                    || class == "stdClass"
+                class == "stdClass"
                     || fields.iter().all(|(name, sup_ty, optional)| {
                         match self.lookup_property(class, name) {
                             Some(p) => self.is_assignable(&p.ty, sup_ty),
@@ -524,38 +524,8 @@ impl Registry {
             // *literal* (an `ArrayShape`) at nearly every real call site,
             // never an actual `Params`-named object - only the
             // Object-vs-Object arm's leniency would leave those failing
-            // just the same way. Excludes the real `object` pseudo-type
-            // (PHP's own native `object` hint - already handled, and
-            // correctly strict, in the dedicated arm above): unlike a
-            // genuinely-unresolvable alias name, `object` means exactly
-            // "some real object instance" and a plain array/string/etc.
-            // is correctly never one.
-            //
-            // Also excludes `resource` - this project's own fixed
-            // pseudo-type sentinel for PHP's native resource type
-            // (`types::parse_type_string`'s own `"resource" =>
-            // Type::Object("resource", ...)` arm, reused verbatim by
-            // `assertIsResource`'s own narrowing target and `is_resource`'s
-            // own predicate type, among others - never a real, resolvable
-            // class name this leniency's own "can't verify, don't guess
-            // wrong" reasoning was written for). Without this exclusion,
-            // `is_assignable(Type::False, Object("resource"))` would
-            // wrongly return `true` (since `"resource"` is never a key
-            // in `self.classes` either), so `narrow_type_to`'s own
-            // `Union` arm would keep a genuinely-impossible `False`
-            // member instead of stripping it - e.g. `assertIsResource
-            // ($proc)` (a common PHPUnit-assertion narrowing idiom)
-            // silently failing to narrow away `resource|false`'s own
-            // `false` member, unlike every sibling `assertIs*` narrowing
-            // target that isn't itself an `Object`.
-            (_, Type::Object(name, _))
-                if name != "object"
-                    && name != "resource"
-                    && name != "closed-resource"
-                    && !self.classes.contains_key(name.as_str()) =>
-            {
-                true
-            }
+            // just the same way.
+            (_, Type::Object(name, _)) if !self.classes.contains_key(name.as_str()) => true,
             _ => types::is_subtype(sub, sup),
         }
     }

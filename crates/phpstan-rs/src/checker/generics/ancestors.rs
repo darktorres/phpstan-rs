@@ -641,7 +641,7 @@ fn upper_first(s: &str) -> String {
 fn collect_class_names(ty: &Type, out: &mut Vec<String>) {
     match ty {
         Type::Object(name, args) => {
-            if !name.starts_with("$$") && !matches!(name.as_str(), "object" | "resource") {
+            if !name.starts_with("$$") {
                 out.push(name.clone());
             }
             for a in args {

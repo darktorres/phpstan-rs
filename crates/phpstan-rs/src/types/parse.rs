@@ -1016,15 +1016,11 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         "scalar" => Type::Union(vec![Type::Int, Type::Float, Type::String, Type::Bool]),
         "numeric" => Type::Union(vec![Type::Int, Type::Float, Type::String]),
         // A real, if untyped-at-the-language-level, PHP value kind
-        // (file/curl/... handles) - represented the same way the native
-        // `object` hint is (a sentinel `Object`, not a real class), with
-        // the same namespace-qualification exemption below: "resource"
-        // isn't a real class reference to resolve per-file.
-        // `open-resource` is an ordinary (open) `resource`; a
-        // `closed-resource` is its own kind, one `is_resource()` rejects
-        // (PHPStan's `ClosedResourceType`).
-        "resource" | "open-resource" => Type::Object("resource".to_string(), Vec::new()),
-        "closed-resource" => Type::Object("closed-resource".to_string(), Vec::new()),
+        // (file/curl/... handles). `open-resource` is an ordinary (open)
+        // `resource`; a `closed-resource` is its own kind, one
+        // `is_resource()` rejects (PHPStan's `ClosedResourceType`).
+        "resource" | "open-resource" => Type::Resource { closed: false },
+        "closed-resource" => Type::Resource { closed: true },
         // `value-of<T>`/`key-of<T>` - real PHPStan's own
         // `ValueOfType`/`KeyOfType`, both evaluated against `T`'s
         // resolved type only once needed. This project has no general
@@ -1222,7 +1218,7 @@ fn parse_type_keyword_or_class(bare: &str, original: &str, generic_args: &[&str]
         // variable reference despite the `$` sigil (real shape: amphp/amp's
         // `@return $this` on several fluent methods).
         "static" | "$this" => Type::StaticRef,
-        "object" => Type::Object("object".to_string(), Vec::new()),
+        "object" => Type::ObjectWithoutClass,
         // A user-defined generic class (`Collection<User>`): each type
         // argument is a full type string, re-run through
         // `parse_generic_arg` (call-site-variance-aware; falls straight

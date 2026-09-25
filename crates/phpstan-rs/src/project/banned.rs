@@ -32,7 +32,7 @@ fn type_mentions(ty: &Type, name: &str) -> bool {
         ("bool", Type::Bool | Type::True | Type::False) => true,
         ("array", Type::Array(..) | Type::ArrayShape(_)) => true,
         ("mixed", Type::Mixed(_)) => true,
-        ("object", Type::Object(n, _)) if n == "object" => true,
+        ("object", Type::ObjectWithoutClass) => true,
         ("callable", Type::Callable(_)) => true,
         ("iterable", Type::Object(n, _)) if n.eq_ignore_ascii_case("Traversable") => true,
         (class, Type::Object(n, _)) => n.trim_start_matches('\\').eq_ignore_ascii_case(class),

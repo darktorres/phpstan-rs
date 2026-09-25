@@ -1870,8 +1870,7 @@ impl Registry {
         match ty {
             Type::Null => true,
             Type::Object(name, _) => {
-                name != "object"
-                    && self.lookup_class(name).is_some()
+                self.lookup_class(name).is_some()
                     && self
                         .all_ancestor_names(name)
                         .iter()

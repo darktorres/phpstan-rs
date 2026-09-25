@@ -58,7 +58,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
         Type::Null => out.add("null"),
         Type::Array(..) | Type::ArrayShape(_) => out.add("array"),
         Type::Callable(_) => out.add("callable"),
-        Type::ObjectShape(_) => out.add("object"),
+        Type::ObjectShape(_) | Type::ObjectWithoutClass => out.add("object"),
         Type::Mixed(_) => out.add("mixed"),
         Type::Void if position == Position::Return => out.add("void"),
         Type::Never if position == Position::Return => out.add("never"),
@@ -66,11 +66,7 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
         Type::SelfRef => out.add("self"),
         Type::ParentRef => out.add("parent"),
         Type::EnumCase(class, _) => out.add(class),
-        Type::Object(name, _) => match name.as_str() {
-            "resource" | "closed-resource" => return false,
-            "object" => out.add("object"),
-            class => out.add(class),
-        },
+        Type::Object(class, _) => out.add(class),
         Type::TemplateParam(param) => return collect(&param.bound, position, out),
         Type::Union(members) => return members.iter().all(|m| collect(m, position, out)),
         Type::Intersection(members) => {
@@ -89,9 +85,6 @@ fn collect(ty: &Type, position: Position, out: &mut Native) -> bool {
                 let Type::Object(class, _) = base else {
                     return false;
                 };
-                if matches!(class.as_str(), "object" | "resource" | "closed-resource") {
-                    return false;
-                }
                 classes.push(class.clone());
             }
             out.add(&classes.join("&"));

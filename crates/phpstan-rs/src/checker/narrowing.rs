@@ -435,7 +435,7 @@ impl<'a> Checker<'a> {
             // (`replay_object_discriminant_facts`'s own doc comment) - the
             // object-typed counterpart of the boolean-flag-proxy case
             // above.
-            let is_object_proxy = matches!(after_ty, Type::Object(..));
+            let is_object_proxy = matches!(after_ty, Type::Object(..) | Type::ObjectWithoutClass);
             // Same proxy shape as `is_object_proxy` above, for a variable
             // that became a concrete enum case specifically within this
             // branch (`AuthService::authKeyLogin`'s own `$valid_key =

@@ -232,7 +232,9 @@ impl<'a> Checker<'a> {
             Type::Intersection(members) if members.iter().any(|m| matches!(m, Type::Array(..))) => {
                 false
             }
-            Type::Object(..) => self.type_to_float(ty).is_some(),
+            Type::Object(..) | Type::ObjectWithoutClass | Type::Resource { .. } => {
+                self.type_to_float(ty).is_some()
+            }
             Type::Union(members) | Type::Intersection(members) => {
                 members.iter().any(|m| self.type_to_number(m))
             }
