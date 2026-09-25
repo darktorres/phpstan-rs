@@ -390,7 +390,10 @@ const RUNTIME_REFLECTION_CLASSES: &[&str] = &[
 /// ever resolve to, so a keyword slipping through this function costs
 /// nothing.
 fn resolved_param_class(p: &Param, ctx: &NameContext) -> Option<String> {
-    resolved_class_from_hint(p.type_hint.as_deref(), ctx)
+    resolved_class_from_hint(
+        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+        ctx,
+    )
 }
 
 /// The shared native-hint-resolution core `resolved_param_class` (above)
@@ -419,7 +422,10 @@ fn resolved_class_from_hint(hint: Option<&str>, ctx: &NameContext) -> Option<Str
 fn class_prop_types(c: &ClassDecl, ctx: &NameContext) -> ParamTypes {
     let mut out = ParamTypes::default();
     for p in &c.properties {
-        if let Some(fqn) = resolved_class_from_hint(p.type_hint.as_deref(), ctx) {
+        if let Some(fqn) = resolved_class_from_hint(
+            p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+            ctx,
+        ) {
             out.insert(p.name.to_string(), fqn);
         }
     }

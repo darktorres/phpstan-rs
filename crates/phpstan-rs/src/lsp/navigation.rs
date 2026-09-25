@@ -51,7 +51,7 @@ use crate::token::{Position, Span};
 use rustc_hash::FxHashSet;
 use std::path::Path;
 
-use crate::text_split::{split_identifier_spans, type_hint_identifiers_qualified};
+use crate::text_split::split_identifier_spans;
 
 #[derive(Debug, Clone)]
 pub(crate) enum Resolved {
@@ -407,30 +407,18 @@ impl<'a> Walker<'a> {
     fn record_type_hint(
         &self,
         out: &mut Vec<(Span, Resolved)>,
-        hint: &str,
-        span: Span,
+        hint: &TypeHint,
         current_class: Option<&str>,
         ctx: &NameContext,
     ) {
-        if !self.anchor.matches(span) {
+        if !self.anchor.matches(hint.span) {
             return;
         }
-        let qualified = type_hint_identifiers_qualified(hint);
-        let names: Vec<String> = qualified.iter().map(|(n, _)| n.clone()).collect();
-        let expected: Vec<&str> = names.iter().map(String::as_str).collect();
-        let Some(spans) = split_identifier_spans(self.source, span, &expected) else {
-            return;
-        };
-        for ((name, fully_qualified), name_span) in qualified.iter().zip(spans.iter()) {
-            let written = if *fully_qualified {
-                format!("\\{name}")
-            } else {
-                name.clone()
-            };
-            if self.anchor.matches(*name_span)
-                && let Some(fqn) = resolve_class_ref(&written, current_class, ctx, self.registry)
+        for (name, name_span) in hint.class_names() {
+            if self.anchor.matches(name_span)
+                && let Some(fqn) = resolve_class_ref(name, current_class, ctx, self.registry)
             {
-                out.push((*name_span, Resolved::Class(fqn)));
+                out.push((name_span, Resolved::Class(fqn)));
             }
         }
     }
@@ -858,8 +846,8 @@ impl<'a> Walker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, Resolved)>,
     ) {
-        if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
-            self.record_type_hint(out, hint, span, current_class, ctx);
+        if let Some(hint) = &p.type_hint {
+            self.record_type_hint(out, hint, current_class, ctx);
         }
         self.record_var_self(out, p.name_span, current_class, &p.name);
     }
@@ -887,8 +875,8 @@ impl<'a> Walker<'a> {
         for p in &f.params {
             self.param(p, ctx, current_class, out);
         }
-        if let (Some(rt), Some(span)) = (&f.return_type, f.return_type_span) {
-            self.record_type_hint(out, rt, span, current_class, ctx);
+        if let Some(rt) = &f.return_type {
+            self.record_type_hint(out, rt, current_class, ctx);
         }
         let previous_function = self.current_function.replace(f.clone());
         let previous_is_static = std::mem::replace(&mut self.current_is_static, is_static);
@@ -929,8 +917,8 @@ impl<'a> Walker<'a> {
                 p.name_span,
                 Resolved::Member(fqn.clone(), p.name.to_string()),
             );
-            if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
-                self.record_type_hint(out, hint, span, Some(&fqn), ctx);
+            if let Some(hint) = &p.type_hint {
+                self.record_type_hint(out, hint, Some(&fqn), ctx);
             }
             if let Some(d) = &p.default {
                 self.expr(d, &mut ctx.clone(), Some(&fqn), out);
@@ -950,8 +938,8 @@ impl<'a> Walker<'a> {
                 cst.name_span,
                 Resolved::Member(fqn.clone(), cst.name.to_string()),
             );
-            if let (Some(hint), Some(span)) = (&cst.type_hint, cst.type_hint_span) {
-                self.record_type_hint(out, hint, span, Some(&fqn), ctx);
+            if let Some(hint) = &cst.type_hint {
+                self.record_type_hint(out, hint, Some(&fqn), ctx);
             }
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }

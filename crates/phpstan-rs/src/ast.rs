@@ -156,8 +156,7 @@ pub struct SwitchCase {
 #[derive(Debug, Clone)]
 pub struct CatchClause {
     pub types: Vec<String>,
-    // See `FunctionDecl::return_type_span`'s own doc comment, one span
-    // per `types` entry (same index).
+    // Each `types` entry's span (same index).
     pub types_spans: Vec<Span>,
     // Taken via `Parser::expect_variable` - see `FunctionDecl::name`'s
     // own doc comment.
@@ -182,10 +181,7 @@ pub struct Param {
     // needed for local-variable-declaration navigation (a read inside the
     // function body jumping back to its own parameter).
     pub name_span: Span,
-    pub type_hint: Option<String>,
-    // See `FunctionDecl::return_type_span`'s own doc comment - identical
-    // shape and purpose, one level down.
-    pub type_hint_span: Option<Span>,
+    pub type_hint: Option<TypeHint>,
     pub default: Option<Expr>,
     pub by_ref: bool,
     pub variadic: bool,
@@ -235,12 +231,7 @@ pub struct FunctionDecl {
     // identifier itself.
     pub name_span: Span,
     pub params: Vec<Param>,
-    pub return_type: Option<String>,
-    // The return type hint's own span (covering the whole
-    // hint text - `?Foo`, `Foo|Bar`, ... - not a per-identifier span;
-    // the LSP's own text-split utility recovers those on demand from
-    // this span's source text). `None` exactly when `return_type` is.
-    pub return_type_span: Option<Span>,
+    pub return_type: Option<TypeHint>,
     // `Arc`, not a plain `Vec` - `registry::FunctionSig::from_decl` shares
     // this exact allocation into its own `body: Option<Arc<Vec<Stmt>>>`
     // field (an `Arc` clone, not a deep AST clone) rather than
@@ -298,9 +289,7 @@ pub struct PropertyDecl {
     // property declaration too.
     pub is_abstract: bool,
     pub is_final: bool,
-    pub type_hint: Option<String>,
-    // See `FunctionDecl::return_type_span`'s own doc comment.
-    pub type_hint_span: Option<Span>,
+    pub type_hint: Option<TypeHint>,
     pub default: Option<Expr>,
     pub doc_comment: Option<Arc<str>>,
     // PHP 8.4 property hooks (`{ get => ...; set(Type $value) { ... } }`).
@@ -436,10 +425,8 @@ pub struct ClassConst {
     // PHP 8.3 typed class constants (`const TYPE NAME = value;`) - same
     // "one type applies to every name in a comma-separated list" cloning
     // as `visibility`/`doc_comment`/`attrs` above.
-    pub type_hint: Option<String>,
-    // See `FunctionDecl::return_type_span`'s own doc comment - also
-    // cloned onto every name in a comma-separated list.
-    pub type_hint_span: Option<Span>,
+    // Cloned onto every name in a comma-separated list.
+    pub type_hint: Option<TypeHint>,
     // PHP 8.1+ `final const`, needed by
     // `FinalConstantRule`/`FinalPrivateConstantRule` to tell a `final`
     // constant apart from an ordinary one. Always `false` for the
@@ -476,8 +463,7 @@ pub struct ClassDecl {
     pub name_span: Span,
     pub kind: ClassKind,
     pub extends: Vec<String>,
-    // One span per `extends` entry, same index, same purpose
-    // as `FunctionDecl::return_type_span`.
+    // Each `extends` entry's span (same index).
     pub extends_spans: Vec<Span>,
     pub implements: Vec<String>,
     pub implements_spans: Vec<Span>,
@@ -548,7 +534,7 @@ pub struct EnumDecl {
     pub name_span: Span,
     // "int" | "string" for a backed enum, None for a pure one. Enums can't
     // extend anything or declare instance properties, unlike ClassDecl.
-    pub backing_type: Option<String>,
+    pub backing_type: Option<TypeHint>,
     pub implements: Vec<String>,
     pub implements_spans: Vec<Span>,
     pub cases: Vec<EnumCase>,
@@ -741,6 +727,91 @@ impl StaticTarget {
         match self {
             StaticTarget::Name(..) => None,
             StaticTarget::Expr(e) => Some(e),
+        }
+    }
+}
+
+/// A native type declaration (`int`, `?Foo`, `A|B`, `(A&B)|null`) as
+/// written, with the span of each part.
+#[derive(Debug, Clone)]
+pub struct TypeHint {
+    pub kind: TypeHintKind,
+    pub span: Span,
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeHintKind {
+    /// A keyword type or a class name, as written (`int`, `static`,
+    /// `\App\Foo`).
+    Name(String),
+    /// `?T`.
+    Nullable(Box<TypeHint>),
+    /// `A|B`.
+    Union(Vec<TypeHint>),
+    /// `A&B`, or a parenthesized `(A&B)` term of a union.
+    Intersection(Vec<TypeHint>),
+}
+
+impl TypeHint {
+    /// Whether two optional declarations are written the same (spans
+    /// aside).
+    pub fn same(a: Option<&TypeHint>, b: Option<&TypeHint>) -> bool {
+        a.map(TypeHint::to_string) == b.map(TypeHint::to_string)
+    }
+
+    /// Every class the declaration names (keyword types like `int` or
+    /// `static` left out), as written, with its span, in source order.
+    pub fn class_names(&self) -> Vec<(&str, Span)> {
+        let mut out = Vec::new();
+        self.collect_class_names(&mut out);
+        out
+    }
+
+    fn collect_class_names<'a>(&'a self, out: &mut Vec<(&'a str, Span)>) {
+        match &self.kind {
+            TypeHintKind::Name(name) => {
+                if !is_primitive_type_name(name.trim_start_matches('\\')) {
+                    out.push((name, self.span));
+                }
+            }
+            TypeHintKind::Nullable(inner) => inner.collect_class_names(out),
+            TypeHintKind::Union(members) | TypeHintKind::Intersection(members) => {
+                for member in members {
+                    member.collect_class_names(out);
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for TypeHint {
+    /// The declaration's text, normalized: no whitespace, and a union's
+    /// intersection terms parenthesized.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.kind {
+            TypeHintKind::Name(name) => f.write_str(name),
+            TypeHintKind::Nullable(inner) => write!(f, "?{inner}"),
+            TypeHintKind::Union(members) => {
+                for (i, member) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str("|")?;
+                    }
+                    match member.kind {
+                        TypeHintKind::Intersection(_) => write!(f, "({member})")?,
+                        _ => write!(f, "{member}")?,
+                    }
+                }
+                Ok(())
+            }
+            TypeHintKind::Intersection(members) => {
+                for (i, member) in members.iter().enumerate() {
+                    if i > 0 {
+                        f.write_str("&")?;
+                    }
+                    write!(f, "{member}")?;
+                }
+                Ok(())
+            }
         }
     }
 }
@@ -994,7 +1065,8 @@ pub enum ExprKind {
         body: Vec<Stmt>,
         is_static: bool,
         by_ref: bool,
-        return_type: Option<String>,
+        // Boxed: keeps `Expr` small, since expression parsing recurses.
+        return_type: Option<Box<TypeHint>>,
         // `#[Attr]` groups on the closure expression itself
         // (`$f = #[Foo] function () {};`), not on any of its parameters.
         attrs: Vec<Attribute>,
@@ -1005,7 +1077,8 @@ pub enum ExprKind {
         is_static: bool,
         // `fn &() => ...` - returns by reference.
         by_ref: bool,
-        return_type: Option<String>,
+        // See `Closure.return_type`.
+        return_type: Option<Box<TypeHint>>,
         // See `Closure.attrs` above.
         attrs: Vec<Attribute>,
     },

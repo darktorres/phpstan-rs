@@ -41,7 +41,7 @@ impl Parser {
         }
 
         let return_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()?
+            self.parse_type_hint()?.map(Box::new)
         } else {
             None
         };
@@ -77,7 +77,7 @@ impl Parser {
         let by_ref = self.eat(&Token::Amp);
         let params = self.parse_params()?;
         let return_type = if self.eat(&Token::Colon) {
-            self.parse_type_hint()?
+            self.parse_type_hint()?.map(Box::new)
         } else {
             None
         };

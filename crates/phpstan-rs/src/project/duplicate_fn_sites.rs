@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use crate::ast::{FunctionDecl, Stmt, StmtKind};
+use crate::ast::{FunctionDecl, Stmt, StmtKind, TypeHint};
 use crate::registry::NameContext;
 use crate::token::Span;
 
@@ -102,8 +102,12 @@ impl DuplicateFunctionSites {
         self.sites.entry(fqn).or_default().push(FnDeclSite {
             path: path.to_path_buf(),
             span: f.name_span,
-            param_hints: f.params.iter().map(|p| p.type_hint.clone()).collect(),
-            return_hint: f.return_type.clone(),
+            param_hints: f
+                .params
+                .iter()
+                .map(|p| p.type_hint.as_ref().map(TypeHint::to_string))
+                .collect(),
+            return_hint: f.return_type.as_ref().map(TypeHint::to_string),
         });
     }
 

@@ -305,17 +305,12 @@ impl Parser {
                 // is followed by *another* identifier (the real name)
                 // rather than `=` - `const FOO = 1;`'s `FOO` is followed
                 // directly by `=`, so nothing is consumed as a type there.
-                let type_hint_start = self.current_pos();
                 let type_hint = if self.is_type_start() && !matches!(self.peek_at(1), Token::Equals)
                 {
                     self.parse_type_hint()?
                 } else {
                     None
                 };
-                let type_hint_span = type_hint.as_ref().map(|_| Span {
-                    start: type_hint_start,
-                    end: self.previous_end(),
-                });
                 loop {
                     let const_start = self.current_pos();
                     let name_start = self.current_pos();
@@ -335,7 +330,6 @@ impl Parser {
                         visibility: visibility.clone(),
                         attrs: attrs.clone(),
                         type_hint: type_hint.clone(),
-                        type_hint_span,
                         is_final: is_final_member,
                         span: Span {
                             start: const_start,
@@ -383,12 +377,7 @@ impl Parser {
             }
 
             // property, possibly with a type hint
-            let type_hint_start = self.current_pos();
             let type_hint = self.parse_type_hint()?;
-            let type_hint_span = type_hint.as_ref().map(|_| Span {
-                start: type_hint_start,
-                end: self.previous_end(),
-            });
             let is_readonly = class_is_readonly || is_readonly_member;
             loop {
                 let prop_start = self.current_pos();
@@ -420,7 +409,6 @@ impl Parser {
                         is_abstract: is_abstract_member,
                         is_final: is_final_member,
                         type_hint: type_hint.clone(),
-                        type_hint_span,
                         default,
                         doc_comment: doc.clone(),
                         hooks: Some(hooks),
@@ -443,7 +431,6 @@ impl Parser {
                     is_abstract: is_abstract_member,
                     is_final: is_final_member,
                     type_hint: type_hint.clone(),
-                    type_hint_span,
                     default,
                     doc_comment: doc.clone(),
                     hooks: None,

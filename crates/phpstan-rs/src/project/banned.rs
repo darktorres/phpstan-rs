@@ -132,7 +132,10 @@ impl<'a> Walker<'a> {
             );
         }
         self.ban_type(
-            decl.return_type_span.unwrap_or(decl.name_span),
+            decl.return_type
+                .as_ref()
+                .map(|h| h.span)
+                .unwrap_or(decl.name_span),
             format!("The return type of {what}"),
             &sig.return_type,
         );

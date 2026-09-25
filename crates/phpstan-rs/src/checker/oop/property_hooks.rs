@@ -41,7 +41,7 @@ impl<'a> Checker<'a> {
             if let Some(body) = &hooks.get {
                 self.check_hook_phpdoc_types(
                     fqn,
-                    p.type_hint.as_deref(),
+                    p.type_hint.as_ref(),
                     None,
                     hooks.get_doc.as_deref(),
                     p.span,
@@ -63,7 +63,7 @@ impl<'a> Checker<'a> {
                     fqn,
                     &p.name,
                     p.span,
-                    p.type_hint.as_deref(),
+                    p.type_hint.as_ref(),
                     param.as_ref(),
                     body,
                     &prop_sig,
@@ -91,7 +91,7 @@ impl<'a> Checker<'a> {
                 if let Some(body) = &hooks.get {
                     self.check_hook_phpdoc_types(
                         fqn,
-                        param.type_hint.as_deref(),
+                        param.type_hint.as_ref(),
                         None,
                         hooks.get_doc.as_deref(),
                         param.span,
@@ -113,7 +113,7 @@ impl<'a> Checker<'a> {
                         fqn,
                         &param.name,
                         param.span,
-                        param.type_hint.as_deref(),
+                        param.type_hint.as_ref(),
                         set_param.as_ref(),
                         body,
                         &prop_sig,
@@ -381,7 +381,7 @@ impl<'a> Checker<'a> {
         fqn: &str,
         name: &str,
         span: Span,
-        type_hint: Option<&str>,
+        type_hint: Option<&TypeHint>,
         param: Option<&Param>,
         body: &PropertyHookBody,
         prop_sig: &PropertySig,
@@ -471,8 +471,14 @@ impl<'a> Checker<'a> {
                 );
             }
             (true, true) => {
-                let param_ty = self.resolve_type_hint(param.and_then(|p| p.type_hint.as_deref()));
-                let prop_native_ty = self.resolve_type_hint(type_hint);
+                let param_ty = self.resolve_type_hint(
+                    param
+                        .and_then(|p| p.type_hint.as_ref())
+                        .map(TypeHint::to_string)
+                        .as_deref(),
+                );
+                let prop_native_ty =
+                    self.resolve_type_hint(type_hint.map(TypeHint::to_string).as_deref());
                 if !self.registry.is_assignable(&prop_native_ty, &param_ty) {
                     self.report_builder(
                         DiagnosticBuilder::new(
@@ -531,7 +537,7 @@ impl<'a> Checker<'a> {
         // reason), so this only ever checks the parameter half.
         if let Some(p) = param {
             self.check_native_union_types_supported_raw(
-                std::iter::once(p.type_hint.as_deref()),
+                std::iter::once(p.type_hint.as_ref()),
                 None,
                 &format!(
                     "Set hook for property {fqn}::${name} uses native union types but they're supported only on PHP 8.0 and later."
@@ -544,7 +550,7 @@ impl<'a> Checker<'a> {
             // have no return-type position (see above), so only the
             // parameter half is reachable here.
             self.check_unresolvable_native_type(
-                p.type_hint.as_deref(),
+                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 &format!(
                     "Parameter ${} of set hook for property {fqn}::${name} has unresolvable native type.",
                     p.name,

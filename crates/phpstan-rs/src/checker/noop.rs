@@ -14,6 +14,7 @@
 //! naming the expression) only when the statement assigns nothing.
 //! Calls and `new` are left to `check_pure_call_without_effect`.
 
+use crate::ast::TypeHint;
 use crate::ast::{BinOp, CastKind, Expr, ExprKind, FunctionDecl, UnaryOp};
 use crate::ast_walk::expr_children;
 use crate::checker::{Checker, Locals};
@@ -576,7 +577,8 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let native_ty = self.resolve_type_hint(param.type_hint.as_deref());
+            let native_ty = self
+                .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
             if !self.param_type_could_satisfy(&native_ty, &Type::Callable(None)) {
                 let identifier = if *immediately {
                     "paramImmediatelyInvokedCallable.nonCallable"
@@ -605,7 +607,8 @@ impl<'a> Checker<'a> {
                 );
                 continue;
             };
-            let native_ty = self.resolve_type_hint(param.type_hint.as_deref());
+            let native_ty = self
+                .resolve_type_hint(param.type_hint.as_ref().map(TypeHint::to_string).as_deref());
             let closure_ty = Type::Object("Closure".to_string(), Vec::new());
             if !self.param_type_could_satisfy(&native_ty, &closure_ty) {
                 self.report(

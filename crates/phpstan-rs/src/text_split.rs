@@ -9,7 +9,6 @@
 //! rely on, rather than a hand-rolled parallel implementation that could
 //! silently diverge from it.
 
-use crate::ast::is_primitive_type_name;
 use crate::lexer::Lexer;
 use crate::parser::Parser;
 use crate::token::{Position, Span, Token};
@@ -26,8 +25,7 @@ use crate::token::{Position, Span, Token};
 /// ordinary class name - see `navigation::resolve_class_ref`), and
 /// filtering it out here would silently break this function's own
 /// `expected`-count check for that whole family of references. Callers
-/// that *do* want primitive/pseudo-type filtering (a compound type hint's
-/// own class names) apply it themselves - see `type_hint_identifiers_qualified`.
+/// that *do* want primitive/pseudo-type filtering apply it themselves.
 ///
 /// `expected` is the name count the caller already has from the AST
 /// (e.g. `[class_name, member]` for a `ClassConstFetch`/`StaticPropertyFetch`) - this function
@@ -67,36 +65,6 @@ pub(crate) fn split_identifier_spans(
     } else {
         None
     }
-}
-
-/// The class-name identifiers inside a raw type-hint *string* (`"?Foo"`,
-/// `"Foo|Bar"`, `"array<Baz>"`), in source order. `deps.rs`'s own
-/// `collect_type_hint` does the identical character-scan (splitting on
-/// anything that isn't part of a bare/qualified identifier, discarding
-/// primitive type keywords), but into an unordered `HashSet` for its own
-/// "does this file mention that name anywhere" purpose. This needs the
-/// same names *in order*, to zip positionally against `split_identifier_
-/// spans`'s own ordered output and learn which name is at which sub-span.
-/// Structured after (not sharing code with) `collect_type_hint`, for
-/// exactly the reason this whole module's own doc comment gives for
-/// `parse_qualified_name_spanned` rather than changing existing call
-/// sites. Each name comes with whether it was written fully qualified (a
-/// leading `\`), which name resolution must know.
-pub(crate) fn type_hint_identifiers_qualified(hint: &str) -> Vec<(String, bool)> {
-    let mut names = Vec::new();
-    let mut current = String::new();
-    for c in hint.chars().chain(std::iter::once(' ')) {
-        if c.is_alphanumeric() || c == '_' || c == '\\' {
-            current.push(c);
-        } else if !current.is_empty() {
-            let name = current.trim_start_matches('\\');
-            if !name.is_empty() && !is_primitive_type_name(name) {
-                names.push((name.to_string(), current.starts_with('\\')));
-            }
-            current.clear();
-        }
-    }
-    names
 }
 
 /// `source`'s own substring covered by `span` - `Position`'s own doc
@@ -180,7 +148,10 @@ mod tests {
         let StmtKind::FunctionDecl(f) = &program[0].kind else {
             panic!("expected FunctionDecl");
         };
-        f.return_type_span.expect("return type span")
+        f.return_type
+            .as_ref()
+            .map(|h| h.span)
+            .expect("return type span")
     }
 
     fn text_at(src: &str, span: Span) -> String {
@@ -224,19 +195,6 @@ mod tests {
         assert_eq!(spans.len(), 2);
         assert_eq!(text_at(src, spans[0]), "\\App\\Foo");
         assert_eq!(text_at(src, spans[1]), "null");
-    }
-
-    #[test]
-    fn type_hint_identifiers_skips_scalar_and_null_keywords() {
-        // Unlike split_identifier_spans (which finds every token run
-        // unfiltered), type_hint_identifiers_qualified is specifically for a
-        // compound type hint's own *class* names - nothing real-class-
-        // shaped in this hint at all.
-        assert!(type_hint_identifiers_qualified("int|string|null").is_empty());
-        assert_eq!(
-            type_hint_identifiers_qualified("?\\App\\Foo|Bar"),
-            vec![("App\\Foo".to_string(), true), ("Bar".to_string(), false)]
-        );
     }
 
     #[test]

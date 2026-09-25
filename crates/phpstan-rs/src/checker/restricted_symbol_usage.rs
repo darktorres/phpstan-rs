@@ -4,6 +4,7 @@
 //! `@internal` checks, one function per event, each opening with a fast
 //! `is_empty()` bail.
 
+use crate::ast::TypeHint;
 use crate::ast::{Arg, ClassKind, Expr, ExprKind, FunctionDecl, Literal, Param, UnaryOp};
 use crate::checker::internal_usage::class_type_word;
 use crate::checker::internal_usage::collect_referenced_class_names;
@@ -968,8 +969,8 @@ impl<'a> Checker<'a> {
     ) {
         self.check_restricted_param_and_return_types_raw(
             &f.params,
-            f.return_type.as_deref(),
-            f.return_type_span.unwrap_or(f.span),
+            f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+            f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
             class_name,
             label,
         );
@@ -996,7 +997,8 @@ impl<'a> Checker<'a> {
             return;
         }
         for p in params {
-            let ty = self.resolve_type_hint(p.type_hint.as_deref());
+            let ty =
+                self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
             let ty = match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,
@@ -1007,7 +1009,7 @@ impl<'a> Checker<'a> {
                 self.check_restricted_class_name_usage(
                     &class,
                     &format!("Parameter ${} references", p.name),
-                    p.type_hint_span.unwrap_or(p.name_span),
+                    p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name_span),
                     label,
                     ClassUsageLocation::ParamType,
                 );

@@ -1,0 +1,1 @@
+text_split::tests::type_hint_identifiers_skips_scalar_and_null_keywords -> parser::tests::type_hints::class_names_skip_keyword_types_and_carry_their_own_spans

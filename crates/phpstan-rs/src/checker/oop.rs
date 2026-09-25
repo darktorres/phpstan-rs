@@ -940,7 +940,7 @@ impl<'a> Checker<'a> {
             let Some(raw_hint) = &c.type_hint else {
                 continue;
             };
-            let declared_ty = self.resolve_type_hint(Some(raw_hint));
+            let declared_ty = self.resolve_type_hint(Some(&raw_hint.to_string()));
             let value_ty = self.infer_expr(&c.value, &Locals::default());
             // `Type::Mixed(false)` here almost always means "this checker
             // couldn't resolve it" (an unrecognized global constant,
@@ -1235,6 +1235,8 @@ impl<'a> Checker<'a> {
             let name = cc.name.as_ref();
             let own_native = cc
                 .type_hint
+                .as_ref()
+                .map(TypeHint::to_string)
                 .as_deref()
                 .map(|h| self.resolve_type_hint(Some(h)));
             for trait_fqn in &all_traits {
@@ -1461,9 +1463,9 @@ impl<'a> Checker<'a> {
         for c in consts {
             let constant = format!("{fqn}::{}", c.name);
             self.check_type_declaration(
-                c.type_hint.as_deref(),
+                c.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 crate::checker::type_declarations::TypePosition::ClassConstant(&constant),
-                c.type_hint_span.unwrap_or(c.span),
+                c.type_hint.as_ref().map(|h| h.span).unwrap_or(c.span),
                 fqn,
             );
             if kind == ClassKind::Trait
@@ -1872,7 +1874,10 @@ impl<'a> Checker<'a> {
             let Some(prop) = c.properties.iter().find(|p| &p.name == prop_name) else {
                 return;
             };
-            if prop.is_static || prop.hooks.is_some() || prop.type_hint != param.type_hint {
+            if prop.is_static
+                || prop.hooks.is_some()
+                || !TypeHint::same(prop.type_hint.as_ref(), param.type_hint.as_ref())
+            {
                 return;
             }
         }

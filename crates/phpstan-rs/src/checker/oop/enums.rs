@@ -175,7 +175,7 @@ impl<'a> Checker<'a> {
             }
         }
 
-        if let Some(backing) = &e.backing_type {
+        if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
             let expects_int = backing.eq_ignore_ascii_case("int");
             let expects_string = backing.eq_ignore_ascii_case("string");
             if !expects_int && !expects_string {
@@ -205,13 +205,18 @@ impl<'a> Checker<'a> {
             );
         }
 
-        let backing_type_word = e.backing_type.as_deref().map(|b| {
-            if b.eq_ignore_ascii_case("int") {
-                "int"
-            } else {
-                "string"
-            }
-        });
+        let backing_type_word = e
+            .backing_type
+            .as_ref()
+            .map(TypeHint::to_string)
+            .as_deref()
+            .map(|b| {
+                if b.eq_ignore_ascii_case("int") {
+                    "int"
+                } else {
+                    "string"
+                }
+            });
         for case in &e.cases {
             match (&e.backing_type, &case.value) {
                 (None, Some(value)) => {

@@ -131,7 +131,7 @@ impl<'a> Checker<'a> {
                     continue;
                 }
                 if let Some(prev) = seen_promoted.insert(param.name.as_ref(), param)
-                    && prev.type_hint == param.type_hint
+                    && TypeHint::same(prev.type_hint.as_ref(), param.type_hint.as_ref())
                 {
                     self.report_builder(
                         DiagnosticBuilder::new(
@@ -211,15 +211,15 @@ pub(crate) fn function_decl_signatures_differ(af: &FunctionDecl, bf: &FunctionDe
     if af.params.len() != bf.params.len() {
         return true;
     }
-    if af.return_type != bf.return_type {
+    if !TypeHint::same(af.return_type.as_ref(), bf.return_type.as_ref()) {
         return true;
     }
     af.params
         .iter()
         .zip(&bf.params)
-        .any(|(ap, bp)| ap.type_hint != bp.type_hint)
+        .any(|(ap, bp)| !TypeHint::same(ap.type_hint.as_ref(), bp.type_hint.as_ref()))
 }
 
 fn property_shapes_differ(a: &PropertyDecl, b: &PropertyDecl) -> bool {
-    a.type_hint != b.type_hint || a.is_readonly != b.is_readonly
+    !TypeHint::same(a.type_hint.as_ref(), b.type_hint.as_ref()) || a.is_readonly != b.is_readonly
 }

@@ -76,12 +76,7 @@ impl Parser {
                 promoted_visibility = Some(Visibility::Public);
             }
 
-            let type_hint_start = self.current_pos();
             let type_hint = self.parse_type_hint()?;
-            let type_hint_span = type_hint.as_ref().map(|_| Span {
-                start: type_hint_start,
-                end: self.previous_end(),
-            });
             let by_ref = self.eat(&Token::Amp);
             let variadic = self.eat(&Token::Ellipsis);
             let name_start = self.current_pos();
@@ -108,7 +103,6 @@ impl Parser {
                 name,
                 name_span,
                 type_hint,
-                type_hint_span,
                 default,
                 by_ref,
                 variadic,
@@ -142,15 +136,8 @@ impl Parser {
             end: self.previous_end(),
         };
         let params = self.parse_params()?;
-        let mut return_type_span = None;
         let return_type = if self.eat(&Token::Colon) {
-            let return_type_start = self.current_pos();
-            let ty = self.parse_type_hint()?;
-            return_type_span = ty.as_ref().map(|_| Span {
-                start: return_type_start,
-                end: self.previous_end(),
-            });
-            ty
+            self.parse_type_hint()?
         } else {
             None
         };
@@ -170,7 +157,6 @@ impl Parser {
             name_span,
             params,
             return_type,
-            return_type_span,
             body: std::sync::Arc::new(body),
             has_body,
             body_open,

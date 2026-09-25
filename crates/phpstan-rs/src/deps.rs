@@ -36,18 +36,9 @@ pub fn referenced_names(stmts: &[Stmt]) -> FxHashSet<String> {
 /// that isn't part of a bare/qualified identifier and discarding the
 /// primitive type keywords - good enough for "does this file mention that
 /// name anywhere", which is all this is used for.
-fn collect_type_hint(hint: &str, names: &mut FxHashSet<String>) {
-    let mut current = String::new();
-    for c in hint.chars().chain(std::iter::once(' ')) {
-        if c.is_alphanumeric() || c == '_' || c == '\\' {
-            current.push(c);
-        } else if !current.is_empty() {
-            let name = current.trim_start_matches('\\');
-            if !name.is_empty() && !is_primitive_type_name(name) {
-                names.insert(name.to_string());
-            }
-            current.clear();
-        }
+fn collect_type_hint(hint: &TypeHint, names: &mut FxHashSet<String>) {
+    for (name, _) in hint.class_names() {
+        names.insert(name.trim_start_matches('\\').to_string());
     }
 }
 

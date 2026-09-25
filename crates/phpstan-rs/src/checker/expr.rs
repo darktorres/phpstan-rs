@@ -3620,8 +3620,9 @@ impl<'a> Checker<'a> {
                 }
                 let closure_label = format!("{label} (closure)");
                 for p in params {
-                    let (ty, case_refs) =
-                        self.resolve_type_hint_with_case_refs(p.type_hint.as_deref());
+                    let (ty, case_refs) = self.resolve_type_hint_with_case_refs(
+                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                    );
                     // Mirrors real PHPStan's
                     // `ExistingClassesInClosureTypehintsRule` - checked on
                     // the un-array-wrapped element type below (a variadic
@@ -3651,8 +3652,10 @@ impl<'a> Checker<'a> {
                     closure_locals.declare(p.name.to_string(), ty, p.name_span);
                     closure_locals.set_native(&p.name, self.closure_param_native(p));
                 }
-                let (declared_return_ty, declared_return_case_refs) =
-                    self.resolve_type_hint_with_case_refs(return_type.as_deref());
+                let (declared_return_ty, declared_return_case_refs) = self
+                    .resolve_type_hint_with_case_refs(
+                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    );
                 let declared_return = Some(declared_return_ty);
                 self.check_type_class_names_exist(
                     declared_return.as_ref().unwrap_or(&Type::Mixed(false)),
@@ -3693,7 +3696,7 @@ impl<'a> Checker<'a> {
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     e.span,
                     false,
                     current_class_for_internal_check.as_deref(),
@@ -3701,7 +3704,7 @@ impl<'a> Checker<'a> {
                 );
                 self.check_restricted_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     e.span,
                     current_class_for_internal_check.as_deref(),
                     &closure_label,
@@ -3936,7 +3939,12 @@ impl<'a> Checker<'a> {
                         closure_falls_off_end,
                     )
                 });
-                self.closure_literal_type(params, return_type.as_deref(), inferred_return, None)
+                self.closure_literal_type(
+                    params,
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    inferred_return,
+                    None,
+                )
             }
             ExprKind::ArrowFn {
                 params,
@@ -3954,8 +3962,9 @@ impl<'a> Checker<'a> {
                 // needed) - a plain clone of `locals` is exactly that.
                 let mut arrow_locals = locals.clone();
                 for p in params {
-                    let (ty, case_refs) =
-                        self.resolve_type_hint_with_case_refs(p.type_hint.as_deref());
+                    let (ty, case_refs) = self.resolve_type_hint_with_case_refs(
+                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                    );
                     // Mirrors real PHPStan's
                     // `ExistingClassesInArrowFunctionTypehintsRule` - same
                     // "check the element type, not the variadic-collected
@@ -3994,7 +4003,13 @@ impl<'a> Checker<'a> {
                 self.current_function_is_generator = expr_contains_yield(body);
                 let declared_return = return_type
                     .as_deref()
-                    .map(|_| self.resolve_type_hint(return_type.as_deref()));
+                    .map(TypeHint::to_string)
+                    .as_deref()
+                    .map(|_| {
+                        self.resolve_type_hint(
+                            return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                        )
+                    });
                 let previous_declared_return_type = self.current_declared_return_type.take();
                 self.current_declared_return_type =
                     declared_return.as_ref().map(|t| match &self.current_class {
@@ -4037,8 +4052,9 @@ impl<'a> Checker<'a> {
                 // Return-vs-declared_return check, kept here since
                 // there's no StmtKind::Return for it to share.
                 if return_type.is_some() {
-                    let (expected, expected_case_refs) =
-                        self.resolve_type_hint_with_case_refs(return_type.as_deref());
+                    let (expected, expected_case_refs) = self.resolve_type_hint_with_case_refs(
+                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    );
                     self.check_type_class_names_exist(
                         &expected,
                         "return type of arrow function",
@@ -4084,7 +4100,7 @@ impl<'a> Checker<'a> {
                 let current_class_for_internal_check = self.current_class.clone();
                 self.check_internal_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     e.span,
                     false,
                     current_class_for_internal_check.as_deref(),
@@ -4092,14 +4108,14 @@ impl<'a> Checker<'a> {
                 );
                 self.check_restricted_param_and_return_types_raw(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     e.span,
                     current_class_for_internal_check.as_deref(),
                     label,
                 );
                 self.closure_literal_type(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     (!expr_contains_yield(body)).then(|| body_ty.clone()),
                     None,
                 )
@@ -4454,7 +4470,12 @@ impl<'a> Checker<'a> {
             } => {
                 let inferred = self
                     .closure_syntactic_return_type(params, uses, body, *is_static, locals, None);
-                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
+                self.closure_literal_type(
+                    params,
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    inferred,
+                    None,
+                )
             }
             ExprKind::ArrowFn {
                 params,
@@ -4463,7 +4484,12 @@ impl<'a> Checker<'a> {
                 ..
             } => {
                 let inferred = self.arrow_fn_inferred_return(params, body, locals, None);
-                self.closure_literal_type(params, return_type.as_deref(), inferred, None)
+                self.closure_literal_type(
+                    params,
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    inferred,
+                    None,
+                )
             }
             ExprKind::Match {
                 subject,
@@ -4972,7 +4998,10 @@ impl<'a> Checker<'a> {
                     arrow_locals.insert(p.name.to_string(), ty.clone());
                 }
                 let inferred = self.infer_expr(body, &arrow_locals);
-                Some(self.prefer_inferred_over_declared_return(return_type.as_deref(), inferred))
+                Some(self.prefer_inferred_over_declared_return(
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                    inferred,
+                ))
             }
             ExprKind::Closure {
                 params,
@@ -5018,14 +5047,14 @@ impl<'a> Checker<'a> {
                         },
                     ] => {
                         let inferred = self.infer_expr(e, &closure_locals);
-                        Some(
-                            self.prefer_inferred_over_declared_return(
-                                return_type.as_deref(),
-                                inferred,
-                            ),
-                        )
+                        Some(self.prefer_inferred_over_declared_return(
+                            return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                            inferred,
+                        ))
                     }
                     _ => return_type
+                        .as_deref()
+                        .map(TypeHint::to_string)
                         .as_deref()
                         .map(|hint| self.resolve_type_hint(Some(hint))),
                 }
@@ -6025,7 +6054,9 @@ impl<'a> Checker<'a> {
                 .enumerate()
                 .map(|(i, p)| types::CallableParam {
                     ty: match p.type_hint {
-                        Some(_) => resolve(p.type_hint.as_deref()),
+                        Some(_) => {
+                            resolve(p.type_hint.as_ref().map(TypeHint::to_string).as_deref())
+                        }
                         None => self.closure_param_type(p, i, overrides),
                     },
                     variadic: p.variadic,
@@ -6144,7 +6175,9 @@ impl<'a> Checker<'a> {
     /// `mixed`.
     fn closure_param_type(&self, p: &Param, i: usize, overrides: Option<&[Type]>) -> Type {
         match (&p.type_hint, overrides.and_then(|o| o.get(i))) {
-            (Some(_), _) => self.resolve_type_hint(p.type_hint.as_deref()),
+            (Some(_), _) => {
+                self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref())
+            }
             (None, Some(expected)) => expected.clone(),
             (None, None) => Type::Mixed(false),
         }
@@ -6178,7 +6211,7 @@ impl<'a> Checker<'a> {
                     self.arrow_fn_inferred_return(params, body, locals, Some(&overrides));
                 Some(self.closure_literal_type(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     inferred,
                     Some(&overrides),
                 ))
@@ -6201,7 +6234,7 @@ impl<'a> Checker<'a> {
                 );
                 Some(self.closure_literal_type(
                     params,
-                    return_type.as_deref(),
+                    return_type.as_deref().map(TypeHint::to_string).as_deref(),
                     inferred,
                     Some(&overrides),
                 ))

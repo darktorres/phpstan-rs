@@ -22,7 +22,10 @@ fn true_and_false_are_valid_return_types() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected FunctionDecl");
     };
-    assert_eq!(f.return_type.as_deref(), Some("string|false"));
+    assert_eq!(
+        f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+        Some("string|false")
+    );
 }
 
 #[test]
@@ -65,7 +68,10 @@ fn backed_enum_with_interface_and_method_parses() {
     let StmtKind::EnumDecl(e) = &program[0].kind else {
         panic!("expected EnumDecl");
     };
-    assert_eq!(e.backing_type.as_deref(), Some("string"));
+    assert_eq!(
+        e.backing_type.as_ref().map(TypeHint::to_string).as_deref(),
+        Some("string")
+    );
     assert_eq!(e.implements, vec!["\\JsonSerializable".to_string()]);
     assert!(matches!(
         &e.cases[0].value,
@@ -471,7 +477,14 @@ fn dnf_type_hint_parses() {
     let StmtKind::ClassDecl(c) = &program[0].kind else {
         panic!("expected ClassDecl");
     };
-    assert_eq!(c.properties[0].type_hint.as_deref(), Some("(A&B)|X"));
+    assert_eq!(
+        c.properties[0]
+            .type_hint
+            .as_ref()
+            .map(TypeHint::to_string)
+            .as_deref(),
+        Some("(A&B)|X")
+    );
 }
 
 #[test]
@@ -526,7 +539,14 @@ fn legacy_var_property_declaration_parses() {
     };
     assert_eq!(c.properties[0].name, "a".into());
     assert_eq!(c.properties[0].visibility, Visibility::Public);
-    assert_eq!(c.properties[0].type_hint.as_deref(), Some("A|(B&C)"));
+    assert_eq!(
+        c.properties[0]
+            .type_hint
+            .as_ref()
+            .map(TypeHint::to_string)
+            .as_deref(),
+        Some("A|(B&C)")
+    );
 }
 
 #[test]

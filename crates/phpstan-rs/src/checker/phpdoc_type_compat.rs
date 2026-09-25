@@ -280,7 +280,7 @@ impl<'a> Checker<'a> {
     pub(crate) fn check_hook_phpdoc_types(
         &mut self,
         fqn: &str,
-        property_type_hint: Option<&str>,
+        property_type_hint: Option<&TypeHint>,
         set_param: Option<Option<&Param>>,
         doc: Option<&str>,
         span: Span,
@@ -299,8 +299,7 @@ impl<'a> Checker<'a> {
                     None => Param {
                         name: "value".into(),
                         name_span: span,
-                        type_hint: property_type_hint.map(str::to_string),
-                        type_hint_span: None,
+                        type_hint: property_type_hint.cloned(),
                         default: None,
                         by_ref: false,
                         variadic: false,
@@ -313,16 +312,19 @@ impl<'a> Checker<'a> {
                         span,
                     },
                 };
-                ("set", vec![value], Some("void".to_string()))
+                let void = TypeHint {
+                    kind: TypeHintKind::Name("void".to_string()),
+                    span,
+                };
+                ("set", vec![value], Some(void))
             }
-            None => ("get", Vec::new(), property_type_hint.map(str::to_string)),
+            None => ("get", Vec::new(), property_type_hint.cloned()),
         };
         let decl = FunctionDecl {
             name: name.into(),
             name_span: span,
             params,
             return_type,
-            return_type_span: None,
             body: std::sync::Arc::new(Vec::new()),
             has_body: false,
             body_open: None,

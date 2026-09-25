@@ -19,7 +19,14 @@ fn a_class_named_enum_is_accepted_as_a_parameter_type_hint() {
     let StmtKind::FunctionDecl(f) = &program[0].kind else {
         panic!("expected a FunctionDecl, got {:?}", program[0].kind);
     };
-    assert_eq!(f.params[0].type_hint.as_deref(), Some("Enum"));
+    assert_eq!(
+        f.params[0]
+            .type_hint
+            .as_ref()
+            .map(TypeHint::to_string)
+            .as_deref(),
+        Some("Enum")
+    );
     assert!(f.params[0].variadic);
 }
 
@@ -102,7 +109,14 @@ fn namespace_relative_name_parses_as_expression_and_as_type() {
     let StmtKind::FunctionDecl(g) = &program[1].kind else {
         panic!("expected FunctionDecl");
     };
-    assert_eq!(g.params[0].type_hint.as_deref(), Some("namespace\\integer"));
+    assert_eq!(
+        g.params[0]
+            .type_hint
+            .as_ref()
+            .map(TypeHint::to_string)
+            .as_deref(),
+        Some("namespace\\integer")
+    );
 }
 
 #[test]

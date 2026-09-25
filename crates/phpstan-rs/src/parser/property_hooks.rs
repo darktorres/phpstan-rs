@@ -58,12 +58,7 @@ impl Parser {
             let param = if is_set && self.eat(&Token::LParen) {
                 let param_start = self.previous_end();
                 let attrs = self.parse_attributes()?;
-                let type_hint_start = self.current_pos();
                 let type_hint = self.parse_type_hint()?;
-                let type_hint_span = type_hint.as_ref().map(|_| Span {
-                    start: type_hint_start,
-                    end: self.previous_end(),
-                });
                 let by_ref = self.eat(&Token::Amp);
                 let name_start = self.current_pos();
                 let name = self.expect_variable()?;
@@ -76,7 +71,6 @@ impl Parser {
                     name,
                     name_span,
                     type_hint,
-                    type_hint_span,
                     default: None,
                     by_ref,
                     variadic: false,

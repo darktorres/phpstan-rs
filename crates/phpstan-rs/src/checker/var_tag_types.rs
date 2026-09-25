@@ -127,7 +127,7 @@ impl<'a> Checker<'a> {
         if p.type_hint.is_none() {
             return Type::Mixed(false);
         }
-        let ty = self.resolve_type_hint(p.type_hint.as_deref());
+        let ty = self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
         let ty = match &self.current_class {
             Some(c) => self.resolve_pseudo(&ty, c),
             None => ty,

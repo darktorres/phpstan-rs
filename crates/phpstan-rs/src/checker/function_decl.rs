@@ -597,7 +597,10 @@ impl<'a> Checker<'a> {
                                 .map(docblock::parse)
                                 .and_then(|d| d.var_type)
                         });
-                    let ty = resolve_type(doc_ty.as_deref(), p.type_hint.as_deref());
+                    let ty = resolve_type(
+                        doc_ty.as_deref(),
+                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                    );
                     // This anonymous-class fallback path builds `ty`
                     // straight from raw text, bypassing `FunctionSig::
                     // from_decl`'s own `ParamSig::case_refs` population,
@@ -613,7 +616,9 @@ impl<'a> Checker<'a> {
                     // on-an-enum resolution `resolve_type` above already
                     // went through, so an unresolvable `value-of<T>`
                     // needs the same native-type fallback here too.
-                    let native_ty = self.resolve_type_hint(p.type_hint.as_deref());
+                    let native_ty = self.resolve_type_hint(
+                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                    );
                     let ty = self
                         .registry
                         .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
@@ -704,7 +709,10 @@ impl<'a> Checker<'a> {
                 .as_deref()
                 .map(docblock::parse)
                 .and_then(|d| d.return_type);
-            let ty = resolve_type(doc_return.as_deref(), f.return_type.as_deref());
+            let ty = resolve_type(
+                doc_return.as_deref(),
+                f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+            );
             // Same "checker builds a Type straight from raw text,
             // bypassing FunctionSig::from_decl" pattern as the param
             // loop's identical fix above.
@@ -716,7 +724,8 @@ impl<'a> Checker<'a> {
             let ty = resolve_names_in_type(ty, &self.name_ctx);
             // The return-position sibling of the param loop's identical
             // fix above, including the same native-fallback need.
-            let native_ty = self.resolve_type_hint(f.return_type.as_deref());
+            let native_ty =
+                self.resolve_type_hint(f.return_type.as_ref().map(TypeHint::to_string).as_deref());
             let ty = self
                 .registry
                 .resolve_deferred_value_of_now_with_native_fallback(ty, &native_ty);
@@ -757,6 +766,8 @@ impl<'a> Checker<'a> {
         let native_return = sig.map(|s| s.return_type_native.clone()).or_else(|| {
             let ty = f
                 .return_type
+                .as_ref()
+                .map(TypeHint::to_string)
                 .as_deref()
                 .map(types::parse_type_string)
                 .map(|ty| resolve_names_in_type(ty, &self.name_ctx))?;
@@ -1048,7 +1059,9 @@ impl<'a> Checker<'a> {
             None => {
                 for p in &f.params {
                     if p.by_ref {
-                        let ty = self.resolve_type_hint(p.type_hint.as_deref());
+                        let ty = self.resolve_type_hint(
+                            p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                        );
                         self.current_function_by_ref_params
                             .insert(p.name.clone(), ty);
                     }
@@ -1175,7 +1188,7 @@ impl<'a> Checker<'a> {
                 self.report(
                     label.clone(),
                     "could be declared to return never - it never returns normally".to_string(),
-                    f.return_type_span.unwrap_or(f.span),
+                    f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
                     5,
                     "return.neverCandidate",
                 );
@@ -1322,8 +1335,8 @@ impl<'a> Checker<'a> {
             "{kind_word} {label}() uses native union types but they're supported only on PHP 8.0 and later."
         );
         self.check_native_union_types_supported_raw(
-            f.params.iter().map(|p| p.type_hint.as_deref()),
-            f.return_type.as_deref(),
+            f.params.iter().map(|p| p.type_hint.as_ref()),
+            f.return_type.as_ref(),
             &message,
             f.span,
             label,
@@ -1343,8 +1356,8 @@ impl<'a> Checker<'a> {
     /// matching real PHPStan's own `$unionTypeReported` latch.
     pub(crate) fn check_native_union_types_supported_raw<'p>(
         &mut self,
-        param_hints: impl Iterator<Item = Option<&'p str>>,
-        return_hint: Option<&str>,
+        param_hints: impl Iterator<Item = Option<&'p TypeHint>>,
+        return_hint: Option<&TypeHint>,
         message: &str,
         span: Span,
         label: &str,
@@ -1386,7 +1399,7 @@ impl<'a> Checker<'a> {
     fn check_unresolvable_native_types(&mut self, f: &FunctionDecl, label: &str) {
         for p in &f.params {
             self.check_unresolvable_native_type(
-                p.type_hint.as_deref(),
+                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 &format!(
                     "Parameter ${} of {label}() has unresolvable native type.",
                     p.name
@@ -1397,7 +1410,7 @@ impl<'a> Checker<'a> {
             );
         }
         self.check_unresolvable_native_type(
-            f.return_type.as_deref(),
+            f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
             &format!("{label}() has unresolvable native return type."),
             "return.unresolvableNativeType",
             f.span,
@@ -1471,9 +1484,10 @@ impl<'a> Checker<'a> {
             return;
         }
         for (i, p) in f.params.iter().enumerate() {
-            let Some(hint) = p.type_hint.as_deref() else {
+            let Some(hint) = p.type_hint.as_ref().map(TypeHint::to_string) else {
                 continue;
             };
+            let hint = hint.as_str();
             if hint.starts_with('?') || hint.contains('&') {
                 continue;
             }
@@ -1710,13 +1724,13 @@ pub(crate) fn missing_return_level(
     }
 }
 
-/// Whether a native type-hint (raw `Param::type_hint`/`FunctionDecl::
-/// return_type` text) is a bare, top-level union (`int|string`) - `?`-
-/// prefixed nullable-single-type and any type containing `&` (an
-/// intersection, which can't also be a union) are excluded first, since
-/// `parse_type_hint`'s construction never mixes `&` into a `|`-joined
-/// list in a way that would make a naive `contains('|')` check safe
-/// without that exclusion.
-fn is_bare_native_union(hint: Option<&str>) -> bool {
-    hint.is_some_and(|h| !h.contains('&') && h.contains('|'))
+/// Whether a native type declaration is a plain union (`int|string`),
+/// not a nullable single type or a DNF type with an intersection term.
+fn is_bare_native_union(hint: Option<&TypeHint>) -> bool {
+    hint.is_some_and(|h| match &h.kind {
+        TypeHintKind::Union(members) => members
+            .iter()
+            .all(|m| !matches!(m.kind, TypeHintKind::Intersection(_))),
+        _ => false,
+    })
 }

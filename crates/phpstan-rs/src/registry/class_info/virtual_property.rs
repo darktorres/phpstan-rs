@@ -1,6 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
+use crate::ast::TypeHint;
 use crate::ast::{Expr, ExprKind, PropertyHookBody, PropertyHooks, Stmt, StmtKind};
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::registry::function_sig::{mark_template_params, resolve_type};
@@ -27,7 +28,10 @@ pub(crate) fn property_hook_set_type(
     let Some((Some(param), _)) = hooks.and_then(|h| h.set.as_ref()) else {
         return (None, Vec::new());
     };
-    let ty = resolve_type(None, param.type_hint.as_deref());
+    let ty = resolve_type(
+        None,
+        param.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+    );
     let ty = mark_template_params(ty, template_params);
     let mut case_refs = Vec::new();
     collect_class_name_case_refs(&ty, ctx, &mut case_refs);

@@ -106,7 +106,7 @@ fn write_params(out: &mut String, params: &[Param]) {
     out.push('(');
     write_list(out, params, |out, p| {
         if let Some(ty) = &p.type_hint {
-            out.push_str(ty);
+            out.push_str(&ty.to_string());
             out.push(' ');
         }
         if p.by_ref {
@@ -125,10 +125,10 @@ fn write_params(out: &mut String, params: &[Param]) {
     out.push(')');
 }
 
-fn write_return_type(out: &mut String, return_type: &Option<String>) {
+fn write_return_type(out: &mut String, return_type: Option<&TypeHint>) {
     if let Some(ty) = return_type {
         out.push_str(": ");
-        out.push_str(ty);
+        out.push_str(&ty.to_string());
     }
 }
 
@@ -472,7 +472,7 @@ fn write_expr(out: &mut String, e: &Expr) {
                 });
                 out.push(')');
             }
-            write_return_type(out, return_type);
+            write_return_type(out, return_type.as_deref());
             out.push_str(" {\n}");
         }
         ExprKind::ArrowFn {
@@ -491,7 +491,7 @@ fn write_expr(out: &mut String, e: &Expr) {
                 out.push('&');
             }
             write_params(out, params);
-            write_return_type(out, return_type);
+            write_return_type(out, return_type.as_deref());
             out.push_str(" => ");
             write_expr(out, body);
         }

@@ -186,7 +186,7 @@ impl<'a> Walker<'a> {
                 let after = doc.split("@var").nth(1)?;
                 after.split_whitespace().next().map(str::to_string)
             });
-            let Some(hint) = p.type_hint.clone().or(doc_var) else {
+            let Some(hint) = p.type_hint.as_ref().map(TypeHint::to_string).or(doc_var) else {
                 continue;
             };
             let hint = &hint;

@@ -64,8 +64,8 @@ impl<'a> Checker<'a> {
                 self.check_function_like_declaration(
                     &f.params,
                     (
-                        f.return_type.as_deref(),
-                        f.return_type_span.unwrap_or(f.span),
+                        f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+                        f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
                     ),
                     PromotionSite::NotConstructor,
                     f.by_ref,
@@ -115,7 +115,10 @@ impl<'a> Checker<'a> {
             } => {
                 self.check_function_like_declaration(
                     params,
-                    (return_type.as_deref(), e.span),
+                    (
+                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                        e.span,
+                    ),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Body(body)),
@@ -133,7 +136,10 @@ impl<'a> Checker<'a> {
             } => {
                 self.check_function_like_declaration(
                     params,
-                    (return_type.as_deref(), e.span),
+                    (
+                        return_type.as_deref().map(TypeHint::to_string).as_deref(),
+                        e.span,
+                    ),
                     PromotionSite::NotConstructor,
                     *by_ref,
                     Some(ReturnSource::Arrow(body)),
@@ -182,8 +188,16 @@ impl<'a> Checker<'a> {
             self.check_function_like_declaration(
                 &m.function.params,
                 (
-                    m.function.return_type.as_deref(),
-                    m.function.return_type_span.unwrap_or(m.function.span),
+                    m.function
+                        .return_type
+                        .as_ref()
+                        .map(TypeHint::to_string)
+                        .as_deref(),
+                    m.function
+                        .return_type
+                        .as_ref()
+                        .map(|h| h.span)
+                        .unwrap_or(m.function.span),
                 ),
                 site,
                 m.function.by_ref,
@@ -247,9 +261,9 @@ impl<'a> Checker<'a> {
         self.check_promoted_params(params, site, label);
         for p in params {
             self.check_type_declaration(
-                p.type_hint.as_deref(),
+                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 TypePosition::Parameter,
-                p.type_hint_span.unwrap_or(p.span),
+                p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.span),
                 label,
             );
         }
@@ -316,7 +330,8 @@ impl<'a> Checker<'a> {
             if matches!(default.kind, ExprKind::Literal(Literal::Null)) {
                 continue;
             }
-            let param_ty = self.resolve_type_hint(p.type_hint.as_deref());
+            let param_ty =
+                self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
             let param_ty = match &param_ty {
                 Type::TemplateParam(tp) => tp.bound.as_ref().clone(),
                 other => other.clone(),

@@ -404,6 +404,8 @@ pub(crate) fn seed_self_typed_param_aliases(
 ) {
     for p in params {
         if p.type_hint
+            .as_ref()
+            .map(TypeHint::to_string)
             .as_deref()
             .is_some_and(|t| class_ref_is_self(t, fqn, ctx))
         {

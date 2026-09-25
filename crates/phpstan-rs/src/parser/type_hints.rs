@@ -1,5 +1,6 @@
+use crate::ast::{TypeHint, TypeHintKind};
 use crate::parser::{ParseError, Parser};
-use crate::token::{Keyword, Token};
+use crate::token::{Keyword, Position, Span, Token};
 
 impl Parser {
     // ---- type hints ----
@@ -40,66 +41,57 @@ impl Parser {
     // `(Countable&Iterator)|null`. Real PHP only allows one level of
     // parens here (no `((A&B)|C)&D`), so this doesn't need to recurse into
     // a further union inside the parens - just a run of `&`-joined atoms.
-    pub(crate) fn parse_type_atom(&mut self) -> Result<String, ParseError> {
+    pub(crate) fn parse_type_atom(&mut self) -> Result<TypeHint, ParseError> {
+        let start = self.current_pos();
         if self.eat(&Token::LParen) {
-            let mut inner = self.parse_type_atom()?;
+            let mut members = vec![self.parse_type_atom()?];
             while self.eat(&Token::Amp) {
-                inner.push('&');
-                inner.push_str(&self.parse_type_atom()?);
+                members.push(self.parse_type_atom()?);
             }
             self.expect(&Token::RParen)?;
-            return Ok(format!("({inner})"));
+            return Ok(self.type_hint(TypeHintKind::Intersection(members), start));
         }
         // These are single keyword tokens - namespaced forms like
         // `array\Foo` don't exist, so each just consumes itself and stops,
         // rather than looping on to swallow whatever bare identifier
         // happens to follow (e.g. `array $items`'s `$items`, or
         // `const array NAME`'s own `NAME`).
-        match self.peek() {
-            Token::Keyword(Keyword::Array) => {
-                self.skip();
-                return Ok("array".to_string());
-            }
-            Token::Keyword(Keyword::Static) => {
-                self.skip();
-                return Ok("static".to_string());
-            }
-            Token::Keyword(Keyword::Null) => {
-                self.skip();
-                return Ok("null".to_string());
-            }
+        let keyword = match self.peek() {
+            Token::Keyword(Keyword::Array) => Some("array"),
+            Token::Keyword(Keyword::Static) => Some("static"),
+            Token::Keyword(Keyword::Null) => Some("null"),
             // PHP 8.2+ stand-alone `true`/`false` types, e.g.
             // `function f(): string|false {}`.
-            Token::Keyword(Keyword::True) => {
+            Token::Keyword(Keyword::True) => Some("true"),
+            Token::Keyword(Keyword::False) => Some("false"),
+            _ => None,
+        };
+        let name = match keyword {
+            Some(keyword) => {
                 self.skip();
-                return Ok("true".to_string());
+                keyword.to_string()
             }
-            Token::Keyword(Keyword::False) => {
-                self.skip();
-                return Ok("false".to_string());
-            }
-            _ => {}
-        }
-        // Otherwise it's a (possibly namespaced) identifier: `int`, `Foo`,
-        // `\App\Foo`, `App\Foo\Bar` - never two unrelated identifiers
-        // glued together with no backslash between them.
-        Ok(self.parse_qualified_name())
+            // Otherwise it's a (possibly namespaced) identifier: `int`,
+            // `Foo`, `\App\Foo`, `App\Foo\Bar` - never two unrelated
+            // identifiers glued together with no backslash between them.
+            None => self.parse_qualified_name(),
+        };
+        Ok(self.type_hint(TypeHintKind::Name(name), start))
     }
 
-    pub(crate) fn parse_type_hint(&mut self) -> Result<Option<String>, ParseError> {
+    pub(crate) fn parse_type_hint(&mut self) -> Result<Option<TypeHint>, ParseError> {
         if !self.is_type_start() {
             return Ok(None);
         }
-        let mut s = String::new();
-        if self.eat(&Token::Question) {
-            s.push('?');
-        }
-        s.push_str(&self.parse_type_atom()?);
+        let start = self.current_pos();
+        let nullable = self.eat(&Token::Question);
+        let inner_start = self.current_pos();
+        // `|` binds looser than `&`: the terms of a union, each a run of
+        // `&`-joined atoms.
+        let mut terms: Vec<Vec<TypeHint>> = vec![vec![self.parse_type_atom()?]];
         loop {
-            if self.check(&Token::Pipe) {
-                self.skip();
-                s.push('|');
-                s.push_str(&self.parse_type_atom()?);
+            if self.eat(&Token::Pipe) {
+                terms.push(vec![self.parse_type_atom()?]);
                 continue;
             }
             // `&` is ambiguous between an intersection type (`A&B`) and a
@@ -107,12 +99,48 @@ impl Parser {
             // of the type when another type atom actually follows.
             if self.check(&Token::Amp) && self.is_type_start_at(1) {
                 self.skip();
-                s.push('&');
-                s.push_str(&self.parse_type_atom()?);
+                let atom = self.parse_type_atom()?;
+                terms.last_mut().expect("at least one term").push(atom);
                 continue;
             }
             break;
         }
-        Ok(Some(s))
+        let mut terms: Vec<TypeHint> = terms
+            .into_iter()
+            .map(|mut atoms| {
+                if atoms.len() == 1 {
+                    atoms.pop().expect("one atom")
+                } else {
+                    let span = Span {
+                        start: atoms[0].span.start,
+                        end: atoms[atoms.len() - 1].span.end,
+                    };
+                    TypeHint {
+                        kind: TypeHintKind::Intersection(atoms),
+                        span,
+                    }
+                }
+            })
+            .collect();
+        let inner = if terms.len() == 1 {
+            terms.pop().expect("one term")
+        } else {
+            self.type_hint(TypeHintKind::Union(terms), inner_start)
+        };
+        Ok(Some(if nullable {
+            self.type_hint(TypeHintKind::Nullable(Box::new(inner)), start)
+        } else {
+            inner
+        }))
+    }
+
+    fn type_hint(&self, kind: TypeHintKind, start: Position) -> TypeHint {
+        TypeHint {
+            kind,
+            span: Span {
+                start,
+                end: self.previous_end(),
+            },
+        }
     }
 }

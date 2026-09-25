@@ -26,6 +26,7 @@
 //! extension checks this too, but no case-tracking plumbing exists for
 //! attribute-usage positions in this project yet).
 
+use crate::ast::TypeHint;
 use crate::ast::{ClassKind, FunctionDecl, Param};
 use crate::checker::Checker;
 use crate::registry::{ConstSig, FunctionSig, PropertySig};
@@ -513,8 +514,8 @@ impl<'a> Checker<'a> {
     ) {
         self.check_internal_param_and_return_types_raw(
             &f.params,
-            f.return_type.as_deref(),
-            f.return_type_span.unwrap_or(f.span),
+            f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
+            f.return_type.as_ref().map(|h| h.span).unwrap_or(f.span),
             class_name.is_some(),
             class_name,
             label,
@@ -553,7 +554,8 @@ impl<'a> Checker<'a> {
             format!("function {label}()")
         };
         for p in params {
-            let ty = self.resolve_type_hint(p.type_hint.as_deref());
+            let ty =
+                self.resolve_type_hint(p.type_hint.as_ref().map(TypeHint::to_string).as_deref());
             let ty = match class_name {
                 Some(c) => self.resolve_pseudo(&ty, c),
                 None => ty,
@@ -566,7 +568,7 @@ impl<'a> Checker<'a> {
                     &format!("Parameter ${}", p.name),
                     &context,
                     "parameter",
-                    p.type_hint_span.unwrap_or(p.name_span),
+                    p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.name_span),
                     label,
                 );
             }

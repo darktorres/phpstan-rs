@@ -34,7 +34,7 @@ use std::path::{Path, PathBuf};
 use crate::ast::*;
 use crate::ast_walk::{expr_children, stmt_children};
 use crate::registry::NameContext;
-use crate::text_split::{split_identifier_spans, type_hint_identifiers_qualified};
+use crate::text_split::split_identifier_spans;
 use crate::token::Span;
 
 /// What a reference site points at - no local-variable variant (see
@@ -172,35 +172,19 @@ impl<'a> ClassFnRefWalker<'a> {
     fn record_type_hint(
         &self,
         out: &mut Vec<(Span, RefTarget)>,
-        hint: &str,
-        span: Span,
+        hint: &TypeHint,
         current_class: Option<&str>,
         ctx: &NameContext,
     ) {
-        let qualified = type_hint_identifiers_qualified(hint);
-        let names: Vec<String> = qualified.iter().map(|(n, _)| n.clone()).collect();
-        let written = |(name, fully_qualified): &(String, bool)| {
-            if *fully_qualified {
-                format!("\\{name}")
-            } else {
-                name.clone()
-            }
-        };
-        let Some(source) = self.source else {
-            for name in &qualified {
-                if let Some(fqn) = resolve_class_ref(&written(name), current_class, ctx) {
-                    out.push((span, RefTarget::Class(fqn)));
-                }
-            }
-            return;
-        };
-        let expected: Vec<&str> = names.iter().map(String::as_str).collect();
-        let Some(spans) = split_identifier_spans(source, span, &expected) else {
-            return;
-        };
-        for (name, name_span) in qualified.iter().zip(spans.iter()) {
-            if let Some(fqn) = resolve_class_ref(&written(name), current_class, ctx) {
-                out.push((*name_span, RefTarget::Class(fqn)));
+        for (name, name_span) in hint.class_names() {
+            if let Some(fqn) = resolve_class_ref(name, current_class, ctx) {
+                // Without the source, a site is the whole declaration.
+                let span = if self.source.is_some() {
+                    name_span
+                } else {
+                    hint.span
+                };
+                out.push((span, RefTarget::Class(fqn)));
             }
         }
     }
@@ -219,8 +203,8 @@ impl<'a> ClassFnRefWalker<'a> {
         current_class: Option<&str>,
         out: &mut Vec<(Span, RefTarget)>,
     ) {
-        if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
-            self.record_type_hint(out, hint, span, current_class, ctx);
+        if let Some(hint) = &p.type_hint {
+            self.record_type_hint(out, hint, current_class, ctx);
         }
         if let Some(d) = &p.default {
             self.expr(d, &mut ctx.clone(), current_class, out);
@@ -432,8 +416,8 @@ impl<'a> ClassFnRefWalker<'a> {
         for p in &f.params {
             self.param(p, ctx, current_class, out);
         }
-        if let (Some(rt), Some(span)) = (&f.return_type, f.return_type_span) {
-            self.record_type_hint(out, rt, span, current_class, ctx);
+        if let Some(rt) = &f.return_type {
+            self.record_type_hint(out, rt, current_class, ctx);
         }
         self.stmts(&f.body, ctx, current_class, out);
     }
@@ -456,8 +440,8 @@ impl<'a> ClassFnRefWalker<'a> {
             }
         }
         for p in &c.properties {
-            if let (Some(hint), Some(span)) = (&p.type_hint, p.type_hint_span) {
-                self.record_type_hint(out, hint, span, Some(&fqn), ctx);
+            if let Some(hint) = &p.type_hint {
+                self.record_type_hint(out, hint, Some(&fqn), ctx);
             }
             if let Some(d) = &p.default {
                 self.expr(d, &mut ctx.clone(), Some(&fqn), out);
@@ -467,8 +451,8 @@ impl<'a> ClassFnRefWalker<'a> {
             self.function(&m.function, &mut ctx.clone(), Some(&fqn), out);
         }
         for cst in &c.consts {
-            if let (Some(hint), Some(span)) = (&cst.type_hint, cst.type_hint_span) {
-                self.record_type_hint(out, hint, span, Some(&fqn), ctx);
+            if let Some(hint) = &cst.type_hint {
+                self.record_type_hint(out, hint, Some(&fqn), ctx);
             }
             self.expr(&cst.value, &mut ctx.clone(), Some(&fqn), out);
         }

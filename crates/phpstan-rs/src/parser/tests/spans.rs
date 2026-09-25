@@ -1,4 +1,4 @@
-//! Span fields like `name_span`/`type_hint_span`/`extends_spans`/etc. -
+//! Span fields like `name_span`/`TypeHint::span`/`extends_spans`/etc. -
 //! each must point at exactly the identifier text it claims to, not just
 //! exist. `helpers::text_at` slices the original source by a span to
 //! check that directly, rather than trusting the span's own byte-range
@@ -27,7 +27,13 @@ fn function_decl_return_type_span_covers_the_whole_compound_hint() {
         panic!("expected FunctionDecl");
     };
     assert_eq!(
-        text_at(src, f.return_type_span.expect("return type span")),
+        text_at(
+            src,
+            f.return_type
+                .as_ref()
+                .map(|h| h.span)
+                .expect("return type span")
+        ),
         "Foo|Bar"
     );
 }
@@ -40,7 +46,14 @@ fn param_type_hint_span_points_at_the_hint_not_the_variable() {
         panic!("expected FunctionDecl");
     };
     assert_eq!(
-        text_at(src, f.params[0].type_hint_span.expect("type hint span")),
+        text_at(
+            src,
+            f.params[0]
+                .type_hint
+                .as_ref()
+                .map(|h| h.span)
+                .expect("type hint span")
+        ),
         "?Foo"
     );
 }
@@ -82,13 +95,25 @@ fn property_and_class_const_name_and_type_hint_spans_are_precise() {
     let prop = &c.properties[0];
     assert_eq!(text_at(src, prop.name_span), "$count");
     assert_eq!(
-        text_at(src, prop.type_hint_span.expect("prop type hint span")),
+        text_at(
+            src,
+            prop.type_hint
+                .as_ref()
+                .map(|h| h.span)
+                .expect("prop type hint span")
+        ),
         "?int"
     );
     let cst = &c.consts[0];
     assert_eq!(text_at(src, cst.name_span), "LIMIT");
     assert_eq!(
-        text_at(src, cst.type_hint_span.expect("const type hint span")),
+        text_at(
+            src,
+            cst.type_hint
+                .as_ref()
+                .map(|h| h.span)
+                .expect("const type hint span")
+        ),
         "int"
     );
 }

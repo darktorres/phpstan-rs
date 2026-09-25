@@ -2,6 +2,7 @@ use indexmap::IndexMap;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
+use crate::ast::TypeHint;
 use crate::ast::{ClassDecl, ClassKind, EnumDecl, ExprKind, Literal, TraitAlias, Visibility};
 use crate::docblock::{self, DocBlock};
 use crate::intern::intern;
@@ -643,7 +644,8 @@ impl ClassInfo {
             .iter()
             .map(|p| {
                 let doc_ty = p.doc_comment.as_deref().map(docblock::parse);
-                let native_hint = p.type_hint.as_deref();
+                let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
+                let native_hint = native_hint_text.as_deref();
                 let native_parsed = native_hint.map(types::parse_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_ref().and_then(|d| d.var_type.as_deref()),
@@ -755,7 +757,8 @@ impl ClassInfo {
                             .map(docblock::parse)
                             .and_then(|d| d.var_type)
                     });
-                let native_hint = p.type_hint.as_deref();
+                let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
+                let native_hint = native_hint_text.as_deref();
                 let native_parsed = native_hint.map(types::parse_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_deref(),
@@ -1333,8 +1336,8 @@ impl ClassInfo {
                 is_magic: true,
             },
         );
-        if let Some(backing) = &e.backing_type {
-            let backing_ty = types::parse_type_string(backing);
+        if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
+            let backing_ty = types::parse_type_string(&backing);
             let value_param = ParamSig {
                 name: intern("value"),
                 ty: backing_ty.clone(),
@@ -1542,7 +1545,7 @@ impl ClassInfo {
                 set_case_refs: Vec::new(),
             },
         );
-        if let Some(backing) = &e.backing_type {
+        if let Some(backing) = e.backing_type.as_ref().map(TypeHint::to_string) {
             // When every case's value is a bare literal (a case value
             // naming a class constant falls back to the plain backing
             // type below, "don't guess"), `->value` is typed as the
@@ -1562,7 +1565,7 @@ impl ClassInfo {
                     _ => Type::Union(case_values),
                 }
             } else {
-                types::parse_type_string(backing)
+                types::parse_type_string(&backing)
             };
             properties.insert(
                 intern("value"),
@@ -1576,7 +1579,7 @@ impl ClassInfo {
                     // PHP's native reflection only ever sees the backing
                     // type (`string`/`int`), never a per-case refinement
                     // PHPStan derives from analysis alone.
-                    ty_native: types::parse_type_string(backing),
+                    ty_native: types::parse_type_string(&backing),
                     has_native_type: true,
                     is_static: false,
                     is_readonly: false,
@@ -1841,6 +1844,7 @@ impl ClassInfo {
 
 /// A class constant's PHP 8.3 native type, name-resolved.
 fn native_const_type(cc: &crate::ast::ClassConst, ctx: &NameContext) -> Option<Type> {
-    let hint = cc.type_hint.as_deref()?;
+    let hint_text = cc.type_hint.as_ref().map(TypeHint::to_string);
+    let hint = hint_text.as_deref()?;
     Some(resolve_names_in_type(types::parse_type_string(hint), ctx))
 }

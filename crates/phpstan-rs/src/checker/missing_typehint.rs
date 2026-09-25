@@ -20,6 +20,7 @@
 //! untyped parameters (they're routinely inferred from context, e.g.
 //! `array_map`'s callback), so inventing that check here would be new,
 //! false-positive-prone behavior with no real rule to model it on.
+use crate::ast::TypeHint;
 use crate::ast::{ClassConst, ClassKind, FunctionDecl, PropertyDecl};
 use crate::checker::Checker;
 use crate::diagnostic::DiagnosticBuilder;
@@ -469,7 +470,11 @@ impl<'a> Checker<'a> {
                 .as_deref()
                 .map(docblock::parse)
                 .and_then(|d| d.var_type);
-            if is_implicit_mixed(&ty, p.type_hint.as_deref(), doc_var_type.as_deref()) {
+            if is_implicit_mixed(
+                &ty,
+                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
+                doc_var_type.as_deref(),
+            ) {
                 self.report(
                     fqn.to_string(),
                     format!("Property {fqn}::${} has no type specified.", p.name),
@@ -490,7 +495,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                has_explicit_mixed_nested_somewhere(p.type_hint.as_deref(), doc_var_type.as_deref()),
+                has_explicit_mixed_nested_somewhere(p.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_deref()),
             );
         }
     }
@@ -542,7 +547,7 @@ impl<'a> Checker<'a> {
                     )
                 },
                 &ty,
-                has_explicit_mixed_nested_somewhere(c.type_hint.as_deref(), doc_var_type.as_deref()),
+                has_explicit_mixed_nested_somewhere(c.type_hint.as_ref().map(TypeHint::to_string).as_deref(), doc_var_type.as_deref()),
             );
         }
     }
@@ -612,11 +617,13 @@ impl<'a> Checker<'a> {
         };
 
         for (i, (name, ty, span)) in resolved_params.iter().enumerate() {
-            let native_hint = f
+            let native_hint_text = f
                 .params
                 .iter()
                 .find(|p| *p.name == **name)
-                .and_then(|p| p.type_hint.as_deref());
+                .and_then(|p| p.type_hint.as_ref())
+                .map(TypeHint::to_string);
+            let native_hint = native_hint_text.as_deref();
             let doc_ty = doc
                 .as_ref()
                 .and_then(|d| d.params.get(name))
@@ -653,7 +660,9 @@ impl<'a> Checker<'a> {
             );
         }
 
-        let native_return = f.return_type.as_deref();
+        let native_return_text = f.return_type.as_ref().map(TypeHint::to_string);
+
+        let native_return = native_return_text.as_deref();
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
 
         // Real PHPStan's own reflection layer only substitutes a magic

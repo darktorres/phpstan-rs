@@ -1,6 +1,7 @@
 use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
+use crate::ast::TypeHint;
 use crate::ast::{ExprKind, FunctionDecl, StaticTarget, Stmt, Visibility};
 use crate::checker::union_types;
 use crate::docblock::{self, DocBlock};
@@ -445,7 +446,8 @@ impl FunctionSig {
                 // pipeline below and the native-only `ty_native` one -
                 // `resolve_type`/`resolve_type(None, ...)` used to each
                 // independently re-parse this same hint string.
-                let native_hint = p.type_hint.as_deref();
+                let native_hint_text = p.type_hint.as_ref().map(TypeHint::to_string);
+                let native_hint = native_hint_text.as_deref();
                 let native_parsed = native_hint.map(types::parse_type_string);
                 let doc_reconciled = resolve_type_with_parsed_native(
                     doc_ty.as_deref(),
@@ -526,7 +528,7 @@ impl FunctionSig {
                     by_ref: p.by_ref,
                     has_own_doc: doc_ty.is_some(),
                     explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
-                        p.type_hint.as_deref(),
+                        p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                         doc_ty.as_deref(),
                     ),
                     case_refs,
@@ -538,7 +540,8 @@ impl FunctionSig {
         let params = dedup_versioned_params(params);
 
         let doc_return = doc.as_ref().and_then(|d| d.return_type.as_deref());
-        let native_return_hint = f.return_type.as_deref();
+        let native_return_hint_text = f.return_type.as_ref().map(TypeHint::to_string);
+        let native_return_hint = native_return_hint_text.as_deref();
         let native_return_parsed = native_return_hint.map(types::parse_type_string);
         let doc_reconciled_return = resolve_type_with_parsed_native(
             doc_return,
@@ -616,7 +619,7 @@ impl FunctionSig {
                 .map(resolve_doc_type),
             return_case_refs,
             return_explicit_mixed_hint: has_explicit_mixed_nested_somewhere(
-                f.return_type.as_deref(),
+                f.return_type.as_ref().map(TypeHint::to_string).as_deref(),
                 doc_return,
             ),
             no_discard,

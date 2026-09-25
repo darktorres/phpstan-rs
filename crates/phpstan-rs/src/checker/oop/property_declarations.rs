@@ -22,7 +22,7 @@ struct PropertyView<'a> {
     is_readonly: bool,
     is_abstract: bool,
     is_final: bool,
-    type_hint: Option<&'a str>,
+    type_hint: Option<&'a TypeHint>,
     has_default: bool,
     hooks: Option<&'a PropertyHooks>,
     doc_comment: Option<&'a str>,
@@ -85,7 +85,7 @@ impl<'a> Checker<'a> {
                 is_readonly: p.is_readonly,
                 is_abstract: p.is_abstract,
                 is_final: p.is_final,
-                type_hint: p.type_hint.as_deref(),
+                type_hint: p.type_hint.as_ref(),
                 has_default: p.default.is_some(),
                 hooks: p.hooks.as_ref(),
                 doc_comment: p.doc_comment.as_deref(),
@@ -109,7 +109,7 @@ impl<'a> Checker<'a> {
                         is_readonly: p.promoted_readonly,
                         is_abstract: false,
                         is_final: p.promoted_final,
-                        type_hint: p.type_hint.as_deref(),
+                        type_hint: p.type_hint.as_ref(),
                         has_default: false,
                         hooks: p.hooks.as_deref(),
                         doc_comment: p.doc_comment.as_deref(),
@@ -119,9 +119,9 @@ impl<'a> Checker<'a> {
         for p in properties {
             let property = format!("{display}::${}", p.name);
             self.check_type_declaration(
-                p.type_hint.as_deref(),
+                p.type_hint.as_ref().map(TypeHint::to_string).as_deref(),
                 crate::checker::type_declarations::TypePosition::Property(&property),
-                p.type_hint_span.unwrap_or(p.span),
+                p.type_hint.as_ref().map(|h| h.span).unwrap_or(p.span),
                 display,
             );
         }
@@ -133,7 +133,7 @@ impl<'a> Checker<'a> {
             }
             self.check_readonly_property_declaration(view, display);
             self.check_unresolvable_native_type(
-                view.type_hint,
+                view.type_hint.map(TypeHint::to_string).as_deref(),
                 &format!(
                     "Property {display}::${} has unresolvable native type.",
                     view.name
@@ -142,7 +142,10 @@ impl<'a> Checker<'a> {
                 view.span,
                 display,
             );
-            if view.type_hint.is_some_and(native_hint_mentions_callable) {
+            if view
+                .type_hint
+                .is_some_and(|h| native_hint_mentions_callable(&h.to_string()))
+            {
                 self.report_property_declaration(
                     display,
                     format!(
