@@ -3,9 +3,9 @@ use crate::checker::expr::builtin_calls::{
     date_format_return_type, date_interval_format_return_type,
 };
 use crate::checker::expr::doctrine_query_result_list_type;
-use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals, resolve_call_args};
 use crate::registry::{FunctionSig, PropertySig};
+use crate::types::union_types;
 use crate::types::{self, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
 

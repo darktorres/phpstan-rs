@@ -3,8 +3,8 @@
 //! resulting `mysqli_result<Row>` (a synthesized generic slot, like
 //! `Doctrine\DBAL\Result`'s) types every `fetch_*` method's row.
 
-use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals};
+use crate::types::union_types;
 use crate::types::{Shape, ShapeField, ShapeKey, Type, parse_type_string};
 use syntax::ast::*;
 

@@ -193,7 +193,6 @@ module checker::throws analyser
 module checker::throws::too_wide rules
 module checker::throws::missing ext-extras
 module checker::throws::dynamic builtins
-module checker::type_union types
 module checker::uninitialized rules
 module checker::uninitialized_dataflow rules
 module checker::unused rules

@@ -1,5 +1,5 @@
 use crate::checker::expr::type_definitely_excludes_null;
-use crate::checker::type_union::union_types;
+use crate::types::union_types;
 use crate::types::{self, AccessoryKind, Type};
 use syntax::ast::*;
 

@@ -31,7 +31,7 @@ use crate::checker::expr::ranges::{
     checked_bound_op, compare_range_outcome, div_int_range, loose_compare_literals, mod_int_range,
     mul_int_range, numeric_comparison_bounds, pow_int_range, shift_int_range, sub_int_range_full,
 };
-use crate::checker::type_union::union_types;
+use crate::types::union_types;
 pub(crate) use ranges::{NullProbeVerdictFn, empty_probe_verdict, null_probe_verdict};
 pub(crate) use ranges::{int_range_bounds, normalize_int_range};
 
@@ -2856,7 +2856,7 @@ impl<'a> Checker<'a> {
                     (Some(names), None) if !names.is_empty() => names
                         .into_iter()
                         .map(|n| self.check_expr(&constant_fetch(target, n, e.span), locals, label))
-                        .reduce(crate::checker::type_union::union_types)
+                        .reduce(crate::types::union_types)
                         .unwrap_or(Type::Mixed(false)),
                     (Some(names), Some(Some(class))) if !names.is_empty() => names
                         .into_iter()
@@ -2870,7 +2870,7 @@ impl<'a> Checker<'a> {
                                 self.static_member_of_class(e, &class, None, &n, false, label)
                             }
                         })
-                        .reduce(crate::checker::type_union::union_types)
+                        .reduce(crate::types::union_types)
                         .unwrap_or(Type::Mixed(false)),
                     (_, Some(Some(class))) => {
                         if self.collect_member_refs {
@@ -4783,7 +4783,7 @@ impl<'a> Checker<'a> {
                     .into_iter()
                     .flatten()
                     .map(|member| self.infer_expr(&constant_fetch(target, member, e.span), locals))
-                    .reduce(crate::checker::type_union::union_types)
+                    .reduce(crate::types::union_types)
                     .unwrap_or(Type::Mixed(false))
             }
             ExprKind::ClassNameFetch(target) => {

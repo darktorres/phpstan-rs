@@ -13,8 +13,8 @@
 //! descendant classes").
 
 use crate::checker::Checker;
-use crate::checker::type_union::union_types;
 use crate::types::Type;
+use crate::types::union_types;
 use syntax::ast::Visibility;
 use syntax::token::Span;
 

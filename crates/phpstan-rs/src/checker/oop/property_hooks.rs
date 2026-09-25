@@ -1,4 +1,3 @@
-use crate::checker::type_union::union_types;
 use crate::checker::{
     ATTRIBUTE_TARGET_METHOD, Checker, Locals, body_contains_explicit_throw, collect_goto_targets,
     expr_contains_explicit_throw,
@@ -6,6 +5,7 @@ use crate::checker::{
 use crate::diagnostic::DiagnosticBuilder;
 use crate::docblock;
 use crate::registry::{self, PropertySig, resolve_names_in_type};
+use crate::types::union_types;
 use crate::types::{self, Type};
 use syntax::ast::*;
 use syntax::token::Span;

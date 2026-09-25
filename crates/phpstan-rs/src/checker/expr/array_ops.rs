@@ -1,9 +1,9 @@
 use crate::checker::expr::{
     invalid_array_key_description, is_canonical_int_key, is_confidently_array,
 };
-use crate::checker::type_union::union_types;
 use crate::checker::{Checker, Locals, TemplateBindings};
 use crate::registry::FunctionSig;
+use crate::types::union_types;
 use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
 use syntax::ast::*;
 use syntax::token::Span;

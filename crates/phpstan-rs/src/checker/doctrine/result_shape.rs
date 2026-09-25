@@ -6,9 +6,9 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::checker::Checker;
-use crate::checker::type_union::union_types;
 use crate::doctrine_functions::DoctrineFunctionKind;
 use crate::registry::ClassInfo;
+use crate::types::union_types;
 use crate::types::{Shape, Type};
 
 use super::dql::{AggregateFn, FieldRef, SelectItem, SelectItemKind};

@@ -1,4 +1,3 @@
-use crate::checker::type_union::{has_offset_value_parts, union_types};
 use crate::checker::{
     Checker, Locals, is_real_variable_key, literal_string_key, narrow_type_excluding,
     narrow_type_excluding_falsy, narrow_type_to, narrowing_type_for_predicate, resolve_call_args,
@@ -6,6 +5,7 @@ use crate::checker::{
 };
 use crate::registry::{FunctionSig, Registry};
 use crate::types::{self, AccessoryKind, Shape, ShapeField, ShapeKey, Type};
+use crate::types::{has_offset_value_parts, union_types};
 use syntax::ast::*;
 use syntax::token::Span;
 

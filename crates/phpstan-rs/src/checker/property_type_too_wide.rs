@@ -15,8 +15,8 @@
 //! to catch.
 
 use crate::checker::Checker;
-use crate::checker::type_union::union_types;
 use crate::types::Type;
+use crate::types::union_types;
 use syntax::ast::{ClassDecl, Expr, ExprKind, Literal, Visibility};
 
 fn flatten_union(ty: &Type) -> Vec<&Type> {

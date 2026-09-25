@@ -1188,7 +1188,6 @@ mod stmt;
 pub(crate) mod suggest;
 mod throws;
 mod type_declarations;
-mod type_union;
 mod uninitialized;
 mod uninitialized_dataflow;
 mod unused;
@@ -1198,6 +1197,9 @@ mod whitespace;
 mod xml_name;
 mod xml_wellformedness;
 
+#[cfg(test)]
+pub(crate) use crate::types::generalize_by_key_set;
+pub(crate) use crate::types::union_types;
 pub(crate) use assignment::{literal_string_key, superglobal_default_type};
 pub(crate) use calls::{CheckArgsCall, is_language_construct, resolve_call_args};
 pub(crate) use coercion::{to_absolute_number, to_bitwise_not};
@@ -1228,9 +1230,6 @@ pub(crate) use oop::{
 pub(crate) use operators::binop_sigil;
 pub(crate) use semantic_tokens::UsageTokenKind;
 pub(crate) use throws::{body_contains_explicit_throw, expr_contains_explicit_throw};
-#[cfg(test)]
-pub(crate) use type_union::generalize_by_key_set;
-pub(crate) use type_union::union_types;
 pub(crate) use visibility::MemberVisibilityCheck;
 
 impl<'a> Checker<'a> {

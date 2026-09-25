@@ -1,6 +1,6 @@
-use crate::checker::type_union::{union_types, union_types_keep_shapes_distinct};
 use crate::regex_groups;
 use crate::types::{AccessoryKind, Shape, Type};
+use crate::types::{union_types, union_types_keep_shapes_distinct};
 use syntax::ast::*;
 
 /// The type of one matched group's "leaf" value in `preg_match`'s own

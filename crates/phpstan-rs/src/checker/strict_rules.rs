@@ -501,10 +501,7 @@ impl<'a> Checker<'a> {
         if !collect_array_values(array, &mut values) {
             return false;
         }
-        let Some(item) = values
-            .into_iter()
-            .reduce(crate::checker::type_union::union_types)
-        else {
+        let Some(item) = values.into_iter().reduce(crate::types::union_types) else {
             return false;
         };
         if let Type::Union(members) = &item {

@@ -41,10 +41,10 @@ use sqlparser::ast::{
 use sqlparser::dialect::GenericDialect;
 use sqlparser::parser::Parser;
 
-use crate::checker::type_union::union_types;
 use crate::registry::Registry;
 use crate::sql_reflection_config::SqlDriver;
 use crate::sql_reflection_schema::{SchemaCatalog, SchemaColumn};
+use crate::types::union_types;
 use crate::types::{Shape, ShapeField, Type};
 
 pub(crate) fn resolve_sql_row_type(registry: &Registry, sql: &str) -> Option<Type> {

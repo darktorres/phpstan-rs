@@ -12,8 +12,8 @@
 //! identical `getOutType() ?? getType()` fallback).
 
 use crate::checker::Checker;
-use crate::checker::type_union::union_types;
 use crate::types::Type;
+use crate::types::union_types;
 use syntax::ast::{Expr, ExprKind, Visibility};
 
 /// Same shape as the identically-named private helper in

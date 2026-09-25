@@ -35,7 +35,7 @@ use super::Registry;
 use syntax::ast::unwrap_grouping;
 use syntax::name_resolution::NameContext;
 
-/// Mirrors `checker::type_union::MAX_UNION_MEMBERS`'s own naming style -
+/// Mirrors `types::MAX_UNION_MEMBERS`'s own naming style -
 /// a different, unrelated constant, not that one reused. Past this many
 /// distinct keys, a global's accumulated shape degrades to a plain
 /// `Array(Mixed)` rather than growing unboundedly.
